@@ -1,0 +1,25 @@
+{
+  "name": "@kairo/java-extension",
+  "version": "0.1.0",
+  "description": "Kairo Java extension — owns the JDT Language Server lifecycle (delegated to the agent) and the Java activity bar.",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "files": ["lib", "src"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "clean": "rm -rf lib",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "test": "echo \"no tests\" && exit 0"
+  },
+  "dependencies": {
+    "@kairo/protocol": "workspace:*",
+    "@kairo/runtime-extension": "workspace:*"
+  },
+  "peerDependencies": {
+    "@theia/core": "1.51.0",
+    "@theia/languages": "1.51.0"
+  },
+  "devDependencies": {
+    "typescript": "5.5.4"
+  }
+}

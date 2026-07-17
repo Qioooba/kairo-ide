@@ -1,0 +1,35 @@
+{
+  "name": "@kairo/browser",
+  "version": "0.1.0",
+  "description": "Kairo IDE — browser entry. Runs the Theia app in headless mode, served to a browser over HTTP.",
+  "private": true,
+  "main": "lib/index.js",
+  "scripts": {
+    "build": "theia build --mode production",
+    "start": "theia start /tmp/kairo-workspace --hostname=0.0.0.0 --port=3000",
+    "dev": "theia start /tmp/kairo-workspace --hostname=0.0.0.0 --port=3000 --log-level=debug",
+    "clean": "rm -rf lib"
+  },
+  "dependencies": {
+    "@kairo/theia-product": "workspace:*",
+    "@kairo/protocol": "workspace:*",
+    "@kairo/runtime-extension": "workspace:*",
+    "@theia/core": "1.51.0",
+    "@theia/editor": "1.51.0",
+    "@theia/filesystem": "1.51.0",
+    "@theia/workspace": "1.51.0",
+    "@theia/languages": "1.51.0",
+    "@theia/terminal": "1.51.0",
+    "@theia/debug": "1.51.0",
+    "@theia/monaco": "1.51.0",
+    "@theia/messages": "1.51.0",
+    "@theia/preferences": "1.51.0",
+    "@theia/markers": "1.51.0",
+    "@theia/outline-view": "1.51.0",
+    "@theia/search-in-workspace": "1.51.0",
+    "@theia/navigator": "1.51.0"
+  },
+  "devDependencies": {
+    "@theia/cli": "1.51.0"
+  }
+}

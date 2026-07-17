@@ -1,0 +1,55 @@
+{
+  "name": "@kairo/desktop",
+  "version": "0.1.0",
+  "description": "Kairo IDE — desktop entry. Electron shell + Theia frontend + in-process Go Runtime Agent.",
+  "private": true,
+  "main": "lib/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json && electron-builder --mac --win --linux",
+    "build:mac": "tsc -p tsconfig.json && electron-builder --mac",
+    "build:win": "tsc -p tsconfig.json && electron-builder --win",
+    "build:linux": "tsc -p tsconfig.json && electron-builder --linux",
+    "start": "electron lib/main.js",
+    "clean": "rm -rf lib dist"
+  },
+  "dependencies": {
+    "@kairo/theia-product": "workspace:*",
+    "@kairo/runtime-extension": "workspace:*",
+    "@theia/core": "1.51.0",
+    "@theia/electron": "1.51.0"
+  },
+  "devDependencies": {
+    "@types/node": "20.14.10",
+    "electron": "31.0.0",
+    "electron-builder": "24.13.3"
+  },
+  "build": {
+    "appId": "org.kairo.ide",
+    "productName": "Kairo",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "lib/**/*",
+      "node_modules/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../../runtime-agent/bin",
+        "to": "bin",
+        "filter": ["kairo-runtime*"]
+      }
+    ],
+    "mac": {
+      "target": ["dmg", "zip"],
+      "category": "public.app-category.developer-tools"
+    },
+    "win": {
+      "target": ["nsis", "portable"]
+    },
+    "linux": {
+      "target": ["AppImage", "deb"]
+    }
+  }
+}

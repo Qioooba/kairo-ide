@@ -1,0 +1,20 @@
+{
+  "name": "@kairo/server",
+  "version": "0.1.0",
+  "description": "Kairo IDE — long-running server entry. Linux production deployment. Multi-user, TLS, theia frontend + Go runtime agent in one process.",
+  "private": true,
+  "main": "lib/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node lib/index.js",
+    "clean": "rm -rf lib"
+  },
+  "dependencies": {
+    "@kairo/theia-product": "workspace:*",
+    "@kairo/runtime-extension": "workspace:*",
+    "@kairo/protocol": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "20.14.10"
+  }
+}

@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project name="kairo-legacy-sample" default="compile" basedir=".">
+
+  <property name="src.dir"     value="src/main/java"/>
+  <property name="res.dir"     value="src/main/resources"/>
+  <property name="lib.dir"     value="lib"/>
+  <property name="build.dir"   value="build/classes"/>
+  <property name="webroot.dir" value="WebRoot"/>
+  <property name="webinf.dir"  value="${webroot.dir}/WEB-INF"/>
+
+  <path id="classpath">
+    <fileset dir="${lib.dir}" includes="**/*.jar"/>
+  </path>
+
+  <target name="init">
+    <mkdir dir="${build.dir}"/>
+  </target>
+
+  <target name="compile" depends="init"
+          description="Compile Java sources with the configured JDK.">
+    <javac srcdir="${src.dir}"
+           destdir="${build.dir}"
+           includeantruntime="false"
+           source="1.6"
+           target="1.6"
+           encoding="UTF-8"
+           classpathref="classpath">
+      <compilerarg value="-Xlint:all"/>
+    </javac>
+    <copy todir="${build.dir}">
+      <fileset dir="${res.dir}"/>
+    </copy>
+  </target>
+
+  <target name="clean" description="Remove build artifacts.">
+    <delete dir="${build.dir}"/>
+  </target>
+
+  <target name="package" depends="compile"
+          description="Build a deployable webapp directory under dist/.">
+    <mkdir dir="dist"/>
+    <copy todir="dist/webapp">
+      <fileset dir="${webroot.dir}"/>
+    </copy>
+    <copy todir="dist/webapp/WEB-INF/classes">
+      <fileset dir="${build.dir}"/>
+    </copy>
+    <copy todir="dist/webapp/WEB-INF/lib" flatten="true">
+      <fileset dir="${lib.dir}" includes="**/*.jar"/>
+    </copy>
+  </target>
+
+</project>

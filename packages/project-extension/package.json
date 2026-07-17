@@ -1,0 +1,26 @@
+{
+  "name": "@kairo/project-extension",
+  "version": "0.1.0",
+  "description": "Kairo project extension — owns the workspace and project models, the welcome view, and the project import wizard.",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "files": ["lib", "src"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "clean": "rm -rf lib",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "test": "echo \"no tests\" && exit 0"
+  },
+  "dependencies": {
+    "@kairo/protocol": "workspace:*",
+    "@kairo/runtime-extension": "workspace:*",
+    "@kairo/config-schema": "workspace:*",
+    "@kairo/ui-kit": "workspace:*"
+  },
+  "peerDependencies": {
+    "@theia/core": "1.51.0"
+  },
+  "devDependencies": {
+    "typescript": "5.5.4"
+  }
+}

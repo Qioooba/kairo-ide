@@ -1,0 +1,25 @@
+{
+  "name": "@kairo/tomcat-extension",
+  "version": "0.1.0",
+  "description": "Kairo Tomcat / Server runtime panel. Tree view of runtimes, deployments, ports, and logs. Talks to /api/v1/servers via the runtime client.",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "files": ["lib", "src"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "clean": "rm -rf lib",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "test": "echo \"no tests\" && exit 0"
+  },
+  "dependencies": {
+    "@kairo/protocol": "workspace:*",
+    "@kairo/runtime-extension": "workspace:*",
+    "@kairo/ui-kit": "workspace:*"
+  },
+  "peerDependencies": {
+    "@theia/core": "1.51.0"
+  },
+  "devDependencies": {
+    "typescript": "5.5.4"
+  }
+}

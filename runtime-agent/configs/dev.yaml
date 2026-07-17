@@ -1,0 +1,39 @@
+# Default dev config for the Kairo Runtime Agent.
+# Used by `pnpm agent:run` (which passes --config configs/dev.yaml).
+
+version: 0.1.0
+
+# Bind to loopback only. Desktop & local browser forms do not
+# need a public address. The server form overrides this.
+bindAddress: 127.0.0.1
+port: 18080
+
+# TLS. Leave empty in dev. Production must set both.
+tlsCert: ""
+tlsKey: ""
+
+# Where the agent stores state. The agent refuses to write
+# outside this tree (apart from the user config dir).
+dataDir: ./.runtime/data
+
+# Where Tomcat 6 and JDT LS live after first use.
+bundledDir: ./.runtime/bundled
+
+# Log level: debug | info | warn | error.
+logLevel: info
+
+# Auth: not required on loopback in dev. The server form sets
+# this to true.
+requireAuth: false
+
+# Performance and timeout knobs.
+tomcatStartTimeout: 60s
+tomcatShutdownTimeout: 15s
+buildFileTimeout: 30s
+
+# Workspace scan limits (defense in depth).
+workspaceScanMaxDepth: 8
+workspaceScanMaxFiles: 50000
+
+# Diagnostic center ring buffer.
+logBufferLines: 5000

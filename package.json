@@ -1,0 +1,34 @@
+{
+  "name": "kairo-ide",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Kairo IDE — a cross-platform IDE for legacy Java Web projects (JDK 1.6 / Tomcat 6 / JSP / Servlet / GBK)",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=20.10.0",
+    "pnpm": ">=9.0.0"
+  },
+  "packageManager": "pnpm@9.15.9",
+  "scripts": {
+    "bootstrap": "pnpm install --frozen-lockfile=false",
+    "build": "pnpm -r --filter='./packages/*' --filter='./apps/*' build",
+    "build:agent": "pnpm --filter @kairo/runtime-agent build",
+    "build:product": "pnpm --filter @kairo/theia-product build",
+    "dev:browser": "pnpm --filter @kairo/theia-product start:browser",
+    "dev:server": "pnpm --filter @kairo/theia-product start:server",
+    "test": "pnpm -r --filter='./packages/*' --filter='./apps/*' test",
+    "test:agent": "cd runtime-agent && go test -race -timeout 120s ./...",
+    "test:agent:integration": "cd runtime-agent && go test -race -timeout 240s -tags=integration ./test/...",
+    "lint": "pnpm -r --filter='./packages/*' --filter='./apps/*' lint",
+    "clean": "pnpm -r exec rm -rf lib out gen dist && rm -rf runtime-agent/bin runtime-agent/dist",
+    "verify": "pnpm bootstrap && pnpm build && pnpm test && pnpm test:agent",
+    "agent:run": "cd runtime-agent && go run ./cmd/kairo-runtime --config ../runtime-agent/configs/dev.yaml",
+    "agent:build": "cd runtime-agent && CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o bin/kairo-runtime ./cmd/kairo-runtime"
+  },
+  "devDependencies": {
+    "typescript": "5.5.4",
+    "@types/node": "20.14.10",
+    "prettier": "3.3.3",
+    "rimraf": "5.0.10"
+  }
+}

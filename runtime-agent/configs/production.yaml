@@ -1,0 +1,30 @@
+# Production config for the Kairo Runtime Agent (server form).
+# Used by the systemd unit. Read the security doc before
+# running this with a non-loopback bind address.
+
+version: 0.1.0
+
+# Production MUST bind to a specific interface. 0.0.0.0 is
+# only acceptable behind a TLS-terminating reverse proxy.
+bindAddress: 10.0.0.1
+port: 8443
+
+tlsCert: /etc/kairo/tls.crt
+tlsKey: /etc/kairo/tls.key
+
+dataDir: /var/lib/kairo
+bundledDir: /var/lib/kairo/bundled
+
+logLevel: info
+requireAuth: true
+
+sessionLifetimeHours: 8
+idleTimeoutMinutes: 30
+
+tomcatStartTimeout: 60s
+tomcatShutdownTimeout: 15s
+buildFileTimeout: 30s
+
+workspaceScanMaxDepth: 8
+workspaceScanMaxFiles: 50000
+logBufferLines: 10000
