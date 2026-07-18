@@ -4,6 +4,10 @@
   "description": "Kairo IDE — browser entry. Runs the Theia app in headless mode, served to a browser over HTTP.",
   "private": true,
   "main": "lib/index.js",
+  "theia": {
+    "target": ["browser"],
+    "frontendPrefix": "/"
+  },
   "scripts": {
     "build": "theia build --mode production",
     "start": "theia start /tmp/kairo-workspace --hostname=0.0.0.0 --port=3000",
@@ -11,25 +15,25 @@
     "clean": "rm -rf lib"
   },
   "dependencies": {
-    "@kairo/theia-product": "workspace:*",
     "@kairo/protocol": "workspace:*",
     "@kairo/runtime-extension": "workspace:*",
-    "@theia/core": "1.51.0",
-    "@theia/editor": "1.51.0",
-    "@theia/filesystem": "1.51.0",
-    "@theia/workspace": "1.51.0",
-    "@theia/languages": "1.51.0",
-    "@theia/terminal": "1.51.0",
-    "@theia/debug": "1.51.0",
-    "@theia/monaco": "1.51.0",
-    "@theia/messages": "1.51.0",
-    "@theia/preferences": "1.51.0",
-    "@theia/markers": "1.51.0",
-    "@theia/outline-view": "1.51.0",
-    "@theia/search-in-workspace": "1.51.0",
-    "@theia/navigator": "1.51.0"
+    "@kairo/theia-product": "workspace:*",
+    "@theia/core": "1.73.1",
+    "@theia/debug": "1.73.1",
+    "@theia/editor": "1.73.1",
+    "@theia/filesystem": "1.73.1",
+    "@theia/markers": "1.73.1",
+    "@theia/messages": "1.73.1",
+    "@theia/monaco": "1.73.1",
+    "@theia/navigator": "1.73.1",
+    "@theia/outline-view": "1.73.1",
+    "@theia/preferences": "1.73.1",
+    "@theia/search-in-workspace": "1.73.1",
+    "@theia/terminal": "1.73.1",
+    "@theia/workspace": "1.73.1"
   },
   "devDependencies": {
-    "@theia/cli": "1.51.0"
+    "@theia/cli": "1.73.1",
+    "esbuild": "0.24.2"
   }
 }

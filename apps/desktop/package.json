@@ -15,13 +15,13 @@
   "dependencies": {
     "@kairo/theia-product": "workspace:*",
     "@kairo/runtime-extension": "workspace:*",
-    "@theia/core": "1.51.0",
-    "@theia/electron": "1.51.0"
+    "@theia/core": "1.73.1",
+    "@theia/electron": "1.73.1"
   },
   "devDependencies": {
     "@types/node": "20.14.10",
-    "electron": "31.0.0",
-    "electron-builder": "24.13.3"
+    "electron": "39.8.7",
+    "electron-builder": "25.1.8"
   },
   "build": {
     "appId": "org.kairo.ide",

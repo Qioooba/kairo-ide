@@ -1,3 +1,1 @@
-export * from './java-service';
-import { bindJavaExtension } from './java-service';
-export { bindJavaExtension };
+export { KairoJavaService, bindJavaExtension } from './java-service';

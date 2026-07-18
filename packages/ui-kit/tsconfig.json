@@ -2,12 +2,14 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "outDir": "lib",
-    "rootDir": "src",
     "declaration": true,
     "composite": true,
     "skipLibCheck": true,
     "jsx": "react"
   },
   "include": ["src/**/*.ts", "src/**/*.tsx"],
-  "exclude": ["node_modules", "lib", "**/*.test.ts", "**/*.test.tsx"]
+  "exclude": ["node_modules", "lib", "**/*.test.ts", "**/*.test.tsx"],
+  "references": [
+    { "path": "../protocol" }
+  ]
 }

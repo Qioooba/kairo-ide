@@ -1,0 +1,24 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "lib",
+    "declaration": false,
+    "composite": false,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "jsx": "react"
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "exclude": ["node_modules", "lib"],
+  "references": [
+    { "path": "../../packages/protocol" },
+    { "path": "../../packages/runtime-extension" },
+    { "path": "../../packages/project-extension" },
+    { "path": "../../packages/search-extension" },
+    { "path": "../../packages/tomcat-extension" },
+    { "path": "../../packages/java-extension" },
+    { "path": "../../packages/jsp-extension" },
+    { "path": "../../packages/ui-kit" },
+    { "path": "../../packages/theia-product" }
+  ]
+}

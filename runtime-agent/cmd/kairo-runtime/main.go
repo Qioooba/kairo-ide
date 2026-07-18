@@ -59,7 +59,12 @@ func run() error {
 
 	// Wire the in-memory services with real implementations of
 	// toolchain / search / encoding / build.
-	svcs := services.NewMemoryServices(cfg.DataDir, cfg.Bundled(), sandbox)
+	svcs := services.NewMemoryServices(services.Config{
+		DataDir:    cfg.DataDir,
+		BundledDir: cfg.Bundled(),
+		Logger:     logger,
+		Tomcat6Home: os.Getenv("KAIRO_TOMCAT6_HOME"),
+	}, sandbox)
 
 	srv := api.NewServer(svcs, logger, auditLog, agentVersion)
 	addr := fmt.Sprintf("%s:%d", cfg.BindAddress, cfg.Port)

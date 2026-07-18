@@ -7,19 +7,14 @@
  */
 
 import { injectable, inject } from '@theia/core/shared/inversify';
-import {
-  Workspace as WorkspaceDTO,
-  ProjectConfig,
-} from '@kairo/protocol';
-import { KairoRuntime } from '@kairo/runtime-extension/lib/browser';
-
-export const KairoProjectService = Symbol('KairoProjectService');
+import type { Workspace as WorkspaceDTO, ProjectConfig } from '@kairo/protocol';
+import { KairoRuntimeImpl } from '@kairo/runtime-extension';
 
 @injectable()
 export class KairoProjectService {
-  @inject(KairoRuntime) protected runtime: KairoRuntime;
+  @inject(KairoRuntimeImpl) protected runtime!: KairoRuntimeImpl;
 
-  protected current: WorkspaceDTO | undefined;
+  protected current?: WorkspaceDTO;
   protected projects = new Map<string, ProjectConfig>();
 
   async openWorkspace(rootPath: string, name?: string): Promise<WorkspaceDTO> {
@@ -29,32 +24,32 @@ export class KairoProjectService {
     return ws;
   }
 
-  async closeWorkspace(): Promise<void> {
-    if (!this.current) return;
-    await this.runtime.request('DELETE /api/v1/workspaces/{id}', undefined, { /* path param */ } as never);
-    this.current = undefined;
-    this.projects.clear();
-  }
-
   async listWorkspaces(): Promise<WorkspaceDTO[]> {
     return this.runtime.request('GET /api/v1/workspaces', undefined);
   }
 
+  async closeWorkspace(id: string): Promise<void> {
+    await this.runtime.request('DELETE /api/v1/workspaces/{id}', undefined, { pathParams: { id } });
+    if (this.current?.id === id) {
+      this.current = undefined;
+      this.projects.clear();
+    }
+  }
+
   async detectLayout(workspaceId: string): Promise<unknown> {
-    return this.runtime.request('POST /api/v1/workspaces/{id}/scan', { deep: true }, workspaceId);
+    return this.runtime.request('POST /api/v1/workspaces/{id}/scan', { deep: true }, { pathParams: { id: workspaceId } });
   }
 
   async listProjects(): Promise<ProjectConfig[]> {
-    const raw = await this.runtime.request('GET /api/v1/projects', undefined) as any[];
-    return raw as ProjectConfig[];
+    return (await this.runtime.request('GET /api/v1/projects', undefined)) as ProjectConfig[];
   }
 
   async getProject(id: string): Promise<ProjectConfig> {
-    return this.runtime.request('GET /api/v1/projects/{id}', undefined, id);
+    return this.runtime.request('GET /api/v1/projects/{id}', undefined, { pathParams: { id } });
   }
 
   async saveProject(id: string, cfg: ProjectConfig): Promise<ProjectConfig> {
-    return this.runtime.request('PUT /api/v1/projects/{id}', { config: cfg }, id);
+    return this.runtime.request('PUT /api/v1/projects/{id}', { config: cfg }, { pathParams: { id } });
   }
 
   currentWorkspace(): WorkspaceDTO | undefined {
@@ -63,5 +58,5 @@ export class KairoProjectService {
 }
 
 export function bindProjectExtension(bind: any): void {
-  bind(KairoProjectService).to(KairoProjectService).inSingletonScope();
+  bind(KairoProjectService).toSelf().inSingletonScope();
 }

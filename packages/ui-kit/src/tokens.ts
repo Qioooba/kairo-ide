@@ -76,10 +76,31 @@ export const tokens = {
 } as const;
 
 export type Theme = 'dark' | 'light';
-export type ColorTokens = typeof tokens.color.dark;
+
+export interface ColorTokens {
+  bgCanvas: string;
+  bgPanel: string;
+  bgElevated: string;
+  bgActive: string;
+  fgPrimary: string;
+  fgSecondary: string;
+  fgMuted: string;
+  borderSubtle: string;
+  borderStrong: string;
+  accentPrimary: string;
+  accentDanger: string;
+  accentWarning: string;
+  accentSuccess: string;
+  serverRunning: string;
+  serverStopped: string;
+  serverError: string;
+  hotReloadGreen: string;
+  hotReloadAmber: string;
+  hotReloadRed: string;
+}
 
 export function getColors(theme: Theme): ColorTokens {
-  return tokens.color[theme];
+  return tokens.color[theme] as unknown as ColorTokens;
 }
 
 export const KAIRO_BRAND = {

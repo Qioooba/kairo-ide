@@ -4,14 +4,12 @@
  */
 
 import { injectable, inject } from '@theia/core/shared/inversify';
-import { ServerInstance } from '@kairo/protocol';
-import { KairoRuntime } from '@kairo/runtime-extension/lib/browser';
-
-export const KairoServerService = Symbol('KairoServerService');
+import type { ServerInstance } from '@kairo/protocol';
+import { KairoRuntimeImpl } from '@kairo/runtime-extension';
 
 @injectable()
 export class KairoServerService {
-  @inject(KairoRuntime) protected runtime: KairoRuntime;
+  @inject(KairoRuntimeImpl) protected runtime!: KairoRuntimeImpl;
 
   protected cache = new Map<string, ServerInstance>();
 
@@ -22,28 +20,28 @@ export class KairoServerService {
   }
 
   async get(id: string): Promise<ServerInstance> {
-    const s = await this.runtime.request('GET /api/v1/servers/{id}', undefined, id);
+    const s = await this.runtime.request('GET /api/v1/servers/{id}', undefined, { pathParams: { id } });
     this.cache.set(id, s);
     return s;
   }
 
   async stop(id: string, force = false): Promise<ServerInstance> {
-    const s = await this.runtime.request('DELETE /api/v1/servers/{id}', { force }, id);
+    const s = await this.runtime.request('DELETE /api/v1/servers/{id}', { force }, { pathParams: { id } });
     this.cache.set(id, s);
     return s;
   }
 
   async debug(id: string): Promise<ServerInstance> {
-    const s = await this.runtime.request('POST /api/v1/servers/{id}/debug', undefined, id);
+    const s = await this.runtime.request('POST /api/v1/servers/{id}/debug', undefined, { pathParams: { id } });
     this.cache.set(id, s);
     return s;
   }
 
   async logs(id: string, follow = false): Promise<{ line: string; ts: string }[]> {
-    return this.runtime.request('GET /api/v1/servers/{id}/logs', { follow }, id);
+    return this.runtime.request('GET /api/v1/servers/{id}/logs', { follow }, { pathParams: { id } });
   }
 }
 
 export function bindTomcatExtension(bind: any): void {
-  bind(KairoServerService).to(KairoServerService).inSingletonScope();
+  bind(KairoServerService).toSelf().inSingletonScope();
 }

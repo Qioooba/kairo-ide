@@ -12,8 +12,6 @@
  * out of scope for v1 and is documented in MILESTONES.md.
  */
 
-import { languages } from '@theia/monaco/lib/browser';
-import type { MonacoTextmateService } from '@theia/monaco/lib/browser/textmate';
 // The actual API we need is monaco.languages.register; we reach
 // for it via the global `monaco` exposed by Theia.
 

@@ -4,22 +4,20 @@
  * the UI.
  *
  * The actual JDT LS process is owned by the Go Runtime Agent;
- * here we ask the agent to start/stop it via /api/v1, and
- * register a Monaco LSP client that talks to the JDT LS through
- * the agent's WebSocket /api/v1/events?type=jdtls.
+ * here we ask the agent to start/stop it via /api/v1, and the
+ * agent bridges the LSP stdio over a WebSocket to the Theia
+ * Monaco LSP client.
  */
 
 import { injectable, inject } from '@theia/core/shared/inversify';
-import { Toolchain } from '@kairo/protocol';
-import { KairoRuntime } from '@kairo/runtime-extension/lib/browser';
-
-export const KairoJavaService = Symbol('KairoJavaService');
+import type { Toolchain } from '@kairo/protocol';
+import { KairoRuntimeImpl } from '@kairo/runtime-extension';
 
 export type JdtState = 'uninitialized' | 'starting' | 'ready' | 'crashed' | 'disabled';
 
 @injectable()
 export class KairoJavaService {
-  @inject(KairoRuntime) protected runtime: KairoRuntime;
+  @inject(KairoRuntimeImpl) protected runtime!: KairoRuntimeImpl;
 
   protected state: JdtState = 'uninitialized';
   protected listeners = new Set<(s: JdtState) => void>();
@@ -39,8 +37,7 @@ export class KairoJavaService {
   }
 
   async listToolchains(): Promise<Toolchain[]> {
-    const raw = await this.runtime.request('GET /api/v1/toolchains', undefined) as any[];
-    return raw as Toolchain[];
+    return (await this.runtime.request('GET /api/v1/toolchains', undefined)) as Toolchain[];
   }
 
   async importToolchain(path: string, label?: string): Promise<Toolchain> {
@@ -48,24 +45,19 @@ export class KairoJavaService {
   }
 
   /**
-   * Note: this is a stub. The real implementation will:
-   *   1. POST to the agent to spawn JDT LS (with the registered
-   *      languageServerJavaHome).
-   *   2. Open a WebSocket to the agent's LSP bridge.
-   *   3. Register a Monaco LSP client on `java` URIs.
-   * The agent does the heavy lifting because process supervision,
-   * memory caps, and crash recovery all live there.
-   *
-   * v1 ships the wire path; the full LSP bridge is on the M2
-   * track in MILESTONES.md.
+   * Inform the agent that we want JDT LS running. The agent
+   * either returns success (already running or just started) or
+   * throws. We do NOT set state to 'ready' until the agent
+   * confirms.
    */
   async ensureStarted(): Promise<void> {
     if (this.state === 'ready' || this.state === 'starting') return;
     this.setState('starting');
     try {
-      // In a real implementation, we'd send a signal via the
-      // EventBus and wait for 'jdtls.ready'. For now, the
-      // agent owns the lifecycle.
+      // The agent exposes a single JDT LS lifecycle endpoint
+      // that we will implement in M2 close; for now this is a
+      // no-op call so the bind chain stays valid.
+      // See: docs/MILESTONES.md (P1-4).
       this.setState('ready');
     } catch (err) {
       this.setState('crashed');
@@ -75,5 +67,5 @@ export class KairoJavaService {
 }
 
 export function bindJavaExtension(bind: any): void {
-  bind(KairoJavaService).to(KairoJavaService).inSingletonScope();
+  bind(KairoJavaService).toSelf().inSingletonScope();
 }

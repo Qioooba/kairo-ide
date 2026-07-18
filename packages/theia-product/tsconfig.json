@@ -8,5 +8,15 @@
     "skipLibCheck": true
   },
   "include": ["src/**/*.ts"],
-  "exclude": ["node_modules", "lib", "**/*.test.ts"]
+  "exclude": ["node_modules", "lib", "**/*.test.ts"],
+  "references": [
+    { "path": "../protocol" },
+    { "path": "../ui-kit" },
+    { "path": "../runtime-extension" },
+    { "path": "../project-extension" },
+    { "path": "../search-extension" },
+    { "path": "../jsp-extension" },
+    { "path": "../tomcat-extension" },
+    { "path": "../java-extension" }
+  ]
 }

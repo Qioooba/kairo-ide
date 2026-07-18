@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Run the agent and the Theia browser app together in dev.
+# On Windows use scripts\dev.ps1 instead.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -8,9 +9,16 @@ export KAIRO_DATA_DIR
 mkdir -p "$KAIRO_DATA_DIR"
 
 # Start the agent in the background.
-(cd runtime-agent && exec go run ./cmd/kairo-runtime --config configs/dev.yaml) &
+(cd runtime-agent && exec GOTOOLCHAIN=local go run ./cmd/kairo-runtime --config configs/dev.yaml) &
 AGENT_PID=$!
-trap 'kill $AGENT_PID 2>/dev/null || true' EXIT INT TERM
+cleanup() {
+  if kill -0 "$AGENT_PID" 2>/dev/null; then
+    kill "$AGENT_PID" 2>/dev/null || true
+    sleep 0.2
+    kill -9 "$AGENT_PID" 2>/dev/null || true
+  fi
+}
+trap cleanup EXIT INT TERM
 
 # Wait for the agent to come up.
 for i in {1..50}; do

@@ -10,3 +10,7 @@
  */
 
 export * from './product';
+// Theia `load(container, jsModule)` reads `jsModule.default` (the
+// ContainerModule itself). `export *` does not re-export the
+// default, so we re-export it explicitly.
+export { default } from './product';

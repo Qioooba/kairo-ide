@@ -16,8 +16,8 @@
     "@kairo/runtime-extension": "workspace:*"
   },
   "peerDependencies": {
-    "@theia/core": "1.51.0",
-    "@theia/editor": "1.51.0"
+    "@theia/core": "1.73.1",
+    "@theia/editor": "1.73.1"
   },
   "devDependencies": {
     "typescript": "5.5.4"

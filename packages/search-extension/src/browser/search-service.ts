@@ -4,10 +4,8 @@
  */
 
 import { injectable, inject } from '@theia/core/shared/inversify';
-import { SearchRequest, SearchResponse, SearchMatch } from '@kairo/protocol';
-import { KairoRuntime } from '@kairo/runtime-extension/lib/browser';
-
-export const KairoSearchService = Symbol('KairoSearchService');
+import type { SearchRequest, SearchResponse } from '@kairo/protocol';
+import { KairoRuntimeImpl } from '@kairo/runtime-extension';
 
 export interface SearchOptions extends Partial<SearchRequest> {
   workspaceId: string;
@@ -15,7 +13,7 @@ export interface SearchOptions extends Partial<SearchRequest> {
 
 @injectable()
 export class KairoSearchService {
-  @inject(KairoRuntime) protected runtime: KairoRuntime;
+  @inject(KairoRuntimeImpl) protected runtime!: KairoRuntimeImpl;
   protected current?: AbortController;
 
   async search(opts: SearchOptions): Promise<SearchResponse> {
@@ -42,5 +40,5 @@ export class KairoSearchService {
 }
 
 export function bindSearchExtension(bind: any): void {
-  bind(KairoSearchService).to(KairoSearchService).inSingletonScope();
+  bind(KairoSearchService).toSelf().inSingletonScope();
 }

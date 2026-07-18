@@ -1,3 +1,1 @@
-export * from './server-service';
-import { bindTomcatExtension } from './server-service';
-export { bindTomcatExtension };
+export { KairoServerService, bindTomcatExtension } from './server-service';

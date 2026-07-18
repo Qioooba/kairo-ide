@@ -92,3 +92,20 @@ legacy-sample/.project
 docs/api/
 *.generated.ts
 *.generated.go
+
+# TypeScript build outputs
+*.tsbuildinfo
+packages/*/src/**/*.d.ts
+packages/*/src/**/*.js
+packages/*/src/**/*.js.map
+apps/*/src/**/*.d.ts
+apps/*/src/**/*.js
+apps/*/src/**/*.js.map
+
+# Theia-generated esbuild config (re-emitted on every `theia build`)
+apps/*/esbuild.mjs
+apps/*/gen-esbuild.*.mjs
+apps/*/src-gen/
+
+# Playwright screenshots (not test artifacts, just visual reference)
+codex-ui-review-shots/

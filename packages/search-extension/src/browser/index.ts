@@ -1,3 +1,1 @@
-export * from './search-service';
-import { bindSearchExtension } from './search-service';
-export { bindSearchExtension };
+export { KairoSearchService, bindSearchExtension } from './search-service';

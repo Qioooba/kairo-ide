@@ -7,31 +7,46 @@
  * in-process agent; in the server form it is the remote agent).
  */
 
-import { injectable } from '@theia/core/shared/inversify';
+import { injectable, postConstruct } from '@theia/core/shared/inversify';
 import {
   PROTOCOL_VERSION_PATH,
   RequestEnvelope,
-  ResponseFor,
   Endpoint,
-  RequestFor,
   WsEvent,
+  type RequestFor,
+  type ResponseFor,
 } from '@kairo/protocol';
 
+/**
+ * The interface for the Kairo runtime client. Extensions bind
+ * to `KairoRuntime` (this Symbol) and receive an injectable.
+ */
 export const KairoRuntime = Symbol('KairoRuntime');
-export const KairoRuntimeFactory = Symbol('KairoRuntimeFactory');
 
 export interface KairoRuntimeConfig {
   baseUrl: string;
-  /** Optional session token for the server form. */
   sessionToken?: string;
-  /** Optional CSRF token; the client adds it to state-changing requests. */
   csrfToken?: string;
 }
 
+export type KairoRequestInit = {
+  /** Path parameter substitutions, in the order they appear in the endpoint. */
+  pathParams?: Record<string, string>;
+  /** Query parameters. */
+  query?: Record<string, string | number | boolean | undefined>;
+  /** Abort signal. */
+  signal?: AbortSignal;
+};
+
 @injectable()
-export class KairoRuntime {
+export class KairoRuntimeImpl {
   protected config: KairoRuntimeConfig = { baseUrl: '' };
   protected workspaceId: string = '';
+
+  @postConstruct()
+  init(): void {
+    // default config; can be overridden via configure()
+  }
 
   configure(cfg: KairoRuntimeConfig): void {
     this.config = cfg;
@@ -45,19 +60,33 @@ export class KairoRuntime {
     return this.workspaceId;
   }
 
-  /** Build the full URL for an endpoint. */
-  url<E extends Endpoint>(endpoint: E, ...pathParams: string[]): string {
+  /**
+   * Build the full URL for an endpoint, applying pathParams and
+   * query.
+   */
+  url(endpoint: Endpoint, init: KairoRequestInit = {}): string {
     let path = endpoint;
-    if (pathParams.length > 0) {
-      // Replace `{id}` in the path with the first param.
-      path = path.replace('{id}', encodeURIComponent(pathParams[0])) as E;
-    }
-    // Strip the HTTP method, e.g. "GET /api/v1/health" -> "/api/v1/health".
     const m = /^[A-Z]+\s+(\/.*)$/.exec(endpoint);
     if (m) {
-      path = m[1] as E;
+      path = m[1] as Endpoint;
     }
-    return this.config.baseUrl.replace(/\/$/, '') + path;
+    if (init.pathParams) {
+      for (const [k, v] of Object.entries(init.pathParams)) {
+        path = path.replace(`{${k}}`, encodeURIComponent(v)) as Endpoint;
+      }
+    }
+    let url = this.config.baseUrl.replace(/\/$/, '') + path;
+    if (init.query) {
+      const q: string[] = [];
+      for (const [k, v] of Object.entries(init.query)) {
+        if (v === undefined) continue;
+        q.push(`${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`);
+      }
+      if (q.length > 0) {
+        url += (url.includes('?') ? '&' : '?') + q.join('&');
+      }
+    }
+    return url;
   }
 
   /**
@@ -67,14 +96,14 @@ export class KairoRuntime {
   async request<E extends Endpoint>(
     endpoint: E,
     payload: RequestFor<E>['payload'],
-    opts?: { signal?: AbortSignal },
+    init: KairoRequestInit = {},
   ): Promise<ResponseFor<E>> {
     const env: RequestEnvelope<RequestFor<E>['payload']> = {
       workspaceId: this.workspaceId,
       requestId: newRequestId(),
-      payload,
+      payload: payload as RequestFor<E>['payload'],
     };
-    const url = this.url(endpoint);
+    const url = this.url(endpoint, init);
     const m = /^[A-Z]+\s+/.exec(endpoint);
     const method = m ? m[0].trim() : 'GET';
     const headers: Record<string, string> = {
@@ -94,7 +123,7 @@ export class KairoRuntime {
       method,
       headers,
       body: method === 'GET' ? undefined : JSON.stringify(env),
-      signal: opts?.signal,
+      signal: init.signal,
     });
     const json = await res.json();
     if (!json.ok) {
@@ -115,7 +144,8 @@ export class KairoRuntime {
     const wsUrl = this.config.baseUrl
       .replace(/^http/, 'ws')
       .replace(/\/$/, '') + PROTOCOL_VERSION_PATH + '/events';
-    const ws = new WebSocket(wsUrl, this.config.sessionToken ? [this.config.sessionToken] : []);
+    const protocols = this.config.sessionToken ? [this.config.sessionToken] : undefined;
+    const ws = protocols ? new WebSocket(wsUrl, protocols) : new WebSocket(wsUrl);
     return new EventStream(ws);
   }
 }
@@ -137,8 +167,8 @@ export class EventStream {
         if (all) {
           for (const fn of all) fn(e);
         }
-      } catch (err) {
-        // ignore
+      } catch (_err) {
+        // ignore malformed messages
       }
     });
   }

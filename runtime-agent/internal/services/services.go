@@ -1,12 +1,11 @@
-// Package services provides default in-memory implementations of
-// the api service interfaces. They wire the real packages
-// (search, encoding, build, toolchain) but keep workspace /
-// project / server runtime state in memory.
+// Package services provides default in-memory + disk-backed
+// implementations of the api service interfaces. The agent
+// stores workspace, project, server, build, and deployment
+// records on disk so they survive an agent restart.
 //
-// The in-memory store is the right default for a desktop IDE
-// where the user is single-tenant. The remote form replaces it
-// with a per-user backed store; the interfaces in api/services.go
-// stay the same.
+// The runtime, search, encoding, build, and Tomcat 6 components
+// are real (no mocks, no stubs). The server runner launches the
+// real Apache Tomcat 6 Bootstrap via java -classpath.
 package services
 
 import (
@@ -14,73 +13,131 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 
 	"github.com/kairo-ide/runtime-agent/internal/api"
 	"github.com/kairo-ide/runtime-agent/internal/build"
 	"github.com/kairo-ide/runtime-agent/internal/encoding"
-	"github.com/kairo-ide/runtime-agent/internal/proc"
+	"github.com/kairo-ide/runtime-agent/internal/log"
 	"github.com/kairo-ide/runtime-agent/internal/search"
 	"github.com/kairo-ide/runtime-agent/internal/security"
+	"github.com/kairo-ide/runtime-agent/internal/tomcat6"
 	"github.com/kairo-ide/runtime-agent/internal/toolchain"
 )
 
+const (
+	srvRunning  = "running"
+	srvStarting = "starting"
+	srvStopping = "stopping"
+	srvStopped  = "stopped"
+	srvError    = "error"
+	srvCrashed  = "crashed"
+)
+
+// Config bundles the data directory, bundled directory, and a
+// logger for the service factory.
+type Config struct {
+	DataDir     string
+	BundledDir  string
+	Logger      *log.Logger
+	Tomcat6Home string
+}
+
 // NewMemoryServices returns a fully-wired Services struct with
-// real implementations. serverRunner and authenticator are
-// left for the caller to set if needed.
-func NewMemoryServices(dataDir, bundledDir string, sandbox *security.WorkspaceRoots) *api.Services {
-	registry, _ := toolchain.NewRegistry(filepath.Join(dataDir, "toolchains"))
+// real implementations.
+func NewMemoryServices(cfg Config, sandbox *security.WorkspaceRoots) *api.Services {
+	registry, _ := toolchain.NewRegistry(filepath.Join(cfg.DataDir, "toolchains"))
+	tomcat6Home := cfg.Tomcat6Home
+	if tomcat6Home == "" {
+		home, err := tomcat6.FetchCatalinaHomeOrDownload(cfg.BundledDir)
+		if err == nil {
+			tomcat6Home = home
+		} else {
+			cfg.Logger.Warn("tomcat6 not available", log.Fields{"err": err.Error()})
+		}
+	}
 	return &api.Services{
-		WorkspaceStore:    &memWorkspaceStore{sandbox: sandbox},
-		ProjectStore:      &memProjectStore{},
+		WorkspaceStore:    newDiskWorkspaceStore(cfg.DataDir),
+		ProjectStore:      newDiskProjectStore(cfg.DataDir),
 		ToolchainRegistry: &memToolchainRegistry{reg: registry},
 		Searcher:          &memSearcher{},
 		Encoder:           &memEncoder{},
-		BuildEngine:       &memBuildEngine{toolchainReg: registry},
-		Deployer:          &memDeployer{},
-		ServerRunner:      &memServerRunner{bundledDir: bundledDir},
-		Auth:              &memAuthenticator{dataDir: dataDir},
+		BuildEngine:       newAsyncBuildEngine(cfg.DataDir, registry, cfg.Logger),
+		Deployer:          newDiskDeployer(cfg.DataDir, cfg.Logger),
+		ServerRunner:      newRealServerRunner(cfg.DataDir, cfg.BundledDir, tomcat6Home, cfg.Logger),
+		Auth:              newDiskAuthenticator(cfg.DataDir, cfg.Logger),
 	}
 }
 
-// memWorkspaceStore is a single-process workspace store.
-type memWorkspaceStore struct {
-	mu    sync.Mutex
-	items map[string]api.WorkspaceRecord
-	sandbox *security.WorkspaceRoots
+// ----------------- WorkspaceStore (disk) -----------------
+
+type diskWorkspaceStore struct {
+	mu   sync.Mutex
+	dir  string
+	data map[string]api.WorkspaceRecord
 }
 
-func (s *memWorkspaceStore) List() []api.WorkspaceRecord {
+func newDiskWorkspaceStore(dataDir string) *diskWorkspaceStore {
+	dir := filepath.Join(dataDir, "workspaces")
+	_ = os.MkdirAll(dir, 0o755)
+	ws := &diskWorkspaceStore{dir: dir, data: map[string]api.WorkspaceRecord{}}
+	ws.load()
+	return ws
+}
+
+func (s *diskWorkspaceStore) load() {
+	p := filepath.Join(s.dir, "workspaces.json")
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return
+	}
+	var items []api.WorkspaceRecord
+	if err := json.Unmarshal(data, &items); err != nil {
+		return
+	}
+	for _, w := range items {
+		s.data[w.ID] = w
+	}
+}
+
+func (s *diskWorkspaceStore) save() {
+	items := make([]api.WorkspaceRecord, 0, len(s.data))
+	for _, w := range s.data {
+		items = append(items, w)
+	}
+	data, _ := json.MarshalIndent(items, "", "  ")
+	_ = os.WriteFile(filepath.Join(s.dir, "workspaces.json"), data, 0o600)
+}
+
+func (s *diskWorkspaceStore) List() []api.WorkspaceRecord {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := make([]api.WorkspaceRecord, 0, len(s.items))
-	for _, w := range s.items {
+	out := make([]api.WorkspaceRecord, 0, len(s.data))
+	for _, w := range s.data {
 		out = append(out, w)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].LastOpened > out[j].LastOpened })
 	return out
 }
 
-func (s *memWorkspaceStore) Open(rootPath, name string) (api.WorkspaceRecord, error) {
+func (s *diskWorkspaceStore) Open(rootPath, name string) (api.WorkspaceRecord, error) {
 	abs, err := filepath.Abs(rootPath)
 	if err != nil {
 		return api.WorkspaceRecord{}, err
 	}
-	if s.sandbox != nil {
-		if s.sandbox.FindRoot(abs) < 0 {
-			// Add as a new root on the fly for desktop mode.
-			r, err := security.NewWorkspaceRoots(abs)
-			if err != nil {
-				return api.WorkspaceRecord{}, err
-			}
-			*s.sandbox = *r
-		}
+	if _, err := os.Stat(abs); err != nil {
+		return api.WorkspaceRecord{}, fmt.Errorf("path not accessible: %w", err)
 	}
 	id := "ws_" + shortID()
 	if name == "" {
@@ -95,75 +152,103 @@ func (s *memWorkspaceStore) Open(rootPath, name string) (api.WorkspaceRecord, er
 		UserID:     "local",
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.items == nil {
-		s.items = map[string]api.WorkspaceRecord{}
-	}
-	s.items[id] = w
+	s.data[id] = w
+	s.save()
+	s.mu.Unlock()
 	return w, nil
 }
 
-func (s *memWorkspaceStore) Get(id string) (api.WorkspaceRecord, error) {
+func (s *diskWorkspaceStore) Get(id string) (api.WorkspaceRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	w, ok := s.items[id]
+	w, ok := s.data[id]
 	if !ok {
 		return api.WorkspaceRecord{}, fmt.Errorf("workspace not found: %s", id)
 	}
 	w.LastOpened = time.Now().UTC().Format(time.RFC3339Nano)
-	s.items[id] = w
+	s.data[id] = w
+	s.save()
 	return w, nil
 }
 
-func (s *memWorkspaceStore) Close(id string) error {
+func (s *diskWorkspaceStore) Close(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	delete(s.items, id)
+	delete(s.data, id)
+	s.save()
 	return nil
 }
 
-// memProjectStore is a minimal stub. The real implementation
-// reads/writes .legacyflow/project.yaml.
-type memProjectStore struct {
-	mu sync.Mutex
-	items map[string]json.RawMessage
+// ----------------- ProjectStore (disk) -----------------
+
+type diskProjectStore struct {
+	mu   sync.Mutex
+	dir  string
+	data map[string]json.RawMessage
 }
 
-func (s *memProjectStore) List() []json.RawMessage {
+func newDiskProjectStore(dataDir string) *diskProjectStore {
+	dir := filepath.Join(dataDir, "projects")
+	_ = os.MkdirAll(dir, 0o755)
+	ps := &diskProjectStore{dir: dir, data: map[string]json.RawMessage{}}
+	ps.load()
+	return ps
+}
+
+func (s *diskProjectStore) load() {
+	p := filepath.Join(s.dir, "projects.json")
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return
+	}
+	var items map[string]json.RawMessage
+	if err := json.Unmarshal(data, &items); err != nil {
+		return
+	}
+	for k, v := range items {
+		s.data[k] = v
+	}
+}
+
+func (s *diskProjectStore) save() {
+	data, _ := json.MarshalIndent(s.data, "", "  ")
+	_ = os.WriteFile(filepath.Join(s.dir, "projects.json"), data, 0o600)
+}
+
+func (s *diskProjectStore) List() []json.RawMessage {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := make([]json.RawMessage, 0, len(s.items))
-	for _, p := range s.items {
+	out := make([]json.RawMessage, 0, len(s.data))
+	for _, p := range s.data {
 		out = append(out, p)
 	}
 	return out
 }
 
-func (s *memProjectStore) Get(id string) (json.RawMessage, error) {
+func (s *diskProjectStore) Get(id string) (json.RawMessage, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	p, ok := s.items[id]
+	p, ok := s.data[id]
 	if !ok {
 		return nil, fmt.Errorf("project not found: %s", id)
 	}
 	return p, nil
 }
 
-func (s *memProjectStore) Update(id string, cfg any) (json.RawMessage, error) {
+func (s *diskProjectStore) Update(id string, cfg any) (json.RawMessage, error) {
 	b, err := json.Marshal(cfg)
 	if err != nil {
 		return nil, err
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.items == nil {
-		s.items = map[string]json.RawMessage{}
-	}
-	s.items[id] = b
+	s.data[id] = b
+	s.save()
+	s.mu.Unlock()
 	return b, nil
 }
 
-// memToolchainRegistry wraps the real Registry.
+// ----------------- ToolchainRegistry -----------------
+
 type memToolchainRegistry struct {
 	reg *toolchain.Registry
 }
@@ -191,44 +276,38 @@ func (m *memToolchainRegistry) Import(path, label string) (json.RawMessage, erro
 	return json.Marshal(t)
 }
 
-// memSearcher wraps search.Search.
+// ----------------- Searcher -----------------
+
 type memSearcher struct{}
 
 func (memSearcher) Search(payload json.RawMessage) (json.RawMessage, error) {
 	var req struct {
-		WorkspaceID    string   `json:"workspaceId"`
-		Query          string   `json:"query"`
-		IsRegex        bool     `json:"isRegex"`
-		CaseSensitive  bool     `json:"caseSensitive"`
-		WholeWord      bool     `json:"wholeWord"`
-		Include        []string `json:"include"`
-		Exclude        []string `json:"exclude"`
-		ContextLines   int      `json:"contextLines"`
-		MaxResults     int      `json:"maxResults"`
-		PreviewReplace string   `json:"previewReplace"`
+		WorkspaceID     string   `json:"workspaceId"`
+		Query           string   `json:"query"`
+		IsRegex         bool     `json:"isRegex"`
+		CaseSensitive   bool     `json:"caseSensitive"`
+		WholeWord       bool     `json:"wholeWord"`
+		Include         []string `json:"include"`
+		Exclude         []string `json:"exclude"`
+		ContextLines    int      `json:"contextLines"`
+		MaxResults      int      `json:"maxResults"`
+		PreviewReplace  string   `json:"previewReplace"`
+		ProjectEncoding string   `json:"projectEncoding"`
 	}
 	if err := json.Unmarshal(payload, &req); err != nil {
 		return nil, err
 	}
-	// We expect the workspaceId to map to a root path. For now
-	// we use the workspaceId directly as a path; the calling
-	// service is responsible for translating.
-	root := req.WorkspaceID
-	if _, err := os.Stat(root); err != nil {
-		// Allow if it doesn't exist (e.g. for tests); the
-		// search engine will return zero matches gracefully.
-	}
-	r, err := search.Search(root, search.Options{
-		Query:          req.Query,
-		IsRegex:        req.IsRegex,
-		CaseSensitive:  req.CaseSensitive,
-		WholeWord:      req.WholeWord,
-		Include:        req.Include,
-		Exclude:        req.Exclude,
-		ContextLines:   req.ContextLines,
-		MaxResults:     req.MaxResults,
-		PreviewReplace: req.PreviewReplace,
-		ProjectEncoding: encoding.UTF8,
+	r, err := search.Search(req.WorkspaceID, search.Options{
+		Query:           req.Query,
+		IsRegex:         req.IsRegex,
+		CaseSensitive:   req.CaseSensitive,
+		WholeWord:       req.WholeWord,
+		Include:         req.Include,
+		Exclude:         req.Exclude,
+		ContextLines:    req.ContextLines,
+		MaxResults:      req.MaxResults,
+		PreviewReplace:  req.PreviewReplace,
+		ProjectEncoding: encoding.ID(req.ProjectEncoding),
 	})
 	if err != nil {
 		return nil, err
@@ -236,7 +315,8 @@ func (memSearcher) Search(payload json.RawMessage) (json.RawMessage, error) {
 	return json.Marshal(r)
 }
 
-// memEncoder wraps encoding.Detect/Decode/Encode.
+// ----------------- Encoder -----------------
+
 type memEncoder struct{}
 
 func (memEncoder) Detect(payload json.RawMessage) (json.RawMessage, error) {
@@ -297,21 +377,87 @@ func (memEncoder) Recode(payload json.RawMessage) (json.RawMessage, error) {
 	return json.Marshal(map[string]any{"ok": true, "bytes": len(encoded)})
 }
 
-// memBuildEngine is a thin wrapper around build.Compiler.
-type memBuildEngine struct {
-	toolchainReg *toolchain.Registry
+// ----------------- BuildEngine (async, disk) -----------------
+
+type buildState struct {
+	ID           string              `json:"id"`
+	State        string              `json:"state"`
+	StartedAt    string              `json:"startedAt"`
+	FinishedAt   string              `json:"finishedAt,omitempty"`
+	ProjectID    string              `json:"projectId"`
+	Toolchain    string              `json:"toolchainId"`
+	SourceLevel  string              `json:"sourceLevel"`
+	TargetLevel  string              `json:"targetLevel"`
+	OutputDir    string              `json:"outputDir"`
+	Diagnostics  []build.Diagnostic  `json:"diagnostics"`
+	FilesCompiled int                `json:"filesCompiled"`
+	ElapsedMs    int64               `json:"elapsedMs"`
+	Output       string              `json:"output"`
+	Error        string              `json:"error,omitempty"`
+	ExitCode     int                 `json:"exitCode"`
 }
 
-func (m *memBuildEngine) Start(payload json.RawMessage) (json.RawMessage, error) {
+type asyncBuildEngine struct {
+	mu       sync.Mutex
+	dir      string
+	running  map[string]context.CancelFunc
+	finished map[string]*buildState
+	logger   *log.Logger
+	registry *toolchain.Registry
+}
+
+func newAsyncBuildEngine(dataDir string, reg *toolchain.Registry, logger *log.Logger) *asyncBuildEngine {
+	dir := filepath.Join(dataDir, "builds")
+	_ = os.MkdirAll(dir, 0o755)
+	b := &asyncBuildEngine{
+		dir:      dir,
+		running:  map[string]context.CancelFunc{},
+		finished: map[string]*buildState{},
+		logger:   logger,
+		registry: reg,
+	}
+	b.loadFinished()
+	return b
+}
+
+func (b *asyncBuildEngine) loadFinished() {
+	p := filepath.Join(b.dir, "finished.json")
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return
+	}
+	var items []*buildState
+	if err := json.Unmarshal(data, &items); err != nil {
+		return
+	}
+	for _, bs := range items {
+		b.finished[bs.ID] = bs
+	}
+}
+
+func (b *asyncBuildEngine) saveFinished() {
+	items := make([]*buildState, 0, len(b.finished))
+	for _, bs := range b.finished {
+		items = append(items, bs)
+	}
+	if len(items) > 200 {
+		items = items[len(items)-200:]
+	}
+	data, _ := json.MarshalIndent(items, "", "  ")
+	_ = os.WriteFile(filepath.Join(b.dir, "finished.json"), data, 0o600)
+}
+
+func (b *asyncBuildEngine) Start(payload json.RawMessage) (json.RawMessage, error) {
 	var req struct {
-		ProjectID  string   `json:"projectId"`
-		Files      []string `json:"files"`
-		Toolchain  string   `json:"toolchainId"`
-		SourceLevel string  `json:"sourceLevel"`
-		TargetLevel string  `json:"targetLevel"`
-		ProjectRoot string  `json:"projectRoot"`
-		OutputDir   string  `json:"outputDir"`
+		ProjectID   string   `json:"projectId"`
+		Files       []string `json:"files"`
+		Toolchain   string   `json:"toolchainId"`
+		SourceLevel string   `json:"sourceLevel"`
+		TargetLevel string   `json:"targetLevel"`
+		ProjectRoot string   `json:"projectRoot"`
+		OutputDir   string   `json:"outputDir"`
 		Classpath   []string `json:"classpath"`
+		Clean       bool     `json:"clean"`
 	}
 	if err := json.Unmarshal(payload, &req); err != nil {
 		return nil, err
@@ -322,17 +468,15 @@ func (m *memBuildEngine) Start(payload json.RawMessage) (json.RawMessage, error)
 	if req.TargetLevel == "" {
 		req.TargetLevel = "1.6"
 	}
-	// Resolve toolchain.
 	var tcHome string
 	if req.Toolchain != "" {
-		tc, ok := m.toolchainReg.Get(req.Toolchain)
+		tc, ok := b.registry.Get(req.Toolchain)
 		if !ok {
 			return nil, fmt.Errorf("toolchain not found: %s", req.Toolchain)
 		}
 		tcHome = tc.Home
 	} else {
-		// Fall back to first registered JDK, or JAVA_HOME.
-		for _, t := range m.toolchainReg.List() {
+		for _, t := range b.registry.List() {
 			tcHome = t.Home
 			break
 		}
@@ -341,10 +485,20 @@ func (m *memBuildEngine) Start(payload json.RawMessage) (json.RawMessage, error)
 		}
 	}
 	if tcHome == "" {
-		return nil, fmt.Errorf("no JDK registered; import a toolchain or set JAVA_HOME")
+		return nil, errors.New("no JDK registered; import a toolchain or set JAVA_HOME")
 	}
 
-	// Resolve sources: if no files, walk projectRoot for *.java.
+	if req.OutputDir == "" {
+		req.OutputDir = filepath.Join(b.dir, "out")
+	}
+	if err := os.MkdirAll(req.OutputDir, 0o755); err != nil {
+		return nil, err
+	}
+	if req.Clean {
+		_ = os.RemoveAll(req.OutputDir)
+		_ = os.MkdirAll(req.OutputDir, 0o755)
+	}
+
 	sources := req.Files
 	if len(sources) == 0 && req.ProjectRoot != "" {
 		_ = filepath.WalkDir(req.ProjectRoot, func(p string, d os.DirEntry, err error) error {
@@ -358,144 +512,673 @@ func (m *memBuildEngine) Start(payload json.RawMessage) (json.RawMessage, error)
 		})
 	}
 
-	// In-memory; we run synchronously. A real implementation
-	// would background and return a buildId.
-	res, err := compileNow(tcHome, req.ProjectRoot, req.SourceLevel, req.TargetLevel, sources, req.Classpath, req.OutputDir)
-	if err != nil {
-		return nil, err
+	id := "build_" + shortID()
+	bs := &buildState{
+		ID:          id,
+		State:       "queued",
+		StartedAt:   time.Now().UTC().Format(time.RFC3339Nano),
+		ProjectID:   req.ProjectID,
+		Toolchain:   req.Toolchain,
+		SourceLevel: req.SourceLevel,
+		TargetLevel: req.TargetLevel,
+		OutputDir:   req.OutputDir,
 	}
-	return json.Marshal(res)
-}
+	b.mu.Lock()
+	b.finished[id] = bs
+	b.saveFinished()
+	b.mu.Unlock()
 
-func (m *memBuildEngine) Get(id string) (json.RawMessage, error) {
-	// We don't track build history yet; return a stub.
+	ctx, cancel := context.WithCancel(context.Background())
+	b.mu.Lock()
+	b.running[id] = cancel
+	b.mu.Unlock()
+
+	go b.run(ctx, id, bs, build.Request{
+		ProjectRoot: req.ProjectRoot,
+		Toolchain:   tcHome,
+		SourceLevel: req.SourceLevel,
+		TargetLevel: req.TargetLevel,
+		Sources:     sources,
+		Classpath:   req.Classpath,
+		OutputDir:   req.OutputDir,
+	})
+
 	return json.Marshal(map[string]any{
-		"id": id, "state": "unknown", "diagnostics": []any{},
+		"id":    id,
+		"state": "queued",
 	})
 }
 
-// memDeployer is a thin wrapper around deploy.Sync.
-type memDeployer struct{}
+func (b *asyncBuildEngine) run(ctx context.Context, id string, bs *buildState, req build.Request) {
+	defer func() {
+		b.mu.Lock()
+		delete(b.running, id)
+		b.mu.Unlock()
+	}()
+	b.mu.Lock()
+	bs.State = "running"
+	b.saveFinished()
+	b.mu.Unlock()
 
-func (memDeployer) Publish(payload json.RawMessage) (json.RawMessage, error) {
+	compiler := build.New(req.Toolchain)
+	res, err := compiler.Compile(ctx, req)
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if err != nil {
+		bs.State = "failed"
+		bs.Error = err.Error()
+		bs.FinishedAt = time.Now().UTC().Format(time.RFC3339Nano)
+		b.saveFinished()
+		return
+	}
+	bs.Output = res.Output
+	bs.Diagnostics = res.Diagnostics
+	bs.FilesCompiled = res.FilesCompiled
+	bs.ElapsedMs = res.ElapsedMs
+	bs.ExitCode = res.ExitCode
+	if res.Success {
+		bs.State = "success"
+	} else {
+		bs.State = "failed"
+	}
+	bs.FinishedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	b.saveFinished()
+}
+
+func (b *asyncBuildEngine) Get(id string) (json.RawMessage, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if bs, ok := b.finished[id]; ok {
+		return json.Marshal(bs)
+	}
+	return nil, fmt.Errorf("build not found: %s", id)
+}
+
+// ----------------- Deployer (disk, real) -----------------
+
+type deployRecord struct {
+	ID            string    `json:"id"`
+	State         string    `json:"state"`
+	StartedAt     time.Time `json:"startedAt"`
+	FinishedAt    time.Time `json:"finishedAt"`
+	ProjectID     string    `json:"projectId"`
+	BuildID       string    `json:"buildId"`
+	What          string    `json:"what"`
+	Source        string    `json:"source"`
+	Target        string    `json:"target"`
+	FilesTouched  int       `json:"filesTouched"`
+	Bytes         int64     `json:"bytes"`
+	FilesAdded    int       `json:"filesAdded"`
+	FilesModified int       `json:"filesModified"`
+	FilesDeleted  int       `json:"filesDeleted"`
+	Trigger       string    `json:"trigger"`
+	HotReloadMode string    `json:"hotReloadMode"`
+	Error         string    `json:"error,omitempty"`
+}
+
+type diskDeployer struct {
+	mu     sync.Mutex
+	dir    string
+	logger *log.Logger
+	items  map[string]*deployRecord
+}
+
+func newDiskDeployer(dataDir string, logger *log.Logger) *diskDeployer {
+	dir := filepath.Join(dataDir, "deployments")
+	_ = os.MkdirAll(dir, 0o755)
+	d := &diskDeployer{
+		dir:    dir,
+		logger: logger,
+		items:  map[string]*deployRecord{},
+	}
+	d.load()
+	return d
+}
+
+func (d *diskDeployer) load() {
+	p := filepath.Join(d.dir, "deployments.json")
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return
+	}
+	var items []*deployRecord
+	if err := json.Unmarshal(data, &items); err != nil {
+		return
+	}
+	for _, r := range items {
+		d.items[r.ID] = r
+	}
+}
+
+func (d *diskDeployer) save() {
+	items := make([]*deployRecord, 0, len(d.items))
+	for _, r := range d.items {
+		items = append(items, r)
+	}
+	data, _ := json.MarshalIndent(items, "", "  ")
+	_ = os.WriteFile(filepath.Join(d.dir, "deployments.json"), data, 0o600)
+}
+
+func (d *diskDeployer) Publish(payload json.RawMessage) (json.RawMessage, error) {
 	var req struct {
 		ProjectID string `json:"projectId"`
 		BuildID   string `json:"buildId"`
 		What      string `json:"what"`
 		Source    string `json:"source"`
 		Target    string `json:"target"`
+		Trigger   string `json:"trigger"`
+		// Mode controls how syncDir reconciles src into dst.
+		//   "merge"  (default): copy each file under src to its
+		//                       corresponding path under dst; do NOT
+		//                       delete anything already in dst. This
+		//                       is the right behavior for incremental
+		//                       IDE deploys where multiple sources
+		//                       (WebRoot, build-out, resources, lib)
+		//                       all target the same webapp tree.
+		//   "mirror": copy src into dst and delete any entry under
+		//                       dst that is not under src. Use this
+		//                       when src is the authoritative copy
+		//                       (e.g. replacing build-out entirely).
+		Mode string `json:"mode"`
 	}
 	if err := json.Unmarshal(payload, &req); err != nil {
 		return nil, err
 	}
-	// No-op for now; a real implementation triggers a build if
-	// BuildID is empty, then syncs source → target.
-	return json.Marshal(map[string]any{
-		"id": "dep_" + shortID(),
-		"state": "success",
-		"filesTouched": 0,
-		"bytes": 0,
-		"trigger": "manual",
-		"hotReloadMode": "staticSync",
+	if req.What == "" {
+		req.What = "all"
+	}
+	if req.Trigger == "" {
+		req.Trigger = "manual"
+	}
+	if req.Mode == "" {
+		req.Mode = "merge"
+	}
+	if req.Mode != "merge" && req.Mode != "mirror" {
+		return nil, fmt.Errorf("mode must be 'merge' or 'mirror'")
+	}
+	if req.Source == "" {
+		return nil, errors.New("source is required")
+	}
+	if req.Target == "" {
+		return nil, errors.New("target is required")
+	}
+	if _, err := os.Stat(req.Source); err != nil {
+		return nil, fmt.Errorf("source not found: %w", err)
+	}
+
+	id := "dep_" + shortID()
+	rec := &deployRecord{
+		ID:            id,
+		State:         "running",
+		StartedAt:     time.Now(),
+		ProjectID:     req.ProjectID,
+		BuildID:       req.BuildID,
+		What:          req.What,
+		Source:        req.Source,
+		Target:        req.Target,
+		HotReloadMode: "staticSync",
+		Trigger:       req.Trigger,
+	}
+	d.mu.Lock()
+	d.items[id] = rec
+	d.save()
+	d.mu.Unlock()
+
+	filesAdded, filesModified, filesDeleted, bytes, err := syncDir(req.Source, req.Target, req.Mode == "mirror")
+	rec.FinishedAt = time.Now()
+	if err != nil {
+		rec.State = "failed"
+		rec.Error = err.Error()
+	} else {
+		rec.State = "success"
+		rec.FilesTouched = filesAdded + filesModified + filesDeleted
+		rec.FilesAdded = filesAdded
+		rec.FilesModified = filesModified
+		rec.FilesDeleted = filesDeleted
+		rec.Bytes = bytes
+	}
+	d.mu.Lock()
+	d.save()
+	d.mu.Unlock()
+	return json.Marshal(rec)
+}
+
+func (d *diskDeployer) Get(id string) (json.RawMessage, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	r, ok := d.items[id]
+	if !ok {
+		return nil, fmt.Errorf("deployment not found: %s", id)
+	}
+	return json.Marshal(r)
+}
+
+// syncDir copies the file tree at src into dst using atomic copies.
+// src may be a file or a directory. For a single file, dst is
+// treated as the target file path. If dst ends in a directory
+// separator or exists as a dir, the file is placed inside that
+// directory using src's basename.
+//
+// When prune is true, any entry under dst that does not exist
+// under src is removed (mirror semantics); when prune is false,
+// only additions and updates are performed (merge semantics, the
+// default for IDE deploys where multiple sources share a target).
+// Returns (added, modified, deleted, bytes, err).
+func syncDir(src, dst string, prune bool) (added, modified, deleted int, bytes int64, err error) {
+	src = filepath.Clean(src)
+	dst = filepath.Clean(dst)
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return 0, 0, 0, 0, err
+	}
+	if !srcInfo.IsDir() {
+		dstInfo, _ := os.Stat(dst)
+		if dstInfo != nil && dstInfo.IsDir() {
+			dst = filepath.Join(dst, filepath.Base(src))
+		} else {
+			if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+				return 0, 0, 0, 0, err
+			}
+		}
+		a, m, b, e := copyOneFile(src, dst)
+		return a, m, 0, b, e
+	}
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		return 0, 0, 0, 0, err
+	}
+	seen := map[string]bool{}
+	walkErr := filepath.WalkDir(src, func(path string, d os.DirEntry, werr error) error {
+		if werr != nil {
+			return werr
+		}
+		rel, e := filepath.Rel(src, path)
+		if e != nil {
+			return e
+		}
+		if rel == "." {
+			return nil
+		}
+		dp := filepath.Join(dst, rel)
+		seen[dp] = true
+		if d.IsDir() {
+			return os.MkdirAll(dp, 0o755)
+		}
+		a, m, b, e := copyOneFile(path, dp)
+		added += a
+		modified += m
+		bytes += b
+		return e
 	})
+	if walkErr != nil {
+		return added, modified, deleted, bytes, walkErr
+	}
+	if prune {
+		if err := pruneUnseen(dst, seen, &deleted); err != nil {
+			return added, modified, deleted, bytes, err
+		}
+	}
+	return added, modified, deleted, bytes, nil
 }
 
-func (memDeployer) Get(id string) (json.RawMessage, error) {
-	return json.Marshal(map[string]any{"id": id, "state": "unknown"})
+// pruneUnseen walks root with an explicit stack (NOT filepath.WalkDir)
+// and removes anything not in seen.
+//
+// filepath.WalkDir is a DFS that reads a directory's entries, then
+// recurses into each subdir. If the closure deletes a subdir that
+// WalkDir has already cached as "a directory to recurse into",
+// WalkDir then fails with a werr of the form
+//
+//	open <subdir>: no such file or directory
+//
+// because the dir was just removed. That werr surfaces to the caller
+// as a spurious sync failure even though every file was copied and
+// every stale entry was deleted. Doing the traversal by hand with
+// os.ReadDir keeps the recursion in our control so a successful
+// RemoveAll is never reported as a failure.
+func pruneUnseen(root string, seen map[string]bool, deleted *int) error {
+	type frame struct {
+		path    string
+		entries []os.DirEntry
+		idx     int
+	}
+	rd, err := os.ReadDir(root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	stack := []frame{{path: root, entries: rd}}
+	for len(stack) > 0 {
+		top := &stack[len(stack)-1]
+		if top.idx >= len(top.entries) {
+			stack = stack[:len(stack)-1]
+			continue
+		}
+		entry := top.entries[top.idx]
+		top.idx++
+		child := filepath.Join(top.path, entry.Name())
+		if !seen[child] {
+			if err := os.RemoveAll(child); err != nil {
+				return err
+			}
+			if !entry.IsDir() {
+				*deleted++
+			}
+			// Do NOT descend into the removed child.
+			continue
+		}
+		if entry.IsDir() {
+			cd, err := os.ReadDir(child)
+			if err != nil {
+				if os.IsNotExist(err) {
+					// Removed between seen-check and readdir; skip.
+					continue
+				}
+				return err
+			}
+			stack = append(stack, frame{path: child, entries: cd})
+		}
+	}
+	return nil
 }
 
-// memServerRunner manages Tomcat processes. It is intentionally
-// minimal: it can start a "stub" server that demonstrates the
-// lifecycle, hooks for the real tomcat6 plugin to fill in.
-type memServerRunner struct {
+// copyOneFile copies src to dst atomically (temp + rename).
+// Returns (added, modified, bytes) where added=1 if dst did not
+// exist before and modified=1 if it existed.
+func copyOneFile(src, dst string) (added, modified int, bytes int64, err error) {
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return 0, 0, 0, err
+	}
+	existing, _ := os.Stat(dst)
+	in, err := os.Open(src)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	defer in.Close()
+	tmp, err := os.CreateTemp(filepath.Dir(dst), ".kairo-tmp-*")
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	tmpPath := tmp.Name()
+	n, err := io.Copy(tmp, in)
+	if err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return 0, 0, 0, err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpPath)
+		return 0, 0, 0, err
+	}
+	if err := os.Rename(tmpPath, dst); err != nil {
+		os.Remove(tmpPath)
+		return 0, 0, 0, err
+	}
+	if existing == nil {
+		added = 1
+	} else {
+		modified = 1
+	}
+	return added, modified, n, nil
+}
+
+// ----------------- ServerRunner (real Tomcat 6) -----------------
+
+type realServerRunner struct {
 	mu          sync.Mutex
+	dataDir     string
 	bundledDir  string
-	processes   map[string]*proc.Process
+	tomcat6Home string
+	logger      *log.Logger
+	instances   map[string]*tomcat6.Instance
+	meta        map[string]*serverMeta
 }
 
-func (m *memServerRunner) Start(payload json.RawMessage) (json.RawMessage, error) {
+type serverMeta struct {
+	ID           string         `json:"id"`
+	ProjectID    string         `json:"projectId"`
+	Type         string         `json:"type"`
+	State        string         `json:"state"`
+	PID          int            `json:"pid"`
+	Ports        *tomcat6.Ports `json:"ports"`
+	StartedAt    time.Time      `json:"startedAt"`
+	JavaHome     string         `json:"javaHome"`
+	ContextPath  string         `json:"contextPath"`
+	WebappDir    string         `json:"webappDir"`
+	CatalinaBase string         `json:"catalinaBase"`
+	LastError    string         `json:"lastError,omitempty"`
+}
+
+func newRealServerRunner(dataDir, bundledDir, tomcat6Home string, logger *log.Logger) *realServerRunner {
+	r := &realServerRunner{
+		dataDir:     dataDir,
+		bundledDir:  bundledDir,
+		tomcat6Home: tomcat6Home,
+		logger:      logger,
+		instances:   map[string]*tomcat6.Instance{},
+		meta:        map[string]*serverMeta{},
+	}
+	r.load()
+	return r
+}
+
+func (r *realServerRunner) load() {
+	p := filepath.Join(r.dataDir, "servers.json")
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return
+	}
+	var items []*serverMeta
+	if err := json.Unmarshal(data, &items); err != nil {
+		return
+	}
+	for _, m := range items {
+		r.meta[m.ID] = m
+	}
+}
+
+func (r *realServerRunner) save() {
+	items := make([]*serverMeta, 0, len(r.meta))
+	for _, m := range r.meta {
+		items = append(items, m)
+	}
+	data, _ := json.MarshalIndent(items, "", "  ")
+	_ = os.WriteFile(filepath.Join(r.dataDir, "servers.json"), data, 0o600)
+}
+
+func (r *realServerRunner) Start(payload json.RawMessage) (json.RawMessage, error) {
+	if r.tomcat6Home == "" {
+		return nil, errors.New("Tomcat 6 not bundled; set KAIRO_TOMCAT6_HOME or run scripts/fetch-tomcat6.sh")
+	}
 	var req struct {
-		ProjectID string `json:"projectId"`
-		Debug     bool   `json:"debug"`
+		ProjectID    string   `json:"projectId"`
+		JavaHome     string   `json:"javaHome"`
+		WebappDir    string   `json:"webappDir"`
+		ContextPath  string   `json:"contextPath"`
+		HTTPPort     int      `json:"httpPort"`
+		ShutdownPort int      `json:"shutdownPort"`
+		AJPPort      int      `json:"ajpPort"`
+		DebugPort    int      `json:"debugPort"`
+		DebugSuspend bool     `json:"debugSuspend"`
+		JVMOptions   []string `json:"jvmOptions"`
 	}
 	if err := json.Unmarshal(payload, &req); err != nil {
 		return nil, err
 	}
+	if req.WebappDir == "" {
+		return nil, errors.New("webappDir is required")
+	}
+	if req.JavaHome == "" {
+		req.JavaHome = os.Getenv("JAVA_HOME")
+	}
+	if req.JavaHome == "" {
+		return nil, errors.New("javaHome is required (or set JAVA_HOME)")
+	}
+	if _, err := os.Stat(req.WebappDir); err != nil {
+		return nil, fmt.Errorf("webappDir not found: %w", err)
+	}
+
 	id := "srv_" + shortID()
-	// We do not actually start Tomcat here; the v1 demo returns
-	// a "stopped" instance with a real PID would require a
-	// download of Tomcat 6 (BLOCKERS.md B-002). We start a
-	// trivial long-running process so the lifecycle machinery
-	// is exercised end-to-end.
-	p := proc.New(proc.Spec{
-		Name: "/bin/sh",
-		Args: []string{"-c", "while true; do echo kairo-stub; sleep 5; done"},
-	})
-	if err := p.Start(timeoutCtx(30 * time.Second)); err != nil {
+	base := filepath.Join(r.dataDir, "runtime", id)
+	if err := os.MkdirAll(base, 0o755); err != nil {
 		return nil, err
 	}
-	m.mu.Lock()
-	if m.processes == nil {
-		m.processes = map[string]*proc.Process{}
-	}
-	m.processes[id] = p
-	m.mu.Unlock()
-
-	return json.Marshal(map[string]any{
-		"id": id,
-		"projectId": req.ProjectID,
-		"type": "tomcat6",
-		"state": "running",
-		"pid": p.PID(),
-		"ports": map[string]int{"http": 0, "shutdown": 0},
-		"catalinaBase": filepath.Join(m.bundledDir, "runtime", id),
+	inst, err := tomcat6.Start(context.Background(), tomcat6.Spec{
+		ID:            id,
+		JavaHome:      req.JavaHome,
+		CatalinaHome:  r.tomcat6Home,
+		CatalinaBase:  base,
+		HTTPPort:      req.HTTPPort,
+		ShutdownPort:  req.ShutdownPort,
+		AJPPort:       req.AJPPort,
+		DebugPort:     req.DebugPort,
+		DebugSuspend:  req.DebugSuspend,
+		ContextPath:   req.ContextPath,
+		WebappDir:     req.WebappDir,
+		JVMOptions:    req.JVMOptions,
+		Logger:        r.logger,
 	})
+	if err != nil {
+		return nil, err
+	}
+	ports := inst.Ports()
+	meta := &serverMeta{
+		ID:           id,
+		ProjectID:    req.ProjectID,
+		Type:         "tomcat6",
+		State:        inst.State(),
+		PID:          inst.PID(),
+		Ports:        &ports,
+		StartedAt:    inst.StartedAt(),
+		JavaHome:     req.JavaHome,
+		ContextPath:  req.ContextPath,
+		WebappDir:    req.WebappDir,
+		CatalinaBase: base,
+	}
+	r.mu.Lock()
+	r.instances[id] = inst
+	r.meta[id] = meta
+	r.save()
+	r.mu.Unlock()
+	return json.Marshal(meta)
 }
 
-func (m *memServerRunner) Get(id string) (json.RawMessage, error) {
-	m.mu.Lock()
-	p, ok := m.processes[id]
-	m.mu.Unlock()
+func (r *realServerRunner) Get(id string) (json.RawMessage, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	m, ok := r.meta[id]
 	if !ok {
 		return nil, fmt.Errorf("server not found: %s", id)
 	}
-	state := string(p.State())
-	return json.Marshal(map[string]any{
-		"id": id,
-		"state": state,
-		"pid": p.PID(),
-	})
+	if inst, ok := r.instances[id]; ok {
+		m.State = inst.State()
+		m.PID = inst.PID()
+		ports := inst.Ports()
+		m.Ports = &ports
+	}
+	return json.Marshal(m)
 }
 
-func (m *memServerRunner) Stop(id string, payload json.RawMessage) (json.RawMessage, error) {
-	var p struct{ Force bool `json:"force"` }
+func (r *realServerRunner) Stop(id string, payload json.RawMessage) (json.RawMessage, error) {
+	var p struct {
+		Force bool `json:"force"`
+	}
 	_ = json.Unmarshal(payload, &p)
-	m.mu.Lock()
-	proc := m.processes[id]
-	m.mu.Unlock()
-	if proc == nil {
+	r.mu.Lock()
+	inst := r.instances[id]
+	m := r.meta[id]
+	r.mu.Unlock()
+	if inst == nil {
 		return nil, fmt.Errorf("server not found: %s", id)
 	}
 	if p.Force {
-		_ = proc.ForceStop()
+		_ = inst.ForceStop()
 	} else {
-		_ = proc.Stop(5 * time.Second)
+		_ = inst.Stop(15 * time.Second)
 	}
-	return json.Marshal(map[string]any{"id": id, "state": "stopped"})
+	if m != nil {
+		m.State = "stopped"
+	}
+	r.mu.Lock()
+	delete(r.instances, id)
+	r.save()
+	r.mu.Unlock()
+	if m == nil {
+		return json.Marshal(map[string]any{"id": id, "state": "stopped"})
+	}
+	return json.Marshal(m)
 }
 
-func (m *memServerRunner) Debug(id string) (json.RawMessage, error) {
-	return json.Marshal(map[string]any{"id": id, "state": "running", "debug": true})
-}
-
-func (m *memServerRunner) Logs(id string, follow bool) (json.RawMessage, error) {
-	m.mu.Lock()
-	p, ok := m.processes[id]
-	m.mu.Unlock()
+func (r *realServerRunner) Debug(id string) (json.RawMessage, error) {
+	r.mu.Lock()
+	m, ok := r.meta[id]
+	r.mu.Unlock()
 	if !ok {
 		return nil, fmt.Errorf("server not found: %s", id)
 	}
-	lines := p.StdoutSnapshot()
+	if inst, ok := r.instances[id]; ok {
+		_ = inst.Stop(10 * time.Second)
+	}
+	debugPort, err := pickFreePort()
+	if err != nil {
+		return nil, err
+	}
+	if m.JavaHome == "" || m.CatalinaBase == "" {
+		return nil, errors.New("server is missing restart metadata")
+	}
+	inst, err := tomcat6.Start(context.Background(), tomcat6.Spec{
+		ID:            id,
+		JavaHome:      m.JavaHome,
+		CatalinaHome:  r.tomcat6Home,
+		CatalinaBase:  m.CatalinaBase,
+		HTTPPort:      m.Ports.HTTP,
+		ShutdownPort:  m.Ports.Shutdown,
+		AJPPort:       m.Ports.AJP,
+		DebugPort:     debugPort,
+		ContextPath:   m.ContextPath,
+		WebappDir:     m.WebappDir,
+		Logger:        r.logger,
+	})
+	if err != nil {
+		return nil, err
+	}
+	ports := inst.Ports()
+	m.PID = inst.PID()
+	m.Ports = &ports
+	m.State = inst.State()
+	r.mu.Lock()
+	r.instances[id] = inst
+	r.save()
+	r.mu.Unlock()
+	return json.Marshal(m)
+}
+
+func (r *realServerRunner) Logs(id string, follow bool) (json.RawMessage, error) {
+	r.mu.Lock()
+	inst, ok := r.instances[id]
+	r.mu.Unlock()
+	if !ok {
+		m, ok2 := r.meta[id]
+		if !ok2 {
+			return nil, fmt.Errorf("server not found: %s", id)
+		}
+		logPath := filepath.Join(m.CatalinaBase, "logs", "kairo-stdout.log")
+		data, err := os.ReadFile(logPath)
+		if err != nil {
+			return json.Marshal([]map[string]any{})
+		}
+		lines := splitLines(string(data), 200)
+		out := make([]map[string]any, 0, len(lines))
+		for _, l := range lines {
+			out = append(out, map[string]any{"line": l, "ts": time.Now().UTC().Format(time.RFC3339Nano)})
+		}
+		return json.Marshal(out)
+	}
+	lines, err := inst.TailLog(200)
+	if err != nil {
+		return json.Marshal([]map[string]any{})
+	}
 	out := make([]map[string]any, 0, len(lines))
 	for _, l := range lines {
 		out = append(out, map[string]any{"line": l, "ts": time.Now().UTC().Format(time.RFC3339Nano)})
@@ -503,13 +1186,52 @@ func (m *memServerRunner) Logs(id string, follow bool) (json.RawMessage, error) 
 	return json.Marshal(out)
 }
 
-// memAuthenticator is a stub. The real implementation uses
-// Argon2id, sessions, and CSRF.
-type memAuthenticator struct {
-	dataDir string
+func splitLines(s string, max int) []string {
+	var out []string
+	start := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\n' {
+			out = append(out, s[start:i])
+			start = i + 1
+		}
+	}
+	if start < len(s) {
+		out = append(out, s[start:])
+	}
+	if len(out) > max {
+		out = out[len(out)-max:]
+	}
+	return out
 }
 
-func (a *memAuthenticator) Login(payload json.RawMessage, w http.ResponseWriter) (json.RawMessage, error) {
+func pickFreePort() (int, error) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return 0, err
+	}
+	defer l.Close()
+	addr, ok := l.Addr().(*net.TCPAddr)
+	if !ok {
+		return 0, errors.New("unexpected listener address")
+	}
+	return addr.Port, nil
+}
+
+// ----------------- Authenticator (disk) -----------------
+
+type diskAuthenticator struct {
+	mu     sync.Mutex
+	dir    string
+	logger *log.Logger
+}
+
+func newDiskAuthenticator(dataDir string, logger *log.Logger) *diskAuthenticator {
+	dir := filepath.Join(dataDir, "auth")
+	_ = os.MkdirAll(dir, 0o755)
+	return &diskAuthenticator{dir: dir, logger: logger}
+}
+
+func (a *diskAuthenticator) Login(payload json.RawMessage, w http.ResponseWriter) (json.RawMessage, error) {
 	var req struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
@@ -518,14 +1240,17 @@ func (a *memAuthenticator) Login(payload json.RawMessage, w http.ResponseWriter)
 		return nil, err
 	}
 	if req.Username == "" || req.Password == "" {
-		return nil, fmt.Errorf("username and password required")
+		return nil, errors.New("username and password required")
 	}
-	// Stub: accept any non-empty pair. Real impl: Argon2id.
+	// Trusted-local mode: accept any non-empty pair. Real password
+	// hashing is deferred (see DELIVERY.md P2-2).
 	tokenBytes := make([]byte, 32)
 	_, _ = rand.Read(tokenBytes)
+	csrf := make([]byte, 16)
+	_, _ = rand.Read(csrf)
 	return json.Marshal(map[string]any{
 		"sessionToken": hex.EncodeToString(tokenBytes),
-		"csrfToken":    hex.EncodeToString(tokenBytes[:16]),
+		"csrfToken":    hex.EncodeToString(csrf),
 		"user": map[string]any{
 			"id":       "u_" + req.Username,
 			"username": req.Username,
@@ -535,12 +1260,12 @@ func (a *memAuthenticator) Login(payload json.RawMessage, w http.ResponseWriter)
 	})
 }
 
-func (a *memAuthenticator) Logout(r *http.Request, w http.ResponseWriter) error {
+func (a *diskAuthenticator) Logout(r *http.Request, w http.ResponseWriter) error {
 	return nil
 }
 
-// shortID returns an 8-char hex string. Cryptographically random
-// is overkill for in-memory IDs but it costs nothing.
+// ----------------- helpers -----------------
+
 func shortID() string {
 	b := make([]byte, 4)
 	_, _ = rand.Read(b)
@@ -552,22 +1277,5 @@ func timeoutCtx(d time.Duration) context.Context {
 	return ctx
 }
 
-// compileNow is a small helper that calls build.Compiler.Compile
-// with the given args. We split it out to keep the JSON-decoded
-// Request type in services.go and the build-domain types in
-// build/ separate.
-func compileNow(javaHome, projectRoot, sourceLevel, targetLevel string, sources, classpath []string, outputDir string) (*build.Result, error) {
-	c := build.New(javaHome)
-	return c.Compile(context.Background(), build.Request{
-		ProjectRoot: projectRoot,
-		Toolchain:   javaHome,
-		SourceLevel: sourceLevel,
-		TargetLevel: targetLevel,
-		Sources:     sources,
-		Classpath:   classpath,
-		OutputDir:   outputDir,
-	})
-}
-
-// keep imports.
-var _ = proc.New
+var _ = exec.Command
+var _ = strconv.Itoa

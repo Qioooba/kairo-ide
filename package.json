@@ -14,7 +14,7 @@
     "build": "pnpm -r --filter='./packages/*' --filter='./apps/*' build",
     "build:agent": "pnpm --filter @kairo/runtime-agent build",
     "build:product": "pnpm --filter @kairo/theia-product build",
-    "dev:browser": "pnpm --filter @kairo/theia-product start:browser",
+    "dev:browser": "pnpm --filter @kairo/browser start",
     "dev:server": "pnpm --filter @kairo/theia-product start:server",
     "test": "pnpm -r --filter='./packages/*' --filter='./apps/*' test",
     "test:agent": "cd runtime-agent && go test -race -timeout 120s ./...",
@@ -26,9 +26,18 @@
     "agent:build": "cd runtime-agent && CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o bin/kairo-runtime ./cmd/kairo-runtime"
   },
   "devDependencies": {
-    "typescript": "5.5.4",
     "@types/node": "20.14.10",
     "prettier": "3.3.3",
-    "rimraf": "5.0.10"
+    "rimraf": "5.0.10",
+    "typescript": "5.5.4"
+  },
+  "pnpm": {
+    "overrides": {
+      "react-dom": "18.3.1",
+      "typescript": "5.5.4"
+    },
+    "patchedDependencies": {
+      "inversify@6.2.2": "patches/inversify@6.2.2.patch"
+    }
   }
 }
