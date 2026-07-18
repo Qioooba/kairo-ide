@@ -6,6 +6,7 @@
   "main": "lib/main.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "prebuild": "cd ../../runtime-agent && go build -o bin/kairo-runtime ./cmd/kairo-runtime",
     "build:mac": "tsc -p tsconfig.json && electron-builder --mac",
     "build:win": "tsc -p tsconfig.json && electron-builder --win",
     "build:linux": "tsc -p tsconfig.json && electron-builder --linux",
@@ -25,32 +26,30 @@
     "electron-builder": "25.1.8"
   },
   "build": {
-    "appId": "org.kairo.ide",
-    "productName": "Kairo",
+    "appId": "com.kairo.ide",
+    "productName": "Kairo IDE",
     "directories": {
       "output": "dist"
     },
     "files": [
       "lib/**/*",
-      "node_modules/**/*",
-      "package.json"
+      "assets/**/*"
     ],
     "extraResources": [
       {
-        "from": "../../runtime-agent/bin",
-        "to": "bin",
-        "filter": ["kairo-runtime*"]
+        "from": "../../runtime-agent/kairo-runtime",
+        "to": "kairo-runtime"
       }
     ],
     "mac": {
-      "target": ["dmg", "zip"],
-      "category": "public.app-category.developer-tools"
+      "category": "public.app-category.developer-tools",
+      "target": "dmg"
     },
     "win": {
-      "target": ["nsis", "portable"]
+      "target": "nsis"
     },
     "linux": {
-      "target": ["AppImage", "deb"]
+      "target": "AppImage"
     }
   }
 }

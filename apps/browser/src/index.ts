@@ -11,7 +11,7 @@
 
 import { Container } from '@theia/core/shared/inversify';
 import { KairoProduct } from '@kairo/theia-product';
-import { KairoRuntime, KairoRuntimeImpl, RUNTIME_BASE_URL } from '@kairo/runtime-extension';
+import { KairoRuntime, RuntimeConnectionService, RUNTIME_BASE_URL } from '@kairo/runtime-extension';
 import { KairoProjectService } from '@kairo/project-extension';
 import { KairoServerService } from '@kairo/tomcat-extension';
 import { KairoSearchService } from '@kairo/search-extension';
@@ -27,7 +27,7 @@ export function configureKairoRuntime(container: Container, baseUrl: string = RU
 
   // Configure the singleton runtime client. The base URL is
   // either passed in by the host or read from the global config.
-  const runtime = container.get<KairoRuntimeImpl>(KairoRuntime);
+  const runtime = container.get<RuntimeConnectionService>(KairoRuntime);
   runtime.configure({ baseUrl });
 
   // Eagerly construct the high-level services so they are

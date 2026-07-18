@@ -1,0 +1,45 @@
+/**
+ * Kairo IDE — preload script.
+ *
+ * Runs in a privileged context before the renderer process loads.
+ * Exposes only the minimal, safe API surface via contextBridge.
+ *
+ * Security guarantees:
+ *   - No Node.js / Electron API surface leaks to the renderer.
+ *   - Config is read from env vars set by the main process
+ *     BEFORE the renderer starts — no race condition.
+ *   - All IPC is channel-scoped; the renderer cannot reach
+ *     arbitrary IPC channels.
+ */
+
+import { contextBridge, ipcRenderer } from 'electron';
+
+// Read config from environment variables set by main process.
+// These are set BEFORE the renderer process starts, so no
+// race condition (unlike executeJavaScript injection).
+const agentUrl = process.env.KAIRO_AGENT_URL || 'http://127.0.0.1:18099';
+const agentSecret = process.env.KAIRO_AGENT_SECRET || '';
+
+// Expose a safe, typed API to the renderer process.
+contextBridge.exposeInMainWorld('kairoConfig', {
+    agentUrl,
+    agentSecret,
+    platform: process.platform,
+    appVersion: process.env.KAIRO_APP_VERSION || '0.1.0',
+});
+
+// Expose safe IPC channels. Only the channels listed here are
+// accessible from the renderer; all other IPC channels are
+// blocked by contextIsolation.
+contextBridge.exposeInMainWorld('kairoIPC', {
+    onMenuAction: (callback: (action: string) => void) => {
+        ipcRenderer.on('menu-action', (_event, action: string) => callback(action));
+    },
+    sendReady: () => {
+        ipcRenderer.send('renderer-ready');
+    },
+});
+
+// Backward compatibility: also expose for the runtime-connection-service
+// which reads globalThis.__KAIRO_DEFAULT_RUNTIME_URL__ at init.
+contextBridge.exposeInMainWorld('__KAIRO_DEFAULT_RUNTIME_URL__', agentUrl);
