@@ -12,7 +12,6 @@ func sysProcAttrForOS() *syscall.SysProcAttr {
 		Setpgid: true,
 	}
 }
-
 // signalProcGroup sends sig to the process group led by pid.
 // Setpgid:true in sysProcAttrForOS makes the JVM its own group
 // leader, so -pid targets the whole group including any

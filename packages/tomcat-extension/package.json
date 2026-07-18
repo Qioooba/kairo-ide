@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "Kairo Tomcat / Server runtime panel. Tree view of runtimes, deployments, ports, and logs. Talks to /api/v1/servers via the runtime client.",
   "main": "lib/index.js",
-  "types": "lib/index.d.ts",
+  "types": "lib/src/index.d.ts",
   "files": ["lib", "src"],
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -23,3 +23,4 @@
     "typescript": "5.5.4"
   }
 }
+

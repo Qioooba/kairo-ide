@@ -12,7 +12,6 @@ func sysProcAttrForOS() *syscall.SysProcAttr {
 		CreationFlags: 0x00000200, // CREATE_NEW_PROCESS_GROUP
 	}
 }
-
 // signalProcGroup on Windows: signal the single PID. Windows
 // does not have POSIX process groups; CREATE_NEW_PROCESS_GROUP
 // above is for console-event delivery, not for kill-tree

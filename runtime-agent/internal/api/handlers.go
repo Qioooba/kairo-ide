@@ -488,6 +488,70 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	s.Services.EventBus.Serve(w, r)
 }
 
+// ----- JDT Language Server -----
+//
+// /api/v1/jdtls
+//   GET    — current status (state, pid, jre, jar, version, lastError)
+//   POST   — start the JDT LS. Body: { jrePath?: string, sourceLevel?:
+//            "1.5".."17", initializeRootURI?: string, timeoutMs?: number }
+//   DELETE — stop the JDT LS.
+//
+// State transitions (on the wire):
+//   stopped --POST--> starting --initialize ok--> running
+//   running --DELETE--> stopping --> stopped
+//   any     --crash---> crashed (lastError set)
+//
+// The agent never silently lies: if Start returns, the process
+// is up AND the LSP initialize handshake has either succeeded
+// or timed out. The status body makes the outcome explicit.
+
+func (s *Server) handleJDTLS(w http.ResponseWriter, r *http.Request) {
+	if s.Services.JDTLS == nil {
+		writeError(w, "", "", protocol.KairoError{
+			Code:    protocol.ErrInternal,
+			Message: "JDTLS not configured on this agent",
+		})
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		env, _, _ := readEnvelopeAndBody(r)
+		st, err := s.Services.JDTLS.Status()
+		if err != nil {
+			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{
+				Code: protocol.ErrInternal, Message: err.Error(),
+			})
+			return
+		}
+		writeOK(w, env, st)
+	case http.MethodPost:
+		env, body, _ := readEnvelopeAndBody(r)
+		st, err := s.Services.JDTLS.Start(extractPayload(body))
+		if err != nil {
+			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{
+				Code:    protocol.ErrProcessSpawnFailed,
+				Message: err.Error(),
+			})
+			return
+		}
+		writeOK(w, env, st)
+	case http.MethodDelete:
+		env, _, _ := readEnvelopeAndBody(r)
+		st, err := s.Services.JDTLS.Stop()
+		if err != nil {
+			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{
+				Code: protocol.ErrInternal, Message: err.Error(),
+			})
+			return
+		}
+		writeOK(w, env, st)
+	default:
+		writeError(w, "", "", protocol.KairoError{
+			Code: protocol.ErrInvalidRequest, Message: "GET, POST, or DELETE only",
+		})
+	}
+}
+
 // payloadOf extracts the JSON payload from a request that
 // has an envelope. We tolerate both { "requestId":..., "payload": {...}}
 // and a bare payload.
@@ -546,3 +610,77 @@ var (
 	_ = encoding.UTF8
 	_ = search.DefaultExcludes
 )
+
+// handleJDTLSBridge returns an http.Handler that proxies LSP
+// frames between the Theia LanguageClientContribution and the
+// JDT LS process. The handler is exposed at
+// /api/v1/jdtls/lsp.
+//
+// The wire is binary: one WebSocket binary message == one LSP
+// frame (Content-Length + body). The bridge takes care of
+// content-type framing on the JDT LS side; on the WebSocket
+// side, it passes bytes through unchanged. This is exactly
+// what Theia's `LspConnection` expects: each WebSocket binary
+// message is one LSP frame.
+func (s *Server) handleJDTLSBridge() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.Services.JDTLS == nil {
+			writeError(w, "", "", protocol.KairoError{
+				Code:    protocol.ErrInternal,
+				Message: "JDTLS not configured on this agent",
+			})
+			return
+		}
+		// Allow the Theia Browser app to attach a workspace
+		// before it opens the WebSocket, so the JDT LS uses
+		// the right per-workspace data dir. The header is
+		// optional; when missing, the previous workspace
+		// (or the default) is used.
+		if ws := r.Header.Get("X-Kairo-Workspace-Id"); ws != "" {
+			s.Services.JDTLS.SetWorkspace(ws)
+		}
+		s.Services.JDTLS.Bridge().ServeHTTP(w, r)
+	})
+}
+
+// handleJDTProject dispatches /api/v1/jdtls/project. POST
+// generates a JDT LS project model under the runtime data
+// dir for a legacy project. GET returns the current status
+// (the workspace the model is bound to and the resolved
+// classpath).
+func (s *Server) handleJDTProject(w http.ResponseWriter, r *http.Request) {
+	if s.Services.JDTProjectGenerator == nil {
+		writeError(w, "", "", protocol.KairoError{
+			Code:    protocol.ErrInternal,
+			Message: "JDTProjectGenerator not configured on this agent",
+		})
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		env, _, _ := readEnvelopeAndBody(r)
+		wsID := r.URL.Query().Get("workspaceId")
+		st, err := s.Services.JDTProjectGenerator.Status(wsID)
+		if err != nil {
+			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{
+				Code: protocol.ErrInternal, Message: err.Error(),
+			})
+			return
+		}
+		writeOK(w, env, st)
+	case http.MethodPost:
+		env, body, _ := readEnvelopeAndBody(r)
+		res, err := s.Services.JDTProjectGenerator.Generate(extractPayload(body))
+		if err != nil {
+			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{
+				Code: protocol.ErrInvalidRequest, Message: err.Error(),
+			})
+			return
+		}
+		writeOK(w, env, res)
+	default:
+		writeError(w, "", "", protocol.KairoError{
+			Code: protocol.ErrInvalidRequest, Message: "GET or POST only",
+		})
+	}
+}

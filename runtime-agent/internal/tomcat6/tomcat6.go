@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/kairo-ide/runtime-agent/internal/log"
+	"github.com/kairo-ide/runtime-agent/internal/proc"
 )
 
 // sysProcAttr returns platform-specific process attributes for
@@ -37,6 +38,10 @@ import (
 func sysProcAttr() *syscall.SysProcAttr {
 	return sysProcAttrForOS()
 }
+
+// isAlive delegates to proc.IsAlive, which is implemented
+// per-platform in internal/proc/proc_{unix,windows}.go.
+func isAlive(pid int) bool { return proc.IsAlive(pid) }
 
 // Spec is the input to Start.
 type Spec struct {

@@ -1,0 +1,11 @@
+{
+  "name": "@kairo/e2e",
+  "version": "0.1.0",
+  "private": true,
+  "description": "End-to-end smoke for the Kairo IDE. The api-smoke is the CI-friendly back-end test; the ui-full-chain drives the real Theia Browser through Playwright.",
+  "scripts": {
+    "test:api": "node tests/e2e/api-smoke.cjs",
+    "test:ui": "node tests/e2e/ui-full-chain.cjs",
+    "test:smoke": "node tests/e2e/theia-smoke.cjs"
+  }
+}

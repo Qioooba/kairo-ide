@@ -1,0 +1,16 @@
+{
+  "name": "drivelist",
+  "version": "12.0.2",
+  "description": "Kairo stub for drivelist — pure-JS, returns an empty drive list. Used because the native binding cannot be built on Windows without a C++ toolchain.",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "files": [
+    "lib",
+    "src"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "clean": "rm -rf lib",
+    "lint": "tsc -p tsconfig.json --noEmit"
+  }
+}

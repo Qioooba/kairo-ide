@@ -1,9 +1,9 @@
 {
   "name": "@kairo/java-extension",
   "version": "0.1.0",
-  "description": "Kairo Java extension â€” owns the JDT Language Server lifecycle (delegated to the agent) and the Java activity bar.",
+  "description": "Kairo Java extension éˆ?owns the JDT Language Server lifecycle (delegated to the agent) and the Java activity bar.",
   "main": "lib/index.js",
-  "types": "lib/index.d.ts",
+  "types": "lib/src/index.d.ts",
   "files": [
     "lib",
     "src"
@@ -25,3 +25,4 @@
     "typescript": "5.5.4"
   }
 }
+

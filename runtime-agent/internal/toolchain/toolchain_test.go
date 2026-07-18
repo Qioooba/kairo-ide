@@ -83,16 +83,17 @@ func hasPrefix(s, p string) bool {
 }
 
 // javaHome returns JAVA_HOME or a reasonable fallback for tests.
+// Priority: JAVA_HOME first (so the test environment can pin
+// the JDK), then which java (which on Windows often resolves
+// to a JRE stub redirector at Common Files\Oracle\Java\javapath).
 func javaHome() string {
-	h := getenv("JAVA_HOME")
-	if h != "" {
+	if h := getenv("JAVA_HOME"); h != "" {
 		return h
 	}
-	// Fall back to "java" on PATH and derive its home.
 	javaPath := which("java")
-	if javaPath == "" {
-		return ""
+	if javaPath != "" {
+		// java is at <home>/bin/java
+		return filepath.Dir(filepath.Dir(javaPath))
 	}
-	// java is at <home>/bin/java
-	return filepath.Dir(filepath.Dir(javaPath))
+	return ""
 }

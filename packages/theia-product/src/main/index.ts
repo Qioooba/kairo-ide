@@ -10,7 +10,9 @@
  */
 
 export * from './product';
+export * from './product-frontend';
 // Theia `load(container, jsModule)` reads `jsModule.default` (the
 // ContainerModule itself). `export *` does not re-export the
 // default, so we re-export it explicitly.
-export { default } from './product';
+export { default } from './product-frontend';
+export { default as KairoProductBackend } from './product';

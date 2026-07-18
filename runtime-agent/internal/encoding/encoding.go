@@ -101,9 +101,12 @@ func Detect(sample []byte, defaultEnc ID, aliases Aliases) (id ID, confidence fl
 		return GB18030, 0.9, false, detectEOL(sample)
 	}
 
-	// 4. Fall back to defaultEnc if it's a known encoding.
-	switch aliases.Resolve(defaultEnc) {
-	case GBK, GB18030, UTF8, USASCII, ISO88591:
+	// 4. Fall back to defaultEnc ONLY if the sample is actually
+	// decodable as that encoding. Without this guard, an
+	// invalid-UTF-8 sample with defaultEnc=utf-8 would lie and
+	// return utf-8 — which is exactly the false-positive the
+	// integration test surfaced.
+	if canDecodeAs(sample, aliases.Resolve(defaultEnc)) {
 		return defaultEnc, 0.6, false, detectEOL(sample)
 	}
 
@@ -153,6 +156,29 @@ func isASCII(b []byte) bool {
 		}
 	}
 	return true
+}
+
+// canDecodeAs returns true if `b` decodes successfully under
+// the given encoding ID. We use this to refuse to claim an
+// encoding the bytes do not actually fit.
+//
+// Special case: utf-8 is checked with utf8.Valid, not the
+// encoding decoder, because the unicode.UTF8 decoder does
+// not error on invalid bytes — it replaces them with U+FFFD.
+// Using utf8.Valid is the truthful "these bytes are valid
+// UTF-8" check.
+func canDecodeAs(b []byte, id ID) bool {
+	switch id {
+	case UTF8, USASCII:
+		return utf8.Valid(b)
+	default:
+		enc := Encoder(id, Aliases{})
+		if enc == nil {
+			return false
+		}
+		_, _, err := transform.Bytes(enc.NewDecoder(), b)
+		return err == nil
+	}
 }
 
 // isGB18030 returns true if the sample can be decoded as GB18030

@@ -7,26 +7,46 @@
  * in-process agent; in the server form it is the remote agent).
  */
 
-import { injectable, postConstruct } from '@theia/core/shared/inversify';
+import { injectable, postConstruct, inject } from '@theia/core/shared/inversify';
 import {
   PROTOCOL_VERSION_PATH,
   RequestEnvelope,
   Endpoint,
   WsEvent,
+  HealthResponse,
   type RequestFor,
   type ResponseFor,
 } from '@kairo/protocol';
+import { KairoError, normaliseThrown, unwrapResponse } from './runtime-errors';
+
+export const KairoRuntime = Symbol('KairoRuntime');
 
 /**
- * The interface for the Kairo runtime client. Extensions bind
- * to `KairoRuntime` (this Symbol) and receive an injectable.
+ * Listener for client-side errors. The Theia side uses this to
+ * drive the status bar ("Runtime Agent: disconnected"), the
+ * notifications service, and the audit log.
  */
-export const KairoRuntime = Symbol('KairoRuntime');
+export const KairoErrorListener = Symbol('KairoErrorListener');
+export interface KairoErrorListener {
+  onError(err: KairoError, ctx: { endpoint: Endpoint; attempt: number }): void;
+}
+
+export class KairoErrorListenerImpl implements KairoErrorListener {
+  onError(_err: KairoError, _ctx: { endpoint: Endpoint; attempt: number }): void {
+    // Default no-op; views register themselves.
+  }
+}
 
 export interface KairoRuntimeConfig {
   baseUrl: string;
   sessionToken?: string;
   csrfToken?: string;
+  /** Bearer token to send in `Authorization` for all requests. */
+  bearerToken?: string;
+  /** Default request timeout in ms. Defaults to 60_000. */
+  defaultTimeoutMs?: number;
+  /** Max number of automatic retries for transient errors. */
+  maxRetries?: number;
 }
 
 export type KairoRequestInit = {
@@ -36,12 +56,21 @@ export type KairoRequestInit = {
   query?: Record<string, string | number | boolean | undefined>;
   /** Abort signal. */
   signal?: AbortSignal;
+  /** Override the per-request timeout in ms. */
+  timeoutMs?: number;
+  /**
+   * If true, the runtime will not retry on transient failures.
+   * Defaults to false (retries are allowed).
+   */
+  noRetry?: boolean;
 };
 
 @injectable()
 export class KairoRuntimeImpl {
+  @inject(KairoErrorListener) protected listener!: KairoErrorListener;
   protected config: KairoRuntimeConfig = { baseUrl: '' };
   protected workspaceId: string = '';
+  protected lastHealth: HealthResponse | undefined;
 
   @postConstruct()
   init(): void {
@@ -69,22 +98,27 @@ export class KairoRuntimeImpl {
     return this.workspaceId;
   }
 
-  /**
-   * Build the full URL for an endpoint, applying pathParams and
-   * query.
-   */
+  setBearerToken(token: string | undefined): void {
+    this.config.bearerToken = token;
+  }
+
+  baseUrl(): string {
+    return this.config.baseUrl;
+  }
+
+  lastSeenHealth(): HealthResponse | undefined {
+    return this.lastHealth;
+  }
+
   url(endpoint: Endpoint, init: KairoRequestInit = {}): string {
-    let path = endpoint;
-    const m = /^[A-Z]+\s+(\/.*)$/.exec(endpoint);
-    if (m) {
-      path = m[1] as Endpoint;
-    }
+    const path = stripMethod(endpoint);
+    let p = path;
     if (init.pathParams) {
       for (const [k, v] of Object.entries(init.pathParams)) {
-        path = path.replace(`{${k}}`, encodeURIComponent(v)) as Endpoint;
+        p = p.replace(`{${k}}`, encodeURIComponent(v)) as Endpoint;
       }
     }
-    let url = this.config.baseUrl.replace(/\/$/, '') + path;
+    let url = this.config.baseUrl.replace(/\/$/, '') + p;
     if (init.query) {
       const q: string[] = [];
       for (const [k, v] of Object.entries(init.query)) {
@@ -98,10 +132,6 @@ export class KairoRuntimeImpl {
     return url;
   }
 
-  /**
-   * Issue a typed request. The endpoint's payload type is
-   * inferred from the EndpointMap.
-   */
   async request<E extends Endpoint>(
     endpoint: E,
     payload: RequestFor<E>['payload'],
@@ -112,27 +142,10 @@ export class KairoRuntimeImpl {
       requestId: newRequestId(),
       payload: payload as RequestFor<E>['payload'],
     };
-    const m = /^[A-Z]+\s+/.exec(endpoint);
-    const method = m ? m[0].trim() : 'GET';
-
-    // GET endpoints cannot carry a JSON body. If the endpoint
-    // declares a payload (e.g. GET /servers/{id}/logs with
-    // {follow,since}), lift the payload fields into query params.
-    // Previously the payload was wrapped in the envelope and then
-    // discarded, so `follow=true` never reached the agent.
-    if (method === 'GET' && payload && typeof payload === 'object') {
-      init = {
-        ...init,
-        query: {
-          ...(init.query ?? {}),
-          ...(payload as Record<string, string | number | boolean | undefined>),
-        },
-      };
-    }
-
     const url = this.url(endpoint, init);
+    const method = methodOf(endpoint);
     const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
+      Accept: 'application/json',
       'X-Kairo-Request-Id': env.requestId,
     };
     if (env.workspaceId) {
@@ -141,140 +154,146 @@ export class KairoRuntimeImpl {
     if (this.config.csrfToken && method !== 'GET') {
       headers['X-Kairo-CSRF'] = this.config.csrfToken;
     }
-    if (this.config.sessionToken) {
-      headers['Authorization'] = 'Bearer ' + this.config.sessionToken;
+    if (this.config.bearerToken) {
+      headers['Authorization'] = 'Bearer ' + this.config.bearerToken;
     }
-    let res: Response;
-    try {
-      res = await fetch(url, {
-        method,
-        headers,
-        body: method === 'GET' ? undefined : JSON.stringify(env),
-        signal: init.signal,
-      });
-    } catch (e) {
-      // Network error or abort. Distinguish aborts so callers can
-      // ignore them (e.g. debounced search).
-      if (e instanceof DOMException && e.name === 'AbortError') {
-        throw e;
-      }
-      const err = new Error(`kairo request failed: ${(e as Error).message}`);
-      Object.assign(err, { code: 'internal', requestId: env.requestId, retryable: true });
-      throw err;
+    if (method !== 'GET' && method !== 'HEAD') {
+      headers['Content-Type'] = 'application/json';
     }
-    if (!res.ok) {
-      // Try to parse the error envelope; fall back to HTTP status.
-      let body: unknown = null;
+
+    const maxRetries = init.noRetry ? 0 : (this.config.maxRetries ?? 2);
+    let lastErr: KairoError | undefined;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      const ctl = composeAbort(init.signal, init.timeoutMs ?? this.config.defaultTimeoutMs);
       try {
-        body = await res.json();
-      } catch {
-        /* not JSON — e.g. HTML 502 from a proxy */
+        const fetchInit: RequestInit = {
+          method,
+          headers,
+          credentials: 'omit',
+          signal: ctl.signal,
+        };
+        if (method !== 'GET' && method !== 'HEAD') {
+          fetchInit.body = JSON.stringify(env);
+        }
+        const res = await fetch(url, fetchInit);
+        const text = await res.text();
+        let body: unknown;
+        if (text.length === 0) {
+          body = undefined;
+        } else {
+          try {
+            body = JSON.parse(text);
+          } catch (parseErr) {
+            throw new KairoError({
+              code: 'internal',
+              message: 'Runtime agent returned non-JSON response',
+              httpStatus: res.status,
+              details: text.slice(0, 200),
+              cause: parseErr,
+            });
+          }
+        }
+        const out = unwrapResponse(res, body);
+        if (endpoint === 'GET /api/v1/health' && out && typeof out === 'object') {
+          this.lastHealth = out as HealthResponse;
+        }
+        return out as ResponseFor<E>;
+      } catch (raw) {
+        const err = normaliseThrown(raw, `Request to ${url} failed`);
+        this.listener.onError(err, { endpoint, attempt });
+        lastErr = err;
+        if (!err.isTransient() || attempt === maxRetries || ctl.signal.aborted) {
+          throw err;
+        }
+        const backoffMs = Math.min(2000, 100 * Math.pow(2, attempt));
+        await delay(backoffMs, ctl.signal);
+      } finally {
+        ctl.dispose();
       }
-      const kerr = (body as { error?: { code?: string; message?: string; details?: unknown; retryable?: boolean } } | null)?.error;
-      const e = new Error(kerr?.message ?? `HTTP ${res.status} ${res.statusText}`);
-      Object.assign(e, {
-        code: kerr?.code ?? 'internal',
-        requestId: env.requestId,
-        correlationId: (body as { correlationId?: string } | null)?.correlationId,
-        details: kerr?.details,
-        retryable: kerr?.retryable,
-      });
-      throw e;
     }
-    let json: { ok: true; payload: ResponseFor<E> } | { ok: false; error: { code: string; message: string; details?: unknown; retryable?: boolean } };
-    try {
-      json = await res.json();
-    } catch (e) {
-      const err = new Error(`kairo response was not JSON: ${(e as Error).message}`);
-      Object.assign(err, { code: 'internal', requestId: env.requestId });
-      throw err;
-    }
-    if (!json.ok) {
-      const kerr = (json as { ok: false; error: { code?: string; message?: string } }).error;
-      const e = new Error(kerr?.message || 'request failed');
-      Object.assign(e, { code: kerr?.code });
-      throw e;
-    }
-    return (json as { ok: true; payload: ResponseFor<E> }).payload;
+    throw lastErr ?? new KairoError({ code: 'internal', message: 'unreachable' });
   }
 
-  /**
-   * Open a WebSocket to /api/v1/events. The returned object
-   * exposes on(type, handler) and close().
-   */
   openEvents(): EventStream {
-    const wsUrl = this.config.baseUrl
-      .replace(/^http/, 'ws')
-      .replace(/\/$/, '') + PROTOCOL_VERSION_PATH + '/events';
-    const protocols = this.config.sessionToken ? [this.config.sessionToken] : undefined;
-    const ws = protocols ? new WebSocket(wsUrl, protocols) : new WebSocket(wsUrl);
-    return new EventStream(ws);
+    const wsBase = this.config.baseUrl.replace(/^http/i, 'ws').replace(/\/$/, '');
+    const wsUrl = `${wsBase}${PROTOCOL_VERSION_PATH}/events`;
+    return new EventStream(wsUrl, this.config.bearerToken);
   }
 }
 
-export class EventStream {
-  protected ws: WebSocket;
-  protected listeners = new Map<string, Set<(e: WsEvent) => void>>();
-  protected readonly onMessage: (ev: MessageEvent) => void;
-  protected readonly onClose: () => void;
+interface AbortCtl {
+  signal: AbortSignal;
+  dispose(): void;
+}
 
-  constructor(ws: WebSocket) {
-    this.ws = ws;
-    this.onMessage = (ev: MessageEvent) => this.handleMessage(ev);
-    this.onClose = () => this.emitClose();
-    this.ws.addEventListener('message', this.onMessage);
-    this.ws.addEventListener('close', this.onClose);
-    this.ws.addEventListener('error', this.onClose);
+function composeAbort(parent: AbortSignal | undefined, timeoutMs: number | undefined): AbortCtl {
+  const ctl = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const onParentAbort = () => ctl.abort(parent?.reason);
+  if (parent) {
+    if (parent.aborted) ctl.abort(parent.reason);
+    else parent.addEventListener('abort', onParentAbort, { once: true });
   }
+  if (timeoutMs && timeoutMs > 0) {
+    timer = setTimeout(() => ctl.abort(new DOMException('timeout', 'AbortError')), timeoutMs);
+  }
+  return {
+    signal: ctl.signal,
+    dispose: () => {
+      if (timer) clearTimeout(timer);
+      if (parent) parent.removeEventListener('abort', onParentAbort);
+    },
+  };
+}
 
-  private handleMessage(ev: MessageEvent): void {
-    // Only swallow JSON parse errors. A throwing listener must
-    // not abort iteration over the rest of the Set, and we want
-    // to know about it.
-    let e: WsEvent;
-    try {
-      e = JSON.parse(ev.data) as WsEvent;
-    } catch {
+function delay(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(resolve, ms);
+    if (signal.aborted) {
+      clearTimeout(t);
+      reject(new KairoError({ code: 'timeout', message: 'Request was aborted during backoff' }));
       return;
     }
-    const snapshot = (set: Set<(ev: WsEvent) => void> | undefined) =>
-      set ? Array.from(set) : [];
-    for (const fn of snapshot(this.listeners.get(e.type))) {
-      try {
-        fn(e);
-      } catch (err) {
-        // eslint-disable-next-line no-console
-        console.error('[kairo] event listener threw', err);
-      }
-    }
-    // Also fire the wildcard subscribers, unless this event IS
-    // a wildcard broadcast (which would be a degenerate loop).
-    // Cast to string because WsEvent.type is a strict union of
-    // real event names; '*' is a subscription channel, not an
-    // event type, so the union correctly doesn't include it.
-    if ((e.type as string) !== '*') {
-      for (const fn of snapshot(this.listeners.get('*'))) {
-        try {
-          fn(e);
-        } catch (err) {
-          // eslint-disable-next-line no-console
-          console.error('[kairo] event listener threw', err);
-        }
-      }
-    }
-  }
+    signal.addEventListener('abort', () => {
+      clearTimeout(t);
+      reject(new KairoError({ code: 'timeout', message: 'Request was aborted during backoff' }));
+    }, { once: true });
+  });
+}
 
-  private emitClose(): void {
-    // Notify subscribers via the wildcard channel so the UI can
-    // re-open the stream. Previously a dropped socket was silent.
-    const synthetic: WsEvent = { type: '__close__' } as unknown as WsEvent;
-    for (const fn of Array.from(this.listeners.get('*') ?? [])) {
-      try {
-        fn(synthetic);
-      } catch {
-        /* ignore */
-      }
-    }
+function stripMethod(endpoint: Endpoint): string {
+  const m = /^[A-Z]+\s+(\/.*)$/.exec(endpoint);
+  return m ? m[1] : (endpoint as string);
+}
+
+function methodOf(endpoint: Endpoint): string {
+  const m = /^[A-Z]+\s+/.exec(endpoint);
+  return m ? m[0].trim() : 'GET';
+}
+
+function newRequestId(): string {
+  return 'req_' + Math.random().toString(36).slice(2, 14);
+}
+
+/**
+ * A typed WebSocket subscription with exponential backoff
+ * reconnect. The Theia side listens for log / build.progress /
+ * deployment.progress / server.state events and re-emits them
+ * on the inversify event bus so views do not depend on a
+ * singleton runtime.
+ */
+export class EventStream {
+  protected ws: WebSocket | null = null;
+  protected listeners = new Map<string, Set<(e: WsEvent) => void>>();
+  protected backoffMs = 250;
+  protected maxBackoffMs = 15_000;
+  protected closedByCaller = false;
+  protected reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+  protected statusListeners = new Set<(s: 'connecting' | 'open' | 'disconnected' | 'closed') => void>();
+  protected currentStatus: 'connecting' | 'open' | 'disconnected' | 'closed' = 'disconnected';
+
+  constructor(protected url: string, protected bearerToken?: string) {
+    this.connect();
   }
 
   on(type: string, handler: (e: WsEvent) => void): () => void {
@@ -289,29 +308,70 @@ export class EventStream {
     };
   }
 
-  close(): void {
-    // Remove listeners so the WebSocket can be GC'd. Previously
-    // the message listener was never detached, leaking on every
-    // openEvents() call.
-    this.ws.removeEventListener('message', this.onMessage);
-    this.ws.removeEventListener('close', this.onClose);
-    this.ws.removeEventListener('error', this.onClose);
-    this.listeners.clear();
-    try {
-      this.ws.close();
-    } catch {
-      /* already closed */
-    }
+  onStatus(handler: (s: 'connecting' | 'open' | 'disconnected' | 'closed') => void): () => void {
+    this.statusListeners.add(handler);
+    handler(this.currentStatus);
+    return () => this.statusListeners.delete(handler);
   }
-}
 
-function newRequestId(): string {
-  // Prefer crypto.randomUUID (UUIDv4, available in modern browsers
-  // and Node 19+) per the protocol contract. Fall back to a
-  // random base36 string for older runtimes.
-  const c = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
-  if (c?.randomUUID) {
-    return c.randomUUID();
+  status(): 'connecting' | 'open' | 'disconnected' | 'closed' {
+    return this.currentStatus;
   }
-  return 'req_' + Math.random().toString(36).slice(2, 14);
+
+  close(): void {
+    this.closedByCaller = true;
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.ws?.close();
+    this.setStatus('closed');
+  }
+
+  protected connect(): void {
+    if (this.closedByCaller) return;
+    this.setStatus('connecting');
+    let ws: WebSocket;
+    try {
+      ws = this.bearerToken
+        ? new WebSocket(this.url, [this.bearerToken])
+        : new WebSocket(this.url);
+    } catch (_err) {
+      this.scheduleReconnect();
+      return;
+    }
+    this.ws = ws;
+    ws.addEventListener('open', () => {
+      this.backoffMs = 250;
+      this.setStatus('open');
+    });
+    ws.addEventListener('message', ev => {
+      try {
+        const e: WsEvent = JSON.parse(typeof ev.data === 'string' ? ev.data : '');
+        const set = this.listeners.get(e.type);
+        if (set) for (const fn of set) fn(e);
+        const all = this.listeners.get('*');
+        if (all) for (const fn of all) fn(e);
+      } catch (_err) {
+        // ignore malformed message
+      }
+    });
+    ws.addEventListener('close', () => {
+      this.setStatus('disconnected');
+      if (!this.closedByCaller) this.scheduleReconnect();
+    });
+    ws.addEventListener('error', () => {
+      this.setStatus('disconnected');
+    });
+  }
+
+  protected scheduleReconnect(): void {
+    if (this.closedByCaller) return;
+    const wait = this.backoffMs;
+    this.backoffMs = Math.min(this.maxBackoffMs, this.backoffMs * 2);
+    this.reconnectTimer = setTimeout(() => this.connect(), wait);
+  }
+
+  protected setStatus(s: 'connecting' | 'open' | 'disconnected' | 'closed'): void {
+    if (this.currentStatus === s) return;
+    this.currentStatus = s;
+    for (const fn of this.statusListeners) fn(s);
+  }
 }

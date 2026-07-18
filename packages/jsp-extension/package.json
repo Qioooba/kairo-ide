@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "Kairo JSP / Taglib / EL support. Provides a Monarch grammar for syntax highlight, a TLD / web.xml parser for taglib completion, and the encoding-aware save flow.",
   "main": "lib/index.js",
-  "types": "lib/index.d.ts",
+  "types": "lib/src/index.d.ts",
   "files": ["lib", "src"],
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -23,3 +23,4 @@
     "typescript": "5.5.4"
   }
 }
+

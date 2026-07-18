@@ -374,6 +374,97 @@ export interface HealthResponse {
 }
 
 /* ------------------------------------------------------------------ */
+/*  JDT Language Server                                                */
+/* ------------------------------------------------------------------ */
+
+// JdtState is the on-the-wire state the agent reports. The
+// frontend derives a richer JavaServiceState from this plus
+// the install state and the LSP `initialize` handshake.
+export type JdtState = 'stopped' | 'starting' | 'running' | 'stopping' | 'crashed';
+
+// The frontend's service-level state machine. 'not-installed'
+// is the value the user sees when no JDT LS is on disk;
+// 'installing' covers a download + extract; 'initializing' is
+// the LSP handshake; 'ready' is when the LS has answered
+// initialize; 'degraded' is when the LS is up but we know we
+// cannot provide the full feature set (e.g. Java 6 source
+// compliance in a Java 17 LS); 'crashed' is the terminal
+// state that the user must click "Restart" to clear.
+export type JavaServiceState =
+  | JdtState
+  | 'uninitialized'
+  | 'not-installed'
+  | 'installing'
+  | 'initializing'
+  | 'ready'
+  | 'degraded';
+
+export interface JdtStatus {
+  state: JdtState;
+  pid?: number;
+  /** JDT LS release version baked into the agent. */
+  version?: string;
+  startedAt?: string;
+  stoppedAt?: string;
+  /** JRE the agent is using to run the JDT LS. */
+  jre?: string;
+  /** Resolved path to the JDT LS launcher JAR. */
+  jar?: string;
+  /** Equinox launcher JAR (same as `jar`; kept for legacy UI). */
+  launcherJar?: string;
+  /** Per-workspace data dir the JDT LS is using. */
+  workspace?: string;
+  /** Project source level (e.g. "1.6"). */
+  sourceLevel?: string;
+  /** When the process exited without a clean Stop. */
+  lastError?: string;
+  /** Absolute path of the per-run stderr capture file. */
+  stderrPath?: string;
+  /** Number of auto-restarts since the agent started. */
+  restartCount?: number;
+  /**
+   * True iff the LSP `initialize` handshake completed. The UI
+   * must NOT advertise completion / hover / etc. until this
+   * is true, even when state == "running".
+   */
+  initializeOk: boolean;
+}
+
+export interface JdtStartRequest {
+  /** Override the JRE the agent uses to run the JDT LS. */
+  jrePath?: string;
+  /** Project source level. Defaults to "1.6". */
+  sourceLevel?: '1.5' | '1.6' | '1.7' | '1.8' | '9' | '11' | '17';
+  /** Workspace root URI passed to the LSP `initialize` request. */
+  initializeRootURI?: string;
+  /** Hard timeout for the Start call. Default 30s. */
+  timeoutMs?: number;
+}
+
+export interface JdtProjectRequest {
+  workspaceId: string;
+  /** The on-disk root of the project; usually the workspace root. */
+  rootPath: string;
+  /** Optional projectId; default = basename of rootPath. */
+  projectId?: string;
+}
+
+export interface JdtProjectResponse {
+  workspaceId: string;
+  projectId: string;
+  projectModel: string;
+  classpath: string;
+  sourceRoots: string[];
+  outputDir: string;
+  encoding: string;
+  sourceLevel: string;
+  targetLevel: string;
+  generatedAt: string;
+  fromCache: boolean;
+  classpathEntries: string[];
+}
+
+/* ------------------------------------------------------------------ */
 /*  Auth                                                               */
 /* ------------------------------------------------------------------ */
 
@@ -410,6 +501,9 @@ export interface AuditEvent {
 
 export interface EndpointMap {
   'GET /api/v1/health': { request: undefined; response: HealthResponse };
+  'GET /api/v1/builds': { request: undefined; response: BuildResult[] };
+  'GET /api/v1/deployments': { request: undefined; response: DeploymentResult[] };
+  'GET /api/v1/servers': { request: undefined; response: ServerInstance[] };
   'GET /api/v1/workspaces': { request: undefined; response: Workspace[] };
   'POST /api/v1/workspaces': {
     request: { rootPath: string; name?: string };
@@ -455,6 +549,14 @@ export interface EndpointMap {
   'POST /api/v1/auth/login': { request: LoginRequest; response: LoginResponse };
   'POST /api/v1/auth/logout': { request: undefined; response: { ok: true } };
   'GET /api/v1/audit': { request: { since?: string }; response: AuditEvent[] };
+  'GET /api/v1/jdtls': { request: undefined; response: JdtStatus };
+  'POST /api/v1/jdtls': { request: JdtStartRequest; response: JdtStatus };
+  'DELETE /api/v1/jdtls': { request: undefined; response: JdtStatus };
+  'POST /api/v1/jdtls/project': { request: JdtProjectRequest; response: JdtProjectResponse };
+  'GET /api/v1/jdtls/project': {
+    request: undefined;
+    response: { workspaceId: string; exists: boolean; projectId?: string; generatedAt?: string };
+  };
 }
 
 export interface DetectedProjectLayout {
@@ -489,9 +591,26 @@ export type ResponseFor<E extends Endpoint> = EndpointMap[E]['response'];
 export type WsEvent =
   | { type: 'log'; serverId: string; line: string; ts: string }
   | { type: 'build.progress'; buildId: string; state: BuildResult['state']; currentFile?: string }
-  | { type: 'deployment.progress'; deploymentId: string; state: DeploymentResult['state']; currentFile?: string }
-  | { type: 'server.state'; serverId: string; state: ServerInstance['state']; pid?: number; ports?: ServerInstance['ports'] }
-  | { type: 'diagnostic'; level: 'info' | 'warn' | 'error'; component: string; message: string; fields?: Record<string, unknown> }
+  | {
+      type: 'deployment.progress';
+      deploymentId: string;
+      state: DeploymentResult['state'];
+      currentFile?: string;
+    }
+  | {
+      type: 'server.state';
+      serverId: string;
+      state: ServerInstance['state'];
+      pid?: number;
+      ports?: ServerInstance['ports'];
+    }
+  | {
+      type: 'diagnostic';
+      level: 'info' | 'warn' | 'error';
+      component: string;
+      message: string;
+      fields?: Record<string, unknown>;
+    }
   | { type: 'audit'; event: AuditEvent };
 
 /* ------------------------------------------------------------------ */

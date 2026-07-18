@@ -2,12 +2,12 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "outDir": "lib",
-    "rootDir": "src",
+    "rootDir": "src/main",
     "declaration": true,
     "composite": true,
     "skipLibCheck": true
   },
-  "include": ["src/**/*.ts"],
+  "include": ["src/main/**/*.ts"],
   "exclude": ["node_modules", "lib", "**/*.test.ts"],
   "references": [
     { "path": "../protocol" },
@@ -17,6 +17,7 @@
     { "path": "../search-extension" },
     { "path": "../jsp-extension" },
     { "path": "../tomcat-extension" },
-    { "path": "../java-extension" }
+    { "path": "../java-extension" },
+    { "path": "../encoding-extension" }
   ]
 }

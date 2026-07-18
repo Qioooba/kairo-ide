@@ -109,3 +109,10 @@ apps/*/src-gen/
 
 # Playwright screenshots (not test artifacts, just visual reference)
 codex-ui-review-shots/
+
+# raw test output (kept as scratch; full reports go under docs/progress/)
+**/*.test-output.txt
+**/runtime-test-raw.txt
+**/api-smoke-raw.txt
+**/probe-raw.txt
+
