@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -39,98 +38,46 @@ func (f *fakeJDTLS) Status() (json.RawMessage, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return json.Marshal(jdtlsTestStatus{
-		State:        f.state,
-		Pid:          f.pid,
-		Version:      f.version,
-		JRE:          f.jre,
-		Jar:          f.jar,
-		InitializeOK: f.initOK,
-		LastError:    f.lastErr,
+		State:     f.state,
+		Pid:       f.pid,
+		Version:   f.version,
+		JRE:       f.jre,
+		Jar:       f.jar,
+		LastError: f.lastErr,
 	})
 }
 
-func (f *fakeJDTLS) Start(payload json.RawMessage) (json.RawMessage, error) {
-	f.mu.Lock()
-	if f.startErr != nil {
-		f.mu.Unlock()
-		return nil, f.startErr
-	}
-	if f.state == "running" || f.state == "starting" {
-		s := f.state
-		f.mu.Unlock()
-		return nil, errors.New("jdtls already in state " + s)
-	}
-	var req struct {
-		JREPath           string `json:"jrePath"`
-		InitializeRootURI string `json:"initializeRootURI"`
-		SourceLevel       string `json:"sourceLevel"`
-		TimeoutMs         int    `json:"timeoutMs"`
-	}
-	if len(payload) > 0 {
-		_ = json.Unmarshal(payload, &req)
-	}
-	if req.JREPath != "" {
-		f.jre = req.JREPath
-	}
-	f.state = "starting"
-	f.lastErr = ""
-	f.initOK = false
-	f.mu.Unlock()
-	// Simulate a real Start: process spawn, then initialize
-	// handshake, then ready. We collapse that to a single
-	// critical-section update because the handler does not
-	// observe the intermediate state on a happy path.
-	time.Sleep(5 * time.Millisecond)
-	f.mu.Lock()
-	f.state = "running"
-	f.pid = 4242
-	f.jar = "bundled/jdtls/jdt-language-server-1.42.0-202407031446.jar"
-	f.version = "1.42.0"
-	if req.InitializeRootURI != "" {
-		f.initOK = true
-	}
-	st := jdtlsTestStatus{
-		State:        f.state,
-		Pid:          f.pid,
-		Version:      f.version,
-		JRE:          f.jre,
-		Jar:          f.jar,
-		InitializeOK: f.initOK,
-	}
-	f.mu.Unlock()
-	return json.Marshal(st)
-}
-
-func (f *fakeJDTLS) Stop() (json.RawMessage, error) {
+func (f *fakeJDTLS) Prepare(ctx context.Context) (json.RawMessage, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.stopErr != nil {
-		return nil, f.stopErr
-	}
-	if f.state != "running" && f.state != "crashed" {
-		return json.Marshal(jdtlsTestStatus{State: f.state, JRE: f.jre, Jar: f.jar})
-	}
-	f.state = "stopping"
-	time.Sleep(5 * time.Millisecond)
 	f.state = "stopped"
-	f.initOK = false
-	return json.Marshal(jdtlsTestStatus{State: f.state, JRE: f.jre, Jar: f.jar})
+	f.version = "1.43.0"
+	return json.Marshal(jdtlsTestStatus{
+		State:   f.state,
+		Version: f.version,
+		JRE:     f.jre,
+	})
 }
 
-func (f *fakeJDTLS) Bridge() http.Handler { return http.NotFoundHandler() }
-func (f *fakeJDTLS) SetWorkspace(string)  {}
+func (f *fakeJDTLS) GetLaunchDescriptor(ctx context.Context, workspaceID string, projectID string) (json.RawMessage, error) {
+	return json.Marshal(map[string]interface{}{
+		"command":    "/path/to/java",
+		"args":       []string{"-jar", "launcher.jar"},
+		"workingDir": "/path/to/project",
+		"env":        []string{"PATH=/usr/bin"},
+	})
+}
 
 type jdtlsTestStatus struct {
-	State        string `json:"state"`
-	Pid          int    `json:"pid,omitempty"`
-	Version      string `json:"version,omitempty"`
-	StartedAt    string `json:"startedAt,omitempty"`
-	StoppedAt    string `json:"stoppedAt,omitempty"`
-	JRE          string `json:"jre,omitempty"`
-	Jar          string `json:"jar,omitempty"`
-	SourceLevel  string `json:"sourceLevel,omitempty"`
-	LastError    string `json:"lastError,omitempty"`
-	InitializeOK bool   `json:"initializeOk"`
+	State       string `json:"state"`
+	Pid         int    `json:"pid,omitempty"`
+	Version     string `json:"version,omitempty"`
+	StartedAt   string `json:"startedAt,omitempty"`
+	StoppedAt   string `json:"stoppedAt,omitempty"`
+	JRE         string `json:"jre,omitempty"`
+	Jar         string `json:"jar,omitempty"`
+	SourceLevel string `json:"sourceLevel,omitempty"`
+	LastError   string `json:"lastError,omitempty"`
 }
 
 func newTestServer(t *testing.T, j *fakeJDTLS) *Server {
@@ -142,7 +89,7 @@ func newTestServer(t *testing.T, j *fakeJDTLS) *Server {
 	}
 	t.Cleanup(func() { _ = auditLog.Close() })
 	svcs := &Services{JDTLS: j}
-	return NewServer(svcs, logger, auditLog, "test-0.1.0")
+	return NewServer(svcs, logger, auditLog, "test-0.1.0", "")
 }
 
 func decodeOK(t *testing.T, body []byte) (protocol.ResponseEnvelope, map[string]any) {
@@ -175,7 +122,7 @@ func decodeErr(t *testing.T, body []byte) (protocol.ErrorResponse, protocol.Kair
 }
 
 func TestJDTLS_GetReturnsStoppedWhenNeverStarted(t *testing.T) {
-	j := &fakeJDTLS{state: "stopped", jre: "C:/jre17", version: "1.42.0"}
+	j := &fakeJDTLS{state: "stopped", jre: "C:/jre17", version: "1.43.0"}
 	srv := newTestServer(t, j)
 
 	rr := httptest.NewRecorder()
@@ -192,107 +139,39 @@ func TestJDTLS_GetReturnsStoppedWhenNeverStarted(t *testing.T) {
 	if p["jre"] != "C:/jre17" {
 		t.Errorf("jre = %v, want C:/jre17", p["jre"])
 	}
-	if _, ok := p["initializeOk"]; !ok {
-		t.Errorf("payload must include initializeOk field")
-	}
 }
 
-func TestJDTLS_PostStartSucceedsAndIsReadyOnlyAfterInitialize(t *testing.T) {
-	j := &fakeJDTLS{state: "stopped", jre: "C:/jre17", version: "1.42.0"}
+func TestJDTLS_PostPrepareInstallsDistribution(t *testing.T) {
+	j := &fakeJDTLS{state: "stopped", jre: "C:/jre17", version: "1.43.0"}
 	srv := newTestServer(t, j)
 
-	// 1) Start without initializeRootURI — process is up but
-	//    initializeOk is false. The UI must NOT yet show
-	//    completion / hover / etc.
-	body := mustEnvelope(t, map[string]any{
-		"jrePath":     "C:/jre17",
-		"sourceLevel": "1.6",
-	})
-	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/jdtls", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	srv.Handler().ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("start status = %d body=%s", rr.Code, rr.Body.String())
-	}
-	_, p := decodeOK(t, rr.Body.Bytes())
-	if p["state"] != "running" {
-		t.Errorf("state = %v, want running", p["state"])
-	}
-	if p["initializeOk"] != false {
-		t.Errorf("initializeOk = %v, want false (no root URI sent)", p["initializeOk"])
-	}
-
-	// 2) Re-Start with initializeRootURI — process is still up
-	//    because our fake refuses a second Start while running,
-	//    so we go through Stop first.
-	j2 := &fakeJDTLS{state: "stopped", jre: "C:/jre17", version: "1.42.0"}
-	srv2 := newTestServer(t, j2)
-	body2 := mustEnvelope(t, map[string]any{
-		"jrePath":           "C:/jre17",
-		"sourceLevel":       "1.6",
-		"initializeRootURI": "file:///c:/workspace",
-	})
-	rr2 := httptest.NewRecorder()
-	req2 := httptest.NewRequest(http.MethodPost, "/api/v1/jdtls", bytes.NewReader(body2))
-	req2.Header.Set("Content-Type", "application/json")
-	srv2.Handler().ServeHTTP(rr2, req2)
-	if rr2.Code != http.StatusOK {
-		t.Fatalf("start-with-init status = %d body=%s", rr2.Code, rr2.Body.String())
-	}
-	_, p2 := decodeOK(t, rr2.Body.Bytes())
-	if p2["state"] != "running" {
-		t.Errorf("state = %v, want running", p2["state"])
-	}
-	if p2["initializeOk"] != true {
-		t.Errorf("initializeOk = %v, want true (root URI sent)", p2["initializeOk"])
-	}
-}
-
-func TestJDTLS_StartRefusedWhenAlreadyRunning(t *testing.T) {
-	j := &fakeJDTLS{state: "running", jre: "C:/jre17"}
-	srv := newTestServer(t, j)
-
-	body := mustEnvelope(t, map[string]any{"jrePath": "C:/jre17"})
+	body := mustEnvelope(t, map[string]any{})
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/jdtls", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	srv.Handler().ServeHTTP(rr, req)
 
-	if rr.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want 500, body=%s", rr.Code, rr.Body.String())
-	}
-	_, e := decodeErr(t, rr.Body.Bytes())
-	if e.Code != protocol.ErrProcessSpawnFailed {
-		t.Errorf("err code = %s, want %s", e.Code, protocol.ErrProcessSpawnFailed)
-	}
-}
-
-func TestJDTLS_DeleteStopResetsState(t *testing.T) {
-	j := &fakeJDTLS{state: "running", jre: "C:/jre17", version: "1.42.0"}
-	srv := newTestServer(t, j)
-
-	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/jdtls", nil)
-	srv.Handler().ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
-		t.Fatalf("stop status = %d body=%s", rr.Code, rr.Body.String())
+		t.Fatalf("prepare status = %d body=%s", rr.Code, rr.Body.String())
 	}
 	_, p := decodeOK(t, rr.Body.Bytes())
 	if p["state"] != "stopped" {
 		t.Errorf("state = %v, want stopped", p["state"])
 	}
-
-	// Subsequent GET must show stopped.
-	rr2 := httptest.NewRecorder()
-	req2 := httptest.NewRequest(http.MethodGet, "/api/v1/jdtls", nil)
-	srv.Handler().ServeHTTP(rr2, req2)
-	if rr2.Code != http.StatusOK {
-		t.Fatalf("get status = %d body=%s", rr2.Code, rr2.Body.String())
+	if p["version"] != "1.43.0" {
+		t.Errorf("version = %v, want 1.43.0", p["version"])
 	}
-	_, p2 := decodeOK(t, rr2.Body.Bytes())
-	if p2["state"] != "stopped" {
-		t.Errorf("state after stop = %v, want stopped", p2["state"])
+}
+
+func TestJDTLS_DeleteMethodNotSupported(t *testing.T) {
+	j := &fakeJDTLS{state: "stopped", jre: "C:/jre17", version: "1.43.0"}
+	srv := newTestServer(t, j)
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/jdtls", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rr.Code)
 	}
 }
 
@@ -314,7 +193,7 @@ func TestJDTLS_NotConfiguredReturnsError(t *testing.T) {
 		t.Fatalf("audit.New: %v", err)
 	}
 	t.Cleanup(func() { _ = auditLog.Close() })
-	srv := NewServer(&Services{}, logger, auditLog, "test-0.1.0")
+	srv := NewServer(&Services{}, logger, auditLog, "test-0.1.0", "")
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/jdtls", nil)
 	srv.Handler().ServeHTTP(rr, req)

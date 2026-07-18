@@ -33,6 +33,7 @@ type Server struct {
 	version  string
 	bindAddr string
 	port     int
+	secret   string
 
 	// injected services
 	Services *Services
@@ -67,16 +68,23 @@ type Services struct {
 	// JDTProjectGenerator writes the JDT LS project model for
 	// legacy projects. Optional.
 	JDTProjectGenerator JDTProjectGenerator
+	// ProjectRepo resolves a project by workspace and project ID.
+	// Used by the JDT LS launch descriptor handler.
+	ProjectRepo ProjectRepo
+	// ToolchainRepo resolves a toolchain by its ID.
+	// Used by the JDT LS launch descriptor handler.
+	ToolchainRepo ToolchainRepo
 }
 
 // NewServer creates a Server.
-func NewServer(services *Services, l *log.Logger, a *audit.Log, version string) *Server {
+func NewServer(services *Services, l *log.Logger, a *audit.Log, version string, secret string) *Server {
 	s := &Server{
 		logger:   l,
 		audit:    a,
 		router:   http.NewServeMux(),
 		started:  time.Now(),
 		version:  version,
+		secret:   secret,
 		Services: services,
 	}
 	s.routes()
@@ -111,8 +119,8 @@ func (s *Server) ListenAndServe(addr string, tlsCert, tlsKey string) error {
 	return srv.ListenAndServe()
 }
 
-// middleware applies request ID, logging, audit, CORS, and
-// recovery in that order.
+// middleware applies request ID, logging, audit, CORS, secret
+// auth check, and recovery in that order.
 func (s *Server) middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rid := r.Header.Get("X-Kairo-Request-Id")
@@ -121,6 +129,19 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 		}
 		cid := r.Header.Get("X-Kairo-Correlation-Id")
 		w.Header().Set("X-Kairo-Request-Id", rid)
+
+		// Secret check: if the agent has a secret configured, require
+		// the X-Kairo-Secret header on every request. The health
+		// endpoint is exempt so the desktop host can poll it.
+		if s.secret != "" && r.URL.Path != "/api/v1/health" {
+			if r.Header.Get("X-Kairo-Secret") != s.secret {
+				writeError(w, rid, cid, protocol.KairoError{
+					Code:    protocol.ErrUnauthenticated,
+					Message: "missing or invalid auth secret",
+				})
+				return
+			}
+		}
 
 		ctx := log.WithRequestContext(r.Context(), rid, cid, "", "")
 		started := time.Now()
@@ -154,6 +175,12 @@ func (s *Server) routes() {
 	// Workspaces
 	s.router.HandleFunc("/api/v1/workspaces", s.handleWorkspaces)
 	s.router.HandleFunc("/api/v1/workspaces/", s.handleWorkspacesSub)
+	// Register the launch-descriptor sub-path before the generic
+	// workspaces sub-handler so it has a chance to match first.
+	// The Go mux dispatches by longest prefix match, so a more
+	// specific path like /api/v1/workspaces/{ws}/java/launch-descriptor
+	// must be registered before the catch-all /api/v1/workspaces/.
+	s.router.HandleFunc("/api/v1/workspaces/{ws}/java/", s.handleWorkspacesJava)
 	// Projects
 	s.router.HandleFunc("/api/v1/projects", s.handleProjects)
 	s.router.HandleFunc("/api/v1/projects/", s.handleProjectByID)
@@ -174,6 +201,7 @@ func (s *Server) routes() {
 	// Encoding
 	s.router.HandleFunc("/api/v1/encoding/detect", s.handleEncodingDetect)
 	s.router.HandleFunc("/api/v1/encoding/recode", s.handleEncodingRecode)
+	s.router.HandleFunc("/api/v1/encoding/validate", s.handleEncodingValidate)
 	// Auth
 	s.router.HandleFunc("/api/v1/auth/login", s.handleLogin)
 	s.router.HandleFunc("/api/v1/auth/logout", s.handleLogout)
@@ -183,10 +211,6 @@ func (s *Server) routes() {
 	s.router.HandleFunc("/api/v1/events", s.handleEvents)
 	// JDT Language Server
 	s.router.HandleFunc("/api/v1/jdtls", s.handleJDTLS)
-	// JDT LS LSP frame bridge (WebSocket). The path is on
-	// the same port as the HTTP API; the WebSocket upgrade is
-	// the same `handleJDTLSBridge` handler below.
-	s.router.Handle("/api/v1/jdtls/lsp", s.handleJDTLSBridge())
 	// JDT project model generator for legacy projects.
 	s.router.HandleFunc("/api/v1/jdtls/project", s.handleJDTProject)
 }

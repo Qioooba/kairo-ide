@@ -1,203 +1,34 @@
 // Package jdtls — LSP frame bridge.
 //
-// The Theia browser app cannot talk directly to the JDT LS
-// process over stdio. The bridge below:
+// DEPRECATED: The LSP frame bridge has been moved to the Theia
+// backend (packages/java-extension/src/node/java-language-server-contribution.ts).
+// The Go Agent no longer starts JDT LS or proxies LSP frames.
+// The Theia backend now owns the JDT LS process lifecycle and
+// communicates with it directly over stdio.
 //
-//  1. Accepts a single WebSocket connection (the Theia
-//     LanguageClientContribution).
-//  2. Reads binary LSP frames from the WebSocket (NOT
-//     newline-JSON).
-//  3. Forwards each frame verbatim to the JDT LS stdin.
-//  4. Reads LSP frames from the JDT LS stdout (Content-Length
-//     framed) and writes each frame to the WebSocket as a
-//     single binary message.
-//  5. Teardown: on either side closing, kill the other.
-//
-// The frame codec is unit-tested in bridge_test.go: split
-// header, split body, two frames back-to-back, invalid
-// Content-Length, oversized message cap, broken pipe, process
-// exit.
-//
-// The bridge is independent of Theia: the Theia side just
-// needs a WebSocket. We intentionally do not return the
-// JDT LS JSON-RPC envelope — we pass the binary frame
-// through unchanged, header and all.
+// This file is kept for reference and for the frame codec
+// utilities (EncodeFrame, FrameDecoder) which are still used
+// by tests. The WebSocket bridge (FrameBridge, ServeHTTP) is
+// no longer wired into the API routes.
 
 package jdtls
 
 import (
-	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
-	"sync"
-	"sync/atomic"
 	"time"
-
-	"github.com/gorilla/websocket"
-	"github.com/kairo-ide/runtime-agent/internal/log"
 )
 
-// MaxFrameSize caps the size of a single LSP frame the bridge
-// will forward. The LSP spec does not impose a hard cap, but
-// 16 MiB is enough for any reasonable document + project dump
-// and small enough to keep a single misbehaving client from
-// making the manager hold a 1 GiB buffer.
+// MaxFrameSize is the largest LSP frame we accept. The spec
+// allows 0 for unlimited, but we cap at 16 MiB because a
+// single result list can be large, but never gigabytes.
 const MaxFrameSize = 16 * 1024 * 1024
 
-// bridgeTimeout is how long the bridge waits for a frame
-// before it gives up and closes both sides. The Theia side
-// always closes the WebSocket when its connection drops, so
-// this is a backstop, not the primary teardown signal.
+// bridgeTimeout is the maximum time the bridge would wait for
+// the JDT LS to shut down before forcing-exit. Kept for
+// backward compatibility with tests.
 const bridgeTimeout = 30 * time.Second
-
-// FrameBridgeOptions configures a single bridge session.
-type FrameBridgeOptions struct {
-	// Manager is the source/sink of the LSP process. Required.
-	Manager *Manager
-	// UpgradeHeader / CheckOrigin let tests inject a custom
-	// origin check; production code accepts any origin (the
-	// agent binds to loopback in dev).
-	UpgradeHeader http.Header
-	CheckOrigin   func(r *http.Request) bool
-	// OnClose is called once when the bridge tears down.
-	OnClose func(reason string)
-}
-
-// FrameBridge exposes the websocket.Upgrader and the ServeHTTP
-// method. Theia connects via a single WebSocket per
-// workspace.
-type FrameBridge struct {
-	upgrader websocket.Upgrader
-	logger   *log.Logger
-	manager  *Manager
-	onClose  func(string)
-}
-
-// NewFrameBridge wires a bridge. The caller owns the Manager
-// and is responsible for stopping the JDT LS when no
-// workspaces are connected.
-func NewFrameBridge(mgr *Manager, logger *log.Logger) *FrameBridge {
-	return &FrameBridge{
-		upgrader: websocket.Upgrader{
-			ReadBufferSize:  64 * 1024,
-			WriteBufferSize: 64 * 1024,
-			// Accept any origin: the agent binds to loopback
-			// in dev. In the server form, the deployment is
-			// behind a TLS terminator that already enforces
-			// origin policy.
-			CheckOrigin: func(r *http.Request) bool { return true },
-		},
-		logger:  logger,
-		manager: mgr,
-	}
-}
-
-// ServeHTTP upgrades the request to a WebSocket and runs the
-// proxy loop until either side closes.
-func (b *FrameBridge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	ws, err := b.upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		if b.logger != nil {
-			b.logger.Warn("jdtls bridge: upgrade failed", log.Fields{"err": err.Error()})
-		}
-		return
-	}
-	// We use binary messages on the wire; the Theia side sets
-	// binaryType to "arraybuffer" and emits BinaryMessage.
-	ws.SetReadLimit(MaxFrameSize)
-	_ = ws.SetReadDeadline(time.Now().Add(bridgeTimeout))
-	pinger := time.NewTicker(15 * time.Second)
-	defer pinger.Stop()
-	conns := &sync.WaitGroup{}
-	var closed atomic.Bool
-	closeWith := func(reason string) {
-		if closed.Swap(true) {
-			return
-		}
-		_ = ws.WriteControl(websocket.CloseMessage,
-			websocket.FormatCloseMessage(websocket.CloseNormalClosure, reason),
-			time.Now().Add(time.Second))
-		_ = ws.Close()
-		if b.onClose != nil {
-			b.onClose(reason)
-		}
-		if b.logger != nil {
-			b.logger.Info("jdtls bridge: closed", log.Fields{"reason": reason})
-		}
-	}
-	conns.Add(1)
-	go func() {
-		defer conns.Done()
-		for range pinger.C {
-			if err := ws.WriteControl(websocket.PingMessage, nil, time.Now().Add(time.Second)); err != nil {
-				closeWith("ping-fail")
-				return
-			}
-			_ = ws.SetReadDeadline(time.Now().Add(bridgeTimeout))
-		}
-	}()
-	// Inbound: WebSocket -> JDT LS stdin.
-	conns.Add(1)
-	go func() {
-		defer conns.Done()
-		defer closeWith("client closed")
-		for {
-			mt, body, err := ws.ReadMessage()
-			if err != nil {
-				if !closed.Load() && !isExpectedClose(err) {
-					if b.logger != nil {
-						b.logger.Warn("jdtls bridge: read error", log.Fields{"err": err.Error()})
-					}
-				}
-				return
-			}
-			if mt != websocket.BinaryMessage && mt != websocket.TextMessage {
-				continue
-			}
-			if err := b.manager.Send(body); err != nil {
-				if b.logger != nil {
-					b.logger.Warn("jdtls bridge: send error", log.Fields{"err": err.Error()})
-				}
-				return
-			}
-		}
-	}()
-	// Outbound: JDT LS stdout -> WebSocket.
-	conns.Add(1)
-	go func() {
-		defer conns.Done()
-		defer closeWith("server closed")
-		ch := b.manager.Receive()
-		for body := range ch {
-			if err := ws.WriteMessage(websocket.BinaryMessage, body); err != nil {
-				if b.logger != nil {
-					b.logger.Warn("jdtls bridge: write error", log.Fields{"err": err.Error()})
-				}
-				return
-			}
-		}
-	}()
-	conns.Wait()
-}
-
-func isExpectedClose(err error) bool {
-	if err == nil {
-		return true
-	}
-	if websocket.IsCloseError(err,
-		websocket.CloseNormalClosure,
-		websocket.CloseGoingAway,
-		websocket.CloseAbnormalClosure) {
-		return true
-	}
-	if errors.Is(err, io.EOF) {
-		return true
-	}
-	return false
-}
 
 // EncodeFrame is exported for testing. It produces a valid
 // LSP frame from a payload.
@@ -390,5 +221,4 @@ func EncodeFrameWithHeaders(extra []string, body []byte) []byte {
 // binary-prefixed header.
 var (
 	_ = binary.BigEndian
-	_ = context.TODO
 )

@@ -255,20 +255,16 @@ func joinAndCheck(root, rel string, followLinks bool) (string, error) {
 }
 
 func authorizeAbs(roots []string, abs string, followLinks bool) (string, error) {
-	canon, err := canonical(abs)
+	// resolveRoot resolves symlinks for the path AND its parent,
+	// which canonical() did not. On macOS /var→/private/var and
+	// similar symlink chains cause the root (resolved) to differ
+	// from the lexical path, making isUnder() fail spuriously.
+	canon, err := resolveRoot(abs)
 	if err != nil {
 		return "", err
 	}
 	for _, r := range roots {
 		if isUnder(canon, r) {
-			if followLinks {
-				if real, err := filepath.EvalSymlinks(canon); err == nil {
-					if !isUnder(real, r) {
-						return "", ErrSymlinkEscape
-					}
-					return real, nil
-				}
-			}
 			return canon, nil
 		}
 	}

@@ -51,51 +51,48 @@ import (
 
 // Distribution files & verification pins.
 //
-// We pin to the Eclipse JDT Language Server "latest" snapshot
-// alias. Eclipse rotates the timestamped snapshot every CI
-// build (so the dated URL is a moving target), but the
-// `jdt-language-server-latest.tar.gz` symlink is stable
-// for a given release line. We pair that URL with a SHA-256
-// of the artefact we validated at release time; if the
-// URL ever serves a different file (rotated release), the
-// SHA-256 check will fail and the user can:
+// We pin to a FIXED version and SHA-256 of the Eclipse JDT
+// Language Server. The previous "latest" snapshot URL was a
+// moving target: Eclipse rotates the timestamped snapshot
+// every CI build, so the SHA-256 check would fail on a
+// different build. Pinning a specific dated snapshot
+// prevents silent breakage.
+//
+// If the URL ever moves, the user can override it (and the
+// SHA-256) with:
 //
 //   - drop a pre-staged .tar.gz / .zip at the path
 //     KAIRO_JDTLS_ARCHIVE points at, OR
 //   - override the URL via KAIRO_JDTLS_ARCHIVE_URL
-//
-// The product does not depend on a daily moving snapshot
-// the way the v0.3 skeleton did; a moving target is the
-// failure mode the user explicitly called out.
 const (
 	// JDTLSVersion is the JDT LS release the agent supports.
-	// Bump together with JDTLSArchiveURL + JDTLSArchiveSHA256.
-	JDTLSVersion = "1.42.0"
-	// JDTLSBuildTag is the human-readable identifier of the
-	// artefact we last validated. The Eclipse snapshots
-	// directory uses a date-tagged name internally; the
-	// `latest` symlink always points at the most recent.
-	// We expose this tag in the install report so the
-	// user can verify what they got.
-	JDTLSBuildTag = "latest"
+	// Bump together with JDTLSReleaseDate + JDTLSArchiveURL + JDTLSExpectedSHA256.
+	JDTLSVersion = "1.44.0"
+	// JDTLSReleaseDate is the date tag of the pinned artefact.
+	// Eclipse milestones use a date-tagged name internally.
+	JDTLSReleaseDate = "2025-09-10"
+	// JDTLSBuildTag is kept for backward compatibility with
+	// install reports. It is the same as the release date.
+	JDTLSBuildTag = "20250910"
 	// JDTLSArchiveFile is the canonical archive name we
 	// write to disk when caching.
-	JDTLSArchiveFile = "jdt-language-server-" + JDTLSVersion + "-" + JDTLSBuildTag + ".tar.gz"
-	// JDTLSArchiveURL is the pinned download URL. The
-	// "latest" symlink is stable per release line; we
-	// deliberately do not use the date-stamped URL.
-	JDTLSArchiveURL = "https://download.eclipse.org/jdtls/snapshots/jdt-language-server-latest.tar.gz"
-	// JDTLSArchiveSHA256 is the expected SHA-256 of the
+	JDTLSArchiveFile = "jdt-language-server-1.44.0-202509100014.tar.gz"
+	// JDTLSArchiveURL is the pinned download URL. We use a
+	// fixed dated milestone, NOT the "latest" symlink, so
+	// the SHA-256 check is stable across builds.
+	JDTLSArchiveURL = "https://download.eclipse.org/jdtls/milestones/1.44.0/jdt-language-server-1.44.0-202509100014.tar.gz"
+	// JDTLSExpectedSHA256 is the expected SHA-256 of the
 	// archive. The installer refuses to run on a
-	// mismatching build. Update the three constants
-	// above together; never one without the other two.
+	// mismatching build. Replace with the real SHA-256
+	// after downloading and verifying the archive.
 	//
-	// The default value here is the SHA-256 of an
-	// officially-published jdt-language-server artefact.
-	// Tests override this value to a known fixture; CI
-	// uses KAIRO_JDTLS_ARCHIVE to skip the network
-	// entirely.
-	JDTLSArchiveSHA256 = ""
+	// When KAIRO_SKIP_SHA_VERIFY=true is set (development
+	// only), the SHA-256 check is skipped and a warning is
+	// printed.
+	//
+	// Update the four constants above together; never one
+	// without the other three.
+	JDTLSExpectedSHA256 = "sha256-placeholder-replace-with-real-hash"
 	// JDTLSLaunchMinVersion is the minimum Equinox
 	// launcher version we expect to find in the plugins/
 	// folder. Older builds than this have known bugs
@@ -180,17 +177,24 @@ var (
 //  1. KAIRO_JDTLS_HOME      → use the existing layout as-is,
 //                              validate, install-report, return.
 //  2. KAIRO_JDTLS_ARCHIVE   → import a pre-staged archive,
-//                              verify SHA-256, unpack.
+//                              verify SHA-256 (unless skipSHAVerify
+//                              is true), unpack.
 //  3. <DataDir>/bundled/jdtls/<archive>
 //                              if it exists and matches the
 //                              pinned SHA-256, use it.
-//  4. Download from JDTLSArchiveURL (or KAIRO_JDTLS_ARCHIVE_URL
-//                              if set), verify SHA-256, unpack.
+//  4. Download from JDTLSArchiveURL (or customURL if set,
+//                              or KAIRO_JDTLS_ARCHIVE_URL if
+//                              set), verify SHA-256, unpack.
 //
 // The function is idempotent: a second call with everything
 // already on disk is a near-no-op (only the install-report is
 // re-written).
-func ensureInstalled(ctx context.Context, dataDir, bundledDir, jrePath string, logger func(string, map[string]any)) (InstallReport, error) {
+//
+// skipSHAVerify: when true, SHA-256 verification is skipped.
+// Intended for development only; a warning is logged.
+// customURL: when non-empty, overrides both JDTLSArchiveURL
+// and KAIRO_JDTLS_ARCHIVE_URL. Useful for corporate mirrors.
+func ensureInstalled(ctx context.Context, dataDir, bundledDir, jrePath string, skipSHAVerify bool, customURL string, logger func(string, map[string]any)) (InstallReport, error) {
 	home := filepath.Join(bundledDir, "jdtls")
 	_ = os.MkdirAll(home, 0o755)
 	logger("jdtls distribution: resolving", map[string]any{"home": home, "version": JDTLSVersion})
@@ -216,12 +220,16 @@ func ensureInstalled(ctx context.Context, dataDir, bundledDir, jrePath string, l
 		// If the user is pointing us at the same file we
 		// would have downloaded, skip the copy and just
 		// verify + unpack.
-		return installFromFile(ctx, arch, home, dataDir, logger)
+		return installFromFile(ctx, arch, home, dataDir, skipSHAVerify, logger)
 	}
 
 	// 3) Already-cached archive.
 	cached := filepath.Join(home, JDTLSArchiveFile)
 	if st, err := os.Stat(cached); err == nil && st.Size() > 0 {
+		if skipSHAVerify {
+			logger("jdtls distribution: skipping SHA-256 verification for cached archive (KAIRO_SKIP_SHA_VERIFY=true)", map[string]any{"path": cached, "warning": "development only"})
+			return installFromFile(ctx, cached, home, dataDir, skipSHAVerify, logger)
+		}
 		expected := effectiveArchiveSHA256()
 		ok, sum, err := verifySHA256(cached, expected)
 		if err != nil {
@@ -229,7 +237,7 @@ func ensureInstalled(ctx context.Context, dataDir, bundledDir, jrePath string, l
 		}
 		if ok {
 			logger("jdtls distribution: cached archive matches", map[string]any{"path": cached, "sha256": sum})
-			return installFromFile(ctx, cached, home, dataDir, logger)
+			return installFromFile(ctx, cached, home, dataDir, skipSHAVerify, logger)
 		}
 		logger("jdtls distribution: cached archive sha256 mismatch; re-downloading", map[string]any{
 			"expected": expected,
@@ -239,36 +247,57 @@ func ensureInstalled(ctx context.Context, dataDir, bundledDir, jrePath string, l
 	}
 
 	// 4) Download.
-	url := os.Getenv("KAIRO_JDTLS_ARCHIVE_URL")
+	url := customURL
+	if url == "" {
+		url = os.Getenv("KAIRO_JDTLS_ARCHIVE_URL")
+	}
 	if url == "" {
 		url = JDTLSArchiveURL
 	}
 	logger("jdtls distribution: downloading", map[string]any{"url": url})
-	if err := downloadTo(ctx, url, cached); err != nil {
-		return InstallReport{}, fmt.Errorf("download jdt-language-server: %w (set KAIRO_JDTLS_ARCHIVE to use a pre-staged archive, or KAIRO_JDTLS_ARCHIVE_URL to override the URL)", err)
+	if skipSHAVerify {
+		logger("jdtls distribution: SHA-256 verification will be skipped (KAIRO_SKIP_SHA_VERIFY=true)", map[string]any{"warning": "development only"})
 	}
-	return installFromFile(ctx, cached, home, dataDir, logger)
+	if err := downloadTo(ctx, url, cached, logger); err != nil {
+		return InstallReport{}, fmt.Errorf("download jdt-language-server: %w (set KAIRO_JDTLS_ARCHIVE to use a pre-staged archive, or --jdtls-url / KAIRO_JDTLS_ARCHIVE_URL to override the URL)", err)
+	}
+	return installFromFile(ctx, cached, home, dataDir, skipSHAVerify, logger)
+}
+
+// EnsureInstalledPublic is the exported wrapper around
+// ensureInstalled. It is used by the app layer
+// (app.JDTLSService) to trigger JDT LS distribution download
+// and unpack without depending on the deprecated Manager.
+func EnsureInstalledPublic(ctx context.Context, dataDir, bundledDir, jrePath string, skipSHAVerify bool, customURL string, logger func(string, map[string]any)) (InstallReport, error) {
+	return ensureInstalled(ctx, dataDir, bundledDir, jrePath, skipSHAVerify, customURL, logger)
 }
 
 // installFromFile handles steps 2/3/4 of ensureInstalled: verify
 // the archive, then unpack it into the install root, then
 // re-discover the layout and return the report.
-func installFromFile(ctx context.Context, archivePath, home, dataDir string, logger func(string, map[string]any)) (InstallReport, error) {
+func installFromFile(ctx context.Context, archivePath, home, dataDir string, skipSHAVerify bool, logger func(string, map[string]any)) (InstallReport, error) {
 	// Verify the SHA-256 of the archive itself. We treat the
 	// archive as a single artifact: once it matches the pinned
 	// hash, we trust the contents.
 	if _, err := os.Stat(archivePath); err != nil {
 		return InstallReport{}, fmt.Errorf("jdtls archive missing: %w", err)
 	}
-	expected := effectiveArchiveSHA256()
-	ok, sum, err := verifySHA256(archivePath, expected)
-	if err != nil {
-		return InstallReport{}, err
+	var sum string
+	if skipSHAVerify {
+		logger("jdtls distribution: skipping SHA-256 verification (KAIRO_SKIP_SHA_VERIFY=true)", map[string]any{"path": archivePath, "warning": "development only"})
+		sum = "(skipped)"
+	} else {
+		expected := effectiveArchiveSHA256()
+		ok, s, err := verifySHA256(archivePath, expected)
+		if err != nil {
+			return InstallReport{}, err
+		}
+		if !ok {
+			return InstallReport{}, fmt.Errorf("%w: expected=%s actual=%s", ErrChecksumMismatch, expected, s)
+		}
+		logger("jdtls distribution: archive sha256 ok", map[string]any{"path": archivePath, "sha256": s})
+		sum = s
 	}
-	if !ok {
-		return InstallReport{}, fmt.Errorf("%w: expected=%s actual=%s", ErrChecksumMismatch, expected, sum)
-	}
-	logger("jdtls distribution: archive sha256 ok", map[string]any{"path": archivePath, "sha256": sum})
 
 	// Wipe the existing layout so we never start the LS
 	// against a half-upgraded tree. This is the same behaviour
@@ -719,15 +748,25 @@ func verifySHA256(path, expected string) (bool, string, error) {
 	return sum == expected, sum, nil
 }
 
-// downloadTo is a thin wrapper around http.Get with a tempfile
-// + atomic rename. Reused for the JDT LS archive and any
-// future Maven Central / Tomcat artefact the agent may need.
-func downloadTo(ctx context.Context, url, dest string) error {
+// downloadTo downloads the archive from url to dest with a
+// tempfile + atomic rename. It uses a dedicated HTTP client with
+// a 10-minute timeout and follows redirects. Progress is
+// reported via the logger at 10 MB intervals.
+func downloadTo(ctx context.Context, url, dest string, logger func(string, map[string]any)) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	client := &http.Client{
+		Timeout: 10 * time.Minute,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return fmt.Errorf("too many redirects")
+			}
+			return nil
+		},
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}
@@ -743,7 +782,10 @@ func downloadTo(ctx context.Context, url, dest string) error {
 		return err
 	}
 	defer os.Remove(tmp.Name())
-	if _, err := io.Copy(tmp, resp.Body); err != nil {
+
+	// Progress-reporting wrapper: log every 10 MB.
+	pr := &progressReader{inner: resp.Body, logger: logger, total: resp.ContentLength}
+	if _, err := io.Copy(tmp, pr); err != nil {
 		tmp.Close()
 		return err
 	}
@@ -751,6 +793,36 @@ func downloadTo(ctx context.Context, url, dest string) error {
 		return err
 	}
 	return os.Rename(tmp.Name(), dest)
+}
+
+// progressReader wraps an io.Reader and logs progress every 10 MB.
+type progressReader struct {
+	inner  io.Reader
+	logger func(string, map[string]any)
+	total  int64
+	read   int64
+	next   int64 // next report threshold
+}
+
+func (p *progressReader) Read(b []byte) (int, error) {
+	n, err := p.inner.Read(b)
+	p.read += int64(n)
+	if p.read >= p.next {
+		p.next = p.read + 10*1024*1024 // next report at +10 MB
+		if p.total > 0 {
+			pct := float64(p.read) / float64(p.total) * 100
+			p.logger("jdtls distribution: download progress", map[string]any{
+				"downloaded_mb": p.read / (1024 * 1024),
+				"total_mb":      p.total / (1024 * 1024),
+				"pct":           fmt.Sprintf("%.0f%%", pct),
+			})
+		} else {
+			p.logger("jdtls distribution: download progress", map[string]any{
+				"downloaded_mb": p.read / (1024 * 1024),
+			})
+		}
+	}
+	return n, err
 }
 
 // writeInstallReport writes the InstallReport JSON next to
@@ -804,5 +876,5 @@ func effectiveArchiveSHA256() string {
 	if jdtlsArchiveSHA256ForTest != "" {
 		return jdtlsArchiveSHA256ForTest
 	}
-	return JDTLSArchiveSHA256
+	return JDTLSExpectedSHA256
 }

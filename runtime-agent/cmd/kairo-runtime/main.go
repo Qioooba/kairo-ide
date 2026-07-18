@@ -4,16 +4,17 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 
 	"github.com/kairo-ide/runtime-agent/internal/api"
 	"github.com/kairo-ide/runtime-agent/internal/audit"
+	"github.com/kairo-ide/runtime-agent/internal/bootstrap"
 	"github.com/kairo-ide/runtime-agent/internal/config"
 	"github.com/kairo-ide/runtime-agent/internal/log"
-	"github.com/kairo-ide/runtime-agent/internal/security"
-	"github.com/kairo-ide/runtime-agent/internal/services"
 )
 
 const agentVersion = "0.1.0"
@@ -49,24 +50,31 @@ func run() error {
 	}
 	defer auditLog.Close()
 
-	// Sandbox: in dev we use the DataDir; in server form the
-	// per-user home is added later. Bundled/ is read-only.
-	sandbox, err := security.NewWorkspaceRoots(cfg.DataDir)
+	// Bootstrap the composition root container.
+	// This is the single entry point that wires all dependencies.
+	container, err := bootstrap.NewContainer(bootstrap.Config{
+		DataDir:       cfg.DataDir,
+		BundledDir:    cfg.Bundled(),
+		Logger:        logger,
+		Tomcat6Home:   os.Getenv("KAIRO_TOMCAT6_HOME"),
+		Secret:        cfg.Secret,
+		SkipSHAVerify: cfg.SkipSHAVerify,
+		JDTLSURL:      cfg.JDTLSURL,
+	})
 	if err != nil {
-		return err
+		return fmt.Errorf("bootstrap: %w", err)
 	}
-	sandbox.WithReadOnly(cfg.Bundled())
+	defer container.Shutdown(context.Background())
 
-	// Wire the in-memory services with real implementations of
-	// toolchain / search / encoding / build.
-	svcs := services.NewMemoryServices(services.Config{
-		DataDir:    cfg.DataDir,
-		BundledDir: cfg.Bundled(),
-		Logger:     logger,
-		Tomcat6Home: os.Getenv("KAIRO_TOMCAT6_HOME"),
-	}, sandbox)
+	srv := api.NewServer(container.Services, logger, auditLog, agentVersion, cfg.Secret)
 
-	srv := api.NewServer(svcs, logger, auditLog, agentVersion)
+	// Remote mode is not available in this release. Only loopback
+	// addresses are allowed.
+	host := cfg.BindAddress
+	if ip := net.ParseIP(host); ip == nil || !ip.IsLoopback() {
+		return fmt.Errorf("remote mode is not available in this release. Please bind to 127.0.0.1 only")
+	}
+
 	addr := fmt.Sprintf("%s:%d", cfg.BindAddress, cfg.Port)
 	return srv.ListenAndServe(addr, cfg.TLSCert, cfg.TLSKey)
 }

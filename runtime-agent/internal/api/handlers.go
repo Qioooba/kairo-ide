@@ -2,12 +2,14 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"path/filepath"
 	"strings"
 
 	"github.com/kairo-ide/runtime-agent/internal/api/protocol"
+	"github.com/kairo-ide/runtime-agent/internal/domain"
 	"github.com/kairo-ide/runtime-agent/internal/encoding"
 	"github.com/kairo-ide/runtime-agent/internal/log"
 	"github.com/kairo-ide/runtime-agent/internal/search"
@@ -207,21 +209,29 @@ func (s *Server) handleToolchainImport(w http.ResponseWriter, r *http.Request) {
 // ----- Builds -----
 
 func (s *Server) handleBuilds(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeError(w, "", "", protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: "POST only"})
-		return
+	switch r.Method {
+	case http.MethodGet:
+		env, _, _ := readEnvelopeAndBody(r)
+		if s.Services.BuildEngine == nil {
+			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInternal, Message: "BuildEngine not configured"})
+			return
+		}
+		writeOK(w, env, s.Services.BuildEngine.List())
+	case http.MethodPost:
+		env, body, _ := readEnvelopeAndBody(r)
+		if s.Services.BuildEngine == nil {
+			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInternal, Message: "BuildEngine not configured"})
+			return
+		}
+		res, err := s.Services.BuildEngine.Start(extractPayload(body))
+		if err != nil {
+			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrCompileFailed, Message: err.Error()})
+			return
+		}
+		writeOK(w, env, res)
+	default:
+		writeError(w, "", "", protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: "GET or POST only"})
 	}
-	env, body, _ := readEnvelopeAndBody(r)
-	if s.Services.BuildEngine == nil {
-		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInternal, Message: "BuildEngine not configured"})
-		return
-	}
-	res, err := s.Services.BuildEngine.Start(extractPayload(body))
-	if err != nil {
-		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrCompileFailed, Message: err.Error()})
-		return
-	}
-	writeOK(w, env, res)
 }
 
 func (s *Server) handleBuildByID(w http.ResponseWriter, r *http.Request) {
@@ -242,21 +252,29 @@ func (s *Server) handleBuildByID(w http.ResponseWriter, r *http.Request) {
 // ----- Deployments -----
 
 func (s *Server) handleDeployments(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeError(w, "", "", protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: "POST only"})
-		return
+	switch r.Method {
+	case http.MethodGet:
+		env, _, _ := readEnvelopeAndBody(r)
+		if s.Services.Deployer == nil {
+			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInternal, Message: "Deployer not configured"})
+			return
+		}
+		writeOK(w, env, s.Services.Deployer.List())
+	case http.MethodPost:
+		env, body, _ := readEnvelopeAndBody(r)
+		if s.Services.Deployer == nil {
+			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInternal, Message: "Deployer not configured"})
+			return
+		}
+		res, err := s.Services.Deployer.Publish(extractPayload(body))
+		if err != nil {
+			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrDeployFailed, Message: err.Error()})
+			return
+		}
+		writeOK(w, env, res)
+	default:
+		writeError(w, "", "", protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: "GET or POST only"})
 	}
-	env, body, _ := readEnvelopeAndBody(r)
-	if s.Services.Deployer == nil {
-		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInternal, Message: "Deployer not configured"})
-		return
-	}
-	res, err := s.Services.Deployer.Publish(extractPayload(body))
-	if err != nil {
-		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrDeployFailed, Message: err.Error()})
-		return
-	}
-	writeOK(w, env, res)
 }
 
 func (s *Server) handleDeploymentByID(w http.ResponseWriter, r *http.Request) {
@@ -277,21 +295,29 @@ func (s *Server) handleDeploymentByID(w http.ResponseWriter, r *http.Request) {
 // ----- Servers -----
 
 func (s *Server) handleServers(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeError(w, "", "", protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: "POST only"})
-		return
+	switch r.Method {
+	case http.MethodGet:
+		env, _, _ := readEnvelopeAndBody(r)
+		if s.Services.ServerRunner == nil {
+			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInternal, Message: "ServerRunner not configured"})
+			return
+		}
+		writeOK(w, env, s.Services.ServerRunner.List())
+	case http.MethodPost:
+		env, body, _ := readEnvelopeAndBody(r)
+		if s.Services.ServerRunner == nil {
+			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInternal, Message: "ServerRunner not configured"})
+			return
+		}
+		srv, err := s.Services.ServerRunner.Start(extractPayload(body))
+		if err != nil {
+			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrProcessSpawnFailed, Message: err.Error()})
+			return
+		}
+		writeOK(w, env, srv)
+	default:
+		writeError(w, "", "", protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: "GET or POST only"})
 	}
-	env, body, _ := readEnvelopeAndBody(r)
-	if s.Services.ServerRunner == nil {
-		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInternal, Message: "ServerRunner not configured"})
-		return
-	}
-	srv, err := s.Services.ServerRunner.Start(extractPayload(body))
-	if err != nil {
-		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrProcessSpawnFailed, Message: err.Error()})
-		return
-	}
-	writeOK(w, env, srv)
 }
 
 func (s *Server) handleServerSub(w http.ResponseWriter, r *http.Request) {
@@ -421,6 +447,24 @@ func (s *Server) handleEncodingRecode(w http.ResponseWriter, r *http.Request) {
 	writeOK(w, env, res)
 }
 
+func (s *Server) handleEncodingValidate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, "", "", protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: "POST only"})
+		return
+	}
+	env, body, _ := readEnvelopeAndBody(r)
+	if s.Services.Encoder == nil {
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInternal, Message: "Encoder not configured"})
+		return
+	}
+	res, err := s.Services.Encoder.Validate(extractPayload(body))
+	if err != nil {
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrIOError, Message: err.Error()})
+		return
+	}
+	writeOK(w, env, res)
+}
+
 // ----- Auth -----
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
@@ -491,19 +535,12 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 // ----- JDT Language Server -----
 //
 // /api/v1/jdtls
-//   GET    — current status (state, pid, jre, jar, version, lastError)
-//   POST   — start the JDT LS. Body: { jrePath?: string, sourceLevel?:
-//            "1.5".."17", initializeRootURI?: string, timeoutMs?: number }
-//   DELETE — stop the JDT LS.
+//   GET     — current distribution status (state, version, JRE, etc.)
+//   POST    — prepare (ensure JDT LS distribution is installed)
 //
-// State transitions (on the wire):
-//   stopped --POST--> starting --initialize ok--> running
-//   running --DELETE--> stopping --> stopped
-//   any     --crash---> crashed (lastError set)
-//
-// The agent never silently lies: if Start returns, the process
-// is up AND the LSP initialize handshake has either succeeded
-// or timed out. The status body makes the outcome explicit.
+// As of Phase 4, the Theia backend owns the JDT LS process
+// lifecycle and LSP communication. The Go Agent provides the
+// launch descriptor and manages the distribution.
 
 func (s *Server) handleJDTLS(w http.ResponseWriter, r *http.Request) {
 	if s.Services.JDTLS == nil {
@@ -525,31 +562,141 @@ func (s *Server) handleJDTLS(w http.ResponseWriter, r *http.Request) {
 		}
 		writeOK(w, env, st)
 	case http.MethodPost:
-		env, body, _ := readEnvelopeAndBody(r)
-		st, err := s.Services.JDTLS.Start(extractPayload(body))
-		if err != nil {
-			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{
-				Code:    protocol.ErrProcessSpawnFailed,
-				Message: err.Error(),
-			})
-			return
-		}
-		writeOK(w, env, st)
-	case http.MethodDelete:
 		env, _, _ := readEnvelopeAndBody(r)
-		st, err := s.Services.JDTLS.Stop()
+		rep, err := s.Services.JDTLS.Prepare(r.Context())
 		if err != nil {
 			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{
 				Code: protocol.ErrInternal, Message: err.Error(),
 			})
 			return
 		}
-		writeOK(w, env, st)
+		writeOK(w, env, rep)
 	default:
 		writeError(w, "", "", protocol.KairoError{
-			Code: protocol.ErrInvalidRequest, Message: "GET, POST, or DELETE only",
+			Code: protocol.ErrInvalidRequest, Message: "GET or POST only",
 		})
 	}
+}
+
+// handleJDTLSLaunchDescriptor returns the launch descriptor
+// for JDT LS. The Theia backend calls this to know how to spawn
+// the JDT LS process.
+//
+// GET /api/v1/workspaces/{ws}/java/launch-descriptor?projectId={project}
+func (s *Server) handleJDTLSLaunchDescriptor(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, "", "", protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: "GET only"})
+		return
+	}
+	if s.Services.JDTLS == nil {
+		writeError(w, "", "", protocol.KairoError{
+			Code:    protocol.ErrInternal,
+			Message: "JDTLS not configured on this agent",
+		})
+		return
+	}
+	env, _, _ := readEnvelopeAndBody(r)
+	// Extract workspace ID from the path: /api/v1/workspaces/{ws}/java/launch-descriptor
+	rest := strings.TrimPrefix(r.URL.Path, "/api/v1/workspaces/")
+	parts := strings.SplitN(rest, "/", 3)
+	if len(parts) < 3 || parts[1] != "java" || parts[2] != "launch-descriptor" {
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{
+			Code: protocol.ErrInvalidRequest, Message: "invalid path",
+		})
+		return
+	}
+	workspaceID := parts[0]
+	projectID := r.URL.Query().Get("projectId")
+	if projectID == "" {
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{
+			Code: protocol.ErrInvalidRequest, Message: "projectId query parameter required",
+		})
+		return
+	}
+
+	// Resolve project from repository.
+	project, err := s.Services.ProjectRepo.Get(r.Context(), domain.WorkspaceID(workspaceID), domain.ProjectID(projectID))
+	if err != nil {
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{
+			Code: protocol.ErrNotFound, Message: fmt.Sprintf("project not found: %s", err.Error()),
+		})
+		return
+	}
+
+	// Resolve toolchain.
+	if project.ToolchainID == "" {
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{
+			Code: protocol.ErrToolchainMissing, Message: "project has no toolchain configured",
+		})
+		return
+	}
+	if s.Services.ToolchainRegistry == nil {
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{
+			Code: protocol.ErrInternal, Message: "ToolchainRegistry not configured",
+		})
+		return
+	}
+	toolchain, err := s.Services.ToolchainRepo.Get(r.Context(), project.ToolchainID)
+	if err != nil {
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{
+			Code: protocol.ErrToolchainMissing, Message: fmt.Sprintf("toolchain not found: %s", err.Error()),
+		})
+		return
+	}
+
+	// Resolve workspace root for the project working directory.
+	var projectRoot string
+	if s.Services.WorkspaceStore != nil {
+		ws, err := s.Services.WorkspaceStore.Get(workspaceID)
+		if err == nil {
+			projectRoot = ws.RootPath
+		}
+	}
+	if projectRoot == "" {
+		projectRoot = projectID // fallback
+	}
+
+	// Build the launch descriptor.
+	desc, err := s.Services.JDTLS.GetLaunchDescriptor(r.Context(), workspaceID, projectID)
+	if err != nil {
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{
+			Code: protocol.ErrInternal, Message: fmt.Sprintf("build launch descriptor: %s", err.Error()),
+		})
+		return
+	}
+	_ = project
+	_ = toolchain
+	writeOK(w, env, desc)
+}
+
+// handleJDTLSPrepare downloads and verifies the JDT LS
+// distribution for a workspace.
+//
+// POST /api/v1/workspaces/{ws}/java/prepare
+func (s *Server) handleJDTLSPrepare(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, "", "", protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: "POST only"})
+		return
+	}
+	if s.Services.JDTLS == nil {
+		writeError(w, "", "", protocol.KairoError{
+			Code:    protocol.ErrInternal,
+			Message: "JDTLS not configured on this agent",
+		})
+		return
+	}
+	env, _, _ := readEnvelopeAndBody(r)
+
+	// Check if already prepared.
+	rep, err := s.Services.JDTLS.Prepare(r.Context())
+	if err != nil {
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{
+			Code:    protocol.ErrInternal,
+			Message: fmt.Sprintf("prepare failed: %s", err.Error()),
+		})
+		return
+	}
+	writeOK(w, env, rep)
 }
 
 // payloadOf extracts the JSON payload from a request that
@@ -611,36 +758,20 @@ var (
 	_ = search.DefaultExcludes
 )
 
-// handleJDTLSBridge returns an http.Handler that proxies LSP
-// frames between the Theia LanguageClientContribution and the
-// JDT LS process. The handler is exposed at
-// /api/v1/jdtls/lsp.
-//
-// The wire is binary: one WebSocket binary message == one LSP
-// frame (Content-Length + body). The bridge takes care of
-// content-type framing on the JDT LS side; on the WebSocket
-// side, it passes bytes through unchanged. This is exactly
-// what Theia's `LspConnection` expects: each WebSocket binary
-// message is one LSP frame.
-func (s *Server) handleJDTLSBridge() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.Services.JDTLS == nil {
-			writeError(w, "", "", protocol.KairoError{
-				Code:    protocol.ErrInternal,
-				Message: "JDTLS not configured on this agent",
-			})
-			return
-		}
-		// Allow the Theia Browser app to attach a workspace
-		// before it opens the WebSocket, so the JDT LS uses
-		// the right per-workspace data dir. The header is
-		// optional; when missing, the previous workspace
-		// (or the default) is used.
-		if ws := r.Header.Get("X-Kairo-Workspace-Id"); ws != "" {
-			s.Services.JDTLS.SetWorkspace(ws)
-		}
-		s.Services.JDTLS.Bridge().ServeHTTP(w, r)
-	})
+// handleWorkspacesJava dispatches workspace-level Java endpoints.
+// It routes /api/v1/workspaces/{ws}/java/launch-descriptor to the
+// launch descriptor handler.
+func (s *Server) handleWorkspacesJava(w http.ResponseWriter, r *http.Request) {
+	ws := r.PathValue("ws")
+	rest := strings.TrimPrefix(r.URL.Path, "/api/v1/workspaces/"+ws+"/java/")
+	switch {
+	case rest == "launch-descriptor":
+		s.handleJDTLSLaunchDescriptor(w, r)
+	case rest == "prepare":
+		s.handleJDTLSPrepare(w, r)
+	default:
+		writeError(w, "", "", protocol.KairoError{Code: protocol.ErrNotFound, Message: "unknown java subpath: " + rest})
+	}
 }
 
 // handleJDTProject dispatches /api/v1/jdtls/project. POST

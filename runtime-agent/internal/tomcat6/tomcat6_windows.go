@@ -28,19 +28,4 @@ func signalProcGroup(pid int, sig syscall.Signal) error {
 	return nil
 }
 
-// isAlive on Windows: find the process handle and check.
-func isAlive(pid int) bool {
-	if pid <= 0 {
-		return false
-	}
-	h, err := syscall.OpenProcess(syscall.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
-	if err != nil {
-		return false
-	}
-	defer syscall.CloseHandle(h)
-	var code uint32
-	if err := syscall.GetExitCodeProcess(h, &code); err != nil {
-		return false
-	}
-	return code == 259 // STILL_ACTIVE
-}
+

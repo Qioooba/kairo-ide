@@ -44,6 +44,9 @@ type Config struct {
 	LogLevel string `yaml:"logLevel"`
 	// RequireAuth even on loopback. Default false in dev.
 	RequireAuth bool `yaml:"requireAuth"`
+	// Secret is a local authentication secret for desktop host mode.
+	// When set, the API middleware requires the X-Kairo-Secret header.
+	Secret string `yaml:"secret"`
 	// SessionLifetimeHours. Default 8.
 	SessionLifetimeHours int `yaml:"sessionLifetimeHours"`
 	// IdleTimeoutMinutes. Default 30.
@@ -61,6 +64,14 @@ type Config struct {
 	TomcatShutdownTimeout time.Duration `yaml:"tomcatShutdownTimeout"`
 	// BuildFileTimeout. Default 30s.
 	BuildFileTimeout time.Duration `yaml:"buildFileTimeout"`
+
+	// JDT LS distribution
+	// SkipSHAVerify skips SHA-256 verification of the JDT LS
+	// archive. For development only.
+	SkipSHAVerify bool `yaml:"skipSHAVerify"`
+	// JDTLSURL overrides the JDT LS download URL. Useful for
+	// corporate mirrors.
+	JDTLSURL string `yaml:"jdtlsUrl"`
 }
 
 // Default returns the default config.
@@ -140,6 +151,9 @@ func ApplyEnv(cfg *Config) {
 	if v := os.Getenv("KAIRO_BUNDLED_DIR"); v != "" {
 		cfg.BundledDir = v
 	}
+	if v := os.Getenv("KAIRO_LOCAL_SECRET"); v != "" {
+		cfg.Secret = v
+	}
 	if v := os.Getenv("KAIRO_REQUIRE_AUTH"); v != "" {
 		if b, err := strconv.ParseBool(v); err == nil {
 			cfg.RequireAuth = b
@@ -186,8 +200,11 @@ func Bind(args []string) (Config, string, error) {
 	requireAuth := fs.Bool("require-auth", false, "require auth on loopback")
 	dataDir := fs.String("data-dir", "", "data directory (overrides KAIRO_DATA_DIR / config)")
 	bundledDir := fs.String("bundled-dir", "", "bundled directory (overrides KAIRO_BUNDLED_DIR / config)")
+	secret := fs.String("secret", "", "local auth secret (or set KAIRO_LOCAL_SECRET)")
 	tlsCert := fs.String("tls-cert", "", "TLS certificate path")
 	tlsKey := fs.String("tls-key", "", "TLS key path")
+	skipSHAVerify := fs.Bool("skip-sha-verify", false, "skip SHA-256 verification of JDT LS archive (dev only)")
+	jdtlsURL := fs.String("jdtls-url", "", "override JDT LS download URL (corporate mirror)")
 	if err := fs.Parse(args); err != nil {
 		return Config{}, "", err
 	}
@@ -214,11 +231,20 @@ func Bind(args []string) (Config, string, error) {
 	if *bundledDir != "" {
 		cfg.BundledDir = *bundledDir
 	}
+	if *secret != "" {
+		cfg.Secret = *secret
+	}
 	if *tlsCert != "" {
 		cfg.TLSCert = *tlsCert
 	}
 	if *tlsKey != "" {
 		cfg.TLSKey = *tlsKey
+	}
+	if *skipSHAVerify {
+		cfg.SkipSHAVerify = true
+	}
+	if *jdtlsURL != "" {
+		cfg.JDTLSURL = *jdtlsURL
 	}
 	return cfg, *configPath, cfg.Validate()
 }

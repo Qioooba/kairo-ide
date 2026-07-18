@@ -1,7 +1,7 @@
 // Package protocol is the hand-written Go mirror of
 // packages/protocol/src/index.ts. It MUST stay in lock-step with
-// the TypeScript source. CI runs `scripts/check-protocol-sync.sh`
-// to detect drift.
+// the TypeScript source. A script to assert structural equivalence
+// will be added in Phase 1.
 package protocol
 
 // PROTOCOL_VERSION is the wire protocol major version. It lives
@@ -110,3 +110,260 @@ const (
 	EncodingISO88591 = "iso-8859-1"
 	EncodingUSASCII  = "us-ascii"
 )
+
+// ---------------------------------------------------------------------------
+//  Frozen wire contract request/response types (mirrors TS protocol)
+// ---------------------------------------------------------------------------
+
+// StartBuildRequest is the POST /api/v1/builds request body.
+// The client only sends stable IDs and intent; the agent resolves
+// execution paths from the trusted Project/Toolchain repository.
+type StartBuildRequest struct {
+	ProjectID     string   `json:"projectId"`
+	Clean         bool     `json:"clean,omitempty"`
+	Intent        string   `json:"intent,omitempty"` // "full" | "selected-files"
+	SelectedFiles []string `json:"selectedFiles,omitempty"`
+}
+
+// StartDeploymentRequest is the POST /api/v1/deployments request body.
+type StartDeploymentRequest struct {
+	ProjectID string `json:"projectId"`
+	BuildID   string `json:"buildId"`
+	Scope     string `json:"scope"` // "all" | "classes" | "webapp" | "resources"
+}
+
+// StartServerRequest is the POST /api/v1/servers request body.
+type StartServerRequest struct {
+	ProjectID string `json:"projectId"`
+}
+
+// BuildResult is the wire format for a build run (mirrors TS BuildResult).
+type BuildResult struct {
+	ID          string            `json:"id"`
+	State       string            `json:"state"` // queued | running | success | failure | cancelled
+	StartedAt   string            `json:"startedAt"`
+	FinishedAt  string            `json:"finishedAt,omitempty"`
+	Diagnostics []BuildDiagnostic `json:"diagnostics"`
+	Output      string            `json:"output"`
+	Summary     BuildSummary      `json:"summary"`
+}
+
+// BuildDiagnostic is a single compiler diagnostic (mirrors TS BuildDiagnostic).
+type BuildDiagnostic struct {
+	File      string `json:"file"`
+	Line      int    `json:"line"`
+	Column    int    `json:"column"`
+	EndLine   int    `json:"endLine,omitempty"`
+	EndColumn int    `json:"endColumn,omitempty"`
+	Severity  string `json:"severity"` // error | warning | info | hint
+	Code      string `json:"code,omitempty"`
+	Message   string `json:"message"`
+}
+
+// BuildSummary is a summary of build results (mirrors TS BuildResult.summary).
+type BuildSummary struct {
+	Errors        int `json:"errors"`
+	Warnings      int `json:"warnings"`
+	FilesCompiled int `json:"filesCompiled"`
+}
+
+// DeploymentResult is the wire format for a deployment (mirrors TS DeploymentResult).
+type DeploymentResult struct {
+	ID            string `json:"id"`
+	State         string `json:"state"` // queued | running | success | failure | cancelled
+	StartedAt     string `json:"startedAt"`
+	FinishedAt    string `json:"finishedAt,omitempty"`
+	FilesTouched  int    `json:"filesTouched"`
+	Bytes         int64  `json:"bytes"`
+	Trigger       string `json:"trigger"`       // manual | auto | post-save
+	HotReloadMode string `json:"hotReloadMode"` // staticSync | compileOnly | classHotSwap | contextReload
+	Error         string `json:"error,omitempty"`
+}
+
+// ServerInstance is the wire format for a server (mirrors TS ServerInstance).
+type ServerInstance struct {
+	ID           string       `json:"id"`
+	ProjectID    string       `json:"projectId"`
+	Type         string       `json:"type"`
+	State        string       `json:"state"` // stopped | starting | running | stopping | error | crashed
+	PID          int          `json:"pid,omitempty"`
+	Ports        ServerPorts  `json:"ports"`
+	StartedAt    string       `json:"startedAt,omitempty"`
+	LastError    string       `json:"lastError,omitempty"`
+	CatalinaBase string       `json:"catalinaBase"`
+	Memory       *ServerMemory `json:"memory,omitempty"`
+}
+
+// ServerPorts represents the allocated ports of a server instance.
+type ServerPorts struct {
+	HTTP     int `json:"http,omitempty"`
+	Shutdown int `json:"shutdown,omitempty"`
+	AJP      int `json:"ajp,omitempty"`
+	JMX      int `json:"jmx,omitempty"`
+	Debug    int `json:"debug,omitempty"`
+}
+
+// ServerMemory represents the memory usage of a server instance.
+type ServerMemory struct {
+	HeapUsedMb float64 `json:"heapUsedMb,omitempty"`
+	HeapMaxMb  float64 `json:"heapMaxMb,omitempty"`
+}
+
+// Workspace is the wire format for a workspace (mirrors TS Workspace).
+type Workspace struct {
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	RootPath     string `json:"rootPath"`
+	CreatedAt    string `json:"createdAt"`
+	LastOpenedAt string `json:"lastOpenedAt"`
+	UserID       string `json:"userId"`
+}
+
+// ProjectConfig is the wire format for a project configuration.
+type ProjectConfig struct {
+	SchemaVersion int                `json:"schemaVersion"`
+	ID            string             `json:"id"`
+	Name          string             `json:"name"`
+	RootPath      string             `json:"rootPath"`
+	SourceLayout  SourceLayout       `json:"sourceLayout"`
+	Encoding      EncodingConfig     `json:"encoding"`
+	Java          JavaConfig         `json:"java"`
+	ServerRuntime ServerRuntimeConfig `json:"serverRuntime"`
+	Build         BuildConfig        `json:"build"`
+	Deploy        DeployConfig       `json:"deploy"`
+	HotReload     HotReloadConfig    `json:"hotReload"`
+}
+
+// SourceLayout describes the project source layout.
+type SourceLayout struct {
+	Src       []string `json:"src"`
+	WebRoot   string   `json:"webRoot"`
+	Config    []string `json:"config"`
+	Lib       string   `json:"lib,omitempty"`
+	TestSrc   []string `json:"testSrc,omitempty"`
+	Resources []string `json:"resources,omitempty"`
+	BuildXML  string   `json:"buildXml,omitempty"`
+}
+
+// EncodingConfig describes the project encoding settings.
+type EncodingConfig struct {
+	Default      string            `json:"default"`
+	Aliases      map[string]string `json:"aliases,omitempty"`
+	PerExtension map[string]string `json:"perExtension,omitempty"`
+}
+
+// JavaConfig describes the Java toolchain configuration.
+type JavaConfig struct {
+	LanguageServer ToolchainRef   `json:"languageServer"`
+	Compiler       CompilerConfig `json:"compiler"`
+	Runtime        ToolchainRef   `json:"runtime"`
+}
+
+// ToolchainRef references a toolchain by ID.
+type ToolchainRef struct {
+	ToolchainID string `json:"toolchainId"`
+	Fingerprint string `json:"fingerprint"`
+	Label       string `json:"label,omitempty"`
+}
+
+// CompilerConfig describes the Java compiler settings.
+type CompilerConfig struct {
+	ToolchainRef
+	SourceLevel  string   `json:"sourceLevel"`
+	TargetLevel  string   `json:"targetLevel"`
+	Args         []string `json:"args,omitempty"`
+	EmulatedV6   bool     `json:"emulatedV6,omitempty"`
+}
+
+// ServerRuntimeConfig describes the server runtime configuration.
+type ServerRuntimeConfig struct {
+	Type   string                 `json:"type"`
+	Config ServerRuntimeSettings  `json:"config"`
+}
+
+// ServerRuntimeSettings contains the detailed server runtime settings.
+type ServerRuntimeSettings struct {
+	HTTPPort     int               `json:"httpPort,omitempty"`
+	ShutdownPort int               `json:"shutdownPort,omitempty"`
+	AJPPort      int               `json:"ajpPort,omitempty"`
+	JMXPort      int               `json:"jmxPort,omitempty"`
+	DebugPort    int               `json:"debugPort,omitempty"`
+	ContextPath  string            `json:"contextPath,omitempty"`
+	Env          map[string]string `json:"env,omitempty"`
+	JVM          *JVMConfig        `json:"jvm,omitempty"`
+}
+
+// JVMConfig describes JVM heap and argument settings.
+type JVMConfig struct {
+	MaxHeapMb  int      `json:"maxHeapMb,omitempty"`
+	PermGenMb  int      `json:"permGenMb,omitempty"`
+	ExtraArgs  []string `json:"extraArgs,omitempty"`
+}
+
+// BuildConfig describes the build tool settings.
+type BuildConfig struct {
+	Mode          string   `json:"mode"` // ant | javac | custom
+	AntFile       string   `json:"antFile,omitempty"`
+	CustomCommand string   `json:"customCommand,omitempty"`
+	Excludes      []string `json:"excludes,omitempty"`
+}
+
+// DeployConfig describes the deployment settings.
+type DeployConfig struct {
+	Mode        string `json:"mode"` // copy | direct
+	Target      string `json:"target"`
+	ClassesPath string `json:"classesPath,omitempty"`
+	LibPath     string `json:"libPath,omitempty"`
+}
+
+// HotReloadConfig describes the hot reload settings.
+type HotReloadConfig struct {
+	Mode             string `json:"mode"` // staticSync | compileOnly | classHotSwap | contextReload
+	DebounceMs       int    `json:"debounceMs,omitempty"`
+	FallbackToReload bool   `json:"fallbackToReload,omitempty"`
+}
+
+// Toolchain is the wire format for a JDK toolchain.
+type Toolchain struct {
+	ID           string   `json:"id"`
+	Kind         string   `json:"kind"`
+	Home         string   `json:"home"`
+	Vendor       string   `json:"vendor"`
+	Version      string   `json:"version"`
+	SourceLevels []string `json:"sourceLevels"`
+	Fingerprint  string   `json:"fingerprint"`
+	ImportedAt   string   `json:"importedAt"`
+}
+
+// DetectedProjectLayout is the result of a workspace scan.
+type DetectedProjectLayout struct {
+	RootPath            string            `json:"rootPath"`
+	Layout              SourceLayout      `json:"layout"`
+	DetectedJDK         *DetectedJDK      `json:"detectedJdk,omitempty"`
+	DetectedServer      *DetectedServer   `json:"detectedServer,omitempty"`
+	WebXML              *WebXMLSummary    `json:"webXml,omitempty"`
+	BuildSystem         string            `json:"buildSystem"` // ant | maven | gradle | none
+	EncodingByExtension map[string]string `json:"encodingByExtension"`
+	Confidence          float64           `json:"confidence"`
+	Warnings            []string          `json:"warnings"`
+}
+
+// DetectedJDK is a JDK detected during workspace scan.
+type DetectedJDK struct {
+	Home    string `json:"home"`
+	Version string `json:"version"`
+}
+
+// DetectedServer is a server runtime detected during workspace scan.
+type DetectedServer struct {
+	Name    string `json:"name"`
+	Version string `json:"version,omitempty"`
+	Home    string `json:"home,omitempty"`
+}
+
+// WebXMLSummary is a summary of web.xml content.
+type WebXMLSummary struct {
+	ServletCount  int               `json:"servletCount"`
+	URLPatterns   []string          `json:"urlPatterns"`
+	ContextParams map[string]string `json:"contextParams"`
+}

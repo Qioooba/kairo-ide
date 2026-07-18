@@ -255,7 +255,7 @@ func TestVerifySHA256_EmptyExpected(t *testing.T) {
 
 func TestNew_NotStarted(t *testing.T) {
 	dir := t.TempDir()
-	m := New(dir, dir, "", log.New("test"))
+	m := New(dir, dir, "", false, "", log.New("test"))
 	if got := m.State(); got != "stopped" {
 		t.Fatalf("expected stopped, got %s", got)
 	}
@@ -263,14 +263,14 @@ func TestNew_NotStarted(t *testing.T) {
 
 func TestManager_AddListener_NoPanic(t *testing.T) {
 	dir := t.TempDir()
-	m := New(dir, dir, "", log.New("test"))
+	m := New(dir, dir, "", false, "", log.New("test"))
 	m.AddListener(func(Event) {})
 	m.AddListener(func(Event) {})
 }
 
 func TestManager_SetWorkspace_AndGet(t *testing.T) {
 	dir := t.TempDir()
-	m := New(dir, dir, "", log.New("test"))
+	m := New(dir, dir, "", false, "", log.New("test"))
 	m.SetWorkspace("ws_correlation")
 	got := m.Workspace()
 	want := filepath.Join(dir, "jdtls-workspace", "ws_correlation")
@@ -288,7 +288,7 @@ func TestManager_EnsureInstalled_NoArchive_NoNetwork(t *testing.T) {
 	t.Setenv("KAIRO_JDTLS_ARCHIVE", "")
 	t.Setenv("KAIRO_JDTLS_ARCHIVE_URL", "http://127.0.0.1:1/does-not-exist.tar.gz")
 	dir := t.TempDir()
-	m := New(dir, dir, "", log.New("test"))
+	m := New(dir, dir, "", false, "", log.New("test"))
 	_, err := m.EnsureInstalled(context.Background())
 	if err == nil {
 		t.Skip("download succeeded; test environment has internet")
@@ -313,7 +313,7 @@ func TestEnsureInstalled_FromPreStagedArchive_TarGz(t *testing.T) {
 
 	bundled := t.TempDir()
 	dataDir := t.TempDir()
-	m := New(dataDir, bundled, "", log.New("test"))
+	m := New(dataDir, bundled, "", false, "", log.New("test"))
 	rep, err := m.EnsureInstalled(context.Background())
 	if err != nil {
 		t.Fatalf("EnsureInstalled: %v", err)
@@ -345,7 +345,7 @@ func TestEnsureInstalled_FromPreStagedArchive_Zip(t *testing.T) {
 	t.Setenv("KAIRO_JDTLS_ARCHIVE_URL", "")
 	pinChecksum(t, want)
 
-	m := New(t.TempDir(), t.TempDir(), "", log.New("test"))
+	m := New(t.TempDir(), t.TempDir(), "", false, "", log.New("test"))
 	rep, err := m.EnsureInstalled(context.Background())
 	if err != nil {
 		t.Fatalf("EnsureInstalled: %v", err)
@@ -361,7 +361,7 @@ func TestEnsureInstalled_AdoptExistingHome(t *testing.T) {
 	t.Setenv("KAIRO_JDTLS_ARCHIVE", "")
 
 	dataDir := t.TempDir()
-	m := New(dataDir, t.TempDir(), "", log.New("test"))
+	m := New(dataDir, t.TempDir(), "", false, "", log.New("test"))
 	rep, err := m.EnsureInstalled(context.Background())
 	if err != nil {
 		t.Fatalf("EnsureInstalled: %v", err)
@@ -383,7 +383,7 @@ func TestEnsureInstalled_ChecksumMismatch(t *testing.T) {
 	t.Setenv("KAIRO_JDTLS_ARCHIVE", archivePath)
 	pinChecksum(t, "0000000000000000000000000000000000000000000000000000000000000000")
 
-	m := New(t.TempDir(), t.TempDir(), "", log.New("test"))
+	m := New(t.TempDir(), t.TempDir(), "", false, "", log.New("test"))
 	_, err := m.EnsureInstalled(context.Background())
 	if err == nil {
 		t.Fatal("expected checksum mismatch error")
@@ -402,7 +402,7 @@ func TestEnsureInstalled_RejectsZipSlip(t *testing.T) {
 	t.Setenv("KAIRO_JDTLS_ARCHIVE", archivePath)
 	pinChecksum(t, want)
 
-	m := New(t.TempDir(), t.TempDir(), "", log.New("test"))
+	m := New(t.TempDir(), t.TempDir(), "", false, "", log.New("test"))
 	_, err := m.EnsureInstalled(context.Background())
 	if err == nil {
 		t.Fatal("expected path-escape rejection")
@@ -423,7 +423,7 @@ func TestEnsureInstalled_CorruptArchive(t *testing.T) {
 	t.Setenv("KAIRO_JDTLS_ARCHIVE", archivePath)
 	pinChecksum(t, want)
 
-	m := New(t.TempDir(), t.TempDir(), "", log.New("test"))
+	m := New(t.TempDir(), t.TempDir(), "", false, "", log.New("test"))
 	_, err := m.EnsureInstalled(context.Background())
 	if err == nil {
 		t.Fatal("expected corrupt archive error")
@@ -445,7 +445,7 @@ func TestEnsureInstalled_ReinstallIdempotent(t *testing.T) {
 
 	bundled := t.TempDir()
 	dataDir := t.TempDir()
-	m := New(dataDir, bundled, "", log.New("test"))
+	m := New(dataDir, bundled, "", false, "", log.New("test"))
 	rep1, err := m.EnsureInstalled(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -477,7 +477,7 @@ func TestEnsureInstalled_PlatformConfig_Selection_Linux(t *testing.T) {
 	t.Setenv("KAIRO_JDTLS_ARCHIVE", archivePath)
 	pinChecksum(t, want)
 
-	m := New(t.TempDir(), t.TempDir(), "", log.New("test"))
+	m := New(t.TempDir(), t.TempDir(), "", false, "", log.New("test"))
 	_, err := m.EnsureInstalled(context.Background())
 	if err == nil {
 		t.Fatal("expected an error: no config_linux in this layout")

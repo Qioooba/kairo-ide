@@ -39,7 +39,7 @@ func newEncodingTestServer(t *testing.T) (*api.Server, string) {
 		// No Tomcat 6 — not needed for encoding tests.
 		Logger: logger,
 	}, sandbox)
-	srv := api.NewServer(svcs, logger, auditLog, "test-0.1.0")
+	srv := api.NewServer(svcs, logger, auditLog, "test-0.1.0", "")
 	return srv, dataDir
 }
 

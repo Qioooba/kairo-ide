@@ -28,6 +28,7 @@ import (
 
 	"github.com/kairo-ide/runtime-agent/internal/api"
 	"github.com/kairo-ide/runtime-agent/internal/build"
+	"github.com/kairo-ide/runtime-agent/internal/domain"
 	"github.com/kairo-ide/runtime-agent/internal/encoding"
 	"github.com/kairo-ide/runtime-agent/internal/jdtls"
 	"github.com/kairo-ide/runtime-agent/internal/jdtproject"
@@ -50,10 +51,12 @@ const (
 // Config bundles the data directory, bundled directory, and a
 // logger for the service factory.
 type Config struct {
-	DataDir     string
-	BundledDir  string
-	Logger      *log.Logger
-	Tomcat6Home string
+	DataDir       string
+	BundledDir    string
+	Logger        *log.Logger
+	Tomcat6Home   string
+	SkipSHAVerify bool
+	JDTLSURL      string
 }
 
 // NewMemoryServices returns a fully-wired Services struct with
@@ -73,16 +76,18 @@ func NewMemoryServices(cfg Config, sandbox *security.WorkspaceRoots) *api.Servic
 		}
 	}
 	return &api.Services{
-		WorkspaceStore:    newDiskWorkspaceStore(cfg.DataDir, sandbox),
-		ProjectStore:      newDiskProjectStore(cfg.DataDir),
-		ToolchainRegistry: &memToolchainRegistry{reg: registry},
-		Searcher:          &memSearcher{sandbox: sandbox},
-		Encoder:           &memEncoder{sandbox: sandbox},
+		WorkspaceStore:     newDiskWorkspaceStore(cfg.DataDir, sandbox),
+		ProjectStore:       newDiskProjectStore(cfg.DataDir),
+		ToolchainRegistry:  &memToolchainRegistry{reg: registry},
+		ProjectRepo:        &domainProjectRepo{store: newDiskProjectStore(cfg.DataDir)},
+		ToolchainRepo:      &domainToolchainRepo{reg: registry},
+		Searcher:           &memSearcher{sandbox: sandbox},
+		Encoder:            &memEncoder{sandbox: sandbox},
 		BuildEngine:       newAsyncBuildEngine(cfg.DataDir, registry, cfg.Logger),
 		Deployer:          newDiskDeployer(cfg.DataDir, cfg.Logger),
 		ServerRunner:      newRealServerRunner(cfg.DataDir, cfg.BundledDir, tomcat6Home, cfg.Logger),
 		Auth:              newDiskAuthenticator(cfg.DataDir, cfg.Logger),
-		JDTLS:             newJDTLSService(cfg.DataDir, cfg.BundledDir, cfg.Logger),
+		JDTLS:             newJDTLSService(cfg.DataDir, cfg.BundledDir, cfg.Logger, cfg.SkipSHAVerify, cfg.JDTLSURL),
 		JDTProjectGenerator: newJDTProjectService(cfg.DataDir, cfg.BundledDir, cfg.Logger),
 	}
 }
@@ -415,10 +420,41 @@ func (m *memEncoder) Recode(payload json.RawMessage) (json.RawMessage, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := os.WriteFile(path, encoded, 0o644); err != nil {
+	// Use atomic write (temp file + fsync + rename) instead of
+	// os.WriteFile in-place, which can corrupt the file on crash.
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if err := atomicWriteFile(path, encoded, info.Mode()); err != nil {
 		return nil, err
 	}
 	return json.Marshal(map[string]any{"ok": true, "bytes": len(encoded)})
+}
+
+func (m *memEncoder) Validate(payload json.RawMessage) (json.RawMessage, error) {
+	var req struct {
+		Text     string `json:"text"`
+		Encoding string `json:"encoding"`
+	}
+	if err := json.Unmarshal(payload, &req); err != nil {
+		return nil, err
+	}
+	if req.Text == "" {
+		return json.Marshal(map[string]any{"valid": true})
+	}
+	// Fast path: UTF-8 always valid
+	if req.Encoding == "utf-8" || req.Encoding == "UTF-8" {
+		return json.Marshal(map[string]any{"valid": true})
+	}
+	_, err := encoding.Encode([]byte(req.Text), req.Encoding, encoding.Aliases{})
+	if err != nil {
+		return json.Marshal(map[string]any{
+			"valid": false,
+			"error": fmt.Sprintf("text cannot be represented in %s: %v", req.Encoding, err),
+		})
+	}
+	return json.Marshal(map[string]any{"valid": true})
 }
 
 // resolveRead authorizes a caller-supplied read path. If a sandbox
@@ -671,6 +707,17 @@ func (b *asyncBuildEngine) Get(id string) (json.RawMessage, error) {
 	return nil, fmt.Errorf("build not found: %s", id)
 }
 
+func (b *asyncBuildEngine) List() json.RawMessage {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	items := make([]*buildState, 0, len(b.finished))
+	for _, bs := range b.finished {
+		items = append(items, bs)
+	}
+	data, _ := json.Marshal(items)
+	return data
+}
+
 // ----------------- Deployer (disk, real) -----------------
 
 type deployRecord struct {
@@ -828,6 +875,17 @@ func (d *diskDeployer) Get(id string) (json.RawMessage, error) {
 		return nil, fmt.Errorf("deployment not found: %s", id)
 	}
 	return json.Marshal(r)
+}
+
+func (d *diskDeployer) List() json.RawMessage {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	items := make([]*deployRecord, 0, len(d.items))
+	for _, r := range d.items {
+		items = append(items, r)
+	}
+	data, _ := json.Marshal(items)
+	return data
 }
 
 // syncDir copies the file tree at src into dst using atomic copies.
@@ -1167,6 +1225,21 @@ func (r *realServerRunner) Get(id string) (json.RawMessage, error) {
 	return json.Marshal(m)
 }
 
+func (r *realServerRunner) List() json.RawMessage {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	items := make([]*serverMeta, 0, len(r.meta))
+	for _, m := range r.meta {
+		if inst, ok := r.instances[m.ID]; ok {
+			m.State = inst.State()
+			m.PID = inst.PID()
+		}
+		items = append(items, m)
+	}
+	data, _ := json.Marshal(items)
+	return data
+}
+
 func (r *realServerRunner) Stop(id string, payload json.RawMessage) (json.RawMessage, error) {
 	var p struct {
 		Force bool `json:"force"`
@@ -1377,58 +1450,117 @@ func (a *diskAuthenticator) Logout(r *http.Request, w http.ResponseWriter) error
 	return nil
 }
 
-// ----------------- JDTLS (jdt-language-server lifecycle) -----------------
+// ----------------- JDTLS (jdt-language-server distribution) -----------------
 //
-// jdtlsService wraps jdtls.Manager and exposes the
-// /api/v1/jdtls endpoint contract. The state machine is:
+// jdtlsService manages the JDT LS distribution (download, install,
+// verify) and provides launch descriptors to the Theia backend.
+// As of Phase 4, the Theia backend owns the JDT LS process
+// lifecycle and LSP communication. The Go Agent does NOT start
+// JDT LS or send LSP initialize.
 //
-//   stopped  --Start()--> starting --LSP initialize ok--> running
-//   running  --Stop()---> stopping --> stopped
-//   any      --crash----> crashed   (lastError set)
-//
-// Start() is synchronous w.r.t. the user-visible state: it
-// does not return until either the JDT LS has answered the LSP
-// `initialize` request, or a hard timeout fires. There is no
-// "we promise it's starting, ask again later" promise. If
-// Start returns nil, the process is up AND initialized.
-//
-// We deliberately do NOT call Initialize on every Start; the
-// caller may have just Stopped and restarted with a new root
-// URI, in which case we issue the LSP `initialize` request
-// during Start. On the very first Start after agent boot, the
-// payload's `initializeRootURI` is what gets sent to the LS.
+// The launch descriptor is a JSON payload with the command,
+// JVM arguments, working directory, and environment variables
+// the Theia backend needs to spawn the JDT LS process.
 
 type jdtlsService struct {
 	mu        sync.Mutex
 	mgr       *jdtls.Manager
-	bridge    *jdtls.FrameBridge
 	logger    *log.Logger
 	sourceLvl string
 }
 
-func newJDTLSService(dataDir, bundled string, logger *log.Logger) *jdtlsService {
-	mgr := jdtls.New(dataDir, bundled, os.Getenv("KAIRO_JRE17_HOME"), logger)
+func newJDTLSService(dataDir, bundled string, logger *log.Logger, skipSHAVerify bool, jdtlsURL string) *jdtlsService {
+	mgr := jdtls.New(dataDir, bundled, os.Getenv("KAIRO_JRE17_HOME"), skipSHAVerify, jdtlsURL, logger)
 	return &jdtlsService{
 		mgr:       mgr,
-		bridge:    jdtls.NewFrameBridge(mgr, logger),
 		logger:    logger,
 		sourceLvl: "1.6",
 	}
 }
 
-// SetWorkspace is the API-side hook used by the LSP bridge
-// handler: the Theia Browser sends a X-Kairo-Workspace-Id
-// header with the upgrade request, and we forward it to the
-// Manager before the bridge accepts frames.
-func (s *jdtlsService) SetWorkspace(workspaceID string) {
-	s.mgr.SetWorkspace(workspaceID)
+// jdtlsStatus is the JSON shape /api/v1/jdtls GET returns.
+type jdtlsStatus struct {
+	State       string `json:"state"`
+	Pid         int    `json:"pid,omitempty"`
+	Version     string `json:"version,omitempty"`
+	StartedAt   string `json:"startedAt,omitempty"`
+	StoppedAt   string `json:"stoppedAt,omitempty"`
+	JRE         string `json:"jre,omitempty"`
+	Jar         string `json:"jar,omitempty"`
+	SourceLevel string `json:"sourceLevel,omitempty"`
+	LastError   string `json:"lastError,omitempty"`
 }
 
-// Bridge returns the WebSocket handler for the LSP frame
-// bridge. The handler upgrades the HTTP request and runs the
-// proxy loop until either side closes.
-func (s *jdtlsService) Bridge() http.Handler {
-	return s.bridge
+func (s *jdtlsService) Status() (json.RawMessage, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st := jdtlsStatus{
+		State:       s.mgr.State(),
+		Version:     jdtls.JDTLSVersion,
+		JRE:         s.mgr.JREPath(),
+		SourceLevel: s.sourceLvl,
+		LastError:   s.mgr.LastError(),
+	}
+	if last := s.mgr.LastStart(); last != nil {
+		st.Pid = last.Pid
+		st.StartedAt = last.StartedAt
+		st.Jar = last.Jar
+	}
+	return json.Marshal(st)
+}
+
+func (s *jdtlsService) Prepare(ctx context.Context) (json.RawMessage, error) {
+	rep, err := s.mgr.EnsureInstalled(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(rep)
+}
+
+// GetLaunchDescriptor returns the JVM launch descriptor for JDT LS.
+// The Theia backend uses this to spawn the JDT LS process and own
+// the LSP communication over stdio.
+func (s *jdtlsService) GetLaunchDescriptor(ctx context.Context, workspaceID string, projectID string) (json.RawMessage, error) {
+	// Ensure the distribution is installed first
+	rep, err := s.mgr.EnsureInstalled(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("jdtls distribution not installed: %w", err)
+	}
+	_ = rep
+
+	// Build the launch descriptor
+	javaBin := filepath.Join(s.mgr.JREPath(), "bin", "java")
+	jdtlsDir := filepath.Join(s.mgr.BundledDir(), "jdtls")
+	launcherGlob := filepath.Join(jdtlsDir, "plugins", "org.eclipse.equinox.launcher_*.jar")
+	matches, err := filepath.Glob(launcherGlob)
+	if err != nil || len(matches) == 0 {
+		return nil, fmt.Errorf("JDT LS launcher not found in %s. Please run prepare first.", jdtlsDir)
+	}
+
+	configDir := filepath.Join(s.mgr.DataDir(), "runtime", "jdtls-config")
+	os.MkdirAll(configDir, 0755)
+
+	workspaceData := filepath.Join(s.mgr.DataDir(), "runtime", "jdtls-workspace", workspaceID+"_"+projectID)
+
+	args := []string{
+		"-Declipse.application=org.eclipse.jdt.ls.core.id1",
+		"-Dosgi.bundles.defaultStartLevel=4",
+		"-Declipse.product=org.eclipse.jdt.ls.core.product",
+		"-Dlog.protocol=true",
+		"-Dlog.level=ALL",
+		"-Xmx256m",
+		"-jar", matches[0],
+		"-configuration", configDir,
+		"-data", workspaceData,
+	}
+
+	desc := map[string]interface{}{
+		"command":    javaBin,
+		"args":       args,
+		"workingDir": projectID, // will be resolved to project root by the caller
+		"env":        os.Environ(),
+	}
+	return json.Marshal(desc)
 }
 
 // ----------------- JDTProjectGenerator (project model) -----------------
@@ -1469,128 +1601,87 @@ func (s *jdtprojectService) Status(workspaceID string) (json.RawMessage, error) 
 	return json.Marshal(st)
 }
 
-// jdtlsStatus is the JSON shape /api/v1/jdtls GET returns. We
-// keep the field set small and stable so the UI can rely on it.
-type jdtlsStatus struct {
-	State        string `json:"state"` // stopped|starting|running|stopping|crashed
-	Pid          int    `json:"pid,omitempty"`
-	Version      string `json:"version,omitempty"`
-	StartedAt    string `json:"startedAt,omitempty"`
-	StoppedAt    string `json:"stoppedAt,omitempty"`
-	JRE          string `json:"jre,omitempty"`
-	Jar          string `json:"jar,omitempty"`
-	SourceLevel  string `json:"sourceLevel,omitempty"`
-	LastError    string `json:"lastError,omitempty"`
-	InitializeOK bool   `json:"initializeOk"`
-}
-
-func (s *jdtlsService) Status() (json.RawMessage, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	st := jdtlsStatus{
-		State:       s.mgr.State(),
-		Version:     jdtls.JDTLSVersion,
-		JRE:         s.mgr.JREPath(),
-		SourceLevel: s.sourceLvl,
-		LastError:   s.mgr.LastError(),
-	}
-	if last := s.mgr.LastStart(); last != nil {
-		st.Pid = last.Pid
-		st.StartedAt = last.StartedAt
-		st.Jar = last.Jar
-		st.InitializeOK = last.InitializeOK
-	}
-	return json.Marshal(st)
-}
-
-func (s *jdtlsService) Start(payload json.RawMessage) (json.RawMessage, error) {
-	var req struct {
-		JREPath           string `json:"jrePath"`
-		SourceLevel       string `json:"sourceLevel"`
-		InitializeRootURI string `json:"initializeRootURI"`
-		TimeoutMs         int    `json:"timeoutMs"`
-	}
-	if len(payload) > 0 {
-		if err := json.Unmarshal(payload, &req); err != nil {
-			return nil, fmt.Errorf("invalid start payload: %w", err)
-		}
-	}
-	if req.SourceLevel == "" {
-		req.SourceLevel = s.sourceLvl
-	}
-	timeout := 30 * time.Second
-	if req.TimeoutMs > 0 {
-		timeout = time.Duration(req.TimeoutMs) * time.Millisecond
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-
-	s.mu.Lock()
-	if req.JREPath != "" {
-		s.mgr.SetJREPath(req.JREPath)
-	}
-	s.sourceLvl = req.SourceLevel
-	mu := s.mgr // keep a ref for after the unlock
-	s.mu.Unlock()
-
-	st, err := mu.Start(ctx)
-	if err != nil {
-		return nil, err
-	}
-	// Send the LSP `initialize` request. The response is the
-	// signal the UI waits for: only after we get it back do we
-	// claim the LS is `running` and ready for documents.
-	caps := json.RawMessage(`{}`)
-	if req.InitializeRootURI != "" {
-		initResp, ierr := mu.Initialize(ctx, req.InitializeRootURI, caps)
-		_ = initResp // body not used here; presence of a non-error response is the signal
-		if ierr != nil {
-			// Initialize failed. Tear the process down so the
-			// agent's state is honest: either it is "ready" with
-			// an initialized LS, or it is "stopped" again. We
-			// refuse to leave it in a half-initialized "running"
-			// state, because the UI would then think
-			// completion/hover work when they actually do not.
-			_ = mu.Stop(ctx)
-			return nil, fmt.Errorf("jdtls initialize failed: %w", ierr)
-		}
-		mu.MarkInitialized()
-	}
-	out := jdtlsStatus{
-		State:        mu.State(),
-		Pid:          st.Pid,
-		Version:      st.Version,
-		StartedAt:    st.StartedAt,
-		JRE:          st.Jre,
-		Jar:          st.Jar,
-		SourceLevel:  s.sourceLvl,
-		InitializeOK: req.InitializeRootURI != "",
-	}
-	return json.Marshal(out)
-}
-
-func (s *jdtlsService) Stop() (json.RawMessage, error) {
-	s.mu.Lock()
-	mu := s.mgr
-	s.mu.Unlock()
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	if err := mu.Stop(ctx); err != nil {
-		return nil, err
-	}
-	return json.Marshal(jdtlsStatus{
-		State:     mu.State(),
-		Version:   jdtls.JDTLSVersion,
-		StoppedAt: time.Now().UTC().Format(time.RFC3339),
-	})
-}
-
 // ----------------- helpers -----------------
 
 func shortID() string {
 	b := make([]byte, 4)
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
+}
+
+// atomicWriteFile writes bytes to a file atomically using
+// temp file + fsync + rename, then syncs the parent directory.
+// This prevents file corruption on crash (V-027).
+func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".kairo-tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmpPath, perm); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return err
+	}
+	// Sync parent directory on Unix
+	if f, err := os.Open(dir); err == nil {
+		f.Sync()
+		f.Close()
+	}
+	return nil
+}
+
+// domainProjectRepo adapts diskProjectStore to api.ProjectRepo.
+type domainProjectRepo struct {
+	store *diskProjectStore
+}
+
+func (r *domainProjectRepo) Get(ctx context.Context, workspaceID domain.WorkspaceID, projectID domain.ProjectID) (*domain.Project, error) {
+	raw, err := r.store.Get(string(projectID))
+	if err != nil {
+		return nil, err
+	}
+	var p domain.Project
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return nil, fmt.Errorf("unmarshal project: %w", err)
+	}
+	if p.WorkspaceID != workspaceID {
+		return nil, fmt.Errorf("project %s belongs to workspace %s, not %s", projectID, p.WorkspaceID, workspaceID)
+	}
+	return &p, nil
+}
+
+// domainToolchainRepo adapts toolchain.Registry to api.ToolchainRepo.
+type domainToolchainRepo struct {
+	reg *toolchain.Registry
+}
+
+func (r *domainToolchainRepo) Get(ctx context.Context, id string) (*domain.Toolchain, error) {
+	tc, ok := r.reg.Get(id)
+	if !ok {
+		return nil, fmt.Errorf("toolchain %s not found", id)
+	}
+	return &domain.Toolchain{
+		ID:          tc.ID,
+		JavaHome:    tc.Home,
+		Version:     tc.Version,
+		Fingerprint: tc.Fingerprint,
+	}, nil
 }
 
 var _ = exec.Command

@@ -1,7 +1,5 @@
-// Package jdtls manages the Eclipse JDT Language Server process
-// that the Kairo IDE uses to provide Java language features
-// (completion, hover, definition, references, diagnostics,
-// outline).
+// Package jdtls manages the Eclipse JDT Language Server
+// distribution and lifecycle for the Kairo IDE.
 //
 // The JDT LS is distributed as a .tar.gz or .zip by the
 // Eclipse Foundation. The distribution installer is in
@@ -9,14 +7,16 @@
 //
 //   - Start a JDT LS as a child process using the launcher
 //     JAR and the host's config_<os>/ directory.
-//   - Speak LSP over stdin/stdout using the Content-Length
-//     framing the spec requires (NOT raw newline-JSON).
-//   - Wait for the LSP `initialize` request to succeed before
-//     declaring the LS ready. The Manager never reports
-//     `running` and `initializeOk` together until both have
-//     happened for real.
-//   - Support stop, restart, and crash detection with a
-//     bounded number of automatic restarts.
+//   - Support stop, restart, and crash detection.
+//
+// DEPRECATED: As of Phase 4, the Theia backend owns the JDT LS
+// process lifecycle and LSP communication. The Go Agent only
+// provides the launch descriptor (see
+// internal/app/jdtls_descriptor.go). The Manager's Start/Stop
+// methods are kept for backward compatibility but are no longer
+// called by the production code path. The LSP frame bridge
+// (bridge.go) and the Initialize/MarkInitialized LSP handshake
+// methods have been removed.
 //
 // The JDT LS requires a modern JRE (17 or 21). The runtime
 // agent keeps this JRE separate from the user's
@@ -27,10 +27,8 @@ package jdtls
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -46,8 +44,12 @@ import (
 
 // Manager is the lifecycle owner for the JDT Language Server
 // process. A single Manager is shared across all workspaces in
-// a single agent process. The Bridge in bridge.go multiplexes
-// the per-workspace channels on top of this single process.
+// a single agent process.
+//
+// DEPRECATED: The LSP frame channels and Initialize/MarkInitialized
+// methods have been removed. The Theia backend now owns the JDT LS
+// process lifecycle. The Manager is kept for distribution
+// management (EnsureInstalled) and backward compatibility.
 type Manager struct {
 	mu      sync.Mutex
 	cmd     *exec.Cmd
@@ -57,18 +59,16 @@ type Manager struct {
 	bundled string
 	jrePath string
 
+	// Distribution configuration
+	skipSHAVerify bool
+	customURL     string
+
 	// Stderr capture
 	stderrFile *os.File
 	stderrPath string
 
 	// Per-workspace data dir (e.g. dataDir/jdtls-workspace/<workspaceID>)
 	workspace string
-
-	// Frame channels
-	stdin     io.WriteCloser
-	stdoutBr  *bufio.Reader
-	framesOut chan []byte
-	framesIn  chan []byte
 
 	// Lifecycle
 	lastErr   string
@@ -92,14 +92,16 @@ type Event struct {
 }
 
 // New creates a manager. The agent is not started yet.
-func New(dataDir, bundled, jrePath string, logger *log.Logger) *Manager {
+// skipSHAVerify: when true, SHA-256 verification is skipped (development only).
+// customURL: when non-empty, overrides the default JDT LS download URL.
+func New(dataDir, bundled, jrePath string, skipSHAVerify bool, customURL string, logger *log.Logger) *Manager {
 	return &Manager{
 		logger:            logger,
 		dataDir:           dataDir,
 		bundled:           bundled,
 		jrePath:           jrePath,
-		framesOut:         make(chan []byte, 256),
-		framesIn:          make(chan []byte, 256),
+		skipSHAVerify:     skipSHAVerify || os.Getenv("KAIRO_SKIP_SHA_VERIFY") == "true",
+		customURL:         customURL,
 		autoRestartBudget: 3,
 	}
 }
@@ -144,6 +146,38 @@ func (m *Manager) LastError() string {
 	return m.lastErr
 }
 
+// DataDir returns the agent data directory.
+func (m *Manager) DataDir() string {
+	return m.dataDir
+}
+
+// BundledDir returns the bundled binaries directory.
+func (m *Manager) BundledDir() string {
+	return m.bundled
+}
+
+// HomedDir returns the JDT LS installation directory.
+func (m *Manager) HomedDir() string {
+	return filepath.Join(m.bundled, "jdtls")
+}
+
+// IsPrepared returns true if the JDT LS distribution is
+// already installed on disk (install.json exists and
+// launcher jar is present).
+func (m *Manager) IsPrepared() bool {
+	rep, err := readInstallReport(m.dataDir)
+	if err != nil || rep == nil {
+		return false
+	}
+	if rep.LauncherJAR == "" {
+		return false
+	}
+	if _, err := os.Stat(rep.LauncherJAR); err != nil {
+		return false
+	}
+	return true
+}
+
 // LastStart returns the metadata of the most recent successful
 // Start, or nil if Start has not been called.
 func (m *Manager) LastStart() *Status {
@@ -154,17 +188,6 @@ func (m *Manager) LastStart() *Status {
 	}
 	cp := *m.lastStart
 	return &cp
-}
-
-// MarkInitialized records that the LSP `initialize` handshake
-// has completed. The next Status() call will reflect
-// `initializeOk: true`.
-func (m *Manager) MarkInitialized() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.lastStart != nil {
-		m.lastStart.InitializeOK = true
-	}
 }
 
 // SetWorkspace sets the per-workspace data dir used by the
@@ -212,7 +235,6 @@ type Status struct {
 	LauncherJAR  string `json:"launcherJar,omitempty"`
 	Workspace    string `json:"workspace,omitempty"`
 	SourceLevel  string `json:"sourceLevel,omitempty"`
-	InitializeOK bool   `json:"initializeOk"`
 	LastError    string `json:"lastError,omitempty"`
 	RestartCount int    `json:"restartCount"`
 }
@@ -239,7 +261,7 @@ func (m *Manager) State() string {
 // use to start the JDT LS. It is the public entry point for
 // the distribution installer.
 func (m *Manager) EnsureInstalled(ctx context.Context) (InstallReport, error) {
-	return ensureInstalled(ctx, m.dataDir, m.bundled, m.jrePath, m.logf)
+	return ensureInstalled(ctx, m.dataDir, m.bundled, m.jrePath, m.skipSHAVerify, m.customURL, m.logf)
 }
 
 func (m *Manager) logf(msg string, fields map[string]any) {
@@ -355,8 +377,8 @@ func (m *Manager) Start(ctx context.Context) (*Status, error) {
 		m.state.Store(0)
 		return nil, err
 	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
+	_ = stdin // stdin is kept for the pipe to stay open; Theia backend owns stdio now
+	if _, err := cmd.StdoutPipe(); err != nil {
 		stderrF.Close()
 		m.state.Store(0)
 		return nil, err
@@ -366,8 +388,6 @@ func (m *Manager) Start(ctx context.Context) (*Status, error) {
 		m.state.Store(0)
 		return nil, err
 	}
-	m.stdin = stdin
-	m.stdoutBr = bufio.NewReader(stdout)
 	m.stderrFile = stderrF
 	m.stderrPath = stderrPath
 	m.cmd = cmd
@@ -386,7 +406,6 @@ func (m *Manager) Start(ctx context.Context) (*Status, error) {
 	m.lastStart = st
 	m.lastErr = ""
 	m.mu.Unlock()
-	go m.readLoop(stdout)
 	go m.watchExit(cmd)
 	m.dispatch(Event{Type: "state", State: "running", At: st.StartedAt})
 	m.logf("jdtls process started", map[string]any{
@@ -466,11 +485,6 @@ func (m *Manager) Stop(ctx context.Context) error {
 		_ = m.stderrFile.Close()
 		m.stderrFile = nil
 	}
-	m.mu.Lock()
-	if m.lastStart != nil {
-		m.lastStart.InitializeOK = false
-	}
-	m.mu.Unlock()
 	m.dispatch(Event{Type: "state", State: "stopped", At: time.Now().UTC().Format(time.RFC3339Nano)})
 	return nil
 }
@@ -484,24 +498,6 @@ func terminateProcessTree(pid int) error {
 	return exec.Command("kill", "-TERM", "-"+strconv.Itoa(pid)).Run()
 }
 
-// Send writes one LSP frame to the JDT LS. Caller is
-// responsible for adding the Content-Length header.
-func (m *Manager) Send(frame []byte) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.stdin == nil {
-		return errors.New("jdtls is not running")
-	}
-	_, err := m.stdin.Write(frame)
-	return err
-}
-
-// Receive returns the next LSP frame the server emitted. The
-// channel is closed when the process exits.
-func (m *Manager) Receive() <-chan []byte {
-	return m.framesOut
-}
-
 // StderrPath returns the absolute path to the per-run stderr
 // log. The status bar surfaces this so the user can open it in
 // a viewer.
@@ -509,33 +505,6 @@ func (m *Manager) StderrPath() string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.stderrPath
-}
-
-func (m *Manager) readLoop(rd io.Reader) {
-	br := bufio.NewReader(rd)
-	for {
-		hdr, err := readHeaders(br)
-		if err != nil {
-			m.setLastErr(err.Error())
-			m.dispatch(Event{Type: "error", Message: err.Error()})
-			close(m.framesOut)
-			return
-		}
-		body := make([]byte, hdr.contentLength)
-		if _, err := io.ReadFull(br, body); err != nil {
-			m.setLastErr(err.Error())
-			m.dispatch(Event{Type: "error", Message: err.Error()})
-			close(m.framesOut)
-			return
-		}
-		select {
-		case m.framesOut <- body:
-		default:
-			// Drop if downstream is slow; the LSP spec says
-			// requests and notifications are independent and
-			// the client is allowed to skip.
-		}
-	}
 }
 
 func (m *Manager) setLastErr(msg string) {
@@ -581,47 +550,6 @@ func (m *Manager) dispatch(e Event) {
 	m.mu.Unlock()
 	for _, fn := range listeners {
 		fn(e)
-	}
-}
-
-// Initialize sends the LSP `initialize` request and waits for
-// the response. The caller is responsible for `initialized`
-// notification.
-func (m *Manager) Initialize(ctx context.Context, rootURI string, capabilities json.RawMessage) (json.RawMessage, error) {
-	if m.stdin == nil {
-		return nil, errors.New("jdtls is not running")
-	}
-	if capabilities == nil {
-		capabilities = json.RawMessage(`{}`)
-	}
-	req := map[string]interface{}{
-		"jsonrpc": "2.0",
-		"id":      1,
-		"method":  "initialize",
-		"params": map[string]interface{}{
-			"processId":    os.Getpid(),
-			"rootUri":      rootURI,
-			"capabilities": capabilities,
-			"workspaceFolders": []map[string]string{
-				{"uri": rootURI, "name": "workspace"},
-			},
-		},
-	}
-	body, _ := json.Marshal(req)
-	hdr := fmt.Sprintf("Content-Length: %d\r\n\r\n", len(body))
-	if _, err := m.stdin.Write([]byte(hdr)); err != nil {
-		return nil, err
-	}
-	if _, err := m.stdin.Write(body); err != nil {
-		return nil, err
-	}
-	select {
-	case resp := <-m.framesOut:
-		return resp, nil
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case <-time.After(60 * time.Second):
-		return nil, errors.New("jdtls initialize timed out")
 	}
 }
 
