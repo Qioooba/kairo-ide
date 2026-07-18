@@ -1,0 +1,9 @@
+{
+  "name": "@kairo/e2e",
+  "version": "0.1.0",
+  "private": true,
+  "description": "End-to-end smoke for the Theia browser IDE. Runs against a live Theia + Runtime Agent pair.",
+  "scripts": {
+    "test": "node tests/e2e/theia-smoke.cjs"
+  }
+}

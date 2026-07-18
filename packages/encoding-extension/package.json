@@ -1,0 +1,25 @@
+{
+  "name": "@kairo/encoding-extension",
+  "version": "0.1.0",
+  "description": "Kairo encoding integration — bridges Monaco / Theia to the Runtime Agent's encoding endpoints so GBK / GB18030 / UTF-8-BOM / ISO-8859-1 files round-trip safely.",
+  "main": "lib/src/index.js",
+  "types": "lib/src/index.d.ts",
+  "files": [
+    "lib",
+    "src"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "clean": "rm -rf lib",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "test": "mocha --require ts-node/register --require source-map-support/register 'src/**/*.test.ts'"
+  },
+  "dependencies": {
+    "@kairo/protocol": "workspace:*",
+    "@kairo/runtime-extension": "workspace:*",
+    "@theia/core": "1.73.1"
+  },
+  "devDependencies": {
+    "typescript": "5.5.4"
+  }
+}
