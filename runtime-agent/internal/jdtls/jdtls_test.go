@@ -2,6 +2,7 @@ package jdtls
 
 import (
 	"bytes"
+	"bufio"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -65,7 +66,7 @@ func TestVerifySHA256_EmptyExpected(t *testing.T) {
 
 func TestNew_NotStarted(t *testing.T) {
 	dir := t.TempDir()
-	m := New(dir, dir, "", quietLogger())
+	m := New(dir, dir, "", log.New("test"))
 	if got := m.State(); got != "stopped" {
 		t.Fatalf("expected stopped, got %s", got)
 	}
@@ -73,7 +74,7 @@ func TestNew_NotStarted(t *testing.T) {
 
 func TestManager_AddListener_NoPanic(t *testing.T) {
 	dir := t.TempDir()
-	m := New(dir, dir, "", quietLogger())
+	m := New(dir, dir, "", log.New("test"))
 	m.AddListener(func(Event) {})
 	m.AddListener(func(Event) {})
 }
@@ -88,7 +89,7 @@ func TestEnsureInstalled_AlreadyVerified(t *testing.T) {
 	if err := os.WriteFile(jar, []byte("placeholder"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	m := New(dir, bundled, "", quietLogger())
+	m := New(dir, bundled, "", log.New("test"))
 	got, err := m.EnsureInstalled(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -99,12 +100,8 @@ func TestEnsureInstalled_AlreadyVerified(t *testing.T) {
 }
 
 func TestEnsureInstalled_Missing(t *testing.T) {
-	// Without a real download source the manager will fall
-	// through to the HTTPS URL, which the test environment
-	// may not be able to reach. We only assert that the call
-	// does not panic and returns a meaningful error.
 	dir := t.TempDir()
-	m := New(dir, dir, "", quietLogger())
+	m := New(dir, dir, "", log.New("test"))
 	_, err := m.EnsureInstalled(context.Background())
 	if err == nil {
 		t.Skip("download succeeded; HTTPS available in this env")
@@ -114,7 +111,7 @@ func TestEnsureInstalled_Missing(t *testing.T) {
 func TestReadHeaders_ParsesContentLength(t *testing.T) {
 	raw := "Content-Length: 5\r\nContent-Type: application/vscode-jsonrpc; charset=utf-8\r\n\r\nhello"
 	br := bytes.NewReader([]byte(raw))
-	h, err := readHeaders(bufioNewReader(br))
+	h, err := readHeaders(bufio.NewReader(br))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,11 +121,4 @@ func TestReadHeaders_ParsesContentLength(t *testing.T) {
 	if h.contentType == "" {
 		t.Fatal("content-type should be set")
 	}
-}
-
-func quietLogger() *log.Logger {
-	var buf bytes.Buffer
-	l := log.New("test")
-	_ = buf
-	return l
 }

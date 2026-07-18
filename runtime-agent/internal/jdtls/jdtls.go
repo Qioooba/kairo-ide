@@ -32,13 +32,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/kairo-ide/runtime-agent/internal/log"
-	"github.com/kairo-ide/runtime-agent/internal/proc"
 )
 
 const (
@@ -57,10 +58,9 @@ const (
 // process. A single instance is shared across all workspaces.
 type Manager struct {
 	mu       sync.Mutex
-	proc     *proc.Process
 	cmd      *exec.Cmd
 	state    atomic.Int32 // 0 = stopped, 1 = starting, 2 = running, 3 = stopping
-	logger   log.Logger
+	logger   *log.Logger
 	dataDir  string
 	bundled  string
 	jrePath  string
@@ -83,7 +83,7 @@ type Event struct {
 }
 
 // New creates a manager. The agent is not started yet.
-func New(dataDir, bundled, jrePath string, logger log.Logger) *Manager {
+func New(dataDir, bundled, jrePath string, logger *log.Logger) *Manager {
 	return &Manager{
 		logger:    logger,
 		dataDir:   dataDir,
@@ -172,7 +172,7 @@ func (m *Manager) Start(ctx context.Context) (*Status, error) {
 	jar, err := m.EnsureInstalled(ctx)
 	if err != nil {
 		m.state.Store(0)
-		return "", err
+		return nil, err
 	}
 	jre := m.jrePath
 	if jre == "" {
@@ -180,7 +180,7 @@ func (m *Manager) Start(ctx context.Context) (*Status, error) {
 	}
 	if jre == "" {
 		m.state.Store(0)
-		return "", errors.New("JDT LS requires a JRE 17+; set KAIRO_JRE17_HOME or pass --jre17")
+		return nil, errors.New("JDT LS requires a JRE 17+; set KAIRO_JRE17_HOME or pass --jre17")
 	}
 
 	// JDT LS is started with a workspace dir; the manager picks
@@ -188,7 +188,7 @@ func (m *Manager) Start(ctx context.Context) (*Status, error) {
 	workspace := filepath.Join(m.dataDir, "jdtls-workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		m.state.Store(0)
-		return "", err
+		return nil, err
 	}
 	cmd := exec.CommandContext(ctx,
 		filepath.Join(jre, "bin", "java"),
@@ -205,17 +205,17 @@ func (m *Manager) Start(ctx context.Context) (*Status, error) {
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		m.state.Store(0)
-		return "", err
+		return nil, err
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		m.state.Store(0)
-		return "", err
+		return nil, err
 	}
 	cmd.Stderr = io.Discard
 	if err := cmd.Start(); err != nil {
 		m.state.Store(0)
-		return "", err
+		return nil, err
 	}
 	m.stdin = stdin
 	m.stdout = bufio.NewReader(stdout)
@@ -233,7 +233,10 @@ func (m *Manager) Start(ctx context.Context) (*Status, error) {
 	}, nil
 }
 
-// Stop terminates the JDT LS process.
+// Stop terminates the JDT LS process. On Windows the process
+// group is killed via taskkill /T so the JVM (and any worker
+// threads it spawned) goes down together. On Unix we signal
+// the negative PID to take the process group.
 func (m *Manager) Stop(ctx context.Context) error {
 	if m.state.Load() != 2 {
 		return nil
@@ -241,17 +244,26 @@ func (m *Manager) Stop(ctx context.Context) error {
 	m.state.Store(3)
 	defer m.state.Store(0)
 	if m.cmd != nil && m.cmd.Process != nil {
-		_ = proc.TerminateGroup(m.cmd.Process.Pid)
+		_ = terminateProcessTree(m.cmd.Process.Pid)
 		done := make(chan struct{})
 		go func() { _ = m.cmd.Wait(); close(done) }()
 		select {
 		case <-done:
 		case <-ctx.Done():
-			_ = proc.KillGroup(m.cmd.Process.Pid)
+			_ = m.cmd.Process.Kill()
 		}
 	}
 	m.dispatch(Event{Type: "state", State: "stopped", At: time.Now().Format(time.RFC3339)})
 	return nil
+}
+
+func terminateProcessTree(pid int) error {
+	if runtime.GOOS == "windows" {
+		// taskkill /T walks the child process tree, /F forces.
+		return exec.Command("taskkill", "/T", "/F", "/PID", strconv.Itoa(pid)).Run()
+	}
+	// On Unix, send SIGTERM to the negative PID (process group).
+	return exec.Command("kill", "-TERM", "-"+strconv.Itoa(pid)).Run()
 }
 
 // Send writes one LSP frame to the JDT LS. Caller is responsible
