@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
 // ErrPathForbidden is returned when a path is not under any
@@ -27,8 +28,13 @@ var ErrSymlinkEscape = errors.New("symlink resolves outside workspace root")
 // to operate in. On the desktop form, the agent runs as a
 // single-user process; on the server form, every user has a
 // per-user root.
+//
+// All fields are guarded by mu because AddRoot can be called at
+// runtime (when a user opens a new workspace) while Authorize*
+// are concurrently invoked by HTTP handlers.
 type WorkspaceRoots struct {
-	roots []string
+	mu       sync.RWMutex
+	roots    []string
 	// readonly are paths that may be read but not written.
 	// These are always relative to the DataDir (e.g. bundled/, audit/).
 	readonly []string
@@ -73,6 +79,8 @@ func resolveRoot(p string) (string, error) {
 
 // WithReadOnly adds extra paths that may be read but not written.
 func (w *WorkspaceRoots) WithReadOnly(paths ...string) *WorkspaceRoots {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	for _, p := range paths {
 		if cr, err := resolveRoot(p); err == nil {
 			w.readonly = append(w.readonly, cr)
@@ -81,8 +89,30 @@ func (w *WorkspaceRoots) WithReadOnly(paths ...string) *WorkspaceRoots {
 	return w
 }
 
+// AddRoot registers an additional workspace root at runtime. Used
+// when a user opens a new workspace folder — that folder must
+// become authorized before any file operations inside it can
+// succeed. Safe to call concurrently with Authorize*.
+func (w *WorkspaceRoots) AddRoot(p string) error {
+	cr, err := resolveRoot(p)
+	if err != nil {
+		return fmt.Errorf("canonicalize root %q: %w", p, err)
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for _, existing := range w.roots {
+		if existing == cr {
+			return nil
+		}
+	}
+	w.roots = append(w.roots, cr)
+	return nil
+}
+
 // Roots returns a copy of the canonical root paths.
 func (w *WorkspaceRoots) Roots() []string {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
 	out := make([]string, len(w.roots))
 	copy(out, w.roots)
 	return out
@@ -97,24 +127,33 @@ func (w *WorkspaceRoots) Roots() []string {
 // via the second return value for diagnostics, but callers should
 // use the resolved one for IO.
 func (w *WorkspaceRoots) AuthorizeRead(rootIdx int, rel string) (string, error) {
+	w.mu.RLock()
 	if rootIdx < 0 || rootIdx >= len(w.roots) {
+		w.mu.RUnlock()
 		return "", fmt.Errorf("root index out of range: %d", rootIdx)
 	}
-	return joinAndCheck(w.roots[rootIdx], rel, true)
+	root := w.roots[rootIdx]
+	w.mu.RUnlock()
+	return joinAndCheck(root, rel, true)
 }
 
 // AuthorizeWrite checks that a workspace-relative path resolves
 // to a real file under one of the roots, *and* is not under a
 // read-only path. It returns the absolute canonical path.
 func (w *WorkspaceRoots) AuthorizeWrite(rootIdx int, rel string) (string, error) {
+	w.mu.RLock()
 	if rootIdx < 0 || rootIdx >= len(w.roots) {
+		w.mu.RUnlock()
 		return "", fmt.Errorf("root index out of range: %d", rootIdx)
 	}
-	abs, err := joinAndCheck(w.roots[rootIdx], rel, false)
+	root := w.roots[rootIdx]
+	readonly := append([]string(nil), w.readonly...)
+	w.mu.RUnlock()
+	abs, err := joinAndCheck(root, rel, false)
 	if err != nil {
 		return "", err
 	}
-	for _, ro := range w.readonly {
+	for _, ro := range readonly {
 		if isUnder(abs, ro) {
 			return "", ErrPathReadOnly
 		}
@@ -124,18 +163,26 @@ func (w *WorkspaceRoots) AuthorizeWrite(rootIdx int, rel string) (string, error)
 
 // AuthorizeReadAbs checks that an absolute path is under one of
 // the roots. Used for path-accepting endpoints that genuinely
-// need an absolute path (rare).
+// need an absolute path (rare). Symlinks are followed so that a
+// symlink inside the workspace that points outside is rejected.
 func (w *WorkspaceRoots) AuthorizeReadAbs(abs string) (string, error) {
-	return authorizeAbs(w.roots, abs, false)
+	w.mu.RLock()
+	roots := append([]string(nil), w.roots...)
+	w.mu.RUnlock()
+	return authorizeAbs(roots, abs, true)
 }
 
 // AuthorizeWriteAbs is the write counterpart.
 func (w *WorkspaceRoots) AuthorizeWriteAbs(abs string) (string, error) {
-	resolved, err := authorizeAbs(w.roots, abs, false)
+	w.mu.RLock()
+	roots := append([]string(nil), w.roots...)
+	readonly := append([]string(nil), w.readonly...)
+	w.mu.RUnlock()
+	resolved, err := authorizeAbs(roots, abs, true)
 	if err != nil {
 		return "", err
 	}
-	for _, ro := range w.readonly {
+	for _, ro := range readonly {
 		if isUnder(resolved, ro) {
 			return "", ErrPathReadOnly
 		}
@@ -151,6 +198,8 @@ func (w *WorkspaceRoots) FindRoot(abs string) int {
 	if err != nil {
 		return -1
 	}
+	w.mu.RLock()
+	defer w.mu.RUnlock()
 	for i, r := range w.roots {
 		if isUnder(canon, r) {
 			return i

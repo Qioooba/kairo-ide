@@ -26,6 +26,14 @@ func NewRingBuffer(cap int) *RingBuffer {
 func (b *RingBuffer) Append(line string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if b.cap == 0 {
+		// Lazily initialize a zero-value RingBuffer so the
+		// "zero value is ready to use" docstring is actually true.
+		// Without this, Append would panic on the nil-slice index
+		// and divide-by-zero on `(b.next+1) % b.cap`.
+		b.cap = 1000
+		b.lines = make([]string, b.cap)
+	}
 	b.lines[b.next] = line
 	b.next = (b.next + 1) % b.cap
 	if b.next == 0 {

@@ -6,9 +6,17 @@ on:
   pull_request:
     branches: [main]
 
+# Least-privilege: only the contents: read needed for actions/checkout.
+# Without this block GitHub Actions implicitly grants a per-job GITHUB_TOKEN
+# with broad write scopes (deployments, statuses, packages) — a compromised
+# dependency could push artifacts under this repo's identity.
+permissions:
+  contents: read
+
 jobs:
   go-test:
     name: Go unit & integration
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -18,6 +26,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
+          # Keep in sync with runtime-agent/go.mod's `go` directive
+          # and the `toolchain` line. Previously this was '1.23.0'
+          # here and '1.22' in legacy-sample-smoke — diverging from
+          # go.mod's `1.23` requirement.
           go-version: '1.23.0'
           cache: true
           cache-dependency-path: runtime-agent/go.sum
@@ -42,6 +54,7 @@ jobs:
 
   go-integration:
     name: Go integration (JDK present)
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     needs: go-test
     steps:
@@ -59,6 +72,7 @@ jobs:
 
   ts-build:
     name: TypeScript packages
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -70,7 +84,11 @@ jobs:
         with:
           version: 9
       - name: Install
-        run: pnpm install --frozen-lockfile=false
+        # --frozen-lockfile enforces that pnpm-lock.yaml is in sync
+        # with package.json. The previous `--frozen-lockfile=false`
+        # silently rewrote the lockfile on every CI run, masking
+        # un-committed dependency changes.
+        run: pnpm install --frozen-lockfile
       - name: Build packages
         run: pnpm -r --filter './packages/*' build
       - name: Typecheck apps
@@ -78,12 +96,15 @@ jobs:
 
   legacy-sample-smoke:
     name: legacy-sample smoke
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          # Was '1.22', diverging from go.mod's `1.23`. Use the
+          # same version as the rest of the Go jobs.
+          go-version: '1.23.0'
       - uses: actions/setup-java@v4
         with:
           distribution: 'temurin'

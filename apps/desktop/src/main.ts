@@ -20,6 +20,7 @@ const KAIRO_VERSION = '0.1.0';
 const RUNTIME_PORT = 18099;
 const THEIA_PORT = 3000;
 let runtimeProc: ChildProcess | undefined;
+let isQuitting = false;
 
 function runtimeBinary(): string {
   const resourcesBin = join(process.resourcesPath || '', 'bin');
@@ -86,11 +87,52 @@ async function createWindow(): Promise<void> {
   });
   win.webContents.setWindowOpenHandler(({ url }) => {
     // External links open in the system browser, not inside
-    // our app shell.
-    shell.openExternal(url);
+    // our app shell. Restrict to http(s) — without this
+    // allowlist a malicious page could trigger shell.openExternal
+    // with file://, javascript:, or custom-scheme URLs that
+    // the OS might handle dangerously.
+    try {
+      const u = new URL(url);
+      if (u.protocol === 'http:' || u.protocol === 'https:') {
+        shell.openExternal(url);
+      } else {
+        console.warn('[kairo] refusing to open URL with scheme:', u.protocol);
+      }
+    } catch {
+      console.warn('[kairo] refusing to open malformed URL:', url);
+    }
     return { action: 'deny' };
   });
   await win.loadURL(`http://127.0.0.1:${THEIA_PORT}/`);
+}
+
+/**
+ * Stop the runtime agent, waiting for it to actually exit.
+ * Returns true if the agent exited cleanly within the timeout.
+ */
+function stopRuntime(timeoutMs = 5_000): Promise<boolean> {
+  return new Promise(resolve => {
+    if (!runtimeProc) {
+      resolve(true);
+      return;
+    }
+    const proc = runtimeProc;
+    let settled = false;
+    const done = (ok: boolean) => {
+      if (settled) return;
+      settled = true;
+      resolve(ok);
+    };
+    proc.once('exit', () => done(true));
+    try { proc.kill('SIGTERM'); } catch { /* already gone */ done(true); }
+    setTimeout(() => {
+      if (!settled) {
+        try { proc.kill('SIGKILL'); } catch { /* already gone */ }
+        // SIGKILL is not synchronous; give the OS a beat to reap.
+        setTimeout(() => done(false), 200);
+      }
+    }, timeoutMs).unref();
+  });
 }
 
 app.on('ready', async () => {
@@ -107,9 +149,25 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 
-app.on('before-quit', () => {
+// Previously `before-quit` fired `kill('SIGTERM')` and then a
+// 5s `setTimeout` for SIGKILL — but Electron doesn't wait for
+// either: the main process exits immediately, orphaning the
+// agent. Use preventDefault + await so we actually tear the
+// agent down before letting Electron quit.
+app.on('before-quit', async (e) => {
+  if (isQuitting) return;
+  isQuitting = true;
+  e.preventDefault();
+  await stopRuntime();
+  app.exit(0);
+});
+
+// If the process is killed by a signal that bypasses Electron's
+// quit flow (SIGTERM from `kill`, OOM-killer, etc.), best-effort
+// SIGKILL the agent so it doesn't outlive us. This runs
+// synchronously on the event loop's way out.
+process.on('exit', () => {
   if (runtimeProc) {
-    runtimeProc.kill('SIGTERM');
-    setTimeout(() => runtimeProc?.kill('SIGKILL'), 5_000);
+    try { runtimeProc.kill('SIGKILL'); } catch { /* already gone */ }
   }
 });

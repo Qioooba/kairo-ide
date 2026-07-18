@@ -56,7 +56,12 @@ func TestSmoke_End2End(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	svcs := services.NewMemoryServices(dataDir, t.TempDir(), sandbox)
+	svcs := services.NewMemoryServices(services.Config{
+		DataDir:     dataDir,
+		BundledDir:  t.TempDir(),
+		Logger:      log.New("test").WithLevel(log.LevelWarn),
+		Tomcat6Home: os.Getenv("KAIRO_TOMCAT6_HOME"),
+	}, sandbox)
 	logger := log.New("test").WithLevel(log.LevelWarn)
 	srv := api.NewServer(svcs, logger, auditLog, "test")
 

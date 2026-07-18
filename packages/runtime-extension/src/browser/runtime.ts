@@ -45,11 +45,20 @@ export class KairoRuntimeImpl {
 
   @postConstruct()
   init(): void {
-    // default config; can be overridden via configure()
+    // Fall back to the host-injected default URL (set by
+    // apps/browser and apps/desktop) or the canonical local
+    // agent URL. Without this, baseUrl stayed '' and every
+    // request hit a relative URL on the wrong origin.
+    if (!this.config.baseUrl) {
+      const injected = (globalThis as unknown as { __KAIRO_DEFAULT_RUNTIME_URL__?: string }).__KAIRO_DEFAULT_RUNTIME_URL__;
+      this.config = { baseUrl: injected ?? '' };
+    }
   }
 
   configure(cfg: KairoRuntimeConfig): void {
-    this.config = cfg;
+    // Merge instead of replace so partial updates (e.g. just a
+    // new sessionToken) don't silently drop the baseUrl.
+    this.config = { ...this.config, ...cfg };
   }
 
   setWorkspace(id: string): void {
@@ -103,9 +112,25 @@ export class KairoRuntimeImpl {
       requestId: newRequestId(),
       payload: payload as RequestFor<E>['payload'],
     };
-    const url = this.url(endpoint, init);
     const m = /^[A-Z]+\s+/.exec(endpoint);
     const method = m ? m[0].trim() : 'GET';
+
+    // GET endpoints cannot carry a JSON body. If the endpoint
+    // declares a payload (e.g. GET /servers/{id}/logs with
+    // {follow,since}), lift the payload fields into query params.
+    // Previously the payload was wrapped in the envelope and then
+    // discarded, so `follow=true` never reached the agent.
+    if (method === 'GET' && payload && typeof payload === 'object') {
+      init = {
+        ...init,
+        query: {
+          ...(init.query ?? {}),
+          ...(payload as Record<string, string | number | boolean | undefined>),
+        },
+      };
+    }
+
+    const url = this.url(endpoint, init);
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'X-Kairo-Request-Id': env.requestId,
@@ -119,21 +144,58 @@ export class KairoRuntimeImpl {
     if (this.config.sessionToken) {
       headers['Authorization'] = 'Bearer ' + this.config.sessionToken;
     }
-    const res = await fetch(url, {
-      method,
-      headers,
-      body: method === 'GET' ? undefined : JSON.stringify(env),
-      signal: init.signal,
-    });
-    const json = await res.json();
-    if (!json.ok) {
-      const err = json.error;
-      const e = new Error(err?.message || 'request failed');
-      // @ts-expect-error attach code
-      e.code = err?.code;
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        method,
+        headers,
+        body: method === 'GET' ? undefined : JSON.stringify(env),
+        signal: init.signal,
+      });
+    } catch (e) {
+      // Network error or abort. Distinguish aborts so callers can
+      // ignore them (e.g. debounced search).
+      if (e instanceof DOMException && e.name === 'AbortError') {
+        throw e;
+      }
+      const err = new Error(`kairo request failed: ${(e as Error).message}`);
+      Object.assign(err, { code: 'internal', requestId: env.requestId, retryable: true });
+      throw err;
+    }
+    if (!res.ok) {
+      // Try to parse the error envelope; fall back to HTTP status.
+      let body: unknown = null;
+      try {
+        body = await res.json();
+      } catch {
+        /* not JSON — e.g. HTML 502 from a proxy */
+      }
+      const kerr = (body as { error?: { code?: string; message?: string; details?: unknown; retryable?: boolean } } | null)?.error;
+      const e = new Error(kerr?.message ?? `HTTP ${res.status} ${res.statusText}`);
+      Object.assign(e, {
+        code: kerr?.code ?? 'internal',
+        requestId: env.requestId,
+        correlationId: (body as { correlationId?: string } | null)?.correlationId,
+        details: kerr?.details,
+        retryable: kerr?.retryable,
+      });
       throw e;
     }
-    return json.payload;
+    let json: { ok: true; payload: ResponseFor<E> } | { ok: false; error: { code: string; message: string; details?: unknown; retryable?: boolean } };
+    try {
+      json = await res.json();
+    } catch (e) {
+      const err = new Error(`kairo response was not JSON: ${(e as Error).message}`);
+      Object.assign(err, { code: 'internal', requestId: env.requestId });
+      throw err;
+    }
+    if (!json.ok) {
+      const kerr = (json as { ok: false; error: { code?: string; message?: string } }).error;
+      const e = new Error(kerr?.message || 'request failed');
+      Object.assign(e, { code: kerr?.code });
+      throw e;
+    }
+    return (json as { ok: true; payload: ResponseFor<E> }).payload;
   }
 
   /**
@@ -153,24 +215,66 @@ export class KairoRuntimeImpl {
 export class EventStream {
   protected ws: WebSocket;
   protected listeners = new Map<string, Set<(e: WsEvent) => void>>();
+  protected readonly onMessage: (ev: MessageEvent) => void;
+  protected readonly onClose: () => void;
 
   constructor(ws: WebSocket) {
     this.ws = ws;
-    this.ws.addEventListener('message', ev => {
+    this.onMessage = (ev: MessageEvent) => this.handleMessage(ev);
+    this.onClose = () => this.emitClose();
+    this.ws.addEventListener('message', this.onMessage);
+    this.ws.addEventListener('close', this.onClose);
+    this.ws.addEventListener('error', this.onClose);
+  }
+
+  private handleMessage(ev: MessageEvent): void {
+    // Only swallow JSON parse errors. A throwing listener must
+    // not abort iteration over the rest of the Set, and we want
+    // to know about it.
+    let e: WsEvent;
+    try {
+      e = JSON.parse(ev.data) as WsEvent;
+    } catch {
+      return;
+    }
+    const snapshot = (set: Set<(ev: WsEvent) => void> | undefined) =>
+      set ? Array.from(set) : [];
+    for (const fn of snapshot(this.listeners.get(e.type))) {
       try {
-        const e: WsEvent = JSON.parse(ev.data);
-        const set = this.listeners.get(e.type);
-        if (set) {
-          for (const fn of set) fn(e);
-        }
-        const all = this.listeners.get('*');
-        if (all) {
-          for (const fn of all) fn(e);
-        }
-      } catch (_err) {
-        // ignore malformed messages
+        fn(e);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[kairo] event listener threw', err);
       }
-    });
+    }
+    // Also fire the wildcard subscribers, unless this event IS
+    // a wildcard broadcast (which would be a degenerate loop).
+    // Cast to string because WsEvent.type is a strict union of
+    // real event names; '*' is a subscription channel, not an
+    // event type, so the union correctly doesn't include it.
+    if ((e.type as string) !== '*') {
+      for (const fn of snapshot(this.listeners.get('*'))) {
+        try {
+          fn(e);
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.error('[kairo] event listener threw', err);
+        }
+      }
+    }
+  }
+
+  private emitClose(): void {
+    // Notify subscribers via the wildcard channel so the UI can
+    // re-open the stream. Previously a dropped socket was silent.
+    const synthetic: WsEvent = { type: '__close__' } as unknown as WsEvent;
+    for (const fn of Array.from(this.listeners.get('*') ?? [])) {
+      try {
+        fn(synthetic);
+      } catch {
+        /* ignore */
+      }
+    }
   }
 
   on(type: string, handler: (e: WsEvent) => void): () => void {
@@ -180,14 +284,34 @@ export class EventStream {
       this.listeners.set(type, set);
     }
     set.add(handler);
-    return () => set!.delete(handler);
+    return () => {
+      set?.delete(handler);
+    };
   }
 
   close(): void {
-    this.ws.close();
+    // Remove listeners so the WebSocket can be GC'd. Previously
+    // the message listener was never detached, leaking on every
+    // openEvents() call.
+    this.ws.removeEventListener('message', this.onMessage);
+    this.ws.removeEventListener('close', this.onClose);
+    this.ws.removeEventListener('error', this.onClose);
+    this.listeners.clear();
+    try {
+      this.ws.close();
+    } catch {
+      /* already closed */
+    }
   }
 }
 
 function newRequestId(): string {
+  // Prefer crypto.randomUUID (UUIDv4, available in modern browsers
+  // and Node 19+) per the protocol contract. Fall back to a
+  // random base36 string for older runtimes.
+  const c = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
+  if (c?.randomUUID) {
+    return c.randomUUID();
+  }
   return 'req_' + Math.random().toString(36).slice(2, 14);
 }

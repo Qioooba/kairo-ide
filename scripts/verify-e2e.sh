@@ -20,15 +20,26 @@ PORT="$1"
 # Tear down any previous agent + tomcat from this script.
 pkill -f kairo-runtime 2>/dev/null || true
 sleep 0.3
-# Force-free the test port
-lsof -ti :"$PORT" 2>/dev/null | xargs -r kill -9 2>/dev/null || true
+# Force-free the test port. `xargs -r` is GNU-only; macOS BSD
+# xargs doesn't support it and would invoke `kill` with no args
+# (which sends SIGTERM to the calling shell). Filter explicitly.
+lsof -ti :"$PORT" 2>/dev/null | grep -E '^[0-9]+$' | xargs kill -9 2>/dev/null || true
 
 # Fresh state.
 ROOT="/tmp/kairo-e2e-${PORT}"
-/Users/qi/.mavis/bin/mavis-trash "$ROOT" 2>/dev/null || true
+# Prefer mavis-trash if available (dev environment convenience),
+# but fall back to rm -rf so this script runs on any machine.
+if command -v mavis-trash >/dev/null 2>&1; then
+  mavis-trash "$ROOT" 2>/dev/null || true
+else
+  rm -rf "$ROOT" 2>/dev/null || true
+fi
 mkdir -p "$ROOT"
 
-cd "$(dirname "$0")/../runtime-agent"
+# Resolve repo root from the script location so this runs on
+# any developer's machine, not just the original author's.
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$REPO_ROOT/runtime-agent"
 
 KAIRO_DATA_DIR="$ROOT/data" \
 KAIRO_TOMCAT6_HOME="${KAIRO_TOMCAT6_HOME:-/tmp/tomcat6-home/apache-tomcat-6.0.53}" \
@@ -41,9 +52,12 @@ DEPLOY_OUT="$ROOT/webapp"
 BUILD_OUT="$ROOT/build-out"
 mkdir -p "$DEPLOY_OUT" "$BUILD_OUT"
 
-LEGACY="/Users/qi/.mavis/sessions/mvs_a92211f21f6147909af9d6ca52d0912e/workspace/legacy-sample"
+# Previously this was a hard-coded path to the original author's
+# /Users/qi/.mavis/sessions/... workspace. Use the repo-relative
+# legacy-sample so the script is portable.
+LEGACY="$REPO_ROOT/legacy-sample"
 
-echo "[1/5] build"
+echo "[1/6] build"
 BUILD_RESP=$(curl -fsS -X POST "http://127.0.0.1:${PORT}/api/v1/builds" -H "Content-Type: application/json" \
   -d "{\"requestId\":\"b1\",\"payload\":{\"projectRoot\":\"${LEGACY}\",\"sourceLevel\":\"8\",\"targetLevel\":\"8\",\"outputDir\":\"${BUILD_OUT}\",\"classpath\":[\"${LEGACY}/lib/javax.servlet-api-4.0.1.jar\"]}}")
 BUILD_ID=$(echo "$BUILD_RESP" | /usr/bin/python3 -c "import json,sys; print(json.load(sys.stdin)['payload']['id'])")
@@ -59,7 +73,7 @@ done
 echo "  build: state=$STATE"
 ls -la $BUILD_OUT/com/example/legacy/ 2>&1 | head -5
 
-echo "[2/5] deploy"
+echo "[2/6] deploy"
 deploy() {
   curl -fsS -X POST "http://127.0.0.1:${PORT}/api/v1/deployments" -H "Content-Type: application/json" \
     -d "{\"requestId\":\"$1\",\"payload\":{\"projectId\":\"p1\",\"source\":\"$2\",\"target\":\"$3\"}}" \
@@ -70,14 +84,14 @@ deploy d2 "${BUILD_OUT}" "${DEPLOY_OUT}/WEB-INF/classes"
 deploy d3 "${LEGACY}/src/main/resources" "${DEPLOY_OUT}/WEB-INF/classes"
 deploy d4 "${LEGACY}/lib" "${DEPLOY_OUT}/WEB-INF/lib"
 
-echo "[3/5] start Tomcat 6"
+echo "[3/6] start Tomcat 6"
 SRV=$(curl -fsS -X POST "http://127.0.0.1:${PORT}/api/v1/servers" -H "Content-Type: application/json" \
   -d "{\"requestId\":\"s1\",\"payload\":{\"projectId\":\"p1\",\"webappDir\":\"${DEPLOY_OUT}\",\"contextPath\":\"/kairo\"}}")
 HTTP_PORT=$(echo "$SRV" | /usr/bin/python3 -c "import json,sys; print(json.load(sys.stdin)['payload']['ports']['http'])")
 SRV_ID=$(echo "$SRV" | /usr/bin/python3 -c "import json,sys; print(json.load(sys.stdin)['payload']['id'])")
 echo "  Tomcat on $HTTP_PORT (id=$SRV_ID)"
 
-echo "[4/5] HTTP smoke test"
+echo "[4/6] HTTP smoke test"
 PASS=0
 FAIL=0
 for path in "/kairo/hello?name=Kairo" "/kairo/i18n" "/kairo/hello.jsp" "/kairo/utf8.jsp"; do
@@ -92,7 +106,7 @@ for path in "/kairo/hello?name=Kairo" "/kairo/i18n" "/kairo/hello.jsp" "/kairo/u
 done
 echo "  summary: $PASS passed, $FAIL failed"
 
-echo "[5/5] static sync (modify JSP)"
+echo "[5/6] static sync (modify JSP)"
 # Modify hello.jsp
 /usr/bin/python3 -c "
 old = open('${LEGACY}/WebRoot/hello.jsp','rb').read()
@@ -108,9 +122,10 @@ if echo "$RES" | grep -q "CHANGED"; then
   echo "  PASS  static sync: change visible in HTTP response"
 else
   echo "  FAIL  static sync: change not visible"
+  FAIL=$((FAIL+1))
 fi
 
-echo "[6/5] stop Tomcat"
+echo "[6/6] stop Tomcat"
 curl -fsS -X DELETE "http://127.0.0.1:${PORT}/api/v1/servers/${SRV_ID}" -H "Content-Type: application/json" -d '{}' > /dev/null
 echo "  stopped"
 

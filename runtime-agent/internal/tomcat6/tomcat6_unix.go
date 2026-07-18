@@ -13,6 +13,19 @@ func sysProcAttrForOS() *syscall.SysProcAttr {
 	}
 }
 
+// signalProcGroup sends sig to the process group led by pid.
+// Setpgid:true in sysProcAttrForOS makes the JVM its own group
+// leader, so -pid targets the whole group including any
+// subprocesses spawned via Runtime.exec.
+func signalProcGroup(pid int, sig syscall.Signal) error {
+	if err := syscall.Kill(-pid, sig); err == nil {
+		return nil
+	}
+	// Fall back to direct PID for the case where Setpgid didn't
+	// take effect (e.g. the process was reparented).
+	return syscall.Kill(pid, sig)
+}
+
 // isAlive reports whether the OS process with the given PID
 // exists.
 func isAlive(pid int) bool {

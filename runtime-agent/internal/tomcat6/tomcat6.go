@@ -601,6 +601,11 @@ func (i *Instance) waitAndWatch(lf *os.File) {
 // Stop issues a graceful stop via the shutdown port, then
 // SIGTERM, then SIGKILL. Returns when the process has actually
 // exited or timeout elapses.
+//
+// Signals are sent to the negative PID (process group) so that
+// child processes the JVM spawned (javac, Runtime.exec, …) are
+// also reaped. Signaling only the parent PID left orphans that
+// held ports and memory after Stop returned.
 func (i *Instance) Stop(timeout time.Duration) error {
 	i.mu.Lock()
 	if i.state != "running" && i.state != "starting" {
@@ -621,19 +626,15 @@ func (i *Instance) Stop(timeout time.Duration) error {
 	case <-time.After(timeout / 2):
 		// continue to step 2
 	}
-	// 2. SIGTERM.
-	if p, err := os.FindProcess(pid); err == nil {
-		_ = p.Signal(syscall.SIGTERM)
-	}
+	// 2. SIGTERM the whole process group.
+	_ = signalProcGroup(pid, syscall.SIGTERM)
 	select {
 	case <-i.stopped:
 		return nil
 	case <-time.After(timeout / 2):
 	}
-	// 3. SIGKILL.
-	if p, err := os.FindProcess(pid); err == nil {
-		_ = p.Signal(syscall.SIGKILL)
-	}
+	// 3. SIGKILL the whole process group.
+	_ = signalProcGroup(pid, syscall.SIGKILL)
 	select {
 	case <-i.stopped:
 		return nil
@@ -650,10 +651,11 @@ func (i *Instance) ForceStop() error {
 		return nil
 	}
 	pid := i.cmd.Process.Pid
+	// Mark as "stopping" so waitAndWatch reports "stopped" rather
+	// than "crashed" — this is a caller-initiated kill, not a crash.
+	i.state = "stopping"
 	i.mu.Unlock()
-	if p, err := os.FindProcess(pid); err == nil {
-		_ = p.Signal(syscall.SIGKILL)
-	}
+	_ = signalProcGroup(pid, syscall.SIGKILL)
 	<-i.stopped
 	return nil
 }
@@ -689,8 +691,11 @@ func (i *Instance) TailLog(n int) ([]string, error) {
 	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
 	for scanner.Scan() {
 		lines = append(lines, scanner.Text())
-		if len(lines) > n*4 {
-			// cheap cap; trim at the end
+		// Cap memory: keep at most 2*n lines so we can still return
+		// the trailing n at the end. Without this, tailing a multi-
+		// MB log with n=200 allocated the entire file.
+		if len(lines) > n*2 {
+			lines = lines[len(lines)-n:]
 		}
 	}
 	if len(lines) > n {

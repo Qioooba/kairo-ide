@@ -11,26 +11,52 @@ export interface SearchOptions extends Partial<SearchRequest> {
   workspaceId: string;
 }
 
+/**
+ * Error thrown when a search was cancelled by a newer search()
+ * call (or by an explicit cancel()). Callers can swallow this
+ * without surfacing it to the UI.
+ */
+export class KairoSearchCancelledError extends Error {
+  constructor() {
+    super('search cancelled');
+    this.name = 'KairoSearchCancelledError';
+  }
+}
+
 @injectable()
 export class KairoSearchService {
   @inject(KairoRuntimeImpl) protected runtime!: KairoRuntimeImpl;
   protected current?: AbortController;
 
   async search(opts: SearchOptions): Promise<SearchResponse> {
+    // Abort any in-flight request before starting a new one.
+    // Previously the previous fetch's AbortError propagated as
+    // an unhandled promise rejection on every keystroke.
     this.current?.abort();
     this.current = new AbortController();
-    return this.runtime.request('POST /api/v1/search', {
-      workspaceId: opts.workspaceId,
-      query: opts.query ?? '',
-      isRegex: opts.isRegex ?? false,
-      caseSensitive: opts.caseSensitive ?? false,
-      wholeWord: opts.wholeWord ?? false,
-      include: opts.include,
-      exclude: opts.exclude,
-      contextLines: opts.contextLines,
-      maxResults: opts.maxResults,
-      previewReplace: opts.previewReplace,
-    }, { signal: this.current.signal });
+    const signal = this.current.signal;
+    try {
+      return await this.runtime.request('POST /api/v1/search', {
+        workspaceId: opts.workspaceId,
+        query: opts.query ?? '',
+        isRegex: opts.isRegex ?? false,
+        caseSensitive: opts.caseSensitive ?? false,
+        wholeWord: opts.wholeWord ?? false,
+        include: opts.include,
+        exclude: opts.exclude,
+        contextLines: opts.contextLines,
+        maxResults: opts.maxResults,
+        previewReplace: opts.previewReplace,
+      }, { signal });
+    } catch (e) {
+      // Convert DOMException AbortError into a typed cancellation
+      // error so callers can distinguish "no result because we
+      // were superseded" from a real network failure.
+      if (signal.aborted || (e instanceof DOMException && e.name === 'AbortError')) {
+        throw new KairoSearchCancelledError();
+      }
+      throw e;
+    }
   }
 
   cancel(): void {

@@ -285,6 +285,11 @@ func PropertiesDecode(src []byte) ([]byte, error) {
 
 // PropertiesEncode converts UTF-8 text to the ISO-8859-1-with-
 // escapes form for *.properties saving.
+//
+// Characters outside the Basic Multilingual Plane (rune > U+FFFF,
+// e.g. emoji or CJK Extension B) are emitted as a UTF-16 surrogate
+// pair, exactly as the Java Properties spec requires. Casting such
+// a rune to uint16 silently truncates it, corrupting the file.
 func PropertiesEncode(src []byte) ([]byte, error) {
 	// We do not use the charmap encoder because that loses chars;
 	// we need the \uXXXX escape form.
@@ -292,6 +297,17 @@ func PropertiesEncode(src []byte) ([]byte, error) {
 	for _, r := range string(src) {
 		if r < 0x80 {
 			out.WriteRune(r)
+			continue
+		}
+		if r > 0xFFFF {
+			// Supplementary plane: emit a UTF-16 surrogate pair.
+			r -= 0x10000
+			hi := 0xD800 + (r >> 10)
+			lo := 0xDC00 + (r & 0x3FF)
+			out.WriteString(`\u`)
+			writeHex4(&out, uint16(hi))
+			out.WriteString(`\u`)
+			writeHex4(&out, uint16(lo))
 			continue
 		}
 		out.WriteString(`\u`)

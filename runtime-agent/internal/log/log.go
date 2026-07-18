@@ -58,8 +58,13 @@ func ParseLevel(s string) Level {
 }
 
 // Logger is a structured JSON logger.
+//
+// The mutex is held by pointer so that loggers derived via With*
+// share the same lock with the parent. Copying a sync.Mutex by
+// value (the previous design) created independent locks that all
+// guarded the same io.Writer, causing interleaved writes.
 type Logger struct {
-	mu        sync.Mutex
+	mu        *sync.Mutex
 	w         io.Writer
 	level     Level
 	redactor  *Redactor
@@ -96,7 +101,13 @@ func (r *Redactor) Apply(v string) string {
 // New creates a logger that writes to stderr. component is the
 // short name that appears in every line ("api", "tomcat", ...).
 func New(component string) *Logger {
-	return &Logger{w: os.Stderr, level: LevelInfo, component: component, redactor: NewRedactor()}
+	return &Logger{
+		mu:        &sync.Mutex{},
+		w:         os.Stderr,
+		level:     LevelInfo,
+		component: component,
+		redactor:  NewRedactor(),
+	}
 }
 
 // WithComponent returns a logger that tags every line with a

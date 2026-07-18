@@ -68,6 +68,10 @@ func atomicCopy(src, dst string) error {
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return err
 	}
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
 	in, err := os.Open(src)
 	if err != nil {
 		return err
@@ -85,6 +89,13 @@ func atomicCopy(src, dst string) error {
 		return err
 	}
 	if err := tmp.Close(); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+	// Preserve source permissions. os.CreateTemp creates the temp
+	// file with mode 0600; without this chmod, deployed executables
+	// and shell scripts lose their execute bits.
+	if err := os.Chmod(tmpPath, srcInfo.Mode()); err != nil {
 		os.Remove(tmpPath)
 		return err
 	}

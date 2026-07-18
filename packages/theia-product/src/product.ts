@@ -13,13 +13,10 @@
  *   container.load(KairoProduct);
  *
  * which is what `apps/browser/index.js` does.
+ *
+ * The actual definition lives in `./product-bindings` to keep
+ * the binder and the ContainerModule in one place and avoid a
+ * circular import.
  */
 
-import { ContainerModule } from '@theia/core/shared/inversify';
-import { bindKairoProduct } from './product-bindings';
-
-export const KairoProduct = new ContainerModule(bind => {
-  bindKairoProduct(bind);
-});
-
-export default KairoProduct;
+export { KairoProduct, default } from './product-bindings';

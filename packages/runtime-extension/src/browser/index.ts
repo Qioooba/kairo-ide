@@ -17,9 +17,29 @@ export const RUNTIME_BASE_URL = 'http://127.0.0.1:18099';
 /**
  * The Kairo runtime frontend module. Apps load it as part of
  * their Theia composition.
+ *
+ * Two bindings are registered:
+ *   - `KairoRuntimeImpl` toSelf (singleton) — the concrete class
+ *     that every Kairo service injects via `@inject(KairoRuntimeImpl)`.
+ *   - `KairoRuntime` (Symbol) toService(KairoRuntimeImpl) — for
+ *     callers that want the Symbol-typed lookup.
+ *
+ * Previously only the Symbol binding existed, so every consumer
+ * that injected the concrete class got "No matching bindings
+ * found for serviceIdentifier: KairoRuntimeImpl" at resolve time
+ * and the entire Kairo composition was non-functional.
  */
-export const KairoRuntimeModule = new ContainerModule(bind => {
-  bind(KairoRuntime).to(KairoRuntimeImpl).inSingletonScope();
+export const KairoRuntimeModule = new ContainerModule((bind, _unbind, isBound, rebind) => {
+  if (isBound(KairoRuntimeImpl)) {
+    rebind(KairoRuntimeImpl).toSelf().inSingletonScope();
+  } else {
+    bind(KairoRuntimeImpl).toSelf().inSingletonScope();
+  }
+  if (isBound(KairoRuntime)) {
+    rebind(KairoRuntime).toService(KairoRuntimeImpl);
+  } else {
+    bind(KairoRuntime).toService(KairoRuntimeImpl);
+  }
 });
 
 /**

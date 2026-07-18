@@ -85,9 +85,10 @@ func TestTomcat6_RealStartAndStop(t *testing.T) {
 	if err := inst.Stop(15 * time.Second); err != nil {
 		t.Errorf("Stop: %v", err)
 	}
-	if !tomcat6.IsPortBound(port) && false {
-		// After Stop, the port should be released. IsPortBound
-		// returning false means the port is free.
+	// After Stop the port must be released. Previously this check
+	// was guarded by `&& false` and never ran, masking regressions.
+	if tomcat6.IsPortBound(port) {
+		t.Errorf("port %d still bound after Stop", port)
 	}
 }
 

@@ -7,21 +7,14 @@
  */
 
 import type { interfaces, Container } from '@theia/core/shared/inversify';
+import { ContainerModule } from '@theia/core/shared/inversify';
 
 import { bindProjectExtension } from '@kairo/project-extension';
-import { KairoRuntime, KairoRuntimeImpl, KairoRuntimeModule } from '@kairo/runtime-extension';
+import { KairoRuntimeModule } from '@kairo/runtime-extension';
 import { bindSearchExtension } from '@kairo/search-extension';
 import { bindJspExtension } from '@kairo/jsp-extension';
 import { bindTomcatExtension } from '@kairo/tomcat-extension';
 import { bindJavaExtension } from '@kairo/java-extension';
-
-/**
- * Load all Kairo extensions into the given container.
- * Apps call this once during Theia composition.
- */
-export function loadKairoProduct(container: Container): void {
-  container.load(KairoRuntimeModule);
-}
 
 /**
  * Single-shot binder used by `KairoProduct` (theia-product
@@ -30,10 +23,34 @@ export function loadKairoProduct(container: Container): void {
  * client that everything else depends on.
  */
 export function bindKairoProduct(bind: interfaces.Bind): void {
-  bind(KairoRuntime).to(KairoRuntimeImpl).inSingletonScope();
   bindProjectExtension(bind);
   bindSearchExtension(bind);
   bindJspExtension(bind);
   bindTomcatExtension(bind);
   bindJavaExtension(bind);
+}
+
+/**
+ * KairoProduct — the Theia ContainerModule that composes all
+ * Kairo extensions. Defined here (next to the binder) to avoid
+ * a circular import with product.ts.
+ */
+export const KairoProduct = new ContainerModule(bind => {
+  bindKairoProduct(bind);
+});
+
+// Default export is the ContainerModule itself. Theia's
+// `load(container, jsModule)` reads `jsModule.default`, so
+// every product entry needs to expose one.
+export default new ContainerModule(bind => {
+  bindKairoProduct(bind);
+});
+
+/**
+ * Load all Kairo extensions into the given container.
+ * Apps call this once during Theia composition.
+ */
+export function loadKairoProduct(container: Container): void {
+  container.load(KairoRuntimeModule);
+  container.load(KairoProduct);
 }

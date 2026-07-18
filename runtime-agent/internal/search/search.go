@@ -19,6 +19,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/kairo-ide/runtime-agent/internal/encoding"
 )
@@ -284,6 +285,12 @@ func scanUTF8(scanner *bufio.Scanner, rel string, m *compiledMatcher, opts Optio
 			res.TotalMatches++
 		}
 	}
+	// bufio.Scanner stops early on lines longer than the buffer
+	// or on I/O errors; surface that instead of silently returning
+	// partial matches.
+	if err := scanner.Err(); err != nil {
+		res.recordError(rel, err)
+	}
 }
 
 func scanBytes(data []byte, rel string, m *compiledMatcher, opts Options, res *Result) {
@@ -304,10 +311,16 @@ func scanBytes(data []byte, rel string, m *compiledMatcher, opts Options, res *R
 			res.TotalMatches++
 		}
 	}
+	if err := scanner.Err(); err != nil {
+		res.recordError(rel, err)
+	}
 }
 
 func buildMatch(rel string, line, start, end int, s string, m *compiledMatcher, opts Options) Match {
-	col := start + 1
+	// IDEs expect a rune-based column, but FindAllStringIndex
+	// returns byte offsets. Convert bytes-to-runes for the prefix
+	// so non-ASCII text gets the right column.
+	col := utf8.RuneCountInString(s[:start]) + 1
 	before := ""
 	after := ""
 	if opts.ContextLines > 0 {
@@ -359,6 +372,12 @@ func (g *globSet) matchAny(s string) bool {
 	return false
 }
 
+// globToRegexp compiles a glob pattern into a regular expression.
+// Only `*`, `**`, `?` and `.` carry glob semantics; every other
+// regex metacharacter (+, (, ), [, ], {, }, |, ^, $, \) is escaped
+// via regexp.QuoteMeta so it matches literally. Without escaping,
+// `file(1).txt` would compile as a regex group and silently match
+// (or fail to compile, dropping the glob entirely).
 func globToRegexp(p string) *regexp.Regexp {
 	var b strings.Builder
 	b.WriteString("^")
@@ -373,10 +392,12 @@ func globToRegexp(p string) *regexp.Regexp {
 			}
 		case '?':
 			b.WriteString("[^/]")
-		case '.':
-			b.WriteString(`\.`)
 		default:
-			b.WriteString(string(p[i]))
+			// QuoteMeta is a no-op for non-metacharacters, so we
+			// can run it byte-by-byte; for multibyte UTF-8 bytes
+			// the result is still valid because QuoteMeta preserves
+			// them as-is.
+			b.WriteString(regexp.QuoteMeta(string(p[i])))
 		}
 	}
 	b.WriteString("$")

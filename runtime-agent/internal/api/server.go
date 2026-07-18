@@ -7,6 +7,7 @@ package api
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -263,12 +264,24 @@ func newRequestID() string {
 	return "req_" + randomID(12)
 }
 
+// randomID returns n characters of cryptographically-random
+// lowercase-alphanumeric output. It must not block; if the system
+// CSPRNG fails we fall back to a time-based value rather than
+// panicking.
 func randomID(n int) string {
 	const alphabet = "0123456789abcdefghijklmnopqrstuvwxyz"
 	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		// Extremely unlikely; keep something non-blocking and
+		// still unique-ish under heavy load.
+		now := time.Now().UnixNano()
+		for i := range b {
+			b[i] = alphabet[(now>>uint(i))%int64(len(alphabet))]
+		}
+		return string(b)
+	}
 	for i := range b {
-		b[i] = alphabet[time.Now().UnixNano()%int64(len(alphabet))]
-		time.Sleep(time.Microsecond)
+		b[i] = alphabet[int(b[i])%len(alphabet)]
 	}
 	return string(b)
 }

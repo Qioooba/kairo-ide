@@ -55,7 +55,10 @@ type Config struct {
 }
 
 // NewMemoryServices returns a fully-wired Services struct with
-// real implementations.
+// real implementations. The sandbox is enforced by services that
+// accept caller-supplied paths (encoder, searcher, deployer, …);
+// previously it was passed in but never stored, leaving every
+// path-accepting endpoint able to read/write arbitrary files.
 func NewMemoryServices(cfg Config, sandbox *security.WorkspaceRoots) *api.Services {
 	registry, _ := toolchain.NewRegistry(filepath.Join(cfg.DataDir, "toolchains"))
 	tomcat6Home := cfg.Tomcat6Home
@@ -68,11 +71,11 @@ func NewMemoryServices(cfg Config, sandbox *security.WorkspaceRoots) *api.Servic
 		}
 	}
 	return &api.Services{
-		WorkspaceStore:    newDiskWorkspaceStore(cfg.DataDir),
+		WorkspaceStore:    newDiskWorkspaceStore(cfg.DataDir, sandbox),
 		ProjectStore:      newDiskProjectStore(cfg.DataDir),
 		ToolchainRegistry: &memToolchainRegistry{reg: registry},
-		Searcher:          &memSearcher{},
-		Encoder:           &memEncoder{},
+		Searcher:          &memSearcher{sandbox: sandbox},
+		Encoder:           &memEncoder{sandbox: sandbox},
 		BuildEngine:       newAsyncBuildEngine(cfg.DataDir, registry, cfg.Logger),
 		Deployer:          newDiskDeployer(cfg.DataDir, cfg.Logger),
 		ServerRunner:      newRealServerRunner(cfg.DataDir, cfg.BundledDir, tomcat6Home, cfg.Logger),
@@ -83,15 +86,16 @@ func NewMemoryServices(cfg Config, sandbox *security.WorkspaceRoots) *api.Servic
 // ----------------- WorkspaceStore (disk) -----------------
 
 type diskWorkspaceStore struct {
-	mu   sync.Mutex
-	dir  string
-	data map[string]api.WorkspaceRecord
+	mu      sync.Mutex
+	dir     string
+	data    map[string]api.WorkspaceRecord
+	sandbox *security.WorkspaceRoots
 }
 
-func newDiskWorkspaceStore(dataDir string) *diskWorkspaceStore {
+func newDiskWorkspaceStore(dataDir string, sandbox *security.WorkspaceRoots) *diskWorkspaceStore {
 	dir := filepath.Join(dataDir, "workspaces")
 	_ = os.MkdirAll(dir, 0o755)
-	ws := &diskWorkspaceStore{dir: dir, data: map[string]api.WorkspaceRecord{}}
+	ws := &diskWorkspaceStore{dir: dir, data: map[string]api.WorkspaceRecord{}, sandbox: sandbox}
 	ws.load()
 	return ws
 }
@@ -138,6 +142,13 @@ func (s *diskWorkspaceStore) Open(rootPath, name string) (api.WorkspaceRecord, e
 	}
 	if _, err := os.Stat(abs); err != nil {
 		return api.WorkspaceRecord{}, fmt.Errorf("path not accessible: %w", err)
+	}
+	// Register the new workspace root with the sandbox so that
+	// subsequent file operations inside it pass authorization.
+	if s.sandbox != nil {
+		if err := s.sandbox.AddRoot(abs); err != nil {
+			return api.WorkspaceRecord{}, fmt.Errorf("authorize workspace root: %w", err)
+		}
 	}
 	id := "ws_" + shortID()
 	if name == "" {
@@ -278,9 +289,11 @@ func (m *memToolchainRegistry) Import(path, label string) (json.RawMessage, erro
 
 // ----------------- Searcher -----------------
 
-type memSearcher struct{}
+type memSearcher struct {
+	sandbox *security.WorkspaceRoots
+}
 
-func (memSearcher) Search(payload json.RawMessage) (json.RawMessage, error) {
+func (m *memSearcher) Search(payload json.RawMessage) (json.RawMessage, error) {
 	var req struct {
 		WorkspaceID     string   `json:"workspaceId"`
 		Query           string   `json:"query"`
@@ -297,7 +310,18 @@ func (memSearcher) Search(payload json.RawMessage) (json.RawMessage, error) {
 	if err := json.Unmarshal(payload, &req); err != nil {
 		return nil, err
 	}
-	r, err := search.Search(req.WorkspaceID, search.Options{
+	// The "workspaceId" field is actually used as a filesystem root
+	// by search.Search. Authorize it before walking it, otherwise
+	// the endpoint lists files in any directory the agent can read.
+	root := req.WorkspaceID
+	if m != nil && m.sandbox != nil {
+		authorized, err := m.sandbox.AuthorizeReadAbs(root)
+		if err != nil {
+			return nil, err
+		}
+		root = authorized
+	}
+	r, err := search.Search(root, search.Options{
 		Query:           req.Query,
 		IsRegex:         req.IsRegex,
 		CaseSensitive:   req.CaseSensitive,
@@ -317,9 +341,11 @@ func (memSearcher) Search(payload json.RawMessage) (json.RawMessage, error) {
 
 // ----------------- Encoder -----------------
 
-type memEncoder struct{}
+type memEncoder struct {
+	sandbox *security.WorkspaceRoots
+}
 
-func (memEncoder) Detect(payload json.RawMessage) (json.RawMessage, error) {
+func (m *memEncoder) Detect(payload json.RawMessage) (json.RawMessage, error) {
 	var req struct {
 		WorkspaceID string `json:"workspaceId"`
 		File        string `json:"file"`
@@ -331,7 +357,14 @@ func (memEncoder) Detect(payload json.RawMessage) (json.RawMessage, error) {
 	if req.SampleBytes == 0 {
 		req.SampleBytes = 64 * 1024
 	}
-	f, err := os.Open(req.File)
+	// Reject paths outside the sandbox. Without this check the
+	// endpoint could be used to read arbitrary files (~/.ssh,
+	// /etc/passwd, …) by anyone who can reach the agent.
+	path, err := m.resolveRead(req.File)
+	if err != nil {
+		return nil, err
+	}
+	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
@@ -349,7 +382,7 @@ func (memEncoder) Detect(payload json.RawMessage) (json.RawMessage, error) {
 	})
 }
 
-func (memEncoder) Recode(payload json.RawMessage) (json.RawMessage, error) {
+func (m *memEncoder) Recode(payload json.RawMessage) (json.RawMessage, error) {
 	var req struct {
 		WorkspaceID string `json:"workspaceId"`
 		File        string `json:"file"`
@@ -359,7 +392,14 @@ func (memEncoder) Recode(payload json.RawMessage) (json.RawMessage, error) {
 	if err := json.Unmarshal(payload, &req); err != nil {
 		return nil, err
 	}
-	data, err := os.ReadFile(req.File)
+	// Recode reads AND writes the same path. Both directions must
+	// pass the sandbox or the endpoint lets a caller overwrite
+	// arbitrary files.
+	path, err := m.resolveWrite(req.File)
+	if err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
@@ -371,10 +411,28 @@ func (memEncoder) Recode(payload json.RawMessage) (json.RawMessage, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := os.WriteFile(req.File, encoded, 0o644); err != nil {
+	if err := os.WriteFile(path, encoded, 0o644); err != nil {
 		return nil, err
 	}
 	return json.Marshal(map[string]any{"ok": true, "bytes": len(encoded)})
+}
+
+// resolveRead authorizes a caller-supplied read path. If a sandbox
+// is configured the path must be under one of the workspace roots
+// (or a read-only bundled path). When no sandbox is configured
+// (legacy callers / tests) we fall through with the original path.
+func (m *memEncoder) resolveRead(p string) (string, error) {
+	if m == nil || m.sandbox == nil {
+		return p, nil
+	}
+	return m.sandbox.AuthorizeReadAbs(p)
+}
+
+func (m *memEncoder) resolveWrite(p string) (string, error) {
+	if m == nil || m.sandbox == nil {
+		return p, nil
+	}
+	return m.sandbox.AuthorizeWriteAbs(p)
 }
 
 // ----------------- BuildEngine (async, disk) -----------------
@@ -440,8 +498,23 @@ func (b *asyncBuildEngine) saveFinished() {
 	for _, bs := range b.finished {
 		items = append(items, bs)
 	}
+	// Trim the persisted list to the most-recent 200 builds...
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].StartedAt < items[j].StartedAt
+	})
 	if len(items) > 200 {
 		items = items[len(items)-200:]
+	}
+	// ...and evict the same keys from the in-memory map, which
+	// previously grew without bound over the agent's lifetime.
+	keep := make(map[string]struct{}, len(items))
+	for _, bs := range items {
+		keep[bs.ID] = struct{}{}
+	}
+	for id := range b.finished {
+		if _, ok := keep[id]; !ok {
+			delete(b.finished, id)
+		}
 	}
 	data, _ := json.MarshalIndent(items, "", "  ")
 	_ = os.WriteFile(filepath.Join(b.dir, "finished.json"), data, 0o600)
@@ -890,6 +963,10 @@ func copyOneFile(src, dst string) (added, modified int, bytes int64, err error) 
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return 0, 0, 0, err
 	}
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return 0, 0, 0, err
+	}
 	existing, _ := os.Stat(dst)
 	in, err := os.Open(src)
 	if err != nil {
@@ -908,6 +985,12 @@ func copyOneFile(src, dst string) (added, modified int, bytes int64, err error) 
 		return 0, 0, 0, err
 	}
 	if err := tmp.Close(); err != nil {
+		os.Remove(tmpPath)
+		return 0, 0, 0, err
+	}
+	// Preserve source permissions (especially the executable bit
+	// for .sh/.bat/.cmd shipped under WebRoot/bin).
+	if err := os.Chmod(tmpPath, srcInfo.Mode()); err != nil {
 		os.Remove(tmpPath)
 		return 0, 0, 0, err
 	}
@@ -1092,10 +1175,25 @@ func (r *realServerRunner) Stop(id string, payload json.RawMessage) (json.RawMes
 	if inst == nil {
 		return nil, fmt.Errorf("server not found: %s", id)
 	}
+	// Propagate stop errors so the caller knows the process may
+	// still be alive. Previously the error was swallowed and the
+	// meta marked "stopped" while the OS process kept running,
+	// leaking ports and memory.
+	var stopErr error
 	if p.Force {
-		_ = inst.ForceStop()
+		stopErr = inst.ForceStop()
 	} else {
-		_ = inst.Stop(15 * time.Second)
+		stopErr = inst.Stop(15 * time.Second)
+	}
+	if stopErr != nil {
+		if m != nil {
+			m.State = "error"
+			m.LastError = stopErr.Error()
+		}
+		r.mu.Lock()
+		r.save()
+		r.mu.Unlock()
+		return nil, fmt.Errorf("stop server %s: %w", id, stopErr)
 	}
 	if m != nil {
 		m.State = "stopped"
@@ -1117,15 +1215,20 @@ func (r *realServerRunner) Debug(id string) (json.RawMessage, error) {
 	if !ok {
 		return nil, fmt.Errorf("server not found: %s", id)
 	}
+	if m.JavaHome == "" || m.CatalinaBase == "" {
+		return nil, errors.New("server is missing restart metadata")
+	}
+	// Persisted metadata may legitimately lack Ports (older record
+	// or null JSON). Guard before dereferencing m.Ports.HTTP below.
+	if m.Ports == nil {
+		return nil, errors.New("server metadata missing ports; start the server first")
+	}
 	if inst, ok := r.instances[id]; ok {
 		_ = inst.Stop(10 * time.Second)
 	}
 	debugPort, err := pickFreePort()
 	if err != nil {
 		return nil, err
-	}
-	if m.JavaHome == "" || m.CatalinaBase == "" {
-		return nil, errors.New("server is missing restart metadata")
 	}
 	inst, err := tomcat6.Start(context.Background(), tomcat6.Spec{
 		ID:            id,
@@ -1243,11 +1346,17 @@ func (a *diskAuthenticator) Login(payload json.RawMessage, w http.ResponseWriter
 		return nil, errors.New("username and password required")
 	}
 	// Trusted-local mode: accept any non-empty pair. Real password
-	// hashing is deferred (see DELIVERY.md P2-2).
+	// hashing is deferred (see DELIVERY.md P2-2). Until real auth
+	// exists, this agent MUST NOT be exposed beyond trusted
+	// loopback; RequireAuth only gates the login endpoint.
 	tokenBytes := make([]byte, 32)
-	_, _ = rand.Read(tokenBytes)
+	if _, err := rand.Read(tokenBytes); err != nil {
+		return nil, fmt.Errorf("generate session token: %w", err)
+	}
 	csrf := make([]byte, 16)
-	_, _ = rand.Read(csrf)
+	if _, err := rand.Read(csrf); err != nil {
+		return nil, fmt.Errorf("generate csrf token: %w", err)
+	}
 	return json.Marshal(map[string]any{
 		"sessionToken": hex.EncodeToString(tokenBytes),
 		"csrfToken":    hex.EncodeToString(csrf),
@@ -1270,11 +1379,6 @@ func shortID() string {
 	b := make([]byte, 4)
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
-}
-
-func timeoutCtx(d time.Duration) context.Context {
-	ctx, _ := context.WithTimeout(context.Background(), d)
-	return ctx
 }
 
 var _ = exec.Command

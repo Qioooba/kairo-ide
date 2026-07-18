@@ -14,10 +14,34 @@ TARBALL="apache-tomcat-6.0.53.tar.gz"
 URL="$MIRROR/$TARBALL"
 TARGET="$DEST/$TARBALL"
 
-# SHA-256 of the official archive. Cross-checked against Apache's
-# own KEYS file at distribution time. We do not download keys
-# automatically — the value below was checked at release time.
-EXPECTED_SHA256="b8326a84a3e2bf85ae5b6ee0a0a0eb21f5b0a4f6b3a3a0e5e2c5b9c0e0d7f1c7a"
+# SHA-256 of the official archive. Apache publishes the hash
+# alongside the binary at $URL.sha256 for modern releases; for
+# 6.0.53 (2017) only .md5/.asc were published, so we can't rely
+# on a downloadable .sha256. Instead the operator must supply
+# the verified value via KAIRO_TOMCAT6_SHA256 (verified against
+# the Apache KEYS file out-of-band).
+#
+# The previous hard-coded value was 65 hex chars — invalid as a
+# SHA-256 (must be exactly 64) and clearly a placeholder.
+# Refuse to run until a real hash is supplied.
+EXPECTED_SHA256="${KAIRO_TOMCAT6_SHA256:-}"
+
+if [ -z "$EXPECTED_SHA256" ]; then
+  echo "ERROR: KAIRO_TOMCAT6_SHA256 is not set." >&2
+  echo "Apache Tomcat 6.0.53 was released before .sha256 files" >&2
+  echo "were published alongside binaries. Verify the archive" >&2
+  echo "against the Apache KEYS file and set KAIRO_TOMCAT6_SHA256" >&2
+  echo "in your environment (or scripts/.env) before running this script." >&2
+  echo "  Example: KAIRO_TOMCAT6_SHA256=<64-hex-chars> $0" >&2
+  exit 1
+fi
+
+# Defense in depth: reject malformed hashes early rather than
+# letting `shasum` produce a confusing mismatch message.
+if ! echo "$EXPECTED_SHA256" | grep -qE '^[0-9a-fA-F]{64}$'; then
+  echo "ERROR: KAIRO_TOMCAT6_SHA256 must be exactly 64 hex chars (got ${#EXPECTED_SHA256})." >&2
+  exit 1
+fi
 
 if [ ! -f "$TARGET" ]; then
   echo "Downloading $URL"
@@ -29,9 +53,8 @@ if [ "$ACTUAL" != "$EXPECTED_SHA256" ]; then
   echo "ERROR: SHA-256 mismatch."
   echo "  expected: $EXPECTED_SHA256"
   echo "  actual:   $ACTUAL"
-  echo "Refusing to use a tampered archive. Update the expected"
-  echo "value in scripts/fetch-tomcat6.sh only after verifying"
-  echo "the archive against the Apache KEYS file."
+  echo "Refusing to use a tampered archive. Re-verify the expected"
+  echo "value against the Apache KEYS file."
   exit 1
 fi
 

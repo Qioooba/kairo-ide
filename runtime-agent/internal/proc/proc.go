@@ -87,6 +87,12 @@ func (p *Process) StartWithSpec(ctx context.Context, spec Spec) error {
 	if p.state != StateNew && p.state != StateStopped && p.state != StateCrashed {
 		return fmt.Errorf("cannot start: state is %s", p.state)
 	}
+	// On restart, allocate a fresh waitCh. The previous wait()
+	// goroutine closed the old one; reusing it would panic with
+	// "close of closed channel" on the next stop.
+	if p.state != StateNew {
+		p.waitCh = make(chan struct{})
+	}
 	cctx, cancel := context.WithCancel(ctx)
 	p.cancel = cancel
 	p.cmd = exec.CommandContext(cctx, p.cmdName(spec), spec.Args...)
