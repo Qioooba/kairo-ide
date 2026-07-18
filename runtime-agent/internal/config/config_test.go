@@ -89,6 +89,89 @@ func TestBundled(t *testing.T) {
 	}
 }
 
+func TestBind_DataDir(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		env  map[string]string
+		want string
+	}{
+		{"flag only", []string{"--data-dir", "/opt/d1"}, nil, "/opt/d1"},
+		{"env only", nil, map[string]string{"KAIRO_DATA_DIR": "/opt/d2"}, "/opt/d2"},
+		{"flag overrides env", []string{"--data-dir", "/opt/d3"}, map[string]string{"KAIRO_DATA_DIR": "/opt/d4"}, "/opt/d3"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			for k, v := range tc.env {
+				t.Setenv(k, v)
+			}
+			c, _, err := Bind(tc.args)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if c.DataDir != tc.want {
+				t.Errorf("DataDir = %q, want %q", c.DataDir, tc.want)
+			}
+		})
+	}
+}
+
+func TestBind_BundledDir(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		env  map[string]string
+		want string
+	}{
+		{"flag only", []string{"--bundled-dir", "/opt/b1"}, nil, "/opt/b1"},
+		{"env only", nil, map[string]string{"KAIRO_BUNDLED_DIR": "/opt/b2"}, "/opt/b2"},
+		{"flag overrides env", []string{"--bundled-dir", "/opt/b3"}, map[string]string{"KAIRO_BUNDLED_DIR": "/opt/b4"}, "/opt/b3"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			for k, v := range tc.env {
+				t.Setenv(k, v)
+			}
+			c, _, err := Bind(tc.args)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if c.BundledDir != tc.want {
+				t.Errorf("BundledDir = %q, want %q", c.BundledDir, tc.want)
+			}
+		})
+	}
+}
+
+func TestBind_OtherFlags(t *testing.T) {
+	c, _, err := Bind([]string{
+		"--bind", "0.0.0.0",
+		"--port", "9090",
+		"--log-level", "debug",
+		"--require-auth",
+		"--tls-cert", "/p/cert",
+		"--tls-key", "/p/key",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.BindAddress != "0.0.0.0" {
+		t.Errorf("BindAddress = %q", c.BindAddress)
+	}
+	if c.Port != 9090 {
+		t.Errorf("Port = %d", c.Port)
+	}
+	if c.LogLevel != "debug" {
+		t.Errorf("LogLevel = %q", c.LogLevel)
+	}
+	if !c.RequireAuth {
+		t.Error("RequireAuth = false, want true")
+	}
+	if c.TLSCert != "/p/cert" || c.TLSKey != "/p/key" {
+		t.Errorf("TLS = %+v", c)
+	}
+}
+
 func writeFile(t *testing.T, path, contents string) error {
 	t.Helper()
 	return osWriteFile(path, []byte(contents), 0o600)

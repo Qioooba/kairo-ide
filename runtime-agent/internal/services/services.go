@@ -30,6 +30,7 @@ import (
 	"github.com/kairo-ide/runtime-agent/internal/build"
 	"github.com/kairo-ide/runtime-agent/internal/encoding"
 	"github.com/kairo-ide/runtime-agent/internal/jdtls"
+	"github.com/kairo-ide/runtime-agent/internal/jdtproject"
 	"github.com/kairo-ide/runtime-agent/internal/log"
 	"github.com/kairo-ide/runtime-agent/internal/search"
 	"github.com/kairo-ide/runtime-agent/internal/security"
@@ -79,6 +80,7 @@ func NewMemoryServices(cfg Config, sandbox *security.WorkspaceRoots) *api.Servic
 		ServerRunner:      newRealServerRunner(cfg.DataDir, cfg.BundledDir, tomcat6Home, cfg.Logger),
 		Auth:              newDiskAuthenticator(cfg.DataDir, cfg.Logger),
 		JDTLS:             newJDTLSService(cfg.DataDir, cfg.BundledDir, cfg.Logger),
+		JDTProjectGenerator: newJDTProjectService(cfg.DataDir, cfg.BundledDir, cfg.Logger),
 	}
 }
 
@@ -1290,16 +1292,72 @@ func (a *diskAuthenticator) Logout(r *http.Request, w http.ResponseWriter) error
 type jdtlsService struct {
 	mu        sync.Mutex
 	mgr       *jdtls.Manager
+	bridge    *jdtls.FrameBridge
 	logger    *log.Logger
 	sourceLvl string
 }
 
 func newJDTLSService(dataDir, bundled string, logger *log.Logger) *jdtlsService {
+	mgr := jdtls.New(dataDir, bundled, os.Getenv("KAIRO_JRE17_HOME"), logger)
 	return &jdtlsService{
-		mgr:       jdtls.New(dataDir, bundled, os.Getenv("KAIRO_JRE17_HOME"), logger),
+		mgr:       mgr,
+		bridge:    jdtls.NewFrameBridge(mgr, logger),
 		logger:    logger,
 		sourceLvl: "1.6",
 	}
+}
+
+// SetWorkspace is the API-side hook used by the LSP bridge
+// handler: the Theia Browser sends a X-Kairo-Workspace-Id
+// header with the upgrade request, and we forward it to the
+// Manager before the bridge accepts frames.
+func (s *jdtlsService) SetWorkspace(workspaceID string) {
+	s.mgr.SetWorkspace(workspaceID)
+}
+
+// Bridge returns the WebSocket handler for the LSP frame
+// bridge. The handler upgrades the HTTP request and runs the
+// proxy loop until either side closes.
+func (s *jdtlsService) Bridge() http.Handler {
+	return s.bridge
+}
+
+// ----------------- JDTProjectGenerator (project model) -----------------
+//
+// The JDT LS needs an Eclipse-shaped project model on disk
+// to produce Java language features. The Generator below
+// reads .legacyflow/project.yaml and writes the model under
+// the runtime data dir. See internal/jdtproject for the
+// schema and the XML/INI renderers.
+
+type jdtprojectService struct {
+	gen *jdtproject.Generator
+}
+
+func newJDTProjectService(dataDir, bundled string, logger *log.Logger) *jdtprojectService {
+	g := jdtproject.NewGenerator(dataDir, bundled)
+	g.Logger = func(msg string, fields map[string]any) {
+		if logger != nil {
+			logger.Info(msg, log.Fields(fields))
+		}
+	}
+	return &jdtprojectService{gen: g}
+}
+
+func (s *jdtprojectService) Generate(payload json.RawMessage) (json.RawMessage, error) {
+	res, err := s.gen.Generate(payload)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(res)
+}
+
+func (s *jdtprojectService) Status(workspaceID string) (json.RawMessage, error) {
+	st, err := s.gen.Status(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(st)
 }
 
 // jdtlsStatus is the JSON shape /api/v1/jdtls GET returns. We

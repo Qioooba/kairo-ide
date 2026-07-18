@@ -63,6 +63,9 @@ type Services struct {
 	// JDTLS owns the Eclipse JDT Language Server lifecycle.
 	// Optional: when nil, /api/v1/jdtls returns 503.
 	JDTLS JDTLS
+	// JDTProjectGenerator writes the JDT LS project model for
+	// legacy projects. Optional.
+	JDTProjectGenerator JDTProjectGenerator
 }
 
 // NewServer creates a Server.
@@ -179,6 +182,12 @@ func (s *Server) routes() {
 	s.router.HandleFunc("/api/v1/events", s.handleEvents)
 	// JDT Language Server
 	s.router.HandleFunc("/api/v1/jdtls", s.handleJDTLS)
+	// JDT LS LSP frame bridge (WebSocket). The path is on
+	// the same port as the HTTP API; the WebSocket upgrade is
+	// the same `handleJDTLSBridge` handler below.
+	s.router.Handle("/api/v1/jdtls/lsp", s.handleJDTLSBridge())
+	// JDT project model generator for legacy projects.
+	s.router.HandleFunc("/api/v1/jdtls/project", s.handleJDTProject)
 }
 
 // ----------------- helpers -----------------

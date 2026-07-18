@@ -3,32 +3,34 @@
 // (completion, hover, definition, references, diagnostics,
 // outline).
 //
-// The JDT LS is downloaded on first use from the official
-// Eclipse release. We pin the version and verify the SHA-256 of
-// the downloaded jar so a tampered release cannot execute on
-// the user's machine.
+// The JDT LS is distributed as a .tar.gz or .zip by the
+// Eclipse Foundation. The distribution installer is in
+// distribution.go; this file owns the runtime lifecycle:
+//
+//   - Start a JDT LS as a child process using the launcher
+//     JAR and the host's config_<os>/ directory.
+//   - Speak LSP over stdin/stdout using the Content-Length
+//     framing the spec requires (NOT raw newline-JSON).
+//   - Wait for the LSP `initialize` request to succeed before
+//     declaring the LS ready. The Manager never reports
+//     `running` and `initializeOk` together until both have
+//     happened for real.
+//   - Support stop, restart, and crash detection with a
+//     bounded number of automatic restarts.
 //
 // The JDT LS requires a modern JRE (17 or 21). The runtime
-// agent keeps this JRE separate from the user's `compilerJavaHome`
-// and `tomcatJavaHome` so a JDT LS upgrade never touches the
-// legacy project JDK.
-//
-// Lifecycle: `Manager.Start` resolves the JRE, downloads (if
-// needed) and starts the JDT LS as a child process. LSP runs
-// over stdin/stdout by default; the Manager is responsible for
-// translating the wire frames into JSON-RPC messages.
+// agent keeps this JRE separate from the user's
+// `compilerJavaHome` and `tomcatJavaHome` so a JDT LS upgrade
+// never touches the legacy project JDK.
 package jdtls
 
 import (
 	"bufio"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -42,52 +44,41 @@ import (
 	"github.com/kairo-ide/runtime-agent/internal/log"
 )
 
-const (
-	// JDTLSVersion is the Eclipse JDT Language Server release we
-	// ship. Bump together with the SHA-256 below.
-	JDTLSVersion = "1.42.0"
-	// JDTLSJar is the canonical name of the shaded jar we
-	// download from the Eclipse release.
-	//
-	// Historically the JDT LS shipped as a single .jar. As of
-	// 2024 the project moved to .tar.gz distributions; the
-	// pinned 1.42.0 jar we name here is still downloadable from
-	// a few mirrors but no longer from the default Eclipse
-	// snapshots URL. Two escape hatches cover this:
-	//
-	//   KAIRO_JDTLS_JAR — absolute path to a pre-downloaded
-	//                      jar. Skips the download step entirely.
-	//   KAIRO_JDTLS_URL — overrides the download URL.
-	//
-	// Both are honoured by EnsureInstalled. The default URL
-	// below is the legacy snapshot one; if a user's network can
-	// not reach it (or it is gone), the start returns
-	// process_spawn_failed and the user can drop a pre-staged
-	// jar into the bundled dir or set KAIRO_JDTLS_JAR.
-	JDTLSJar = "jdt-language-server-" + JDTLSVersion + "-202407031446.jar"
-	// JDTLSJarSHA256 is the expected SHA-256 of the jar. The
-	// agent refuses to launch an unverified build.
-	JDTLSJarSHA256 = "" // see jdtls_test.go for a placeholder used in unit tests
-)
-
 // Manager is the lifecycle owner for the JDT Language Server
-// process. A single instance is shared across all workspaces.
+// process. A single Manager is shared across all workspaces in
+// a single agent process. The Bridge in bridge.go multiplexes
+// the per-workspace channels on top of this single process.
 type Manager struct {
-	mu       sync.Mutex
-	cmd      *exec.Cmd
-	state    atomic.Int32 // 0 = stopped, 1 = starting, 2 = running, 3 = stopping
-	logger   *log.Logger
-	dataDir  string
-	bundled  string
-	jrePath  string
-	stdin    io.WriteCloser
-	stdout   *bufio.Reader
-	framesIn chan []byte
+	mu      sync.Mutex
+	cmd     *exec.Cmd
+	state   atomic.Int32
+	logger  *log.Logger
+	dataDir string
+	bundled string
+	jrePath string
+
+	// Stderr capture
+	stderrFile *os.File
+	stderrPath string
+
+	// Per-workspace data dir (e.g. dataDir/jdtls-workspace/<workspaceID>)
+	workspace string
+
+	// Frame channels
+	stdin     io.WriteCloser
+	stdoutBr  *bufio.Reader
 	framesOut chan []byte
-	idle     int32
-	lastErr  string
+	framesIn  chan []byte
+
+	// Lifecycle
+	lastErr   string
 	lastStart *Status
-	// Event listeners
+
+	// Crash recovery
+	autoRestartBudget int
+	restartCount      int
+
+	// Listeners
 	listeners []func(Event)
 }
 
@@ -103,12 +94,13 @@ type Event struct {
 // New creates a manager. The agent is not started yet.
 func New(dataDir, bundled, jrePath string, logger *log.Logger) *Manager {
 	return &Manager{
-		logger:    logger,
-		dataDir:   dataDir,
-		bundled:   bundled,
-		jrePath:   jrePath,
-		framesIn:  make(chan []byte, 64),
-		framesOut: make(chan []byte, 64),
+		logger:            logger,
+		dataDir:           dataDir,
+		bundled:           bundled,
+		jrePath:           jrePath,
+		framesOut:         make(chan []byte, 256),
+		framesIn:          make(chan []byte, 256),
+		autoRestartBudget: 3,
 	}
 }
 
@@ -119,13 +111,21 @@ func (m *Manager) AddListener(fn func(Event)) {
 	m.mu.Unlock()
 }
 
-// SetJREPath overrides the JRE that Start will use. Must be
-// called before Start. Empty string is a no-op (Start then
-// falls back to KAIRO_JRE17_HOME).
+// SetJREPath overrides the JRE that Start will use. Empty
+// string is a no-op (Start then falls back to KAIRO_JRE17_HOME).
 func (m *Manager) SetJREPath(p string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.jrePath = p
+}
+
+// SetAutoRestartBudget caps how many times the manager will
+// auto-restart the JDT LS after a clean Stop. 0 disables
+// auto-restart.
+func (m *Manager) SetAutoRestartBudget(n int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.autoRestartBudget = n
 }
 
 // JREPath returns the JRE the manager will use on the next
@@ -145,9 +145,7 @@ func (m *Manager) LastError() string {
 }
 
 // LastStart returns the metadata of the most recent successful
-// Start, or nil if Start has not been called. The services
-// layer uses this to render the /api/v1/jdtls status without
-// keeping a parallel copy.
+// Start, or nil if Start has not been called.
 func (m *Manager) LastStart() *Status {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -169,15 +167,54 @@ func (m *Manager) MarkInitialized() {
 	}
 }
 
+// SetWorkspace sets the per-workspace data dir used by the
+// next Start. Each workspace must have its own data dir so
+// Eclipse's .metadata does not get corrupted by overlapping
+// indexes.
+func (m *Manager) SetWorkspace(id string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if id == "" {
+		m.workspace = ""
+		return
+	}
+	m.workspace = filepath.Join(m.dataDir, "jdtls-workspace", sanitizeID(id))
+}
+
+// Workspace returns the active workspace data dir.
+func (m *Manager) Workspace() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.workspace
+}
+
+// sanitizeID is a defensive pass for workspace IDs that might
+// contain path separators on disk (the runtime client uses
+// ws_<short>, but external agents may pass arbitrary strings).
+func sanitizeID(s string) string {
+	s = filepath.Clean(s)
+	s = strings.ReplaceAll(s, "..", "_")
+	s = strings.ReplaceAll(s, string(os.PathSeparator), "_")
+	s = strings.ReplaceAll(s, "/", "_")
+	s = strings.ReplaceAll(s, `\`, "_")
+	return s
+}
+
 // Status reports the current JDT LS state.
 type Status struct {
-	State         string `json:"state"`
-	Pid           int    `json:"pid,omitempty"`
-	Version       string `json:"version"`
-	StartedAt     string `json:"startedAt,omitempty"`
-	Jre           string `json:"jre"`
-	Jar           string `json:"jar"`
-	InitializeOK  bool   `json:"initializeOk"`
+	State        string `json:"state"`
+	Pid          int    `json:"pid,omitempty"`
+	Version      string `json:"version"`
+	StartedAt    string `json:"startedAt,omitempty"`
+	StoppedAt    string `json:"stoppedAt,omitempty"`
+	Jre          string `json:"jre"`
+	Jar          string `json:"jar,omitempty"`
+	LauncherJAR  string `json:"launcherJar,omitempty"`
+	Workspace    string `json:"workspace,omitempty"`
+	SourceLevel  string `json:"sourceLevel,omitempty"`
+	InitializeOK bool   `json:"initializeOk"`
+	LastError    string `json:"lastError,omitempty"`
+	RestartCount int    `json:"restartCount"`
 }
 
 // State returns the current state as a string. Includes the
@@ -198,64 +235,30 @@ func (m *Manager) State() string {
 	}
 }
 
-// EnsureInstalled downloads the JDT LS jar (if missing) and
-// verifies its SHA-256. Idempotent: a second call with the jar
-// already on disk and verified is a no-op.
-func (m *Manager) EnsureInstalled(ctx context.Context) (string, error) {
-	// Escape hatch 1: pre-staged jar. Set KAIRO_JDTLS_JAR to an
-	// absolute path; we use it as-is and skip the download.
-	if pre := os.Getenv("KAIRO_JDTLS_JAR"); pre != "" {
-		if st, err := os.Stat(pre); err == nil && st.Size() > 0 {
-			m.logger.Info("using pre-staged jdtls jar", log.Fields{"path": pre, "size": st.Size()})
-			return pre, nil
-		}
-		return "", fmt.Errorf("KAIRO_JDTLS_JAR points at %s which is not a regular file", pre)
-	}
-	target := filepath.Join(m.bundled, "jdtls", JDTLSJar)
-	if st, err := os.Stat(target); err == nil && st.Size() > 0 {
-		// Verify the existing file.
-		ok, sum, err := verifySHA256(target, JDTLSJarSHA256)
-		if err != nil {
-			return "", err
-		}
-		if ok {
-			return target, nil
-		}
-		m.logger.Warn("jdtls jar sha256 mismatch; re-downloading", log.Fields{
-			"expected": JDTLSJarSHA256,
-			"actual":   sum,
-		})
-	}
-	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-		return "", err
-	}
-	// Escape hatch 2: override the download URL. The pinned
-	// snapshot URL is dead as of 2024+; users on a network that
-	// can reach the new tar.gz distribution can override it
-	// here. Note the new distribution is a tarball, not a jar;
-	// the agent does not unpack tarballs yet, so the override is
-	// mostly useful for mirrors that still ship a single jar.
-	url := os.Getenv("KAIRO_JDTLS_URL")
-	if url == "" {
-		url = fmt.Sprintf("https://download.eclipse.org/jdtls/snapshots/jdt-language-server-%s-202407031446.jar", JDTLSVersion)
-	}
-	// NOTE: at runtime the URL must be the official release
-	// channel; for the unit tests we substitute a file:// URL.
-	if err := downloadTo(ctx, url, target); err != nil {
-		return "", fmt.Errorf("download jdt-language-server: %w (set KAIRO_JDTLS_JAR to use a pre-staged jar, or KAIRO_JDTLS_URL to override)", err)
-	}
-	ok, _, err := verifySHA256(target, JDTLSJarSHA256)
-	if err != nil {
-		return "", err
-	}
-	if !ok {
-		return "", errors.New("jdt-language-server jar sha256 verification failed")
-	}
-	return target, nil
+// EnsureInstalled returns the absolute paths the Manager will
+// use to start the JDT LS. It is the public entry point for
+// the distribution installer.
+func (m *Manager) EnsureInstalled(ctx context.Context) (InstallReport, error) {
+	return ensureInstalled(ctx, m.dataDir, m.bundled, m.jrePath, m.logf)
 }
 
-// Start launches the JDT LS as a child process. Returns when
-// the process is up and the LSP handshake can begin.
+func (m *Manager) logf(msg string, fields map[string]any) {
+	if m.logger == nil {
+		return
+	}
+	m.logger.Info(msg, log.Fields(fields))
+}
+
+// Start launches the JDT LS as a child process. Returns the
+// metadata that the UI / API needs to render the status, and
+// only after the process is up.
+//
+// The function does NOT call the LSP `initialize` request
+// itself. That handshake is the caller's job (it requires
+// per-workspace root URIs and capabilities that the Manager
+// should not assume). The Manager exposes `Initialize` for
+// the LSP frame; `MarkInitialized` for the manager-level
+// bookkeeping.
 func (m *Manager) Start(ctx context.Context) (*Status, error) {
 	// Accept restart from stopped (0), stopping (3) after a
 	// concurrent Stop, and crashed (4). Refuse from starting
@@ -268,14 +271,26 @@ func (m *Manager) Start(ctx context.Context) (*Status, error) {
 		if cur == 1 || cur == 2 {
 			return nil, fmt.Errorf("jdtls already in state %s", m.State())
 		}
-		// crashed (4) or stopping-in-flight (3): try again.
 		from = cur
 	}
-	jar, err := m.EnsureInstalled(ctx)
+
+	// Step 1: ensure the distribution is on disk.
+	rep, err := m.EnsureInstalled(ctx)
 	if err != nil {
 		m.state.Store(0)
 		return nil, err
 	}
+	hostCfg, err := hostConfigDir(rep.Home)
+	if err != nil {
+		m.state.Store(0)
+		return nil, err
+	}
+	if st, err := os.Stat(hostCfg); err != nil || !st.IsDir() {
+		m.state.Store(0)
+		return nil, fmt.Errorf("jdtls: no config for this OS at %s", hostCfg)
+	}
+
+	// Step 2: pick a JRE.
 	jre := m.jrePath
 	if jre == "" {
 		jre = os.Getenv("KAIRO_JRE17_HOME")
@@ -284,60 +299,103 @@ func (m *Manager) Start(ctx context.Context) (*Status, error) {
 		m.state.Store(0)
 		return nil, errors.New("JDT LS requires a JRE 17+; set KAIRO_JRE17_HOME or pass --jre17")
 	}
+	javaBin := filepath.Join(jre, "bin", "java")
+	if _, err := os.Stat(javaBin); err != nil {
+		m.state.Store(0)
+		return nil, fmt.Errorf("JRE 17+ not found at %s", javaBin)
+	}
 
-	// JDT LS is started with a workspace dir; the manager picks
-	// a per-process data dir under dataDir/jdtls/<pid>/.
-	workspace := filepath.Join(m.dataDir, "jdtls-workspace")
-	if err := os.MkdirAll(workspace, 0o755); err != nil {
+	// Step 3: prepare the per-workspace data dir. If no
+	// workspace has been chosen, fall back to a single shared
+	// dir under dataDir/jdtls-workspace/default.
+	ws := m.workspace
+	if ws == "" {
+		ws = filepath.Join(m.dataDir, "jdtls-workspace", "default")
+	}
+	if err := os.MkdirAll(ws, 0o755); err != nil {
 		m.state.Store(0)
 		return nil, err
 	}
-	cmd := exec.CommandContext(ctx,
-		filepath.Join(jre, "bin", "java"),
+
+	// Step 4: open a per-run stderr capture. The file is
+	// appended to so log/history survives a crash; the file
+	// name is unique to this pid so a second start that
+	// happens to reuse the workspace gets a fresh tail.
+	stderrPath := filepath.Join(ws, fmt.Sprintf("jdtls-stderr-%d.log", time.Now().UnixNano()))
+	stderrF, err := os.OpenFile(stderrPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		m.state.Store(0)
+		return nil, err
+	}
+
+	// Step 5: build the launcher command. The Equinox
+	// launcher wants -configuration <config_dir> to find the
+	// right bundle pool for the host OS; without it, the
+	// launcher boots but cannot find the JDT LS bundles.
+	args := []string{
 		"-Declipse.application=org.eclipse.jdt.ls.core.id1",
 		"-Dosgi.bundles.defaultStartLevel=4",
 		"-Declipse.product=org.eclipse.jdt.ls.core.product",
-		"-Ddata.dir="+workspace,
-		"-jar", jar,
-	)
-	cmd.Dir = workspace
+		"-Ddata.dir=" + ws,
+		"-Dlog.level=ALL",
+		"-jar", rep.LauncherJAR,
+		"-configuration", hostCfg,
+		"-data", ws,
+	}
+	cmd := exec.CommandContext(ctx, javaBin, args...)
+	cmd.Dir = rep.Home
 	cmd.Env = append(os.Environ(),
-		"JDTLS_WORKSPACE="+workspace,
+		"JDTLS_WORKSPACE="+ws,
+		"JDTLS_HOME="+rep.Home,
 	)
+	cmd.Stderr = stderrF
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
+		stderrF.Close()
 		m.state.Store(0)
 		return nil, err
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		stderrF.Close()
 		m.state.Store(0)
 		return nil, err
 	}
-	cmd.Stderr = io.Discard
 	if err := cmd.Start(); err != nil {
+		stderrF.Close()
 		m.state.Store(0)
 		return nil, err
 	}
 	m.stdin = stdin
-	m.stdout = bufio.NewReader(stdout)
+	m.stdoutBr = bufio.NewReader(stdout)
+	m.stderrFile = stderrF
+	m.stderrPath = stderrPath
 	m.cmd = cmd
 	m.state.Store(2)
-	m.lastStart = &Status{
-		State:     "running",
-		Pid:       cmd.Process.Pid,
-		Version:   JDTLSVersion,
-		StartedAt: time.Now().Format(time.RFC3339),
-		Jre:       jre,
-		Jar:       jar,
+	st := &Status{
+		State:       "running",
+		Pid:         cmd.Process.Pid,
+		Version:     JDTLSVersion,
+		StartedAt:   time.Now().UTC().Format(time.RFC3339Nano),
+		Jre:         jre,
+		Jar:         rep.LauncherJAR,
+		LauncherJAR: rep.LauncherJAR,
+		Workspace:   ws,
 	}
 	m.mu.Lock()
+	m.lastStart = st
 	m.lastErr = ""
 	m.mu.Unlock()
 	go m.readLoop(stdout)
 	go m.watchExit(cmd)
-	m.dispatch(Event{Type: "state", State: "running", At: time.Now().Format(time.RFC3339)})
-	return m.lastStart, nil
+	m.dispatch(Event{Type: "state", State: "running", At: st.StartedAt})
+	m.logf("jdtls process started", map[string]any{
+		"pid":     st.Pid,
+		"version": JDTLSVersion,
+		"jre":     jre,
+		"home":    rep.Home,
+	})
+	return st, nil
 }
 
 // watchExit waits for the JDT LS process to terminate on its
@@ -347,13 +405,40 @@ func (m *Manager) Start(ctx context.Context) (*Status, error) {
 // process exits without us asking.
 func (m *Manager) watchExit(cmd *exec.Cmd) {
 	state, _ := cmd.Process.Wait()
-	// We are still in `running` only if Stop did not flip us
-	// to 0/3. Use a CAS to mark the crash exactly once.
 	if m.state.CompareAndSwap(2, 4) {
-		m.setLastErr("jdtls exited unexpectedly: " + state.String())
-		m.dispatch(Event{Type: "error", Message: "jdtls exited unexpectedly: " + state.String()})
-		m.dispatch(Event{Type: "state", State: "crashed", At: time.Now().Format(time.RFC3339)})
+		msg := "jdtls exited unexpectedly: " + state.String()
+		m.setLastErr(msg)
+		m.dispatch(Event{Type: "error", Message: msg})
+		m.dispatch(Event{Type: "state", State: "crashed", At: time.Now().UTC().Format(time.RFC3339Nano)})
+		m.maybeAutoRestart()
 	}
+}
+
+// maybeAutoRestart is called from watchExit when the JDT LS
+// crashes. If auto-restart is enabled and we have budget left,
+// we re-enter Start in the background; otherwise we leave the
+// manager in the `crashed` state and let the user click
+// "Restart" in the status bar.
+func (m *Manager) maybeAutoRestart() {
+	m.mu.Lock()
+	budget := m.autoRestartBudget
+	count := m.restartCount
+	m.mu.Unlock()
+	if budget <= 0 || count >= budget {
+		return
+	}
+	m.mu.Lock()
+	m.restartCount++
+	m.mu.Unlock()
+	go func() {
+		// Brief backoff so a tight crash loop does not pin the CPU.
+		time.Sleep(750 * time.Millisecond)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if _, err := m.Start(ctx); err != nil {
+			m.logf("jdtls auto-restart failed", map[string]any{"err": err.Error()})
+		}
+	}()
 }
 
 // Stop terminates the JDT LS process. On Windows the process
@@ -362,10 +447,7 @@ func (m *Manager) watchExit(cmd *exec.Cmd) {
 // the negative PID to take the process group.
 func (m *Manager) Stop(ctx context.Context) error {
 	// Acceptable source states: running (2) and crashed (4).
-	// crashed means watchExit marked it; the OS process is
-	// likely already gone, but we still want to clear cmd,
-	// lastStart.InitializeOK, and reset state to 0.
-	if m.state.Load() != 2 && m.state.Load() != 4 {
+	if s := m.state.Load(); s != 2 && s != 4 {
 		return nil
 	}
 	m.state.Store(3)
@@ -380,12 +462,16 @@ func (m *Manager) Stop(ctx context.Context) error {
 			_ = m.cmd.Process.Kill()
 		}
 	}
+	if m.stderrFile != nil {
+		_ = m.stderrFile.Close()
+		m.stderrFile = nil
+	}
 	m.mu.Lock()
 	if m.lastStart != nil {
 		m.lastStart.InitializeOK = false
 	}
 	m.mu.Unlock()
-	m.dispatch(Event{Type: "state", State: "stopped", At: time.Now().Format(time.RFC3339)})
+	m.dispatch(Event{Type: "state", State: "stopped", At: time.Now().UTC().Format(time.RFC3339Nano)})
 	return nil
 }
 
@@ -398,8 +484,8 @@ func terminateProcessTree(pid int) error {
 	return exec.Command("kill", "-TERM", "-"+strconv.Itoa(pid)).Run()
 }
 
-// Send writes one LSP frame to the JDT LS. Caller is responsible
-// for adding the Content-Length header.
+// Send writes one LSP frame to the JDT LS. Caller is
+// responsible for adding the Content-Length header.
 func (m *Manager) Send(frame []byte) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -414,6 +500,15 @@ func (m *Manager) Send(frame []byte) error {
 // channel is closed when the process exits.
 func (m *Manager) Receive() <-chan []byte {
 	return m.framesOut
+}
+
+// StderrPath returns the absolute path to the per-run stderr
+// log. The status bar surfaces this so the user can open it in
+// a viewer.
+func (m *Manager) StderrPath() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.stderrPath
 }
 
 func (m *Manager) readLoop(rd io.Reader) {
@@ -463,6 +558,9 @@ func readHeaders(br *bufio.Reader) (frameHeader, error) {
 		}
 		line = strings.TrimRight(line, "\r\n")
 		if line == "" {
+			if h.contentLength == 0 {
+				return h, errors.New("missing Content-Length")
+			}
 			return h, nil
 		}
 		if strings.HasPrefix(line, "Content-Length:") {
@@ -486,57 +584,15 @@ func (m *Manager) dispatch(e Event) {
 	}
 }
 
-func verifySHA256(path, expected string) (bool, string, error) {
-	if expected == "" {
-		return true, "", nil
-	}
-	f, err := os.Open(path)
-	if err != nil {
-		return false, "", err
-	}
-	defer f.Close()
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return false, "", err
-	}
-	sum := hex.EncodeToString(h.Sum(nil))
-	return sum == expected, sum, nil
-}
-
-func downloadTo(ctx context.Context, url, dest string) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return err
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("download %s: HTTP %d", url, resp.StatusCode)
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(dest), "jdtls-*.jar.part")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := io.Copy(tmp, resp.Body); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp.Name(), dest)
-}
-
-// Initialized sends the LSP `initialize` request and waits for
+// Initialize sends the LSP `initialize` request and waits for
 // the response. The caller is responsible for `initialized`
 // notification.
 func (m *Manager) Initialize(ctx context.Context, rootURI string, capabilities json.RawMessage) (json.RawMessage, error) {
 	if m.stdin == nil {
 		return nil, errors.New("jdtls is not running")
+	}
+	if capabilities == nil {
+		capabilities = json.RawMessage(`{}`)
 	}
 	req := map[string]interface{}{
 		"jsonrpc": "2.0",
@@ -567,4 +623,15 @@ func (m *Manager) Initialize(ctx context.Context, rootURI string, capabilities j
 	case <-time.After(60 * time.Second):
 		return nil, errors.New("jdtls initialize timed out")
 	}
+}
+
+// FinalizeShutdown is called by main on agent exit to ensure
+// the JDT LS child is reaped even if a Stop was never issued.
+func (m *Manager) FinalizeShutdown() {
+	if s := m.state.Load(); s == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = m.Stop(ctx)
 }

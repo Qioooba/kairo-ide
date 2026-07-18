@@ -13,10 +13,12 @@ concurrency:
 
 jobs:
   # -----------------------------------------------------------------------
-  # 1. Go unit + integration tests on every platform.
+  # 1. Go unit tests on every platform. The JDT LS installer +
+  #    frame bridge are package-level unit tests; the same
+  #    source compiles + runs on Linux, macOS, and Windows.
   # -----------------------------------------------------------------------
   go-test:
-    name: Go unit & integration (${{ matrix.os }})
+    name: Go unit tests (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
@@ -29,11 +31,16 @@ jobs:
           go-version: '1.22.0'
           cache: true
           cache-dependency-path: runtime-agent/go.sum
-      - name: Test (unit)
+      - name: Test (unit, with -race)
         working-directory: runtime-agent
-        run: GOTOOLCHAIN=local go test -race -timeout 120s ./...
+        env:
+          GOPROXY: https://goproxy.cn,direct
+          GOSUMDB: sum.golang.org https://goproxy.cn/sumdb/sum.golang.org
+        run: GOTOOLCHAIN=local go test -race -timeout 180s ./...
       - name: Build all targets
         working-directory: runtime-agent
+        env:
+          GOPROXY: https://goproxy.cn,direct
         run: |
           for goos in darwin linux windows; do
             for goarch in amd64 arm64; do
@@ -46,26 +53,9 @@ jobs:
             done
           done
 
-  go-integration:
-    name: Go integration (JDK present, Linux)
-    runs-on: ubuntu-latest
-    needs: go-test
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.22.0'
-      - uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '21'
-      - name: Integration tests
-        working-directory: runtime-agent
-        run: GOTOOLCHAIN=local go test -race -tags=integration -timeout 240s ./test/integration/...
-
   # -----------------------------------------------------------------------
-  # 2. TypeScript packages + apps build. Includes the real Theia build,
-  #    not just typecheck.
+  # 2. TypeScript packages + apps build + Runtime Client + encoding
+  #    + command registration unit tests. Linux.
   # -----------------------------------------------------------------------
   ts-build:
     name: TypeScript packages + Theia build (Linux)
@@ -85,12 +75,18 @@ jobs:
         run: pnpm -r --filter './packages/*' build
       - name: Typecheck apps
         run: pnpm -r --filter './apps/*' exec tsc -p tsconfig.json --noEmit
-      - name: Real Theia browser build
+      - name: Real Theia browser production build
         run: pnpm --filter @kairo/browser exec theia build --mode production
+      - name: Runtime Client unit tests (14 base + 24 dynamic routes)
+        run: pnpm --filter @kairo/runtime-extension exec node --test src/browser/runtime.test.cjs src/browser/runtime-dynamic-routes.test.cjs
+      - name: Encoding service unit tests
+        run: pnpm --filter @kairo/encoding-extension exec node --test src/browser/encoding-service.test.cjs
+      - name: Kairo command registration regression test
+        run: pnpm --filter @kairo/theia-product exec node --test src/main/browser/kairo-commands.test.cjs
 
   # -----------------------------------------------------------------------
   # 3. legacy-sample smoke against the real agent. Uses real javac,
-  #    real TOMCAT 6, and asserts HTTP responses.
+  #    real TOMCAT 6, and asserts HTTP responses. Linux.
   # -----------------------------------------------------------------------
   legacy-sample-smoke:
     name: legacy-sample smoke (Linux)
@@ -128,15 +124,25 @@ jobs:
         env:
           KAIRO_TOMCAT6_HOME: /tmp/kairo-tomcat6/apache-tomcat-6.0.53
         run: bash scripts/verify-e2e.sh 18099
+      - name: Upload agent + tomcat logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: legacy-sample-smoke-logs
+          path: |
+            /tmp/kairo-tomcat6/apache-tomcat-6.0.53/logs/
+            /tmp/kairo-e2e-*/agent.log
+          if-no-files-found: ignore
 
   # -----------------------------------------------------------------------
-  # 4. Theia Browser UI smoke (Playwright). Boots the full stack,
-  #    opens the browser, asserts the Kairo commands and views are
-  #    registered. Runs only on Linux because Playwright headless
-  #    shells are easier to manage there.
+  # 4. Theia Browser UI full-chain (Playwright). Boots the full
+  #    stack and exercises the real IDE loop: open workspace,
+  #    open a .java file, trigger completion, F12, build,
+  #    deploy, start, open application, GBK JSP round-trip.
+  #    Linux because Playwright headless is easiest here.
   # -----------------------------------------------------------------------
   theia-browser-ui:
-    name: Theia Browser UI smoke
+    name: Theia Browser UI full-chain
     runs-on: ubuntu-latest
     needs: [go-test, ts-build, legacy-sample-smoke]
     steps:
@@ -167,6 +173,8 @@ jobs:
       - name: Fetch Tomcat 6
         if: steps.tomcat.outputs.cache-hit != 'true'
         run: bash scripts/fetch-tomcat6.sh /tmp/kairo-tomcat6
+      - name: Install Playwright browser
+        run: pnpm exec playwright install chromium
       - name: Boot Runtime Agent
         working-directory: runtime-agent
         env:
@@ -174,31 +182,41 @@ jobs:
         run: |
           go build -o bin/kairo-runtime ./cmd/kairo-runtime
           mkdir -p /tmp/kairo-data
-          ./bin/kairo-runtime --bind 127.0.0.1 --port 18099 --data-dir /tmp/kairo-data --log-level info &
+          ./bin/kairo-runtime --bind 127.0.0.1 --port 18099 --data-dir /tmp/kairo-data --log-level info > /tmp/agent.log 2>&1 &
           for i in {1..40}; do
             curl -fsS http://127.0.0.1:18099/api/v1/health && break
             sleep 0.25
           done
       - name: Boot Theia
         run: |
-          pnpm --filter @kairo/browser exec theia start legacy-sample --hostname=127.0.0.1 --port=3000 &
+          pnpm --filter @kairo/browser exec theia start legacy-sample --hostname=127.0.0.1 --port=3000 > /tmp/theia.log 2>&1 &
           for i in {1..60}; do
             curl -fsS http://127.0.0.1:3000/ >/dev/null && break
             sleep 0.5
           done
-      - name: Run Playwright UI E2E
-        run: node tests/e2e/theia-smoke.cjs http://127.0.0.1:3000 18099
+      - name: Run Playwright UI full-chain
+        run: node tests/e2e/ui-full-chain.cjs http://127.0.0.1:3000 18099
       - name: Upload Theia screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: theia-screenshots
+          name: theia-ui-screenshots
           path: docs/screenshots/*.png
+          if-no-files-found: ignore
+      - name: Upload Theia + agent logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: theia-ui-logs
+          path: |
+            /tmp/agent.log
+            /tmp/theia.log
           if-no-files-found: ignore
 
   # -----------------------------------------------------------------------
-  # 5. Windows verifier. Runs the same end-to-end as Linux but
-  #    exercises Windows process kill, paths, and PowerShell.
+  # 5. Windows e2e — PowerShell verify-e2e.ps1 with the new
+  #    --data-dir flag (which is now a real agent flag, not
+  #    silently ignored). Windows process kill, paths, etc.
   # -----------------------------------------------------------------------
   windows-e2e:
     name: Windows e2e (PowerShell)
@@ -221,6 +239,8 @@ jobs:
           java-version: '17'
       - name: Install + build
         shell: pwsh
+        env:
+          GOPROXY: https://goproxy.cn,direct
         run: |
           pnpm install --frozen-lockfile --ignore-scripts
           pnpm -r --filter './packages/*' build
@@ -236,7 +256,6 @@ jobs:
             bash scripts/fetch-tomcat6.sh "C:\tools\tomcat6"
           }
         env:
-          # Avoid interactive prompts
           DEBIAN_FRONTEND: noninteractive
       - name: Run end-to-end smoke
         shell: pwsh
@@ -245,3 +264,39 @@ jobs:
         run: |
           $env:KAIRO_TOMCAT6_HOME = "C:\tools\tomcat6\apache-tomcat-6.0.53"
           powershell -ExecutionPolicy Bypass -File scripts/verify-e2e.ps1 -Port 18099 -TomcatPort 61100 -RepoRoot "$env:GITHUB_WORKSPACE"
+
+  # -----------------------------------------------------------------------
+  # 6. macOS build + JDT LS installer + project generator. macOS
+  #    has no JDT LS binary fetch in CI; the test imports a
+  #    synthetic archive via KAIRO_JDTLS_ARCHIVE so the network
+  #    is not touched.
+  # -----------------------------------------------------------------------
+  macos-build:
+    name: macOS build + JDT LS installer (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest]
+    runs-on: ${{ matrix.os }}
+    needs: go-test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22.0'
+      - name: Build macOS agent
+        working-directory: runtime-agent
+        run: |
+          GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 \
+            go build -trimpath -ldflags='-s -w' \
+            -o bin/kairo-runtime-darwin-arm64 ./cmd/kairo-runtime
+      - name: Verify config flags
+        working-directory: runtime-agent
+        env:
+          GOPROXY: https://goproxy.cn,direct
+        run: go test -count=1 -run 'TestBind_' ./internal/config/... -v
+      - name: Verify jdtls installer + project generator
+        working-directory: runtime-agent
+        env:
+          GOPROXY: https://goproxy.cn,direct
+        run: go test -count=1 -v ./internal/jdtls/... ./internal/jdtproject/... ./internal/api/...

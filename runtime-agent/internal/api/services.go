@@ -87,8 +87,18 @@ type EventBus interface {
 // and the JDT LS has been told (via the Initialize LSP request)
 // to be ready; Stop does not return until the process is gone.
 //
+// SetWorkspace selects the per-workspace data dir the JDT LS
+// will use on the next Start. Each workspace gets its own
+// Eclipse .metadata directory; sharing one across workspaces
+// corrupts indexes.
+//
 // Status returns the current state plus enough metadata to
 // render the IDE status bar (state, pid, jre, jar, version).
+//
+// Bridge exposes the WebSocket handler that proxies LSP
+// frames between the Theia LanguageClientContribution and
+// the JDT LS process. The same Manager is shared across all
+// workspaces in a single agent process.
 //
 // The HTTP layer does NOT poll; the agent's event bus is the
 // canonical source of state-change events. Status is what the
@@ -97,4 +107,15 @@ type JDTLS interface {
 	Status() (json.RawMessage, error)
 	Start(payload json.RawMessage) (json.RawMessage, error)
 	Stop() (json.RawMessage, error)
+	SetWorkspace(workspaceID string)
+	Bridge() http.Handler
+}
+
+// JDTProjectGenerator writes the JDT LS-readable project
+// model (invisible project + .classpath/.project +
+// referenced libraries) for a legacy project so the JDT LS
+// can produce accurate completion, hover, and outline.
+type JDTProjectGenerator interface {
+	Generate(payload json.RawMessage) (json.RawMessage, error)
+	Status(workspaceID string) (json.RawMessage, error)
 }

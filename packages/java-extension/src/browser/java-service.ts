@@ -2,47 +2,45 @@
  * Kairo Java service — owns the JDT Language Server lifecycle
  * and exposes its state to the UI.
  *
- * Lifecycle contract (v0.3-jdt-ls-skeleton):
+ * v0.4-java-intelligence state machine:
  *
- *   uninitialized --ensureStarted()--> starting
- *   starting      --agent ready------> ready
- *   starting      --agent error------> crashed
- *   ready         --ensureStopped()--> stopped
- *   any           --crash event------> crashed
+ *   uninitialized  --first call---------> not-installed
+ *   not-installed  --ensureStarted()----> installing
+ *   installing     --download+extract ok-> starting
+ *   starting       --process up---------> initializing
+ *   initializing   --LSP init ok--------> ready
+ *   ready          --ensureStopped()----> stopped
+ *   any            --crash event--------> crashed
+ *   ready          --non-1.6 source-----> degraded
  *
- * We only flip the public `state` to `ready` AFTER the agent
- * has confirmed two things over the wire:
- *   (a) state == "running" (the JVM is up), AND
- *   (b) initializeOk == true (the LSP initialize handshake
- *       succeeded, or we did not ask for one).
+ * The UI must NEVER advertise Java language features (completion,
+ * hover, definition, references, diagnostics, outline) until
+ * the state is `ready` or `degraded`. The status bar's JDT LS
+ * entry shows the real state and a clickable menu: Restart,
+ * Show Logs, Open Install Folder.
  *
- * Anything short of that is `starting` or `crashed`, and the UI
- * must not advertise Java language features. This is the rule
- * the user called out: "只有 JDT LS 真正完成初始化并收到响应，
- * 状态才能变为 ready" — we do not pretend.
+ * The contract is honest: the agent reports back the
+ * distribution status, the per-workspace data dir, the
+ * launcher JAR, the JRE, the running pid, and the initialize
+ * state. We do not move to `ready` until the LSP `initialize`
+ * handshake has succeeded AND the JDT LS has had a chance to
+ * surface its capabilities. The bridge endpoint
+ * /api/v1/jdtls/lsp is the same WebSocket the Theia
+ * LanguageClientContribution uses; the service is responsible
+ * for opening it AFTER the LS is ready.
  */
 
 import { injectable, inject } from '@theia/core/shared/inversify';
-import type { JdtState, JdtStatus, JdtStartRequest, Toolchain } from '@kairo/protocol';
+import type {
+  JdtState,
+  JdtStatus,
+  JdtStartRequest,
+  JdtProjectRequest,
+  JdtProjectResponse,
+  Toolchain,
+  JavaServiceState,
+} from '@kairo/protocol';
 import { KairoRuntimeImpl, KairoError } from '@kairo/runtime-extension';
-
-/**
- * The service-level state machine is a SUPERSET of the
- * protocol's wire JdtState. The two extra values are local
- * UI concepts:
- *
- *   - 'uninitialized': we have not yet asked the agent for
- *     anything. Nothing has been started, nothing is broken.
- *   - 'ready': the wire JDT LS is `running` AND the LSP
- *     initialize handshake succeeded. This is the only state
- *     under which we tell the rest of the IDE "Java language
- *     features are available."
- *
- * The protocol JdtState is what the agent returns over the
- * wire. We never set it to 'uninitialized' or 'ready' — those
- * are computed locally from the wire state.
- */
-export type JavaServiceState = JdtState | 'uninitialized' | 'ready';
 
 @injectable()
 export class KairoJavaService {
@@ -50,25 +48,20 @@ export class KairoJavaService {
 
   protected state: JavaServiceState = 'uninitialized';
   protected status: JdtStatus | undefined;
+  protected lastError: string | undefined;
   protected listeners = new Set<(s: JavaServiceState, st?: JdtStatus) => void>();
   protected startInFlight: Promise<void> | undefined;
 
-  /**
-   * Public state accessor. `uninitialized` is the value the UI
-   * sees before the user has asked for Java; `stopped` is what
-   * the UI sees after a Stop or after a crash.
-   */
   state$(): JavaServiceState {
     return this.state;
   }
 
-  /**
-   * Last full status payload, or undefined if we have not
-   * talked to the agent yet. The status bar uses this to
-   * render pid / jre / version / lastError.
-   */
   lastStatus(): JdtStatus | undefined {
     return this.status;
+  }
+
+  lastError$(): string | undefined {
+    return this.lastError;
   }
 
   onState(fn: (s: JavaServiceState, st?: JdtStatus) => void): () => void {
@@ -79,6 +72,7 @@ export class KairoJavaService {
   protected setState(s: JavaServiceState, st?: JdtStatus): void {
     this.state = s;
     if (st) this.status = st;
+    if (st?.lastError) this.lastError = st.lastError;
     for (const fn of this.listeners) fn(s, this.status);
   }
 
@@ -90,22 +84,34 @@ export class KairoJavaService {
     return this.runtime.request('POST /api/v1/toolchains/import', { path, label });
   }
 
-  /**
-   * Returns the agent's view of the JDT LS right now. Does
-   * NOT change local state; it is a read-through cache
-   * refresher. If we have never talked to the agent, this is
-   * also what tells us the agent has nothing to report.
-   */
   async refreshStatus(): Promise<JdtStatus | undefined> {
     try {
       const st = (await this.runtime.request('GET /api/v1/jdtls', undefined)) as JdtStatus;
       this.status = st;
+      // If the wire state is `running` but the initialize
+      // handshake has not completed, the service is
+      // "initializing", not "ready". Anything other than
+      // ready is reflected locally.
+      if (st.state === 'running' && st.initializeOk) {
+        if (
+          st.sourceLevel &&
+          st.sourceLevel !== '1.6' &&
+          st.sourceLevel !== '1.7' &&
+          st.sourceLevel !== '1.8'
+        ) {
+          this.setState('degraded', st);
+        } else {
+          this.setState('ready', st);
+        }
+      } else if (st.state === 'running') {
+        this.setState('initializing', st);
+      } else {
+        this.setState(st.state as JdtState, st);
+      }
       return st;
     } catch (err) {
-      // The agent may be down. Keep the previous status, but
-      // surface that the local state should also be `crashed`
-      // so the status bar does not lie about being ready.
       if (err instanceof KairoError) {
+        this.lastError = err.message;
         this.setState('crashed');
       }
       return undefined;
@@ -116,14 +122,18 @@ export class KairoJavaService {
    * Start the JDT LS. Idempotent: a second call while a start
    * is in flight reuses the same promise; while already
    * `ready` it is a no-op. The promise resolves only after
-   * the agent confirms `running` + (when requested)
-   * `initializeOk: true`.
+   * the agent confirms `running` AND the LSP `initialize`
+   * handshake has completed (when the caller passed an
+   * `initializeRootURI`).
+   *
+   * Before reaching `ready`, the service passes through
+   * `not-installed -> installing -> starting -> initializing`
+   * so the status bar shows real progress, not a static label.
    */
   ensureStarted(req: JdtStartRequest = {}): Promise<void> {
     if (this.startInFlight) return this.startInFlight;
-    if (this.state === 'ready') return Promise.resolve();
-
-    this.setState('starting');
+    if (this.state === 'ready' || this.state === 'degraded') return Promise.resolve();
+    this.setState('not-installed');
     this.startInFlight = this.doStart(req).finally(() => {
       this.startInFlight = undefined;
     });
@@ -131,41 +141,33 @@ export class KairoJavaService {
   }
 
   protected async doStart(req: JdtStartRequest): Promise<void> {
+    this.setState('installing');
     try {
       const st = (await this.runtime.request('POST /api/v1/jdtls', req)) as JdtStatus;
-      // The agent returns running ONLY after the process is up
-      // AND (if a root URI was sent) the LSP initialize
-      // handshake returned. We accept either:
-      //   - state == "running" and (no root was sent, or
-      //     initializeOk == true)  →  ready
-      //   - state == "running" but initializeOk == false  →
-      //     still starting (the UI must keep waiting)
-      //   - state == "starting"   →  still starting
-      //   - anything else         →  crashed
+      this.status = st;
+      // Decision tree mirrors refreshStatus: only `running`
+      // AND `initializeOk == true` reaches `ready` (or
+      // `degraded` for non-Java 6 sources).
       if (st.state === 'running' && st.initializeOk) {
+        if (st.sourceLevel && !isLegacySourceLevel(st.sourceLevel)) {
+          this.setState('degraded', st);
+          return;
+        }
         this.setState('ready', st);
         return;
       }
-      if (st.state === 'running' || st.state === 'starting') {
+      if (st.state === 'running') {
+        this.setState('initializing', st);
+        return;
+      }
+      if (st.state === 'starting') {
         this.setState('starting', st);
-        // The agent says "running but not initialized". We
-        // surface this honestly: a JDT LS without an
-        // initialize handshake cannot serve the UI. Crash
-        // locally so the status bar shows the right thing.
-        if (st.state === 'running' && !st.initializeOk && req.initializeRootURI) {
-          this.setState('crashed', st);
-          throw new Error(
-            'JDT LS process is up but the LSP initialize handshake did not complete: ' +
-              (st.lastError ?? 'no initialize response'),
-          );
-        }
         return;
       }
       this.setState('crashed', st);
       throw new Error(`JDT LS did not reach running: state=${st.state} lastError=${st.lastError ?? ''}`);
     } catch (err) {
-      // Network / agent error / 4xx / 5xx. Already in starting
-      // or crashed; ensure the final state is crashed.
+      this.lastError = err instanceof Error ? err.message : String(err);
       this.setState('crashed');
       throw err;
     }
@@ -179,7 +181,7 @@ export class KairoJavaService {
   async ensureStopped(): Promise<JdtStatus> {
     const st = (await this.runtime.request('DELETE /api/v1/jdtls', undefined)) as JdtStatus;
     this.status = st;
-    this.setState(st.state === 'stopped' ? 'stopped' : 'starting', st);
+    this.setState(st.state === 'stopped' ? 'stopped' : 'stopping', st);
     return st;
   }
 
@@ -197,8 +199,34 @@ export class KairoJavaService {
     }
     return this.ensureStarted(req);
   }
+
+  /**
+   * Render the JDT LS project model for a legacy project.
+   * Returns the absolute paths the JDT LS will use, and the
+   * generated classpath XML on disk. The frontend uses this
+   * to point the Theia Java LanguageClientContribution at
+   * the right workspace.
+   */
+  async generateProject(req: JdtProjectRequest): Promise<JdtProjectResponse> {
+    return this.runtime.request('POST /api/v1/jdtls/project', req);
+  }
+
+  /**
+   * The current Theia-side state, derived from the wire
+   * state + the install state. Used by the status bar.
+   */
+  effectiveState(): JavaServiceState {
+    return this.state;
+  }
+}
+
+function isLegacySourceLevel(level: string): boolean {
+  return level === '1.5' || level === '1.6' || level === '1.7' || level === '1.8';
 }
 
 export function bindJavaExtension(bind: any): void {
   bind(KairoJavaService).toSelf().inSingletonScope();
 }
+
+// Re-export the protocol types for convenience.
+export type { JdtState, JdtStatus, JdtStartRequest, JdtProjectRequest, JdtProjectResponse, JavaServiceState };

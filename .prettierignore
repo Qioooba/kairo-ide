@@ -1,0 +1,59 @@
+# Auto-generated / dependency files (do not reformat)
+pnpm-lock.yaml
+package-lock.json
+yarn.lock
+**/*.min.js
+**/*.min.css
+**/*.bundle.js
+
+# Build outputs
+apps/*/lib/
+apps/*/out/
+apps/*/gen/
+apps/*/dist/
+apps/*/src-gen/
+apps/*/esbuild.mjs
+apps/*/gen-esbuild.*.mjs
+packages/*/lib/
+packages/*/out/
+packages/*/src-gen/
+runtime-agent/bin/
+runtime-agent/dist/
+
+# Test output / scratch
+**/*.test-output.txt
+**/runtime-test-raw.txt
+**/api-smoke-raw.txt
+**/probe-raw.txt
+**/playwright-report/
+**/test-results/
+**/playwright/.cache/
+
+# Bundled third-party
+bundled/tomcat6/apache-tomcat-*/
+bundled/jdk*/
+bundled/jre*/
+bundled/eclipse-jdt-ls/
+
+# Sample project transient
+legacy-sample/build/
+legacy-sample/dist/
+legacy-sample/work/
+legacy-sample/temp/
+legacy-sample/logs/
+
+# Local user state
+.runtime/
+.runtime-tmp/
+.legacyflow/
+.user/
+.config/
+
+# Generated docs
+docs/api/
+
+# Backend bundled crates / large files
+*.dmg
+*.AppImage
+*.deb
+*.rpm

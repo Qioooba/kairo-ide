@@ -117,6 +117,9 @@ func (f *fakeJDTLS) Stop() (json.RawMessage, error) {
 	return json.Marshal(jdtlsTestStatus{State: f.state, JRE: f.jre, Jar: f.jar})
 }
 
+func (f *fakeJDTLS) Bridge() http.Handler { return http.NotFoundHandler() }
+func (f *fakeJDTLS) SetWorkspace(string)  {}
+
 type jdtlsTestStatus struct {
 	State        string `json:"state"`
 	Pid          int    `json:"pid,omitempty"`

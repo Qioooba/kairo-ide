@@ -78,6 +78,11 @@ Step "agent.start" {
   $env:KAIRO_DATA_DIR = $dataDir
   $env:KAIRO_TOMCAT6_HOME = $KairoTomcat6Home
   $agentBin = Join-Path $RepoRoot "runtime-agent\bin\kairo-runtime.exe"
+  # The agent supports both --data-dir and KAIRO_DATA_DIR. We
+  # pass the flag explicitly so the script's behaviour does
+  # not depend on environment variables that may or may not
+  # be inherited from the calling shell. --data-dir is a
+  # first-class flag (see runtime-agent/internal/config).
   $args = @("--bind", "127.0.0.1", "--port", "$Port",
             "--data-dir", $dataDir, "--log-level", "info")
   $proc = Start-Process -FilePath $agentBin -ArgumentList $args -PassThru -NoNewWindow

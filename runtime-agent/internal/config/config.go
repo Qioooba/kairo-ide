@@ -184,6 +184,10 @@ func Bind(args []string) (Config, string, error) {
 	port := fs.Int("port", 0, "port (overrides config)")
 	logLevel := fs.String("log-level", "", "log level (debug|info|warn|error)")
 	requireAuth := fs.Bool("require-auth", false, "require auth on loopback")
+	dataDir := fs.String("data-dir", "", "data directory (overrides KAIRO_DATA_DIR / config)")
+	bundledDir := fs.String("bundled-dir", "", "bundled directory (overrides KAIRO_BUNDLED_DIR / config)")
+	tlsCert := fs.String("tls-cert", "", "TLS certificate path")
+	tlsKey := fs.String("tls-key", "", "TLS key path")
 	if err := fs.Parse(args); err != nil {
 		return Config{}, "", err
 	}
@@ -203,6 +207,18 @@ func Bind(args []string) (Config, string, error) {
 	}
 	if *requireAuth {
 		cfg.RequireAuth = true
+	}
+	if *dataDir != "" {
+		cfg.DataDir = *dataDir
+	}
+	if *bundledDir != "" {
+		cfg.BundledDir = *bundledDir
+	}
+	if *tlsCert != "" {
+		cfg.TLSCert = *tlsCert
+	}
+	if *tlsKey != "" {
+		cfg.TLSKey = *tlsKey
 	}
 	return cfg, *configPath, cfg.Validate()
 }
