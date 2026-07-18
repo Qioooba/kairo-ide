@@ -4,6 +4,8 @@
   "private": true,
   "description": "End-to-end smoke for the Theia browser IDE. Runs against a live Theia + Runtime Agent pair.",
   "scripts": {
-    "test": "node tests/e2e/theia-smoke.cjs"
+    "test": "node tests/e2e/theia-smoke.cjs",
+    "test:api": "node tests/e2e/api-smoke.cjs",
+    "test:full": "node tests/e2e/full-chain.cjs"
   }
 }
