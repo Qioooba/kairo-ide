@@ -17,7 +17,8 @@
   "dependencies": {
     "@kairo/protocol": "workspace:*",
     "@kairo/runtime-extension": "workspace:*",
-    "@theia/core": "1.73.1"
+    "@theia/core": "1.73.1",
+    "@theia/filesystem": "1.73.1"
   },
   "devDependencies": {
     "typescript": "5.5.4"

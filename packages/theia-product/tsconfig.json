@@ -17,6 +17,7 @@
     { "path": "../search-extension" },
     { "path": "../jsp-extension" },
     { "path": "../tomcat-extension" },
-    { "path": "../java-extension" }
+    { "path": "../java-extension" },
+    { "path": "../encoding-extension" }
   ]
 }

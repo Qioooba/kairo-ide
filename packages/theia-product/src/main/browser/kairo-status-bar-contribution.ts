@@ -16,10 +16,13 @@ import {
   FrontendApplicationContribution,
   FrontendApplication,
 } from '@theia/core/lib/browser';
+import { Disposable } from '@theia/core/lib/common/disposable';
 import { KairoRuntimeImpl, EventStream, KairoError } from '@kairo/runtime-extension';
 import { KairoProjectService } from '@kairo/project-extension';
 import { KairoServerService } from '@kairo/tomcat-extension';
 import { KairoJavaService, JavaServiceState } from '@kairo/java-extension';
+import { KairoEncodingServiceImpl } from '@kairo/encoding-extension';
+import { EditorManager } from '@theia/editor/lib/browser/editor-manager';
 import type { ServerInstance } from '@kairo/protocol';
 
 @injectable()
@@ -29,11 +32,14 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
   @inject(KairoProjectService) protected projectSvc!: KairoProjectService;
   @inject(KairoServerService) protected serverSvc!: KairoServerService;
   @inject(KairoJavaService) protected javaSvc!: KairoJavaService;
+  @inject(KairoEncodingServiceImpl) protected encodingSvc!: KairoEncodingServiceImpl;
+  @inject(EditorManager) protected editorManager!: EditorManager;
 
   protected eventStream: EventStream | undefined;
   protected unsubscribeStatus: (() => void) | undefined;
   protected unsubscribeServerEvents: (() => void) | undefined;
   protected unsubscribeJdtState: (() => void) | undefined;
+  protected unsubscribeEditor: Disposable | undefined;
   protected pollTimer: ReturnType<typeof setInterval> | undefined;
 
   @postConstruct()
@@ -58,7 +64,7 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
     });
     this.statusBar.setElement('kairo.encoding', {
       text: '$(text) Encoding: -',
-      tooltip: 'Default file encoding',
+      tooltip: 'Encoding of the active editor (UTF-8 default)',
       alignment: StatusBarAlignment.LEFT,
       priority: 98,
     });
@@ -81,9 +87,13 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
     this.unsubscribeStatus = this.eventStream.onStatus(s => this.setRuntimeStatus(s));
     this.unsubscribeServerEvents = this.eventStream.on('server.state', () => this.refreshServerStatus());
     this.unsubscribeJdtState = this.javaSvc.onState((s, st) => this.setJdtStatus(s, st));
+    this.unsubscribeEditor = this.editorManager.onCurrentEditorChanged(() =>
+      this.refreshEncodingStatus(),
+    );
     // Pull the current JDT LS state once on start so the
     // status bar shows truth after a reconnect / window reload.
     void this.refreshJdtStatus();
+    void this.refreshEncodingStatus();
     // Poll once on start so the user immediately sees the
     // current state. After that the WebSocket keeps things in sync.
     try {
@@ -108,6 +118,7 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
     this.unsubscribeStatus?.();
     this.unsubscribeServerEvents?.();
     this.unsubscribeJdtState?.();
+    this.unsubscribeEditor?.dispose();
     this.eventStream?.close();
     if (this.pollTimer) clearInterval(this.pollTimer);
   }
@@ -166,6 +177,36 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
   protected async refreshJdtStatus(): Promise<void> {
     const st = await this.javaSvc.refreshStatus();
     this.setJdtStatus(this.javaSvc.state$(), st);
+  }
+
+  /**
+   * Render the encoding of the active editor. The encoding
+   * service keeps a per-URI override; the EncodingRegistry
+   * is the source of truth, this is just the rendering.
+   */
+  protected refreshEncodingStatus(): void {
+    const w = this.editorManager.currentEditor;
+    const uri = w?.editor?.document?.uri;
+    if (!uri) {
+      this.statusBar.setElement('kairo.encoding', {
+        text: '$(text) Encoding: -',
+        tooltip: 'No active editor',
+        alignment: StatusBarAlignment.LEFT,
+        priority: 98,
+      });
+      return;
+    }
+    const enc = this.encodingSvc.getEncodingFor(uri as any);
+    const isOverride = enc !== 'utf-8';
+    this.statusBar.setElement('kairo.encoding', {
+      text: `$(text) Encoding: ${enc}${isOverride ? ' *' : ''}`,
+      tooltip:
+        `${uri.toString()}\n` +
+        `Encoding: ${enc}${isOverride ? ' (override)' : ' (default)'}\n` +
+        'Kairo: Reopen with Encoding / Save with Encoding to change.',
+      alignment: StatusBarAlignment.LEFT,
+      priority: 98,
+    });
   }
 
   protected setRuntimeStatus(s: 'connecting' | 'open' | 'disconnected' | 'closed'): void {

@@ -17,6 +17,7 @@ import {
   WidgetFactory,
   WidgetManager,
 } from '@theia/core/lib/browser';
+import { CommandContribution } from '@theia/core/lib/common';
 import {
   KairoServersWidget,
   KairoBuildsWidget,
@@ -25,6 +26,7 @@ import {
   KairoViewsContribution,
 } from './kairo-views-contribution';
 import { KairoStatusBarContribution } from './kairo-status-bar-contribution';
+import { KairoEncodingCommandsContribution } from '@kairo/encoding-extension';
 
 export const KAIRO_SERVERS_FACTORY_ID = 'kairo-servers';
 export const KAIRO_BUILDS_FACTORY_ID = 'kairo-builds';
@@ -36,6 +38,17 @@ export function bindKairoFrontend(bind: interfaces.Bind): void {
   bind(FrontendApplicationContribution).toService(KairoStatusBarContribution);
   bind(KairoViewsContribution).toSelf().inSingletonScope();
   bind(FrontendApplicationContribution).toService(KairoViewsContribution);
+  // The Kairo views contribution also registers commands
+  // (Build / Build & Deploy / Start / Stop / etc.). Bind
+  // it as a CommandContribution so Theia's command registry
+  // picks up the methods. (Previously the
+  // registerCommands(registry) method existed but no one
+  // called it — v0.3-encoding fixes this so the palette
+  // entries actually appear.)
+  bind(CommandContribution).toService(KairoViewsContribution);
+
+  bind(KairoEncodingCommandsContribution).toSelf().inSingletonScope();
+  bind(CommandContribution).toService(KairoEncodingCommandsContribution);
 
   bind(KairoServersWidget).toSelf();
   bind(KairoBuildsWidget).toSelf();
