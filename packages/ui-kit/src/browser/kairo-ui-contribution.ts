@@ -130,9 +130,6 @@ const KAIRO_DARK_VARS: Record<string, string> = {
   '--theia-tab-unfocusedActiveBackground': '#252629',
   '--theia-tab-closeButton': '#8b8f96',
   '--theia-editorPane-background': '#1e1f22',
-  '--theia-editor-foreground': '#dfe1e5',
-  '--theia-editor-background': '#1e1f22',
-  '--theia-editorLineNumber-foreground': '#5d6166',
   '--theia-breadcrumb-background': '#1e1f22',
   '--theia-breadcrumb-foreground': '#8b8f96',
   '--theia-breadcrumb-activeForeground': '#c5c8cc',
@@ -350,7 +347,7 @@ html, body {
   background: var(--theia-selected-text-background);
 }
 
-/* ====== Scrollbars — thin, modern, Zed/JetBrains style ====== */
+/* ====== Scrollbars — thin, modern, JetBrains/Zed style ====== */
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;
@@ -363,7 +360,8 @@ html, body {
   border-radius: 5px;
   border: 2px solid transparent;
   background-clip: padding-box;
-  min-height: 30px;
+  min-height: 36px;
+  transition: background 150ms ease;
 }
 ::-webkit-scrollbar-thumb:hover {
   background: var(--theia-scrollbarSlider-hoverBackground);
@@ -379,7 +377,7 @@ html, body {
   background: transparent;
 }
 
-/* ====== Activity Bar ====== */
+/* ====== Activity Bar — subtle, modern ====== */
 .theia-app-left.theia-app-sides,
 .theia-app-sidebar-container {
   background: var(--theia-activityBar-background) !important;
@@ -388,50 +386,48 @@ html, body {
   border-right: 1px solid var(--theia-activityBar-border) !important;
 }
 .theia-app-sides .lm-TabBar-content {
-  padding: 4px 0 !important;
-  gap: 2px !important;
+  padding: 6px 0 !important;
+  gap: 1px !important;
 }
 .theia-app-sides .lm-TabBar-tab {
   color: var(--theia-activityBar-inactiveForeground) !important;
   background: transparent !important;
-  height: 36px !important;
-  min-height: 36px !important;
   border-radius: 6px !important;
-  margin: 0 6px !important;
+  margin: 1px 5px !important;
   padding: 0 !important;
   position: relative;
-  transition: color 120ms ease, background 120ms ease;
+  transition: color 140ms cubic-bezier(0.4,0,0.2,1), background 140ms cubic-bezier(0.4,0,0.2,1);
 }
 .theia-app-sides .lm-TabBar-tab:hover {
   color: var(--theia-sideBar-foreground) !important;
-  background: rgba(255,255,255,0.05) !important;
+  background: rgba(255,255,255,0.06) !important;
 }
 .theia-app-sides .lm-TabBar-tab.lm-mod-current {
-  color: var(--theia-activityBar-foreground) !important;
-  background: rgba(124,92,191,0.12) !important;
+  color: var(--theia-brand-color1) !important;
+  background: rgba(124,92,191,0.15) !important;
 }
 .theia-app-sides .lm-TabBar-tab.lm-mod-current::before {
   content: '';
   position: absolute;
   left: 0;
-  top: 6px;
-  bottom: 6px;
+  top: 8px;
+  bottom: 8px;
   width: 2px;
-  background: var(--theia-activityBar-activeBorder);
+  background: var(--theia-brand-color1);
   border-radius: 0 2px 2px 0;
-}
-.theia-app-sides .lm-TabBar-tab .lm-TabBar-tabIcon,
-.theia-app-sides .lm-TabBar-tab .theia-icon {
-  font-size: 18px !important;
-}
-.theia-app-sides .lm-TabBar-tab.lm-mod-current .theia-icon,
-.theia-app-sides .lm-TabBar-tab.lm-mod-current .lm-TabBar-tabIcon,
-.theia-app-sides .lm-TabBar-tab.lm-mod-current .codicon {
-  color: var(--theia-activityBar-foreground) !important;
+  box-shadow: 0 0 8px rgba(124,92,191,0.5);
 }
 .theia-app-sides .lm-TabBar-tab .codicon {
   color: inherit !important;
   font-size: 20px !important;
+}
+.theia-app-sides .lm-TabBar-tab .lm-TabBar-tabIcon,
+.theia-app-sides .lm-TabBar-tab .theia-icon {
+  font-size: 20px !important;
+}
+.theia-app-sides .lm-TabBar-tab.lm-mod-current .theia-icon,
+.theia-app-sides .lm-TabBar-tab.lm-mod-current .codicon {
+  color: var(--theia-brand-color1) !important;
 }
 
 /* ====== Sidebar / Explorer Panel ====== */
@@ -443,13 +439,12 @@ html, body {
 .theia-sidepanel-toolbar {
   background: var(--theia-sideBarSectionHeader-background) !important;
   border-bottom: 1px solid var(--theia-sideBarSectionHeader-border) !important;
-  padding: 4px 8px !important;
+  padding: 6px 10px !important;
   font-size: 11px !important;
   font-weight: 600 !important;
   text-transform: uppercase !important;
-  letter-spacing: 0.5px !important;
-  color: var(--theia-sideBarSectionHeader-foreground) !important;
-  min-height: 30px !important;
+  letter-spacing: 0.6px !important;
+  color: var(--theia-ui-font-color2) !important;
   display: flex !important;
   align-items: center !important;
 }
@@ -458,10 +453,10 @@ html, body {
   font-weight: 600 !important;
   text-transform: uppercase !important;
   letter-spacing: 0.7px !important;
-  color: var(--theia-sideBarTitle-foreground) !important;
+  color: var(--theia-ui-font-color2) !important;
 }
 
-/* ====== File Tree / Navigator ====== */
+/* ====== File Tree / Navigator — JetBrains compact style ====== */
 .theia-Tree,
 .theia-TreeContainer {
   background: var(--theia-sideBar-background) !important;
@@ -470,26 +465,26 @@ html, body {
   outline: none !important;
 }
 .theia-TreeNode {
-  line-height: 22px !important;
-  min-height: 22px !important;
-  padding: 0 8px !important;
-  border-radius: 3px !important;
-  margin: 0 2px !important;
-  transition: background 80ms ease;
+  line-height: 24px !important;
+  padding: 0 8px 0 4px !important;
+  border-radius: 4px !important;
+  margin: 0 4px !important;
+  transition: background 90ms ease;
 }
 .theia-TreeNode:hover {
-  background: var(--theia-list-hoverBackground) !important;
+  background: rgba(255,255,255,0.05) !important;
 }
 .theia-TreeNode.theia-mod-selected {
-  background: var(--theia-list-inactiveSelectionBackground) !important;
+  background: rgba(255,255,255,0.08) !important;
   color: var(--theia-list-inactiveSelectionForeground) !important;
 }
 .theia-TreeNode.theia-mod-selected.theia-mod-focus {
-  background: var(--theia-list-activeSelectionBackground) !important;
-  color: var(--theia-list-activeSelectionForeground) !important;
+  background: rgba(124,92,191,0.2) !important;
+  color: #ffffff !important;
+  box-shadow: inset 2px 0 0 var(--theia-brand-color1);
 }
 .theia-TreeNodeSegment {
-  line-height: 22px !important;
+  line-height: 24px !important;
 }
 .theia-TreeNodeSegmentGrow.name,
 .theia-TreeNode .name {
@@ -498,11 +493,12 @@ html, body {
 }
 .theia-FileTreeNode,
 .theia-DirNode {
-  padding: 0 4px !important;
+  padding: 0 4px 0 2px !important;
 }
 .theia-FileTreeNode .file-icon,
 .theia-DirNode .folder-icon {
-  margin-right: 4px !important;
+  margin-right: 6px !important;
+  font-size: 15px !important;
 }
 .theia-TreeNode .theia-TreeNodeTail {
   display: flex !important;
@@ -511,9 +507,9 @@ html, body {
 }
 .theia-TreeNode .theia-TreeNodeTail .codicon {
   opacity: 0;
-  transition: opacity 100ms ease;
+  transition: opacity 120ms ease, background 120ms ease;
   font-size: 14px !important;
-  padding: 2px !important;
+  padding: 3px !important;
   border-radius: 3px !important;
   color: var(--theia-ui-font-color2) !important;
 }
@@ -521,27 +517,30 @@ html, body {
   opacity: 1;
 }
 .theia-TreeNode .theia-TreeNodeTail .codicon:hover {
-  background: rgba(255,255,255,0.08) !important;
+  background: rgba(255,255,255,0.1) !important;
   color: var(--theia-ui-font-color0) !important;
 }
-/* Expansion toggle */
 .theia-ExpansionToggle {
-  width: 16px !important;
-  height: 22px !important;
+  width: 20px !important;
   display: inline-flex !important;
   align-items: center !important;
   justify-content: center !important;
   color: var(--theia-ui-font-color2) !important;
-  transition: transform 120ms ease;
+  transition: transform 150ms cubic-bezier(0.4,0,0.2,1), color 120ms ease;
+  border-radius: 3px !important;
 }
 .theia-ExpansionToggle.codicon {
   font-size: 12px !important;
+}
+.theia-ExpansionToggle:hover {
+  color: var(--theia-ui-font-color0) !important;
+  background: rgba(255,255,255,0.06) !important;
 }
 .theia-ExpansionToggle.theia-mod-collapsed {
   transform: rotate(-90deg);
 }
 
-/* ====== Editor Tabs ====== */
+/* ====== Editor Tabs — Zed/VS Code modern style ====== */
 #theia-editor-card-area,
 .theia-editor-area,
 .theia-app-centers,
@@ -562,13 +561,11 @@ html, body {
   border-right: 1px solid var(--theia-tab-border) !important;
   border-bottom: 1px solid var(--theia-editorGroupHeader-tabsBorder) !important;
   padding: 0 12px !important;
-  min-height: 35px !important;
-  height: 35px !important;
   border-top: none !important;
   border-left: none !important;
   border-radius: 0 !important;
   position: relative;
-  transition: background 100ms ease, color 100ms ease;
+  transition: background 120ms ease, color 120ms ease;
 }
 .lm-TabBar.theia-app-centers .lm-TabBar-tab:hover {
   background: var(--theia-tab-hoverBackground) !important;
@@ -582,16 +579,15 @@ html, body {
 .lm-TabBar.theia-app-centers .lm-TabBar-tab.lm-mod-current::after {
   content: '';
   position: absolute;
-  left: 12px;
-  right: 12px;
+  left: 0;
+  right: 0;
   bottom: -1px;
   height: 2px;
-  background: var(--theia-tab-activeBorder);
-  border-radius: 1px 1px 0 0;
+  background: var(--theia-brand-color1);
+  border-radius: 0;
 }
 .lm-TabBar.theia-app-centers .lm-TabBar-tabLabel {
   font-size: 13px !important;
-  line-height: 35px !important;
 }
 .lm-TabBar.theia-app-centers .lm-TabBar-tabIcon,
 .lm-TabBar.theia-app-centers .lm-TabBar-tab .theia-file-icons {
@@ -599,43 +595,40 @@ html, body {
   font-size: 14px !important;
 }
 .lm-TabBar.theia-app-centers .lm-TabBar-tabCloseIcon {
-  margin-left: 6px !important;
-  width: 16px !important;
-  height: 16px !important;
-  border-radius: 3px !important;
+  margin-left: 8px !important;
+  width: 18px !important;
+  height: 18px !important;
+  border-radius: 4px !important;
   display: inline-flex !important;
   align-items: center !important;
   justify-content: center !important;
   font-size: 14px !important;
   color: var(--theia-tab-closeButton) !important;
   opacity: 0;
-  transition: opacity 80ms ease, background 80ms ease;
+  transition: opacity 100ms ease, background 100ms ease, color 100ms ease;
 }
 .lm-TabBar.theia-app-centers .lm-TabBar-tab:hover .lm-TabBar-tabCloseIcon,
-.lm-TabBar.theia-app-centers .lm-TabBar-tab.lm-mod-current .lm-TabBar-tabCloseIcon,
-.lm-TabBar.theia-app-centers .lm-TabBar-tab.theia-mod-dirty .lm-TabBar-tabCloseIcon {
+.lm-TabBar.theia-app-centers .lm-TabBar-tab.lm-mod-current .lm-TabBar-tabCloseIcon {
   opacity: 1;
 }
 .lm-TabBar.theia-app-centers .lm-TabBar-tabCloseIcon:hover {
   background: rgba(255,255,255,0.1) !important;
   color: var(--theia-ui-font-color0) !important;
 }
-/* Dirty tab indicator — yellow dot */
-.lm-TabBar.theia-app-centers .lm-TabBar-tab.theia-mod-dirty .lm-TabBar-tabIcon.theia-mod-dirty,
-.lm-TabBar.theia-app-centers .lm-TabBar-tab.theia-mod-dirty .theia-dirty-dot {
+.lm-TabBar.theia-app-centers .lm-TabBar-tab.theia-mod-dirty .lm-TabBar-tabCloseIcon {
+  opacity: 1;
   color: var(--theia-warning-color1) !important;
 }
-.lm-TabBar.theia-app-centers .lm-TabBar-tab .lm-TabBar-tabCloseIcon.theia-mod-dirty,
-.lm-TabBar.theia-app-centers .lm-TabBar-tab.theia-mod-dirty .close-icon {
-  display: none !important;
+.lm-TabBar.theia-app-centers .lm-TabBar-tab.theia-mod-dirty .lm-TabBar-tabCloseIcon:hover {
+  color: var(--theia-ui-font-color0) !important;
 }
-/* Tab actions bar */
+
+/* Breadcrumbs */
 .theia-editor-crumbbar,
 .theia-breadcrumbs {
   background: var(--theia-breadcrumb-background) !important;
   border-bottom: 1px solid var(--theia-editorGroupHeader-tabsBorder) !important;
-  padding: 0 12px !important;
-  height: 22px !important;
+  padding: 0 14px !important;
   display: flex !important;
   align-items: center !important;
   font-size: 12px !important;
@@ -643,19 +636,25 @@ html, body {
 .breadcrumb-item {
   color: var(--theia-breadcrumb-foreground) !important;
   font-size: 12px !important;
-  padding: 0 4px !important;
+  padding: 0 6px !important;
+  transition: color 100ms ease;
+  border-radius: 3px !important;
 }
 .breadcrumb-item:first-child {
   padding-left: 0 !important;
 }
 .breadcrumb-item:hover {
   color: var(--theia-breadcrumb-activeForeground) !important;
+  background: rgba(255,255,255,0.04) !important;
 }
 .breadcrumb-item.folder,
 .breadcrumb-item.file {
   display: inline-flex !important;
   align-items: center !important;
-  gap: 3px !important;
+  gap: 4px !important;
+}
+.breadcrumb-item .codicon {
+  font-size: 12px !important;
 }
 
 /* ====== Main Editor Area ====== */
@@ -669,11 +668,11 @@ html, body {
   color: var(--theia-editorLineNumber-foreground) !important;
 }
 .monaco-editor .current-line {
-  background: rgba(255,255,255,0.03) !important;
+  background: rgba(255,255,255,0.04) !important;
   border: none !important;
 }
 
-/* ====== Status Bar ====== */
+/* ====== Status Bar — elegant gradient ====== */
 #theia-statusBar,
 #theia-statusBar .area {
   background: var(--theia-statusBar-background) !important;
@@ -684,8 +683,6 @@ html, body {
 }
 #theia-statusBar .area .element {
   padding: 0 10px !important;
-  height: 22px !important;
-  line-height: 22px !important;
   font-size: 12px !important;
   transition: background 100ms ease;
   white-space: nowrap;
@@ -705,7 +702,7 @@ html, body {
 }
 #theia-statusBar .codicon {
   font-size: 13px !important;
-  margin-right: 4px !important;
+  margin-right: 5px !important;
 }
 
 /* ====== Terminal ====== */
@@ -726,7 +723,7 @@ html, body {
 .xterm .xterm-rows {
   font-family: var(--theia-monospace-font-family) !important;
   font-size: 12.5px !important;
-  line-height: 1.5 !important;
+  line-height: 1.55 !important;
 }
 .terminal-container .xterm-viewport::-webkit-scrollbar {
   width: 8px;
@@ -741,16 +738,11 @@ html, body {
 #theia-bottom-content-panel .lm-TabBar.theia-app-sides {
   background: var(--theia-panel-background) !important;
   border-top: 1px solid var(--theia-panel-border) !important;
-  min-height: 30px !important;
-  height: 30px !important;
 }
 #theia-bottom-split-panel .lm-TabBar .lm-TabBar-tab {
   color: var(--theia-panelTitle-inactiveForeground) !important;
   background: transparent !important;
-  padding: 0 12px !important;
-  height: 29px !important;
-  line-height: 29px !important;
-  min-height: 29px !important;
+  padding: 0 14px !important;
   border-top: none !important;
   border-radius: 0 !important;
   position: relative;
@@ -758,7 +750,7 @@ html, body {
   font-size: 11px !important;
   letter-spacing: 0.5px !important;
   font-weight: 500 !important;
-  transition: color 100ms ease;
+  transition: color 120ms ease;
 }
 #theia-bottom-split-panel .lm-TabBar .lm-TabBar-tab:hover {
   color: var(--theia-panelTitle-activeForeground) !important;
@@ -770,64 +762,85 @@ html, body {
   content: '';
   position: absolute;
   top: 0;
-  left: 8px;
-  right: 8px;
-  height: 1px;
-  background: var(--theia-panelTitle-activeBorder);
+  left: 10px;
+  right: 10px;
+  height: 2px;
+  background: var(--theia-brand-color1);
+  border-radius: 0 0 2px 2px;
+}
+#theia-bottom-split-panel .lm-TabBar-tab .codicon,
+#theia-bottom-split-panel .lm-TabBar-tab .theia-icon {
+  font-size: 13px !important;
+  margin-right: 5px !important;
 }
 
-/* ====== Buttons ====== */
+/* ====== Buttons — polished, modern ====== */
 .theia-button {
   background: var(--theia-button-background) !important;
   color: var(--theia-button-foreground) !important;
   border: none !important;
-  border-radius: 5px !important;
-  padding: 5px 14px !important;
-  font-size: 12.5px !important;
+  border-radius: 6px !important;
+  padding: 6px 16px !important;
+  font-size: 13px !important;
   font-weight: 500 !important;
   cursor: pointer !important;
-  transition: background 120ms ease, transform 60ms ease;
+  transition: background 150ms cubic-bezier(0.4,0,0.2,1), transform 80ms ease, box-shadow 150ms ease;
   font-family: var(--theia-ui-font-family) !important;
   outline: none !important;
-  min-width: 65px !important;
   line-height: 1.4 !important;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
 }
 .theia-button:hover {
   background: var(--theia-button-hoverBackground) !important;
+  box-shadow: 0 2px 8px rgba(124,92,191,0.3);
 }
 .theia-button:active {
   transform: scale(0.97);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.2);
 }
 .theia-button.secondary {
   background: var(--theia-button-secondaryBackground) !important;
   color: var(--theia-button-secondaryForeground) !important;
+  box-shadow: none;
 }
 .theia-button.secondary:hover {
   background: var(--theia-button-secondaryHoverBackground) !important;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.2);
 }
 .theia-button[disabled] {
-  opacity: 0.5 !important;
+  opacity: 0.45 !important;
   cursor: default !important;
   pointer-events: none !important;
+  box-shadow: none !important;
 }
 
-/* ====== Inputs & Controls ====== */
+/* ====== Inputs & Controls — refined ====== */
 .theia-input,
 input[type="text"],
 input[type="search"],
 input[type="number"],
+input[type="email"],
+input[type="password"],
 textarea,
 select {
   background: var(--theia-input-background) !important;
   color: var(--theia-input-foreground) !important;
   border: 1px solid var(--theia-input-border) !important;
-  border-radius: 4px !important;
-  padding: 4px 8px !important;
-  font-size: 12.5px !important;
+  border-radius: 5px !important;
+  padding: 5px 10px !important;
+  font-size: 13px !important;
   font-family: var(--theia-ui-font-family) !important;
   outline: none !important;
-  transition: border-color 120ms ease;
+  transition: border-color 150ms cubic-bezier(0.4,0,0.2,1), box-shadow 150ms ease;
   line-height: 1.4 !important;
+}
+.theia-input:hover,
+input[type="text"]:hover,
+input[type="search"]:hover,
+input[type="number"]:hover,
+textarea:hover,
+select:hover {
+  border-color: #45484d !important;
 }
 .theia-input:focus,
 input[type="text"]:focus,
@@ -836,11 +849,19 @@ input[type="number"]:focus,
 textarea:focus,
 select:focus {
   border-color: var(--theia-focusBorder) !important;
+  box-shadow: 0 0 0 2px rgba(124,92,191,0.2);
 }
 .theia-input::placeholder,
 input::placeholder,
 textarea::placeholder {
   color: var(--theia-input-placeholderForeground) !important;
+}
+/* Checkboxes and radios */
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: var(--theia-brand-color1);
+  width: 14px;
+  height: 14px;
 }
 
 /* Search box */
@@ -849,93 +870,109 @@ textarea::placeholder {
 .search-input {
   background: var(--theia-input-background) !important;
   border: 1px solid var(--theia-input-border) !important;
-  border-radius: 4px !important;
-  padding: 4px 8px 4px 28px !important;
+  border-radius: 5px !important;
+  padding: 5px 10px 5px 30px !important;
   color: var(--theia-input-foreground) !important;
-  font-size: 12.5px !important;
+  font-size: 13px !important;
   outline: none !important;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+.theia-search-box:focus,
+.theia-filterinput:focus,
+.search-input:focus {
+  border-color: var(--theia-focusBorder) !important;
+  box-shadow: 0 0 0 2px rgba(124,92,191,0.15);
 }
 
-/* ====== Dialogs & Modals ====== */
+/* ====== Dialogs & Modals — clean, professional ====== */
 .theia-Dialog,
 .dialogBlock {
   background: var(--theia-notification-background) !important;
   color: var(--theia-notification-foreground) !important;
   border: 1px solid var(--theia-notification-border) !important;
-  border-radius: 10px !important;
-  box-shadow: 0 12px 48px rgba(0,0,0,0.6) !important;
+  border-radius: 12px !important;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.05) !important;
   font-family: var(--theia-ui-font-family) !important;
+  overflow: hidden !important;
 }
 .theia-Dialog .dialogTitle,
 .dialogBlock .dialogTitle {
-  background: transparent !important;
+  background: linear-gradient(180deg, rgba(255,255,255,0.02) 0%, transparent 100%) !important;
   border-bottom: 1px solid var(--theia-widget-border) !important;
-  padding: 14px 20px 12px !important;
+  padding: 16px 20px 14px !important;
   font-size: 14px !important;
   font-weight: 600 !important;
   color: var(--theia-foreground) !important;
-  border-radius: 10px 10px 0 0 !important;
+  letter-spacing: -0.1px !important;
 }
 .theia-Dialog .dialogContent,
 .dialogBlock .dialogContent {
-  padding: 16px 20px !important;
+  padding: 18px 20px !important;
+  font-size: 13px !important;
+  line-height: 1.5 !important;
 }
 .theia-Dialog .dialogControl,
 .dialogBlock .dialogControl {
-  padding: 12px 20px !important;
+  padding: 14px 20px !important;
   border-top: 1px solid var(--theia-widget-border) !important;
   display: flex !important;
   gap: 8px !important;
   justify-content: flex-end !important;
-  background: rgba(0,0,0,0.15) !important;
-  border-radius: 0 0 10px 10px !important;
+  background: rgba(0,0,0,0.2) !important;
 }
 .dialogBlock .dialogContent .dialogSection {
-  margin-bottom: 12px !important;
+  margin-bottom: 14px !important;
 }
 .dialogBlock .dialogContent label {
   color: var(--theia-descriptionForeground) !important;
   font-size: 12px !important;
-  margin-bottom: 4px !important;
+  margin-bottom: 6px !important;
   display: block !important;
+  font-weight: 500 !important;
 }
 
-/* ====== Quick Open / Command Palette ====== */
+/* ====== Quick Open / Command Palette — Zed-style floating ====== */
 .quick-input-widget,
 .quick-open-widget,
 .monaco-quick-open-widget {
   background: var(--theia-quickInput-background) !important;
   border: 1px solid var(--theia-menu-border) !important;
-  border-radius: 8px !important;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.5) !important;
+  border-radius: 10px !important;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.04) !important;
   padding: 0 !important;
+  overflow: hidden !important;
 }
 .quick-input-titlebar,
 .quick-open-widget .monaco-list .monaco-list-title {
   background: var(--theia-quickInputTitle-background) !important;
   border-bottom: 1px solid var(--theia-widget-border) !important;
-  border-radius: 8px 8px 0 0 !important;
-  padding: 8px 14px !important;
+  padding: 10px 16px !important;
   font-size: 11px !important;
   font-weight: 600 !important;
   text-transform: uppercase !important;
-  letter-spacing: 0.5px !important;
+  letter-spacing: 0.6px !important;
+  color: var(--theia-ui-font-color2) !important;
 }
 .quick-input-widget .quick-input-filter,
 .quick-open-widget .monaco-inputbox {
-  padding: 10px 14px !important;
+  padding: 12px 16px !important;
   border-bottom: 1px solid var(--theia-widget-border) !important;
+}
+.quick-input-widget .quick-input-filter .monaco-inputbox,
+.quick-open-widget .monaco-inputbox {
+  font-size: 14px !important;
 }
 .quick-input-widget .quick-input-list,
 .quick-open-widget .monaco-list {
-  padding: 4px !important;
+  padding: 6px !important;
 }
 .quick-input-list .monaco-list-row,
 .quick-open-widget .monaco-list .monaco-list-row {
-  border-radius: 4px !important;
-  padding: 5px 8px !important;
+  border-radius: 5px !important;
+  padding: 7px 10px !important;
   line-height: 1.4 !important;
   font-size: 13px !important;
+  transition: background 80ms ease;
 }
 .quick-input-list .monaco-list-row.focused,
 .quick-open-widget .monaco-list .monaco-list-row.focused {
@@ -953,7 +990,7 @@ textarea::placeholder {
   font-size: 11px !important;
 }
 
-/* ====== Context Menus ====== */
+/* ====== Context Menus — elegant floating ====== */
 .lm-Menu,
 .lm-ContextMenu,
 .theia-context-menu,
@@ -961,19 +998,19 @@ textarea::placeholder {
 .monaco-menu .monaco-menu-container {
   background: var(--theia-menu-background) !important;
   border: 1px solid var(--theia-menu-border) !important;
-  border-radius: 8px !important;
-  padding: 5px !important;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.55) !important;
+  border-radius: 9px !important;
+  padding: 6px !important;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.04) !important;
 }
 .lm-Menu-item,
 .monaco-menu .action-item,
 .monaco-menu .monaco-action-bar .action-item {
   color: var(--theia-menu-foreground) !important;
-  padding: 6px 28px 6px 10px !important;
-  border-radius: 4px !important;
-  font-size: 12.5px !important;
-  margin: 1px 3px !important;
-  transition: background 70ms ease;
+  padding: 7px 30px 7px 12px !important;
+  border-radius: 5px !important;
+  font-size: 13px !important;
+  margin: 1px 2px !important;
+  transition: background 80ms ease, color 80ms ease;
 }
 .lm-Menu-item:hover,
 .lm-Menu-item.lm-mod-active,
@@ -989,7 +1026,7 @@ textarea::placeholder {
 .lm-Menu-item.lm-mod-separator,
 .monaco-menu .menu-separator {
   border-top: 1px solid var(--theia-menu-separatorBackground) !important;
-  margin: 4px 6px !important;
+  margin: 5px 8px !important;
   padding: 0 !important;
   height: 0 !important;
 }
@@ -998,6 +1035,7 @@ textarea::placeholder {
   color: var(--theia-ui-font-color2) !important;
   font-size: 11px !important;
   font-family: var(--theia-monospace-font-family) !important;
+  opacity: 0.8;
 }
 .lm-Menu-itemSubmenuIcon {
   color: var(--theia-ui-font-color2) !important;
@@ -1011,20 +1049,17 @@ textarea::placeholder {
   background: var(--theia-titleBar-activeBackground) !important;
 }
 .lm-MenuBar-content {
-  padding: 0 6px !important;
-  height: 30px !important;
+  padding: 0 8px !important;
   display: flex !important;
   align-items: center !important;
 }
 .lm-MenuBar-item {
   color: var(--theia-titleBar-activeForeground) !important;
   padding: 0 10px !important;
-  height: 26px !important;
-  line-height: 26px !important;
-  font-size: 12.5px !important;
-  border-radius: 4px !important;
-  margin: 0 1px !important;
-  transition: background 100ms ease;
+  font-size: 13px !important;
+  border-radius: 5px !important;
+  margin: 0 2px !important;
+  transition: background 120ms ease;
 }
 .lm-MenuBar-item:hover,
 .lm-MenuBar-item.lm-mod-active {
@@ -1037,68 +1072,83 @@ textarea::placeholder {
 .theia-NotificationContainer .theia-notification {
   background: var(--theia-notification-background) !important;
   border: 1px solid var(--theia-notification-border) !important;
-  border-radius: 8px !important;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.4) !important;
-  padding: 12px 16px !important;
+  border-radius: 10px !important;
+  box-shadow: 0 12px 32px rgba(0,0,0,0.45) !important;
+  padding: 14px 18px !important;
 }
 .theia-notification-message {
   font-size: 13px !important;
   color: var(--theia-notification-foreground) !important;
+  line-height: 1.5 !important;
 }
 .theia-notification-item {
-  padding: 10px 14px !important;
+  padding: 8px 16px !important;
   border-radius: 6px !important;
   font-size: 12px !important;
   background: var(--theia-button-secondaryBackground) !important;
   color: var(--theia-button-secondaryForeground) !important;
   border: none !important;
-  margin: 0 2px !important;
-  transition: background 100ms ease;
+  margin: 0 4px !important;
+  transition: background 120ms ease, transform 80ms ease;
   cursor: pointer !important;
+  font-weight: 500 !important;
 }
 .theia-notification-item:hover {
   background: var(--theia-button-secondaryHoverBackground) !important;
+}
+.theia-notification-item:active {
+  transform: scale(0.97);
 }
 
 /* ====== Tooltips ====== */
 .theia-tooltip,
 .lm-Widget .p-Tip,
 .lm-Tip {
-  background: #2a2d30 !important;
-  color: #dfe1e5 !important;
+  background: #2f3237 !important;
+  color: #e8eaed !important;
   border: 1px solid #3d4148 !important;
-  border-radius: 5px !important;
-  padding: 5px 9px !important;
+  border-radius: 6px !important;
+  padding: 6px 10px !important;
   font-size: 12px !important;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.4) !important;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.4) !important;
   z-index: 50000 !important;
+  line-height: 1.4 !important;
 }
 
 /* ====== Toolbars & Icon Buttons ====== */
 .theia-button .codicon,
 .button .codicon,
 .theia-Icon {
-  font-size: 14px !important;
+  font-size: 15px !important;
 }
 .theia-sidebar-toolbar,
-.theia-view-container .theia-TreeContainer .theia-TreeContainer-ToolBar,
+.theia-view-container .theia-TreeContainer .theia-TreeContainer-ToolBar {
+  display: flex !important;
+  align-items: center !important;
+  gap: 2px !important;
+}
+.theia-sidebar-toolbar .codicon,
 .theia-sidepanel-toolbar .codicon {
   color: var(--theia-ui-font-color2) !important;
+  padding: 4px !important;
+  border-radius: 4px !important;
+  transition: color 120ms ease, background 120ms ease;
+  font-size: 15px !important;
 }
 .theia-sidebar-toolbar .codicon:hover,
 .theia-sidepanel-toolbar .codicon:hover {
   color: var(--theia-ui-font-color0) !important;
-  background: rgba(255,255,255,0.06) !important;
-  border-radius: 3px !important;
+  background: rgba(255,255,255,0.08) !important;
 }
 .codicon {
   font-family: 'codicon' !important;
+  transition: color 120ms ease;
 }
 
 /* ====== Splitter / Sash Handles ====== */
 .lm-SplitPanel-handle {
   background: transparent !important;
-  transition: background 120ms ease;
+  transition: background 150ms ease;
 }
 .lm-SplitPanel-handle:hover {
   background: var(--theia-sash-hoverBorder) !important;
@@ -1107,11 +1157,9 @@ textarea::placeholder {
   background: transparent !important;
 }
 
-/* ====== Monaco Overrides ====== */
+/* ====== Monaco Syntax Highlighting — refined ====== */
 .monaco-editor,
-.monaco-editor .mtk1 {
-  color: #d4d4d4 !important;
-}
+.monaco-editor .mtk1 { color: #d4d4d4 !important; }
 .monaco-editor .mtk5 { color: #569cd6 !important; }
 .monaco-editor .mtk6 { color: #4ec9b0 !important; }
 .monaco-editor .mtk7 { color: #ce9178 !important; }
@@ -1126,18 +1174,18 @@ textarea::placeholder {
   color: #5d6166 !important;
 }
 .monaco-editor .current-line {
-  background: rgba(255,255,255,0.03) !important;
+  background: rgba(255,255,255,0.04) !important;
 }
 .monaco-editor .cursors-layer .cursor {
   border-left: 2px solid #aeafad !important;
 }
 .monaco-editor .core-guide,
 .monaco-editor .indent-guide {
-  border-color: rgba(255,255,255,0.08) !important;
+  border-color: rgba(255,255,255,0.07) !important;
 }
 .monaco-editor .core-guide.active,
 .monaco-editor .indent-guide.active {
-  border-color: rgba(255,255,255,0.15) !important;
+  border-color: rgba(255,255,255,0.14) !important;
 }
 .monaco-editor .selected-text {
   background: #264f78 !important;
@@ -1145,35 +1193,39 @@ textarea::placeholder {
 .monaco-editor .focused .selected-text {
   background: #264f78 !important;
 }
-/* Minimap */
 .monaco-editor .minimap {
-  opacity: 0.7;
+  opacity: 0.65;
 }
-/* Overview ruler */
 .monaco-editor .decorationsOverviewRuler {
-  opacity: 0.6;
+  opacity: 0.55;
 }
 
 /* ====== Monaco Find Widget ====== */
 .monaco-editor .find-widget {
   background: var(--theia-editorWidget-background) !important;
   border: 1px solid var(--theia-editorWidget-border) !important;
-  border-radius: 6px !important;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.4) !important;
-  padding: 4px !important;
+  border-radius: 8px !important;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.45) !important;
+  padding: 6px !important;
 }
 .monaco-editor .find-widget input {
   background: var(--theia-input-background) !important;
   border: 1px solid var(--theia-input-border) !important;
-  border-radius: 4px !important;
+  border-radius: 5px !important;
   color: var(--theia-input-foreground) !important;
-  padding: 3px 6px !important;
-  font-size: 12.5px !important;
+  padding: 4px 8px !important;
+  font-size: 13px !important;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+.monaco-editor .find-widget input:focus {
+  border-color: var(--theia-focusBorder) !important;
+  box-shadow: 0 0 0 2px rgba(124,92,191,0.2);
 }
 .monaco-editor .find-widget .codicon {
   color: var(--theia-icon-foreground) !important;
-  border-radius: 3px !important;
-  padding: 3px !important;
+  border-radius: 4px !important;
+  padding: 4px !important;
+  transition: background 100ms ease, color 100ms ease;
 }
 .monaco-editor .find-widget .codicon:hover {
   background: rgba(255,255,255,0.08) !important;
@@ -1181,9 +1233,10 @@ textarea::placeholder {
 
 /* ====== Progress Bar ====== */
 .theia-progress-bar {
-  background: var(--theia-progressBar-background) !important;
+  background: linear-gradient(90deg, var(--theia-brand-color1), #a78be0) !important;
   height: 2px !important;
   z-index: 1000;
+  box-shadow: 0 0 8px rgba(124,92,191,0.5);
 }
 
 /* ====== Badge ====== */
@@ -1194,7 +1247,7 @@ textarea::placeholder {
   border-radius: 10px !important;
   font-size: 10px !important;
   font-weight: 600 !important;
-  padding: 1px 6px !important;
+  padding: 1px 7px !important;
   min-width: 18px !important;
   height: 16px !important;
   line-height: 14px !important;
@@ -1209,26 +1262,28 @@ textarea::placeholder {
 .settings-header {
   background: var(--theia-sideBarSectionHeader-background) !important;
   border-bottom: 1px solid var(--theia-widget-border) !important;
-  padding: 12px 20px !important;
+  padding: 16px 24px !important;
 }
 .settings-section-title {
   color: var(--theia-foreground) !important;
   font-weight: 600 !important;
   font-size: 16px !important;
-  padding-bottom: 8px !important;
+  padding-bottom: 10px !important;
   border-bottom: 1px solid var(--theia-widget-border) !important;
+  letter-spacing: -0.2px !important;
 }
 .pref-input {
   background: var(--theia-settings-textInputBackground) !important;
   border: 1px solid var(--theia-settings-textInputBorder) !important;
-  border-radius: 4px !important;
+  border-radius: 5px !important;
   color: var(--theia-settings-textInputForeground) !important;
-  padding: 4px 8px !important;
-}
-
-/* ====== Open Editors section ====== */
-.theia-open-editors-widget .theia-TreeNode {
+  padding: 5px 10px !important;
   font-size: 13px !important;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+.pref-input:focus {
+  border-color: var(--theia-focusBorder) !important;
+  box-shadow: 0 0 0 2px rgba(124,92,191,0.2);
 }
 
 /* ====== Command Center / Top bar ====== */
@@ -1237,18 +1292,20 @@ textarea::placeholder {
   border-bottom: 1px solid var(--theia-sideBar-border) !important;
 }
 
-/* ====== Command palette trigger ====== */
-.theia-command-palette-key {
+/* ====== Keybinding labels — chiclet style ====== */
+.theia-command-palette-key,
+.monaco-keybinding-key {
   background: var(--theia-keybindingLabel-background) !important;
   color: var(--theia-keybindingLabel-foreground) !important;
   border: 1px solid var(--theia-keybindingLabel-border) !important;
   border-bottom-width: 2px !important;
-  border-radius: 3px !important;
-  padding: 1px 5px !important;
+  border-radius: 4px !important;
+  padding: 2px 6px !important;
   font-size: 11px !important;
   font-family: var(--theia-monospace-font-family) !important;
-  min-width: 18px !important;
+  min-width: 20px !important;
   text-align: center !important;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.2);
 }
 
 /* ====== Tree indent guides ====== */
@@ -1257,7 +1314,7 @@ textarea::placeholder {
 }
 .theia-TreeContainer.alwaysIndentGuides .theia-TreeNodeIndent,
 .theia-TreeContainer.onDepthIndentGuides .theia-TreeNodeIndent.has-indent-guide {
-  border-left-color: var(--theia-tree-indentGuidesStroke) !important;
+  border-left-color: rgba(255,255,255,0.06) !important;
 }
 
 /* ====== Resize cursor ====== */
@@ -1268,22 +1325,29 @@ textarea::placeholder {
   cursor: row-resize;
 }
 
-/* ====== Focus outline ====== */
+/* ====== Focus outline — subtle ring ====== */
 .lm-Widget:focus,
 .theia-TreeNode.theia-mod-focus {
   outline: none !important;
+}
+*:focus-visible {
+  outline: 2px solid var(--theia-focusBorder);
+  outline-offset: -1px;
+  border-radius: 3px;
 }
 
 /* ====== Monaco Editor Suggest Widget ====== */
 .monaco-editor .suggest-widget {
   background: var(--theia-editorSuggestWidget-background) !important;
   border: 1px solid var(--theia-editorSuggestWidget-border) !important;
-  border-radius: 6px !important;
-  box-shadow: 0 6px 20px rgba(0,0,0,0.4) !important;
+  border-radius: 8px !important;
+  box-shadow: 0 8px 28px rgba(0,0,0,0.45) !important;
+  overflow: hidden !important;
 }
 .monaco-editor .suggest-widget .monaco-list .monaco-list-row {
-  border-radius: 3px !important;
-  padding: 2px 6px !important;
+  border-radius: 4px !important;
+  padding: 4px 8px !important;
+  transition: background 80ms ease;
 }
 .monaco-editor .suggest-widget .monaco-list .monaco-list-row.focused {
   background: var(--theia-editorSuggestWidget-selectedBackground) !important;
@@ -1292,14 +1356,6 @@ textarea::placeholder {
 .monaco-editor .suggest-widget .monaco-list .monaco-list-row .label,
 .monaco-editor .suggest-widget .monaco-list .monaco-list-row .monaco-highlighted-label {
   font-size: 13px !important;
-}
-
-/* ====== Dialog message/confirm ====== */
-.theia-confirm-Dialog .dialogContent,
-.theia-message-Dialog .dialogContent {
-  font-size: 13px !important;
-  line-height: 1.5 !important;
-  color: var(--theia-notification-foreground) !important;
 }
 
 /* ====== Outline / Symbols panel ====== */
@@ -1315,15 +1371,8 @@ textarea::placeholder {
   background: var(--theia-panel-background) !important;
   color: var(--theia-ui-font-color1) !important;
 }
-.problem-widget .problem-count {
-  font-size: 12px !important;
-}
-.theia-marker-container .marker-icon {
-  font-size: 12px !important;
-}
 .theia-marker-container .theia-TreeNode {
   font-size: 12.5px !important;
-  line-height: 20px !important;
 }
 
 /* ====== Output / Log panel ====== */
@@ -1334,7 +1383,8 @@ textarea::placeholder {
   color: var(--theia-ui-font-color1) !important;
   font-family: var(--theia-monospace-font-family) !important;
   font-size: 12.5px !important;
-  padding: 8px 12px !important;
+  padding: 10px 14px !important;
+  line-height: 1.5 !important;
 }
 
 /* ====== Welcome Page ====== */
@@ -1346,6 +1396,7 @@ textarea::placeholder {
 .welcomePage h1 {
   color: var(--theia-foreground) !important;
   font-weight: 300 !important;
+  letter-spacing: -0.5px !important;
 }
 .welcomePage .theia-button {
   background: var(--theia-welcomePage-buttonBackground) !important;
@@ -1359,20 +1410,19 @@ textarea::placeholder {
 .debug-toolbar {
   background: var(--theia-debugToolBar-background) !important;
   border: 1px solid var(--theia-debugToolBar-border) !important;
-  border-radius: 7px !important;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.4) !important;
-  padding: 4px 6px !important;
+  border-radius: 8px !important;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.45) !important;
+  padding: 5px 8px !important;
+  gap: 2px !important;
 }
 .theia-debug-toolbar .debug-action,
 .debug-toolbar .debug-action {
   color: var(--theia-icon-foreground) !important;
-  width: 28px !important;
-  height: 24px !important;
-  border-radius: 4px !important;
+  border-radius: 5px !important;
   display: inline-flex !important;
   align-items: center !important;
   justify-content: center !important;
-  transition: background 80ms ease;
+  transition: background 100ms ease, color 100ms ease;
 }
 .theia-debug-toolbar .debug-action:hover,
 .debug-toolbar .debug-action:hover {
@@ -1387,19 +1437,19 @@ textarea::placeholder {
   color: var(--theia-error-color0) !important;
 }
 
-/* ====== Hover Widgets (tooltips over code) ====== */
+/* ====== Hover Widgets (code intelligence) ====== */
 .monaco-editor .monaco-hover,
 .monaco-hover {
   background: var(--theia-editorHoverWidget-background) !important;
   border: 1px solid var(--theia-editorHoverWidget-border) !important;
-  border-radius: 6px !important;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.4) !important;
-  padding: 4px 8px !important;
+  border-radius: 8px !important;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.45) !important;
+  padding: 6px 10px !important;
 }
 .monaco-hover .monaco-hover-content,
 .monaco-hover-content {
   font-size: 12.5px !important;
-  line-height: 1.5 !important;
+  line-height: 1.55 !important;
 }
 .monaco-hover .markdown-hover .hover-contents,
 .monaco-hover-content .hover-contents {
@@ -1411,37 +1461,13 @@ textarea::placeholder {
   font-size: 12.5px !important;
 }
 
-/* ====== Keybindings in context menus/quickpick ====== */
-.monaco-keybinding-key {
-  background: var(--theia-keybindingLabel-background) !important;
-  color: var(--theia-keybindingLabel-foreground) !important;
-  border: 1px solid var(--theia-keybindingLabel-border) !important;
-  border-bottom-width: 2px !important;
-  border-radius: 3px !important;
-  padding: 1px 5px !important;
-  font-size: 10px !important;
-  font-family: var(--theia-monospace-font-family) !important;
-}
-
-/* ====== File icons colors ====== */
+/* ====== File icons ====== */
 .theia-file-icons-js .file-icon,
 .theia-file-icons-js .folder-icon {
-  font-size: 14px !important;
+  font-size: 15px !important;
 }
 
-/* ====== Breadcrumb icons ====== */
-.breadcrumb-item .codicon {
-  font-size: 12px !important;
-}
-
-/* ====== Panel icons ====== */
-#theia-bottom-split-panel .lm-TabBar-tab .codicon,
-#theia-bottom-split-panel .lm-TabBar-tab .theia-icon {
-  font-size: 14px !important;
-  margin-right: 5px !important;
-}
-
-/* ====== Misc: chevrons, disclosure triangles ====== */
+/* ====== Misc chevrons ====== */
 .codicon-chevron-down,
 .codicon-chevron-right,
 .codicon-tree-item-expanded,
@@ -1455,12 +1481,14 @@ textarea::placeholder {
 .search-box .theia-input {
   background: var(--theia-input-background) !important;
   border: 1px solid var(--theia-input-border) !important;
-  border-radius: 4px !important;
+  border-radius: 5px !important;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
 }
-
-/* ====== Monaco inline editor / suggest ====== */
-.monaco-editor .lines-content .cigra {
-  background: rgba(124,92,191,0.3) !important;
+.theia-search-box .theia-input:focus,
+.search-in-workspace .theia-input:focus,
+.search-box .theia-input:focus {
+  border-color: var(--theia-focusBorder) !important;
+  box-shadow: 0 0 0 2px rgba(124,92,191,0.15);
 }
 
 /* ====== Selection highlight ====== */
@@ -1471,28 +1499,46 @@ textarea::placeholder {
   background: var(--theia-editor-wordHighlightStrongBackground) !important;
 }
 
-/* ====== Global transition for interactive elements ====== */
+/* ====== Global interactive: prevent text selection on UI chrome ====== */
 .theia-button,
 .theia-input,
-.codicon,
 .lm-TabBar-tab,
 .lm-MenuBar-item,
 .lm-Menu-item,
-.theia-TreeNode {
+.theia-TreeNode,
+.codicon,
+.theia-sidebar-toolbar,
+.theia-sidepanel-toolbar,
+.theia-badge,
+.badge,
+.lm-Menu,
+.lm-ContextMenu {
   -webkit-user-select: none;
   user-select: none;
 }
 
-/* ====== Editor area backdrop (when no tabs open) ====== */
+/* ====== Editor area backdrop ====== */
 .theia-main-content-panel .lm-DockPanel-widget:not(.lm-mod-hidden) ~ .lm-DockPanel-drop-zone {
   background: var(--theia-editor-background) !important;
 }
 
-/* ====== Hidden scrollbars on sidebar (JetBrains/Zed style: only show on hover) ====== */
+/* ====== Tree scrollbars — subtle ====== */
 .theia-TreeContainer::-webkit-scrollbar,
 .theia-side-panel::-webkit-scrollbar {
   width: 8px !important;
   height: 8px !important;
+}
+
+/* ====== Global smooth transitions for common interactions ====== */
+.theia-TreeNode,
+.lm-TabBar-tab,
+.lm-MenuBar-item,
+.lm-Menu-item,
+.theia-button,
+.breadcrumb-item,
+.theia-sidebar-toolbar .codicon,
+.theia-notification-item {
+  -webkit-tap-highlight-color: transparent;
 }
 `;
 
