@@ -139,6 +139,19 @@ export function unwrapResponse(res: Response, body: unknown): unknown {
       details: body,
     });
   }
+  if (isErrorEnvelope(body)) {
+    // 2xx with ok:false is a valid protocol error envelope;
+    // surface it with the agent's code, not the generic
+    // FALLBACK_ERROR_CODE.
+    const e = body.error;
+    throw new KairoError({
+      code: e.code,
+      message: e.message,
+      details: e.details,
+      retryable: e.retryable,
+      httpStatus: res.status,
+    });
+  }
   if (!isResponseEnvelope(body)) {
     throw new KairoError({
       code: FALLBACK_ERROR_CODE,

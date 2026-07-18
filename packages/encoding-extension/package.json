@@ -1,8 +1,8 @@
 {
   "name": "@kairo/encoding-extension",
   "version": "0.1.0",
-  "description": "Kairo encoding integration â€” bridges Monaco / Theia to the Runtime Agent's encoding endpoints so GBK / GB18030 / UTF-8-BOM / ISO-8859-1 files round-trip safely.",
-  "main": "lib/src/index.js",
+  "description": "Kairo encoding integration â€?bridges Monaco / Theia to the Runtime Agent's encoding endpoints so GBK / GB18030 / UTF-8-BOM / ISO-8859-1 files round-trip safely.",
+  "main": "lib/index.js",
   "types": "lib/src/index.d.ts",
   "files": [
     "lib",

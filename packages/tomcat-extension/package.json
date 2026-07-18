@@ -2,7 +2,7 @@
   "name": "@kairo/tomcat-extension",
   "version": "0.1.0",
   "description": "Kairo Tomcat / Server runtime panel. Tree view of runtimes, deployments, ports, and logs. Talks to /api/v1/servers via the runtime client.",
-  "main": "lib/src/index.js",
+  "main": "lib/index.js",
   "types": "lib/src/index.d.ts",
   "files": ["lib", "src"],
   "scripts": {

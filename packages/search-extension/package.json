@@ -2,7 +2,7 @@
   "name": "@kairo/search-extension",
   "version": "0.1.0",
   "description": "Kairo full-text search UI. Talks to /api/v1/search via the runtime client; renders the standard search-in-workspace widget with replace preview.",
-  "main": "lib/src/index.js",
+  "main": "lib/index.js",
   "types": "lib/src/index.d.ts",
   "files": ["lib", "src"],
   "scripts": {

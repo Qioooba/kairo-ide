@@ -1,8 +1,8 @@
 {
   "name": "@kairo/config-schema",
   "version": "0.1.0",
-  "description": "JSON Schema for .legacyflow/project.yaml éˆ¥?the canonical project configuration file. Generated into Theia form-fillers, used by the Go agent to validate configs.",
-  "main": "lib/src/index.js",
+  "description": "JSON Schema for .legacyflow/project.yaml éˆ?the canonical project configuration file. Generated into Theia form-fillers, used by the Go agent to validate configs.",
+  "main": "lib/index.js",
   "types": "lib/src/index.d.ts",
   "files": [
     "lib",
