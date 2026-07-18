@@ -1,9 +1,9 @@
 {
   "name": "@kairo/project-extension",
   "version": "0.1.0",
-  "description": "Kairo project extension — owns the workspace and project models, the welcome view, and the project import wizard.",
-  "main": "lib/index.js",
-  "types": "lib/index.d.ts",
+  "description": "Kairo project extension 鈥?owns the workspace and project models, the welcome view, and the project import wizard.",
+  "main": "lib/src/index.js",
+  "types": "lib/src/index.d.ts",
   "files": ["lib", "src"],
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -24,3 +24,4 @@
     "typescript": "5.5.4"
   }
 }
+

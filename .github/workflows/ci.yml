@@ -23,7 +23,7 @@ jobs:
           cache-dependency-path: runtime-agent/go.sum
       - name: Test
         working-directory: runtime-agent
-        run: GOTOOLCHAIN=local go test -race -timeout 120s ./...
+        run: GOTOOLCHAIN=local pnpm test:agent:race
       - name: Build all targets
         working-directory: runtime-agent
         if: matrix.os == 'ubuntu-latest'

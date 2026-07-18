@@ -2,8 +2,8 @@
   "name": "@kairo/ui-kit",
   "version": "0.1.0",
   "description": "Kairo design tokens, theme constants, and reusable layout primitives. Theia extensions import from here instead of hardcoding colors.",
-  "main": "lib/index.js",
-  "types": "lib/index.d.ts",
+  "main": "lib/src/index.js",
+  "types": "lib/src/index.d.ts",
   "files": [
     "lib",
     "src"
@@ -22,3 +22,4 @@
     "typescript": "5.5.4"
   }
 }
+

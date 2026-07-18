@@ -8,9 +8,25 @@
  */
 
 import { ContainerModule, injectable } from '@theia/core/shared/inversify';
-import { KairoRuntime, KairoRuntimeImpl, KairoRuntimeConfig } from './runtime';
+import {
+  KairoRuntime,
+  KairoRuntimeImpl,
+  KairoRuntimeConfig,
+  KairoErrorListener,
+  KairoErrorListenerImpl,
+} from './runtime';
 
-export { KairoRuntime, KairoRuntimeImpl, KairoRuntimeConfig, EventStream } from './runtime';
+export {
+  KairoRuntime,
+  KairoRuntimeImpl,
+  KairoRuntimeConfig,
+  KairoErrorListener,
+  KairoErrorListenerImpl,
+  EventStream,
+} from './runtime';
+
+export { KairoError, normaliseThrown, unwrapResponse, FALLBACK_ERROR_CODE } from './runtime-errors';
+export type { KairoRequestInit } from './runtime';
 
 export const RUNTIME_BASE_URL = 'http://127.0.0.1:18099';
 
@@ -20,6 +36,7 @@ export const RUNTIME_BASE_URL = 'http://127.0.0.1:18099';
  */
 export const KairoRuntimeModule = new ContainerModule(bind => {
   bind(KairoRuntime).to(KairoRuntimeImpl).inSingletonScope();
+  bind(KairoErrorListener).to(KairoErrorListenerImpl).inSingletonScope();
 });
 
 /**

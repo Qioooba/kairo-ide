@@ -2,8 +2,8 @@
   "name": "@kairo/protocol",
   "version": "0.1.0",
   "description": "Kairo wire protocol: shapes, error codes, and versioned endpoint definitions shared by Theia extensions and the Go Runtime Agent.",
-  "main": "lib/index.js",
-  "types": "lib/index.d.ts",
+  "main": "lib/src/index.js",
+  "types": "lib/src/index.d.ts",
   "files": [
     "lib",
     "src"
@@ -19,3 +19,4 @@
     "@types/node": "20.14.10"
   }
 }
+

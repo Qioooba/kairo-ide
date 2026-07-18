@@ -321,23 +321,15 @@ func (r *ringBuffer) snapshot() []string {
 }
 
 // ----------------- system process helpers -----------------
+// Platform-specific implementations of terminateGroup / killGroup /
+// signalGroup / IsAlive live in proc_unix.go and proc_windows.go.
 
 func terminateGroup(pid int) error {
-	return signalGroup(pid, syscall.SIGTERM)
+	return signalGroup(pid, terminateSignal())
 }
 
 func killGroup(pid int) error {
-	return signalGroup(pid, syscall.SIGKILL)
-}
-
-func signalGroup(pid int, sig syscall.Signal) error {
-	// Negative PID means "process group".
-	pgid := -pid
-	if err := syscall.Kill(pgid, sig); err == nil {
-		return nil
-	}
-	// Fall back to direct PID.
-	return syscall.Kill(pid, sig)
+	return signalGroup(pid, killSignal())
 }
 
 // sysProcAttr sets platform-specific detach flags.
@@ -348,15 +340,7 @@ func sysProcAttr() *syscall.SysProcAttr {
 // IsAlive reports whether the process with the given PID is
 // alive on this system. Used by liveness checks.
 func IsAlive(pid int) bool {
-	if pid <= 0 {
-		return false
-	}
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	err = proc.Signal(syscall.Signal(0))
-	return err == nil
+	return isProcessAlive(pid)
 }
 
 // PortDescription is a human-friendly port number for logs.

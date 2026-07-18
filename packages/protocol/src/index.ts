@@ -410,6 +410,9 @@ export interface AuditEvent {
 
 export interface EndpointMap {
   'GET /api/v1/health': { request: undefined; response: HealthResponse };
+  'GET /api/v1/builds': { request: undefined; response: BuildResult[] };
+  'GET /api/v1/deployments': { request: undefined; response: DeploymentResult[] };
+  'GET /api/v1/servers': { request: undefined; response: ServerInstance[] };
   'GET /api/v1/workspaces': { request: undefined; response: Workspace[] };
   'POST /api/v1/workspaces': {
     request: { rootPath: string; name?: string };

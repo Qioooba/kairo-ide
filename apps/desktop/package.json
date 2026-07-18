@@ -5,10 +5,11 @@
   "private": true,
   "main": "lib/main.js",
   "scripts": {
-    "build": "tsc -p tsconfig.json && electron-builder --mac --win --linux",
+    "build": "tsc -p tsconfig.json",
     "build:mac": "tsc -p tsconfig.json && electron-builder --mac",
     "build:win": "tsc -p tsconfig.json && electron-builder --win",
     "build:linux": "tsc -p tsconfig.json && electron-builder --linux",
+    "build:all": "tsc -p tsconfig.json && electron-builder --mac --win --linux",
     "start": "electron lib/main.js",
     "clean": "rm -rf lib dist"
   },

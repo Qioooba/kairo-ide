@@ -18,9 +18,16 @@ import { bindJavaExtension } from '@kairo/java-extension';
 /**
  * Load all Kairo extensions into the given container.
  * Apps call this once during Theia composition.
+ *
+ * The frontend module (status bar, views, commands) is NOT
+ * loaded here. It is loaded by the Theia browser app via
+ * `theiaExtensions[].frontend` (see `./product-frontend.ts`),
+ * so the Theia server / Electron host process does not need
+ * to drag browser-only Inversify bindings into its own runtime.
  */
 export function loadKairoProduct(container: Container): void {
   container.load(KairoRuntimeModule);
+  bindKairoProduct(container.bind.bind(container));
 }
 
 /**

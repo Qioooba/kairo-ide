@@ -2,8 +2,8 @@
   "name": "@kairo/runtime-extension",
   "version": "0.1.0",
   "description": "Kairo runtime extension — owns the HTTP/WS client to the Go Runtime Agent. The rest of the UI uses this client and never talks to /api/v1 directly.",
-  "main": "lib/index.js",
-  "types": "lib/index.d.ts",
+  "main": "lib/src/index.js",
+  "types": "lib/src/index.d.ts",
   "files": ["lib", "src"],
   "scripts": {
     "build": "tsc -p tsconfig.json",
