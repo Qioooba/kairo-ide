@@ -48,6 +48,22 @@ const (
 	JDTLSVersion = "1.42.0"
 	// JDTLSJar is the canonical name of the shaded jar we
 	// download from the Eclipse release.
+	//
+	// Historically the JDT LS shipped as a single .jar. As of
+	// 2024 the project moved to .tar.gz distributions; the
+	// pinned 1.42.0 jar we name here is still downloadable from
+	// a few mirrors but no longer from the default Eclipse
+	// snapshots URL. Two escape hatches cover this:
+	//
+	//   KAIRO_JDTLS_JAR — absolute path to a pre-downloaded
+	//                      jar. Skips the download step entirely.
+	//   KAIRO_JDTLS_URL — overrides the download URL.
+	//
+	// Both are honoured by EnsureInstalled. The default URL
+	// below is the legacy snapshot one; if a user's network can
+	// not reach it (or it is gone), the start returns
+	// process_spawn_failed and the user can drop a pre-staged
+	// jar into the bundled dir or set KAIRO_JDTLS_JAR.
 	JDTLSJar = "jdt-language-server-" + JDTLSVersion + "-202407031446.jar"
 	// JDTLSJarSHA256 is the expected SHA-256 of the jar. The
 	// agent refuses to launch an unverified build.
@@ -69,6 +85,8 @@ type Manager struct {
 	framesIn chan []byte
 	framesOut chan []byte
 	idle     int32
+	lastErr  string
+	lastStart *Status
 	// Event listeners
 	listeners []func(Event)
 }
@@ -101,17 +119,70 @@ func (m *Manager) AddListener(fn func(Event)) {
 	m.mu.Unlock()
 }
 
-// Status reports the current JDT LS state.
-type Status struct {
-	State     string `json:"state"`
-	Pid       int    `json:"pid,omitempty"`
-	Version   string `json:"version"`
-	StartedAt string `json:"startedAt,omitempty"`
-	Jre       string `json:"jre"`
-	Jar       string `json:"jar"`
+// SetJREPath overrides the JRE that Start will use. Must be
+// called before Start. Empty string is a no-op (Start then
+// falls back to KAIRO_JRE17_HOME).
+func (m *Manager) SetJREPath(p string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.jrePath = p
 }
 
-// State returns the current state as a string.
+// JREPath returns the JRE the manager will use on the next
+// Start. Used by /api/v1/jdtls GET to render the status.
+func (m *Manager) JREPath() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.jrePath
+}
+
+// LastError returns the most recent error event the manager
+// observed. Used to surface crash reasons to the UI.
+func (m *Manager) LastError() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.lastErr
+}
+
+// LastStart returns the metadata of the most recent successful
+// Start, or nil if Start has not been called. The services
+// layer uses this to render the /api/v1/jdtls status without
+// keeping a parallel copy.
+func (m *Manager) LastStart() *Status {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.lastStart == nil {
+		return nil
+	}
+	cp := *m.lastStart
+	return &cp
+}
+
+// MarkInitialized records that the LSP `initialize` handshake
+// has completed. The next Status() call will reflect
+// `initializeOk: true`.
+func (m *Manager) MarkInitialized() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.lastStart != nil {
+		m.lastStart.InitializeOK = true
+	}
+}
+
+// Status reports the current JDT LS state.
+type Status struct {
+	State         string `json:"state"`
+	Pid           int    `json:"pid,omitempty"`
+	Version       string `json:"version"`
+	StartedAt     string `json:"startedAt,omitempty"`
+	Jre           string `json:"jre"`
+	Jar           string `json:"jar"`
+	InitializeOK  bool   `json:"initializeOk"`
+}
+
+// State returns the current state as a string. Includes the
+// `crashed` terminal state in addition to stopped / starting
+// / running / stopping.
 func (m *Manager) State() string {
 	switch m.state.Load() {
 	case 1:
@@ -120,6 +191,8 @@ func (m *Manager) State() string {
 		return "running"
 	case 3:
 		return "stopping"
+	case 4:
+		return "crashed"
 	default:
 		return "stopped"
 	}
@@ -129,6 +202,15 @@ func (m *Manager) State() string {
 // verifies its SHA-256. Idempotent: a second call with the jar
 // already on disk and verified is a no-op.
 func (m *Manager) EnsureInstalled(ctx context.Context) (string, error) {
+	// Escape hatch 1: pre-staged jar. Set KAIRO_JDTLS_JAR to an
+	// absolute path; we use it as-is and skip the download.
+	if pre := os.Getenv("KAIRO_JDTLS_JAR"); pre != "" {
+		if st, err := os.Stat(pre); err == nil && st.Size() > 0 {
+			m.logger.Info("using pre-staged jdtls jar", log.Fields{"path": pre, "size": st.Size()})
+			return pre, nil
+		}
+		return "", fmt.Errorf("KAIRO_JDTLS_JAR points at %s which is not a regular file", pre)
+	}
 	target := filepath.Join(m.bundled, "jdtls", JDTLSJar)
 	if st, err := os.Stat(target); err == nil && st.Size() > 0 {
 		// Verify the existing file.
@@ -147,11 +229,20 @@ func (m *Manager) EnsureInstalled(ctx context.Context) (string, error) {
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 		return "", err
 	}
-	url := fmt.Sprintf("https://download.eclipse.org/jdtls/snapshots/jdt-language-server-%s-202407031446.jar", JDTLSVersion)
+	// Escape hatch 2: override the download URL. The pinned
+	// snapshot URL is dead as of 2024+; users on a network that
+	// can reach the new tar.gz distribution can override it
+	// here. Note the new distribution is a tarball, not a jar;
+	// the agent does not unpack tarballs yet, so the override is
+	// mostly useful for mirrors that still ship a single jar.
+	url := os.Getenv("KAIRO_JDTLS_URL")
+	if url == "" {
+		url = fmt.Sprintf("https://download.eclipse.org/jdtls/snapshots/jdt-language-server-%s-202407031446.jar", JDTLSVersion)
+	}
 	// NOTE: at runtime the URL must be the official release
 	// channel; for the unit tests we substitute a file:// URL.
 	if err := downloadTo(ctx, url, target); err != nil {
-		return "", fmt.Errorf("download jdt-language-server: %w", err)
+		return "", fmt.Errorf("download jdt-language-server: %w (set KAIRO_JDTLS_JAR to use a pre-staged jar, or KAIRO_JDTLS_URL to override)", err)
 	}
 	ok, _, err := verifySHA256(target, JDTLSJarSHA256)
 	if err != nil {
@@ -166,8 +257,19 @@ func (m *Manager) EnsureInstalled(ctx context.Context) (string, error) {
 // Start launches the JDT LS as a child process. Returns when
 // the process is up and the LSP handshake can begin.
 func (m *Manager) Start(ctx context.Context) (*Status, error) {
-	if !m.state.CompareAndSwap(0, 1) && !m.state.CompareAndSwap(3, 1) {
-		return nil, fmt.Errorf("jdtls already in state %s", m.State())
+	// Accept restart from stopped (0), stopping (3) after a
+	// concurrent Stop, and crashed (4). Refuse from starting
+	// (1) and running (2).
+	for from := int32(0); ; {
+		cur := m.state.Load()
+		if cur == from && m.state.CompareAndSwap(from, 1) {
+			break
+		}
+		if cur == 1 || cur == 2 {
+			return nil, fmt.Errorf("jdtls already in state %s", m.State())
+		}
+		// crashed (4) or stopping-in-flight (3): try again.
+		from = cur
 	}
 	jar, err := m.EnsureInstalled(ctx)
 	if err != nil {
@@ -221,16 +323,37 @@ func (m *Manager) Start(ctx context.Context) (*Status, error) {
 	m.stdout = bufio.NewReader(stdout)
 	m.cmd = cmd
 	m.state.Store(2)
-	go m.readLoop(stdout)
-	m.dispatch(Event{Type: "state", State: "running", At: time.Now().Format(time.RFC3339)})
-	return &Status{
+	m.lastStart = &Status{
 		State:     "running",
 		Pid:       cmd.Process.Pid,
 		Version:   JDTLSVersion,
 		StartedAt: time.Now().Format(time.RFC3339),
 		Jre:       jre,
 		Jar:       jar,
-	}, nil
+	}
+	m.mu.Lock()
+	m.lastErr = ""
+	m.mu.Unlock()
+	go m.readLoop(stdout)
+	go m.watchExit(cmd)
+	m.dispatch(Event{Type: "state", State: "running", At: time.Now().Format(time.RFC3339)})
+	return m.lastStart, nil
+}
+
+// watchExit waits for the JDT LS process to terminate on its
+// own and marks the state as `crashed`. A clean Stop() goes
+// through the CAS path (state: 2 -> 3 -> 0) and never reaches
+// here in the crashed branch; we only set crashed when the
+// process exits without us asking.
+func (m *Manager) watchExit(cmd *exec.Cmd) {
+	state, _ := cmd.Process.Wait()
+	// We are still in `running` only if Stop did not flip us
+	// to 0/3. Use a CAS to mark the crash exactly once.
+	if m.state.CompareAndSwap(2, 4) {
+		m.setLastErr("jdtls exited unexpectedly: " + state.String())
+		m.dispatch(Event{Type: "error", Message: "jdtls exited unexpectedly: " + state.String()})
+		m.dispatch(Event{Type: "state", State: "crashed", At: time.Now().Format(time.RFC3339)})
+	}
 }
 
 // Stop terminates the JDT LS process. On Windows the process
@@ -238,7 +361,11 @@ func (m *Manager) Start(ctx context.Context) (*Status, error) {
 // threads it spawned) goes down together. On Unix we signal
 // the negative PID to take the process group.
 func (m *Manager) Stop(ctx context.Context) error {
-	if m.state.Load() != 2 {
+	// Acceptable source states: running (2) and crashed (4).
+	// crashed means watchExit marked it; the OS process is
+	// likely already gone, but we still want to clear cmd,
+	// lastStart.InitializeOK, and reset state to 0.
+	if m.state.Load() != 2 && m.state.Load() != 4 {
 		return nil
 	}
 	m.state.Store(3)
@@ -253,6 +380,11 @@ func (m *Manager) Stop(ctx context.Context) error {
 			_ = m.cmd.Process.Kill()
 		}
 	}
+	m.mu.Lock()
+	if m.lastStart != nil {
+		m.lastStart.InitializeOK = false
+	}
+	m.mu.Unlock()
 	m.dispatch(Event{Type: "state", State: "stopped", At: time.Now().Format(time.RFC3339)})
 	return nil
 }
@@ -289,12 +421,14 @@ func (m *Manager) readLoop(rd io.Reader) {
 	for {
 		hdr, err := readHeaders(br)
 		if err != nil {
+			m.setLastErr(err.Error())
 			m.dispatch(Event{Type: "error", Message: err.Error()})
 			close(m.framesOut)
 			return
 		}
 		body := make([]byte, hdr.contentLength)
 		if _, err := io.ReadFull(br, body); err != nil {
+			m.setLastErr(err.Error())
 			m.dispatch(Event{Type: "error", Message: err.Error()})
 			close(m.framesOut)
 			return
@@ -307,6 +441,12 @@ func (m *Manager) readLoop(rd io.Reader) {
 			// the client is allowed to skip.
 		}
 	}
+}
+
+func (m *Manager) setLastErr(msg string) {
+	m.mu.Lock()
+	m.lastErr = msg
+	m.mu.Unlock()
 }
 
 type frameHeader struct {

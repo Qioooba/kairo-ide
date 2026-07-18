@@ -60,6 +60,9 @@ type Services struct {
 	Auth Authenticator
 	// EventBus streams WebSocket events.
 	EventBus EventBus
+	// JDTLS owns the Eclipse JDT Language Server lifecycle.
+	// Optional: when nil, /api/v1/jdtls returns 503.
+	JDTLS JDTLS
 }
 
 // NewServer creates a Server.
@@ -174,6 +177,8 @@ func (s *Server) routes() {
 	s.router.HandleFunc("/api/v1/audit", s.handleAudit)
 	// WebSocket events
 	s.router.HandleFunc("/api/v1/events", s.handleEvents)
+	// JDT Language Server
+	s.router.HandleFunc("/api/v1/jdtls", s.handleJDTLS)
 }
 
 // ----------------- helpers -----------------

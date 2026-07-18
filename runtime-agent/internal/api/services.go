@@ -78,3 +78,23 @@ type Authenticator interface {
 type EventBus interface {
 	Serve(w http.ResponseWriter, r *http.Request)
 }
+
+// JDTLS owns the Eclipse JDT Language Server process and
+// surfaces its lifecycle to the API layer.
+//
+// Start / Stop are synchronous w.r.t. the user-visible state
+// transition: Start does not return until the process is up
+// and the JDT LS has been told (via the Initialize LSP request)
+// to be ready; Stop does not return until the process is gone.
+//
+// Status returns the current state plus enough metadata to
+// render the IDE status bar (state, pid, jre, jar, version).
+//
+// The HTTP layer does NOT poll; the agent's event bus is the
+// canonical source of state-change events. Status is what the
+// UI asks for once on connection and after a reconnect.
+type JDTLS interface {
+	Status() (json.RawMessage, error)
+	Start(payload json.RawMessage) (json.RawMessage, error)
+	Stop() (json.RawMessage, error)
+}

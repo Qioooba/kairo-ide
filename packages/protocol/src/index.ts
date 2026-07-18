@@ -374,6 +374,46 @@ export interface HealthResponse {
 }
 
 /* ------------------------------------------------------------------ */
+/*  JDT Language Server                                                */
+/* ------------------------------------------------------------------ */
+
+export type JdtState = 'stopped' | 'starting' | 'running' | 'stopping' | 'crashed';
+
+export interface JdtStatus {
+  state: JdtState;
+  pid?: number;
+  /** JDT LS release version baked into the agent. */
+  version?: string;
+  startedAt?: string;
+  stoppedAt?: string;
+  /** JRE the agent is using to run the JDT LS. */
+  jre?: string;
+  /** Resolved path to the JDT LS shaded jar. */
+  jar?: string;
+  /** Project source level (e.g. "1.6"). */
+  sourceLevel?: string;
+  /** When the process exited without a clean Stop. */
+  lastError?: string;
+  /**
+   * True iff the LSP `initialize` handshake completed. The UI
+   * must NOT advertise completion / hover / etc. until this
+   * is true, even when state == "running".
+   */
+  initializeOk: boolean;
+}
+
+export interface JdtStartRequest {
+  /** Override the JRE the agent uses to run the JDT LS. */
+  jrePath?: string;
+  /** Project source level. Defaults to "1.6". */
+  sourceLevel?: '1.5' | '1.6' | '1.7' | '1.8' | '9' | '11' | '17';
+  /** Workspace root URI passed to the LSP `initialize` request. */
+  initializeRootURI?: string;
+  /** Hard timeout for the Start call. Default 30s. */
+  timeoutMs?: number;
+}
+
+/* ------------------------------------------------------------------ */
 /*  Auth                                                               */
 /* ------------------------------------------------------------------ */
 
@@ -458,6 +498,9 @@ export interface EndpointMap {
   'POST /api/v1/auth/login': { request: LoginRequest; response: LoginResponse };
   'POST /api/v1/auth/logout': { request: undefined; response: { ok: true } };
   'GET /api/v1/audit': { request: { since?: string }; response: AuditEvent[] };
+  'GET /api/v1/jdtls': { request: undefined; response: JdtStatus };
+  'POST /api/v1/jdtls': { request: JdtStartRequest; response: JdtStatus };
+  'DELETE /api/v1/jdtls': { request: undefined; response: JdtStatus };
 }
 
 export interface DetectedProjectLayout {

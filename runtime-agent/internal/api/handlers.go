@@ -488,6 +488,70 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	s.Services.EventBus.Serve(w, r)
 }
 
+// ----- JDT Language Server -----
+//
+// /api/v1/jdtls
+//   GET    — current status (state, pid, jre, jar, version, lastError)
+//   POST   — start the JDT LS. Body: { jrePath?: string, sourceLevel?:
+//            "1.5".."17", initializeRootURI?: string, timeoutMs?: number }
+//   DELETE — stop the JDT LS.
+//
+// State transitions (on the wire):
+//   stopped --POST--> starting --initialize ok--> running
+//   running --DELETE--> stopping --> stopped
+//   any     --crash---> crashed (lastError set)
+//
+// The agent never silently lies: if Start returns, the process
+// is up AND the LSP initialize handshake has either succeeded
+// or timed out. The status body makes the outcome explicit.
+
+func (s *Server) handleJDTLS(w http.ResponseWriter, r *http.Request) {
+	if s.Services.JDTLS == nil {
+		writeError(w, "", "", protocol.KairoError{
+			Code:    protocol.ErrInternal,
+			Message: "JDTLS not configured on this agent",
+		})
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		env, _, _ := readEnvelopeAndBody(r)
+		st, err := s.Services.JDTLS.Status()
+		if err != nil {
+			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{
+				Code: protocol.ErrInternal, Message: err.Error(),
+			})
+			return
+		}
+		writeOK(w, env, st)
+	case http.MethodPost:
+		env, body, _ := readEnvelopeAndBody(r)
+		st, err := s.Services.JDTLS.Start(extractPayload(body))
+		if err != nil {
+			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{
+				Code:    protocol.ErrProcessSpawnFailed,
+				Message: err.Error(),
+			})
+			return
+		}
+		writeOK(w, env, st)
+	case http.MethodDelete:
+		env, _, _ := readEnvelopeAndBody(r)
+		st, err := s.Services.JDTLS.Stop()
+		if err != nil {
+			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{
+				Code: protocol.ErrInternal, Message: err.Error(),
+			})
+			return
+		}
+		writeOK(w, env, st)
+	default:
+		writeError(w, "", "", protocol.KairoError{
+			Code: protocol.ErrInvalidRequest, Message: "GET, POST, or DELETE only",
+		})
+	}
+}
+
 // payloadOf extracts the JSON payload from a request that
 // has an envelope. We tolerate both { "requestId":..., "payload": {...}}
 // and a bare payload.

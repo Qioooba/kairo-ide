@@ -19,6 +19,7 @@ import {
 import { KairoRuntimeImpl, EventStream, KairoError } from '@kairo/runtime-extension';
 import { KairoProjectService } from '@kairo/project-extension';
 import { KairoServerService } from '@kairo/tomcat-extension';
+import { KairoJavaService, JavaServiceState } from '@kairo/java-extension';
 import type { ServerInstance } from '@kairo/protocol';
 
 @injectable()
@@ -27,10 +28,12 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
   @inject(KairoRuntimeImpl) protected runtime!: KairoRuntimeImpl;
   @inject(KairoProjectService) protected projectSvc!: KairoProjectService;
   @inject(KairoServerService) protected serverSvc!: KairoServerService;
+  @inject(KairoJavaService) protected javaSvc!: KairoJavaService;
 
   protected eventStream: EventStream | undefined;
   protected unsubscribeStatus: (() => void) | undefined;
   protected unsubscribeServerEvents: (() => void) | undefined;
+  protected unsubscribeJdtState: (() => void) | undefined;
   protected pollTimer: ReturnType<typeof setInterval> | undefined;
 
   @postConstruct()
@@ -46,6 +49,12 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
       tooltip: 'Java compiler configuration',
       alignment: StatusBarAlignment.LEFT,
       priority: 99,
+    });
+    this.statusBar.setElement('kairo.jdtls', {
+      text: '$(coffee) JDT LS: idle',
+      tooltip: 'Eclipse JDT Language Server (skeleton — no LSP bridge yet)',
+      alignment: StatusBarAlignment.LEFT,
+      priority: 96,
     });
     this.statusBar.setElement('kairo.encoding', {
       text: '$(text) Encoding: -',
@@ -71,6 +80,10 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
     this.eventStream = this.runtime.openEvents();
     this.unsubscribeStatus = this.eventStream.onStatus(s => this.setRuntimeStatus(s));
     this.unsubscribeServerEvents = this.eventStream.on('server.state', () => this.refreshServerStatus());
+    this.unsubscribeJdtState = this.javaSvc.onState((s, st) => this.setJdtStatus(s, st));
+    // Pull the current JDT LS state once on start so the
+    // status bar shows truth after a reconnect / window reload.
+    void this.refreshJdtStatus();
     // Poll once on start so the user immediately sees the
     // current state. After that the WebSocket keeps things in sync.
     try {
@@ -85,14 +98,74 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
         });
       }
     }
-    this.pollTimer = setInterval(() => this.refreshServerStatus(), 5_000);
+    this.pollTimer = setInterval(() => {
+      void this.refreshServerStatus();
+      void this.refreshJdtStatus();
+    }, 5_000);
   }
 
   onStop(): void {
     this.unsubscribeStatus?.();
     this.unsubscribeServerEvents?.();
+    this.unsubscribeJdtState?.();
     this.eventStream?.close();
     if (this.pollTimer) clearInterval(this.pollTimer);
+  }
+
+  /**
+   * Map the JDT LS state machine to a status-bar entry.
+   * The state field on the service is the local view
+   * (uninitialized / starting / ready / crashed); the agent
+   * status is the wire truth (stopped / starting / running /
+   * stopping / crashed). Both are useful; we surface the
+   * wire truth when we have it.
+   */
+  protected setJdtStatus(
+    s: JavaServiceState,
+    st?: { state: string; jre?: string; pid?: number; lastError?: string; version?: string },
+  ): void {
+    const local = s;
+    const wire = st?.state;
+    const effective: string = wire ?? local;
+    const icon = (iconFor: string): string => {
+      switch (iconFor) {
+        case 'ready':
+        case 'running':
+          return '$(coffee)';
+        case 'starting':
+          return '$(sync~spin)';
+        case 'stopping':
+          return '$(debug-stop)';
+        case 'crashed':
+          return '$(error)';
+        case 'stopped':
+        case 'uninitialized':
+        default:
+          return '$(circle-outline)';
+      }
+    };
+    const tooltipParts: string[] = [
+      `Local: ${local}`,
+      wire ? `Agent: ${wire}` : 'Agent: (no status yet)',
+    ];
+    if (st?.version) tooltipParts.push(`Version: ${st.version}`);
+    if (st?.jre) tooltipParts.push(`JRE: ${st.jre}`);
+    if (st?.pid) tooltipParts.push(`PID: ${st.pid}`);
+    if (st?.lastError) tooltipParts.push(`Last error: ${st.lastError}`);
+    tooltipParts.push(
+      'Skeleton: HTTP state + status bar only. LSP frame bridge to Monaco is the next round (v0.3-jdt-ls-bridge).',
+    );
+    this.statusBar.setElement('kairo.jdtls', {
+      text: `${icon(effective)} JDT LS: ${effective}`,
+      tooltip: tooltipParts.join('\n'),
+      alignment: StatusBarAlignment.LEFT,
+      priority: 96,
+    });
+  }
+
+  protected async refreshJdtStatus(): Promise<void> {
+    const st = await this.javaSvc.refreshStatus();
+    this.setJdtStatus(this.javaSvc.state$(), st);
   }
 
   protected setRuntimeStatus(s: 'connecting' | 'open' | 'disconnected' | 'closed'): void {

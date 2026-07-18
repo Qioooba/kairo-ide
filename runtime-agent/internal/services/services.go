@@ -29,6 +29,7 @@ import (
 	"github.com/kairo-ide/runtime-agent/internal/api"
 	"github.com/kairo-ide/runtime-agent/internal/build"
 	"github.com/kairo-ide/runtime-agent/internal/encoding"
+	"github.com/kairo-ide/runtime-agent/internal/jdtls"
 	"github.com/kairo-ide/runtime-agent/internal/log"
 	"github.com/kairo-ide/runtime-agent/internal/search"
 	"github.com/kairo-ide/runtime-agent/internal/security"
@@ -77,6 +78,7 @@ func NewMemoryServices(cfg Config, sandbox *security.WorkspaceRoots) *api.Servic
 		Deployer:          newDiskDeployer(cfg.DataDir, cfg.Logger),
 		ServerRunner:      newRealServerRunner(cfg.DataDir, cfg.BundledDir, tomcat6Home, cfg.Logger),
 		Auth:              newDiskAuthenticator(cfg.DataDir, cfg.Logger),
+		JDTLS:             newJDTLSService(cfg.DataDir, cfg.BundledDir, cfg.Logger),
 	}
 }
 
@@ -1262,6 +1264,158 @@ func (a *diskAuthenticator) Login(payload json.RawMessage, w http.ResponseWriter
 
 func (a *diskAuthenticator) Logout(r *http.Request, w http.ResponseWriter) error {
 	return nil
+}
+
+// ----------------- JDTLS (jdt-language-server lifecycle) -----------------
+//
+// jdtlsService wraps jdtls.Manager and exposes the
+// /api/v1/jdtls endpoint contract. The state machine is:
+//
+//   stopped  --Start()--> starting --LSP initialize ok--> running
+//   running  --Stop()---> stopping --> stopped
+//   any      --crash----> crashed   (lastError set)
+//
+// Start() is synchronous w.r.t. the user-visible state: it
+// does not return until either the JDT LS has answered the LSP
+// `initialize` request, or a hard timeout fires. There is no
+// "we promise it's starting, ask again later" promise. If
+// Start returns nil, the process is up AND initialized.
+//
+// We deliberately do NOT call Initialize on every Start; the
+// caller may have just Stopped and restarted with a new root
+// URI, in which case we issue the LSP `initialize` request
+// during Start. On the very first Start after agent boot, the
+// payload's `initializeRootURI` is what gets sent to the LS.
+
+type jdtlsService struct {
+	mu        sync.Mutex
+	mgr       *jdtls.Manager
+	logger    *log.Logger
+	sourceLvl string
+}
+
+func newJDTLSService(dataDir, bundled string, logger *log.Logger) *jdtlsService {
+	return &jdtlsService{
+		mgr:       jdtls.New(dataDir, bundled, os.Getenv("KAIRO_JRE17_HOME"), logger),
+		logger:    logger,
+		sourceLvl: "1.6",
+	}
+}
+
+// jdtlsStatus is the JSON shape /api/v1/jdtls GET returns. We
+// keep the field set small and stable so the UI can rely on it.
+type jdtlsStatus struct {
+	State        string `json:"state"` // stopped|starting|running|stopping|crashed
+	Pid          int    `json:"pid,omitempty"`
+	Version      string `json:"version,omitempty"`
+	StartedAt    string `json:"startedAt,omitempty"`
+	StoppedAt    string `json:"stoppedAt,omitempty"`
+	JRE          string `json:"jre,omitempty"`
+	Jar          string `json:"jar,omitempty"`
+	SourceLevel  string `json:"sourceLevel,omitempty"`
+	LastError    string `json:"lastError,omitempty"`
+	InitializeOK bool   `json:"initializeOk"`
+}
+
+func (s *jdtlsService) Status() (json.RawMessage, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st := jdtlsStatus{
+		State:       s.mgr.State(),
+		Version:     jdtls.JDTLSVersion,
+		JRE:         s.mgr.JREPath(),
+		SourceLevel: s.sourceLvl,
+		LastError:   s.mgr.LastError(),
+	}
+	if last := s.mgr.LastStart(); last != nil {
+		st.Pid = last.Pid
+		st.StartedAt = last.StartedAt
+		st.Jar = last.Jar
+		st.InitializeOK = last.InitializeOK
+	}
+	return json.Marshal(st)
+}
+
+func (s *jdtlsService) Start(payload json.RawMessage) (json.RawMessage, error) {
+	var req struct {
+		JREPath           string `json:"jrePath"`
+		SourceLevel       string `json:"sourceLevel"`
+		InitializeRootURI string `json:"initializeRootURI"`
+		TimeoutMs         int    `json:"timeoutMs"`
+	}
+	if len(payload) > 0 {
+		if err := json.Unmarshal(payload, &req); err != nil {
+			return nil, fmt.Errorf("invalid start payload: %w", err)
+		}
+	}
+	if req.SourceLevel == "" {
+		req.SourceLevel = s.sourceLvl
+	}
+	timeout := 30 * time.Second
+	if req.TimeoutMs > 0 {
+		timeout = time.Duration(req.TimeoutMs) * time.Millisecond
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	s.mu.Lock()
+	if req.JREPath != "" {
+		s.mgr.SetJREPath(req.JREPath)
+	}
+	s.sourceLvl = req.SourceLevel
+	mu := s.mgr // keep a ref for after the unlock
+	s.mu.Unlock()
+
+	st, err := mu.Start(ctx)
+	if err != nil {
+		return nil, err
+	}
+	// Send the LSP `initialize` request. The response is the
+	// signal the UI waits for: only after we get it back do we
+	// claim the LS is `running` and ready for documents.
+	caps := json.RawMessage(`{}`)
+	if req.InitializeRootURI != "" {
+		initResp, ierr := mu.Initialize(ctx, req.InitializeRootURI, caps)
+		_ = initResp // body not used here; presence of a non-error response is the signal
+		if ierr != nil {
+			// Initialize failed. Tear the process down so the
+			// agent's state is honest: either it is "ready" with
+			// an initialized LS, or it is "stopped" again. We
+			// refuse to leave it in a half-initialized "running"
+			// state, because the UI would then think
+			// completion/hover work when they actually do not.
+			_ = mu.Stop(ctx)
+			return nil, fmt.Errorf("jdtls initialize failed: %w", ierr)
+		}
+		mu.MarkInitialized()
+	}
+	out := jdtlsStatus{
+		State:        mu.State(),
+		Pid:          st.Pid,
+		Version:      st.Version,
+		StartedAt:    st.StartedAt,
+		JRE:          st.Jre,
+		Jar:          st.Jar,
+		SourceLevel:  s.sourceLvl,
+		InitializeOK: req.InitializeRootURI != "",
+	}
+	return json.Marshal(out)
+}
+
+func (s *jdtlsService) Stop() (json.RawMessage, error) {
+	s.mu.Lock()
+	mu := s.mgr
+	s.mu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := mu.Stop(ctx); err != nil {
+		return nil, err
+	}
+	return json.Marshal(jdtlsStatus{
+		State:     mu.State(),
+		Version:   jdtls.JDTLSVersion,
+		StoppedAt: time.Now().UTC().Format(time.RFC3339),
+	})
 }
 
 // ----------------- helpers -----------------
