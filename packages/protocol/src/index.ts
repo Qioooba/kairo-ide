@@ -4,8 +4,8 @@
  * Hand-written and the single source of truth. The Go Runtime
  * Agent has a parallel hand-written mirror in
  * `runtime-agent/internal/api/protocol/types.go` that this file
- * must keep in sync. The CI step `scripts/check-protocol-sync.sh`
- * asserts structural equivalence of the two trees.
+ * must keep in sync. A script to assert structural equivalence
+ * of the two trees will be added in Phase 1.
  *
  * The major version is `/api/v1`. Breaking changes bump to
  * `/api/v2`.
@@ -242,15 +242,21 @@ export interface ServerInstance {
   };
 }
 
-export interface BuildRequest {
-  /** Which project to build. */
+export interface StartBuildRequest {
   projectId: string;
-  /** Optional subset of files (workspace-relative). If empty, full project. */
-  files?: string[];
-  /** Force a clean before the build. */
   clean?: boolean;
-  /** Run tests after compile. */
-  runTests?: boolean;
+  intent?: 'full' | 'selected-files';
+  selectedFiles?: string[];
+}
+
+export interface StartDeploymentRequest {
+  projectId: string;
+  buildId: string;
+  scope: 'all' | 'classes' | 'webapp' | 'resources';
+}
+
+export interface StartServerRequest {
+  projectId: string;
 }
 
 export interface BuildResult {
@@ -357,6 +363,16 @@ export interface EncodingRecodeRequest {
   to: EncodingId;
   /** Optional EOL override. */
   eol?: Eol;
+}
+
+export interface EncodingValidateRequest {
+  text: string;
+  encoding: string;
+}
+
+export interface EncodingValidateResponse {
+  valid: boolean;
+  error?: string;
 }
 
 export interface HealthResponse {
@@ -500,62 +516,33 @@ export interface AuditEvent {
 /* ------------------------------------------------------------------ */
 
 export interface EndpointMap {
-  'GET /api/v1/health': { request: undefined; response: HealthResponse };
-  'GET /api/v1/builds': { request: undefined; response: BuildResult[] };
-  'GET /api/v1/deployments': { request: undefined; response: DeploymentResult[] };
-  'GET /api/v1/servers': { request: undefined; response: ServerInstance[] };
   'GET /api/v1/workspaces': { request: undefined; response: Workspace[] };
   'POST /api/v1/workspaces': {
     request: { rootPath: string; name?: string };
     response: Workspace;
   };
-  'DELETE /api/v1/workspaces/{id}': { request: undefined; response: { ok: true } };
-  'POST /api/v1/workspaces/{id}/scan': {
+  'POST /api/v1/workspaces/{workspaceId}/scan': {
     request: { deep?: boolean };
     response: { detected: DetectedProjectLayout[] };
   };
   'GET /api/v1/projects': { request: undefined; response: ProjectConfig[] };
-  'GET /api/v1/projects/{id}': { request: undefined; response: ProjectConfig };
-  'PUT /api/v1/projects/{id}': { request: { config: ProjectConfig }; response: ProjectConfig };
-  'GET /api/v1/toolchains': { request: undefined; response: Toolchain[] };
-  'POST /api/v1/toolchains/import': {
-    request: { path: string; label?: string };
-    response: Toolchain;
-  };
-  'POST /api/v1/builds': { request: BuildRequest; response: BuildResult };
-  'GET /api/v1/builds/{id}': { request: undefined; response: BuildResult };
-  'POST /api/v1/deployments': { request: DeploymentRequest; response: DeploymentResult };
-  'GET /api/v1/deployments/{id}': { request: undefined; response: DeploymentResult };
-  'POST /api/v1/servers': {
-    request: { projectId: string; debug?: boolean };
-    response: ServerInstance;
-  };
-  'DELETE /api/v1/servers/{id}': { request: { force?: boolean }; response: ServerInstance };
-  'GET /api/v1/servers/{id}': { request: undefined; response: ServerInstance };
-  'POST /api/v1/servers/{id}/debug': { request: undefined; response: ServerInstance };
-  'GET /api/v1/servers/{id}/logs': {
+  'GET /api/v1/projects/{projectId}': { request: undefined; response: ProjectConfig };
+  'PUT /api/v1/projects/{projectId}': { request: { config: ProjectConfig }; response: ProjectConfig };
+  'GET /api/v1/builds': { request: undefined; response: BuildResult[] };
+  'POST /api/v1/builds': { request: StartBuildRequest; response: BuildResult };
+  'GET /api/v1/builds/{buildId}': { request: undefined; response: BuildResult };
+  'DELETE /api/v1/builds/{buildId}': { request: undefined; response: BuildResult };
+  'GET /api/v1/deployments': { request: undefined; response: DeploymentResult[] };
+  'POST /api/v1/deployments': { request: StartDeploymentRequest; response: DeploymentResult };
+  'GET /api/v1/deployments/{deploymentId}': { request: undefined; response: DeploymentResult };
+  'GET /api/v1/servers': { request: undefined; response: ServerInstance[] };
+  'POST /api/v1/servers': { request: StartServerRequest; response: ServerInstance };
+  'GET /api/v1/servers/{serverId}': { request: undefined; response: ServerInstance };
+  'POST /api/v1/servers/{serverId}/restart': { request: undefined; response: ServerInstance };
+  'DELETE /api/v1/servers/{serverId}': { request: undefined; response: ServerInstance };
+  'GET /api/v1/servers/{serverId}/logs': {
     request: { follow?: boolean; since?: number };
     response: { line: string; ts: string }[];
-  };
-  'POST /api/v1/search': { request: SearchRequest; response: SearchResponse };
-  'POST /api/v1/encoding/detect': {
-    request: EncodingDetectRequest;
-    response: EncodingDetectResponse;
-  };
-  'POST /api/v1/encoding/recode': {
-    request: EncodingRecodeRequest;
-    response: { ok: true; bytes: number };
-  };
-  'POST /api/v1/auth/login': { request: LoginRequest; response: LoginResponse };
-  'POST /api/v1/auth/logout': { request: undefined; response: { ok: true } };
-  'GET /api/v1/audit': { request: { since?: string }; response: AuditEvent[] };
-  'GET /api/v1/jdtls': { request: undefined; response: JdtStatus };
-  'POST /api/v1/jdtls': { request: JdtStartRequest; response: JdtStatus };
-  'DELETE /api/v1/jdtls': { request: undefined; response: JdtStatus };
-  'POST /api/v1/jdtls/project': { request: JdtProjectRequest; response: JdtProjectResponse };
-  'GET /api/v1/jdtls/project': {
-    request: undefined;
-    response: { workspaceId: string; exists: boolean; projectId?: string; generatedAt?: string };
   };
 }
 

@@ -17,37 +17,38 @@
     "build": "tsc -p tsconfig.json",
     "clean": "rm -rf lib",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "test": "echo \"no tests\" && exit 0",
+    "test": "node --test src/main/browser/kairo-commands.test.cjs",
     "start:browser": "theia start /tmp/kairo-workspace --hostname=0.0.0.0 --port=3000",
     "start:server": "theia start /var/lib/kairo/workspaces --hostname=0.0.0.0 --port=8443"
   },
   "dependencies": {
+    "@kairo/build-extension": "workspace:*",
     "@kairo/config-schema": "workspace:*",
+    "@kairo/java-extension": "workspace:*",
+    "@kairo/jsp-extension": "workspace:*",
     "@kairo/project-extension": "workspace:*",
+    "@kairo/protocol": "workspace:*",
     "@kairo/runtime-extension": "workspace:*",
     "@kairo/search-extension": "workspace:*",
-    "@kairo/jsp-extension": "workspace:*",
     "@kairo/tomcat-extension": "workspace:*",
-    "@kairo/java-extension": "workspace:*",
     "@kairo/ui-kit": "workspace:*",
-    "@kairo/protocol": "workspace:*",
     "@theia/core": "1.73.1",
+    "@theia/debug": "1.73.1",
     "@theia/editor": "1.73.1",
     "@theia/filesystem": "1.73.1",
-    "@theia/workspace": "1.73.1",
-    "@theia/terminal": "1.73.1",
-    "@theia/debug": "1.73.1",
-    "@theia/monaco": "1.73.1",
-    "@theia/messages": "1.73.1",
-    "@theia/preferences": "1.73.1",
     "@theia/markers": "1.73.1",
-    "@theia/outline-view": "1.73.1",
-    "@theia/search-in-workspace": "1.73.1",
+    "@theia/messages": "1.73.1",
+    "@theia/monaco": "1.73.1",
     "@theia/navigator": "1.73.1",
-    "@theia/variable-resolver": "1.73.1"
+    "@theia/outline-view": "1.73.1",
+    "@theia/preferences": "1.73.1",
+    "@theia/search-in-workspace": "1.73.1",
+    "@theia/terminal": "1.73.1",
+    "@theia/variable-resolver": "1.73.1",
+    "@theia/workspace": "1.73.1"
   },
   "devDependencies": {
+    "jsdom": "^29.1.1",
     "typescript": "5.5.4"
   }
 }
-

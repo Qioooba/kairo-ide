@@ -19,8 +19,8 @@
  * not pull browser-only code into its own process.
  */
 
-import { ContainerModule } from '@theia/core/shared/inversify';
-import { bindKairoProduct } from './product-bindings';
+import type { interfaces } from '@theia/core/shared/inversify';
+import { KairoProduct as KairoProductFromBindings } from './product-bindings';
 
 export {
   KAIRO_SERVERS_FACTORY_ID,
@@ -29,8 +29,10 @@ export {
   KAIRO_LOGS_FACTORY_ID,
 } from './browser/kairo-product-frontend-module';
 
-export const KairoProduct = new ContainerModule(bind => {
-  bindKairoProduct(bind);
-});
+// Re-export from product-bindings so that the runtime bindings
+// (KairoRuntimeImpl, KairoRuntime, KairoErrorListener) are
+// always included, whether the caller uses `loadKairoProduct()`
+// or loads KairoProduct directly.
+export const KairoProduct: interfaces.ContainerModule = KairoProductFromBindings;
 
 export default KairoProduct;

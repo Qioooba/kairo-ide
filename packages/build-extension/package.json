@@ -1,7 +1,7 @@
 {
-  "name": "@kairo/project-extension",
+  "name": "@kairo/build-extension",
   "version": "0.1.0",
-  "description": "Kairo project extension �?owns the workspace and project models, the welcome view, and the project import wizard.",
+  "description": "Kairo Build extension — build store, build view widget, and build lifecycle management.",
   "main": "lib/index.js",
   "types": "lib/src/index.d.ts",
   "files": ["lib", "src"],
@@ -14,16 +14,14 @@
   "dependencies": {
     "@kairo/protocol": "workspace:*",
     "@kairo/runtime-extension": "workspace:*",
-    "@kairo/config-schema": "workspace:*",
+    "@kairo/project-extension": "workspace:*",
     "@kairo/ui-kit": "workspace:*"
   },
   "peerDependencies": {
-    "@theia/core": "1.73.1",
-    "react": "18.3.1"
+    "@theia/core": "1.73.1"
   },
   "devDependencies": {
     "@types/react": "18.3.1",
     "typescript": "5.5.4"
   }
 }
-

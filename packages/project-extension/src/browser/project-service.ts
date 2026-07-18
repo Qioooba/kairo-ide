@@ -8,11 +8,11 @@
 
 import { injectable, inject } from '@theia/core/shared/inversify';
 import type { Workspace as WorkspaceDTO, ProjectConfig } from '@kairo/protocol';
-import { KairoRuntimeImpl } from '@kairo/runtime-extension';
+import { RuntimeConnectionService } from '@kairo/runtime-extension';
 
 @injectable()
 export class KairoProjectService {
-  @inject(KairoRuntimeImpl) protected runtime!: KairoRuntimeImpl;
+  @inject(RuntimeConnectionService) protected runtime!: RuntimeConnectionService;
 
   protected current?: WorkspaceDTO;
   protected projects = new Map<string, ProjectConfig>();
@@ -29,7 +29,7 @@ export class KairoProjectService {
   }
 
   async closeWorkspace(id: string): Promise<void> {
-    await this.runtime.request('DELETE /api/v1/workspaces/{id}', undefined, { pathParams: { id } });
+    await this.runtime.request('DELETE /api/v1/workspaces/{workspaceId}', undefined, { pathParams: { workspaceId: id } });
     if (this.current?.id === id) {
       this.current = undefined;
       this.projects.clear();
@@ -37,7 +37,7 @@ export class KairoProjectService {
   }
 
   async detectLayout(workspaceId: string): Promise<unknown> {
-    return this.runtime.request('POST /api/v1/workspaces/{id}/scan', { deep: true }, { pathParams: { id: workspaceId } });
+    return this.runtime.request('POST /api/v1/workspaces/{workspaceId}/scan', { deep: true }, { pathParams: { workspaceId } });
   }
 
   async listProjects(): Promise<ProjectConfig[]> {
@@ -45,11 +45,11 @@ export class KairoProjectService {
   }
 
   async getProject(id: string): Promise<ProjectConfig> {
-    return this.runtime.request('GET /api/v1/projects/{id}', undefined, { pathParams: { id } });
+    return this.runtime.request('GET /api/v1/projects/{projectId}', undefined, { pathParams: { projectId: id } });
   }
 
   async saveProject(id: string, cfg: ProjectConfig): Promise<ProjectConfig> {
-    return this.runtime.request('PUT /api/v1/projects/{id}', { config: cfg }, { pathParams: { id } });
+    return this.runtime.request('PUT /api/v1/projects/{projectId}', { config: cfg }, { pathParams: { projectId: id } });
   }
 
   currentWorkspace(): WorkspaceDTO | undefined {

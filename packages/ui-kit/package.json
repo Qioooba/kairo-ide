@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "Kairo design tokens, theme constants, and reusable layout primitives. Theia extensions import from here instead of hardcoding colors.",
   "main": "lib/index.js",
-  "types": "lib/src/index.d.ts",
+  "types": "lib/index.d.ts",
   "files": [
     "lib",
     "src"

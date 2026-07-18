@@ -1,0 +1,153 @@
+import * as React from 'react';
+import { injectable, inject } from '@theia/core/shared/inversify';
+import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
+import { CommandService } from '@theia/core/lib/common';
+import { BuildStore, BuildRun, BuildDiagnostic } from './build-store';
+
+function stateIcon(state: BuildRun['state']): string {
+    switch (state) {
+        case 'pending': return '\u23f3'; // hourglass
+        case 'running': return '\u2699\ufe0f'; // gear
+        case 'succeeded': return '\u2705'; // checkmark
+        case 'failed': return '\u274c'; // cross
+        case 'cancelled': return '\u23f9\ufe0f'; // stop
+    }
+}
+
+function severityIcon(severity: BuildDiagnostic['severity']): string {
+    switch (severity) {
+        case 'error': return '\u274c';
+        case 'warning': return '\u26a0\ufe0f';
+        case 'info': return '\u2139\ufe0f';
+    }
+}
+
+interface BuildViewProps {
+    store: BuildStore;
+    commandService: CommandService;
+}
+
+const BuildViewComponent: React.FC<BuildViewProps> = ({ store, commandService }) => {
+    const [builds, setBuilds] = React.useState<BuildRun[]>(store.getBuilds());
+
+    React.useEffect(() => {
+        const sub = store.onDidChange(b => setBuilds([...b]));
+        return () => sub.dispose();
+    }, [store]);
+
+    const latest = builds.length > 0 ? builds[builds.length - 1] : undefined;
+
+    const handleBuild = () => commandService.executeCommand('kairo.build');
+    const handleCleanBuild = () => commandService.executeCommand('kairo.buildAndDeploy');
+
+    return (
+        <div className="kairo-widget" data-testid="build-view">
+            <div className="kairo-widget-header" data-testid="build-view-header">
+                <span className="kairo-widget-title">Build Status</span>
+                {latest && (
+                    <span
+                        className="kairo-build-state"
+                        data-testid="build-state"
+                        data-state={latest.state}
+                    >
+                        {stateIcon(latest.state)} {latest.state}
+                    </span>
+                )}
+                {!latest && (
+                    <span className="kairo-build-state" data-testid="build-state" data-state="idle">
+                        idle
+                    </span>
+                )}
+            </div>
+
+            <div className="kairo-widget-toolbar" data-testid="build-view-toolbar">
+                <button
+                    className="theia-button"
+                    data-testid="build-button"
+                    onClick={handleBuild}
+                >
+                    Build
+                </button>
+                <button
+                    className="theia-button"
+                    data-testid="clean-build-button"
+                    onClick={handleCleanBuild}
+                >
+                    Clean Build
+                </button>
+            </div>
+
+            {latest && latest.summary && (
+                <div className="kairo-build-summary" data-testid="build-summary">
+                    {latest.summary}
+                </div>
+            )}
+
+            {latest && latest.diagnostics && latest.diagnostics.length > 0 && (
+                <div className="kairo-widget-section" data-testid="build-diagnostics">
+                    <div className="kairo-section-title">Diagnostics</div>
+                    <ul className="kairo-diagnostics-list" data-testid="diagnostics-list">
+                        {latest.diagnostics.map((d, i) => (
+                            <li
+                                key={i}
+                                className={`kairo-diagnostic kairo-diagnostic-${d.severity}`}
+                                data-testid={`diagnostic-${d.severity}`}
+                            >
+                                <span className="kairo-diagnostic-icon">{severityIcon(d.severity)}</span>
+                                <span className="kairo-diagnostic-location">
+                                    {d.file}:{d.line}:{d.column}
+                                </span>
+                                <span className="kairo-diagnostic-message">{d.message}</span>
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+            )}
+
+            <div className="kairo-widget-section" data-testid="build-history">
+                <div className="kairo-section-title">Build History</div>
+                {builds.length === 0 ? (
+                    <p className="kairo-empty" data-testid="build-empty">
+                        No builds yet. Press <strong>Build</strong> to start one.
+                    </p>
+                ) : (
+                    <ul className="kairo-build-list" data-testid="build-list">
+                        {builds.map(b => (
+                            <li key={b.id} className="kairo-build-item" data-testid={`build-${b.id}`}>
+                                <span className="kairo-build-state-icon">{stateIcon(b.state)}</span>
+                                <span className="kairo-build-id">{b.id}</span>
+                                <span className="kairo-build-time">{b.startTime}</span>
+                                {b.endTime && (
+                                    <span className="kairo-build-end-time">{b.endTime}</span>
+                                )}
+                            </li>
+                        ))}
+                    </ul>
+                )}
+            </div>
+        </div>
+    );
+};
+
+@injectable()
+export class BuildViewWidget extends ReactWidget {
+    static readonly ID = 'kairo-build-view';
+
+    @inject(BuildStore) protected readonly buildStore!: BuildStore;
+    @inject(CommandService) protected readonly commandService!: CommandService;
+
+    constructor() {
+        super();
+        this.id = BuildViewWidget.ID;
+        this.title.label = 'Kairo Build';
+        this.title.caption = 'Kairo Build View';
+        this.addClass('kairo-widget');
+    }
+
+    protected render(): React.ReactNode {
+        return React.createElement(BuildViewComponent, {
+            store: this.buildStore,
+            commandService: this.commandService,
+        });
+    }
+}

@@ -1,0 +1,221 @@
+:root {
+    /* Kairo brand colors */
+    --kairo-primary: #7C3AED;
+    --kairo-primary-hover: #6D28D9;
+    --kairo-primary-light: #8B5CF6;
+    --kairo-bg: #1a1a2e;
+    --kairo-bg-secondary: #16213e;
+    --kairo-surface: #0f3460;
+    --kairo-text: #e0e0e0;
+    --kairo-text-secondary: #a0a0a0;
+    --kairo-border: #333355;
+    --kairo-success: #10B981;
+    --kairo-warning: #F59E0B;
+    --kairo-error: #EF4444;
+    --kairo-info: #3B82F6;
+}
+
+/* Kairo component styles - only for Kairo-specific widgets, not Theia core */
+.kairo-import-wizard {
+    padding: 24px;
+    max-width: 600px;
+    margin: 0 auto;
+    color: var(--kairo-text);
+}
+
+.kairo-wizard-header h1 {
+    font-size: 24px;
+    margin-bottom: 8px;
+    color: var(--kairo-primary-light);
+}
+
+.kairo-wizard-steps {
+    display: flex;
+    gap: 16px;
+    margin: 24px 0;
+}
+
+.kairo-wizard-step {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    opacity: 0.4;
+}
+
+.kairo-wizard-step.active {
+    opacity: 1;
+}
+
+.kairo-wizard-step .step-number {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: var(--kairo-border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.kairo-wizard-step.active .step-number {
+    background: var(--kairo-primary);
+}
+
+.kairo-project-selector {
+    position: relative;
+}
+
+.kairo-project-selector-btn {
+    background: none;
+    border: 1px solid var(--kairo-border);
+    color: var(--kairo-text);
+    padding: 4px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+}
+
+.kairo-project-selector-btn:hover {
+    background: var(--kairo-bg-secondary);
+}
+
+.kairo-project-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    margin-top: 4px;
+    background: var(--kairo-bg-secondary);
+    border: 1px solid var(--kairo-border);
+    border-radius: 4px;
+    padding: 12px;
+    min-width: 200px;
+    z-index: 1000;
+}
+
+.kairo-build-view {
+    padding: 12px;
+    color: var(--kairo-text);
+}
+
+.kairo-build-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px;
+    border-radius: 4px;
+    margin-bottom: 12px;
+    font-size: 14px;
+}
+
+.kairo-build-status.succeeded {
+    background: rgba(16, 185, 129, 0.1);
+    color: var(--kairo-success);
+}
+
+.kairo-build-status.failed {
+    background: rgba(239, 68, 68, 0.1);
+    color: var(--kairo-error);
+}
+
+.kairo-build-status.running {
+    background: rgba(59, 130, 246, 0.1);
+    color: var(--kairo-info);
+}
+
+.kairo-diagnostic-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.kairo-diagnostic-item {
+    padding: 4px 8px;
+    font-family: monospace;
+    font-size: 12px;
+    border-bottom: 1px solid var(--kairo-border);
+    cursor: pointer;
+}
+
+.kairo-diagnostic-item:hover {
+    background: var(--kairo-bg-secondary);
+}
+
+.kairo-diagnostic-item.error {
+    color: var(--kairo-error);
+}
+
+.kairo-diagnostic-item.warning {
+    color: var(--kairo-warning);
+}
+
+.kairo-server-view {
+    padding: 12px;
+    color: var(--kairo-text);
+}
+
+.kairo-server-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px;
+    border-radius: 4px;
+    margin-bottom: 12px;
+}
+
+.kairo-server-status.running {
+    background: rgba(16, 185, 129, 0.1);
+    color: var(--kairo-success);
+}
+
+.kairo-server-status.stopped {
+    background: rgba(160, 160, 160, 0.1);
+    color: var(--kairo-text-secondary);
+}
+
+.kairo-server-status.error {
+    background: rgba(239, 68, 68, 0.1);
+    color: var(--kairo-error);
+}
+
+.kairo-server-actions {
+    display: flex;
+    gap: 8px;
+    margin: 12px 0;
+}
+
+.kairo-server-url {
+    font-family: monospace;
+    font-size: 13px;
+    color: var(--kairo-info);
+    cursor: pointer;
+    text-decoration: underline;
+}
+
+.kairo-log-viewer {
+    padding: 8px;
+    font-family: monospace;
+    font-size: 12px;
+    color: var(--kairo-text);
+    max-height: 300px;
+    overflow-y: auto;
+    background: var(--kairo-bg);
+    border-radius: 4px;
+}
+
+.kairo-log-line {
+    padding: 2px 4px;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+.kairo-log-line.error {
+    color: var(--kairo-error);
+}
+
+.kairo-log-line.warning {
+    color: var(--kairo-warning);
+}

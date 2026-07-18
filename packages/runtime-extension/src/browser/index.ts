@@ -1,5 +1,5 @@
 /**
- * The browser-side module that wires the KairoRuntime into
+ * The browser-side module that wires the Kairo runtime into
  * inversify.
  *
  * Bindings are registered as a Theia ContainerModule, not via
@@ -10,23 +10,25 @@
 import { ContainerModule, injectable } from '@theia/core/shared/inversify';
 import {
   KairoRuntime,
-  KairoRuntimeImpl,
-  KairoRuntimeConfig,
   KairoErrorListener,
   KairoErrorListenerImpl,
 } from './runtime';
+import { WorkspaceContextService } from './workspace-context-service';
+import { RuntimeConnectionService, EventStream, type KairoRuntimeConfig, type KairoRequestInit } from './runtime-connection-service';
 
 export {
   KairoRuntime,
-  KairoRuntimeImpl,
-  KairoRuntimeConfig,
   KairoErrorListener,
   KairoErrorListenerImpl,
-  EventStream,
 } from './runtime';
 
 export { KairoError, normaliseThrown, unwrapResponse, FALLBACK_ERROR_CODE } from './runtime-errors';
-export type { KairoRequestInit } from './runtime';
+
+export { WorkspaceContextService } from './workspace-context-service';
+export type { WorkspaceContext } from './workspace-context-service';
+
+export { RuntimeConnectionService, EventStream } from './runtime-connection-service';
+export type { KairoRuntimeConfig, KairoRequestInit } from './runtime-connection-service';
 
 export const RUNTIME_BASE_URL = 'http://127.0.0.1:18099';
 
@@ -34,32 +36,32 @@ export const RUNTIME_BASE_URL = 'http://127.0.0.1:18099';
  * The Kairo runtime frontend module. Apps load it as part of
  * their Theia composition.
  *
- * Two bindings are registered:
- *   - `KairoRuntimeImpl` toSelf (singleton) — the concrete class
- *     that every Kairo service injects via `@inject(KairoRuntimeImpl)`.
- *   - `KairoRuntime` (Symbol) toService(KairoRuntimeImpl) — for
+ * Key bindings:
+ *   - `RuntimeConnectionService` toSelf (singleton) — the single
+ *     HTTP client that every Kairo service injects.
+ *   - `KairoRuntime` (Symbol) toService(RuntimeConnectionService) — for
  *     callers that want the Symbol-typed lookup.
- *
- * Previously only the Symbol binding existed, so every consumer
- * that injected the concrete class got "No matching bindings
- * found for serviceIdentifier: KairoRuntimeImpl" at resolve time
- * and the entire Kairo composition was non-functional.
  */
 export const KairoRuntimeModule = new ContainerModule((bind, _unbind, isBound, rebind) => {
-  if (isBound(KairoRuntimeImpl)) {
-    rebind(KairoRuntimeImpl).toSelf().inSingletonScope();
+  if (isBound(RuntimeConnectionService)) {
+    rebind(RuntimeConnectionService).toSelf().inSingletonScope();
   } else {
-    bind(KairoRuntimeImpl).toSelf().inSingletonScope();
+    bind(RuntimeConnectionService).toSelf().inSingletonScope();
   }
   if (isBound(KairoRuntime)) {
-    rebind(KairoRuntime).toService(KairoRuntimeImpl);
+    rebind(KairoRuntime).toService(RuntimeConnectionService);
   } else {
-    bind(KairoRuntime).toService(KairoRuntimeImpl);
+    bind(KairoRuntime).toService(RuntimeConnectionService);
   }
   if (isBound(KairoErrorListener)) {
     rebind(KairoErrorListener).to(KairoErrorListenerImpl).inSingletonScope();
   } else {
     bind(KairoErrorListener).to(KairoErrorListenerImpl).inSingletonScope();
+  }
+  if (isBound(WorkspaceContextService)) {
+    rebind(WorkspaceContextService).toSelf().inSingletonScope();
+  } else {
+    bind(WorkspaceContextService).toSelf().inSingletonScope();
   }
 });
 

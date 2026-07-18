@@ -26,14 +26,17 @@ import {
   ApplicationShell,
 } from '@theia/core/lib/browser';
 import { Command, CommandRegistry, CommandService, MessageService } from '@theia/core/lib/common';
-import { Message } from '@lumino/messaging';
-import { KairoRuntimeImpl, EventStream, KairoError } from '@kairo/runtime-extension';
+import { RuntimeConnectionService, EventStream, KairoError } from '@kairo/runtime-extension';
 import {
   KairoServerService,
 } from '@kairo/tomcat-extension';
 import {
   KairoProjectService,
+  ActiveProjectService,
 } from '@kairo/project-extension';
+import { BuildViewWidget } from '@kairo/build-extension';
+import { BuildStore } from '@kairo/build-extension';
+import { ServerViewWidget, LogViewerWidget } from '@kairo/tomcat-extension';
 import type {
   ServerInstance,
   BuildResult,
@@ -65,86 +68,6 @@ const KAIRO_ACTIVITY_BAR_ORDER = 6;
 /* ------------------------------------------------------------------ */
 /*  Widgets                                                             */
 /* ------------------------------------------------------------------ */
-
-@injectable()
-export class KairoServersWidget extends Widget {
-  static readonly ID = 'kairo-servers';
-  servers: ServerInstance[] = [];
-
-  @inject(KairoServerService) protected serverSvc!: KairoServerService;
-
-  constructor() {
-    super();
-    this.id = KairoServersWidget.ID;
-    this.title.label = 'Kairo Servers';
-    this.title.caption = 'Kairo Servers (workspace)';
-    this.addClass('kairo-widget');
-    this.node.innerHTML = `<div class="kairo-widget-body">
-      <p>No servers registered yet.</p>
-    </div>`;
-  }
-
-  async refresh(): Promise<void> {
-    // Real refresh: re-fetch project + servers through the service.
-    this.node.innerHTML = `<div class="kairo-widget-body"><p>Loading…</p></div>`;
-    // The runtime client raises an error if the agent is down;
-    // we want to show that visibly so the user can fix it.
-    try {
-      // Workspace id is set by the project service; here we list
-      // servers globally (per the runtime client) and let the
-      // widget filter by workspace if needed.
-      this.node.innerHTML = `<div class="kairo-widget-body">
-        <p>Servers view — wire to a workspace once one is opened.</p>
-      </div>`;
-    } catch (err) {
-      const msg = err instanceof KairoError ? err.format() : String(err);
-      this.node.innerHTML = `<div class="kairo-widget-body">
-        <p class="kairo-error">Failed to load servers: ${escapeHtml(msg)}</p>
-      </div>`;
-    }
-  }
-}
-
-@injectable()
-export class KairoBuildsWidget extends Widget {
-  static readonly ID = 'kairo-builds';
-  builds: BuildResult[] = [];
-
-  constructor() {
-    super();
-    this.id = KairoBuildsWidget.ID;
-    this.title.label = 'Kairo Builds';
-    this.title.caption = 'Kairo Builds';
-    this.addClass('kairo-widget');
-    this.node.innerHTML = `<div class="kairo-widget-body">
-      <p>No builds yet. Press <strong>Kairo: Build</strong> to start one.</p>
-    </div>`;
-  }
-
-  setBuilds(builds: BuildResult[]): void {
-    this.builds = builds;
-    if (builds.length === 0) {
-      this.node.innerHTML = `<div class="kairo-widget-body">
-        <p>No builds yet. Press <strong>Kairo: Build</strong> to start one.</p>
-      </div>`;
-      return;
-    }
-    const rows = builds.slice(0, 50).map(b => `
-      <tr>
-        <td>${escapeHtml(b.id)}</td>
-        <td>${escapeHtml(b.state)}</td>
-        <td>${b.summary.errors} err / ${b.summary.warnings} warn</td>
-        <td>${escapeHtml(b.startedAt)}</td>
-      </tr>
-    `).join('');
-    this.node.innerHTML = `<div class="kairo-widget-body">
-      <table class="kairo-builds-table">
-        <thead><tr><th>ID</th><th>State</th><th>Summary</th><th>Started</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
-    </div>`;
-  }
-}
 
 @injectable()
 export class KairoDeploymentsWidget extends Widget {
@@ -188,110 +111,6 @@ export class KairoDeploymentsWidget extends Widget {
   }
 }
 
-/**
- * A bounded ring buffer for log lines. Bounded so the DOM does
- * not grow without limit during a long-running session.
- */
-class RingBuffer<T> {
-  private items: T[] = [];
-  constructor(public capacity: number = 5000) {}
-  push(item: T): void {
-    this.items.push(item);
-    if (this.items.length > this.capacity) {
-      this.items.splice(0, this.items.length - this.capacity);
-    }
-  }
-  toArray(): T[] { return this.items; }
-  clear(): void { this.items = []; }
-}
-
-@injectable()
-export class KairoTomcatLogsWidget extends Widget {
-  static readonly ID = 'kairo-logs';
-  readonly buffer = new RingBuffer<{ serverId: string; line: string; ts: string }>(5000);
-  protected unsub: (() => void) | undefined;
-  protected unsubStatus: (() => void) | undefined;
-  protected serverFilter: string | undefined;
-
-  @inject(KairoRuntimeImpl) protected runtime!: KairoRuntimeImpl;
-
-  constructor() {
-    super();
-    this.id = KairoTomcatLogsWidget.ID;
-    this.title.label = 'Kairo Tomcat Logs';
-    this.title.caption = 'Kairo Tomcat Logs (live)';
-    this.addClass('kairo-widget');
-    this.node.innerHTML = `<div class="kairo-widget-body">
-      <p>No log stream yet. Start a server to see live logs here.</p>
-    </div>`;
-  }
-
-  @postConstruct()
-  init(): void {
-    this.attachStream();
-  }
-
-  protected attachStream(): void {
-    try {
-      const stream: EventStream = this.runtime.openEvents();
-      this.unsub = stream.on('log', (e: WsEvent) => {
-        if (e.type !== 'log') return;
-        if (this.serverFilter && e.serverId !== this.serverFilter) return;
-        this.buffer.push({ serverId: e.serverId, line: e.line, ts: e.ts });
-        this.refresh();
-      });
-      this.unsubStatus = stream.onStatus(s => {
-        if (s === 'disconnected' || s === 'closed') {
-          this.node.innerHTML = `<div class="kairo-widget-body">
-            <p class="kairo-error">Runtime Agent is ${s}. Logs will resume when it comes back.</p>
-          </div>`;
-        } else if (s === 'open' && this.buffer.toArray().length === 0) {
-          this.refresh();
-        }
-      });
-    } catch (err) {
-      const msg = err instanceof KairoError ? err.format() : String(err);
-      this.node.innerHTML = `<div class="kairo-widget-body">
-        <p class="kairo-error">Cannot open log stream: ${escapeHtml(msg)}</p>
-      </div>`;
-    }
-  }
-
-  setServerFilter(serverId: string | undefined): void {
-    this.serverFilter = serverId;
-    this.buffer.clear();
-    this.refresh();
-  }
-
-  refresh(): void {
-    const lines = this.buffer.toArray();
-    if (lines.length === 0) {
-      this.node.innerHTML = `<div class="kairo-widget-body">
-        <p>No log lines yet. Start a server to see live logs here.</p>
-      </div>`;
-      return;
-    }
-    const body = lines
-      .map(l => `<div class="kairo-log-line" data-ts="${escapeHtml(l.ts)}">[${escapeHtml(l.ts)}] ${escapeHtml(l.line)}</div>`)
-      .join('');
-    this.node.innerHTML = `<div class="kairo-widget-body kairo-log-body">${body}</div>`;
-    // Auto-scroll to bottom.
-    const el = this.node.querySelector('.kairo-log-body') as HTMLElement | null;
-    if (el) el.scrollTop = el.scrollHeight;
-  }
-
-  clear(): void {
-    this.buffer.clear();
-    this.refresh();
-  }
-
-  onCloseRequest(msg: Message): void {
-    this.unsub?.();
-    this.unsubStatus?.();
-    super.onCloseRequest(msg);
-  }
-}
-
 /* ------------------------------------------------------------------ */
 /*  Contribution — wires commands, views, and event subscriptions       */
 /* ------------------------------------------------------------------ */
@@ -301,18 +120,20 @@ export class KairoViewsContribution implements FrontendApplicationContribution {
   @inject(ApplicationShell) protected shell!: ApplicationShell;
   @inject(WidgetManager) protected widgetManager!: WidgetManager;
   @inject(CommandService) protected commands!: CommandService;
-  @inject(KairoRuntimeImpl) protected runtime!: KairoRuntimeImpl;
+  @inject(RuntimeConnectionService) protected runtime!: RuntimeConnectionService;
   @inject(KairoServerService) protected serverSvc!: KairoServerService;
   @inject(KairoProjectService) protected projectSvc!: KairoProjectService;
+  @inject(ActiveProjectService) protected activeProject!: ActiveProjectService;
   @inject(MessageService) protected messages!: MessageService;
+  @inject(BuildStore) protected buildStore!: BuildStore;
 
   protected eventStream: EventStream | undefined;
   protected eventsUnsub: (() => void) | undefined;
   protected statusUnsub: (() => void) | undefined;
-  protected serversView: KairoServersWidget | undefined;
-  protected buildsView: KairoBuildsWidget | undefined;
+  protected serversView: ServerViewWidget | undefined;
+  protected buildsView: BuildViewWidget | undefined;
   protected deploymentsView: KairoDeploymentsWidget | undefined;
-  protected logsView: KairoTomcatLogsWidget | undefined;
+  protected logsView: LogViewerWidget | undefined;
 
   @postConstruct()
   init(): void {
@@ -361,13 +182,8 @@ export class KairoViewsContribution implements FrontendApplicationContribution {
     registry.registerCommand(KairoCommands.BUILD, {
       execute: async () => {
         try {
-          const projects = await this.projectSvc.listProjects();
-          const p = projects[0];
-          if (!p) {
-            this.messages.warn('No project configured. Run Scan Project first.');
-            return undefined;
-          }
-          const result = await this.runtime.request('POST /api/v1/builds', { projectId: p.id });
+          const p = await this.activeProject.requireProject();
+          const result = await this.runtime.request('POST /api/v1/builds', { projectId: p.projectId });
           this.messages.info(`Build ${result.state}.`);
           await this.refreshBuilds();
         } catch (err) {
@@ -380,14 +196,9 @@ export class KairoViewsContribution implements FrontendApplicationContribution {
     registry.registerCommand(KairoCommands.BUILD_AND_DEPLOY, {
       execute: async () => {
         try {
-          const projects = await this.projectSvc.listProjects();
-          const p = projects[0];
-          if (!p) {
-            this.messages.warn('No project configured.');
-            return undefined;
-          }
-          const build = await this.runtime.request('POST /api/v1/builds', { projectId: p.id });
-          const deploy = await this.runtime.request('POST /api/v1/deployments', { projectId: p.id, buildId: build.id, what: 'all' });
+          const p = await this.activeProject.requireProject();
+          const build = await this.runtime.request('POST /api/v1/builds', { projectId: p.projectId });
+          const deploy = await this.runtime.request('POST /api/v1/deployments', { projectId: p.projectId, buildId: build.id, scope: 'all' });
           this.messages.info(`Build ${build.state} → Deploy ${deploy.state}.`);
           await this.refreshBuilds();
           await this.refreshDeployments();
@@ -401,13 +212,8 @@ export class KairoViewsContribution implements FrontendApplicationContribution {
     registry.registerCommand(KairoCommands.START_SERVER, {
       execute: async () => {
         try {
-          const projects = await this.projectSvc.listProjects();
-          const p = projects[0];
-          if (!p) {
-            this.messages.warn('No project configured.');
-            return undefined;
-          }
-          const srv = await this.serverSvc.start(p.id, false);
+          const p = await this.activeProject.requireProject();
+          const srv = await this.serverSvc.start(p.projectId, false);
           this.messages.info(`Server ${srv.id} ${srv.state}.`);
         } catch (err) {
           this.messages.error(kairoErrorMessage(err, 'Server start failed'));
@@ -419,13 +225,8 @@ export class KairoViewsContribution implements FrontendApplicationContribution {
     registry.registerCommand(KairoCommands.DEBUG_SERVER, {
       execute: async () => {
         try {
-          const projects = await this.projectSvc.listProjects();
-          const p = projects[0];
-          if (!p) {
-            this.messages.warn('No project configured.');
-            return undefined;
-          }
-          const srv = await this.serverSvc.start(p.id, true);
+          const p = await this.activeProject.requireProject();
+          const srv = await this.serverSvc.start(p.projectId, true);
           this.messages.info(`Server ${srv.id} (debug) ${srv.state}.`);
         } catch (err) {
           this.messages.error(kairoErrorMessage(err, 'Server debug start failed'));
@@ -437,7 +238,7 @@ export class KairoViewsContribution implements FrontendApplicationContribution {
     registry.registerCommand(KairoCommands.STOP_SERVER, {
       execute: async () => {
         try {
-          const list = await this.runtime.request('GET /api/v1/servers', undefined).catch(() => []);
+          const list = await this.runtime.request('GET /api/v1/servers', undefined);
           for (const srv of (list as ServerInstance[])) {
             await this.serverSvc.stop(srv.id, false);
             this.messages.info(`Server ${srv.id} stopped.`);
@@ -452,7 +253,7 @@ export class KairoViewsContribution implements FrontendApplicationContribution {
     registry.registerCommand(KairoCommands.RESTART_SERVER, {
       execute: async () => {
         try {
-          const list = await this.runtime.request('GET /api/v1/servers', undefined).catch(() => []);
+          const list = await this.runtime.request('GET /api/v1/servers', undefined);
           for (const srv of (list as ServerInstance[])) {
             await this.serverSvc.stop(srv.id, true);
             this.messages.info(`Server ${srv.id} stopped (forced).`);
@@ -467,7 +268,7 @@ export class KairoViewsContribution implements FrontendApplicationContribution {
     registry.registerCommand(KairoCommands.OPEN_APPLICATION, {
       execute: async () => {
         try {
-          const list = (await this.runtime.request('GET /api/v1/servers', undefined).catch(() => [])) as ServerInstance[];
+          const list = (await this.runtime.request('GET /api/v1/servers', undefined)) as ServerInstance[];
           const srv = list[0];
           if (!srv || !srv.ports.http) {
             this.messages.warn('No running server with an HTTP port.');
@@ -483,16 +284,16 @@ export class KairoViewsContribution implements FrontendApplicationContribution {
     });
 
     registry.registerCommand(KairoCommands.REVEAL_KAIRO_SERVERS, {
-      execute: () => { void this.revealOrCreate(KairoServersWidget.ID, () => this.serversView, w => { this.serversView = w; }); },
+      execute: () => { void this.revealOrCreate(ServerViewWidget.ID, () => this.serversView, w => { this.serversView = w; }); },
     });
     registry.registerCommand(KairoCommands.REVEAL_KAIRO_BUILDS, {
-      execute: () => { void this.revealOrCreate(KairoBuildsWidget.ID, () => this.buildsView, w => { this.buildsView = w; }); },
+      execute: () => { void this.revealOrCreate(BuildViewWidget.ID, () => this.buildsView, w => { this.buildsView = w; }); },
     });
     registry.registerCommand(KairoCommands.REVEAL_KAIRO_DEPLOYMENTS, {
       execute: () => { void this.revealOrCreate(KairoDeploymentsWidget.ID, () => this.deploymentsView, w => { this.deploymentsView = w; }); },
     });
     registry.registerCommand(KairoCommands.REVEAL_KAIRO_LOGS, {
-      execute: () => { void this.revealOrCreate(KairoTomcatLogsWidget.ID, () => this.logsView, w => { this.logsView = w; }); },
+      execute: () => { void this.revealOrCreate(LogViewerWidget.ID, () => this.logsView, w => { this.logsView = w; }); },
     });
   }
 
@@ -520,10 +321,26 @@ export class KairoViewsContribution implements FrontendApplicationContribution {
   }
 
   protected async refreshBuilds(): Promise<void> {
-    if (!this.buildsView) return;
     try {
-      const list = (await this.runtime.request('GET /api/v1/builds', undefined).catch(() => [])) as BuildResult[];
-      this.buildsView.setBuilds(Array.isArray(list) ? list : []);
+      const list = (await this.runtime.request('GET /api/v1/builds', undefined)) as BuildResult[];
+      if (Array.isArray(list)) {
+        this.buildStore.setBuilds(list.map(b => ({
+          id: b.id,
+          workspaceId: this.runtime.workspace(),
+          projectId: '',
+          state: b.state === 'success' ? 'succeeded' : b.state === 'failure' ? 'failed' : b.state === 'queued' ? 'pending' : b.state,
+          startTime: b.startedAt,
+          endTime: b.finishedAt,
+          summary: `${b.summary.errors} errors, ${b.summary.warnings} warnings`,
+          diagnostics: b.diagnostics.map(d => ({
+            file: d.file,
+            line: d.line,
+            column: d.column,
+            severity: d.severity === 'hint' ? 'info' : d.severity,
+            message: d.message,
+          })),
+        })));
+      }
     } catch (err) {
       this.messages.error(kairoErrorMessage(err, 'Refresh builds failed'));
     }
@@ -532,7 +349,7 @@ export class KairoViewsContribution implements FrontendApplicationContribution {
   protected async refreshDeployments(): Promise<void> {
     if (!this.deploymentsView) return;
     try {
-      const list = (await this.runtime.request('GET /api/v1/deployments', undefined).catch(() => [])) as DeploymentResult[];
+      const list = (await this.runtime.request('GET /api/v1/deployments', undefined)) as DeploymentResult[];
       this.deploymentsView.setDeployments(Array.isArray(list) ? list : []);
     } catch (err) {
       this.messages.error(kairoErrorMessage(err, 'Refresh deployments failed'));

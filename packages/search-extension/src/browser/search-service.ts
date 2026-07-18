@@ -5,7 +5,7 @@
 
 import { injectable, inject } from '@theia/core/shared/inversify';
 import type { SearchRequest, SearchResponse } from '@kairo/protocol';
-import { KairoRuntimeImpl } from '@kairo/runtime-extension';
+import { RuntimeConnectionService } from '@kairo/runtime-extension';
 
 export interface SearchOptions extends Partial<SearchRequest> {
   workspaceId: string;
@@ -25,7 +25,7 @@ export class KairoSearchCancelledError extends Error {
 
 @injectable()
 export class KairoSearchService {
-  @inject(KairoRuntimeImpl) protected runtime!: KairoRuntimeImpl;
+  @inject(RuntimeConnectionService) protected runtime!: RuntimeConnectionService;
   protected current?: AbortController;
 
   async search(opts: SearchOptions): Promise<SearchResponse> {

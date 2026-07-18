@@ -1,44 +1,144 @@
-// KairoViewsContribution.registerCommands — contract test.
+// KairoViewsContribution.registerCommands — contract test
+// using a real inversify container with mocked dependencies.
 //
-// The Theia contribution registers a set of commands. We
-// exercise the registration in isolation with a stub
-// CommandRegistry that records every registration, and
-// assert that every command the Kairo UI relies on is
-// present.
-//
-// This is the "code written but never called" guard: if a
-// refactor removes a registry.registerCommand(...) line, or
-// renames a Command constant so it no longer matches the
-// expected id, this test fails loudly.
-//
-// The Theia product's compiled module pulls in Theia +
-// Lumino DOM utilities at import time, so requiring it in
-// plain Node is not viable. Instead we read the source
-// file and parse the KairoCommands namespace + the
-// registerCommands() body via a small regex extractor.
-// This is the same approach we use to keep the test
-// independent of the Theia runtime, while still catching
-// the regression we care about: a missing or renamed
-// command id, and a missing registerCommand() call.
+// Verifies that every command the Kairo UI relies on is
+// registered in the CommandRegistry. This catches regressions
+// where a command is removed or renamed.
 //
 // Run with:
-//   pnpm --filter @kairo/theia-product exec node --test src/main/browser/kairo-commands.test.cjs
+//   node --test src/main/browser/kairo-commands.test.cjs
 
 'use strict';
 
-const { test } = require('node:test');
-const assert = require('node:assert');
-const fs = require('fs');
-const path = require('path');
+// Use Theia's jsdom helper to set up a proper DOM environment
+// before any Lumino/Theia browser code is loaded.
+const { enableJSDOM } = require('@theia/core/lib/browser/test/jsdom');
+const disableJSDOM = enableJSDOM();
 
-const SRC = path.join(__dirname, 'kairo-views-contribution.ts');
-
-function readSrc() {
-  return fs.readFileSync(SRC, 'utf-8');
+// jsdom doesn't include DragEvent — patch it so Lumino's dragdrop loads
+if (!global.DragEvent) {
+  global.DragEvent = class DragEvent extends global.MouseEvent {
+    constructor(type, init) {
+      super(type, init);
+      this.dataTransfer = (init && init.dataTransfer) || null;
+    }
+  };
 }
 
+// Theia browser modules require CSS files — stub them out
+const Module = require('module');
+const origLoad = Module._extensions['.css'] || Module._extensions['.js'];
+Module._extensions['.css'] = function (module, filename) {
+  module._compile('module.exports = {};', filename);
+};
+
+// Theia requires FrontendApplicationConfigProvider to be set before
+// any browser module is loaded.
+const { FrontendApplicationConfigProvider } = require('@theia/core/lib/browser/frontend-application-config-provider');
+FrontendApplicationConfigProvider.set({
+  defaultTheme: 'dark',
+  defaultIconTheme: 'theia-file-icons',
+  applicationName: 'Kairo',
+  validatePreferencesSchema: true,
+});
+
+require('reflect-metadata');
+
+const { test } = require('node:test');
+const assert = require('node:assert');
+const { Container } = require('inversify');
+
+// Theia core symbols and classes
+const { ApplicationShell, WidgetManager } = require('@theia/core/lib/browser');
+const { CommandRegistry, CommandService, MessageService } = require('@theia/core/lib/common');
+
+// Kairo extension symbols
+const { KairoRuntimeImpl } = require('@kairo/runtime-extension/lib/browser');
+const { KairoServerService } = require('@kairo/tomcat-extension/lib/browser');
+const { KairoProjectService, ActiveProjectService } = require('@kairo/project-extension/lib/browser');
+
+// The production module under test
+const { KairoViewsContribution, KairoCommands } = require('../../../lib/browser/kairo-views-contribution');
+
+// --------------- mock factories ---------------
+
+function createMock(obj, overrides) {
+  const mock = {};
+  for (const key of Object.getOwnPropertyNames(obj)) {
+    if (typeof obj[key] === 'function') {
+      mock[key] = overrides[key] || (() => {});
+    }
+  }
+  return mock;
+}
+
+function createMockApplicationShell() {
+  return {
+    activateWidget: () => {},
+    getDockPanel: () => ({}),
+    addWidget: () => {},
+  };
+}
+
+function createMockWidgetManager() {
+  return {
+    getOrCreateWidget: () => Promise.resolve({ id: 'mock-widget' }),
+    getWidgets: () => [],
+  };
+}
+
+function createMockCommandService() {
+  return {
+    executeCommand: () => Promise.resolve(),
+    executeCommandByHandler: () => Promise.resolve(),
+  };
+}
+
+function createMockKairoRuntimeImpl() {
+  return {
+    openEvents: () => ({
+      on: () => () => {},
+      onStatus: () => () => {},
+      close: () => {},
+    }),
+    request: () => Promise.resolve({}),
+  };
+}
+
+function createMockKairoServerService() {
+  return {
+    start: () => Promise.resolve({ id: 'mock-srv', state: 'running' }),
+    stop: () => Promise.resolve({}),
+    list: () => Promise.resolve([]),
+  };
+}
+
+function createMockKairoProjectService() {
+  return {
+    currentWorkspace: () => ({ id: 'mock-ws', rootPath: '/mock' }),
+    detectLayout: () => Promise.resolve({}),
+  };
+}
+
+function createMockActiveProjectService() {
+  return {
+    requireProject: () => Promise.resolve({ projectId: 'mock-proj' }),
+    getProject: () => Promise.resolve({}),
+  };
+}
+
+function createMockMessageService() {
+  return {
+    info: () => {},
+    warn: () => {},
+    error: () => {},
+    log: () => {},
+  };
+}
+
+// --------------- tests ---------------
+
 test('KairoCommands namespace declares the expected command ids with non-empty labels', () => {
-  const src = readSrc();
   const expected = [
     'kairo.project.scan',
     'kairo.build',
@@ -53,67 +153,88 @@ test('KairoCommands namespace declares the expected command ids with non-empty l
     'kairo.view.deployments',
     'kairo.view.logs',
   ];
+
+  const commandEntries = Object.values(KairoCommands);
+  const ids = commandEntries.map(c => c.id).sort();
+
   for (const id of expected) {
-    // Match `id: 'kairo.x.y'` literally.
-    const re = new RegExp(`id:\\s*'${id.replace(/\./g, '\\.')}'`);
-    assert.ok(re.test(src), `KairoCommands.${id} is missing from ${SRC}`);
-    // The same line should have a label.
-    const block = new RegExp(`id:\\s*'${id.replace(/\./g, '\\.')}',\\s*label:\\s*'([^']+)'`);
-    const m = block.exec(src);
-    assert.ok(m, `${id} should have a label`);
-    assert.ok(m[1].length > 0, `${id} label should be non-empty`);
+    assert.ok(ids.includes(id), `KairoCommands.${id} is missing from the namespace`);
+  }
+
+  for (const cmd of commandEntries) {
+    assert.ok(typeof cmd.label === 'string' && cmd.label.length > 0,
+      `Command ${cmd.id} should have a non-empty label`);
   }
 });
 
-test('KairoViewsContribution.registerCommands body registers every KairoCommands id', () => {
-  const src = readSrc();
-  // Slice out the registerCommands method body. The body
-  // is the text between the opening brace after
-  // `registerCommands(` and the matching closing brace at
-  // the method's level. Because each command handler is an
-  // arrow function with its own block, we need a proper
-  // brace counter.
-  const start = src.indexOf('async registerCommands(');
-  assert.ok(start >= 0, 'registerCommands method must exist');
-  let i = src.indexOf('{', start);
-  assert.ok(i >= 0, 'registerCommands must have a body');
-  let depth = 0;
-  for (; i < src.length; i++) {
-    const c = src[i];
-    if (c === '{') depth++;
-    else if (c === '}') {
-      depth--;
-      if (depth === 0) {
-        i++;
-        break;
-      }
-    }
-  }
-  const body = src.slice(start, i);
-  // Expected: 12 ids, each one referenced via
-  // `KairoCommands.<NAME>` exactly once in registerCommands.
-  const expected = [
-    'SCAN_PROJECT',
-    'BUILD',
-    'BUILD_AND_DEPLOY',
-    'START_SERVER',
-    'DEBUG_SERVER',
-    'STOP_SERVER',
-    'RESTART_SERVER',
-    'OPEN_APPLICATION',
-    'REVEAL_KAIRO_SERVERS',
-    'REVEAL_KAIRO_BUILDS',
-    'REVEAL_KAIRO_DEPLOYMENTS',
-    'REVEAL_KAIRO_LOGS',
+test('KairoViewsContribution.registerCommands registers every command in a real CommandRegistry', () => {
+  // Build a minimal inversify container
+  const container = new Container();
+
+  container.bind(ApplicationShell).toConstantValue(createMockApplicationShell());
+  container.bind(WidgetManager).toConstantValue(createMockWidgetManager());
+  container.bind(CommandService).toConstantValue(createMockCommandService());
+  container.bind(KairoRuntimeImpl).toConstantValue(createMockKairoRuntimeImpl());
+  container.bind(KairoServerService).toConstantValue(createMockKairoServerService());
+  container.bind(KairoProjectService).toConstantValue(createMockKairoProjectService());
+  container.bind(ActiveProjectService).toConstantValue(createMockActiveProjectService());
+  container.bind(MessageService).toConstantValue(createMockMessageService());
+
+  // Bind the contribution under test
+  container.bind(KairoViewsContribution).toSelf().inSingletonScope();
+
+  // Resolve the contribution
+  const contribution = container.get(KairoViewsContribution);
+
+  // Create a real CommandRegistry to capture registrations
+  const registry = new CommandRegistry();
+
+  // Call the production registerCommands method
+  contribution.registerCommands(registry);
+
+  // Verify all 12 expected command IDs are registered
+  const expectedIds = [
+    'kairo.project.scan',
+    'kairo.build',
+    'kairo.buildAndDeploy',
+    'kairo.server.start',
+    'kairo.server.debug',
+    'kairo.server.stop',
+    'kairo.server.restart',
+    'kairo.app.open',
+    'kairo.view.servers',
+    'kairo.view.builds',
+    'kairo.view.deployments',
+    'kairo.view.logs',
   ];
-  for (const name of expected) {
-    const re = new RegExp(`registry\\.registerCommand\\(\\s*KairoCommands\\.${name}\\b`);
-    assert.ok(re.test(body), `KairoCommands.${name} is not wired into registerCommands`);
+
+  const registeredIds = registry.commandIds;
+
+  for (const id of expectedIds) {
+    assert.ok(registeredIds.includes(id),
+      `Command '${id}' should be registered in CommandRegistry`);
   }
-  // Sanity: at least 12 registerCommand calls in the body.
-  const calls = body.match(/registry\.registerCommand\(/g) || [];
-  assert.ok(
-    calls.length >= expected.length,
-    `registerCommands should call registry.registerCommand at least ${expected.length} times; saw ${calls.length}`,
-  );
+});
+
+test('KairoViewsContribution.registerCommands registers exactly 12 commands', () => {
+  const container = new Container();
+
+  container.bind(ApplicationShell).toConstantValue(createMockApplicationShell());
+  container.bind(WidgetManager).toConstantValue(createMockWidgetManager());
+  container.bind(CommandService).toConstantValue(createMockCommandService());
+  container.bind(KairoRuntimeImpl).toConstantValue(createMockKairoRuntimeImpl());
+  container.bind(KairoServerService).toConstantValue(createMockKairoServerService());
+  container.bind(KairoProjectService).toConstantValue(createMockKairoProjectService());
+  container.bind(ActiveProjectService).toConstantValue(createMockActiveProjectService());
+  container.bind(MessageService).toConstantValue(createMockMessageService());
+
+  container.bind(KairoViewsContribution).toSelf().inSingletonScope();
+
+  const contribution = container.get(KairoViewsContribution);
+  const registry = new CommandRegistry();
+  contribution.registerCommands(registry);
+
+  // We expect exactly 12 commands
+  assert.strictEqual(registry.commandIds.length, 12,
+    `Expected 12 commands, got ${registry.commandIds.length}: ${registry.commandIds.join(', ')}`);
 });

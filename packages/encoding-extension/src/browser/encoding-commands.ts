@@ -31,7 +31,6 @@ import URI from '@theia/core/lib/common/uri';
 import {
   KairoEncodingServiceImpl,
   KAIRO_ENCODING_OPTIONS,
-  canEncode,
 } from './encoding-service';
 
 export namespace KairoEncodingCommands {
@@ -117,11 +116,14 @@ export class KairoEncodingCommandsContribution implements CommandContribution {
         const current = this.service.getEncodingFor(target);
         const picked = await this.pickEncoding(current);
         if (!picked) return;
-        if (!canEncode(text, picked)) {
+        // Validate via Go agent instead of buggy TextEncoder (V-025)
+        const validation = await this.service.validateEncoding(text, picked);
+        if (!validation.valid) {
           this.messages.error(
             `Cannot save as ${picked}: the document contains characters ` +
-              `${picked} cannot represent. Save refused; choose an encoding ` +
-              `that can represent the buffer (utf-8 is always safe).`,
+              `${picked} cannot represent. ${validation.error || ''} ` +
+              `Save refused; choose an encoding that can represent the ` +
+              `buffer (utf-8 is always safe).`,
           );
           return;
         }

@@ -15,23 +15,21 @@ import { ContainerModule, interfaces } from '@theia/core/shared/inversify';
 import {
   FrontendApplicationContribution,
   WidgetFactory,
-  WidgetManager,
 } from '@theia/core/lib/browser';
 import { CommandContribution } from '@theia/core/lib/common';
 import {
-  KairoServersWidget,
-  KairoBuildsWidget,
   KairoDeploymentsWidget,
-  KairoTomcatLogsWidget,
   KairoViewsContribution,
 } from './kairo-views-contribution';
 import { KairoStatusBarContribution } from './kairo-status-bar-contribution';
 import { KairoEncodingCommandsContribution } from '@kairo/encoding-extension';
+import { BuildViewWidget } from '@kairo/build-extension';
+import { ServerViewWidget, LogViewerWidget } from '@kairo/tomcat-extension';
 
-export const KAIRO_SERVERS_FACTORY_ID = 'kairo-servers';
-export const KAIRO_BUILDS_FACTORY_ID = 'kairo-builds';
+export const KAIRO_SERVERS_FACTORY_ID = 'kairo-server-view';
+export const KAIRO_BUILDS_FACTORY_ID = 'kairo-build-view';
 export const KAIRO_DEPLOYMENTS_FACTORY_ID = 'kairo-deployments';
-export const KAIRO_LOGS_FACTORY_ID = 'kairo-logs';
+export const KAIRO_LOGS_FACTORY_ID = 'kairo-log-viewer';
 
 export function bindKairoFrontend(bind: interfaces.Bind): void {
   bind(KairoStatusBarContribution).toSelf().inSingletonScope();
@@ -50,20 +48,17 @@ export function bindKairoFrontend(bind: interfaces.Bind): void {
   bind(KairoEncodingCommandsContribution).toSelf().inSingletonScope();
   bind(CommandContribution).toService(KairoEncodingCommandsContribution);
 
-  bind(KairoServersWidget).toSelf();
-  bind(KairoBuildsWidget).toSelf();
   bind(KairoDeploymentsWidget).toSelf();
-  bind(KairoTomcatLogsWidget).toSelf();
 
   // Register widget factories so the WidgetManager can lazily
   // construct each view the first time the user opens it.
   bind(WidgetFactory).toDynamicValue(ctx => ({
     id: KAIRO_SERVERS_FACTORY_ID,
-    createWidget: () => ctx.container.get(KairoServersWidget),
+    createWidget: () => ctx.container.get(ServerViewWidget),
   })).inSingletonScope();
   bind(WidgetFactory).toDynamicValue(ctx => ({
     id: KAIRO_BUILDS_FACTORY_ID,
-    createWidget: () => ctx.container.get(KairoBuildsWidget),
+    createWidget: () => ctx.container.get(BuildViewWidget),
   })).inSingletonScope();
   bind(WidgetFactory).toDynamicValue(ctx => ({
     id: KAIRO_DEPLOYMENTS_FACTORY_ID,
@@ -71,9 +66,8 @@ export function bindKairoFrontend(bind: interfaces.Bind): void {
   })).inSingletonScope();
   bind(WidgetFactory).toDynamicValue(ctx => ({
     id: KAIRO_LOGS_FACTORY_ID,
-    createWidget: () => ctx.container.get(KairoTomcatLogsWidget),
+    createWidget: () => ctx.container.get(LogViewerWidget),
   })).inSingletonScope();
-  bind(WidgetManager).toSelf().inSingletonScope();
 }
 
 export default new ContainerModule(bind => bindKairoFrontend(bind));

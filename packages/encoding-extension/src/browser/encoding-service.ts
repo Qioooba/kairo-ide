@@ -35,30 +35,21 @@ import URI from '@theia/core/lib/common/uri';
 import { EncodingRegistry } from '@theia/core/lib/browser/encoding-registry';
 import { FileService } from '@theia/filesystem/lib/browser/file-service';
 import { MessageService } from '@theia/core/lib/common';
-import { KairoRuntimeImpl, KairoError } from '@kairo/runtime-extension';
+import { RuntimeConnectionService, KairoError } from '@kairo/runtime-extension';
 import type {
   EncodingDetectRequest,
   EncodingDetectResponse,
   EncodingRecodeRequest,
 } from '@kairo/protocol';
+import {
+  KAIRO_ENCODING_OPTIONS,
+  SUPPORTS_ENCODER,
+  normalizeEncodingLabel,
+} from './encoding-utils';
+
+export { KAIRO_ENCODING_OPTIONS, SUPPORTS_ENCODER, normalizeEncodingLabel } from './encoding-utils';
 
 export const KairoEncodingService = Symbol('KairoEncodingService');
-
-/**
- * The encodings the user is offered. Must match the
- * EncodingId union in @kairo/protocol. The order here is the
- * order shown in the quick-pick.
- */
-export const KAIRO_ENCODING_OPTIONS: readonly string[] = [
-  'utf-8',
-  'utf-8-bom',
-  'gbk',
-  'gb18030',
-  'iso-8859-1',
-  'us-ascii',
-  'utf-16le',
-  'utf-16be',
-];
 
 export interface DetectArgs {
   workspaceId: string;
@@ -87,7 +78,7 @@ export type EncodingOverrideScope = 'file';
 
 @injectable()
 export class KairoEncodingServiceImpl {
-  @inject(KairoRuntimeImpl) protected runtime!: KairoRuntimeImpl;
+  @inject(RuntimeConnectionService) protected runtime!: RuntimeConnectionService;
   @inject(FileService) protected fileService!: FileService;
   @inject(EncodingRegistry) protected encodingRegistry!: EncodingRegistry;
   @inject(MessageService) protected messages!: MessageService;
@@ -213,70 +204,32 @@ export class KairoEncodingServiceImpl {
     });
     this.cache.set(uri.toString(), encoding);
   }
-}
 
-// ----------------- encoding helpers -----------------
-
-const SUPPORTS_ENCODER = new Set([
-  'utf-8',
-  'utf-16le',
-  'utf-16be',
-  // The set below is supported on Chrome 91+ via the
-  // Encoding spec; on older engines the encode call will
-  // throw RangeError at runtime. We test membership here
-  // so the error message is friendly instead of a stack
-  // trace.
-  'gbk',
-  'gb18030',
-  'gb2312',
-  'big5',
-  'iso-8859-1',
-  'iso-8859-2',
-  'windows-1252',
-]);
-
-function normalizeEncodingLabel(encoding: string): string {
-  switch (encoding) {
-    case 'utf-8-bom':
-      return 'utf-8';
-    case 'gbk':
-    case 'gb18030':
-    case 'gb2312':
-    case 'iso-8859-1':
-    case 'us-ascii':
-    case 'utf-8':
-    case 'utf-16le':
-    case 'utf-16be':
-      return encoding;
-    default:
-      // Pass through; the engine will reject unknown labels.
-      return encoding;
-  }
-}
-
-/**
- * True if every character in `text` can be encoded with
- * `encoding`. Used to refuse a save when the buffer contains
- * a character the chosen encoding cannot represent.
- *
- * Implementation: try to encode then decode the bytes with
- * the same encoding; if the round-trip preserves the text,
- * the encoding is a faithful representation.
- */
-export function canEncode(text: string, encoding: string): boolean {
-  const label = normalizeEncodingLabel(encoding);
-  if (!SUPPORTS_ENCODER.has(label)) {
-    // Engine does not encode this. Caller should fall back
-    // to the agent's /api/v1/encoding/recode.
-    return false;
-  }
-  try {
-    const enc = new TextEncoder();
-    const bytes = enc.encode(text);
-    const dec = new TextDecoder(label, { fatal: true });
-    const round = dec.decode(bytes);
-    return round === text;
-  } catch {
-    return false;
+  /**
+   * Validate that the given text can be represented in the target
+   * encoding. For UTF-8 the check is always true (fast path). For
+   * every other encoding we call the Go agent's
+   * /api/v1/encoding/validate endpoint, which uses
+   * golang.org/x/text to perform a real byte-safe round-trip check.
+   *
+   * This replaces the old canEncode() which used TextEncoder —
+   * TextEncoder only produces UTF-8, so it could never validate
+   * GBK, ISO-8859-1, or any other non-UTF-8 encoding (V-025).
+   */
+  async validateEncoding(text: string, targetEncoding: string): Promise<{ valid: boolean; error?: string }> {
+      // Fast path: UTF-8 is always valid
+      if (targetEncoding === 'UTF-8' || targetEncoding === 'utf-8' || targetEncoding === 'utf-8-bom') {
+          return { valid: true };
+      }
+      // Call Go Agent for server-side validation
+      try {
+          const result = await this.runtime.request('POST /api/v1/encoding/validate', {
+              text,
+              encoding: targetEncoding,
+          });
+          return { valid: result.valid, error: result.error };
+      } catch (err) {
+          return { valid: false, error: `validation failed: ${(err as Error).message}` };
+      }
   }
 }

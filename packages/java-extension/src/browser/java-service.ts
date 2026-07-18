@@ -40,11 +40,11 @@ import type {
   Toolchain,
   JavaServiceState,
 } from '@kairo/protocol';
-import { KairoRuntimeImpl, KairoError } from '@kairo/runtime-extension';
+import { RuntimeConnectionService, KairoError } from '@kairo/runtime-extension';
 
 @injectable()
 export class KairoJavaService {
-  @inject(KairoRuntimeImpl) protected runtime!: KairoRuntimeImpl;
+  @inject(RuntimeConnectionService) protected runtime!: RuntimeConnectionService;
 
   protected state: JavaServiceState = 'uninitialized';
   protected status: JdtStatus | undefined;

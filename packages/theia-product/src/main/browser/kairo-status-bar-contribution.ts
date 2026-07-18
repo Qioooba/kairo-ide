@@ -17,9 +17,10 @@ import {
   FrontendApplication,
 } from '@theia/core/lib/browser';
 import { Disposable } from '@theia/core/lib/common/disposable';
-import { KairoRuntimeImpl, EventStream, KairoError } from '@kairo/runtime-extension';
+import { RuntimeConnectionService, EventStream, KairoError } from '@kairo/runtime-extension';
 import { KairoProjectService } from '@kairo/project-extension';
 import { KairoServerService } from '@kairo/tomcat-extension';
+import { ServerStore } from '@kairo/tomcat-extension';
 import { KairoJavaService, JavaServiceState } from '@kairo/java-extension';
 import { KairoEncodingServiceImpl } from '@kairo/encoding-extension';
 import { EditorManager } from '@theia/editor/lib/browser/editor-manager';
@@ -28,19 +29,19 @@ import type { ServerInstance } from '@kairo/protocol';
 @injectable()
 export class KairoStatusBarContribution implements FrontendApplicationContribution {
   @inject(StatusBar) protected statusBar!: StatusBar;
-  @inject(KairoRuntimeImpl) protected runtime!: KairoRuntimeImpl;
+  @inject(RuntimeConnectionService) protected runtime!: RuntimeConnectionService;
   @inject(KairoProjectService) protected projectSvc!: KairoProjectService;
   @inject(KairoServerService) protected serverSvc!: KairoServerService;
   @inject(KairoJavaService) protected javaSvc!: KairoJavaService;
   @inject(KairoEncodingServiceImpl) protected encodingSvc!: KairoEncodingServiceImpl;
   @inject(EditorManager) protected editorManager!: EditorManager;
+  @inject(ServerStore) protected serverStore!: ServerStore;
 
   protected eventStream: EventStream | undefined;
   protected unsubscribeStatus: (() => void) | undefined;
   protected unsubscribeServerEvents: (() => void) | undefined;
   protected unsubscribeJdtState: (() => void) | undefined;
   protected unsubscribeEditor: Disposable | undefined;
-  protected pollTimer: ReturnType<typeof setInterval> | undefined;
 
   @postConstruct()
   init(): void {
@@ -94,24 +95,10 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
     // status bar shows truth after a reconnect / window reload.
     void this.refreshJdtStatus();
     void this.refreshEncodingStatus();
-    // Poll once on start so the user immediately sees the
-    // current state. After that the WebSocket keeps things in sync.
-    try {
-      await this.runtime.request('GET /api/v1/health', undefined);
-    } catch (err) {
-      if (err instanceof KairoError) {
-        this.statusBar.setElement('kairo.runtime', {
-          text: '$(error) Runtime: error',
-          tooltip: err.format(),
-          alignment: StatusBarAlignment.RIGHT,
-          priority: 100,
-        });
-      }
-    }
-    this.pollTimer = setInterval(() => {
-      void this.refreshServerStatus();
-      void this.refreshJdtStatus();
-    }, 5_000);
+    // Subscribe to ServerStore for server status updates.
+    this.serverStore.onDidChange(() => this.renderServerStatus());
+    // Load initial server status from store.
+    this.renderServerStatus();
   }
 
   onStop(): void {
@@ -120,7 +107,6 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
     this.unsubscribeJdtState?.();
     this.unsubscribeEditor?.dispose();
     this.eventStream?.close();
-    if (this.pollTimer) clearInterval(this.pollTimer);
   }
 
   /**
@@ -246,29 +232,47 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
     }
   }
 
-  protected async refreshServerStatus(): Promise<void> {
-    try {
-      const list = (await this.runtime.request('GET /api/v1/servers', undefined).catch(() => [])) as ServerInstance[];
-      const srv = list[0];
-      if (!srv) {
-        this.statusBar.setElement('kairo.server', {
-          text: '$(server-process) Server: stopped',
-          tooltip: 'No running Tomcat server',
-          alignment: StatusBarAlignment.LEFT,
-          priority: 97,
-        });
-        return;
-      }
-      const port = srv.ports.http ? `:${srv.ports.http}` : '';
-      const icon = srv.state === 'running' ? '$(server-process~spin)' : '$(server-process)';
+  protected renderServerStatus(): void {
+    const servers = this.serverStore.getServers();
+    const srv = servers[0];
+    if (!srv) {
       this.statusBar.setElement('kairo.server', {
-        text: `${icon} Server: ${srv.state} ${port}`.trim(),
-        tooltip: `Tomcat ${srv.state} (id=${srv.id})`,
+        text: '$(server-process) Server: stopped',
+        tooltip: 'No running Tomcat server',
         alignment: StatusBarAlignment.LEFT,
         priority: 97,
       });
-    } catch {
-      // Network blip — keep previous status.
+      return;
+    }
+    const port = srv.httpPort ? `:${srv.httpPort}` : '';
+    const icon = srv.state === 'running' ? '$(server-process~spin)' : '$(server-process)';
+    this.statusBar.setElement('kairo.server', {
+      text: `${icon} Server: ${srv.state} ${port}`.trim(),
+      tooltip: `Tomcat ${srv.state} (id=${srv.id})`,
+      alignment: StatusBarAlignment.LEFT,
+      priority: 97,
+    });
+  }
+
+  protected async refreshServerStatus(): Promise<void> {
+    try {
+      const list = await this.runtime.request('GET /api/v1/servers', undefined);
+      const servers = Array.isArray(list) ? list as ServerInstance[] : [];
+      for (const srv of servers) {
+        this.serverStore.upsertServer({
+          id: srv.id,
+          workspaceId: '',
+          projectId: srv.projectId,
+          state: srv.state,
+          httpPort: srv.ports.http || 0,
+          pid: srv.pid || 0,
+          startTime: srv.startedAt || '',
+          url: srv.ports.http ? `http://127.0.0.1:${srv.ports.http}` : undefined,
+        });
+      }
+      this.renderServerStatus();
+    } catch (err) {
+      // Network blip — keep previous status from store.
     }
   }
 }
