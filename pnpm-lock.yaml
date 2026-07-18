@@ -379,6 +379,8 @@ importers:
         specifier: 5.5.4
         version: 5.5.4
 
+  tests/e2e: {}
+
 packages:
 
   7zip-bin@5.2.0:

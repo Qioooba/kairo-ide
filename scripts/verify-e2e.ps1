@@ -32,7 +32,7 @@ Push-Location $RepoRoot
 $logDir = Join-Path $RepoRoot ".runtime\verify"
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 $logFile = Join-Path $logDir "verify-$(Get-Date -Format yyyyMMddHHmmss).log"
-$failures = New-Object System.Collections.Generic.List[string]
+$script:failures = New-Object System.Collections.Generic.List[string]
 function Step($name, [scriptblock]$body) {
   Write-Host "[$name] starting" -ForegroundColor Cyan
   try {
@@ -40,7 +40,7 @@ function Step($name, [scriptblock]$body) {
     Write-Host "[$name] OK" -ForegroundColor Green
   } catch {
     Write-Host "[$name] FAILED: $_" -ForegroundColor Red
-    $script:failures.Add("$name: $_")
+    $script:failures.Add("$name : $_")
   }
 }
 

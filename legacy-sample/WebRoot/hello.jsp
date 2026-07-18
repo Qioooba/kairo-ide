@@ -7,7 +7,7 @@
 <h1>CHANGED，欢迎使用 Kairo IDE</h1>
 <p>当前时间：<%= new java.util.Date() %></p>
 <c:if test="${not empty param.name}">
-  <p>Hello, <c:out value="${param.name}"/>!</p>
+  <p>Hello, <c:out value="${param.name}"/></p>
 </c:if>
 </body>
 </html>
