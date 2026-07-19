@@ -17,13 +17,9 @@ func TestSandbox_TraversalBlocked(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// `sub/../etc/passwd` resolves to `dir/etc/passwd` which is
-	// INSIDE the workspace. Lexical traversal that stays inside
-	// is allowed.
 	if _, err := w.AuthorizeRead(0, "sub/../etc/passwd"); err != nil {
 		t.Errorf("in-workspace traversal should be allowed, got %v", err)
 	}
-	// But `../../../../etc/passwd` escapes.
 	if _, err := w.AuthorizeRead(0, "../../../../etc/passwd"); err == nil {
 		t.Errorf("expected path_forbidden for escape, got nil")
 	}
@@ -96,6 +92,89 @@ func TestSandbox_SymlinkEscape(t *testing.T) {
 	}
 	if _, err := w.AuthorizeRead(0, "link"); err == nil {
 		t.Errorf("expected symlink escape to be blocked")
+	}
+}
+
+func TestSandbox_SymlinkEscapeMultilevel(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink tests require Unix")
+	}
+	dir := t.TempDir()
+	other := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(other, "deeper"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	projectDir := filepath.Join(dir, "project")
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(projectDir, "link")
+	if err := os.Symlink(other, link); err != nil {
+		t.Fatal(err)
+	}
+	w, err := NewWorkspaceRoots(projectDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.AuthorizeRead(0, "link/nonexistent/deeper/file.txt"); err == nil {
+		t.Errorf("expected symlink escape through multilevel nonexistent path to be blocked")
+	}
+}
+
+func TestSandbox_RootIsSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink tests require Unix")
+	}
+	dir := t.TempDir()
+	realDir := filepath.Join(dir, "real")
+	if err := os.MkdirAll(realDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(realDir, "file.txt"), []byte("test"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	linkDir := filepath.Join(dir, "link")
+	if err := os.Symlink(realDir, linkDir); err != nil {
+		t.Fatal(err)
+	}
+	w, err := NewWorkspaceRoots(linkDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := w.AuthorizeRead(0, "file.txt")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want, err := filepath.EvalSymlinks(filepath.Join(realDir, "file.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Errorf("got %q want %q", got, want)
+	}
+}
+
+func TestSandbox_WindowsVolumeRejected(t *testing.T) {
+	dir := t.TempDir()
+	w, err := NewWorkspaceRoots(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []string{
+		"C:/Windows/System32",
+		`C:\Windows\System32`,
+		"D:/test",
+		`D:\test`,
+		"//server/share",
+		`\\server\share`,
+		`foo\bar`,
+	}
+	for _, path := range tests {
+		t.Run(path, func(t *testing.T) {
+			if _, err := w.AuthorizeRead(0, path); err == nil {
+				t.Errorf("expected error for path %q", path)
+			}
+		})
 	}
 }
 

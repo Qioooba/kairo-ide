@@ -5,38 +5,102 @@ import (
 	"time"
 )
 
-// WorkspaceID is a unique identifier for a workspace.
 type WorkspaceID string
-
-// ProjectID is a unique identifier for a project within a workspace.
 type ProjectID string
-
-// BuildID is a unique identifier for a build run.
 type BuildID string
-
-// ServerID is a unique identifier for a server instance.
 type ServerID string
+type BuildToolID string
+type DeployAction string
+type DeployMode string
+type BuildEventType string
+type Stream int
 
-// WorkspacePath is a canonical absolute path within a workspace.
-type WorkspacePath string
+type DeploymentOwnerToken struct {
+	nonce uint64
+}
 
-// WorkspaceRepository is the persistence interface for workspaces.
+func NewDeploymentOwnerToken() DeploymentOwnerToken {
+	return DeploymentOwnerToken{nonce: nextOwnerNonce()}
+}
+
+func (t DeploymentOwnerToken) Valid() bool {
+	return t.nonce != 0
+}
+
+var ownerNonceCounter uint64
+
+func nextOwnerNonce() uint64 {
+	ownerNonceCounter++
+	return ownerNonceCounter
+}
+
+type DeploymentTarget struct {
+	WorkspaceID WorkspaceID
+	ProjectID   ProjectID
+	ServerID    ServerID
+	Root        string
+	OwnerToken  DeploymentOwnerToken
+}
+
+type DeploymentTargetResolver interface {
+	ResolveDeploymentTarget(ctx context.Context, ws WorkspaceID, project ProjectID, server ServerID) (DeploymentTarget, error)
+}
+
+const (
+	BuildToolAnt   BuildToolID = "ant"
+	BuildToolJavac BuildToolID = "javac"
+)
+
+const (
+	DeployActionAdd    DeployAction = "add"
+	DeployActionModify DeployAction = "modify"
+	DeployActionDelete DeployAction = "delete"
+)
+
+const (
+	DeployModeMerge  DeployMode = "merge"
+	DeployModeMirror DeployMode = "mirror"
+)
+
+const (
+	BuildStateQueued    BuildState = "queued"
+	BuildStateRunning   BuildState = "running"
+	BuildStateSucceeded BuildState = "succeeded"
+	BuildStateFailed    BuildState = "failed"
+	BuildStateCancelled BuildState = "cancelled"
+)
+
+const (
+	BuildEventQueued            BuildEventType = "queued"
+	BuildEventStarted           BuildEventType = "started"
+	BuildEventProgress          BuildEventType = "progress"
+	BuildEventSucceeded         BuildEventType = "succeeded"
+	BuildEventFailed            BuildEventType = "failed"
+	BuildEventCancelled         BuildEventType = "cancelled"
+	BuildEventPersistenceFailed BuildEventType = "persistence-failed"
+)
+
+const (
+	StreamStdout Stream = iota
+	StreamStderr
+)
+
 type WorkspaceRepository interface {
 	Get(ctx context.Context, id WorkspaceID) (*Workspace, error)
 	List(ctx context.Context) ([]Workspace, error)
 	Save(ctx context.Context, ws Workspace) error
+	Touch(ctx context.Context, id WorkspaceID) error
 	Delete(ctx context.Context, id WorkspaceID) error
 }
 
-// ProjectRepository is the persistence interface for projects.
 type ProjectRepository interface {
 	Get(ctx context.Context, workspaceID WorkspaceID, projectID ProjectID) (*Project, error)
 	List(ctx context.Context, workspaceID WorkspaceID) ([]Project, error)
 	Save(ctx context.Context, project Project) error
 	Delete(ctx context.Context, workspaceID WorkspaceID, projectID ProjectID) error
+	FindByRoot(ctx context.Context, workspaceID WorkspaceID, root string) (*Project, error)
 }
 
-// ToolchainRepository is the persistence interface for toolchains.
 type ToolchainRepository interface {
 	Get(ctx context.Context, id string) (*Toolchain, error)
 	List(ctx context.Context) ([]Toolchain, error)
@@ -44,14 +108,12 @@ type ToolchainRepository interface {
 	FindByJavaHome(ctx context.Context, javaHome string) (*Toolchain, error)
 }
 
-// BuildHistoryRepository is the persistence interface for build runs.
 type BuildHistoryRepository interface {
 	Save(ctx context.Context, run BuildRun) error
 	Get(ctx context.Context, workspaceID WorkspaceID, buildID BuildID) (*BuildRun, error)
 	List(ctx context.Context, workspaceID WorkspaceID, projectID ProjectID, limit int) ([]BuildRun, error)
 }
 
-// ServerHistoryRepository is the persistence interface for server instances.
 type ServerHistoryRepository interface {
 	Save(ctx context.Context, instance ServerInstance) error
 	Get(ctx context.Context, workspaceID WorkspaceID, serverID ServerID) (*ServerInstance, error)
@@ -59,80 +121,75 @@ type ServerHistoryRepository interface {
 	Delete(ctx context.Context, workspaceID WorkspaceID, serverID ServerID) error
 }
 
-// Workspace represents a local workspace directory.
 type Workspace struct {
 	ID         WorkspaceID `json:"id"`
 	Name       string      `json:"name"`
-	Root       string      `json:"root"` // absolute path
+	Root       string      `json:"root"`
 	LastOpened time.Time   `json:"lastOpened"`
+	CreatedAt  time.Time   `json:"createdAt"`
 }
 
-// Project represents a project configuration stored in .kairo/project.yaml.
-// Paths in config are relative to the project root directory.
 type Project struct {
-	ID          ProjectID `json:"id"`
-	WorkspaceID WorkspaceID `json:"workspaceId"`
-	Name        string    `json:"name"`
-	// SourceRoots are relative paths from project root, e.g. ["src/main/java"]
-	SourceRoots   []string `json:"sourceRoots"`
-	// ResourceRoots are relative paths, e.g. ["src/main/resources"]
-	ResourceRoots []string `json:"resourceRoots"`
-	// WebappDir is relative path, e.g. "src/main/webapp" or "WebRoot"
-	WebappDir     string `json:"webappDir"`
-	// OutputDir is relative path, e.g. "target/classes" or "build/classes"
-	OutputDir     string `json:"outputDir"`
-	SourceLevel   string `json:"sourceLevel"`
-	TargetLevel   string `json:"targetLevel"`
-	Encoding      string `json:"encoding"`
-	BuildTool     string `json:"buildTool"`    // "ant" | "javac"
-	ContextPath   string `json:"contextPath"`  // e.g. "/myapp"
-	ToolchainID   string `json:"toolchainId,omitempty"`
-	RuntimeID     string `json:"runtimeId,omitempty"`
+	ID            ProjectID   `json:"id"`
+	WorkspaceID   WorkspaceID `json:"workspaceId"`
+	Name          string      `json:"name"`
+	Root          string      `json:"root"`
+	SourceRoots   []string    `json:"sourceRoots"`
+	ResourceRoots []string    `json:"resourceRoots"`
+	LibraryDirs   []string    `json:"libraryDirs"`
+	WebappDir     string      `json:"webappDir"`
+	OutputDir     string      `json:"outputDir"`
+	BuildFile     string      `json:"buildFile"`
+	BuildTargets  []string    `json:"buildTargets"`
+	SourceLevel   string      `json:"sourceLevel"`
+	TargetLevel   string      `json:"targetLevel"`
+	Encoding      string      `json:"encoding"`
+	BuildTool     BuildToolID `json:"buildTool"`
+	ContextPath   string      `json:"contextPath"`
+	ToolchainID   string      `json:"toolchainId,omitempty"`
+	RuntimeID     string      `json:"runtimeId,omitempty"`
+	CreatedAt     time.Time   `json:"createdAt"`
+	UpdatedAt     time.Time   `json:"updatedAt"`
 }
 
-// ResolvedProject contains all paths resolved to absolute paths.
-// Only created by PlanResolver, never by client code.
 type ResolvedProject struct {
-	Project Project
-	// Root is the canonical absolute path to the project directory.
-	Root string
-	// AbsoluteSourceRoots are root + each SourceRoot
-	AbsoluteSourceRoots []string
-	// AbsoluteResourceRoots are root + each ResourceRoot
-	AbsoluteResourceRoots []string
-	// AbsoluteWebappDir is root + WebappDir
-	AbsoluteWebappDir string
-	// AbsoluteOutputDir is root + OutputDir
-	AbsoluteOutputDir string
+	Project       Project
+	Root          string
+	SourceRoots   []string
+	ResourceRoots []string
+	LibraryDirs   []string
+	WebappDir     string
+	OutputDir     string
+	BuildFile     string
+	Classpath     []string
 }
 
-// Toolchain represents a JDK installation.
 type Toolchain struct {
 	ID          string    `json:"id"`
 	JavaHome    string    `json:"javaHome"`
 	Version     string    `json:"version"`
-	Fingerprint string    `json:"fingerprint"` // SHA-256 of key binaries
+	Fingerprint string    `json:"fingerprint"`
 	VerifiedAt  time.Time `json:"verifiedAt"`
 }
 
-// BuildPlan is the resolved plan for a build operation.
-// All paths are absolute, resolved by PlanResolver.
 type BuildPlan struct {
-	WorkspaceID WorkspaceID `json:"workspaceId"`
-	ProjectID   ProjectID   `json:"projectId"`
-	// AbsoluteSourceRoots are absolute paths for source directories.
-	AbsoluteSourceRoots []string `json:"sourceRoots"`
-	// AbsoluteOutputDir is the absolute path for build output.
-	AbsoluteOutputDir string   `json:"outputDir"`
-	Classpath         []string `json:"classpath"`
-	SourceLevel       string   `json:"sourceLevel"`
-	TargetLevel       string   `json:"targetLevel"`
-	Encoding          string   `json:"encoding"`
-	BuildTool         string   `json:"buildTool"`
-	Clean             bool     `json:"clean"`
+	WorkspaceID   WorkspaceID `json:"workspaceId"`
+	ProjectID     ProjectID   `json:"projectId"`
+	ProjectRoot   string      `json:"projectRoot"`
+	BuildTool     BuildToolID `json:"buildTool"`
+	BuildFile     string      `json:"buildFile"`
+	Targets       []string    `json:"targets"`
+	SourceRoots   []string    `json:"sourceRoots"`
+	OutputDir     string      `json:"outputDir"`
+	Classpath     []string    `json:"classpath"`
+	JavaHome      string      `json:"javaHome"`
+	SourceLevel   string      `json:"sourceLevel"`
+	TargetLevel   string      `json:"targetLevel"`
+	Encoding      string      `json:"encoding"`
+	Clean         bool        `json:"clean"`
+	SelectedFiles []string    `json:"selectedFiles,omitempty"`
 }
 
-// RuntimePlan is the resolved plan for starting a server.
 type RuntimePlan struct {
 	ServerID     ServerID `json:"serverId"`
 	JavaHome     string   `json:"javaHome"`
@@ -141,28 +198,28 @@ type RuntimePlan struct {
 	HTTPPort     int      `json:"httpPort"`
 	ShutdownPort int      `json:"shutdownPort"`
 	ContextPath  string   `json:"contextPath"`
-	// AbsoluteWebappDir is the absolute path to the webapp directory.
-	AbsoluteWebappDir string `json:"webappDir"`
+	WebappDir    string   `json:"webappDir"`
 	JVMOptions   []string `json:"jvmOptions"`
 }
 
-// DeployPlan is the resolved plan for a deploy operation.
 type DeployPlan struct {
-	WorkspaceID WorkspaceID   `json:"workspaceId"`
-	ProjectID   ProjectID     `json:"projectId"`
-	BuildID     BuildID       `json:"buildId"`
-	Entries     []DeployEntry `json:"entries"`
-	Mode        string        `json:"mode"` // "merge" | "mirror"
+	WorkspaceID    WorkspaceID          `json:"workspaceId"`
+	ProjectID      ProjectID            `json:"projectId"`
+	BuildID        BuildID              `json:"buildId"`
+	DeploymentRoot string               `json:"deploymentRoot"`
+	OwnerToken     DeploymentOwnerToken `json:"-"`
+	Entries        []DeployEntry        `json:"entries"`
+	Mode           DeployMode           `json:"mode"`
 }
 
-// DeployEntry represents a single file/directory to deploy.
 type DeployEntry struct {
-	Source string `json:"source"`
-	Target string `json:"target"`
-	Action string `json:"action"` // "add" | "modify" | "delete"
+	Source string       `json:"source"`
+	Target string       `json:"target"`
+	Action DeployAction `json:"action"`
+	Size   int64        `json:"size"`
+	Mode   int          `json:"mode"`
 }
 
-// BuildIntent is the user's intent for a build.
 type BuildIntent string
 
 const (
@@ -170,40 +227,30 @@ const (
 	BuildIntentSelectedFiles BuildIntent = "selected-files"
 )
 
-// BuildState represents the state of a build run.
 type BuildState string
 
-const (
-	BuildStateQueued    BuildState = "queued"
-	BuildStatePending   BuildState = "pending"
-	BuildStateRunning   BuildState = "running"
-	BuildStateSucceeded BuildState = "succeeded"
-	BuildStateFailed    BuildState = "failed"
-	BuildStateCancelled BuildState = "cancelled"
-)
-
-// BuildRun represents a single build execution.
 type BuildRun struct {
-	ID          BuildID          `json:"id"`
-	WorkspaceID WorkspaceID      `json:"workspaceId"`
-	ProjectID   ProjectID        `json:"projectId"`
-	State       BuildState       `json:"state"`
-	StartTime   time.Time        `json:"startTime"`
-	EndTime     *time.Time       `json:"endTime,omitempty"`
-	Summary     string           `json:"summary,omitempty"`
+	ID          BuildID           `json:"id"`
+	WorkspaceID WorkspaceID       `json:"workspaceId"`
+	ProjectID   ProjectID         `json:"projectId"`
+	State       BuildState        `json:"state"`
+	QueuedAt    time.Time         `json:"queuedAt"`
+	StartedAt   *time.Time        `json:"startedAt,omitempty"`
+	FinishedAt  *time.Time        `json:"finishedAt,omitempty"`
+	ExitCode    *int              `json:"exitCode,omitempty"`
+	LogPath     string            `json:"logPath,omitempty"`
+	Summary     string            `json:"summary,omitempty"`
 	Diagnostics []BuildDiagnostic `json:"diagnostics,omitempty"`
 }
 
-// BuildDiagnostic is a single compiler diagnostic.
 type BuildDiagnostic struct {
 	File     string `json:"file"`
 	Line     int    `json:"line"`
 	Column   int    `json:"column"`
-	Severity string `json:"severity"` // "error" | "warning" | "info"
+	Severity string `json:"severity"`
 	Message  string `json:"message"`
 }
 
-// ServerState represents the state of a server instance.
 type ServerState string
 
 const (
@@ -215,48 +262,50 @@ const (
 	ServerStateError    ServerState = "error"
 )
 
-// ServerInstance represents a running server.
 type ServerInstance struct {
-	ID          ServerID    `json:"id"`
-	WorkspaceID WorkspaceID `json:"workspaceId"`
-	ProjectID   ProjectID   `json:"projectId"`
-	State       ServerState `json:"state"`
-	HTTPPort    int         `json:"httpPort"`
-	PID         int         `json:"pid"`
-	StartTime   time.Time   `json:"startTime"`
-	URL         string      `json:"url,omitempty"`
+	ID          ServerID     `json:"id"`
+	WorkspaceID WorkspaceID  `json:"workspaceId"`
+	ProjectID   ProjectID    `json:"projectId"`
+	State       ServerState  `json:"state"`
+	HTTPPort    int          `json:"httpPort"`
+	PID         int          `json:"pid"`
+	StartTime   time.Time    `json:"startTime"`
+	URL         string       `json:"url,omitempty"`
 	LastPlan    *RuntimePlan `json:"lastPlan,omitempty"`
-	Error       string      `json:"error,omitempty"`
+	Error       string       `json:"error,omitempty"`
 }
 
-// BuildOutput is the result of a build execution.
 type BuildOutput struct {
 	ExitCode    int               `json:"exitCode"`
 	StartTime   time.Time         `json:"startTime"`
 	EndTime     time.Time         `json:"endTime"`
-	RawLog      string            `json:"rawLog"`
 	Diagnostics []BuildDiagnostic `json:"diagnostics,omitempty"`
 }
 
-// BuildEvent represents a build progress event.
 type BuildEvent struct {
-	BuildID BuildID   `json:"buildId"`
-	Type    string    `json:"type"` // "started", "progress", "completed", "failed"
-	Message string    `json:"message"`
-	Time    time.Time `json:"time"`
+	WorkspaceID WorkspaceID    `json:"workspaceId"`
+	ProjectID   ProjectID      `json:"projectId"`
+	BuildID     BuildID        `json:"buildId"`
+	Type        BuildEventType `json:"type"`
+	State       BuildState     `json:"state"`
+	Message     string         `json:"message"`
+	Time        time.Time      `json:"time"`
 }
 
-// BuildEventSink receives build events.
-type BuildEventSink func(event BuildEvent)
+type BuildEventPublisher interface {
+	PublishBuildEvent(ctx context.Context, event BuildEvent) error
+}
 
-// BuildProvider is the interface for build tool implementations.
 type BuildProvider interface {
-	ID() string
-	Validate(ctx context.Context, p Project, tc Toolchain) error
-	Build(ctx context.Context, plan BuildPlan, sink BuildEventSink) (*BuildOutput, error)
+	ID() BuildToolID
+	Validate(ctx context.Context, plan BuildPlan) error
+	Build(ctx context.Context, plan BuildPlan, sink func(event BuildEvent), logLine func(stream Stream, line string)) (*BuildOutput, error)
 }
 
-// RuntimeProvider is the interface for runtime implementations.
+type BuildProviderRegistry interface {
+	Get(id BuildToolID) (BuildProvider, bool)
+}
+
 type RuntimeProvider interface {
 	ID() string
 	Prepare(ctx context.Context, project Project) (*RuntimePlan, error)
@@ -265,10 +314,49 @@ type RuntimeProvider interface {
 	Inspect(ctx context.Context, id ServerID) (*ServerInstance, error)
 }
 
-// PlanResolver resolves project-relative paths into absolute execution plans.
-// Only PlanResolver creates BuildPlan, RuntimePlan, and DeployPlan.
 type PlanResolver interface {
-	ResolveBuild(ctx context.Context, workspaceID WorkspaceID, projectID ProjectID, intent BuildIntent, clean bool) (*BuildPlan, error)
-	ResolveDeploy(ctx context.Context, workspaceID WorkspaceID, projectID ProjectID, buildID BuildID) (*DeployPlan, error)
+	ResolveProject(ctx context.Context, workspaceID WorkspaceID, projectID ProjectID) (*ResolvedProject, error)
+	ResolveBuild(ctx context.Context, workspaceID WorkspaceID, projectID ProjectID, intent BuildIntent, clean bool, selectedFiles []string) (*BuildPlan, error)
+	ResolveDeploy(ctx context.Context, workspaceID WorkspaceID, projectID ProjectID, buildID BuildID, target DeploymentTarget) (*DeployPlan, error)
 	ResolveRuntime(ctx context.Context, workspaceID WorkspaceID, projectID ProjectID) (*RuntimePlan, error)
+}
+
+func (s BuildState) CanTransitionTo(target BuildState) bool {
+	switch s {
+	case BuildStateQueued:
+		return target == BuildStateRunning || target == BuildStateCancelled
+	case BuildStateRunning:
+		return target == BuildStateSucceeded || target == BuildStateFailed || target == BuildStateCancelled
+	default:
+		return false
+	}
+}
+
+func (b *BuildRun) IsTerminal() bool {
+	return b.State == BuildStateSucceeded || b.State == BuildStateFailed || b.State == BuildStateCancelled
+}
+
+func (b BuildRun) DeepCopy() BuildRun {
+	cp := b
+	if b.StartedAt != nil {
+		t := *b.StartedAt
+		cp.StartedAt = &t
+	}
+	if b.FinishedAt != nil {
+		t := *b.FinishedAt
+		cp.FinishedAt = &t
+	}
+	if b.ExitCode != nil {
+		code := *b.ExitCode
+		cp.ExitCode = &code
+	}
+	if b.Diagnostics != nil {
+		cp.Diagnostics = make([]BuildDiagnostic, len(b.Diagnostics))
+		copy(cp.Diagnostics, b.Diagnostics)
+	}
+	return cp
+}
+
+func UTCNow() time.Time {
+	return time.Now().UTC()
 }

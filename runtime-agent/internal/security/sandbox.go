@@ -8,8 +8,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
+)
+
+var (
+	volumePatternLex = regexp.MustCompile(`^[A-Za-z]:[\\/]`)
+	uncPatternLex    = regexp.MustCompile(`^[/\\]{2}`)
 )
 
 // ErrPathForbidden is returned when a path is not under any
@@ -33,16 +39,17 @@ var ErrSymlinkEscape = errors.New("symlink resolves outside workspace root")
 // runtime (when a user opens a new workspace) while Authorize*
 // are concurrently invoked by HTTP handlers.
 type WorkspaceRoots struct {
-	mu       sync.RWMutex
-	roots    []string
+	mu    sync.RWMutex
+	roots []string
 	// readonly are paths that may be read but not written.
 	// These are always relative to the DataDir (e.g. bundled/, audit/).
 	readonly []string
 }
 
 // NewWorkspaceRoots builds a roots set. Input paths are
-// canonicalized and symlinks are resolved. A non-existent root
-// is allowed (the agent may not have created it yet).
+// canonicalized and symlinks are resolved using nearest-existing-
+// ancestor algorithm. A non-existent root is allowed (the agent
+// may not have created it yet).
 func NewWorkspaceRoots(roots ...string) (*WorkspaceRoots, error) {
 	out := &WorkspaceRoots{}
 	for _, r := range roots {
@@ -55,26 +62,51 @@ func NewWorkspaceRoots(roots ...string) (*WorkspaceRoots, error) {
 	return out, nil
 }
 
-// resolveRoot canonicalizes and (when possible) resolves
-// symlinks. If the path does not exist, it is canonicalized
-// lexically only.
+// resolveRoot canonicalizes and resolves symlinks using the
+// nearest-existing-ancestor algorithm. Starting from the path,
+// walk up until we find an ancestor that exists; EvalSymlinks
+// that ancestor; then re-append the non-existent segments.
 func resolveRoot(p string) (string, error) {
-	abs, err := filepath.Abs(p)
+	return evalSymlinksNearest(p)
+}
+
+// evalSymlinksNearest resolves symlinks using the nearest-existing-
+// ancestor algorithm:
+// 1. Try EvalSymlinks on the full path
+// 2. If not found, walk up directories until we find one that exists
+// 3. EvalSymlinks that ancestor
+// 4. Re-append the non-existent suffix segments
+func evalSymlinksNearest(target string) (string, error) {
+	abs, err := filepath.Abs(target)
 	if err != nil {
 		return "", err
 	}
 	cleaned := filepath.Clean(abs)
+
 	if real, err := filepath.EvalSymlinks(cleaned); err == nil {
-		return real, nil
+		return filepath.Clean(real), nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", err
 	}
-	// Path does not exist; do a lexical clean only. The parent
-	// of a non-existent root may itself be a symlink; resolve
-	// what we can.
-	parent := filepath.Dir(cleaned)
-	if real, err := filepath.EvalSymlinks(parent); err == nil {
-		return filepath.Join(real, filepath.Base(cleaned)), nil
+
+	current := cleaned
+	var parts []string
+	for {
+		parent := filepath.Dir(current)
+		base := filepath.Base(current)
+		if parent == current {
+			return cleaned, nil
+		}
+		parts = append([]string{base}, parts...)
+		if real, err := filepath.EvalSymlinks(parent); err == nil {
+			realClean := filepath.Clean(real)
+			joined := filepath.Join(append([]string{realClean}, parts...)...)
+			return filepath.Clean(joined), nil
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return "", err
+		}
+		current = parent
 	}
-	return cleaned, nil
 }
 
 // WithReadOnly adds extra paths that may be read but not written.
@@ -209,21 +241,31 @@ func (w *WorkspaceRoots) FindRoot(abs string) int {
 }
 
 // joinAndCheck joins a root with a workspace-relative path and
-// checks the result is under the root.
+// checks the result is under the root. Uses platform-neutral
+// lexical validation (rejects backslashes, volume prefixes, UNC).
 //
 // If followLinks is false, only the textual path is checked
 // (good for write). If followLinks is true, the result is
-// resolved through any symlinks and re-checked.
+// resolved through any symlinks using nearest-existing-ancestor
+// and re-checked.
 func joinAndCheck(root, rel string, followLinks bool) (string, error) {
 	if rel == "" {
 		return "", errors.New("empty relative path")
 	}
-	// Reject obvious traversal attempts at the lexical layer.
-	// `..` is checked again after canonicalization; this is
-	// defense in depth.
-	if strings.HasPrefix(rel, "/") || strings.HasPrefix(rel, `\`) {
+
+	if strings.ContainsRune(rel, 0) {
 		return "", ErrPathForbidden
 	}
+	if strings.Contains(rel, "\\") {
+		return "", ErrPathForbidden
+	}
+	if volumePatternLex.MatchString(rel) || uncPatternLex.MatchString(rel) {
+		return "", ErrPathForbidden
+	}
+	if strings.HasPrefix(rel, "/") {
+		return "", ErrPathForbidden
+	}
+
 	joined := filepath.Join(root, rel)
 	canon, err := canonical(joined)
 	if err != nil {
@@ -235,15 +277,9 @@ func joinAndCheck(root, rel string, followLinks bool) (string, error) {
 	if !followLinks {
 		return canon, nil
 	}
-	real, err := filepath.EvalSymlinks(canon)
+	real, err := evalSymlinksNearest(canon)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			// File does not exist. For reads this is a not-found
-			// condition; for writes this is fine as long as the
-			// parent is inside the workspace. We don't know which
-			// the caller wants, so we return the lexically-resolved
-			// path and a nil error. Callers that need to verify
-			// existence should stat() the result.
 			return canon, nil
 		}
 		return "", err
@@ -255,10 +291,6 @@ func joinAndCheck(root, rel string, followLinks bool) (string, error) {
 }
 
 func authorizeAbs(roots []string, abs string, followLinks bool) (string, error) {
-	// resolveRoot resolves symlinks for the path AND its parent,
-	// which canonical() did not. On macOS /var→/private/var and
-	// similar symlink chains cause the root (resolved) to differ
-	// from the lexical path, making isUnder() fail spuriously.
 	canon, err := resolveRoot(abs)
 	if err != nil {
 		return "", err
@@ -272,7 +304,7 @@ func authorizeAbs(roots []string, abs string, followLinks bool) (string, error) 
 }
 
 // canonical returns a clean, lexically-absolute path. It does not
-// resolve symlinks (use filepath.EvalSymlinks for that).
+// resolve symlinks (use evalSymlinksNearest for that).
 func canonical(p string) (string, error) {
 	if p == "" {
 		return "", errors.New("empty path")
@@ -297,10 +329,11 @@ func isUnder(child, parent string) bool {
 	if rel == "." {
 		return true
 	}
-	if strings.HasPrefix(rel, "..") || strings.HasPrefix(rel, string(os.PathSeparator)) {
-		_ = rel
+	if rel == ".." {
+		return false
 	}
-	if rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+	sep := string(os.PathSeparator)
+	if strings.HasPrefix(rel, ".."+sep) {
 		return false
 	}
 	return !strings.HasPrefix(rel, "..")
