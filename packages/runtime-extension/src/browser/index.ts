@@ -14,7 +14,7 @@ import {
   KairoErrorListenerImpl,
 } from './runtime';
 import { WorkspaceContextService } from './workspace-context-service';
-import { RuntimeConnectionService, EventStream, type KairoRuntimeConfig, type KairoRequestInit } from './runtime-connection-service';
+import { RuntimeConnectionService } from './runtime-connection-service';
 
 export {
   KairoRuntime,

@@ -44,7 +44,6 @@ import type {
 } from '@kairo/protocol';
 import {
   KAIRO_ENCODING_OPTIONS,
-  SUPPORTS_ENCODER,
   normalizeEncodingLabel,
 } from './encoding-utils';
 

@@ -44,7 +44,6 @@ export const KairoProductFrontend: ContainerModule = (() => {
   // synchronously by the Electron preload script before the
   // page begins evaluating, so it is safe to read here.
   if (typeof window !== 'undefined' && window.kairoConfig?.noKairoFrontend) {
-    // eslint-disable-next-line no-console
     console.log('[kairo] noKairoFrontend=true; loading empty frontend module');
     return new ContainerModule(() => { /* no-op */ });
   }

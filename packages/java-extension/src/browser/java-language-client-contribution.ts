@@ -1,4 +1,4 @@
-import { injectable, inject } from '@theia/core/shared/inversify';
+import { injectable } from '@theia/core/shared/inversify';
 import { JAVA_LANGUAGE_ID, JAVA_LANGUAGE_NAME } from '../common/java-common';
 
 /**

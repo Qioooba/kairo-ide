@@ -1,7 +1,6 @@
 import * as React from 'react';
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import { injectable, inject } from '@theia/core/shared/inversify';
-import { WorkspaceService } from '@theia/workspace/lib/browser/workspace-service';
 import { FileDialogService } from '@theia/filesystem/lib/browser/file-dialog';
 import { KairoProjectService } from './project-service';
 import { ActiveProjectService } from './active-project-service';
@@ -11,9 +10,6 @@ import type { ProjectConfig } from '@kairo/protocol';
 @injectable()
 export class ImportWizardWidget extends ReactWidget {
     static readonly ID = 'kairo-import-wizard';
-
-    @inject(WorkspaceService)
-    protected readonly workspaceService!: WorkspaceService;
 
     @inject(FileDialogService)
     protected readonly fileDialogService!: FileDialogService;
@@ -38,7 +34,6 @@ export class ImportWizardWidget extends ReactWidget {
 
     protected render(): React.ReactNode {
         return React.createElement(ImportWizard, {
-            workspaceService: this.workspaceService,
             fileDialogService: this.fileDialogService,
             projectService: this.projectService,
             activeProject: this.activeProject,
@@ -48,7 +43,6 @@ export class ImportWizardWidget extends ReactWidget {
 }
 
 interface ImportWizardProps {
-    workspaceService: WorkspaceService;
     fileDialogService: FileDialogService;
     projectService: KairoProjectService;
     activeProject: ActiveProjectService;
@@ -56,7 +50,7 @@ interface ImportWizardProps {
 }
 
 const ImportWizard: React.FC<ImportWizardProps> = ({
-    workspaceService, fileDialogService, projectService, activeProject, runtime,
+    fileDialogService, projectService, activeProject, runtime,
 }) => {
     const [step, setStep] = React.useState(1);
     const [workspacePath, setWorkspacePath] = React.useState('');

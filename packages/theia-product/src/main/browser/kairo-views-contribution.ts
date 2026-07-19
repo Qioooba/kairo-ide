@@ -41,7 +41,6 @@ import type {
   ServerInstance,
   BuildResult,
   DeploymentResult,
-  WsEvent,
 } from '@kairo/protocol';
 import { mapBuildState } from '@kairo/protocol';
 
@@ -63,8 +62,6 @@ export namespace KairoCommands {
   export const REVEAL_KAIRO_DEPLOYMENTS: Command = { id: 'kairo.view.deployments', label: 'Kairo: Show Deployments' };
   export const REVEAL_KAIRO_LOGS: Command = { id: 'kairo.view.logs', label: 'Kairo: Show Tomcat Logs' };
 }
-
-const KAIRO_ACTIVITY_BAR_ORDER = 6;
 
 /* ------------------------------------------------------------------ */
 /*  Widgets                                                             */

@@ -29,6 +29,19 @@ type asyncBuildEngine struct {
 	registry *toolchain.Registry
 }
 
+// cloneBuildResult returns a detached snapshot that callers may safely encode
+// or inspect after the engine lock has been released. BuildResult instances in
+// finished are mutated by the asynchronous compiler goroutine and must never
+// escape directly.
+func cloneBuildResult(src *api.BuildResult) *api.BuildResult {
+	if src == nil {
+		return nil
+	}
+	dst := *src
+	dst.Diagnostics = append([]build.Diagnostic(nil), src.Diagnostics...)
+	return &dst
+}
+
 func newAsyncBuildEngine(dataDir string, reg *toolchain.Registry, logger *log.Logger) *asyncBuildEngine {
 	dir := filepath.Join(dataDir, "builds")
 	_ = os.MkdirAll(dir, 0o755)
@@ -167,7 +180,10 @@ func (b *asyncBuildEngine) Start(req api.BuildRequest) (*api.BuildResult, error)
 		OutputDir:   req.OutputDir,
 	})
 
-	return bs, nil
+	b.mu.Lock()
+	snapshot := cloneBuildResult(bs)
+	b.mu.Unlock()
+	return snapshot, nil
 }
 
 func (b *asyncBuildEngine) run(ctx context.Context, id string, bs *api.BuildResult, req build.Request) {
@@ -210,7 +226,7 @@ func (b *asyncBuildEngine) Get(id string) (*api.BuildResult, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if bs, ok := b.finished[id]; ok {
-		return bs, nil
+		return cloneBuildResult(bs), nil
 	}
 	return nil, fmt.Errorf("build not found: %s", id)
 }
@@ -220,7 +236,7 @@ func (b *asyncBuildEngine) List() []*api.BuildResult {
 	defer b.mu.Unlock()
 	items := make([]*api.BuildResult, 0, len(b.finished))
 	for _, bs := range b.finished {
-		items = append(items, bs)
+		items = append(items, cloneBuildResult(bs))
 	}
 	return items
 }

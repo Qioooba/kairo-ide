@@ -7,7 +7,6 @@
  * re-exports for backward compatibility.
  */
 
-import { injectable } from '@theia/core/shared/inversify';
 import { Endpoint } from '@kairo/protocol';
 import { KairoError } from './runtime-errors';
 

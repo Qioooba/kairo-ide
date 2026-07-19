@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import { injectable, inject } from '@theia/core/shared/inversify';
-import { ServerStore, ServerInstance } from './server-store';
+import { ServerStore } from './server-store';
 import { RuntimeConnectionService } from '@kairo/runtime-extension';
 import { WorkspaceContextService } from '@kairo/runtime-extension';
 

@@ -35,7 +35,7 @@ import {
   normaliseThrown,
   unwrapResponse,
 } from './runtime-errors';
-import { KairoErrorListener, KairoErrorListenerImpl } from './runtime';
+import { KairoErrorListener } from './runtime';
 
 /** Subprotocol name the agent requires for WS auth. */
 export const KAIRO_WS_SUBPROTOCOL = 'kairo-secret-v1' as const;

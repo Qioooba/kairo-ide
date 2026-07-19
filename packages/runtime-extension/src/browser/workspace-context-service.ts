@@ -47,7 +47,7 @@ export class WorkspaceContextService {
                     const created = await this.runtime.request('POST /api/v1/workspaces', { rootPath, name }) as any;
                     this.setWorkspace(created.id, created.rootPath);
                 }
-            } catch (err) {
+            } catch (_err) {
                 // If the backend is not available, derive workspaceId from path
                 const fallbackId = `local-${btoa(rootPath).replace(/[+/=]/g, '').slice(0, 16)}`;
                 this.setWorkspace(fallbackId, rootPath);

@@ -51,9 +51,10 @@ func detectLayout(root string) map[string]any {
 		"webRoot": "WebRoot",
 		"config":  []string{},
 	}
-	// Common alternates.
-	alts := []string{"WebContent", "web", "src/main/webapp"}
-	for _, a := range alts {
+	// Prefer the classic legacy layout when multiple layouts coexist. This is
+	// common in migration workspaces that also contain a newer Maven skeleton.
+	webRoots := []string{"WebRoot", "WebContent", "web", "src/main/webapp"}
+	for _, a := range webRoots {
 		if _, err := os.Stat(filepath.Join(root, a)); err == nil {
 			layout["webRoot"] = a
 			break

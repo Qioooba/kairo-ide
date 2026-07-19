@@ -17,8 +17,7 @@ import {
   FrontendApplication,
 } from '@theia/core/lib/browser';
 import { Disposable } from '@theia/core/lib/common/disposable';
-import { RuntimeConnectionService, KairoError } from '@kairo/runtime-extension';
-import { KairoServerService } from '@kairo/tomcat-extension';
+import { RuntimeConnectionService } from '@kairo/runtime-extension';
 import { ServerStore } from '@kairo/tomcat-extension';
 import { KairoJavaService, JavaServiceState } from '@kairo/java-extension';
 import { KairoEncodingServiceImpl } from '@kairo/encoding-extension';
@@ -80,7 +79,7 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
     });
   }
 
-  async onStart(app: FrontendApplication): Promise<void> {
+  async onStart(_app: FrontendApplication): Promise<void> {
     this.unsubscribeStatus = this.runtime.onStatusChange(s => this.setRuntimeStatus(s));
     this.unsubscribeServerEvents = this.runtime.subscribeEvents(this.runtime.workspace(), (e: any) => {
       if (e.type === 'server.state') {
@@ -271,7 +270,7 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
         });
       }
       this.renderServerStatus();
-    } catch (err) {
+    } catch (_err) {
       // Network blip — keep previous status from store.
     }
   }
