@@ -1,7 +1,7 @@
 {
   "name": "@kairo/config-schema",
   "version": "0.1.0",
-  "description": "JSON Schema for .legacyflow/project.yaml éˆ?the canonical project configuration file. Generated into Theia form-fillers, used by the Go agent to validate configs.",
+  "description": "JSON Schema for .legacyflow/project.yaml ï¿½?the canonical project configuration file. Generated into Theia form-fillers, used by the Go agent to validate configs.",
   "main": "lib/index.js",
   "types": "lib/src/index.d.ts",
   "files": [
@@ -12,7 +12,7 @@
     "build": "tsc -p tsconfig.json",
     "clean": "rm -rf lib",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "test": "echo \"no tests\" && exit 0"
+    "test": "node --require ts-node/register --require source-map-support/register --test src/index.test.ts"
   },
   "dependencies": {
     "@kairo/protocol": "workspace:*",

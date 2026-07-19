@@ -1,0 +1,58 @@
+#!/usr/bin/env node
+// apps/desktop/scripts/copy-bundled.js
+// Mirror the project's `bundled/` directory (populated by
+// `pnpm bundled:prepare`) into `apps/desktop/bundled/` so that
+// electron-builder picks it up via the `files` glob in
+// `apps/desktop/package.json` and ships it inside the NSIS
+// installer. Electron-builder's `files` globs cannot traverse
+// above the package's own directory, so the project-root
+// `bundled/` has to be copied into the desktop package's tree
+// first.
+//
+// Behaviour:
+//   * If `bundled/` at the project root is empty or missing,
+//     we log a warning and exit 0 — packaging still succeeds
+//     and the runtime falls back to first-run download.
+//   * If `apps/desktop/bundled/` already contains the same
+//     files, we still refresh (cheap copy of a small tree).
+//   * We never copy `bundled/.gitkeep` or `bundled/README.md`
+//     into the installer (no value to the end user).
+
+'use strict';
+
+const fs = require('node:fs');
+const path = require('node:path');
+
+const repoRoot = path.resolve(__dirname, '..', '..', '..');
+const src = path.join(repoRoot, 'bundled');
+const dst = path.join(__dirname, '..', 'bundled');
+
+if (!fs.existsSync(src)) {
+  console.log(`[copy-bundled] WARN: ${src} does not exist — runtime will fall back to first-run download`);
+  process.exit(0);
+}
+
+const entries = fs.readdirSync(src, { withFileTypes: true });
+const realDirs = entries.filter((e) => e.isDirectory());
+if (realDirs.length === 0) {
+  console.log(`[copy-bundled] WARN: ${src} is empty — runtime will fall back to first-run download`);
+  process.exit(0);
+}
+
+fs.mkdirSync(dst, { recursive: true });
+// Clean dst to avoid stale files.
+for (const e of fs.readdirSync(dst, { withFileTypes: true })) {
+  const p = path.join(dst, e.name);
+  fs.rmSync(p, { recursive: true, force: true });
+}
+
+let copied = 0;
+for (const dirent of realDirs) {
+  const from = path.join(src, dirent.name);
+  const to = path.join(dst, dirent.name);
+  // Recursive copy via cpSync (Node 16.7+).
+  fs.cpSync(from, to, { recursive: true, dereference: false });
+  copied += 1;
+  console.log(`[copy-bundled] ${from} -> ${to}`);
+}
+console.log(`[copy-bundled] OK: ${copied} bundled dir(s) staged for packaging`);

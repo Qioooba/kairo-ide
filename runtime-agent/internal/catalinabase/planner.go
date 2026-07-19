@@ -2,6 +2,7 @@ package catalinabase
 
 import (
 	"fmt"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -70,7 +71,7 @@ func NormalizeContextPath(contextPath string) (normalized string, webappDirName 
 		return "", "", fmt.Errorf("%w: context path contains traversal", domain.ErrInvalidConfig)
 	}
 
-	cleaned := filepath.Clean(contextPath)
+	cleaned := path.Clean(contextPath)
 	if cleaned == "/" {
 		return "/", "ROOT", nil
 	}

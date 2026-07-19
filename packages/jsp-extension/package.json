@@ -9,7 +9,7 @@
     "build": "tsc -p tsconfig.json",
     "clean": "rm -rf lib",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "test": "echo \"no tests\" && exit 0"
+    "test": "node --require source-map-support/register --test src/browser/tld-parser.test.cjs"
   },
   "dependencies": {
     "@kairo/protocol": "workspace:*",

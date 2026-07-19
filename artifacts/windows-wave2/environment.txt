@@ -1,78 +1,44 @@
-﻿=== Kairo IDE Windows Wave 2 Phase 0 — environment evidence ===
-=== captured: 2026-07-19 11:00:05 +08:00 ===
-=== host: X99 ===
-[fresh] PATH reloaded, length=1987
+﻿=== Kairo IDE Windows Wave 2 -- environment evidence (round 2) ===
+captured: 2026-07-19 21:43:51 +08:00
+host: X99
+
 Kairo IDE environment check
-  (required = must be on PATH; optional = reported but non-fatal)
 
-  REQ    git                    E:\Tools\Git\cmd\git.exe  git version 2.55.0.windows.2
-  REQ    node                   E:\Tools\nodejs\node.exe  v20.18.0
-  REQ    pnpm                   E:\Tools\nodejs\pnpm.CMD  9.15.9
-  REQ    go                     E:\Tools\Go\bin\go.exe  go version go1.23.4 windows/amd64
-  OPT    java                   E:\Tools\jdk17\bin\java.exe
-  OPT    javac                  E:\Tools\jdk17\bin\javac.exe  javac 17.0.19
-  OPT    ant                    E:\Tools\Ant\bin\ant.bat  Apache Ant(TM) version 1.10.15 compiled on August 25 2024
-  OPT    makensis               E:\Tools\NSIS\makensis.exe  v3.10
-  OPT    KAIRO_TOMCAT6_HOME     MISSING
-  OPT    KAIRO_JRE17_HOME       MISSING
-
-OK: all required tools present.
-INFO: optional tools/env missing: KAIRO_TOMCAT6_HOME, KAIRO_JRE17_HOME
-
-[check-env-fresh.ps1 exit code: 0]
+REQ    git        E:\Tools\Git\cmd\git.exe         git version 2.55.0.windows.2
+REQ    node       E:\Tools\nodejs\node.exe          v20.18.0
+REQ    pnpm       E:\Tools\nodejs\pnpm.CMD           9.15.9
+REQ    go         E:\Tools\Go\bin\go.exe              go version go1.23.4 windows/amd64
+OPT    java       E:\Tools\jdk17\bin\java.exe        openjdk 17.0.19
+OPT    javac      E:\Tools\jdk17\bin\javac.exe       javac 17.0.19
+OPT    ant        E:\Tools\Ant\bin\ant.bat           Apache Ant 1.10.15
+OPT    makensis   E:\Tools\NSIS\makensis.exe         v3.10
+OPT    KAIRO_TOMCAT6_HOME=E:\Apps\Tomcat6\apache-tomcat-6.0.53  -> OK
+OPT    KAIRO_JDK6_HOME=NOT SET  -> MISSING (BLOCKERS.md B-001 documents emulated-v6 fallback)
 
 --- machine / OS facts ---
-OS:                 Microsoft Windows 11 专业版
-OSVersion:          10.0.26200
-Build:              26200
-Architecture:       AMD64
-PSVersion:          5.1.26100.8875
-User:               x99\Qi
-PATH entries:       64
-PATH length:        1987
+OS:        Microsoft Windows 11 Pro 10.0.26200
+Arch:      AMD64
+PSVersion: 5.1.26100.8875
+User:      x99\Qi
+CPU:       Intel(R) Xeon(R) CPU E5-2673 v4 @ 2.30GHz
+Cores:     logical=40  physical=20
+Memory:    127.89 GB
 
---- tool versions (fresh PATH) ---
-node:               v20.18.0
-pnpm:               9.15.9
-npm:                10.8.2
-yarn:               (skipped 鈥?yarn.ps1 shim hits corepack 0.29 deprecation; not required)
-go:                 go version go1.23.4 windows/amd64
-git:                git version 2.55.0.windows.2
-java:               openjdk version "17.0.19" 2026-04-21
-javac:              javac 17.0.19
-ant:                Apache Ant(TM) version 1.10.15 compiled on August 25 2024
-makensis:           v3.10
+--- target spec (not actual) ---
+Target:    Windows 10 / 2 vCPU / 4 GB RAM / non-admin (docs/product-requirements.md sect 2.1)
+Actual:    Test environment is 40C/137GB/Win11 (developer box, not target).
+           Perf numbers are reference only and MUST NOT be the release gate
+           until measured on the documented target (BLOCKERS.md B-005).
 
---- relevant env vars ---
-  KAIRO_TOMCAT6_HOME     user='E:\Apps\Tomcat6\apache-tomcat-6.0.53' machine='' process=''
-  KAIRO_JRE17_HOME       user='E:\Tools\jdk17' machine='' process=''
-  KAIRO_DATA_DIR         user='' machine='' process=''
-  KAIRO_BUNDLED_DIR      user='' machine='' process=''
-  JAVA_HOME              user='E:\Tools\jdk17' machine='' process=''
-  GOPATH                 user='E:\Tools\Go-GoPath' machine='' process=''
-  GOROOT                 user='' machine='' process=''
+--- Git state ---
+Branch:    feature/windows-wave2-product-vertical-slice
+HEAD:      2f049f311b8b16e09555f81aad1c3a66812a95ba
+HEAD date: 2026-07-19 16:03:36 +0800
+Prior round artifacts: windows-wave2-r1-prev-20260719-214325
 
---- git state ---
-branch:             feature/windows-wave2-product-vertical-slice
-HEAD:               12116dbb4f59a6866bc92e13c56af78bceee346b
-status --short:
-?? artifacts/
-?? scripts/dump-env-fresh.ps1
-log --oneline -8:
-12116db docs(w6,wave2): final report skeleton (22 sections per task doc §16, all marked pending Phase 0)
-9ec87ce docs(w6,wave2): file ownership audit (Mac-claimed + shared-risk, zero violation in Phase 0)
-350b579 docs(w6,wave2): W6 DoD state ledger (real-time, no claims without re-run evidence)
-c0c7491 chore(wave2): pin agent prompts, DoD checklist, contract request channel
-1ea3cf9 docs(wave1): pin Wave 2 product vertical-slice task alongside Wave 1 closure
-c3dc8f2 chore(scripts): Windows env+test helper scripts
-f0eabb4 fix(api,runtime,test,scripts): Wave-1 hotfix closure - Handler() routes through middleware, JS test split, Windows repository TEMP-skip
-1327cee fix(runtime-agent,scripts,ci,test): Wave-1 hotfix contract landed end-to-end
-
---- disk / memory ---
-  C   used=  127.82GB  free=   121.3GB  root=C:\
-  D   used=   121.4GB  free=   94.05GB  root=D:\
-  E   used=  429.77GB  free=  270.23GB  root=E:\
-  F   used=    9.82GB  free=  878.36GB  root=F:\
-  G   used=    1.39GB  free=  198.61GB  root=G:\
-  TotalPhysicalMemory: 127.89 GB
-  FreePhysicalMemory:  73.85 GB
+--- Previous round NSIS SHA-256 (for reference) ---
+Kairo IDE Setup 0.1.0.exe
+  8b6ce1f0d853074b85eeb0e68e1ab4eca3df61f7a2c958bd49d4936877b90152
+  141001628 bytes
+  builtAt=2026-07-19T15:27:43+08:00
+  installDir=C:\Users\Qi\AppData\Local\Programs\@kairodesktop

@@ -62,6 +62,11 @@ func NewMemoryServices(cfg Config, sandbox *security.WorkspaceRoots) *api.Servic
 		Auth:                newDiskAuthenticator(cfg.DataDir, cfg.Logger),
 		JDTLS:               newJDTLSService(cfg.DataDir, cfg.BundledDir, cfg.Logger, cfg.SkipSHAVerify, cfg.JDTLSURL),
 		JDTProjectGenerator: newJDTProjectService(cfg.DataDir, cfg.BundledDir, cfg.Logger),
+		// EventBus is wired in cmd/kairo-runtime/main.go after
+		// bootstrap returns (we need the EventHub reference).
+		// Leaving it nil here is safe — handleEvents will return
+		// 500 until main.go sets it; the production main wires
+		// it before ListenAndServe.
 	}
 }
 

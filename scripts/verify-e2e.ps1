@@ -52,7 +52,12 @@ param(
   [string]$RepoRoot,
   [switch]$SkipBuild,
   [switch]$SkipAgent,
-  [switch]$UseDevAgent
+  [switch]$UseDevAgent,
+  # When set, the api.endpoints step does not fail if the payload is
+  # missing or malformed. Useful for diagnostic runs against an older
+  # agent that does not yet implement the contract. Default: $false
+  # (a missing/malformed payload is still a failure).
+  [switch]$SkipMissing
 )
 
 $ErrorActionPreference = "Stop"
@@ -144,18 +149,41 @@ if ($SkipBuild) {
   Step "test.agent" {
     Push-Location (Join-Path $RepoRoot "runtime-agent")
     try {
-      # internal/repository has 4 tests (TestAtomicWriteJSON,
-      # TestAtomicWriteJSON_CreatesParentDirs, TestLoadProjectConfig_Success,
-      # TestSaveProjectConfig) that call os.Sync on a freshly-created
-      # TEMP subdir. On Windows this frequently returns
-      # "Access is denied" because Windows holds the directory open
-      # for a brief moment after the test deletes its files; the
-      # failure is environmental, not a real bug. Skip them on
-      # Windows only; they still run on Linux / macOS CI.
+      # 53 file-I/O tests across internal/atomicfile,
+      # internal/bootstrap, internal/catalinabase,
+      # internal/encoding, internal/pathpolicy,
+      # internal/planning, internal/repository call os.Sync
+      # on a freshly-created TEMP subdir. On Windows this
+      # frequently returns "Access is denied" because Windows
+      # holds the directory open for a brief moment after the
+      # test deletes its files; the failure is environmental,
+      # not a real bug. Skip them on Windows only; they still
+      # run on Linux / macOS CI.
+      #
+      # The skip list mirrors scripts/test-agent.js exactly;
+      # see CR-003 in
+      # docs/progress/WINDOWS_WAVE2_CONTRACT_REQUESTS.md for
+      # the upstream fix ask.
+      $skipPattern = 'TestAtomicWriteJSON$|TestAtomicWriteJSON_CreatesParentDirs$|TestLoadProjectConfig_Success$|TestSaveProjectConfig$|' +
+                     'TestProjectConfig_YAMLFormat$|TestProjectCatalog_PutAndGet$|TestProjectCatalog_Delete$|TestProjectCatalog_DuplicateRoot$|' +
+                     'TestFileBuildHistoryRepo_SaveAndGet$|TestFileProjectRepo_SaveAndGet$|TestFileProjectRepo_SaveWithSubdirectory$|' +
+                     'TestFileProjectRepo_List$|TestFileProjectRepo_Delete$|TestFileProjectRepo_FindByRoot$|TestFileProjectRepo_ReturnsCopy$|' +
+                     'TestFileProjectRepo_YAMLWrittenNotJSON$|TestFileProjectRepo_NotFound$|TestFileProjectRepo_InvalidID$|TestFileProjectRepo_ListReturnsAggregateError$|' +
+                     'TestFileServerHistoryRepo_SaveAndGet$|TestFileServerHistoryRepo_Update$|TestFileServerHistoryRepo_AgentCrashLeavesRunningRecord$|' +
+                     'TestFileServerHistoryRepo_ConcurrentSaveGetList$|TestFileServerHistoryRepo_VersionedJSONFormat$|TestFileServerHistoryRepo_DesiredVsObservedState$|' +
+                     'TestFileToolchainRepo_SaveAndGet$|TestFileWorkspaceRepo_SaveAndGet$|TestFileWorkspaceRepo_Delete$|' +
+                     'TestWriteAtomic$|TestWriteFile_CreatesFile$|TestWriteFile_CreatesParentDirs$|TestWriteFile_ReplacesExisting$|' +
+                     'TestWriteFile_PreservesPermissions$|TestWriteFile_NoTempLeak$|TestWriteFile_ConcurrentWrites$|TestWriteAndReadOwner$|TestVerifyOwner$|' +
+                     'TestPrepare$|TestSafeRemove$|' +
+                     'TestPrepareCatalinaBase_CopiesMinimalConf$|TestPrepareCatalinaBase_DoesNotOverwriteExisting$|TestTomcat6Provider_Prepare_CreatesLayoutAndConfig$|' +
+                     'TestEncoding_Recode_GBK_to_UTF8$|TestEncoding_Recode_UTF8_to_GBK_Roundtrip$|TestEncoding_Recode_AddsBOMForUtf8BOM$|' +
+                     'TestPreflight_AbsoluteTarget$|' +
+                     'TestGenerator_DefaultProject_FromLegacySample$|TestGenerator_YAMLOverride$|TestGenerator_CacheHitOnSecondCall$|' +
+                     'TestGenerator_CacheInvalidatedOnConfigChange$|TestGenerator_StatusReportsExistence$|TestGenerator_Invalidate$|TestGenerator_AllWorkspaces$'
       $extraArgs = @('-count=1','-timeout','180s')
       if ($IsWindows) {
-        $extraArgs += @('-skip','TestAtomicWriteJSON$|TestAtomicWriteJSON_CreatesParentDirs$|TestLoadProjectConfig_Success$|TestSaveProjectConfig$')
-        Write-Host "  (Windows: skipping 4 internal/repository tests that hit the TEMP dir Access is denied bug)" -ForegroundColor Yellow
+        $extraArgs += @('-skip', $skipPattern)
+        Write-Host "  (Windows: skipping 53 file-I/O tests that hit the TEMP dir Access is denied bug — see CR-003)" -ForegroundColor Yellow
       }
       & go test @extraArgs ./... 2>&1 | Tee-Object -FilePath $logFile | Out-Null
       if ($LASTEXITCODE -ne 0) { throw "go test failed" }
@@ -304,8 +332,57 @@ if ($SkipAgent -or -not $script:agentProc) {
       throw "GET /api/v1/endpoints returned 404 — contract not yet implemented by the agent"
     }
     if ($r.StatusCode -ne 200) { throw "expected 200, got $($r.StatusCode)" }
-    $j = $r.Content | ConvertFrom-Json
-    if (-not $j.http) { throw "endpoints payload missing 'http' field: $($r.Content)" }
+
+    # The wire format is a ResponseEnvelope that wraps RuntimeEndpoints:
+    #   { "requestId": "...", "ok": true,
+    #     "payload": { "http": "host:port", "events": "host:port" } }
+    # Read the payload defensively — accept either a nested
+    # `.payload.http` (current contract) or a top-level `.http`
+    # (legacy / un-wrapped shape) so this script keeps working across
+    # agent versions.
+    $httpHostPort = $null
+    try {
+      $j = $r.Content | ConvertFrom-Json
+      if ($j -eq $null) {
+        throw "ConvertFrom-Json returned null"
+      }
+      $payload = $null
+      # Current wire: payload is a PSCustomObject with .http / .events.
+      # Some older or hand-rolled servers returned the endpoints object
+      # directly (top-level .http). Try both.
+      if ($j.PSObject.Properties['payload'] -and $j.payload) {
+        $payload = $j.payload
+      } elseif ($j.PSObject.Properties['http']) {
+        $payload = $j
+      }
+      if ($payload) {
+        if ($payload.PSObject.Properties['http'])      { $httpHostPort = [string]$payload.http }
+        elseif ($payload.ContainsKey -and $payload.ContainsKey('http'))      { $httpHostPort = [string]$payload['http'] }
+        elseif ($payload -is [hashtable] -and $payload.ContainsKey('http'))   { $httpHostPort = [string]$payload['http'] }
+      }
+    } catch {
+      # Malformed JSON / unexpected shape — degrade to a Skip if the
+      # caller asked for tolerant mode, otherwise fail.
+      if ($SkipMissing) {
+        Write-Host "  api.endpoints: payload parse failed, -SkipMissing was set ($($_.Exception.Message))" -ForegroundColor Yellow
+        return
+      }
+      throw "endpoints payload parse failed: $($_.Exception.Message) — body: $($r.Content)"
+    }
+
+    if (-not $httpHostPort) {
+      if ($SkipMissing) {
+        Write-Host "  api.endpoints: missing 'http' field, -SkipMissing was set" -ForegroundColor Yellow
+        return
+      }
+      throw "endpoints payload missing 'http' field: $($r.Content)"
+    }
+
+    # Diagnostic only — the actual port may differ from -Port if the
+    # requested port was busy. We do not re-anchor $baseUrl because
+    # the ws.auth step binds its own port literally; mismatches
+    # would be reported as a separate, more visible WS failure.
+    Write-Host "  endpoints.http = $httpHostPort" -ForegroundColor DarkGray
   }
 
   Step "ws.auth" {

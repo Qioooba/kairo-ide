@@ -1,9 +1,22 @@
-export { JavaLanguageServerManager } from './java-language-server-contribution';
-export type { LaunchDescriptor } from './java-language-server-contribution';
+export { JdtLsManager } from './jdt-ls-manager';
+export type {
+  JdtLsDistribution,
+  JdtLsEvent,
+  JdtLsState,
+  JdtLsEventListener,
+  JdtLsStartError,
+} from './jdt-ls-manager';
+export { JdtLsService } from './jdt-ls-service';
+export type { JdtLsServiceEvent } from './jdt-ls-service';
+export { encodeLspMessage, LSPMessageParser } from '../common/lsp-protocol';
 
 import { interfaces } from '@theia/core/shared/inversify';
-import { JavaLanguageServerManager } from './java-language-server-contribution';
+import { JdtLsManager } from './jdt-ls-manager';
+import { JdtLsService } from './jdt-ls-service';
 
-export function bindJavaLanguageServerManager(bind: interfaces.Bind): void {
-    bind(JavaLanguageServerManager).toSelf().inSingletonScope();
+export function bindJdtLsService(bind: interfaces.Bind): void {
+  bind(JdtLsService).toSelf().inSingletonScope();
 }
+
+// Silence the unused warning for the JdtLsManager export.
+void JdtLsManager;

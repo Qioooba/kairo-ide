@@ -70,9 +70,20 @@ logs/
 
 # Bundled third-party (large)
 bundled/tomcat6/apache-tomcat-*/
+bundled/tomcat6/bin/
+bundled/tomcat6/lib/
+bundled/tomcat6/conf/
+bundled/tomcat6/logs/
+bundled/tomcat6/temp/
+bundled/tomcat6/work/
+bundled/tomcat6/webapps/
 bundled/jdk*/
 bundled/jre*/
 bundled/eclipse-jdt-ls/
+# Pre-stage dir for electron-builder — populated by
+# `pnpm --filter @kairo/desktop build:win` from bundled/ at
+# packaging time, then removed by clean().
+apps/desktop/bundled/
 
 # Local user state
 .legacyflow/
@@ -116,4 +127,15 @@ codex-ui-review-shots/
 **/runtime-test-raw.txt
 **/api-smoke-raw.txt
 **/probe-raw.txt
+
+# Acceptance / verification scratch (10k-file benchmarks, install
+# dirs, in-progress evidence bundles). Real reports go to
+# docs/progress/. Keep these out of git to avoid a 10000-file
+# commit every time a verification cycle is run locally.
+artifacts/acceptance-*/
+artifacts/windows-wave2/
+artifacts/windows-wave2-r1-prev-*/
+
+# Local scratch files (test probes, one-off scripts)
+scratchpad/
 

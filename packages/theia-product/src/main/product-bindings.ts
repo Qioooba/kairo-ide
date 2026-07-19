@@ -22,7 +22,11 @@ import {
 import { bindSearchExtension } from '@kairo/search-extension';
 import { bindJspExtension } from '@kairo/jsp-extension';
 import { bindTomcatExtension } from '@kairo/tomcat-extension';
-import { bindJavaExtension, bindJavaLanguageClientContribution } from '@kairo/java-extension';
+import {
+  bindJavaExtension,
+  bindJavaLanguageClientContribution,
+  bindJdtLsService,
+} from '@kairo/java-extension';
 import { KairoEncodingServiceImpl, bindEncodingCommands } from '@kairo/encoding-extension';
 import { bindBuildExtension } from '@kairo/build-extension';
 import { KairoThemeContribution } from '@kairo/ui-kit';
@@ -98,6 +102,7 @@ export function bindKairoProduct(
   bindBuildExtension(bind);
   bindJavaExtension(bind);
   bindJavaLanguageClientContribution(bind);
+  bindJdtLsService(bind);
   bind(KairoEncodingServiceImpl).toSelf().inSingletonScope();
   bindEncodingCommands(bind);
 

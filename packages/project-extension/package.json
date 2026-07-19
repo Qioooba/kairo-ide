@@ -9,7 +9,7 @@
     "build": "tsc -p tsconfig.json",
     "clean": "rm -rf lib",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "test": "echo \"no tests\" && exit 0"
+    "test": "node -r ./test-setup.cjs -r ts-node/register --no-warnings src/browser/import-wizard-widget.test.ts"
   },
   "dependencies": {
     "@kairo/protocol": "workspace:*",

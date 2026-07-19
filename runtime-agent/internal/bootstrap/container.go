@@ -37,6 +37,13 @@ type Container struct {
 
 	// Infrastructure
 	EventHub *events.EventHub
+	// EventBus is the api.EventBus adapter that the
+	// /api/v1/events WebSocket handler drives. It wraps
+	// EventHub and is the only piece of the EventHub
+	// surface exposed to the api layer (the api package
+	// itself does not import the events package, so the
+	// interface keeps the dependency one-way).
+	EventBus *events.EventBusAdapter
 	Sandbox  *security.WorkspaceRoots
 
 	// Lifecycle
@@ -57,6 +64,13 @@ func NewContainer(cfg Config) (*Container, error) {
 	// 2. Create EventHub
 	eventHub := events.NewEventHub(1000, 100)
 
+	// 2a. Create the EventBus adapter that the /api/v1/events
+	//     WebSocket handler will use. Without this, the HTTP
+	//     layer's handleEvents returns 500 "EventBus not
+	//     configured" and the browser WS connection times out
+	//     (P0-8: WS auth subprotocol negotiation failed).
+	eventBus := &events.EventBusAdapter{Hub: eventHub}
+
 	// 3. Wire services using the existing service implementations.
 	// This is transitional - the old services package wraps the
 	// older concrete implementations.
@@ -75,6 +89,7 @@ func NewContainer(cfg Config) (*Container, error) {
 	container := &Container{
 		Services: svcs,
 		EventHub: eventHub,
+		EventBus: eventBus,
 		Sandbox:  sandbox,
 		shutdownFns: []func(context.Context) error{
 			func(ctx context.Context) error {

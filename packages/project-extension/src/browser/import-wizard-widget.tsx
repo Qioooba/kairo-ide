@@ -152,19 +152,26 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
                 },
             };
 
-            // Step 3: Save the project config
-            await runtime.request(
-                'PUT /api/v1/projects/{projectId}',
-                { config: projectConfig },
-                { pathParams: { projectId } },
-            );
+            // Step 3: Save the project config via the service.
+            // The Save button used to issue the PUT request
+            // directly through `runtime.request`, which
+            // bypassed the project's own service layer and
+            // left the local cache unsynced. Routing through
+            // `projectService.create()` makes the wire
+            // contract the service's responsibility and
+            // keeps the projects map in step with the agent.
+            const saved = await projectService.create(projectConfig);
 
-            // Step 4: Update the ActiveProjectService
+            // Step 4: Update the ActiveProjectService with
+            // the id the agent actually stored. Use the
+            // service return value rather than the locally
+            // generated `projectId` so we follow the agent
+            // as the source of truth.
             await activeProject.setProject({
                 workspaceId,
-                projectId,
-                name: projectName,
-                root: workspacePath,
+                projectId: saved.id,
+                name: saved.name,
+                root: saved.rootPath,
             });
 
             setSaveSuccess(true);
@@ -175,7 +182,7 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
         } finally {
             setSaving(false);
         }
-    }, [runtime, workspaceId, workspacePath, projectName, sourceLevel, encoding, buildTool, detectedConfig, activeProject]);
+    }, [runtime, projectService, workspaceId, workspacePath, projectName, sourceLevel, encoding, buildTool, detectedConfig, activeProject]);
 
     const handleStartIDE = React.useCallback(async () => {
         if (workspacePath && projectService) {

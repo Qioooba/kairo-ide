@@ -330,22 +330,12 @@ func (s *Server) doRestart() {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	// 1. Call the user's shutdown hook (e.g. container.Shutdown).
-	if rc.OnShutdown != nil {
-		if err := rc.OnShutdown(ctx); err != nil && s.logger != nil {
-			s.logger.Warn("restart: shutdown hook returned error", log.Fields{"err": err.Error()})
-		}
-	}
-
-	// 2. Stop the HTTP server so the new process can bind the port.
-	if err := s.Shutdown(ctx); err != nil && s.logger != nil {
-		s.logger.Warn("restart: http shutdown returned error", log.Fields{"err": err.Error()})
-	}
-
-	// 3. Spawn a fresh process with the original args. Skip
-	//    when NoExec is set (unit tests that don't want to
-	//    replace the test process) or when neither the
-	//    executable nor the args are configured.
+	// 1. Spawn the fresh process FIRST (P0-13): if we instead
+	//    shutdown the HTTP server first, ListenAndServe returns
+	//    immediately, main() exits, and the goroutine running
+	//    this function is killed before it can spawn the
+	//    replacement. Spawn-then-shutdown guarantees the child
+	//    is alive by the time we let the parent die.
 	if !rc.NoExec && (rc.Executable != "" || rc.Args != nil) {
 		exe := rc.Executable
 		if exe == "" {
@@ -355,28 +345,42 @@ func (s *Server) doRestart() {
 				s.logger.Error("restart: os.Executable failed", log.Fields{"err": err.Error()})
 			}
 		}
+		fmt.Fprintf(os.Stderr, "[restart] spawning exe=%s argvLen=%d\n", exe, len(rc.Args))
 		env := rc.Env
 		if env == nil {
 			env = os.Environ()
 		}
 		cmd := exec.Command(exe, rc.Args...)
 		cmd.Env = env
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
+		// P0-13: on Windows, attaching the new agent to the
+		// current process's console / stdio means it dies the
+		// moment we call os.Exit(0) below. Detach stdio so
+		// the child survives past the parent's lifetime.
+		cmd.Stdin = nil
+		cmd.Stdout = nil
+		cmd.Stderr = nil
 		if err := cmd.Start(); err != nil {
-			if s.logger != nil {
-				s.logger.Error("restart: spawn failed", log.Fields{"err": err.Error()})
-			}
+			fmt.Fprintf(os.Stderr, "[restart] spawn FAILED: %v\n", err)
 			os.Exit(1)
 			return
 		}
-		if s.logger != nil {
-			s.logger.Info("restart: spawned replacement process", log.Fields{
-				"pid":     cmd.Process.Pid,
-				"exe":     exe,
-				"argvLen": len(rc.Args),
-			})
+		fmt.Fprintf(os.Stderr, "[restart] spawn OK pid=%d\n", cmd.Process.Pid)
+		// Release so the child is not a zombie if the
+		// reaper does not pick it up. cmd.Wait() would block;
+		// Release() returns immediately.
+		_ = cmd.Process.Release()
+	}
+
+	// 2. Call the user's shutdown hook (e.g. container.Shutdown).
+	if rc.OnShutdown != nil {
+		if err := rc.OnShutdown(ctx); err != nil && s.logger != nil {
+			s.logger.Warn("restart: shutdown hook returned error", log.Fields{"err": err.Error()})
 		}
+	}
+
+	// 3. Stop the HTTP server so the new process can bind the port.
+	if err := s.Shutdown(ctx); err != nil && s.logger != nil {
+		s.logger.Warn("restart: http shutdown returned error", log.Fields{"err": err.Error()})
 	}
 
 	// 4. Exit the current process cleanly so the new one takes

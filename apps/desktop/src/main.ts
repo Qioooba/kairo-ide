@@ -383,13 +383,28 @@ async function createWindow(): Promise<void> {
     },
   });
 
-  // Auto-open DevTools in dev builds so the user can see the
-  // renderer's actual console / network / errors. Set
-  // KAIRO_NO_DEVTOOLS=1 to opt out.
-  if (!process.env.KAIRO_NO_DEVTOOLS) {
+  // Auto-open DevTools only in unpackaged (dev) runs so the user
+  // can see the renderer's actual console / network / errors. In
+  // packaged production builds, DevTools must stay closed unless
+  // the operator explicitly opts in via KAIRO_DEV=1. Set
+  // KAIRO_NO_DEVTOOLS=1 to opt out even in dev.
+  if (!app.isPackaged && !process.env.KAIRO_NO_DEVTOOLS) {
     mainWindow.webContents.openDevTools({ mode: 'detach' });
-    flog('[kairo] DevTools auto-opened (set KAIRO_NO_DEVTOOLS=1 to disable)');
+    flog('[kairo] DevTools auto-opened (unpackaged dev build; set KAIRO_NO_DEVTOOLS=1 to disable)');
   }
+
+  // Force the OS window title to "Kairo IDE" regardless of what the
+  // Theia HTML / runtime sets. Theia 1.73 ships an index.html with
+  // <title>Eclipse Theia</title> and a few Theia widgets call
+  // document.title = ... at runtime, so the BrowserWindow `title:`
+  // option alone is overwritten as soon as the page loads. We
+  // preventDefault() on every update and re-assert the product name.
+  mainWindow.on('page-title-updated', (event) => {
+    event.preventDefault();
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.setTitle('Kairo IDE');
+    }
+  });
 
   // Mirror the renderer's console + load events to the file log
   // so we can post-mortem frontend issues (workspace-context
@@ -457,18 +472,23 @@ if (!gotLock) {
     // Set CSP before creating any windows.
     app.on('session-created', (session) => {
       session.webRequest.onHeadersReceived((details, callback) => {
+        // Theia 1.73 ships with ajv-generated validators that use
+        // `new Function` for JSON schema compile. Without
+        // 'unsafe-eval' the very first schema validate throws
+        // EvalError and the frontend hangs in the splash. We
+        // therefore default the production CSP to the tightest
+        // policy that still lets Theia load its static assets, and
+        // gate 'unsafe-eval' behind KAIRO_DEV=1 so packaged builds
+        // ship with a hardened policy. If the renderer ever truly
+        // needs eval in production, switch the policy to add it
+        // back — but record the reason in the commit message.
+        const scriptSrcExtra = process.env.KAIRO_DEV === '1' ? " 'unsafe-eval'" : '';
         callback({
           responseHeaders: {
             ...details.responseHeaders,
             'Content-Security-Policy': [
               "default-src 'self'",
-              // Theia 1.73 ships with ajv-generated validators that
-              // use `new Function` for JSON schema compile. Without
-              // 'unsafe-eval' the very first schema validate throws
-              // EvalError and the frontend hangs in the splash. The
-              // desktop is bound to loopback, so the eval risk is
-              // localised to the Theia bundle we just served.
-              "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+              `script-src 'self' 'unsafe-inline'${scriptSrcExtra}`,
               "style-src 'self' 'unsafe-inline'",
               "connect-src 'self' data: http://127.0.0.1:* ws://127.0.0.1:*",
               "img-src 'self' data: https:",
@@ -506,6 +526,19 @@ if (!gotLock) {
     isQuitting = true;
     stopTheiaBackend();
     stopAgent();
+
+    // WM_CLOSE / app.quit() can stall for ~15s on Windows when a
+    // child process (Theia, the Go agent, or a hung renderer)
+    // refuses to release its stdio pipes. Without a hard timeout
+    // the user sees the window vanish but the tray icon — and
+    // sometimes the whole process tree — linger. After 5s we
+    // bypass any in-flight cleanup and force-exit the process.
+    // During a clean shutdown the event loop is already gone
+    // before this fires, so the timer is a safe no-op.
+    setTimeout(() => {
+      flog('[kairo] quit timeout reached; forcing app.exit(0)');
+      app.exit(0);
+    }, 5_000);
   });
 
   app.on('window-all-closed', () => {

@@ -30,6 +30,7 @@ import {
   KairoViewsContribution,
 } from './kairo-views-contribution';
 import { KairoStatusBarContribution } from './kairo-status-bar-contribution';
+import { KairoFileCommandsContribution } from './kairo-file-commands';
 import { KairoEncodingCommandsContribution } from '@kairo/encoding-extension';
 import { BuildViewWidget } from '@kairo/build-extension';
 import { ServerViewWidget, LogViewerWidget } from '@kairo/tomcat-extension';
@@ -91,6 +92,17 @@ export function bindKairoFrontend(bind: interfaces.Bind, unbind?: interfaces.Unb
   // picks up the methods.
   bind(CommandContribution).toService(KairoViewsContribution);
   bind(CommandContribution).toService(KairoEncodingCommandsContribution);
+  // KairoFileCommandsContribution is a defensive re-registration
+  // of the standard Theia file.* / workspace:* / core.*
+  // commands. Theia's standard modules already register
+  // these, but a missing module in a stripped build causes
+  // the menu bar to throw "No command X exists" at click
+  // time. This contribution guarantees the commands are
+  // always present (either the real handler or a friendly
+  // fallback message). See the file header for the long
+  // version of this rationale.
+  bind(KairoFileCommandsContribution).toSelf().inSingletonScope();
+  bind(CommandContribution).toService(KairoFileCommandsContribution);
 
   bind(KairoDeploymentsWidget).toSelf();
 

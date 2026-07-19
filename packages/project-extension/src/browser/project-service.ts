@@ -28,6 +28,31 @@ export class KairoProjectService {
     return this.runtime.request('POST /api/v1/workspaces/{workspaceId}/scan', { deep: true }, { pathParams: { workspaceId } });
   }
 
+  /**
+   * Persist a ProjectConfig to the runtime agent via
+   * PUT /api/v1/projects/{projectId}. The Save button in the
+   * Import Wizard routes through this method instead of
+   * calling the runtime client directly, so the service
+   * owns the wire contract and the local cache.
+   *
+   * The returned value is the canonical ProjectConfig as
+   * stored by the agent; callers should treat it as the new
+   * source of truth (e.g. the wizard's success step reads
+   * `result.id` to drive active-project selection).
+   */
+  async create(config: ProjectConfig): Promise<ProjectConfig> {
+    if (!config || !config.id) {
+      throw new Error('KairoProjectService.create: config.id is required');
+    }
+    const saved = await this.runtime.request(
+      'PUT /api/v1/projects/{projectId}',
+      { config },
+      { pathParams: { projectId: config.id } },
+    ) as ProjectConfig;
+    this.projects.set(saved.id, saved);
+    return saved;
+  }
+
   currentWorkspace(): WorkspaceDTO | undefined {
     return this.current;
   }

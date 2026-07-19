@@ -88,6 +88,23 @@ func run() error {
 	}
 	defer auditLog.Close()
 
+	// P0-4 security hardening: when the Desktop host spawns this
+	// agent (KAIRO_DESKTOP=1), auth is non-negotiable — the loopback
+	// socket is still reachable by any local user and the per-
+	// session secret is what prevents a hostile local process from
+	// driving the agent. The Desktop host sets KAIRO_LOCAL_SECRET
+	// in the env (main.js in apps/desktop); we verify the secret
+	// is non-empty in that mode and fail fast otherwise so a
+	// misconfigured host never runs an unauthenticated agent.
+	if os.Getenv("KAIRO_DESKTOP") == "1" {
+		if cfg.Secret == "" {
+			return fmt.Errorf("KAIRO_DESKTOP=1 but no secret configured (set --secret or KAIRO_LOCAL_SECRET)")
+		}
+		logger.Info("desktop mode: secret auth enforced on all non-public endpoints", log.Fields{
+			"secretBytes": len(cfg.Secret),
+		})
+	}
+
 	// Bootstrap the composition root container.
 	// This is the single entry point that wires all dependencies.
 	container, err := bootstrap.NewContainer(bootstrap.Config{
@@ -109,6 +126,16 @@ func run() error {
 	// run twice on the happy path. The container is also
 	// explicitly shut down when ListenAndServe returns (e.g.
 	// the listener errored out) below.
+
+	// Wire the WebSocket EventBus. The adapter wraps the
+	// EventHub created by bootstrap and is what the api
+	// layer's /api/v1/events handler drives. Without this
+	// wiring, handleEvents returns 500 "EventBus not
+	// configured" and the browser WS connection times out
+	// (P0-8).
+	if container.Services != nil {
+		container.Services.EventBus = container.EventBus
+	}
 
 	srv := api.NewServer(container.Services, logger, auditLog, agentVersion, cfg.Secret)
 

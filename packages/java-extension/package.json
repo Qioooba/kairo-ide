@@ -1,7 +1,7 @@
 {
   "name": "@kairo/java-extension",
   "version": "0.1.0",
-  "description": "Kairo Java extension �?owns the JDT Language Server lifecycle (delegated to the agent) and the Java activity bar.",
+  "description": "Kairo Java extension — owns the JDT Language Server lifecycle (delegated to the agent) and the Java activity bar.",
   "main": "lib/index.js",
   "types": "lib/src/index.d.ts",
   "files": [
@@ -12,7 +12,7 @@
     "build": "tsc -p tsconfig.json",
     "clean": "rm -rf lib",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "test": "echo \"no tests\" && exit 0"
+    "test": "node --test src/common/lsp-protocol.test.cjs src/node/jdt-ls-manager.test.cjs"
   },
   "dependencies": {
     "@kairo/project-extension": "workspace:*",
@@ -27,4 +27,3 @@
     "typescript": "5.5.4"
   }
 }
-
