@@ -21,6 +21,8 @@ requireAuth: true
 sessionLifetimeHours: 8
 idleTimeoutMinutes: 30
 
+# JDT LS heap defaults to 768 MB. Set KAIRO_JDTLS_MAX_HEAP_MB (256-4096)
+# according to the memory budget of the deployment.
 tomcatStartTimeout: 60s
 tomcatShutdownTimeout: 15s
 buildFileTimeout: 30s

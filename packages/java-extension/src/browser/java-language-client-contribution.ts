@@ -41,7 +41,10 @@ export class JavaLanguageClientContribution {
                 java: {
                     completion: {
                         enabled: true,
-                        guessMethodArguments: true,
+                        // Argument guessing creates additional resolve work on
+                        // every completion request and is especially costly in
+                        // multi-thousand-line legacy classes.
+                        guessMethodArguments: false,
                         favoriteStaticMembers: [
                             'org.junit.Assert.*',
                             'org.junit.Assume.*',
@@ -60,20 +63,20 @@ export class JavaLanguageClientContribution {
                         },
                     },
                     references: {
-                        includeDecompiledSources: true,
+                        includeDecompiledSources: false,
                     },
                     signatureHelp: {
                         enabled: true,
                     },
                     implementationsCodeLens: {
-                        enabled: true,
+                        enabled: false,
                     },
                     configuration: {
                         checkProjectSettingsExclusions: false,
                         updateBuildConfiguration: 'interactive',
                     },
                     trace: {
-                        server: 'verbose',
+                        server: 'off',
                     },
                 },
             },

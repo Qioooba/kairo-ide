@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 
 	"github.com/kairo-ide/runtime-agent/internal/jdtls"
@@ -29,6 +30,26 @@ type jdtlsService struct {
 	mgr       *jdtls.Manager
 	logger    *log.Logger
 	sourceLvl string
+}
+
+const defaultJDTLSMaxHeapMB = 768
+
+// jdtlsMaxHeapMB keeps the default useful for real legacy workspaces while
+// allowing constrained deployments to tune it without rebuilding Kairo.
+// Bounds prevent accidental values that either guarantee GC thrashing or can
+// exhaust a developer machine.
+func jdtlsMaxHeapMB() int {
+	const minHeapMB = 256
+	const maxHeapMB = 4096
+	raw := os.Getenv("KAIRO_JDTLS_MAX_HEAP_MB")
+	if raw == "" {
+		return defaultJDTLSMaxHeapMB
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value < minHeapMB || value > maxHeapMB {
+		return defaultJDTLSMaxHeapMB
+	}
+	return value
 }
 
 func newJDTLSService(dataDir, bundled string, logger *log.Logger, skipSHAVerify bool, jdtlsURL string) *jdtlsService {
@@ -108,9 +129,12 @@ func (s *jdtlsService) GetLaunchDescriptor(ctx context.Context, workspaceID stri
 		"-Declipse.application=org.eclipse.jdt.ls.core.id1",
 		"-Dosgi.bundles.defaultStartLevel=4",
 		"-Declipse.product=org.eclipse.jdt.ls.core.product",
-		"-Dlog.protocol=true",
-		"-Dlog.level=ALL",
-		"-Xmx256m",
+		"-Dlog.protocol=false",
+		"-Dlog.level=WARN",
+		"-Xms128m",
+		fmt.Sprintf("-Xmx%dm", jdtlsMaxHeapMB()),
+		"-XX:+UseG1GC",
+		"-XX:MaxGCPauseMillis=200",
 		"-jar", matches[0],
 		"-configuration", configDir,
 		"-data", workspaceData,
