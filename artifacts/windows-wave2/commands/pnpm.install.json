@@ -1,0 +1,12 @@
+﻿{
+    "exitCode":  0,
+    "name":  "pnpm.install",
+    "cmd":  "pnpm",
+    "logFile":  "G:\\spaces\\kairo-ide\\artifacts\\windows-wave2\\commands\\pnpm.install.log",
+    "elapsedMs":  3105,
+    "args":  [
+                 "install",
+                 "--frozen-lockfile"
+             ],
+    "capturedAt":  "2026-07-19T11:38:55.8871917+08:00"
+}

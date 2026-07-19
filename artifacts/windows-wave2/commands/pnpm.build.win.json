@@ -1,0 +1,13 @@
+﻿{
+    "exitCode":  1,
+    "name":  "pnpm.build.win",
+    "cmd":  "pnpm",
+    "logFile":  "G:\\spaces\\kairo-ide\\artifacts\\windows-wave2\\commands\\pnpm.build.win.log",
+    "elapsedMs":  10539,
+    "args":  [
+                 "--filter",
+                 "@kairo/desktop",
+                 "build:win"
+             ],
+    "capturedAt":  "2026-07-19T12:14:41.2685014+08:00"
+}
