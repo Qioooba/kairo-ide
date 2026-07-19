@@ -76,18 +76,24 @@ function resolveAgentPath(): string {
   // layout does not exist. Fall back to the monorepo-local Go build
   // output, which the desktop package's prebuild script produces.
   // apps/desktop/lib/main.js → ../../runtime-agent/bin/kairo-runtime[.exe]
-  const devPath = path.resolve(
-    __dirname, '..', '..', '..',
-    'runtime-agent', 'bin', binaryName
-  );
-  if (fs.existsSync(devPath)) {
-    return devPath;
+  const devDir = path.resolve(__dirname, '..', '..', '..', 'runtime-agent', 'bin');
+  const candidates = process.platform === 'win32'
+    // Go on Windows usually writes `kairo-runtime.exe`, but `go build -o
+    // bin/kairo-runtime` in some toolchains (e.g. cross-compile, mingw)
+    // drops the suffix. Try both.
+    ? [binaryName, binaryName.replace(/\.exe$/i, '')]
+    : [binaryName];
+  for (const name of candidates) {
+    const devPath = path.join(devDir, name);
+    if (fs.existsSync(devPath)) {
+      return devPath;
+    }
   }
 
   throw new Error(
-    `Cannot locate kairo-runtime binary in dev mode. Expected at: ${devPath}. ` +
-    `Either run the desktop prebuild (pnpm --filter @kairo/desktop build) ` +
-    `or set KAIRO_AGENT_PATH to the binary location.`
+    `Cannot locate kairo-runtime binary in dev mode. Searched in: ${devDir} ` +
+    `(candidates: ${candidates.join(', ')}). Either run the desktop prebuild ` +
+    `(pnpm --filter @kairo/desktop build) or set KAIRO_AGENT_PATH to the binary location.`
   );
 }
 
