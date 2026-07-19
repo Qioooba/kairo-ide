@@ -1,5 +1,6 @@
 import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
 import { ILogger } from '@theia/core/lib/common/logger';
+import { Disposable } from '@theia/core/lib/common/disposable';
 import { RuntimeConnectionService, WorkspaceContextService } from '@kairo/runtime-extension';
 import { ActiveProjectService } from '@kairo/project-extension';
 
@@ -34,23 +35,24 @@ export class JavaLanguageServerLifecycle {
     private readonly logger!: ILogger;
 
     private launchDescriptor: unknown | undefined;
+    private toDispose: Disposable[] = [];
 
     @postConstruct()
     protected async init(): Promise<void> {
         this.logger.info('JavaLanguageServerLifecycle initialized');
 
         // Listen for project changes
-        this.activeProject.onDidChangeProject(async (project) => {
+        this.toDispose.push(this.activeProject.onDidChangeProject(async (project) => {
             if (!project) {
                 this.logger.info('No project selected, skipping JDT LS launch');
                 return;
             }
 
             await this.onProjectChanged(project);
-        });
+        }));
 
         // Also listen for workspace context changes
-        this.workspaceContext.onDidChangeContext(async (ctx) => {
+        this.toDispose.push(this.workspaceContext.onDidChangeContext(async (ctx) => {
             if (!ctx) {
                 this.logger.info('No workspace context, skipping JDT LS launch');
                 return;
@@ -60,7 +62,14 @@ export class JavaLanguageServerLifecycle {
             if (project) {
                 await this.onProjectChanged(project);
             }
-        });
+        }));
+    }
+
+    dispose(): void {
+        for (const d of this.toDispose) {
+            d.dispose();
+        }
+        this.toDispose = [];
     }
 
     /**

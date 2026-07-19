@@ -20,9 +20,10 @@
     "test:agent": "node scripts/test-agent.js",
     "test:agent:race": "cd runtime-agent && go test -race -timeout 120s ./...",
     "test:agent:integration": "cd runtime-agent && go test -timeout 240s -tags=integration ./test/...",
-    "lint": "pnpm -r --filter \"./packages/*\" lint && pnpm -r --filter \"./apps/*\" lint",
+    "lint": "eslint 'packages/*/src/**/*.{ts,tsx}' --max-warnings 0",
+    "format": "prettier --write 'packages/*/src/**/*.{ts,tsx,css}'",
     "clean": "pnpm -r exec rm -rf lib out gen dist && rm -rf runtime-agent/bin runtime-agent/dist",
-    "verify": "pnpm bootstrap && pnpm build && pnpm test && pnpm test:agent",
+    "verify": "pnpm bootstrap && pnpm build && pnpm test && pnpm test:agent && pnpm lint",
     "agent:run": "cd runtime-agent && go run ./cmd/kairo-runtime --config ../runtime-agent/configs/dev.yaml",
     "agent:build": "cd runtime-agent && CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o bin/kairo-runtime ./cmd/kairo-runtime"
   },
@@ -41,8 +42,6 @@
       "puppeteer-core": "21.11.0",
       "puppeteer": "21.11.0"
     },
-    "patchedDependencies": {
-      "inversify@6.2.2": "patches/inversify@6.2.2.patch"
-    }
+    "patchedDependencies": {}
   }
 }

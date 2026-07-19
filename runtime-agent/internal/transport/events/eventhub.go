@@ -38,6 +38,8 @@ type subscriber struct {
 	ch chan Event
 }
 
+const maxSubscribers = 1000
+
 // EventHub is a publish-subscribe event bus with history and sequence tracking.
 // Multiple subscribers per workspace are supported.
 type EventHub struct {
@@ -80,6 +82,19 @@ func generateSubscriberID() string {
 func (h *EventHub) Subscribe(workspaceID string) (string, <-chan Event, func()) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+
+	// Count total subscribers across all workspaces
+	total := 0
+	for _, wsSubs := range h.subscribers {
+		total += len(wsSubs)
+	}
+	if total >= maxSubscribers {
+		// Return a closed channel so the caller does not block.
+		// The caller must check for a nil / closed channel.
+		ch := make(chan Event)
+		close(ch)
+		return "", ch, func() {}
+	}
 
 	id := generateSubscriberID()
 	ch := make(chan Event, h.chanBuffer)

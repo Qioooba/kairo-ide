@@ -89,7 +89,7 @@ const BuildViewComponent: React.FC<BuildViewProps> = ({ store, commandService })
                     <ul className="kairo-diagnostics-list" data-testid="diagnostics-list">
                         {latest.diagnostics.map((d, i) => (
                             <li
-                                key={i}
+                                key={`${d.file}:${d.line}:${d.column}:${i}`}
                                 className={`kairo-diagnostic kairo-diagnostic-${d.severity}`}
                                 data-testid={`diagnostic-${d.severity}`}
                             >

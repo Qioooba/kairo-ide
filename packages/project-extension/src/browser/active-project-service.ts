@@ -1,5 +1,6 @@
 import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
 import { Emitter, Event } from '@theia/core/lib/common/event';
+import { Disposable } from '@theia/core/lib/common/disposable';
 import { WorkspaceContextService } from '@kairo/runtime-extension';
 import { RuntimeConnectionService } from '@kairo/runtime-extension';
 import type { ProjectConfig } from '@kairo/protocol';
@@ -18,6 +19,7 @@ export class ActiveProjectService {
     private currentProject: ProjectInfo | undefined;
     private readonly onDidChangeProjectEmitter = new Emitter<ProjectInfo | undefined>();
     readonly onDidChangeProject: Event<ProjectInfo | undefined> = this.onDidChangeProjectEmitter.event;
+    private toDispose: Disposable | undefined;
 
     @inject(WorkspaceContextService)
     protected readonly workspaceContext!: WorkspaceContextService;
@@ -27,7 +29,7 @@ export class ActiveProjectService {
 
     @postConstruct()
     protected init(): void {
-        this.workspaceContext.onDidChangeContext(async (ctx) => {
+        this.toDispose = this.workspaceContext.onDidChangeContext(async (ctx) => {
             if (!ctx) {
                 this.currentProject = undefined;
                 this.onDidChangeProjectEmitter.fire(undefined);
@@ -66,6 +68,11 @@ export class ActiveProjectService {
                 this.onDidChangeProjectEmitter.fire(undefined);
             }
         });
+    }
+
+    dispose(): void {
+        this.toDispose?.dispose();
+        this.onDidChangeProjectEmitter.dispose();
     }
 
     get project(): ProjectInfo | undefined {

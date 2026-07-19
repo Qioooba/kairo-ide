@@ -10,6 +10,7 @@ import { injectable, inject } from '@theia/core/shared/inversify';
 import { FrontendApplicationContribution } from '@theia/core/lib/browser/frontend-application-contribution';
 import { CommandService } from '@theia/core/lib/common/command';
 import { WorkspaceService } from '@theia/workspace/lib/browser/workspace-service';
+import { Disposable } from '@theia/core/lib/common/disposable';
 
 // ============================================================================
 // KairoUiContribution — auto-opens Explorer on workspace load
@@ -17,6 +18,10 @@ import { WorkspaceService } from '@theia/workspace/lib/browser/workspace-service
 
 @injectable()
 export class KairoUiContribution implements FrontendApplicationContribution {
+  private onWorkspaceChangedDisposable: Disposable | undefined;
+  private explorerTimer: ReturnType<typeof setTimeout> | undefined;
+  private workspaceTimer: ReturnType<typeof setTimeout> | undefined;
+
   constructor(
     @inject(CommandService) protected readonly commandService: CommandService,
     @inject(WorkspaceService) protected readonly workspaceService: WorkspaceService
@@ -24,6 +29,18 @@ export class KairoUiContribution implements FrontendApplicationContribution {
 
   onStart(): void {
     this.maybeOpenExplorerOnTrust();
+  }
+
+  onStop(): void {
+    this.onWorkspaceChangedDisposable?.dispose();
+    if (this.explorerTimer !== undefined) {
+      clearTimeout(this.explorerTimer);
+      this.explorerTimer = undefined;
+    }
+    if (this.workspaceTimer !== undefined) {
+      clearTimeout(this.workspaceTimer);
+      this.workspaceTimer = undefined;
+    }
   }
 
   /**
@@ -40,8 +57,10 @@ export class KairoUiContribution implements FrontendApplicationContribution {
       if (trusted === false) return;
       this.commandService.executeCommand('workbench.view.explorer').catch(() => undefined);
     };
-    setTimeout(tryOpen, 1500);
-    this.workspaceService.onWorkspaceChanged?.(() => setTimeout(tryOpen, 800));
+    this.explorerTimer = setTimeout(tryOpen, 1500);
+    this.onWorkspaceChangedDisposable = this.workspaceService.onWorkspaceChanged?.(() => {
+      this.workspaceTimer = setTimeout(tryOpen, 800);
+    });
   }
 }
 

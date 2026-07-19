@@ -3,6 +3,7 @@ import { Emitter, Event } from '@theia/core/lib/common/event';
 import { RuntimeConnectionService } from '@kairo/runtime-extension';
 import { WorkspaceContextService } from '@kairo/runtime-extension';
 import type { ServerInstance as ProtocolServerInstance } from '@kairo/protocol';
+import { mapBuildState } from '@kairo/protocol';
 
 export interface ServerInstance {
     id: string;

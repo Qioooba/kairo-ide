@@ -783,18 +783,24 @@ func downloadTo(ctx context.Context, url, dest string, logger func(string, map[s
 	if err != nil {
 		return err
 	}
-	defer os.Remove(tmp.Name())
+	tmpName := tmp.Name()
 
 	// Progress-reporting wrapper: log every 10 MB.
 	pr := &progressReader{inner: resp.Body, logger: logger, total: resp.ContentLength}
 	if _, err := io.Copy(tmp, pr); err != nil {
 		tmp.Close()
+		os.Remove(tmpName)
 		return err
 	}
 	if err := tmp.Close(); err != nil {
+		os.Remove(tmpName)
 		return err
 	}
-	return atomicfile.Rename(tmp.Name(), dest)
+	if err := atomicfile.Rename(tmpName, dest); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	return nil
 }
 
 // progressReader wraps an io.Reader and logs progress every 10 MB.

@@ -26,6 +26,7 @@ import {
   PROTOCOL_VERSION_PATH,
   RequestEnvelope,
   Endpoint,
+  ResponseFor,
   WsEvent,
   HealthResponse,
 } from '@kairo/protocol';
@@ -285,11 +286,11 @@ export class RuntimeConnectionService {
     this.cachedEndpoints = undefined;
   }
 
-  async request<E extends Endpoint | string>(
+  async request<E extends Endpoint>(
     endpoint: E,
     payload: unknown,
     init: KairoRequestInit = {},
-  ): Promise<any> {
+  ): Promise<ResponseFor<E>> {
     const env: RequestEnvelope = {
       workspaceId: this.workspaceId,
       requestId: newRequestId(),

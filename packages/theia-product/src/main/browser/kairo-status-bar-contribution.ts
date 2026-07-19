@@ -18,7 +18,6 @@ import {
 } from '@theia/core/lib/browser';
 import { Disposable } from '@theia/core/lib/common/disposable';
 import { RuntimeConnectionService, EventStream, KairoError } from '@kairo/runtime-extension';
-import { KairoProjectService } from '@kairo/project-extension';
 import { KairoServerService } from '@kairo/tomcat-extension';
 import { ServerStore } from '@kairo/tomcat-extension';
 import { KairoJavaService, JavaServiceState } from '@kairo/java-extension';
@@ -30,8 +29,6 @@ import type { ServerInstance } from '@kairo/protocol';
 export class KairoStatusBarContribution implements FrontendApplicationContribution {
   @inject(StatusBar) protected statusBar!: StatusBar;
   @inject(RuntimeConnectionService) protected runtime!: RuntimeConnectionService;
-  @inject(KairoProjectService) protected projectSvc!: KairoProjectService;
-  @inject(KairoServerService) protected serverSvc!: KairoServerService;
   @inject(KairoJavaService) protected javaSvc!: KairoJavaService;
   @inject(KairoEncodingServiceImpl) protected encodingSvc!: KairoEncodingServiceImpl;
   @inject(EditorManager) protected editorManager!: EditorManager;
@@ -42,6 +39,7 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
   protected unsubscribeServerEvents: (() => void) | undefined;
   protected unsubscribeJdtState: (() => void) | undefined;
   protected unsubscribeEditor: Disposable | undefined;
+  protected unsubscribeServerStore: Disposable | undefined;
 
   @postConstruct()
   init(): void {
@@ -96,7 +94,7 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
     void this.refreshJdtStatus();
     void this.refreshEncodingStatus();
     // Subscribe to ServerStore for server status updates.
-    this.serverStore.onDidChange(() => this.renderServerStatus());
+    this.unsubscribeServerStore = this.serverStore.onDidChange(() => this.renderServerStatus());
     // Load initial server status from store.
     this.renderServerStatus();
   }
@@ -106,6 +104,7 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
     this.unsubscribeServerEvents?.();
     this.unsubscribeJdtState?.();
     this.unsubscribeEditor?.dispose();
+    this.unsubscribeServerStore?.dispose();
     this.eventStream?.close();
   }
 

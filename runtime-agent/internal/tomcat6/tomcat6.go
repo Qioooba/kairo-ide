@@ -20,6 +20,8 @@ import (
 	"time"
 
 	"github.com/kairo-ide/runtime-agent/internal/atomicfile"
+	"github.com/kairo-ide/runtime-agent/internal/domain"
+	"github.com/kairo-ide/runtime-agent/internal/proc"
 )
 
 const (
@@ -465,15 +467,17 @@ type Ports struct {
 }
 
 type Instance struct {
-	mu        sync.Mutex
-	spec      Spec
-	cmd       *exec.Cmd
-	pid       int
-	state     string
-	startedAt time.Time
-	ports     Ports
-	logPath   string
-	stopped   chan struct{}
+	mu              sync.Mutex
+	spec            Spec
+	cmd             *exec.Cmd
+	pid             int
+	state           string
+	startedAt       time.Time
+	ports           Ports
+	logPath         string
+	stopped         chan struct{}
+	process         proc.ManagedProcess
+	processIdentity domain.ProcessIdentity
 }
 
 func (i *Instance) State() string            { i.mu.Lock(); defer i.mu.Unlock(); return i.state }
@@ -484,15 +488,99 @@ func (i *Instance) LogPath() string          { return i.logPath }
 func (i *Instance) Stopped() <-chan struct{} { return i.stopped }
 
 func Start(ctx context.Context, spec Spec) (*Instance, error) {
-	return nil, errors.New("legacy Start() not supported; use Tomcat6Provider via RuntimeProvider interface")
+	// 1. Build Config
+	cfg := Config{
+		CatalinaHome: spec.CatalinaHome,
+		CatalinaBase: spec.CatalinaBase,
+		JavaHome:     spec.JavaHome,
+		HTTPPort:     spec.HTTPPort,
+		ShutdownPort: spec.ShutdownPort,
+		ContextPath:  spec.ContextPath,
+		WebappDir:    spec.WebappDir,
+		JVMOptions:   spec.JVMOptions,
+		Env:          spec.Env,
+	}
+
+	// 2. Build command
+	executable, args, env, err := BuildCommand(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("build command: %w", err)
+	}
+
+	// 3. Create managed process
+	process := proc.New()
+	procSpec := proc.ProcessSpec{
+		Executable:   executable,
+		Args:         args,
+		Dir:          spec.CatalinaBase,
+		Env:          env,
+		LogDir:       filepath.Join(spec.CatalinaBase, "logs"),
+		CatalinaBase: spec.CatalinaBase,
+	}
+
+	obs, err := process.Start(ctx, procSpec)
+	if err != nil {
+		return nil, fmt.Errorf("start process: %w", err)
+	}
+
+	// 4. Build Instance
+	inst := &Instance{
+		spec:  spec,
+		pid:   obs.PID,
+		state: "running",
+		startedAt: time.Now(),
+		ports: Ports{
+			HTTP:     spec.HTTPPort,
+			Shutdown: spec.ShutdownPort,
+			AJP:      spec.AJPPort,
+			Debug:    spec.DebugPort,
+		},
+		logPath:         filepath.Join(spec.CatalinaBase, "logs", "kairo-stdout.log"),
+		stopped:         make(chan struct{}),
+		process:         process,
+		processIdentity: obs.Identity,
+	}
+
+	// 5. Wait for readiness
+	timeout := spec.StartTimeout
+	if timeout <= 0 {
+		timeout = DefaultStartTimeout
+	}
+	deadline := time.Now().Add(timeout)
+	if err := WaitForReady(ctx, spec.HTTPPort, deadline); err != nil {
+		// Clean up on failure
+		process.ForceStop(context.Background(), obs.Identity)
+		return nil, fmt.Errorf("readiness: %w", err)
+	}
+
+	// 6. Monitor process exit in background
+	go func() {
+		process.Wait()
+		inst.mu.Lock()
+		inst.state = "stopped"
+		inst.mu.Unlock()
+		close(inst.stopped)
+	}()
+
+	return inst, nil
 }
 
 func (i *Instance) Stop(timeout time.Duration) error {
-	return errors.New("legacy Stop() not supported")
+	if i.process == nil {
+		return errors.New("no managed process")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	return i.process.GracefulStop(ctx, i.processIdentity)
 }
 
 func (i *Instance) ForceStop() error {
-	return errors.New("legacy ForceStop() not supported")
+	if i.process == nil {
+		return errors.New("no managed process")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	return i.process.ForceStop(ctx, i.processIdentity)
 }
 
 func IsPortBound(port int) bool {
@@ -505,7 +593,43 @@ func IsPortBound(port int) bool {
 }
 
 func (i *Instance) TailLog(n int) ([]string, error) {
-	return nil, nil
+	if i.logPath == "" {
+		return nil, nil
+	}
+	data, err := os.ReadFile(i.logPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	lines := tailLines(string(data), n)
+	return lines, nil
+}
+
+// tailLines returns the last n lines from the given text.
+func tailLines(s string, n int) []string {
+	if n <= 0 {
+		return nil
+	}
+	all := splitLines(s)
+	if len(all) <= n {
+		return all
+	}
+	return all[len(all)-n:]
+}
+
+// splitLines splits text into lines, preserving empty lines.
+func splitLines(s string) []string {
+	if s == "" {
+		return nil
+	}
+	lines := strings.Split(s, "\n")
+	// Remove trailing empty string from Split if s ends with \n
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return lines
 }
 
 func fileSHA256(path string) (string, error) {

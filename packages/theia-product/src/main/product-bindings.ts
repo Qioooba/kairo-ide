@@ -28,6 +28,23 @@ import { bindBuildExtension } from '@kairo/build-extension';
 import { KairoThemeContribution } from '@kairo/ui-kit';
 
 /**
+ * Bind an identifier to self in singleton scope, using rebind
+ * if the identifier is already bound, otherwise bind.
+ */
+export function bindOrRebindSelf(
+  bind: interfaces.Bind,
+  isBound: interfaces.IsBound,
+  rebind: interfaces.Rebind,
+  ident: any,
+): void {
+  if (isBound(ident)) {
+    rebind(ident).toSelf().inSingletonScope();
+  } else {
+    bind(ident).toSelf().inSingletonScope();
+  }
+}
+
+/**
  * Single-shot binder used by `KairoProduct` (theia-product
  * ContainerModule) and by anyone wiring the Kairo extensions
  * by hand. Binds every Kairo service, including the runtime
@@ -45,8 +62,8 @@ export function bindKairoProduct(
   // Runtime client — every other Kairo extension depends on
   // RuntimeConnectionService (the single HTTP client to the Go
   // Runtime Agent). These bindings mirror KairoRuntimeModule.
-  if (isBound && rebind && isBound(RuntimeConnectionService)) {
-    rebind(RuntimeConnectionService).toSelf().inSingletonScope();
+  if (isBound && rebind) {
+    bindOrRebindSelf(bind, isBound, rebind, RuntimeConnectionService);
   } else {
     bind(RuntimeConnectionService).toSelf().inSingletonScope();
   }
@@ -62,16 +79,16 @@ export function bindKairoProduct(
   }
 
   // Workspace context service
-  if (isBound && rebind && isBound(WorkspaceContextService)) {
-    rebind(WorkspaceContextService).toSelf().inSingletonScope();
+  if (isBound && rebind) {
+    bindOrRebindSelf(bind, isBound, rebind, WorkspaceContextService);
   } else {
     bind(WorkspaceContextService).toSelf().inSingletonScope();
   }
 
   bindProjectExtension(bind);
   // Active project service
-  if (isBound && rebind && isBound(ActiveProjectService)) {
-    rebind(ActiveProjectService).toSelf().inSingletonScope();
+  if (isBound && rebind) {
+    bindOrRebindSelf(bind, isBound, rebind, ActiveProjectService);
   } else {
     bind(ActiveProjectService).toSelf().inSingletonScope();
   }
@@ -85,8 +102,8 @@ export function bindKairoProduct(
   bindEncodingCommands(bind);
 
   // Theme contribution
-  if (isBound && rebind && isBound(KairoThemeContribution)) {
-    rebind(KairoThemeContribution).toSelf().inSingletonScope();
+  if (isBound && rebind) {
+    bindOrRebindSelf(bind, isBound, rebind, KairoThemeContribution);
   } else {
     bind(KairoThemeContribution).toSelf().inSingletonScope();
   }

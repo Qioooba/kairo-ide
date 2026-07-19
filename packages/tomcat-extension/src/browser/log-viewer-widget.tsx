@@ -241,7 +241,7 @@ const LogViewer: React.FC<LogViewerProps> = ({ serverStore, runtime, runtimeConn
                 ) : (
                     visibleLines.map((log, idx) => (
                         <div
-                            key={idx}
+                            key={`${log.ts}-${idx}`}
                             className={`kairo-log-line ${log.level || ''}`}
                             data-testid={`log-line-${idx}`}
                         >

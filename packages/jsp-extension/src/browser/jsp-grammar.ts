@@ -12,6 +12,8 @@
  * out of scope for v1 and is documented in MILESTONES.md.
  */
 
+import { interfaces } from '@theia/core/shared/inversify';
+
 // The actual API we need is monaco.languages.register; we reach
 // for it via the global `monaco` exposed by Theia.
 

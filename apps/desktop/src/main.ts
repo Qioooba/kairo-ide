@@ -21,7 +21,7 @@ import { spawn, ChildProcess } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as http from 'http';
-import * as net from 'net';
+import { findFreePort } from '@kairo/protocol';
 import { randomBytes } from 'crypto';
 
 let agentProcess: ChildProcess | null = null;
@@ -31,20 +31,6 @@ let theiaProcess: ChildProcess | null = null;
 let theiaPort: number = 0;
 let mainWindow: BrowserWindow | null = null;
 let isQuitting = false;
-
-// ─── Port Discovery ───────────────────────────────────────────
-
-function findFreePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const server = net.createServer();
-    server.unref();
-    server.on('error', reject);
-    server.listen(0, '127.0.0.1', () => {
-      const port = (server.address() as net.AddressInfo).port;
-      server.close(() => resolve(port));
-    });
-  });
-}
 
 // ─── Secret Generation ────────────────────────────────────────
 

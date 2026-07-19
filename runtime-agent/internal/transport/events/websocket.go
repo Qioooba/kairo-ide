@@ -1,7 +1,9 @@
 package events
 
 import (
+	"context"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -9,8 +11,21 @@ import (
 
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
-		// Only allow localhost in Desktop v1
-		return true // For now, let middleware handle auth
+		origin := r.Header.Get("Origin")
+		if origin == "" {
+			return true // 同源请求没有 Origin 头
+		}
+		// 允许 localhost
+		if strings.HasPrefix(origin, "http://localhost") ||
+			strings.HasPrefix(origin, "http://127.0.0.1") ||
+			strings.HasPrefix(origin, "http://[::1]") {
+			return true
+		}
+		// 允许 file:// 协议（Electron/Desktop）
+		if strings.HasPrefix(origin, "file://") {
+			return true
+		}
+		return false
 	},
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
@@ -29,28 +44,29 @@ func (h *EventHub) ServeWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Set read deadline for ping/pong
-	conn.SetReadDeadline(time.Now().Add(30 * time.Second))
+	// Set read deadline for ping/pong (5min for IDE long-lived connections)
+	conn.SetReadDeadline(time.Now().Add(300 * time.Second))
 	conn.SetPongHandler(func(string) error {
-		conn.SetReadDeadline(time.Now().Add(30 * time.Second))
+		conn.SetReadDeadline(time.Now().Add(300 * time.Second))
 		return nil
 	})
 
 	// Send ping every 15 seconds
-	done := make(chan struct{})
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+
 	go func() {
 		ticker := time.NewTicker(15 * time.Second)
 		defer ticker.Stop()
 		for {
 			select {
+			case <-ctx.Done():
+				return
 			case <-ticker.C:
 				conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 				if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-					close(done)
 					return
 				}
-			case <-done:
-				return
 			}
 		}
 	}()
