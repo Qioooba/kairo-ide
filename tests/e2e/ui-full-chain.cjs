@@ -38,7 +38,7 @@
 // agent.
 //
 // Run with:
-//   node tests/e2e/ui-full-chain.cjs http://127.0.0.1:3000 18099
+//   node tests/e2e/ui-full-chain.cjs http://127.0.0.1:3000 18080
 //
 // Exit code 0 = pass, 1 = fail. Gated steps are not
 // failures.
@@ -48,7 +48,7 @@ const path = require('path');
 const { chromium } = require('playwright');
 
 const theiaUrl = process.argv[2] || 'http://127.0.0.1:3000';
-const agentPort = process.argv[3] || '18099';
+const agentPort = process.argv[3] || '18080';
 const outDir = path.resolve(__dirname, '..', '..', 'docs', 'screenshots');
 fs.mkdirSync(outDir, { recursive: true });
 

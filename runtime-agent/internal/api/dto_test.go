@@ -53,7 +53,7 @@ func TestToServerResponse_DoesNotLeakSensitiveFields(t *testing.T) {
 		UpdatedAt: startedAt,
 	}
 
-	resp := ToServerResponse(rec)
+	resp := ToServerUseCaseResponse(rec)
 	data, err := json.Marshal(resp)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
@@ -131,7 +131,7 @@ func TestToServerResponse_SafeFieldsPresent(t *testing.T) {
 		UpdatedAt: startedAt,
 	}
 
-	resp := ToServerResponse(rec)
+	resp := ToServerUseCaseResponse(rec)
 
 	if resp.ID != "srv_abc" {
 		t.Errorf("ID = %q, want srv_abc", resp.ID)
@@ -193,7 +193,7 @@ func TestToServerResponse_NoPortsNoURL(t *testing.T) {
 		DesiredState:  domain.DesiredServerStateStopped,
 		ObservedState: domain.ServerStateStopped,
 	}
-	resp := ToServerResponse(rec)
+	resp := ToServerUseCaseResponse(rec)
 	if resp.URL != "" {
 		t.Errorf("URL = %q, want empty when HTTPPort=0", resp.URL)
 	}
@@ -211,7 +211,7 @@ func TestToServerResponseList_NilEntriesSkipped(t *testing.T) {
 	rec1 := &domain.ServerRecord{ID: "srv_1"}
 	rec2 := &domain.ServerRecord{ID: "srv_2"}
 	records := []*domain.ServerRecord{rec1, nil, rec2}
-	list := ToServerResponseList(records)
+	list := ToServerUseCaseResponseList(records)
 	if len(list) != 2 {
 		t.Fatalf("len(list) = %d, want 2", len(list))
 	}
@@ -229,7 +229,7 @@ func TestToServerResponse_NilProcessIdentity(t *testing.T) {
 		ObservedState: domain.ServerStateStopped,
 		DesiredState:  domain.DesiredServerStateStopped,
 	}
-	resp := ToServerResponse(rec)
+	resp := ToServerUseCaseResponse(rec)
 	data, err := json.Marshal(resp)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)

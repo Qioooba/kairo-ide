@@ -26,7 +26,7 @@ import {
   ApplicationShell,
 } from '@theia/core/lib/browser';
 import { Command, CommandRegistry, CommandService, MessageService } from '@theia/core/lib/common';
-import { RuntimeConnectionService, EventStream, KairoError } from '@kairo/runtime-extension';
+import { RuntimeConnectionService, KairoError } from '@kairo/runtime-extension';
 import {
   KairoServerService,
 } from '@kairo/tomcat-extension';
@@ -128,7 +128,6 @@ export class KairoViewsContribution implements FrontendApplicationContribution {
   @inject(MessageService) protected messages!: MessageService;
   @inject(BuildStore) protected buildStore!: BuildStore;
 
-  protected eventStream: EventStream | undefined;
   protected eventsUnsub: (() => void) | undefined;
   protected statusUnsub: (() => void) | undefined;
   protected serversView: ServerViewWidget | undefined;
@@ -146,19 +145,17 @@ export class KairoViewsContribution implements FrontendApplicationContribution {
     // Register commands. The commands accept a `Widget | undefined`
     // argument when triggered from a view, but most user flows
     // come from the toolbar / command palette.
-    this.eventStream = this.runtime.openEvents();
-    this.statusUnsub = this.eventStream.onStatus(s => {
+    this.statusUnsub = this.runtime.onStatusChange(s => {
       if (s === 'disconnected') {
         this.messages.warn('Runtime Agent is disconnected. Buttons will retry on click.');
       }
     });
-    this.eventsUnsub = this.eventStream.on('*', (e: WsEvent) => this.handleEvent(e));
+    this.eventsUnsub = this.runtime.subscribeEvents(this.runtime.workspace(), (e: any) => this.handleEvent(e));
   }
 
   onStop(): void {
     this.eventsUnsub?.();
     this.statusUnsub?.();
-    this.eventStream?.close();
   }
 
   async registerCommands(registry: CommandRegistry): Promise<void> {
@@ -325,24 +322,26 @@ export class KairoViewsContribution implements FrontendApplicationContribution {
     try {
       const list = (await this.runtime.request('GET /api/v1/builds', undefined)) as BuildResult[];
       if (Array.isArray(list)) {
-        this.buildStore.setBuilds(list.map(b => {
+        const builds = list.map(b => {
           mapBuildState(b.state);
           return {
-          id: b.id,
-          workspaceId: this.runtime.workspace(),
-          projectId: '',
-          state: b.state === 'success' ? 'succeeded' : b.state === 'failure' ? 'failed' : b.state === 'queued' ? 'pending' : b.state,
-          startTime: b.startedAt,
-          endTime: b.finishedAt,
-          summary: `${b.summary.errors} errors, ${b.summary.warnings} warnings`,
-          diagnostics: b.diagnostics.map(d => ({
-            file: d.file,
-            line: d.line,
-            column: d.column,
-            severity: d.severity === 'hint' ? 'info' : d.severity,
-            message: d.message,
-          })),
-        })));
+            id: b.id,
+            workspaceId: this.runtime.workspace(),
+            projectId: '',
+            state: (b.state === 'success' ? 'succeeded' : b.state === 'failure' ? 'failed' : b.state === 'queued' ? 'pending' : b.state) as 'succeeded' | 'failed' | 'pending' | 'running' | 'cancelled',
+            startTime: b.startedAt,
+            endTime: b.finishedAt,
+            summary: `${b.summary.errors} errors, ${b.summary.warnings} warnings`,
+            diagnostics: b.diagnostics.map(d => ({
+              file: d.file,
+              line: d.line,
+              column: d.column,
+              severity: d.severity === 'hint' ? 'info' : d.severity,
+              message: d.message,
+            })),
+          };
+        });
+        this.buildStore.setBuilds(builds);
       }
     } catch (err) {
       this.messages.error(kairoErrorMessage(err, 'Refresh builds failed'));
@@ -359,7 +358,7 @@ export class KairoViewsContribution implements FrontendApplicationContribution {
     }
   }
 
-  protected handleEvent(e: WsEvent): void {
+  protected handleEvent(e: any): void {
     switch (e.type) {
       case 'build.progress':
         void this.refreshBuilds();

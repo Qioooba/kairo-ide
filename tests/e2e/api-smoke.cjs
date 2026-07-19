@@ -16,7 +16,10 @@
 //
 // Exit 0 = pass, 1 = fail. Gated steps are NOT failures.
 
-const port = parseInt(process.argv[2] || '18099', 10);
+const path = require('path');
+const os = require('os');
+
+const port = parseInt(process.argv[2] || '18080', 10);
 
 const failures = [];
 const gated = [];
@@ -76,7 +79,7 @@ async function api(method, path, body) {
   else pass(`state=${d1.json.payload.state}`);
 
   step('encoding: detect GBK file (legacy-sample hello.jsp)');
-  const e1 = await api('POST', '/api/v1/encoding/detect', { file: 'F:/ideaSpace/kairo-ide/legacy-sample/WebRoot/hello.jsp' });
+  const e1 = await api('POST', '/api/v1/encoding/detect', { file: path.resolve(__dirname, '..', '..', 'legacy-sample', 'WebRoot', 'hello.jsp') });
   if (e1.status !== 200) fail(`detect: ${e1.status} ${e1.body.slice(0, 200)}`);
   else {
     const enc = e1.json.payload.encoding;
@@ -91,7 +94,7 @@ async function api(method, path, body) {
   // We use a temp file path inside the agent's data dir to
   // not muck with the source tree. The agent restricts
   // writes to its data dir, so we use a temp filename.
-  const tmp = `F:/ideaSpace/kairo-ide/.runtime/verify/api-smoke-${Date.now()}.txt`;
+  const tmp = path.join(os.tmpdir(), `kairo-api-smoke-${Date.now()}.txt`);
   require('fs').writeFileSync(tmp, Buffer.from('Round trip: 你好', 'utf-8'));
   const r1 = await api('POST', '/api/v1/encoding/recode', { file: tmp, from: 'utf-8', to: 'gbk' });
   if (r1.status !== 200) fail(`recode utf-8->gbk: ${r1.status} ${r1.body.slice(0, 200)}`);
@@ -108,7 +111,7 @@ async function api(method, path, body) {
   require('fs').unlinkSync(tmp);
 
   step('workspaces: open legacy-sample');
-  const w = await api('POST', '/api/v1/workspaces', { rootPath: 'F:/ideaSpace/kairo-ide/legacy-sample' });
+  const w = await api('POST', '/api/v1/workspaces', { rootPath: path.resolve(__dirname, '..', '..', 'legacy-sample') });
   if (w.status !== 200) fail(`workspace open: ${w.status} ${w.body.slice(0, 200)}`);
   else pass(`workspace id=${w.json.payload.id}`);
 

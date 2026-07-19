@@ -367,6 +367,11 @@ export interface EncodingRecodeRequest {
   eol?: Eol;
 }
 
+export interface EncodingRecodeResponse {
+  ok: true;
+  bytes: number;
+}
+
 export interface EncodingValidateRequest {
   text: string;
   encoding: string;
@@ -576,7 +581,7 @@ export interface EndpointMap {
   'POST /api/v1/jdtls/project': { request: JdtProjectRequest; response: JdtProjectResponse };
   // Encoding
   'POST /api/v1/encoding/detect': { request: EncodingDetectRequest; response: EncodingDetectResponse };
-  'POST /api/v1/encoding/recode': { request: EncodingRecodeRequest; response: void };
+  'POST /api/v1/encoding/recode': { request: EncodingRecodeRequest; response: EncodingRecodeResponse };
   'POST /api/v1/encoding/validate': { request: EncodingValidateRequest; response: EncodingValidateResponse };
 }
 

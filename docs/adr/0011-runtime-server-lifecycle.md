@@ -2,7 +2,7 @@
 
 Date: 2026-07-19
 Branch: feature/mac-runtime-server-core
-Status: Accepted
+Status: Superseded by ADR-0015
 
 ## Context
 

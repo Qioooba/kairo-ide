@@ -17,7 +17,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 // Read config from environment variables set by main process.
 // These are set BEFORE the renderer process starts, so no
 // race condition (unlike executeJavaScript injection).
-const agentUrl = process.env.KAIRO_AGENT_URL || 'http://127.0.0.1:18099';
+const agentUrl = process.env.KAIRO_AGENT_URL || 'http://127.0.0.1:18080';
 const agentSecret = process.env.KAIRO_AGENT_SECRET || '';
 
 // Expose a safe, typed API to the renderer process.
@@ -44,6 +44,16 @@ contextBridge.exposeInMainWorld('kairoIPC', {
     },
 });
 
-// Backward compatibility: also expose for the runtime-connection-service
-// which reads globalThis.__KAIRO_DEFAULT_RUNTIME_URL__ at init.
+// Also expose KAIRO_RUNTIME_BASE_URL globally so the frontend
+// reads it without an extra /api/v1/endpoints round-trip. The
+// product-bindings.ts reads window.KAIRO_RUNTIME_BASE_URL to
+// configure RuntimeConnectionService.
+contextBridge.exposeInMainWorld('KAIRO_RUNTIME_BASE_URL', agentUrl);
+
+// Backward compatibility: also expose the runtime URL for the
+// browser-mode path in runtime-connection-service.ts, which reads
+// globalThis.__KAIRO_DEFAULT_RUNTIME_URL__ at init.
+// contextBridge.exposeInMainWorld makes the value available as
+// window.__KAIRO_DEFAULT_RUNTIME_URL__ (=== globalThis in the
+// renderer's isolated world), which is the correct contract.
 contextBridge.exposeInMainWorld('__KAIRO_DEFAULT_RUNTIME_URL__', agentUrl);

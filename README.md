@@ -2,26 +2,26 @@
 
 A lightweight, cross-platform IDE for legacy Java Web projects:
 JDK 1.6 / Tomcat 6 / Servlet / JSP / GBK. Runs as a native
-desktop app, a localhost browser app, or a remote Linux server.
+desktop app or a localhost browser app.
 
 This is **not** IntelliJ IDEA. It is not VS Code. It is a focused
 tool for a focused job: keep a 2008-vintage Servlet/JSP project
 alive on a 4 GB Windows 10 cloud desktop, with the same workflow
 in Chrome from a Mac laptop when the developer is travelling.
 
-## Three forms, one codebase
+## Two forms, one codebase
 
 | Form | Use case | What runs where |
 |------|----------|-----------------|
 | **Desktop** | day-to-day work on the same machine | Electron + Theia + Go agent, all in one process |
-| **Localhost browser** | same as desktop, but in Chrome | Theia in browser, Go agent on the same box, served by `kairo-server` |
-| **Remote Linux server** | central build / dev box on the intranet | Theia in browser, Go agent on a Linux box, accessed by Chrome |
+| **Localhost browser** | same as desktop, but in Chrome | Theia in browser, Go agent on the same box |
 
-All three share:
+All forms share:
 - The same compiled web frontend (Monaco + Theia shell + Kairo extensions).
 - The same workspace, project, and toolchain model.
 - The same `/api/v1` wire protocol.
-- The same plugin system (Theia extensions, VS Code extensions, LegacyFlow runtime plugins).
+
+Remote Linux Server is deferred to post-v1 (ADR-0014).
 
 ## Quick start (developer)
 
@@ -74,7 +74,7 @@ pnpm --filter @kairo/desktop dist:linux
 ## Repository layout
 
 ```
-apps/{desktop,browser,server}        # entry points
+apps/{desktop,browser}               # entry points
 packages/{theia-product,...-ext}     # Theia extensions
 runtime-agent/                       # Go service
 legacy-sample/                       # test fixture (real Servlet/JSP/Ant)
@@ -88,9 +88,14 @@ tests/e2e/                           # Playwright
 
 ## Status
 
-This is the M0 + M1 deliverable. See `docs/MILESTONES.md` for the
-honest list of what is built and what is scaffolded.
+Wave 1 (Architecture Convergence). All Wave 0 gates pass:
+- `go build ./...` ✅
+- `go vet ./...` ✅
+- `go test -count=1 ./...` ✅ (26 packages)
+- `tsc --noEmit` ✅
+
+See `docs/MILESTONES.md` for the honest list of what is built and what is deferred.
 
 ## License
 
-Apache-2.0. See `LICENSE` (in the next commit; placeholder for now).
+Apache-2.0. See `LICENSE`.

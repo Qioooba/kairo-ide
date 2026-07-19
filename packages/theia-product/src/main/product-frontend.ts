@@ -60,7 +60,7 @@ export const KairoProductFrontend: ContainerModule = (() => {
     // behaviour that configureKairoRuntime() previously provided.
     // The base URL is read from the global KAIRO_RUNTIME_BASE_URL if
     // set by the host HTML page, otherwise the empty-string default.
-    onActivation(RuntimeConnectionService, (_ctx, svc) => {
+    onActivation((svc: RuntimeConnectionService) => {
       const baseUrl: string =
         (typeof window !== 'undefined' && (window as any).KAIRO_RUNTIME_BASE_URL) ||
         RUNTIME_BASE_URL;

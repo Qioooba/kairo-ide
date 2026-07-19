@@ -8,10 +8,10 @@
 Provide a **lightweight, cross-platform IDE** for developers maintaining legacy
 Java Web projects in low-spec, restricted environments — typically a Windows 10
 cloud desktop on a corporate intranet. The product must let a developer
-**import, edit, build, run, debug, hot-swap, search, and redeploy** a
+**import, edit, build, run, search, and redeploy** a
 JDK 1.6 / Tomcat 6 / Servlet / JSP / GBK project without leaving the IDE,
-across three deployment forms (native desktop, browser, remote Linux server)
-from a single codebase.
+across two deployment forms (native desktop, localhost browser) from a single
+codebase. Remote Linux Server is deferred to post-v1 (ADR-0014).
 
 ## 2. Target users and environments
 
@@ -36,21 +36,21 @@ from a single codebase.
   for that.
 - High-end developer hardware. We are optimized for 4 GB RAM, not 64 GB.
 
-## 3. Three deployment forms, one product
+## 3. Two deployment forms, one product (v1)
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │                                                                     │
-│   ┌────────────┐   ┌────────────┐   ┌────────────────────────┐      │
-│   │ Form A:    │   │ Form B:    │   │ Form C:                │      │
-│   │ Desktop    │   │ Localhost  │   │ Linux server           │      │
-│   │ (Win/macOS)│   │ browser    │   │ (browser, multi-user)  │      │
-│   └─────┬──────┘   └─────┬──────┘   └─────────┬──────────────┘      │
-│         │                │                    │                     │
-│         │  Theia Desktop │  Theia Browser    │  Theia Browser      │
-│         │  + Go Agent    │  + Go Agent       │  + Go Agent (Linux) │
-│         │  (same box)    │  (same box)       │  (remote box)       │
-│         ▼                ▼                    ▼                     │
+│   ┌────────────┐   ┌────────────┐                                   │
+│   │ Form A:    │   │ Form B:    │   ┌────────────────────────┐      │
+│   │ Desktop    │   │ Localhost  │   │ Remote Linux Server    │      │
+│   │ (Win/macOS)│   │ browser    │   │ (deferred to post-v1)  │      │
+│   └─────┬──────┘   └─────┬──────┘   └────────────────────────┘      │
+│         │                │                                          │
+│         │  Theia Desktop │  Theia Browser                          │
+│         │  + Go Agent    │  + Go Agent                             │
+│         │  (same box)    │  (same box)                             │
+│         ▼                ▼                                          │
 │   ┌──────────────────────────────────────────────────────────┐      │
 │   │   Same frontend · same workspace model · same protocol   │      │
 │   │   /api/v1 over HTTP + WebSocket, regardless of form      │      │
@@ -59,10 +59,11 @@ from a single codebase.
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-- All three forms load **the same compiled web frontend** and **the same
+- Both forms load **the same compiled web frontend** and **the same
   Go Runtime Agent binary** for the host platform.
 - No business code forks per form. Platform differences live in
   `runtime-agent/internal/platform/`, nothing else.
+- Remote Linux Server is deferred to post-v1 (ADR-0014).
 
 ## 4. Functional pillars (v1 scope, what we are committing to)
 
@@ -74,10 +75,10 @@ from a single codebase.
 | **Java** | JDT LS for code intel; separate toolchain for compiler | yes (see ADR-0006) |
 | **JSP / HTML / CSS / JS** | Syntax, encoding, ES5 default | yes |
 | **Build** | Real `javac` (any JDK), Ant-aware, incremental | yes |
-| **Tomcat 6** | Run, stop, deploy, hot-swap, logs | yes |
-| **Debug** | DAP, breakpoints, variables, JDWP transport | yes (compatibility caveats) |
-| **Remote** | Auth, sandbox, audit, reconnect | yes |
-| **Plugins** | Theia ext + VS Code ext + LegacyFlow runtime plugin | scaffold + 1 sample each |
+| **Tomcat 6** | Run, stop, deploy, logs | yes |
+| **Debug** | DAP, breakpoints, variables, JDWP transport | deferred (post-v1) |
+| **Remote** | Auth, sandbox, audit, reconnect | deferred (post-v1, ADR-0014) |
+| **Plugins** | Theia extensions + Go internal adapters | yes (two layers only) |
 
 ## 5. Out of scope for v1 (recorded so we don't argue later)
 
@@ -87,6 +88,10 @@ from a single codebase.
 - Cloud sync, account federation, OAuth.
 - AI completion (separate roadmap, conflicts with low-spec target).
 - Git LFS, Git LFS-based large media workflows.
+- DAP/JDWP Debug — endpoint scaffold exists but no breakpoint→hit proof.
+- Remote Linux Server — multi-user, remote auth, audit, container isolation (ADR-0014).
+- LegacyFlow runtime plugins (Layer 3) — dynamic loading, JSON-RPC, sandbox (ADR-0014).
+- Class HotSwap — requires JDWP agent integration.
 
 ## 6. Quality bars (v1 acceptance)
 
@@ -110,12 +115,17 @@ The v1 ships when, on a Windows 10 cloud desktop without admin rights:
 4. The user can run the project on a bundled Tomcat 6.0.53 with one click.
 5. The user can save a JSP and see the change in a browser without a
    Context Reload.
-6. The user can set a breakpoint, fire an HTTP request, hit the breakpoint,
-   inspect a local variable, and step.
-7. The same project, when copied to a Linux server, can be opened in
-   Chrome from a Windows box and the same workflow runs.
+6. The same project can be opened in the localhost browser form and the
+   same workflow runs.
 
 If any one of these fails, v1 has not shipped.
+
+### Post-v1 success criteria (future roadmap)
+
+7. The user can set a breakpoint, fire an HTTP request, hit the breakpoint,
+   inspect a local variable, and step (DAP/JDWP Debug).
+8. The same project, when copied to a Linux server, can be opened in
+   Chrome from a Windows box and the same workflow runs (Remote Linux Server).
 
 ## 8. Non-goals (do not even try)
 

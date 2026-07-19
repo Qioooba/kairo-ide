@@ -70,12 +70,13 @@ type DeploymentResponse struct {
 	Deleted   int    `json:"deleted"`
 }
 
-// StartServerRequest is the request body for POST /api/v1/servers.
-type StartServerRequest struct {
+// StartServerUseCaseRequest is the request body for POST /api/v1/servers
+// in the ServerUseCase flow (Wave 2 converge).
+type StartServerUseCaseRequest struct {
 	ProjectID string `json:"projectId"`
 }
 
-// ServerResponse is the SAFE API response for server endpoints.
+// ServerUseCaseResponse is the SAFE API response for the ServerUseCase flow.
 //
 // It is a deliberately-typed DTO that strips internal/sensitive
 // fields from domain.ServerRecord. Domain objects (ServerRecord,
@@ -91,9 +92,9 @@ type StartServerRequest struct {
 //
 // Adding a new sensitive field to ServerRecord / RuntimePlan /
 // ProcessIdentity will NOT automatically appear in the API
-// response — it must be explicitly added to ToServerResponse,
+// response — it must be explicitly added to ToServerUseCaseResponse,
 // which is the single choke point for API output.
-type ServerResponse struct {
+type ServerUseCaseResponse struct {
 	ID            string  `json:"id"`
 	WorkspaceID   string  `json:"workspaceId"`
 	ProjectID     string  `json:"projectId"`
@@ -114,8 +115,8 @@ type ServerResponse struct {
 	URL string `json:"url,omitempty"`
 }
 
-// ToServerResponse maps a domain.ServerRecord to a safe
-// ServerResponse DTO.
+// ToServerUseCaseResponse maps a domain.ServerRecord to a safe
+// ServerUseCaseResponse DTO.
 //
 // It NEVER copies:
 //   - ProcessIdentity (Executable path, StartTime, CatalinaBase,
@@ -129,8 +130,8 @@ type ServerResponse struct {
 // is no "leak by accident" path. Adding a new field to
 // ServerRecord/RuntimePlan/ProcessIdentity does NOT automatically
 // surface in the API response.
-func ToServerResponse(rec domain.ServerRecord) ServerResponse {
-	resp := ServerResponse{
+func ToServerUseCaseResponse(rec domain.ServerRecord) ServerUseCaseResponse {
+	resp := ServerUseCaseResponse{
 		ID:            string(rec.ID),
 		WorkspaceID:   string(rec.WorkspaceID),
 		ProjectID:     string(rec.ProjectID),
@@ -160,15 +161,15 @@ func ToServerResponse(rec domain.ServerRecord) ServerResponse {
 	return resp
 }
 
-// ToServerResponseList maps a slice of domain.ServerRecord to a
-// slice of safe ServerResponse DTOs. Nil entries are skipped.
-func ToServerResponseList(records []*domain.ServerRecord) []ServerResponse {
-	out := make([]ServerResponse, 0, len(records))
+// ToServerUseCaseResponseList maps a slice of domain.ServerRecord to a
+// slice of safe ServerUseCaseResponse DTOs. Nil entries are skipped.
+func ToServerUseCaseResponseList(records []*domain.ServerRecord) []ServerUseCaseResponse {
+	out := make([]ServerUseCaseResponse, 0, len(records))
 	for _, rec := range records {
 		if rec == nil {
 			continue
 		}
-		out = append(out, ToServerResponse(*rec))
+		out = append(out, ToServerUseCaseResponse(*rec))
 	}
 	return out
 }

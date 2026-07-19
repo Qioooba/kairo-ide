@@ -525,9 +525,9 @@ func Start(ctx context.Context, spec Spec) (*Instance, error) {
 
 	// 4. Build Instance
 	inst := &Instance{
-		spec:  spec,
-		pid:   obs.PID,
-		state: "running",
+		spec:      spec,
+		pid:       obs.PID,
+		state:     "running",
 		startedAt: time.Now(),
 		ports: Ports{
 			HTTP:     spec.HTTPPort,

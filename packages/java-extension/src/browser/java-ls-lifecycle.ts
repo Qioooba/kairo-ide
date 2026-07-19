@@ -3,6 +3,7 @@ import { ILogger } from '@theia/core/lib/common/logger';
 import { Disposable } from '@theia/core/lib/common/disposable';
 import { RuntimeConnectionService, WorkspaceContextService } from '@kairo/runtime-extension';
 import { ActiveProjectService } from '@kairo/project-extension';
+import type { Endpoint } from '@kairo/protocol';
 
 /**
  * Java Language Server lifecycle manager.
@@ -84,13 +85,13 @@ export class JavaLanguageServerLifecycle {
 
             // First, ensure JDT LS is prepared on the agent side
             await this.runtime.request(
-                `POST /api/v1/workspaces/${ctx.workspaceId}/java/prepare`,
+                `POST /api/v1/workspaces/${ctx.workspaceId}/java/prepare` as Endpoint,
                 { projectId: project.projectId },
             );
 
             // Then get the launch descriptor
             this.launchDescriptor = await this.runtime.request(
-                `GET /api/v1/workspaces/${ctx.workspaceId}/java/launch-descriptor`,
+                `GET /api/v1/workspaces/${ctx.workspaceId}/java/launch-descriptor` as Endpoint,
                 undefined,
                 { query: { projectId: project.projectId } },
             );

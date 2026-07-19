@@ -6,18 +6,17 @@
  *
  *   * `KairoViewsContribution`     — commands, view containers, event wiring
  *   * `KairoStatusBarContribution` — status bar entries
- *   * Every Kairo service the contributions / widgets need
+ *   * Widget factories for the four Kairo views
  *
  * Widgets are not bound globally; they are constructed lazily
  * by the `WidgetManager` when the user opens a view.
  *
- * Binding the per-extension services here is required:
- * KairoStatusBarContribution and KairoViewsContribution inject
- * KairoProjectService / KairoServerService / ServerStore /
- * BuildStore / KairoEncodingServiceImpl / KairoJavaService.
- * Without these bindings in the frontend container inversify
- * throws "No matching bindings found" and the React shell
- * crashes to a blank page (N-023 / N-026 in MILESTONES.md).
+ * Service-layer bindings (BuildStore, KairoProjectService,
+ * KairoServerService, etc.) are handled by `bindKairoProduct`
+ * in product-bindings.ts and are NOT duplicated here.
+ * The KairoProductFrontend ContainerModule in product-frontend.ts
+ * calls both bindKairoFrontend (this module) and bindKairoProduct
+ * so the container is fully populated.
  */
 
 import { ContainerModule, interfaces } from '@theia/core/shared/inversify';
@@ -31,21 +30,9 @@ import {
   KairoViewsContribution,
 } from './kairo-views-contribution';
 import { KairoStatusBarContribution } from './kairo-status-bar-contribution';
-import {
-  KairoEncodingServiceImpl,
-  KairoEncodingCommandsContribution,
-  bindEncodingCommands,
-} from '@kairo/encoding-extension';
-import { BuildViewWidget, bindBuildExtension } from '@kairo/build-extension';
-import {
-  ServerViewWidget,
-  LogViewerWidget,
-  bindTomcatExtension,
-} from '@kairo/tomcat-extension';
-import { KairoProjectService, ActiveProjectService, bindProjectExtension } from '@kairo/project-extension';
-import { KairoJavaService, bindJavaExtension, bindJavaLanguageClientContribution } from '@kairo/java-extension';
-import { bindSearchExtension } from '@kairo/search-extension';
-import { bindJspExtension } from '@kairo/jsp-extension';
+import { KairoEncodingCommandsContribution } from '@kairo/encoding-extension';
+import { BuildViewWidget } from '@kairo/build-extension';
+import { ServerViewWidget, LogViewerWidget } from '@kairo/tomcat-extension';
 import {
   RuntimeConnectionService,
   KairoRuntime,
@@ -92,21 +79,6 @@ export function bindKairoFrontend(bind: interfaces.Bind, unbind?: interfaces.Unb
   } else {
     bind(WorkspaceContextService).toSelf().inSingletonScope();
   }
-
-  // ── Kairo per-extension services ─────────────────────────────
-  // These must be in the frontend container because the
-  // contributions below inject them.
-  bindProjectExtension(bind);                  // KairoProjectService
-  bindTomcatExtension(bind);                   // KairoServerService, ServerStore, ServerViewWidget
-  bindBuildExtension(bind);                    // BuildStore, BuildViewWidget
-  bindJavaExtension(bind);                     // KairoJavaService
-  bindJavaLanguageClientContribution(bind);    // Java language client (frontend side)
-  bindSearchExtension(bind);                   // KairoSearchService
-  bindJspExtension(bind);                      // KairoJspService
-  bind(KairoEncodingServiceImpl).toSelf().inSingletonScope();
-  bindEncodingCommands(bind);                  // KairoEncodingCommandsContribution
-  // Active project service lives in project-extension.
-  bind(ActiveProjectService).toSelf().inSingletonScope();
 
   // ── Kairo contributions ──────────────────────────────────────
   bind(KairoStatusBarContribution).toSelf().inSingletonScope();

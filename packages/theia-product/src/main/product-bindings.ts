@@ -126,7 +126,7 @@ export const KairoProduct = new ContainerModule((bind, _unbind, isBound, rebind,
   // the behaviour that configureKairoRuntime() previously provided.
   // The base URL is read from the global KAIRO_RUNTIME_BASE_URL if
   // set by the host HTML page, otherwise the empty-string default.
-  onActivation(RuntimeConnectionService, (_ctx, svc) => {
+  onActivation((svc: RuntimeConnectionService) => {
     const baseUrl: string =
       (typeof window !== 'undefined' && (window as any).KAIRO_RUNTIME_BASE_URL) ||
       RUNTIME_BASE_URL;
@@ -135,20 +135,10 @@ export const KairoProduct = new ContainerModule((bind, _unbind, isBound, rebind,
   });
 });
 
-// Default export is the ContainerModule itself. Theia's
-// `load(container, jsModule)` reads `jsModule.default`, so
-// every product entry needs to expose one.
-export default new ContainerModule((bind, _unbind, isBound, rebind, onActivation) => {
-  bindKairoProduct(bind, isBound, rebind);
-
-  onActivation(RuntimeConnectionService, (_ctx, svc) => {
-    const baseUrl: string =
-      (typeof window !== 'undefined' && (window as any).KAIRO_RUNTIME_BASE_URL) ||
-      RUNTIME_BASE_URL;
-    svc.configure({ baseUrl });
-    return svc;
-  });
-});
+// Default export re-exports the named ContainerModule so that
+// Theia's `load(container, jsModule)` (which reads `jsModule.default`)
+// uses the same single KairoProduct composition root.
+export default KairoProduct;
 
 /**
  * Load all Kairo extensions into the given container.

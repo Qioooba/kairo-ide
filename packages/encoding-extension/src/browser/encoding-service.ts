@@ -40,6 +40,7 @@ import type {
   EncodingDetectRequest,
   EncodingDetectResponse,
   EncodingRecodeRequest,
+  EncodingRecodeResponse,
 } from '@kairo/protocol';
 import {
   KAIRO_ENCODING_OPTIONS,
@@ -123,7 +124,7 @@ export class KairoEncodingServiceImpl {
     from: string;
     to: string;
     eol?: 'lf' | 'crlf' | 'cr';
-  }): Promise<{ ok: true; bytes: number }> {
+  }): Promise<EncodingRecodeResponse> {
     const payload: EncodingRecodeRequest = {
       workspaceId: args.workspaceId,
       file: args.file,

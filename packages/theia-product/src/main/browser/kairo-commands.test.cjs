@@ -56,6 +56,7 @@ const { CommandRegistry, CommandService, MessageService } = require('@theia/core
 const { RuntimeConnectionService } = require('@kairo/runtime-extension/lib/browser');
 const { KairoServerService } = require('@kairo/tomcat-extension/lib/browser');
 const { KairoProjectService, ActiveProjectService } = require('@kairo/project-extension/lib/browser');
+const { BuildStore } = require('@kairo/build-extension/lib/browser');
 
 // The production module under test
 const { KairoViewsContribution, KairoCommands } = require('../../../lib/browser/kairo-views-contribution');
@@ -96,12 +97,10 @@ function createMockCommandService() {
 
 function createMockRuntimeConnectionService() {
   return {
-    openEvents: () => ({
-      on: () => () => {},
-      onStatus: () => () => {},
-      close: () => {},
-    }),
+    onStatusChange: () => () => {},
+    subscribeEvents: () => () => {},
     request: () => Promise.resolve({}),
+    workspace: () => '',
   };
 }
 
@@ -133,6 +132,14 @@ function createMockMessageService() {
     warn: () => {},
     error: () => {},
     log: () => {},
+  };
+}
+
+function createMockBuildStore() {
+  return {
+    setBuilds: () => {},
+    getBuilds: () => [],
+    onBuildEvent: () => () => {},
   };
 }
 
@@ -179,6 +186,7 @@ test('KairoViewsContribution.registerCommands registers every command in a real 
   container.bind(KairoProjectService).toConstantValue(createMockKairoProjectService());
   container.bind(ActiveProjectService).toConstantValue(createMockActiveProjectService());
   container.bind(MessageService).toConstantValue(createMockMessageService());
+  container.bind(BuildStore).toConstantValue(createMockBuildStore());
 
   // Bind the contribution under test
   container.bind(KairoViewsContribution).toSelf().inSingletonScope();
@@ -227,6 +235,7 @@ test('KairoViewsContribution.registerCommands registers exactly 12 commands', ()
   container.bind(KairoProjectService).toConstantValue(createMockKairoProjectService());
   container.bind(ActiveProjectService).toConstantValue(createMockActiveProjectService());
   container.bind(MessageService).toConstantValue(createMockMessageService());
+  container.bind(BuildStore).toConstantValue(createMockBuildStore());
 
   container.bind(KairoViewsContribution).toSelf().inSingletonScope();
 

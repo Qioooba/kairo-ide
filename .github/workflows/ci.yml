@@ -38,7 +38,7 @@ jobs:
         with:
           # Keep in sync with runtime-agent/go.mod's `go` directive
           # and the `toolchain` line.
-          go-version: '1.23.0'
+          go-version: '1.22.0'
           cache: true
           cache-dependency-path: runtime-agent/go.sum
       - name: Test (unit, with -race)
@@ -47,7 +47,8 @@ jobs:
           GOPROXY: https://goproxy.cn,direct
           GOSUMDB: sum.golang.org https://goproxy.cn/sumdb/sum.golang.org
         run: GOTOOLCHAIN=local go test -race -timeout 180s ./...
-      - name: Build all targets
+      - name: Build all targets (cross-compile)
+        if: runner.os != 'Windows'
         working-directory: runtime-agent
         env:
           GOPROXY: https://goproxy.cn,direct
@@ -62,6 +63,61 @@ jobs:
                 -o bin/kairo-runtime-$goos-$goarch$ext ./cmd/kairo-runtime
             done
           done
+      - name: Build (native, Windows)
+        if: runner.os == 'Windows'
+        working-directory: runtime-agent
+        env:
+          GOPROXY: https://goproxy.cn,direct
+        run: |
+          GOTOOLCHAIN=local go build -trimpath -ldflags='-s -w' -o bin/kairo-runtime.exe ./cmd/kairo-runtime
+
+  # -----------------------------------------------------------------------
+  # 1b. Contract tests — build Go agent, start it, run API smoke
+  #     tests against live endpoints, then stop the agent.
+  #     Linux because it's the simplest CI target.
+  # -----------------------------------------------------------------------
+  contract-test:
+    name: Contract tests (Go agent + API smoke)
+    runs-on: ubuntu-latest
+    needs: [go-test]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22.0'
+          cache-dependency-path: runtime-agent/go.sum
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Build Go agent
+        run: |
+          cd runtime-agent
+          go build -o bin/kairo-runtime ./cmd/kairo-runtime/
+      - name: Start agent
+        run: |
+          cd runtime-agent
+          ./bin/kairo-runtime --bind 127.0.0.1 --port 18080 --data-dir /tmp/kairo-test-data &
+          AGENT_PID=$!
+          echo "AGENT_PID=$AGENT_PID" >> $GITHUB_ENV
+          # Wait for health check
+          for i in $(seq 1 30); do
+            if curl -s http://127.0.0.1:18080/api/v1/health > /dev/null 2>&1; then
+              echo "Agent healthy"
+              break
+            fi
+            echo "Waiting for agent... ($i/30)"
+            sleep 1
+          done
+      - name: Run API smoke test
+        run: |
+          node tests/e2e/api-smoke.cjs 18080
+      - name: Stop agent
+        if: always()
+        run: |
+          if [ -n "$AGENT_PID" ]; then
+            kill $AGENT_PID 2>/dev/null || true
+          fi
 
   go-integration:
     name: Go integration (JDK present)
@@ -72,7 +128,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.23.0'
+          go-version: '1.22.0'
       - uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
@@ -138,21 +194,6 @@ jobs:
         run: pnpm -r --filter './packages/*' test
 
   # -----------------------------------------------------------------------
-  # 2c. Contract tests — requires Go Agent + Theia running together.
-  #     Stub: not yet implemented in CI; run locally with the full stack.
-  # -----------------------------------------------------------------------
-  contract-test:
-    name: Contract tests (stub)
-    runs-on: ubuntu-latest
-    needs: [go-test, ts-build]
-    steps:
-      - name: Contract tests require Go Agent + Theia running
-        run: |
-          echo "Contract tests require Go Agent + Theia running together."
-          echo "Run locally: start the agent and Theia, then execute the contract test suite."
-          echo "CI integration blocked on: reproducible agent + Theia co-boot orchestration."
-
-  # -----------------------------------------------------------------------
   # 3. legacy-sample smoke against the real agent. Uses real javac,
   #    real TOMCAT 6, and asserts HTTP responses. Linux.
   # -----------------------------------------------------------------------
@@ -165,7 +206,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.23.0'
+          go-version: '1.22.0'
       - uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
@@ -355,7 +396,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.23.0'
+          go-version: '1.22.0'
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
@@ -385,7 +426,7 @@ jobs:
       - name: Runtime-extension node --test wire-protocol tests
         shell: pwsh
         run: pnpm --filter @kairo/runtime-extension exec node --test src/browser/runtime.test.cjs src/browser/runtime-dynamic-routes.test.cjs
-      - name: Package test sweep (pnp test: every packages/*)
+      - name: 'Package test sweep (pnp test: every packages/*)'
         shell: pwsh
         run: pnpm -r --filter './packages/*' test
       - name: Go unit tests on Windows

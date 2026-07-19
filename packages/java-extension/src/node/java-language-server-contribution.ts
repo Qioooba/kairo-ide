@@ -3,6 +3,7 @@ import { ILogger } from '@theia/core/lib/common/logger';
 import { spawn, ChildProcess } from 'child_process';
 import { StreamMessageReader, StreamMessageWriter } from 'vscode-jsonrpc/node';
 import { RuntimeConnectionService } from '@kairo/runtime-extension';
+import type { Endpoint } from '@kairo/protocol';
 
 export interface LaunchDescriptor {
     command: string;
@@ -29,7 +30,7 @@ export class JavaLanguageServerManager {
 
     async getLaunchDescriptor(workspaceId: string, projectId: string): Promise<LaunchDescriptor> {
         return this.runtime.request(
-            `GET /api/v1/workspaces/${workspaceId}/java/launch-descriptor`,
+            `GET /api/v1/workspaces/${workspaceId}/java/launch-descriptor` as Endpoint,
             undefined,
             { query: { projectId } },
         ) as Promise<LaunchDescriptor>;

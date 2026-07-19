@@ -5,24 +5,30 @@
 
 ## 1. Architectural goals
 
-1. **One frontend, one backend protocol, three deployment forms.**
-   No form-specific business code.
+1. **One frontend, one backend protocol, two deployment forms.**
+   Desktop (Electron) and localhost Browser. Remote Linux Server is
+   deferred to post-v1 (ADR-0014).
 2. **UI never executes shell.** All process / filesystem / OS effects go
    through the Go Runtime Agent.
 3. **Plugin-friendly core.** All `ServerRuntimeProvider`,
-   `BuildProvider`, `DebugAdapterProvider`, `EncodingProvider`,
-   `ProjectImporter` are interfaces with at least one real implementation.
+   `BuildProvider`, `EncodingProvider`, `ProjectImporter` are typed Go
+   interfaces with at least one real implementation.
 4. **Replaceable transports.** v1 uses HTTP + WebSocket under
    `/api/v1`. The wire format is the contract; HTTP is replaceable.
-5. **No JDT-6 vs. Tomcat-6 specifics in core.** They live in plugins
+5. **No JDT-6 vs. Tomcat-6 specifics in core.** They live in providers
    (ADR-0004).
 
-## 2. Layered architecture
+## 2. Vertical slice architecture (ADR-0015)
+
+The domain layer is organized as **lightweight vertical slices** per
+business domain. Each slice is a self-contained Go package with typed
+Service, Plan, and Repository. JSON is only at the HTTP/WS adapter and
+persistence codec boundaries.
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
 │                            PRESENTATION                              │
-│  apps/desktop · apps/browser · apps/server · packages/ui-kit        │
+│  apps/desktop · apps/browser · packages/ui-kit                       │
 │  Theia frontend (Monaco + Theia shells)                              │
 └────────────────────────────────┬─────────────────────────────────────┘
                                  │ @kairo/protocol (TypeScript)
@@ -37,23 +43,25 @@
                                  ▼
 ┌──────────────────────────────────────────────────────────────────────┐
 │                              DOMAIN                                  │
-│  runtime-agent/internal/domain                                        │
-│  Workspace · Project · JavaToolchain · ServerRuntime · BuildProfile  │
-│  Deployment · DebugSession · FileSync · Search · Encoding · Task     │
-│  Terminal · LogStream · Plugin · UserSession                         │
+│  Vertical slices (ADR-0015):                                         │
+│  workspace · project · buildsvc · deploysvc · serversvc ·            │
+│  search · encoding · toolchain                                       │
+│  Each slice: typed Service + Plan + Repository                       │
+│  Shared: internal/domain (Workspace, Project, ServerRecord, etc.)    │
 └────────────────────────────────┬─────────────────────────────────────┘
                                  │
                                  ▼
 ┌──────────────────────────────────────────────────────────────────────┐
 │                           INFRASTRUCTURE                             │
-│  runtime-agent/internal/{api,platform,security,audit,fs,proc,log}    │
+│  runtime-agent/internal/{api,platform,security,fs,proc,log,provider} │
 │  HTTP router · process supervisor · sandbox · event bus · encoders   │
+│  Composition root: internal/bootstrap/                               │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
 Dependency rule: **inner layers never import outer layers.** The
-`domain` package has no `api/` imports; the `api` package depends on
-`domain`; the UI never calls `infrastructure` directly.
+domain slices have no `api/` imports; the `api` package depends on
+domain slices; the UI never calls `infrastructure` directly.
 
 ## 3. Monorepo layout
 
@@ -61,8 +69,7 @@ Dependency rule: **inner layers never import outer layers.** The
 kairo-ide/
 ├── apps/
 │   ├── desktop/         # Electron + Theia entry
-│   ├── browser/         # Browser entry (Theia Browser app)
-│   └── server/          # Linux server entry (long-running daemon)
+│   └── browser/         # Browser entry (Theia Browser app)
 ├── packages/
 │   ├── theia-product/   # Composes extensions into a Theia application
 │   ├── project-extension/
@@ -76,7 +83,16 @@ kairo-ide/
 │   └── config-schema/       # JSON Schema for .legacyflow/project.yaml
 ├── runtime-agent/           # Go service, single binary
 │   ├── cmd/kairo-runtime/
-│   ├── internal/{api,domain,platform,security,audit,fs,proc,log,plugin}
+│   ├── internal/
+│   │   ├── api/             # HTTP/WS handlers + DTOs
+│   │   ├── bootstrap/       # Composition root
+│   │   ├── domain/          # Shared domain types
+│   │   ├── provider/        # Go-typed interface implementations
+│   │   ├── platform/        # OS-specific code
+│   │   ├── security/        # Auth, sandbox
+│   │   ├── fs/              # Filesystem operations
+│   │   ├── proc/            # Process management
+│   │   └── log/             # Structured logging
 │   ├── test/
 │   ├── configs/
 │   └── go.mod
@@ -87,8 +103,7 @@ kairo-ide/
 ├── scripts/
 ├── tests/e2e/               # Playwright
 ├── packaging/
-│   ├── electron/            # electron-builder config
-│   └── linux/               # tarball + systemd unit
+│   └── electron/            # electron-builder config
 ├── docs/
 │   ├── product-requirements.md
 │   ├── architecture.md      (this file)
@@ -106,10 +121,8 @@ kairo-ide/
 ## 4. The Process Model
 
 There is exactly **one Runtime Agent process** per workspace session.
-The Theia Backend runs in the same OS process for desktop mode, in
-the same container for server mode. The agent is a sibling process;
-it can be embedded in the desktop process and is mandatory in the
-server process.
+
+### Desktop (primary v1 form)
 
 ```
 ┌─────────────── Desktop process ─────────────────┐
@@ -126,8 +139,15 @@ server process.
 └─────────────────────────────────────────────────────────────┘
 ```
 
-In server mode the layout is identical except Electron is replaced by
-a headless Theia + browser over reverse proxy.
+### Localhost Browser
+
+Theia served from localhost, Go agent on the same machine. Same
+protocol, same domain model, same process layout (minus Electron).
+
+### Remote Linux Server
+
+**Deferred to post-v1** (ADR-0014). Will require multi-user session
+management, remote auth, audit logging, and container isolation.
 
 ## 5. The Protocol (v1)
 
@@ -189,10 +209,10 @@ Error codes are a closed enum. They live in
 | `GET`  | `/api/v1/builds/{id}` | Build status |
 | `POST` | `/api/v1/deployments` | Publish artifacts |
 | `GET`  | `/api/v1/deployments/{id}` | Deployment status |
-| `POST` | `/api/v1/servers` | Start a server (Tomcat 6, 7, 9, Jetty, etc.) |
+| `POST` | `/api/v1/servers` | Start a server (Tomcat 6, etc.) |
 | `DELETE` | `/api/v1/servers/{id}` | Stop a server |
 | `GET`  | `/api/v1/servers/{id}` | Server state + PIDs + ports |
-| `POST` | `/api/v1/servers/{id}/debug` | Restart with JDWP |
+| `POST` | `/api/v1/servers/{id}/debug` | Restart with JDWP (deferred, see §11) |
 | `GET`  | `/api/v1/servers/{id}/logs?follow=true` | NDJSON over WS |
 | `POST` | `/api/v1/search` | Full-text search |
 | `POST` | `/api/v1/encoding/detect` | Sniff BOM + heuristics |
@@ -200,7 +220,7 @@ Error codes are a closed enum. They live in
 | `WS`   | `/api/v1/events` | Subscribe to all long-lived streams |
 | `POST` | `/api/v1/auth/login` | Session login |
 | `POST` | `/api/v1/auth/logout` | |
-| `GET`  | `/api/v1/audit` | Audit log (server mode only) |
+| `GET`  | `/api/v1/audit` | Audit log (deferred, see §11) |
 
 The protocol package is the single source of truth for these shapes.
 The Go agent imports a generated Go version; the Theia extension
@@ -235,26 +255,42 @@ Workspace (root folder + settings)
 The model is **owned by the Runtime Agent** (domain layer). The
 TypeScript side keeps a faithful, read-mostly mirror for UI.
 
-## 7. Plugin architecture
+## 7. Plugin architecture (v1: two layers)
 
-See `adr/0004-plugin-architecture.md` for details. The summary:
+See ADR-0004 and ADR-0014 for details. The v1 plugin architecture has
+two layers:
 
 - **Theia extensions** (TypeScript, in `packages/*-extension`): the
   default way to add UI, menus, views, commands, preferences.
-- **VS Code compatible extensions** (TypeScript): language servers,
-  themes, snippets.
-- **LegacyFlow runtime plugins** (any language, dynamic load): server
-  types, build providers, deployment providers, toolchain
-  providers, encoding providers.
+- **Go internal adapters** (in `internal/provider/`): typed Go
+  interfaces (`ServerRuntimeProvider`, `BuildProvider`,
+  `EncodingProvider`, etc.) implemented directly in the Go agent
+  binary.
 
-The first two are loaded by Theia's standard mechanism. The third is
-discovered from `.legacyflow/plugins/<id>/plugin.yaml` and a binary
-or script referenced by it. The plugin runs as a **sandboxed
-subprocess** of the Runtime Agent; it talks to the agent over a
-narrowed JSON-RPC channel on a localhost-only port. (See
-`adr/0004`.)
+**LegacyFlow runtime plugins (Layer 3) are deferred to post-v1**
+(ADR-0014). The ADR-0004 design remains the reference for the plugin
+vision, but v1 ships with only the above two layers. No dynamic
+loading, no JSON-RPC bridge, no sandboxed subprocess plugin manager.
 
-## 8. Encoding discipline (this is important)
+## 8. Composition root
+
+The composition root is in `internal/bootstrap/`. It is responsible
+for:
+
+1. Creating all repository implementations (file-based, memory-based).
+2. Creating all provider implementations (Tomcat, Ant, Javac, etc.).
+3. Creating all vertical slice services with their dependencies injected.
+4. Creating HTTP handlers that map DTOs to/from typed service calls.
+5. Wiring the event bus, log sinks, and security middleware.
+
+The composition root is the **only place** that knows about all slices
+and their dependencies. Vertical slices do not import each other.
+
+The current `main.go` still uses `NewMemoryServices` (God Service
+pattern). Migration to the composition root with vertical slices is
+in progress (ADR-0015).
+
+## 9. Encoding discipline (this is important)
 
 - **All files on disk are bytes.** Kairo never assumes UTF-8.
 - Every `TextDocument` has a `DocumentEncoding` with
@@ -263,17 +299,31 @@ narrowed JSON-RPC channel on a localhost-only port. (See
 - Workspace encoding is a *fallback*, not a *mandate*.
 - See `adr/0007-encoding-handling.md`.
 
-## 9. Logging
+## 10. Logging
 
 - The Runtime Agent emits **structured JSON** to stderr (12-factor).
 - Every log line carries: `ts, level, component, workspaceId,
   projectId, requestId, correlationId, msg, fields...`.
 - The Theia Backend mirrors the same shape; frontend logs add `form`
-  (desktop|server).
+  (desktop|browser).
 - The UI "Diagnostic Center" produces a downloadable tarball of
   recent log lines + sanitized config. Source files are excluded.
 
-## 10. Performance budget
+## 11. Deferred capabilities (post-v1)
+
+The following capabilities are explicitly deferred to post-v1. They
+are not v1 release blockers:
+
+| Capability | Reason | Tracking |
+|------------|--------|----------|
+| Remote Linux Server | Requires multi-user, auth, audit, container isolation | ADR-0014 |
+| DAP/JDWP Debug | `/api/v1/servers/{id}/debug` endpoint exists but no breakpoint→hit proof | MILESTONES.md |
+| LegacyFlow runtime plugins (Layer 3) | Dynamic plugin loading, JSON-RPC bridge, sandboxed subprocess | ADR-0014 |
+| Class HotSwap | Requires JDWP agent integration | future roadmap |
+| Dynamic plugins | Plugin marketplace, online install | future roadmap |
+| Remote audit log | `/api/v1/audit` endpoint exists but remote mode deferred | ADR-0014 |
+
+## 12. Performance budget
 
 | Operation | Target | Tooling |
 |-----------|--------|---------|
@@ -288,7 +338,7 @@ narrowed JSON-RPC channel on a localhost-only port. (See
 We **measure** in CI. Numbers that miss are tracked as
 `MILESTONES.md` debt.
 
-## 11. Versioning and stability
+## 13. Versioning and stability
 
 - The protocol has a `v1` frozen contract. Breaking changes bump to
   `v2`. The agent supports v1 + v2 simultaneously in transition
@@ -298,9 +348,11 @@ We **measure** in CI. Numbers that miss are tracked as
   Old configs migrate on open.
 - Plugin API version is independent of product version.
 
-## 12. Where to read next
+## 14. Where to read next
 
 - `ui-spec.md` — how it looks.
 - `security.md` — threat model and sandbox.
 - `testing.md` — how we know it works.
 - `adr/` — every decision that shaped this file.
+- `adr/0014-desktop-localhost-v1.md` — v1 scope decision.
+- `adr/0015-lightweight-vertical-slices.md` — slice architecture.

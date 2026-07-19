@@ -29,6 +29,9 @@
   },
   "devDependencies": {
     "@types/node": "20.14.10",
+    "@typescript-eslint/eslint-plugin": "^8.64.0",
+    "@typescript-eslint/parser": "^8.64.0",
+    "eslint": "^10.7.0",
     "playwright": "^1.61.1",
     "prettier": "3.3.3",
     "rimraf": "5.0.10",

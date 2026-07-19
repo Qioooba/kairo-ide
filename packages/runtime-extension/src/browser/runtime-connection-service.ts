@@ -100,9 +100,6 @@ export class RuntimeConnectionService {
   protected config: KairoRuntimeConfig = { baseUrl: '' };
   protected workspaceId: string = '';
   protected lastHealth: HealthResponse | undefined;
-  private eventSocket: WebSocket | undefined;
-  private sequence: number = 0;
-  private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   /** Multi-subscriber dispatch: workspaceId → set of callbacks. */
   private subscribers = new Map<string, Set<(event: any) => void>>();
   /**
@@ -113,6 +110,17 @@ export class RuntimeConnectionService {
    */
   private cachedEndpoints: RuntimeEndpoints | undefined;
   private endpointsPromise: Promise<RuntimeEndpoints> | undefined;
+  /**
+   * The single WebSocket / EventStream connection. All event
+   * subscriptions flow through this one instance. Created
+   * lazily on the first subscribeEvents() call.
+   */
+  private internalEventStream: EventStream | undefined;
+  private statusSubscribers = new Set<(s: 'connecting' | 'open' | 'disconnected' | 'closed') => void>();
+  /** Track the current workspaceId for the EventStream URL. */
+  private activeWorkspaceId: string = '';
+  /** Track the highest sequence seen so far for reconnection. */
+  private sequence: number = 0;
 
   @postConstruct()
   protected init(): void {
@@ -372,29 +380,26 @@ export class RuntimeConnectionService {
   }
 
   /**
-   * Open the EventStream / WebSocket. The WS URL is built
-   * from the cached `RuntimeEndpoints.events` value (NOT
-   * the hardcoded 18099), and the secret rides in the
-   * subprotocol token per 搂1.2.
+   * Subscribe to connection status changes. The callback
+   * fires immediately with the current status, then again
+   * whenever the status transitions. Returns an unsubscribe
+   * function.
    */
-  openEvents(): EventStream {
-    // Fall back to the configured baseUrl if endpoints have
-    // not been fetched yet. The caller can call
-    // `fetchEndpoints()` separately to refresh.
-    const hostport = this.cachedEndpoints?.events ?? wsHostPortFromBase(this.config.baseUrl);
-    const wsBase = hostport.startsWith('ws://') || hostport.startsWith('wss://')
-      ? hostport
-      : `ws://${hostport}`;
-    const wsUrl = `${wsBase}${PROTOCOL_VERSION_PATH}/events`;
-    return new EventStream(wsUrl, this.agentSecret());
+  onStatusChange(handler: (s: 'connecting' | 'open' | 'disconnected' | 'closed') => void): () => void {
+    this.statusSubscribers.add(handler);
+    // Fire immediately with current status.
+    const current = this.internalEventStream?.status() ?? 'disconnected';
+    handler(current);
+    return () => {
+      this.statusSubscribers.delete(handler);
+    };
   }
 
-  // --- WebSocket event methods (from old RuntimeConnectionService) ---
-
   /**
-   * Subscribe to runtime events via a shared WebSocket.
-   * Multiple callers can subscribe simultaneously; each
-   * event is dispatched to every registered callback.
+   * Subscribe to runtime events via the single shared
+   * WebSocket. Multiple callers can subscribe
+   * simultaneously; each event is dispatched to every
+   * registered callback across all workspaceIds.
    * Returns an unsubscribe function — call it when the
    * subscriber is no longer interested (e.g. on dispose).
    *
@@ -411,10 +416,8 @@ export class RuntimeConnectionService {
     }
     subs.add(onEvent);
 
-    // Open the WebSocket if not already connected.
-    if (!this.eventSocket || this.eventSocket.readyState === WebSocket.CLOSED || this.eventSocket.readyState === WebSocket.CLOSING) {
-      this.startEventSocket(workspaceId);
-    }
+    // Ensure the single EventStream is started.
+    this.ensureEventStream();
 
     return () => {
       const s = this.subscribers.get(workspaceId);
@@ -422,7 +425,10 @@ export class RuntimeConnectionService {
         s.delete(onEvent);
         if (s.size === 0) {
           this.subscribers.delete(workspaceId);
-          this.disconnectEvents();
+          // If no subscribers remain, close the EventStream.
+          if (this.subscribers.size === 0) {
+            this.closeEventStream();
+          }
         }
       }
     };
@@ -430,8 +436,8 @@ export class RuntimeConnectionService {
 
   /**
    * @deprecated Use `subscribeEvents` instead — the old
-   * single-callback model silently overwrites other
-   * subscribers on the shared WebSocket.
+   * single-callback model is replaced by multi-subscriber
+   * dispatch on the single shared EventStream.
    */
   connectEvents(workspaceId: string, onEvent: (event: any) => void): void {
     this.subscribeEvents(workspaceId, onEvent);
@@ -443,48 +449,66 @@ export class RuntimeConnectionService {
    * closed for ALL subscribers.
    */
   disconnectEvents(): void {
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = undefined;
-    }
-    if (this.eventSocket) {
-      this.eventSocket.close();
-      this.eventSocket = undefined;
-    }
+    this.closeEventStream();
   }
 
-  /** Open (or re-open) the shared WebSocket and wire up
-   * multi-subscriber dispatch + reconnect. */
-  private startEventSocket(workspaceId: string): void {
-    this.disconnectEvents();
+  /**
+   * Open the EventStream / WebSocket. The WS URL is built
+   * from the cached `RuntimeEndpoints.events` value (NOT
+   * the hardcoded 18099), and the secret rides in the
+   * subprotocol token per 搂1.2.
+   *
+   * @deprecated Use `subscribeEvents` + `onStatusChange`
+   * instead. Each call to `openEvents()` used to create a
+   * separate WebSocket; now it returns the single shared
+   * EventStream. New code should prefer the
+   * RuntimeConnectionService methods directly.
+   */
+  openEvents(): EventStream {
+    this.ensureEventStream();
+    return this.internalEventStream!;
+  }
+
+  // --- Private: single EventStream management ---
+
+  /** Ensure the single shared EventStream exists and is
+   * wired up for multi-subscriber dispatch. */
+  private ensureEventStream(): void {
+    if (this.internalEventStream && this.internalEventStream.status() !== 'closed') {
+      return;
+    }
     const hostport = this.cachedEndpoints?.events ?? wsHostPortFromBase(this.config.baseUrl);
     const wsBase = hostport.startsWith('ws://') || hostport.startsWith('wss://')
       ? hostport
       : `ws://${hostport}`;
-    const wsUrl = `${wsBase}${PROTOCOL_VERSION_PATH}/events?workspaceId=${encodeURIComponent(workspaceId)}&after=${this.sequence}`;
-    this.eventSocket = new WebSocket(wsUrl);
-    this.eventSocket.onmessage = (msg) => {
-      try {
-        const event = JSON.parse(msg.data);
-        this.sequence = event.sequence;
-        // Dispatch to every subscriber registered for this workspaceId.
-        const subs = this.subscribers.get(workspaceId);
-        if (subs) {
-          for (const fn of subs) {
-            fn(event);
-          }
+    const wsUrl = `${wsBase}${PROTOCOL_VERSION_PATH}/events`;
+    this.internalEventStream = new EventStream(wsUrl, this.agentSecret());
+
+    // Wire up status forwarding.
+    this.internalEventStream.onStatus(s => {
+      for (const fn of this.statusSubscribers) {
+        fn(s);
+      }
+    });
+
+    // Wire up multi-subscriber dispatch: every event from
+    // the single EventStream is forwarded to ALL registered
+    // subscribers across all workspaceIds.
+    this.internalEventStream.on('*', (e: any) => {
+      this.sequence = e.sequence ?? this.sequence;
+      for (const subs of this.subscribers.values()) {
+        for (const fn of subs) {
+          fn(e);
         }
-      } catch { /* ignore parse errors */ }
-    };
-    this.eventSocket.onclose = () => {
-      const delay = 1000 + Math.random() * 2000;
-      this.reconnectTimer = setTimeout(() => {
-        // Only reconnect if there are still subscribers left.
-        if (this.subscribers.has(workspaceId)) {
-          this.startEventSocket(workspaceId);
-        }
-      }, delay);
-    };
+      }
+    });
+  }
+
+  private closeEventStream(): void {
+    if (this.internalEventStream) {
+      this.internalEventStream.close();
+      this.internalEventStream = undefined;
+    }
   }
 }
 

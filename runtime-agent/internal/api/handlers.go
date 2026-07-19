@@ -146,10 +146,8 @@ func (s *Server) handleProjectByID(w http.ResponseWriter, r *http.Request) {
 		}
 		writeOK(w, env, p)
 	case http.MethodPut:
-		var p struct {
-			Config any `json:"config"`
-		}
-		if err := json.Unmarshal(extractPayload(body), &p); err != nil {
+		var project domain.Project
+		if err := json.Unmarshal(extractPayload(body), &project); err != nil {
 			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: err.Error()})
 			return
 		}
@@ -157,7 +155,7 @@ func (s *Server) handleProjectByID(w http.ResponseWriter, r *http.Request) {
 			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInternal, Message: "ProjectStore not configured"})
 			return
 		}
-		updated, err := s.Services.ProjectStore.Update(rest, p.Config)
+		updated, err := s.Services.ProjectStore.Update(rest, &project)
 		if err != nil {
 			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: err.Error()})
 			return
@@ -226,7 +224,12 @@ func (s *Server) handleBuilds(w http.ResponseWriter, r *http.Request) {
 			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInternal, Message: "BuildEngine not configured"})
 			return
 		}
-		res, err := s.Services.BuildEngine.Start(extractPayload(body))
+		var req BuildRequest
+		if err := json.Unmarshal(extractPayload(body), &req); err != nil {
+			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: err.Error()})
+			return
+		}
+		res, err := s.Services.BuildEngine.Start(req)
 		if err != nil {
 			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrCompileFailed, Message: err.Error()})
 			return
@@ -269,7 +272,12 @@ func (s *Server) handleDeployments(w http.ResponseWriter, r *http.Request) {
 			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInternal, Message: "Deployer not configured"})
 			return
 		}
-		res, err := s.Services.Deployer.Publish(extractPayload(body))
+		var req DeployRequest
+		if err := json.Unmarshal(extractPayload(body), &req); err != nil {
+			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: err.Error()})
+			return
+		}
+		res, err := s.Services.Deployer.Publish(req)
 		if err != nil {
 			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrDeployFailed, Message: err.Error()})
 			return
@@ -312,7 +320,12 @@ func (s *Server) handleServers(w http.ResponseWriter, r *http.Request) {
 			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInternal, Message: "ServerRunner not configured"})
 			return
 		}
-		srv, err := s.Services.ServerRunner.Start(extractPayload(body))
+		var req StartServerRequest
+		if err := json.Unmarshal(extractPayload(body), &req); err != nil {
+			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: err.Error()})
+			return
+		}
+		srv, err := s.Services.ServerRunner.Start(req)
 		if err != nil {
 			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrProcessSpawnFailed, Message: err.Error()})
 			return
@@ -351,7 +364,11 @@ func (s *Server) handleServerSub(w http.ResponseWriter, r *http.Request) {
 			}
 			writeOK(w, env, srv)
 		case http.MethodDelete:
-			srv, err := s.Services.ServerRunner.Stop(id, extractPayload(body))
+			var p struct {
+				Force bool `json:"force"`
+			}
+			_ = json.Unmarshal(extractPayload(body), &p)
+			srv, err := s.Services.ServerRunner.Stop(id, p.Force)
 			if err != nil {
 				writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrProcessSpawnFailed, Message: err.Error()})
 				return

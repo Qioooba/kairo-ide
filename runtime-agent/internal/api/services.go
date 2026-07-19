@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"time"
 
+	"github.com/kairo-ide/runtime-agent/internal/build"
 	"github.com/kairo-ide/runtime-agent/internal/domain"
 )
 
@@ -28,9 +30,9 @@ type WorkspaceRecord struct {
 
 // ProjectStore manages project configs.
 type ProjectStore interface {
-	List() []json.RawMessage
-	Get(id string) (json.RawMessage, error)
-	Update(id string, cfg any) (json.RawMessage, error)
+	List() []domain.Project
+	Get(id string) (domain.Project, error)
+	Update(id string, cfg *domain.Project) (domain.Project, error)
 }
 
 // ToolchainRegistry imports and lists toolchains.
@@ -51,28 +53,132 @@ type Encoder interface {
 	Validate(payload json.RawMessage) (json.RawMessage, error)
 }
 
+// BuildRequest is the typed request to start a build.
+type BuildRequest struct {
+	ProjectID   string   `json:"projectId"`
+	Files       []string `json:"files"`
+	Toolchain   string   `json:"toolchainId"`
+	SourceLevel string   `json:"sourceLevel"`
+	TargetLevel string   `json:"targetLevel"`
+	ProjectRoot string   `json:"projectRoot"`
+	OutputDir   string   `json:"outputDir"`
+	Classpath   []string `json:"classpath"`
+	Clean       bool     `json:"clean"`
+}
+
+// BuildResult is the typed build result.
+type BuildResult struct {
+	ID            string           `json:"id"`
+	State         string           `json:"state"`
+	StartedAt     string           `json:"startedAt"`
+	FinishedAt    string           `json:"finishedAt,omitempty"`
+	ProjectID     string           `json:"projectId"`
+	Toolchain     string           `json:"toolchainId"`
+	SourceLevel   string           `json:"sourceLevel"`
+	TargetLevel   string           `json:"targetLevel"`
+	OutputDir     string           `json:"outputDir"`
+	Diagnostics   []build.Diagnostic `json:"diagnostics"`
+	FilesCompiled int              `json:"filesCompiled"`
+	ElapsedMs     int64            `json:"elapsedMs"`
+	Output        string           `json:"output"`
+	Error         string           `json:"error,omitempty"`
+	ExitCode      int              `json:"exitCode"`
+}
+
+// DeployRequest is the typed request to publish a deployment.
+type DeployRequest struct {
+	ProjectID string `json:"projectId"`
+	BuildID   string `json:"buildId"`
+	What      string `json:"what"`
+	Source    string `json:"source"`
+	Target    string `json:"target"`
+	Trigger   string `json:"trigger"`
+	Mode      string `json:"mode"`
+}
+
+// DeployResult is the typed deployment result.
+type DeployResult struct {
+	ID            string    `json:"id"`
+	State         string    `json:"state"`
+	StartedAt     time.Time `json:"startedAt"`
+	FinishedAt    time.Time `json:"finishedAt"`
+	ProjectID     string    `json:"projectId"`
+	BuildID       string    `json:"buildId"`
+	What          string    `json:"what"`
+	Source        string    `json:"source"`
+	Target        string    `json:"target"`
+	FilesTouched  int       `json:"filesTouched"`
+	Bytes         int64     `json:"bytes"`
+	FilesAdded    int       `json:"filesAdded"`
+	FilesModified int       `json:"filesModified"`
+	FilesDeleted  int       `json:"filesDeleted"`
+	Trigger       string    `json:"trigger"`
+	HotReloadMode string    `json:"hotReloadMode"`
+	Error         string    `json:"error,omitempty"`
+}
+
 // BuildEngine starts a build and reports its result.
 type BuildEngine interface {
-	Start(payload json.RawMessage) (json.RawMessage, error)
-	Get(id string) (json.RawMessage, error)
-	List() json.RawMessage
+	Start(req BuildRequest) (*BuildResult, error)
+	Get(id string) (*BuildResult, error)
+	List() []*BuildResult
 }
 
 // Deployer publishes a deployment.
 type Deployer interface {
-	Publish(payload json.RawMessage) (json.RawMessage, error)
-	Get(id string) (json.RawMessage, error)
-	List() json.RawMessage
+	Publish(req DeployRequest) (*DeployResult, error)
+	Get(id string) (*DeployResult, error)
+	List() []*DeployResult
+}
+
+// StartServerRequest is the typed request to start a server.
+type StartServerRequest struct {
+	ProjectID    string   `json:"projectId"`
+	JavaHome     string   `json:"javaHome"`
+	WebappDir    string   `json:"webappDir"`
+	ContextPath  string   `json:"contextPath"`
+	HTTPPort     int      `json:"httpPort"`
+	ShutdownPort int      `json:"shutdownPort"`
+	AJPPort      int      `json:"ajpPort"`
+	DebugPort    int      `json:"debugPort"`
+	DebugSuspend bool     `json:"debugSuspend"`
+	JVMOptions   []string `json:"jvmOptions"`
+}
+
+// ServerResponse is the safe API response shape for server info.
+type ServerResponse struct {
+	ID          string       `json:"id"`
+	ProjectID   string       `json:"projectId"`
+	Type        string       `json:"type"`
+	State       string       `json:"state"`
+	PID         int          `json:"pid"`
+	Ports       *ServerPorts `json:"ports,omitempty"`
+	StartedAt   time.Time    `json:"startedAt"`
+	ContextPath string       `json:"contextPath"`
+	LastError   string       `json:"lastError,omitempty"`
+	URL         string       `json:"url,omitempty"`
+}
+
+// ServerPorts exposes only user-facing ports.
+type ServerPorts struct {
+	HTTP  int `json:"http,omitempty"`
+	Debug int `json:"debug,omitempty"`
+}
+
+// ServerLogEntry is a single log line with timestamp.
+type ServerLogEntry struct {
+	Line string `json:"line"`
+	TS   string `json:"ts"`
 }
 
 // ServerRunner starts/stops a server runtime.
 type ServerRunner interface {
-	Start(payload json.RawMessage) (json.RawMessage, error)
-	Get(id string) (json.RawMessage, error)
-	Stop(id string, payload json.RawMessage) (json.RawMessage, error)
-	Debug(id string) (json.RawMessage, error)
-	Logs(id string, follow bool) (json.RawMessage, error)
-	List() json.RawMessage
+	Start(req StartServerRequest) (*ServerResponse, error)
+	Get(id string) (*ServerResponse, error)
+	Stop(id string, force bool) (*ServerResponse, error)
+	Debug(id string) (*ServerResponse, error)
+	Logs(id string, follow bool) ([]ServerLogEntry, error)
+	List() []*ServerResponse
 }
 
 // Authenticator handles login/logout.

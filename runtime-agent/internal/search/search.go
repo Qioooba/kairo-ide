@@ -1,8 +1,4 @@
 // Package search is the workspace text search engine.
-//
-// When ripgrep (rg) is available on PATH we shell out to it for
-// fast, multi-threaded search. Otherwise we fall back to a pure-Go
-// filepath.WalkDir implementation.
 package search
 
 import (
@@ -14,12 +10,9 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
-	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -34,19 +27,6 @@ var DefaultExcludes = []string{
 	"logs",
 	"work", "temp", // Tomcat
 	".legacyflow", ".kairo", // runtime state
-}
-
-var (
-	rgOnce      sync.Once
-	rgAvailable bool
-)
-
-func isRgAvailable() bool {
-	rgOnce.Do(func() {
-		_, err := exec.LookPath("rg")
-		rgAvailable = err == nil
-	})
-	return rgAvailable
 }
 
 // Options configures a search.
@@ -111,10 +91,6 @@ func Search(root string, opts Options) (*Result, error) {
 		opts.ProjectEncoding = encoding.UTF8
 	}
 
-	if isRgAvailable() {
-		return searchWithRipgrep(opts.Cancel, root, opts.Query, opts)
-	}
-
 	start := time.Now()
 	res := &Result{allDecoders: map[string]func() ([]byte, error){}}
 	matcher, err := buildMatcher(opts)
@@ -168,84 +144,6 @@ func Search(root string, opts Options) (*Result, error) {
 	_ = err
 	res.ElapsedMs = time.Since(start).Milliseconds()
 	return res, nil
-}
-
-// searchWithRipgrep runs rg as a subprocess for fast, multi-threaded search.
-func searchWithRipgrep(ctx context.Context, root, query string, opts Options) (*Result, error) {
-	start := time.Now()
-	args := []string{"--no-heading", "--line-number", "--color=never", "--no-messages"}
-
-	if !opts.IsRegex {
-		args = append(args, "-F")
-	}
-	if !opts.CaseSensitive {
-		args = append(args, "-i")
-	}
-	if opts.WholeWord {
-		args = append(args, "-w")
-	}
-	for _, pattern := range opts.Include {
-		args = append(args, "-g", pattern)
-	}
-	for _, exclude := range opts.Exclude {
-		args = append(args, "-g", "!"+exclude)
-	}
-
-	args = append(args, "--", query, root)
-
-	cmd := exec.CommandContext(ctx, "rg", args...)
-	output, err := cmd.Output()
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			if exitErr.ExitCode() == 1 {
-				res := &Result{}
-				res.ElapsedMs = time.Since(start).Milliseconds()
-				return res, nil // rg exit 1 = no matches
-			}
-		}
-		return nil, fmt.Errorf("rg failed: %w", err)
-	}
-
-	res := parseRgOutput(string(output), opts)
-	res.ElapsedMs = time.Since(start).Milliseconds()
-	return res, nil
-}
-
-// parseRgOutput converts rg output lines into a Result.
-func parseRgOutput(output string, opts Options) *Result {
-	res := &Result{}
-	for _, line := range strings.Split(output, "\n") {
-		if line == "" {
-			continue
-		}
-		if match := parseRgLine(line); match != nil {
-			res.Matches = append(res.Matches, *match)
-			res.TotalMatches++
-			if opts.MaxResults > 0 && res.TotalMatches >= opts.MaxResults {
-				res.Truncated = true
-				break
-			}
-		}
-	}
-	return res
-}
-
-// parseRgLine parses a single rg --no-heading output line.
-// Format: file:line:text
-func parseRgLine(line string) *Match {
-	parts := strings.SplitN(line, ":", 3)
-	if len(parts) < 3 {
-		return nil
-	}
-	lineNum, err := strconv.Atoi(parts[1])
-	if err != nil {
-		return nil
-	}
-	return &Match{
-		File:      parts[0],
-		Line:      lineNum,
-		MatchText: parts[2],
-	}
 }
 
 func (r *Result) recordError(path string, err error) {

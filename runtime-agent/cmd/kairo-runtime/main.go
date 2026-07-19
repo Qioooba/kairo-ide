@@ -131,7 +131,7 @@ func run() error {
 	}
 
 	addr := fmt.Sprintf("%s:%d", cfg.BindAddress, cfg.Port)
-if err := srv.ListenAndServe(addr, cfg.TLSCert, cfg.TLSKey); err != nil {
+	if err := srv.ListenAndServe(addr, cfg.TLSCert, cfg.TLSKey); err != nil {
 		// ListenAndServe returning != nil usually means the
 		// server stopped (e.g. port in use, TLS misconfigured).
 		// But http.ErrServerClosed is the normal return value

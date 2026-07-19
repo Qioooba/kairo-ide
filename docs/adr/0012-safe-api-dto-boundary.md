@@ -1,6 +1,6 @@
 # ADR-0012: Safe API DTO Boundary
 
-**Status**: Accepted
+**Status**: Superseded by ADR-0015
 **Date**: 2026-07-19
 **Supersedes**: Section 2 of `docs/progress/MAC_RUNTIME_INTEGRATION_REQUESTS.md`
 (which instructed the Windows integration lead to "serialize all fields" of

@@ -17,7 +17,7 @@ import {
   FrontendApplication,
 } from '@theia/core/lib/browser';
 import { Disposable } from '@theia/core/lib/common/disposable';
-import { RuntimeConnectionService, EventStream, KairoError } from '@kairo/runtime-extension';
+import { RuntimeConnectionService, KairoError } from '@kairo/runtime-extension';
 import { KairoServerService } from '@kairo/tomcat-extension';
 import { ServerStore } from '@kairo/tomcat-extension';
 import { KairoJavaService, JavaServiceState } from '@kairo/java-extension';
@@ -34,7 +34,6 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
   @inject(EditorManager) protected editorManager!: EditorManager;
   @inject(ServerStore) protected serverStore!: ServerStore;
 
-  protected eventStream: EventStream | undefined;
   protected unsubscribeStatus: (() => void) | undefined;
   protected unsubscribeServerEvents: (() => void) | undefined;
   protected unsubscribeJdtState: (() => void) | undefined;
@@ -82,9 +81,12 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
   }
 
   async onStart(app: FrontendApplication): Promise<void> {
-    this.eventStream = this.runtime.openEvents();
-    this.unsubscribeStatus = this.eventStream.onStatus(s => this.setRuntimeStatus(s));
-    this.unsubscribeServerEvents = this.eventStream.on('server.state', () => this.refreshServerStatus());
+    this.unsubscribeStatus = this.runtime.onStatusChange(s => this.setRuntimeStatus(s));
+    this.unsubscribeServerEvents = this.runtime.subscribeEvents(this.runtime.workspace(), (e: any) => {
+      if (e.type === 'server.state') {
+        void this.refreshServerStatus();
+      }
+    });
     this.unsubscribeJdtState = this.javaSvc.onState((s, st) => this.setJdtStatus(s, st));
     this.unsubscribeEditor = this.editorManager.onCurrentEditorChanged(() =>
       this.refreshEncodingStatus(),
@@ -105,7 +107,6 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
     this.unsubscribeJdtState?.();
     this.unsubscribeEditor?.dispose();
     this.unsubscribeServerStore?.dispose();
-    this.eventStream?.close();
   }
 
   /**
