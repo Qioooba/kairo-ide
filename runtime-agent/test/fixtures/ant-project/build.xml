@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project name="test-ant" default="compile" basedir=".">
+    <property name="src.dir" value="src/main/java"/>
+    <property name="build.dir" value="target/classes"/>
+    <target name="clean">
+        <delete dir="${build.dir}"/>
+    </target>
+    <target name="compile" depends="clean">
+        <mkdir dir="${build.dir}"/>
+        <javac srcdir="${src.dir}" destdir="${build.dir}"/>
+    </target>
+</project>
