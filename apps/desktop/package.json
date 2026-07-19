@@ -33,6 +33,7 @@
     "directories": {
       "output": "dist"
     },
+    "npmRebuild": false,
     "files": [
       "lib/main.js",
       "lib/preload.js",
