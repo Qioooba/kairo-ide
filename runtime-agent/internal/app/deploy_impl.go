@@ -5,7 +5,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"syscall"
 
 	"github.com/kairo-ide/runtime-agent/internal/domain"
 	"github.com/kairo-ide/runtime-agent/internal/security"
@@ -271,6 +270,3 @@ func fsyncDir(dir string) error {
 	defer f.Close()
 	return f.Sync()
 }
-
-// Ensure syscall import is used (for cross-platform builds that need it)
-var _ = syscall.Flock

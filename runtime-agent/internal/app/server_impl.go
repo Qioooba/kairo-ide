@@ -112,8 +112,12 @@ func (uc *serverUseCaseImpl) Start(ctx context.Context, cmd StartServerCommand) 
 	}
 	plan.JavaHome = tc
 
-	// Resolve AbsoluteWebappDir from project root
-	plan.AbsoluteWebappDir = resolvePath(projectRoot, cfg.WebappDir)
+	// Resolve WebappDir from project root
+	if cfg.WebappDir != "" {
+		plan.WebappDir = filepath.Join(projectRoot, cfg.WebappDir)
+	} else {
+		plan.WebappDir = projectRoot
+	}
 
 	// Generate a random ServerID for the CatalinaBase directory name.
 	// Never use the raw ProjectID — it may contain special characters

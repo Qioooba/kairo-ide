@@ -52,15 +52,15 @@ func (p *Tomcat6Provider) Prepare(ctx context.Context, project domain.Project) (
 	}
 
 	plan := &domain.RuntimePlan{
-		ServerID:         domain.ServerID(project.ID),
-		JavaHome:         "", // resolved from toolchain at start time
-		CatalinaHome:     catalinaHome,
-		CatalinaBase:     "", // set during Start
-		HTTPPort:         0,  // auto
-		ShutdownPort:     0,  // auto
-		ContextPath:      project.ContextPath,
-		AbsoluteWebappDir: project.WebappDir, // relative; resolved by caller
-		JVMOptions:       []string{},
+		ServerID:     domain.ServerID(project.ID),
+		JavaHome:     "",
+		CatalinaHome: catalinaHome,
+		CatalinaBase: "",
+		HTTPPort:     0,
+		ShutdownPort: 0,
+		ContextPath:  project.ContextPath,
+		WebappDir:    project.WebappDir,
+		JVMOptions:   []string{},
 	}
 
 	return plan, nil
@@ -75,7 +75,7 @@ func (p *Tomcat6Provider) Start(ctx context.Context, plan domain.RuntimePlan) (*
 		HTTPPort:     plan.HTTPPort,
 		ShutdownPort: plan.ShutdownPort,
 		ContextPath:  plan.ContextPath,
-		WebappDir:    plan.AbsoluteWebappDir,
+		WebappDir:    plan.WebappDir,
 		JVMOptions:   plan.JVMOptions,
 	}
 
