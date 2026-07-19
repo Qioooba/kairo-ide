@@ -37,7 +37,9 @@
     "overrides": {
       "react-dom": "18.3.1",
       "typescript": "5.5.4",
-      "drivelist": "workspace:*"
+      "drivelist": "workspace:*",
+      "puppeteer-core": "21.11.0",
+      "puppeteer": "21.11.0"
     },
     "patchedDependencies": {
       "inversify@6.2.2": "patches/inversify@6.2.2.patch"

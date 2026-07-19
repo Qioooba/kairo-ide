@@ -6,7 +6,7 @@
   "main": "lib/main.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "prebuild": "cd ../../runtime-agent && go build -o bin/kairo-runtime ./cmd/kairo-runtime && node scripts/copy-browser-artifacts.js",
+    "prebuild": "cd ../../runtime-agent && go build -o bin/kairo-runtime ./cmd/kairo-runtime && node ../apps/desktop/scripts/copy-browser-artifacts.js",
     "build:mac": "tsc -p tsconfig.json && electron-builder --mac",
     "build:win": "tsc -p tsconfig.json && electron-builder --win",
     "build:linux": "tsc -p tsconfig.json && electron-builder --linux",
