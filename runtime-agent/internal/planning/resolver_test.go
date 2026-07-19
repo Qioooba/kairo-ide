@@ -288,7 +288,7 @@ func TestResolveRuntime_ReturnsError(t *testing.T) {
 	pp := pathpolicy.NewDefaultPathPolicy()
 	resolver := NewDefaultPlanResolver(wsRepo, projRepo, tcRepo, pp)
 
-	_, err := resolver.ResolveRuntime(context.Background(), "ws_aaaaaaaaaaaaaaaaaaaaaaaaaa", "prj_aaaaaaaaaaaaaaaaaaaaaaaaaa")
+	_, err := resolver.ResolveRuntime(context.Background(), "ws_aaaaaaaaaaaaaaaaaaaaaaaaaa", "prj_aaaaaaaaaaaaaaaaaaaaaaaaaa", nil)
 	if err != domain.ErrRuntimeIntegrationRequired {
 		t.Errorf("expected ErrRuntimeIntegrationRequired, got %v", err)
 	}

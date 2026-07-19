@@ -10,13 +10,20 @@ import (
 
 	"github.com/kairo-ide/runtime-agent/internal/domain"
 	"github.com/kairo-ide/runtime-agent/internal/pathpolicy"
+	"github.com/kairo-ide/runtime-agent/internal/runtimeplan"
 )
 
+type RuntimePlanResolver interface {
+	ResolveRuntime(ctx context.Context, workspaceID domain.WorkspaceID, projectID domain.ProjectID, existingServerID *domain.ServerID) (*domain.RuntimePlan, error)
+	ResolveDeploymentTarget(plan *domain.RuntimePlan) (domain.DeploymentTarget, error)
+}
+
 type DefaultPlanResolver struct {
-	workspaces domain.WorkspaceRepository
-	projects   domain.ProjectRepository
-	toolchains domain.ToolchainRepository
-	pathPolicy pathpolicy.PathAuthorizer
+	workspaces      domain.WorkspaceRepository
+	projects        domain.ProjectRepository
+	toolchains      domain.ToolchainRepository
+	pathPolicy      pathpolicy.PathAuthorizer
+	runtimeResolver RuntimePlanResolver
 }
 
 func NewDefaultPlanResolver(
@@ -32,6 +39,24 @@ func NewDefaultPlanResolver(
 		pathPolicy: pathPolicy,
 	}
 }
+
+func NewDefaultPlanResolverWithRuntime(
+	workspaces domain.WorkspaceRepository,
+	projects domain.ProjectRepository,
+	toolchains domain.ToolchainRepository,
+	pathPolicy pathpolicy.PathAuthorizer,
+	runtimeResolver RuntimePlanResolver,
+) *DefaultPlanResolver {
+	return &DefaultPlanResolver{
+		workspaces:      workspaces,
+		projects:        projects,
+		toolchains:      toolchains,
+		pathPolicy:      pathPolicy,
+		runtimeResolver: runtimeResolver,
+	}
+}
+
+var _ runtimeplan.IDGenerator = (*pathpolicy.CryptoIDGenerator)(nil)
 
 func (r *DefaultPlanResolver) ResolveProject(ctx context.Context, workspaceID domain.WorkspaceID, projectID domain.ProjectID) (*domain.ResolvedProject, error) {
 	if err := pathpolicy.ValidateWorkspaceID(string(workspaceID)); err != nil {
@@ -280,8 +305,18 @@ func (r *DefaultPlanResolver) ResolveDeploy(ctx context.Context, workspaceID dom
 	}, nil
 }
 
-func (r *DefaultPlanResolver) ResolveRuntime(ctx context.Context, workspaceID domain.WorkspaceID, projectID domain.ProjectID) (*domain.RuntimePlan, error) {
-	return nil, domain.ErrRuntimeIntegrationRequired
+func (r *DefaultPlanResolver) ResolveRuntime(ctx context.Context, workspaceID domain.WorkspaceID, projectID domain.ProjectID, existingServerID *domain.ServerID) (*domain.RuntimePlan, error) {
+	if r.runtimeResolver == nil {
+		return nil, domain.ErrRuntimeIntegrationRequired
+	}
+	return r.runtimeResolver.ResolveRuntime(ctx, workspaceID, projectID, existingServerID)
+}
+
+func (r *DefaultPlanResolver) ResolveDeploymentTarget(plan *domain.RuntimePlan) (domain.DeploymentTarget, error) {
+	if r.runtimeResolver == nil {
+		return domain.DeploymentTarget{}, domain.ErrRuntimeIntegrationRequired
+	}
+	return r.runtimeResolver.ResolveDeploymentTarget(plan)
 }
 
 func (r *DefaultPlanResolver) resolvePaths(root string, rels []string, allowEmpty bool) ([]string, error) {
