@@ -53,7 +53,7 @@
     ],
     "mac": {
       "category": "public.app-category.developer-tools",
-      "target": "dmg",
+      "target": ["dmg", "zip"],
       "extraResources": [
         {
           "from": "../../runtime-agent/bin/kairo-runtime",
@@ -62,10 +62,10 @@
       ]
     },
     "win": {
-      "target": "nsis"
+      "target": ["nsis", "zip"]
     },
     "linux": {
-      "target": "AppImage",
+      "target": ["AppImage", "zip"],
       "extraResources": [
         {
           "from": "../../runtime-agent/bin/kairo-runtime",
