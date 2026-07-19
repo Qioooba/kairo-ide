@@ -53,7 +53,7 @@ const { ApplicationShell, WidgetManager } = require('@theia/core/lib/browser');
 const { CommandRegistry, CommandService, MessageService } = require('@theia/core/lib/common');
 
 // Kairo extension symbols
-const { KairoRuntimeImpl } = require('@kairo/runtime-extension/lib/browser');
+const { RuntimeConnectionService } = require('@kairo/runtime-extension/lib/browser');
 const { KairoServerService } = require('@kairo/tomcat-extension/lib/browser');
 const { KairoProjectService, ActiveProjectService } = require('@kairo/project-extension/lib/browser');
 
@@ -94,7 +94,7 @@ function createMockCommandService() {
   };
 }
 
-function createMockKairoRuntimeImpl() {
+function createMockRuntimeConnectionService() {
   return {
     openEvents: () => ({
       on: () => () => {},
@@ -174,7 +174,7 @@ test('KairoViewsContribution.registerCommands registers every command in a real 
   container.bind(ApplicationShell).toConstantValue(createMockApplicationShell());
   container.bind(WidgetManager).toConstantValue(createMockWidgetManager());
   container.bind(CommandService).toConstantValue(createMockCommandService());
-  container.bind(KairoRuntimeImpl).toConstantValue(createMockKairoRuntimeImpl());
+  container.bind(RuntimeConnectionService).toConstantValue(createMockRuntimeConnectionService());
   container.bind(KairoServerService).toConstantValue(createMockKairoServerService());
   container.bind(KairoProjectService).toConstantValue(createMockKairoProjectService());
   container.bind(ActiveProjectService).toConstantValue(createMockActiveProjectService());
@@ -222,7 +222,7 @@ test('KairoViewsContribution.registerCommands registers exactly 12 commands', ()
   container.bind(ApplicationShell).toConstantValue(createMockApplicationShell());
   container.bind(WidgetManager).toConstantValue(createMockWidgetManager());
   container.bind(CommandService).toConstantValue(createMockCommandService());
-  container.bind(KairoRuntimeImpl).toConstantValue(createMockKairoRuntimeImpl());
+  container.bind(RuntimeConnectionService).toConstantValue(createMockRuntimeConnectionService());
   container.bind(KairoServerService).toConstantValue(createMockKairoServerService());
   container.bind(KairoProjectService).toConstantValue(createMockKairoProjectService());
   container.bind(ActiveProjectService).toConstantValue(createMockActiveProjectService());

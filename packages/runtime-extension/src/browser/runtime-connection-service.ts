@@ -102,6 +102,8 @@ export class RuntimeConnectionService {
   private eventSocket: WebSocket | undefined;
   private sequence: number = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Multi-subscriber dispatch: workspaceId → set of callbacks. */
+  private subscribers = new Map<string, Set<(event: any) => void>>();
   /**
    * Cached host:port returned by GET /api/v1/endpoints. The
    * frontend used to hardcode 18099; it now fetches this on
@@ -389,13 +391,70 @@ export class RuntimeConnectionService {
   // --- WebSocket event methods (from old RuntimeConnectionService) ---
 
   /**
-   * Connect the legacy reconnecting WS used by the build /
-   * server views. The host:port is taken from the cached
+   * Subscribe to runtime events via a shared WebSocket.
+   * Multiple callers can subscribe simultaneously; each
+   * event is dispatched to every registered callback.
+   * Returns an unsubscribe function — call it when the
+   * subscriber is no longer interested (e.g. on dispose).
+   *
+   * The host:port is taken from the cached
    * `RuntimeEndpoints.events` (NOT a hardcoded 18099), so
    * this method works even when the agent bound a different
    * port at startup.
    */
+  subscribeEvents(workspaceId: string, onEvent: (event: any) => void): () => void {
+    let subs = this.subscribers.get(workspaceId);
+    if (!subs) {
+      subs = new Set();
+      this.subscribers.set(workspaceId, subs);
+    }
+    subs.add(onEvent);
+
+    // Open the WebSocket if not already connected.
+    if (!this.eventSocket || this.eventSocket.readyState === WebSocket.CLOSED || this.eventSocket.readyState === WebSocket.CLOSING) {
+      this.startEventSocket(workspaceId);
+    }
+
+    return () => {
+      const s = this.subscribers.get(workspaceId);
+      if (s) {
+        s.delete(onEvent);
+        if (s.size === 0) {
+          this.subscribers.delete(workspaceId);
+          this.disconnectEvents();
+        }
+      }
+    };
+  }
+
+  /**
+   * @deprecated Use `subscribeEvents` instead — the old
+   * single-callback model silently overwrites other
+   * subscribers on the shared WebSocket.
+   */
   connectEvents(workspaceId: string, onEvent: (event: any) => void): void {
+    this.subscribeEvents(workspaceId, onEvent);
+  }
+
+  /**
+   * @deprecated Prefer the unsubscribe function returned by
+   * `subscribeEvents`. Calling this forces the WebSocket
+   * closed for ALL subscribers.
+   */
+  disconnectEvents(): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = undefined;
+    }
+    if (this.eventSocket) {
+      this.eventSocket.close();
+      this.eventSocket = undefined;
+    }
+  }
+
+  /** Open (or re-open) the shared WebSocket and wire up
+   * multi-subscriber dispatch + reconnect. */
+  private startEventSocket(workspaceId: string): void {
     this.disconnectEvents();
     const hostport = this.cachedEndpoints?.events ?? wsHostPortFromBase(this.config.baseUrl);
     const wsBase = hostport.startsWith('ws://') || hostport.startsWith('wss://')
@@ -407,24 +466,24 @@ export class RuntimeConnectionService {
       try {
         const event = JSON.parse(msg.data);
         this.sequence = event.sequence;
-        onEvent(event);
+        // Dispatch to every subscriber registered for this workspaceId.
+        const subs = this.subscribers.get(workspaceId);
+        if (subs) {
+          for (const fn of subs) {
+            fn(event);
+          }
+        }
       } catch { /* ignore parse errors */ }
     };
     this.eventSocket.onclose = () => {
       const delay = 1000 + Math.random() * 2000;
-      this.reconnectTimer = setTimeout(() => this.connectEvents(workspaceId, onEvent), delay);
+      this.reconnectTimer = setTimeout(() => {
+        // Only reconnect if there are still subscribers left.
+        if (this.subscribers.has(workspaceId)) {
+          this.startEventSocket(workspaceId);
+        }
+      }, delay);
     };
-  }
-
-  disconnectEvents(): void {
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = undefined;
-    }
-    if (this.eventSocket) {
-      this.eventSocket.close();
-      this.eventSocket = undefined;
-    }
   }
 }
 

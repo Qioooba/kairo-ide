@@ -140,7 +140,7 @@ const LogViewer: React.FC<LogViewerProps> = ({ serverStore, runtime, runtimeConn
     React.useEffect(() => {
         const ctx = workspaceContext.context;
         if (!ctx) return;
-        runtimeConnection.connectEvents(ctx.workspaceId, (event: any) => {
+        const unsub = runtimeConnection.subscribeEvents(ctx.workspaceId, (event: any) => {
             if (event.type === 'log') {
                 if (selectedServerId && event.serverId !== selectedServerId) return;
                 const newLine: LogLine = {
@@ -152,7 +152,7 @@ const LogViewer: React.FC<LogViewerProps> = ({ serverStore, runtime, runtimeConn
             }
         });
         return () => {
-            runtimeConnection.disconnectEvents();
+            unsub();
         };
     }, [selectedServerId, runtimeConnection, workspaceContext, appendLog, classifyLogLevel]);
 

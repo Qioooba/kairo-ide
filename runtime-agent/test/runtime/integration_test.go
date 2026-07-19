@@ -38,6 +38,7 @@ type fakeRuntimeProvider struct {
 	startCount   int
 	graceCount   int
 	forceCount   int
+	markerSeq    int
 }
 
 func newFakeRuntimeProvider(id string) *fakeRuntimeProvider {
@@ -110,8 +111,9 @@ func (p *fakeRuntimeProvider) Start(ctx context.Context, plan domain.RuntimePlan
 		Env:          []string{},
 		LogDir:       plan.CatalinaBase + "/logs",
 		CatalinaBase: plan.CatalinaBase,
-		MarkerToken:  "kairo-test-marker",
+		MarkerToken:  fmt.Sprintf("kairo-test-marker-%d", p.markerSeq),
 	}
+	p.markerSeq++
 	obs, err := fp.Start(context.Background(), spec)
 	if err != nil {
 		return nil, err

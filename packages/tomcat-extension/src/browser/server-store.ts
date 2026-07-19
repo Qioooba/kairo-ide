@@ -29,6 +29,7 @@ export class ServerStore {
     private servers: ServerInstance[] = [];
     private readonly onDidChangeEmitter = new Emitter<ServerInstance[]>();
     readonly onDidChange: Event<ServerInstance[]> = this.onDidChangeEmitter.event;
+    private eventsUnsubscribe?: () => void;
 
     @postConstruct()
     protected async init(): Promise<void> {
@@ -57,7 +58,7 @@ export class ServerStore {
 
         // Subscribe to events
         if (ctx) {
-            this.runtimeConnection.connectEvents(ctx.workspaceId, (event: any) => {
+            this.eventsUnsubscribe = this.runtimeConnection.subscribeEvents(ctx.workspaceId, (event: any) => {
                 if (event.type === 'server.state') {
                     const existing = this.servers.find(s => s.id === event.serverId);
                     this.upsertServer({
@@ -88,7 +89,7 @@ export class ServerStore {
         if (idx >= 0) {
             this.servers = [...this.servers.slice(0, idx), server, ...this.servers.slice(idx + 1)];
         } else {
-            this.servers = [...this.servers, server];
+            this.servers = [...this.servers, server].slice(-16);
         }
         this.onDidChangeEmitter.fire(this.getServers());
     }
@@ -96,5 +97,10 @@ export class ServerStore {
     removeServer(id: string): void {
         this.servers = this.servers.filter(s => s.id !== id);
         this.onDidChangeEmitter.fire(this.getServers());
+    }
+
+    dispose(): void {
+        this.eventsUnsubscribe?.();
+        this.onDidChangeEmitter.dispose();
     }
 }

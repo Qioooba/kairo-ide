@@ -21,10 +21,10 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
 const http = require('node:http');
-const { KairoRuntimeImpl, KairoErrorListenerImpl } = require('@kairo/runtime-extension');
+const { RuntimeConnectionService, KairoErrorListenerImpl } = require('@kairo/runtime-extension');
 
 function makeRuntime() {
-  const rt = new KairoRuntimeImpl();
+  const rt = new RuntimeConnectionService();
   // Bypass Inversify — assign the listener directly.
   rt['listener'] = new KairoErrorListenerImpl();
   return rt;

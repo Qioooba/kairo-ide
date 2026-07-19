@@ -270,6 +270,7 @@ func fsyncDir(dir string) error {
 	defer f.Close()
 	return f.Sync()
 }
+
 // Compile-time marker: deploy_impl previously used syscall.Flock
 // for cross-platform file locking. We dropped that because
 // syscall.Flock does not exist on Windows. The deploy engine
