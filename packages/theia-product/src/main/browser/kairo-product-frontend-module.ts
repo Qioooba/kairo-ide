@@ -25,6 +25,7 @@ import {
   WidgetFactory,
 } from '@theia/core/lib/browser';
 import { CommandContribution } from '@theia/core/lib/common';
+import { PreferenceContribution } from '@theia/core/lib/common/preferences';
 import {
   KairoDeploymentsWidget,
   KairoViewsContribution,
@@ -40,6 +41,8 @@ import {
   KairoErrorListenerImpl,
   WorkspaceContextService,
 } from '@kairo/runtime-extension';
+import { KairoLargeFileContribution } from './kairo-large-file-contribution';
+import { KairoLargeFilePreferenceContribution } from './kairo-large-file-preferences';
 
 export const KAIRO_SERVERS_FACTORY_ID = 'kairo-server-view';
 export const KAIRO_BUILDS_FACTORY_ID = 'kairo-build-view';
@@ -91,6 +94,10 @@ export function bindKairoFrontend(bind: interfaces.Bind, unbind?: interfaces.Unb
   // picks up the methods.
   bind(CommandContribution).toService(KairoViewsContribution);
   bind(CommandContribution).toService(KairoEncodingCommandsContribution);
+  bind(KairoLargeFileContribution).toSelf().inSingletonScope();
+  bind(FrontendApplicationContribution).toService(KairoLargeFileContribution);
+  bind(CommandContribution).toService(KairoLargeFileContribution);
+  bind(PreferenceContribution).toConstantValue(KairoLargeFilePreferenceContribution);
 
   bind(KairoDeploymentsWidget).toSelf();
 
@@ -117,4 +124,3 @@ export function bindKairoFrontend(bind: interfaces.Bind, unbind?: interfaces.Unb
 export default new ContainerModule((bind, unbind, isBound, rebind) => {
   bindKairoFrontend(bind, unbind, isBound, rebind);
 });
-

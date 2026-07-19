@@ -9,7 +9,7 @@
     "build": "tsc -p tsconfig.json",
     "clean": "rm -rf lib",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "test": "echo \"no tests\" && exit 0"
+    "test": "node --test src/browser/*.test.cjs"
   },
   "dependencies": {
     "@kairo/protocol": "workspace:*",
@@ -23,4 +23,3 @@
     "typescript": "5.5.4"
   }
 }
-
