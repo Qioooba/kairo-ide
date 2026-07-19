@@ -1,0 +1,14 @@
+﻿{
+    "mirror":  "https://npmmirror.com/mirrors/",
+    "capturedAt":  "2026-07-19T15:26:53.7252199+08:00",
+    "elapsedMs":  77100,
+    "name":  "pnpm.build.win.admin",
+    "exitCode":  0,
+    "cmd":  "pnpm",
+    "logFile":  "G:\\spaces\\kairo-ide\\artifacts\\windows-wave2\\commands\\pnpm.build.win.admin.log",
+    "args":  [
+                 "--filter",
+                 "@kairo/desktop",
+                 "build:win"
+             ]
+}

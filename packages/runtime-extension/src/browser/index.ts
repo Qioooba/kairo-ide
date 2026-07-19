@@ -27,10 +27,27 @@ export { KairoError, normaliseThrown, unwrapResponse, FALLBACK_ERROR_CODE } from
 export { WorkspaceContextService } from './workspace-context-service';
 export type { WorkspaceContext } from './workspace-context-service';
 
-export { RuntimeConnectionService, EventStream } from './runtime-connection-service';
-export type { KairoRuntimeConfig, KairoRequestInit } from './runtime-connection-service';
+export {
+  RuntimeConnectionService,
+  EventStream,
+  KAIRO_WS_SUBPROTOCOL,
+} from './runtime-connection-service';
+export type {
+  KairoRuntimeConfig,
+  KairoRequestInit,
+  RuntimeEndpoints,
+} from './runtime-connection-service';
 
-export const RUNTIME_BASE_URL = 'http://127.0.0.1:18099';
+/**
+ * @deprecated Per docs/hotfix-windows-test-readiness.md 搂2,
+ * the frontend MUST NOT hardcode the agent port. Call
+ * `RuntimeConnectionService.fetchEndpoints()` after the
+ * first connect to learn the dynamic host:port the agent
+ * bound. The constant is kept only so old callers that
+ * still reference it continue to typecheck; new code
+ * should treat it as a sentinel for "no port configured".
+ */
+export const RUNTIME_BASE_URL = '';
 
 /**
  * The Kairo runtime frontend module. Apps load it as part of

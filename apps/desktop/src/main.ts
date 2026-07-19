@@ -55,28 +55,45 @@ function generateSecret(): string {
 // ─── Agent Lifecycle ──────────────────────────────────────────
 
 function resolveAgentPath(): string {
+  // Allow operators to override the binary location (e.g. local dev or
+  // custom install layouts). When unset, fall back to the packaged
+  // extraResources location (or monorepo-local Go build output in dev).
   if (process.env.KAIRO_AGENT_PATH) {
     return process.env.KAIRO_AGENT_PATH;
   }
-  const resourcesDir = process.resourcesPath || '';
-  const exeDir = path.dirname(process.execPath);
 
   const binaryName = process.platform === 'win32' ? 'kairo-runtime.exe' : 'kairo-runtime';
-  const candidates = [
-    // Packaged: extraResources -> bin/kairo-runtime
-    path.join(resourcesDir, 'bin', binaryName),
-    // Dev: ../../runtime-agent/bin/kairo-runtime
-    path.join(__dirname, '..', '..', '..', 'runtime-agent', 'bin', binaryName),
-    // CWD fallback
-    path.join(process.cwd(), 'runtime-agent', 'bin', binaryName),
-  ];
 
-  for (const p of candidates) {
-    if (fs.existsSync(p)) return p;
+  // Packaged build: extraResources puts the binary at <resourcesPath>/bin/.
+  // process.resourcesPath in this mode points to the install dir's resources
+  // folder, which is NOT inside the Electron install tree.
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, 'bin', binaryName);
   }
+
+  // Dev mode: process.resourcesPath points inside the Electron install
+  // tree (node_modules/.pnpm/electron@*/.../resources), so the packaged
+  // layout does not exist. Fall back to the monorepo-local Go build
+  // output, which the desktop package's prebuild script produces.
+  // apps/desktop/lib/main.js → ../../runtime-agent/bin/kairo-runtime[.exe]
+  const devDir = path.resolve(__dirname, '..', '..', '..', 'runtime-agent', 'bin');
+  const candidates = process.platform === 'win32'
+    // Go on Windows usually writes `kairo-runtime.exe`, but `go build -o
+    // bin/kairo-runtime` in some toolchains (e.g. cross-compile, mingw)
+    // drops the suffix. Try both.
+    ? [binaryName, binaryName.replace(/\.exe$/i, '')]
+    : [binaryName];
+  for (const name of candidates) {
+    const devPath = path.join(devDir, name);
+    if (fs.existsSync(devPath)) {
+      return devPath;
+    }
+  }
+
   throw new Error(
-    'kairo-runtime binary not found in any of: ' + candidates.join(', ') +
-    '\nSet KAIRO_AGENT_PATH to the binary location.'
+    `Cannot locate kairo-runtime binary in dev mode. Searched in: ${devDir} ` +
+    `(candidates: ${candidates.join(', ')}). Either run the desktop prebuild ` +
+    `(pnpm --filter @kairo/desktop build) or set KAIRO_AGENT_PATH to the binary location.`
   );
 }
 
@@ -183,8 +200,9 @@ function stopAgent(): void {
 async function startTheiaBackend(): Promise<number> {
   const port = await findFreePort();
 
-  // Theia backend entry: apps/browser/lib/backend/main.js
-  const theiaEntry = path.join(__dirname, '..', '..', 'browser', 'lib', 'backend', 'main.js');
+  // Theia backend entry, copied from apps/browser/lib/backend/main.js
+  // into apps/desktop/lib/backend/main.js by copy-browser-artifacts.js.
+  const theiaEntry = path.join(__dirname, 'backend', 'main.js');
 
   console.log(`[kairo] Starting Theia backend: ${theiaEntry} on port ${port}`);
 
@@ -192,6 +210,13 @@ async function startTheiaBackend(): Promise<number> {
     stdio: ['ignore', 'pipe', 'pipe'],
     env: {
       ...process.env,
+      // Run Electron as plain Node.js so the Theia backend can use
+      // require() / CommonJS without the Chromium runtime overhead.
+      ELECTRON_RUN_AS_NODE: '1',
+      // The Theia backend binds to THEIA_PORT. The value is also
+      // surfaced via the runtime agent's /api/v1/endpoints response
+      // (see docs/hotfix-windows-test-readiness.md §2) so the renderer
+      // discovers it dynamically.
       THEIA_PORT: String(port),
       KAIRO_AGENT_URL: `http://127.0.0.1:${agentPort}`,
       KAIRO_AGENT_SECRET: agentSecret,

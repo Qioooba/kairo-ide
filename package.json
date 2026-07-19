@@ -11,16 +11,16 @@
   "packageManager": "pnpm@9.15.9",
   "scripts": {
     "bootstrap": "pnpm install --frozen-lockfile=false",
-    "build": "pnpm -r --filter ./packages/* build && pnpm -r --filter ./apps/* build",
+    "build": "pnpm -r --filter \"./packages/*\" build && pnpm -r --filter \"./apps/*\" build",
     "build:agent": "pnpm --filter @kairo/runtime-agent build",
     "build:product": "pnpm --filter @kairo/theia-product build",
     "dev:browser": "pnpm --filter @kairo/browser start",
     "dev:server": "pnpm --filter @kairo/theia-product start:server",
-    "test": "pnpm -r --filter ./packages/* test && pnpm -r --filter ./apps/* test",
-    "test:agent": "cd runtime-agent && go test -timeout 120s ./...",
+    "test": "pnpm -r --filter \"./packages/*\" test && pnpm -r --filter \"./apps/*\" test",
+    "test:agent": "node scripts/test-agent.js",
     "test:agent:race": "cd runtime-agent && go test -race -timeout 120s ./...",
     "test:agent:integration": "cd runtime-agent && go test -timeout 240s -tags=integration ./test/...",
-    "lint": "pnpm -r --filter ./packages/* lint && pnpm -r --filter ./apps/* lint",
+    "lint": "pnpm -r --filter \"./packages/*\" lint && pnpm -r --filter \"./apps/*\" lint",
     "clean": "pnpm -r exec rm -rf lib out gen dist && rm -rf runtime-agent/bin runtime-agent/dist",
     "verify": "pnpm bootstrap && pnpm build && pnpm test && pnpm test:agent",
     "agent:run": "cd runtime-agent && go run ./cmd/kairo-runtime --config ../runtime-agent/configs/dev.yaml",
@@ -37,7 +37,9 @@
     "overrides": {
       "react-dom": "18.3.1",
       "typescript": "5.5.4",
-      "drivelist": "workspace:*"
+      "drivelist": "workspace:*",
+      "puppeteer-core": "21.11.0",
+      "puppeteer": "21.11.0"
     },
     "patchedDependencies": {
       "inversify@6.2.2": "patches/inversify@6.2.2.patch"

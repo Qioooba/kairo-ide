@@ -12,6 +12,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
@@ -21,6 +23,22 @@ import (
 	"github.com/kairo-ide/runtime-agent/internal/audit"
 	"github.com/kairo-ide/runtime-agent/internal/log"
 )
+
+// WebSocketSubprotocol is the single subprotocol that all
+// EventStream / WebSocket clients MUST use to present the
+// shared secret. The header value sent on the wire is
+//
+//	Sec-WebSocket-Protocol: kairo-secret-v1
+//
+// The secret is NOT carried in the header. Instead the
+// server's response includes a subprotocol token equal to
+// the expected secret, so the browser API contract is
+// `new WebSocket(url, ["kairo-secret-v1", secret])`. This
+// keeps the secret out of the request URL/logs and works
+// for browser WebSockets, which cannot set custom headers.
+//
+// Per docs/hotfix-windows-test-readiness.md 搂1.2.
+const WebSocketSubprotocol = "kairo-secret-v1"
 
 // Server is the HTTP server. It is built by NewServer and run
 // by ListenAndServe.
@@ -35,8 +53,46 @@ type Server struct {
 	port     int
 	secret   string
 
+	// httpServer is the live *http.Server. It is created
+	// lazily by ListenAndServe so Shutdown can be called by
+	// the runtime-restart handler.
+	httpServer *http.Server
+
+	// restartConfig, if set, lets /api/v1/runtime/restart
+	// spawn a fresh process. See SetRestartConfig.
+	restartConfig RestartConfig
+
 	// injected services
 	Services *Services
+}
+
+// RestartConfig tells /api/v1/runtime/restart how to
+// respawn the current process. Set via SetRestartConfig from
+// main(). All fields are optional; the handler returns 200
+// in all cases (the contract says "no body, secret auth,
+// 200 {status: restarting}"), then performs the actual
+// restart asynchronously.
+type RestartConfig struct {
+	// Executable is the path of the running binary. If
+	// empty, os.Executable() is used.
+	Executable string
+	// Args are the CLI args to pass to the new process
+	// (typically os.Args[1:]).
+	Args []string
+	// Env is the environment passed to the new process. If
+	// nil, os.Environ() is used.
+	Env []string
+	// ShutdownTimeout bounds the time given to the user's
+	// shutdown hook and the HTTP server. Default 3s.
+	ShutdownTimeout time.Duration
+	// OnShutdown is called after writing the 200 response.
+	// Typically this is container.Shutdown. Optional.
+	OnShutdown func(ctx context.Context) error
+	// NoExec skips the spawn-and-exit phase. Used by unit
+	// tests that want to exercise the 200-response and
+	// OnShutdown hook without actually replacing the test
+	// process. Production code MUST leave this false.
+	NoExec bool
 }
 
 // Services is the bag of dependencies the handlers use. Set
@@ -91,8 +147,23 @@ func NewServer(services *Services, l *log.Logger, a *audit.Log, version string, 
 	return s
 }
 
+// SetRestartConfig configures how /api/v1/runtime/restart
+// respawns the current process. Safe to call once before
+// ListenAndServe. If unset, /api/v1/runtime/restart still
+// returns 200 but performs no respawn (e.g. for test
+// scenarios).
+func (s *Server) SetRestartConfig(rc RestartConfig) {
+	s.restartConfig = rc
+}
+
 // Handler returns the underlying http.Handler. Useful in tests.
-func (s *Server) Handler() http.Handler { return s.router }
+// Handler returns the http.Handler that should be exposed to
+// callers, including the security / logging / audit middleware.
+// Callers (tests, ListenAndServe) must use this rather than
+// s.router directly — the bare router skips secret checks and
+// request-id propagation, so production and test paths must
+// match.
+func (s *Server) Handler() http.Handler { return s.middleware(s.router) }
 
 // ListenAndServe starts the HTTP server. addr is "host:port".
 func (s *Server) ListenAndServe(addr string, tlsCert, tlsKey string) error {
@@ -102,21 +173,34 @@ func (s *Server) ListenAndServe(addr string, tlsCert, tlsKey string) error {
 	if n, err := strconv.Atoi(port); err == nil {
 		s.port = n
 	}
-	s.mu.Unlock()
-
-	srv := &http.Server{
-		Addr:    addr,
-		Handler: s.middleware(s.router),
+	s.httpServer = &http.Server{
+		Addr:              addr,
+		Handler:           s.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      60 * time.Second,
 		IdleTimeout:       2 * time.Minute,
 	}
+	srv := s.httpServer
+	s.mu.Unlock()
+
 	s.logger.Info("http listen", log.Fields{"addr": addr, "tls": tlsCert != ""})
 	if tlsCert != "" {
 		return srv.ListenAndServeTLS(tlsCert, tlsKey)
 	}
 	return srv.ListenAndServe()
+}
+
+// Shutdown gracefully stops the HTTP server. Used by
+// /api/v1/runtime/restart and by the container on exit.
+func (s *Server) Shutdown(ctx context.Context) error {
+	s.mu.Lock()
+	srv := s.httpServer
+	s.mu.Unlock()
+	if srv == nil {
+		return nil
+	}
+	return srv.Shutdown(ctx)
 }
 
 // middleware applies request ID, logging, audit, CORS, secret
@@ -131,15 +215,26 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 		w.Header().Set("X-Kairo-Request-Id", rid)
 
 		// Secret check: if the agent has a secret configured, require
-		// the X-Kairo-Secret header on every request. The health
-		// endpoint is exempt so the desktop host can poll it.
-		if s.secret != "" && r.URL.Path != "/api/v1/health" {
-			if r.Header.Get("X-Kairo-Secret") != s.secret {
-				writeError(w, rid, cid, protocol.KairoError{
-					Code:    protocol.ErrUnauthenticated,
-					Message: "missing or invalid auth secret",
-				})
-				return
+		// the X-Kairo-Secret header on every request. The health and
+		// endpoints routes are exempt so the desktop host can poll
+		// them during boot before the secret is wired into the
+		// runtime client. /api/v1/events does its own auth via the
+		// WebSocket Sec-WebSocket-Protocol subprotocol (browsers
+		// cannot set custom headers on a WebSocket upgrade).
+		if s.secret != "" {
+			switch r.URL.Path {
+			case "/api/v1/health", "/api/v1/endpoints":
+				// Public, by contract.
+			case "/api/v1/events":
+				// WebSocket auth is handled inside handleEvents.
+			default:
+				if r.Header.Get("X-Kairo-Secret") != s.secret {
+					writeError(w, rid, cid, protocol.KairoError{
+						Code:    protocol.ErrUnauthenticated,
+						Message: "missing or invalid auth secret",
+					})
+					return
+				}
 			}
 		}
 
@@ -172,6 +267,12 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 func (s *Server) routes() {
 	// Health
 	s.router.HandleFunc("/api/v1/health", s.handleHealth)
+	// Endpoints — dynamic host:port for the runtime client
+	// to discover where to connect (replaces the previously
+	// hardcoded 18099 in the frontend).
+	s.router.HandleFunc("/api/v1/endpoints", s.handleEndpoints)
+	// Runtime control (restart).
+	s.router.HandleFunc("/api/v1/runtime/restart", s.handleRuntimeRestart)
 	// Workspaces
 	s.router.HandleFunc("/api/v1/workspaces", s.handleWorkspaces)
 	s.router.HandleFunc("/api/v1/workspaces/", s.handleWorkspacesSub)
@@ -213,6 +314,78 @@ func (s *Server) routes() {
 	s.router.HandleFunc("/api/v1/jdtls", s.handleJDTLS)
 	// JDT project model generator for legacy projects.
 	s.router.HandleFunc("/api/v1/jdtls/project", s.handleJDTProject)
+}
+
+// doRestart performs the actual restart sequence after
+// handleRuntimeRestart has already sent the 200 response.
+// It is safe to call with an empty RestartConfig (in which
+// case the process exits without respawning — useful for
+// tests).
+func (s *Server) doRestart() {
+	rc := s.restartConfig
+	timeout := rc.ShutdownTimeout
+	if timeout <= 0 {
+		timeout = 3 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	// 1. Call the user's shutdown hook (e.g. container.Shutdown).
+	if rc.OnShutdown != nil {
+		if err := rc.OnShutdown(ctx); err != nil && s.logger != nil {
+			s.logger.Warn("restart: shutdown hook returned error", log.Fields{"err": err.Error()})
+		}
+	}
+
+	// 2. Stop the HTTP server so the new process can bind the port.
+	if err := s.Shutdown(ctx); err != nil && s.logger != nil {
+		s.logger.Warn("restart: http shutdown returned error", log.Fields{"err": err.Error()})
+	}
+
+	// 3. Spawn a fresh process with the original args. Skip
+	//    when NoExec is set (unit tests that don't want to
+	//    replace the test process) or when neither the
+	//    executable nor the args are configured.
+	if !rc.NoExec && (rc.Executable != "" || rc.Args != nil) {
+		exe := rc.Executable
+		if exe == "" {
+			if e, err := os.Executable(); err == nil {
+				exe = e
+			} else if s.logger != nil {
+				s.logger.Error("restart: os.Executable failed", log.Fields{"err": err.Error()})
+			}
+		}
+		env := rc.Env
+		if env == nil {
+			env = os.Environ()
+		}
+		cmd := exec.Command(exe, rc.Args...)
+		cmd.Env = env
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Start(); err != nil {
+			if s.logger != nil {
+				s.logger.Error("restart: spawn failed", log.Fields{"err": err.Error()})
+			}
+			os.Exit(1)
+			return
+		}
+		if s.logger != nil {
+			s.logger.Info("restart: spawned replacement process", log.Fields{
+				"pid":     cmd.Process.Pid,
+				"exe":     exe,
+				"argvLen": len(rc.Args),
+			})
+		}
+	}
+
+	// 4. Exit the current process cleanly so the new one takes
+	//    over the port and any other resources. A 0 exit is
+	//    what the contract expects. Skipped in test mode
+	//    (NoExec) so the unit test doesn't tear itself down.
+	if !rc.NoExec {
+		os.Exit(0)
+	}
 }
 
 // ----------------- helpers -----------------

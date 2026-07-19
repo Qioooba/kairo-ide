@@ -6,12 +6,14 @@
   "main": "lib/main.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "prebuild": "cd ../../runtime-agent && go build -o bin/kairo-runtime ./cmd/kairo-runtime",
+    "prebuild": "node scripts/build-agent.js && node scripts/copy-browser-artifacts.js",
     "build:mac": "tsc -p tsconfig.json && electron-builder --mac",
     "build:win": "tsc -p tsconfig.json && electron-builder --win",
     "build:linux": "tsc -p tsconfig.json && electron-builder --linux",
     "build:all": "tsc -p tsconfig.json && electron-builder --mac --win --linux",
+    "prestart": "node scripts/copy-browser-artifacts.js",
     "start": "electron lib/main.js",
+    "copy:browser": "node scripts/copy-browser-artifacts.js",
     "clean": "rm -rf lib dist"
   },
   "dependencies": {
@@ -31,25 +33,44 @@
     "directories": {
       "output": "dist"
     },
+    "npmRebuild": false,
     "files": [
-      "lib/**/*",
-      "assets/**/*"
+      "lib/main.js",
+      "lib/preload.js",
+      "lib/frontend/**/*",
+      "lib/backend/**/*",
+      "../browser/lib/frontend/**/*",
+      "../browser/lib/backend/**/*",
+      "assets/**/*",
+      "package.json"
     ],
     "extraResources": [
       {
-        "from": "../../runtime-agent/kairo-runtime",
-        "to": "kairo-runtime"
+        "from": "../../runtime-agent/kairo-runtime.exe",
+        "to": "bin/kairo-runtime.exe"
       }
     ],
     "mac": {
       "category": "public.app-category.developer-tools",
-      "target": "dmg"
+      "target": "dmg",
+      "extraResources": [
+        {
+          "from": "../../runtime-agent/bin/kairo-runtime",
+          "to": "bin/kairo-runtime"
+        }
+      ]
     },
     "win": {
       "target": "nsis"
     },
     "linux": {
-      "target": "AppImage"
+      "target": "AppImage",
+      "extraResources": [
+        {
+          "from": "../../runtime-agent/bin/kairo-runtime",
+          "to": "bin/kairo-runtime"
+        }
+      ]
     }
   }
 }

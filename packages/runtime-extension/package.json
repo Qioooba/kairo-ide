@@ -4,12 +4,18 @@
   "description": "Kairo runtime extension �?owns the HTTP/WS client to the Go Runtime Agent. The rest of the UI uses this client and never talks to /api/v1 directly.",
   "main": "lib/index.js",
   "types": "lib/src/index.d.ts",
-  "files": ["lib", "src"],
+  "files": [
+    "lib",
+    "src"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "clean": "rm -rf lib",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "test": "node --test src/browser/runtime.test.cjs"
+    "test": "node --test src/browser/runtime.test.cjs",
+    "test:dynamic": "node --test src/browser/runtime-dynamic-routes.test.cjs",
+    "test:mocha": "mocha",
+    "test:all": "pnpm run test:mocha && pnpm run test && pnpm run test:dynamic"
   },
   "dependencies": {
     "@kairo/protocol": "workspace:*",
@@ -19,6 +25,10 @@
     "@theia/core": "1.73.1"
   },
   "devDependencies": {
+    "@types/mocha": "10.0.10",
+    "jsdom": "24.1.3",
+    "jsdom-global": "3.0.2",
+    "mocha": "10.8.2",
     "typescript": "5.5.4"
   }
 }

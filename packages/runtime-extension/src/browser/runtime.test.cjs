@@ -323,18 +323,26 @@ test('workspaceId + requestId header propagation', async () => {
   } finally { srv.close(); }
 });
 
-// Test 14: bearer token attaches as Authorization header.
-test('bearerToken attaches as Authorization: Bearer', async () => {
+// Test 14: agent secret attaches as X-Kairo-Secret header.
+// Per docs/hotfix-windows-test-readiness.md 搂1.1, the
+// secret rides in `X-Kairo-Secret`. The previous
+// `Authorization: Bearer` pattern has been removed from the
+// protocol — this test guards the new contract.
+test('agentSecret attaches as X-Kairo-Secret header (no Authorization Bearer)', async () => {
   let captured = null;
   const { srv, baseUrl } = await runServer((req, res) => {
-    captured = req.headers['authorization'];
+    captured = {
+      secret: req.headers['x-kairo-secret'],
+      authorization: req.headers['authorization'],
+    };
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ ok: true, payload: { ok: true } }));
   });
   try {
     const rt = makeRuntime();
-    rt.configure({ baseUrl, bearerToken: 'secret-token' });
+    rt.configure({ baseUrl, agentSecret: 'secret-token' });
     await rt.request('GET /api/v1/health', undefined);
-    assert.strictEqual(captured, 'Bearer secret-token');
+    assert.strictEqual(captured.secret, 'secret-token', 'X-Kairo-Secret must carry the agent secret');
+    assert.strictEqual(captured.authorization, undefined, 'Authorization header must NOT be set');
   } finally { srv.close(); }
 });
