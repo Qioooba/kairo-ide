@@ -55,29 +55,23 @@ function generateSecret(): string {
 // ─── Agent Lifecycle ──────────────────────────────────────────
 
 function resolveAgentPath(): string {
+  // Allow operators to override the binary location (e.g. local dev or
+  // custom install layouts). When unset, fall back to the packaged
+  // extraResources location: process.resourcesPath/bin/kairo-runtime[.exe].
   if (process.env.KAIRO_AGENT_PATH) {
     return process.env.KAIRO_AGENT_PATH;
   }
-  const resourcesDir = process.resourcesPath || '';
-  const exeDir = path.dirname(process.execPath);
+
+  const resourcesDir = process.resourcesPath;
+  if (!resourcesDir) {
+    throw new Error(
+      'process.resourcesPath is not set. Run the packaged build, ' +
+      'or set KAIRO_AGENT_PATH to the kairo-runtime binary location.'
+    );
+  }
 
   const binaryName = process.platform === 'win32' ? 'kairo-runtime.exe' : 'kairo-runtime';
-  const candidates = [
-    // Packaged: extraResources -> bin/kairo-runtime
-    path.join(resourcesDir, 'bin', binaryName),
-    // Dev: ../../runtime-agent/bin/kairo-runtime
-    path.join(__dirname, '..', '..', '..', 'runtime-agent', 'bin', binaryName),
-    // CWD fallback
-    path.join(process.cwd(), 'runtime-agent', 'bin', binaryName),
-  ];
-
-  for (const p of candidates) {
-    if (fs.existsSync(p)) return p;
-  }
-  throw new Error(
-    'kairo-runtime binary not found in any of: ' + candidates.join(', ') +
-    '\nSet KAIRO_AGENT_PATH to the binary location.'
-  );
+  return path.join(resourcesDir, 'bin', binaryName);
 }
 
 async function startAgent(dataDir: string): Promise<{ port: number; secret: string }> {
@@ -183,8 +177,9 @@ function stopAgent(): void {
 async function startTheiaBackend(): Promise<number> {
   const port = await findFreePort();
 
-  // Theia backend entry: apps/browser/lib/backend/main.js
-  const theiaEntry = path.join(__dirname, '..', '..', 'browser', 'lib', 'backend', 'main.js');
+  // Theia backend entry, copied from apps/browser/lib/backend/main.js
+  // into apps/desktop/lib/backend/main.js by copy-browser-artifacts.js.
+  const theiaEntry = path.join(__dirname, 'backend', 'main.js');
 
   console.log(`[kairo] Starting Theia backend: ${theiaEntry} on port ${port}`);
 
@@ -192,6 +187,13 @@ async function startTheiaBackend(): Promise<number> {
     stdio: ['ignore', 'pipe', 'pipe'],
     env: {
       ...process.env,
+      // Run Electron as plain Node.js so the Theia backend can use
+      // require() / CommonJS without the Chromium runtime overhead.
+      ELECTRON_RUN_AS_NODE: '1',
+      // The Theia backend binds to THEIA_PORT. The value is also
+      // surfaced via the runtime agent's /api/v1/endpoints response
+      // (see docs/hotfix-windows-test-readiness.md §2) so the renderer
+      // discovers it dynamically.
       THEIA_PORT: String(port),
       KAIRO_AGENT_URL: `http://127.0.0.1:${agentPort}`,
       KAIRO_AGENT_SECRET: agentSecret,

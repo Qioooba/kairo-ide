@@ -1,0 +1,5 @@
+# Placeholder so the packaged resources/bin/ directory is tracked in git.
+# electron-builder's extraResources rule copies the Go agent
+# (runtime-agent/bin/kairo-runtime[.exe]) into this directory at build time;
+# the directory must exist for electron-builder to write into it on case-
+# insensitive filesystems.
