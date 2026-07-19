@@ -7,10 +7,10 @@ import (
 	"errors"
 	"os"
 	"syscall"
+
+	"github.com/kairo-ide/runtime-agent/internal/domain"
 )
 
-// sysProcAttrForOS sets the process group so we can kill the
-// whole tree, and detaches from the controlling terminal.
 func sysProcAttrForOS() *syscall.SysProcAttr {
 	return &syscall.SysProcAttr{
 		Setpgid: true,
@@ -18,24 +18,34 @@ func sysProcAttrForOS() *syscall.SysProcAttr {
 	}
 }
 
-// terminateSignal / killSignal return the platform "please go away"
-// and "die now" signals. On POSIX these are SIGTERM / SIGKILL.
-func terminateSignal() syscall.Signal { return syscall.SIGTERM }
-func killSignal() syscall.Signal      { return syscall.SIGKILL }
-
-// signalGroup delivers a signal to the process group rooted at
-// pid. A negative pid means "send to the process group whose
-// pgid is |pid|". Falls back to the direct PID if the group
-// signal is not supported (e.g. the process is not a group leader).
-func signalGroup(pid int, sig syscall.Signal) error {
-	pgid := -pid
-	if err := syscall.Kill(pgid, sig); err == nil {
+func terminateProcessGroup(pid int) error {
+	if pid <= 0 {
 		return nil
 	}
-	return syscall.Kill(pid, sig)
+	pgid := -pid
+	if err := syscall.Kill(pgid, syscall.SIGTERM); err != nil {
+		if err == syscall.ESRCH {
+			return nil
+		}
+		return syscall.Kill(pid, syscall.SIGTERM)
+	}
+	return nil
 }
 
-// isProcessAlive uses signal 0, the POSIX liveness probe.
+func killProcessGroup(pid int) error {
+	if pid <= 0 {
+		return nil
+	}
+	pgid := -pid
+	if err := syscall.Kill(pgid, syscall.SIGKILL); err != nil {
+		if err == syscall.ESRCH {
+			return nil
+		}
+		return syscall.Kill(pid, syscall.SIGKILL)
+	}
+	return nil
+}
+
 func isProcessAlive(pid int) bool {
 	if pid <= 0 {
 		return false
@@ -45,7 +55,23 @@ func isProcessAlive(pid int) bool {
 		return false
 	}
 	if err := p.Signal(syscall.Signal(0)); err != nil {
-		return !errors.Is(err, os.ErrProcessDone)
+		if errors.Is(err, os.ErrProcessDone) {
+			return false
+		}
+		if err == syscall.ESRCH {
+			return false
+		}
+		return false
+	}
+	return true
+}
+
+func verifyProcessIdentity(pid int, identity domain.ProcessIdentity) bool {
+	if pid <= 0 {
+		return false
+	}
+	if !isProcessAlive(pid) {
+		return false
 	}
 	return true
 }

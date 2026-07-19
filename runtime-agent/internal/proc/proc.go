@@ -1,373 +1,536 @@
-// Package proc supervises long-running processes (Tomcat) and
-// short-lived ones (javac, ant). It enforces timeouts, captures
-// stdout/stderr, exposes start/stop/forceStop, and tracks the
-// PID and process group so we can clean up reliably on shutdown.
 package proc
 
 import (
-	"bufio"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
-	"strconv"
+	"path/filepath"
 	"sync"
-	"syscall"
 	"time"
+
+	"github.com/kairo-ide/runtime-agent/internal/domain"
 )
-
-// Process is a supervised process. It is safe to call Stop
-// concurrently with Wait.
-type Process struct {
-	mu        sync.Mutex
-	spec      Spec
-	cmd       *exec.Cmd
-	cancel    context.CancelFunc
-	state     State
-	exitErr   error
-	startedAt time.Time
-	stoppedAt time.Time
-	stdout    *ringBuffer
-	stderr    *ringBuffer
-	waitCh    chan struct{}
-}
-
-// State is the lifecycle state.
-type State string
 
 const (
-	StateNew     State = "new"
-	StateRunning State = "running"
-	StateStopped State = "stopped"
-	StateCrashed State = "crashed"
+	MaxLogLines = 10000
+	MaxLogBytes = 1024 * 1024
 )
 
-// Spec describes how to start a process.
-type Spec struct {
-	Name    string
-	Args    []string
-	Env     []string
-	Dir     string
-	// Stdin is set if you want to feed the process input.
-	Stdin io.Reader
-	// CaptureBufferLines is the size of the captured stdout/stderr
-	// ring buffer. Default 5000.
-	CaptureBufferLines int
-	// On Windows we cannot setpgid; this is a hint.
-	IsLongRunning bool
+type ProcessSpec struct {
+	Executable   string
+	Args         []string
+	Dir          string
+	Env          []string
+	LogDir       string
+	CatalinaBase string
+	MarkerToken  string
 }
 
-// New creates a process from spec but does not start it.
-func New(spec Spec) *Process {
-	if spec.CaptureBufferLines <= 0 {
-		spec.CaptureBufferLines = 5000
+type ProcessObservation struct {
+	PID              int
+	Identity         domain.ProcessIdentity
+	Running          bool
+	ExitCode         *int
+	IdentityMismatch bool
+}
+
+type LogListener func(line domain.LogLine)
+
+type Disposable interface {
+	Dispose()
+}
+
+type ManagedProcess interface {
+	Start(ctx context.Context, spec ProcessSpec) (ProcessObservation, error)
+	GracefulStop(ctx context.Context, identity domain.ProcessIdentity) error
+	ForceStop(ctx context.Context, identity domain.ProcessIdentity) error
+	Inspect(ctx context.Context, identity domain.ProcessIdentity) (ProcessObservation, error)
+	SubscribeLogs(listener LogListener) Disposable
+	Wait()
+}
+
+type procState int32
+
+const (
+	stateIdle procState = iota
+	stateStarting
+	stateRunning
+	stateStopping
+	stateStopped
+)
+
+type realOSProcess struct {
+	mu sync.Mutex
+
+	state       procState
+	cmd         *exec.Cmd
+	cancel      context.CancelFunc
+	startedAt   time.Time
+	stoppedAt   time.Time
+	exitCode    *int
+	exitErr     error
+	identity    domain.ProcessIdentity
+	waitCh      chan struct{}
+	waitClosed  sync.Once
+	logBuf      *ringLogBuffer
+	listeners   map[uint64]LogListener
+	listenerSeq uint64
+	generation  uint64
+}
+
+func New() ManagedProcess {
+	p := &realOSProcess{
+		state:     stateIdle,
+		waitCh:    make(chan struct{}),
+		logBuf:    newRingLogBuffer(MaxLogLines, MaxLogBytes),
+		listeners: make(map[uint64]LogListener),
 	}
-	return &Process{
-		spec:    spec,
-		stdout:  newRing(spec.CaptureBufferLines),
-		stderr:  newRing(spec.CaptureBufferLines),
-		waitCh:  make(chan struct{}),
-		state:   StateNew,
-	}
+	closeWaitCh(p)
+	return p
 }
 
-// Start launches the process. The spec from New is used.
-func (p *Process) Start(ctx context.Context) error {
-	return p.StartWithSpec(ctx, p.spec)
+func (p *realOSProcess) Wait() {
+	<-p.waitCh
 }
 
-// StartWithSpec launches the process with an explicit spec.
-// This lets a caller reuse a single Process value across
-// restarts.
-func (p *Process) StartWithSpec(ctx context.Context, spec Spec) error {
+func (p *realOSProcess) Start(ctx context.Context, spec ProcessSpec) (ProcessObservation, error) {
 	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.state != StateNew && p.state != StateStopped && p.state != StateCrashed {
-		return fmt.Errorf("cannot start: state is %s", p.state)
+	if p.state != stateIdle && p.state != stateStopped {
+		p.mu.Unlock()
+		return ProcessObservation{}, fmt.Errorf("cannot start: process already running or in transition")
 	}
-	// On restart, allocate a fresh waitCh. The previous wait()
-	// goroutine closed the old one; reusing it would panic with
-	// "close of closed channel" on the next stop.
-	if p.state != StateNew {
-		p.waitCh = make(chan struct{})
+
+	generation := p.generation + 1
+	p.generation = generation
+	p.waitCh = make(chan struct{})
+	p.waitClosed = sync.Once{}
+	p.state = stateStarting
+	p.exitCode = nil
+	p.exitErr = nil
+	p.logBuf = newRingLogBuffer(MaxLogLines, MaxLogBytes)
+	p.listeners = make(map[uint64]LogListener)
+
+	exePath, err := filepath.EvalSymlinks(spec.Executable)
+	if err != nil {
+		exePath = spec.Executable
 	}
-	cctx, cancel := context.WithCancel(ctx)
+
+	markerToken := spec.MarkerToken
+	if markerToken == "" {
+		markerToken = generateMarkerToken()
+	}
+	env := append([]string{}, spec.Env...)
+	env = append(env, "KAIRO_PROCESS_MARKER="+markerToken)
+
+	cctx, cancel := context.WithCancel(context.Background())
 	p.cancel = cancel
-	p.cmd = exec.CommandContext(cctx, p.cmdName(spec), spec.Args...)
+
+	cmd := exec.CommandContext(cctx, spec.Executable, spec.Args...)
 	if spec.Dir != "" {
-		p.cmd.Dir = spec.Dir
+		cmd.Dir = spec.Dir
 	}
-	if len(spec.Env) > 0 {
-		p.cmd.Env = append(os.Environ(), spec.Env...)
-	} else {
-		p.cmd.Env = os.Environ()
+	cmd.Env = append(os.Environ(), env...)
+	cmd.SysProcAttr = sysProcAttrForOS()
+
+	stdoutw := &captureWriter{
+		buf:        p.logBuf,
+		stream:     domain.LogStreamStdout,
+		generation: generation,
+		onLine:     p.dispatchLine,
 	}
-	if spec.Stdin != nil {
-		p.cmd.Stdin = spec.Stdin
+	stderrw := &captureWriter{
+		buf:        p.logBuf,
+		stream:     domain.LogStreamStderr,
+		generation: generation,
+		onLine:     p.dispatchLine,
 	}
-	p.cmd.Stdout = &captureWriter{r: p.stdout, stream: "stdout"}
-	p.cmd.Stderr = &captureWriter{r: p.stderr, stream: "stderr"}
-	// Detach the process from the parent's controlling terminal.
-	p.cmd.SysProcAttr = sysProcAttr()
-	if err := p.cmd.Start(); err != nil {
+	cmd.Stdout = stdoutw
+	cmd.Stderr = stderrw
+
+	if err := cmd.Start(); err != nil {
 		cancel()
-		return fmt.Errorf("start: %w", err)
+		p.state = stateStopped
+		p.stoppedAt = time.Now()
+		p.mu.Unlock()
+		closeWaitCh(p)
+		return ProcessObservation{}, fmt.Errorf("start: %w", err)
 	}
+
+	p.cmd = cmd
 	p.startedAt = time.Now()
-	p.state = StateRunning
-	go p.wait()
+	p.identity = domain.ProcessIdentity{
+		PID:          cmd.Process.Pid,
+		Executable:   exePath,
+		StartTime:    p.startedAt,
+		CatalinaBase: spec.CatalinaBase,
+		MarkerToken:  markerToken,
+	}
+	p.state = stateRunning
+	obs := ProcessObservation{
+		PID:      cmd.Process.Pid,
+		Identity: p.identity,
+		Running:  true,
+	}
+	p.mu.Unlock()
+
+	go p.waitExit(generation, stdoutw, stderrw)
+
+	return obs, nil
+}
+
+func (p *realOSProcess) waitExit(generation uint64, stdoutw, stderrw *captureWriter) {
+	err := p.cmd.Wait()
+	_ = stdoutw.Close()
+	_ = stderrw.Close()
+
+	p.mu.Lock()
+	if p.generation != generation {
+		p.mu.Unlock()
+		return
+	}
+	p.stoppedAt = time.Now()
+	if err != nil {
+		p.exitErr = err
+		var ee *exec.ExitError
+		if errors.As(err, &ee) {
+			code := ee.ExitCode()
+			p.exitCode = &code
+		} else {
+			code := -1
+			p.exitCode = &code
+		}
+	} else {
+		code := 0
+		p.exitCode = &code
+	}
+	p.state = stateStopped
+	if p.cancel != nil {
+		p.cancel()
+	}
+	p.mu.Unlock()
+
+	closeWaitCh(p)
+}
+
+func closeWaitCh(p *realOSProcess) {
+	p.waitClosed.Do(func() {
+		close(p.waitCh)
+	})
+}
+
+func (p *realOSProcess) GracefulStop(ctx context.Context, identity domain.ProcessIdentity) error {
+	p.mu.Lock()
+	if p.state != stateRunning || p.cmd == nil || p.cmd.Process == nil {
+		p.mu.Unlock()
+		return nil
+	}
+	currentIdentity := p.identity
+	pid := p.cmd.Process.Pid
+	p.state = stateStopping
+	p.mu.Unlock()
+
+	if !identityMatches(currentIdentity, identity) {
+		return domain.ErrProcessIdentityMismatch
+	}
+
+	if !verifyProcessIdentity(pid, currentIdentity) {
+		return domain.ErrProcessIdentityMismatch
+	}
+
+	_ = terminateProcessGroup(pid)
+
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-p.waitCh:
+			close(done)
+		case <-ctx.Done():
+			close(done)
+		}
+	}()
+	<-done
+
+	if ctx.Err() != nil {
+		return p.ForceStop(context.Background(), identity)
+	}
 	return nil
 }
 
-// PID returns the OS PID, or 0 if not started.
-func (p *Process) PID() int {
+func (p *realOSProcess) ForceStop(ctx context.Context, identity domain.ProcessIdentity) error {
 	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.cmd == nil || p.cmd.Process == nil {
-		return 0
-	}
-	return p.cmd.Process.Pid
-}
-
-// State returns the current state.
-func (p *Process) State() State {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.state
-}
-
-// StartedAt returns the time the process started.
-func (p *Process) StartedAt() time.Time {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.startedAt
-}
-
-// StoppedAt returns the time the process stopped.
-func (p *Process) StoppedAt() time.Time {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.stoppedAt
-}
-
-// ExitError returns the exit error if the process crashed or
-// returned non-zero.
-func (p *Process) ExitError() error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.exitErr
-}
-
-// Stop sends SIGTERM, waits up to timeout, then SIGKILL.
-func (p *Process) Stop(timeout time.Duration) error {
-	p.mu.Lock()
-	if p.state != StateRunning || p.cmd == nil || p.cmd.Process == nil {
+	if p.cmd == nil || p.cmd.Process == nil || p.state == stateStopped {
 		p.mu.Unlock()
 		return nil
 	}
 	pid := p.cmd.Process.Pid
+	currentIdentity := p.identity
+	p.state = stateStopping
 	p.mu.Unlock()
 
-	if err := terminateGroup(pid); err != nil && !errors.Is(err, os.ErrProcessDone) {
-		// Continue; the wait goroutine will reap.
-		_ = err
+	if !identityMatches(currentIdentity, identity) {
+		return domain.ErrProcessIdentityMismatch
 	}
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if p.State() != StateRunning {
-			return nil
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	_ = killGroup(pid)
-	// Final wait.
-	for time.Now().Before(deadline.Add(2 * time.Second)) {
-		if p.State() != StateRunning {
-			return nil
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	return errors.New("process did not stop in time")
-}
 
-// ForceStop sends SIGKILL immediately.
-func (p *Process) ForceStop() error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.cmd == nil || p.cmd.Process == nil {
+	if !verifyProcessIdentity(pid, currentIdentity) {
+		return domain.ErrProcessIdentityMismatch
+	}
+
+	_ = killProcessGroup(pid)
+
+	select {
+	case <-p.waitCh:
 		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
-	return killGroup(p.cmd.Process.Pid)
 }
 
-// Wait blocks until the process exits.
-func (p *Process) Wait() {
-	<-p.waitCh
-}
-
-// StdoutSnapshot returns captured stdout lines.
-func (p *Process) StdoutSnapshot() []string { return p.stdout.snapshot() }
-
-// StderrSnapshot returns captured stderr lines.
-func (p *Process) StderrSnapshot() []string { return p.stderr.snapshot() }
-
-// StdoutReader returns a reader that streams stdout.
-func (p *Process) StdoutReader() *io.PipeReader { return nil }
-
-// cmdName picks the binary from spec.Args[0].
-func (p *Process) cmdName(spec Spec) string {
-	if len(spec.Args) == 0 {
-		return spec.Name
-	}
-	return spec.Name
-}
-
-func (p *Process) wait() {
-	err := p.cmd.Wait()
+func (p *realOSProcess) Inspect(ctx context.Context, identity domain.ProcessIdentity) (ProcessObservation, error) {
 	p.mu.Lock()
-	p.stoppedAt = time.Now()
-	if err != nil {
-		p.exitErr = err
-		// Differentiate crash vs. stopped: if ExitCode == -1
-		// and we were killed, treat as stopped.
-		var ee *exec.ExitError
-		if errors.As(err, &ee) {
-			if ee.ExitCode() == -1 {
-				p.state = StateStopped
-			} else {
-				p.state = StateCrashed
-			}
-		} else {
-			p.state = StateCrashed
-		}
-	} else {
-		p.state = StateStopped
+	if p.state == stateIdle {
+		p.mu.Unlock()
+		return ProcessObservation{Running: false}, nil
 	}
-	close(p.waitCh)
+	currentIdentity := p.identity
+	pid := 0
+	var exitCode *int
+	running := false
+	if p.cmd != nil && p.cmd.Process != nil {
+		pid = p.cmd.Process.Pid
+	}
+	if p.state == stateRunning || p.state == stateStarting || p.state == stateStopping {
+		running = isProcessAlive(pid)
+	}
+	if p.state == stateStopped {
+		exitCode = p.exitCode
+		running = false
+	}
 	p.mu.Unlock()
-	if p.cancel != nil {
-		p.cancel()
+
+	mismatch := false
+	if running && pid > 0 {
+		if !identityMatches(currentIdentity, identity) {
+			mismatch = true
+		} else if !verifyProcessIdentity(pid, currentIdentity) {
+			mismatch = true
+		}
+	}
+
+	return ProcessObservation{
+		PID:              pid,
+		Identity:         currentIdentity,
+		Running:          running,
+		ExitCode:         exitCode,
+		IdentityMismatch: mismatch,
+	}, nil
+}
+
+func (p *realOSProcess) SubscribeLogs(listener LogListener) Disposable {
+	p.mu.Lock()
+	id := p.listenerSeq
+	p.listenerSeq++
+	p.listeners[id] = listener
+	existing := p.logBuf.snapshot()
+	p.mu.Unlock()
+
+	for _, line := range existing {
+		listener(line)
+	}
+
+	return &subscription{p: p, id: id}
+}
+
+func (p *realOSProcess) dispatchLine(line domain.LogLine) {
+	p.mu.Lock()
+	var ls []LogListener
+	for _, l := range p.listeners {
+		ls = append(ls, l)
+	}
+	p.mu.Unlock()
+	for _, l := range ls {
+		l(line)
 	}
 }
 
-// captureWriter writes to a ring buffer and (optionally) to
-// stderr. We do not stream to stderr by default to keep logs
-// clean; the supervisor attaches the buffer to a log.Logger.
-type captureWriter struct {
-	r      *ringBuffer
-	stream string
+func (p *realOSProcess) removeListener(id uint64) {
+	p.mu.Lock()
+	delete(p.listeners, id)
+	p.mu.Unlock()
 }
 
-func (c *captureWriter) Write(p []byte) (int, error) {
-	c.r.write(c.stream, p)
+type subscription struct {
+	p  *realOSProcess
+	id uint64
+}
+
+func (s *subscription) Dispose() {
+	s.p.removeListener(s.id)
+}
+
+func identityMatches(a, b domain.ProcessIdentity) bool {
+	if a.PID != b.PID {
+		return false
+	}
+	if a.MarkerToken != "" && b.MarkerToken != "" && a.MarkerToken != b.MarkerToken {
+		return false
+	}
+	return true
+}
+
+type captureWriter struct {
+	mu         sync.Mutex
+	buf        *ringLogBuffer
+	stream     domain.LogStream
+	generation uint64
+	onLine     func(domain.LogLine)
+	partial    []byte
+	closed     bool
+}
+
+func (w *captureWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.closed {
+		return len(p), nil
+	}
+	data := append(w.partial, p...)
+	lines := splitLinesInPlace(data, &w.partial)
+	for _, line := range lines {
+		ll := domain.LogLine{
+			Stream:     w.stream,
+			Time:       time.Now(),
+			Text:       line,
+			Generation: w.generation,
+		}
+		w.buf.append(ll)
+		if w.onLine != nil {
+			w.onLine(ll)
+		}
+	}
 	return len(p), nil
 }
 
-type ringBuffer struct {
-	mu      sync.Mutex
-	lines   []string
-	cap     int
-	next    int
-	full    bool
-}
-
-func newRing(cap int) *ringBuffer {
-	if cap <= 0 {
-		cap = 1000
+func (w *captureWriter) Close() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.closed {
+		return nil
 	}
-	return &ringBuffer{lines: make([]string, cap), cap: cap}
-}
-
-func (r *ringBuffer) write(stream string, p []byte) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	// Split on newlines, keep the partial line at the end.
-	for _, line := range splitLines(p) {
-		r.lines[r.next] = stream + ": " + line
-		r.next = (r.next + 1) % r.cap
-		if r.next == 0 {
-			r.full = true
+	w.closed = true
+	if len(w.partial) > 0 {
+		ll := domain.LogLine{
+			Stream:     w.stream,
+			Time:       time.Now(),
+			Text:       string(w.partial),
+			Generation: w.generation,
 		}
+		w.buf.append(ll)
+		if w.onLine != nil {
+			w.onLine(ll)
+		}
+		w.partial = nil
 	}
+	return nil
 }
 
-func splitLines(p []byte) []string {
-	var out []string
+func splitLinesInPlace(data []byte, leftover *[]byte) []string {
+	var lines []string
 	start := 0
-	for i, b := range p {
-		if b == '\n' {
-			line := string(p[start:i])
+	for i := 0; i < len(data); i++ {
+		if data[i] == '\n' {
+			line := data[start:i]
 			if len(line) > 0 && line[len(line)-1] == '\r' {
 				line = line[:len(line)-1]
 			}
-			out = append(out, line)
+			lines = append(lines, string(line))
 			start = i + 1
 		}
 	}
-	if start < len(p) {
-		out = append(out, string(p[start:]))
+	if start < len(data) {
+		*leftover = append((*leftover)[:0], data[start:]...)
+	} else {
+		*leftover = (*leftover)[:0]
 	}
-	return out
+	return lines
 }
 
-func (r *ringBuffer) snapshot() []string {
+type ringLogBuffer struct {
+	mu       sync.Mutex
+	lines    []domain.LogLine
+	cap      int
+	maxBytes int
+	bytes    int
+	start    int
+	count    int
+}
+
+func newRingLogBuffer(maxLines, maxBytes int) *ringLogBuffer {
+	if maxLines <= 0 {
+		maxLines = MaxLogLines
+	}
+	if maxBytes <= 0 {
+		maxBytes = MaxLogBytes
+	}
+	return &ringLogBuffer{
+		lines:    make([]domain.LogLine, maxLines),
+		cap:      maxLines,
+		maxBytes: maxBytes,
+	}
+}
+
+func (r *ringLogBuffer) append(line domain.LogLine) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if !r.full {
-		out := make([]string, r.next)
-		copy(out, r.lines[:r.next])
-		return out
+	lineBytes := len(line.Text)
+
+	for r.count > 0 && (r.bytes+lineBytes > r.maxBytes || r.count == r.cap) {
+		old := r.lines[r.start]
+		r.bytes -= len(old.Text)
+		r.lines[r.start] = domain.LogLine{}
+		r.start = (r.start + 1) % r.cap
+		r.count--
 	}
-	out := make([]string, r.cap)
-	copy(out, r.lines[r.next:])
-	copy(out[r.cap-r.next:], r.lines[:r.next])
-	return out
+
+	idx := (r.start + r.count) % r.cap
+	r.lines[idx] = line
+	r.bytes += lineBytes
+	r.count++
 }
 
-// ----------------- system process helpers -----------------
-// Platform-specific implementations of terminateGroup / killGroup /
-// signalGroup / IsAlive live in proc_unix.go and proc_windows.go.
-
-func terminateGroup(pid int) error {
-	return signalGroup(pid, terminateSignal())
-}
-
-func killGroup(pid int) error {
-	return signalGroup(pid, killSignal())
-}
-
-// sysProcAttr sets platform-specific detach flags.
-func sysProcAttr() *syscall.SysProcAttr {
-	return sysProcAttrForOS()
-}
-
-// IsAlive reports whether the process with the given PID is
-// alive on this system. Used by liveness checks.
-func IsAlive(pid int) bool {
-	return isProcessAlive(pid)
-}
-
-// PortDescription is a human-friendly port number for logs.
-func PortDescription(p int) string { return strconv.Itoa(p) }
-
-// ShortID returns a short id from a UUID-like string. We don't
-// use a real UUID library to keep deps small.
-func ShortID(s string) string {
-	if len(s) > 8 {
-		return s[:8]
+func (r *ringLogBuffer) snapshot() []domain.LogLine {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.count == 0 {
+		return nil
 	}
-	return s
-}
-
-// ReadLines is a helper that reads a reader as lines.
-func ReadLines(r io.Reader) []string {
-	var out []string
-	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
-	for scanner.Scan() {
-		out = append(out, scanner.Text())
+	out := make([]domain.LogLine, r.count)
+	for i := 0; i < r.count; i++ {
+		out[i] = r.lines[(r.start+i)%r.cap]
 	}
 	return out
 }
+
+func (r *ringLogBuffer) lineCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.count
+}
+
+func (r *ringLogBuffer) byteCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.bytes
+}
+
+func generateMarkerToken() string {
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+var _ io.Closer = (*captureWriter)(nil)
