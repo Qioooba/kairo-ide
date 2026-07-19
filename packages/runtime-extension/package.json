@@ -12,9 +12,10 @@
     "build": "tsc -p tsconfig.json",
     "clean": "rm -rf lib",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "test": "node --require ./test-setup.cjs --test src/browser/runtime.test.cjs src/browser/runtime-dynamic-routes.test.cjs",
+    "test": "node --test src/browser/runtime.test.cjs",
+    "test:dynamic": "node --test src/browser/runtime-dynamic-routes.test.cjs",
     "test:mocha": "mocha",
-    "test:all": "pnpm run test:mocha && pnpm run test"
+    "test:all": "pnpm run test:mocha && pnpm run test && pnpm run test:dynamic"
   },
   "dependencies": {
     "@kairo/protocol": "workspace:*",

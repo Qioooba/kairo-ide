@@ -4,6 +4,21 @@
  * Merged from the old KairoRuntimeImpl (runtime.ts) and the WebSocket event
  * layer. All API calls go through here; the rest of the IDE never issues
  * fetch() calls to /api/v1 directly.
+ *
+ * Auth contract (per docs/hotfix-windows-test-readiness.md 搂1):
+ *   - HTTP: every request (except /api/v1/health and /api/v1/endpoints)
+ *     carries `X-Kairo-Secret: <secret>`.
+ *   - WebSocket: the browser cannot set custom headers on a WS
+ *     upgrade, so the secret is carried as a WebSocket
+ *     subprotocol token: `new WebSocket(url, ["kairo-secret-v1",
+ *     secret])`. The server echoes the secret back as the
+ *     selected subprotocol.
+ *
+ * Endpoints discovery (per 搂2): the runtime client calls
+ * GET /api/v1/endpoints on first use to learn the dynamic
+ * host:port the agent bound. The frontend no longer hardcodes
+ * 18099 — every WS / EventStream URL is derived from the
+ * returned value.
  */
 
 import { injectable, postConstruct, inject } from '@theia/core/shared/inversify';
@@ -21,11 +36,40 @@ import {
 } from './runtime-errors';
 import { KairoErrorListener, KairoErrorListenerImpl } from './runtime';
 
+/** Subprotocol name the agent requires for WS auth. */
+export const KAIRO_WS_SUBPROTOCOL = 'kairo-secret-v1' as const;
+
+/**
+ * Response shape of GET /api/v1/endpoints. Kept local to
+ * this package so the change ships in worker 1's commit
+ * without touching the @kairo/protocol package (which
+ * belongs to the wire-protocol owner).
+ */
+export interface RuntimeEndpoints {
+  /** host:port for the /api/v1/* REST surface. */
+  http: string;
+  /** host:port for /api/v1/events (WebSocket). */
+  events: string;
+}
+
 export interface KairoRuntimeConfig {
   baseUrl: string;
   sessionToken?: string;
   csrfToken?: string;
-  /** Bearer token to send in `Authorization` for all requests. */
+  /**
+   * Agent shared secret. Sent as `X-Kairo-Secret` on every
+   * HTTP request and as a WebSocket subprotocol token on
+   * `/api/v1/events`. The frontend no longer uses
+   * `Authorization: Bearer` — that pattern is gone.
+   */
+  agentSecret?: string;
+  /**
+   * Backwards-compat alias for `agentSecret`. If both are
+   * set, `agentSecret` wins. Existing callers that still
+   * pass `bearerToken` keep working until the migration
+   * is complete.
+   * @deprecated use `agentSecret`
+   */
   bearerToken?: string;
   /** Default request timeout in ms. Defaults to 60_000. */
   defaultTimeoutMs?: number;
@@ -58,6 +102,14 @@ export class RuntimeConnectionService {
   private eventSocket: WebSocket | undefined;
   private sequence: number = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+  /**
+   * Cached host:port returned by GET /api/v1/endpoints. The
+   * frontend used to hardcode 18099; it now fetches this on
+   * first use and threads it through every WS / EventStream
+   * URL. Cached so the lookup is amortised.
+   */
+  private cachedEndpoints: RuntimeEndpoints | undefined;
+  private endpointsPromise: Promise<RuntimeEndpoints> | undefined;
 
   @postConstruct()
   protected init(): void {
@@ -79,7 +131,7 @@ export class RuntimeConnectionService {
   initialize(agentUrl: string, agentSecret: string): void {
     this.config = {
       baseUrl: agentUrl,
-      bearerToken: agentSecret,
+      agentSecret: agentSecret,
     };
   }
 
@@ -95,8 +147,17 @@ export class RuntimeConnectionService {
     return this.workspaceId;
   }
 
+  /**
+   * @deprecated use `setAgentSecret` — the `Authorization: Bearer`
+   * header is no longer used; secrets are sent as `X-Kairo-Secret`.
+   */
   setBearerToken(token: string | undefined): void {
-    this.config.bearerToken = token;
+    this.config.agentSecret = token;
+  }
+
+  /** Set the agent shared secret (sent as `X-Kairo-Secret`). */
+  setAgentSecret(secret: string | undefined): void {
+    this.config.agentSecret = secret;
   }
 
   baseUrl(): string {
@@ -105,6 +166,15 @@ export class RuntimeConnectionService {
 
   lastSeenHealth(): HealthResponse | undefined {
     return this.lastHealth;
+  }
+
+  /**
+   * The active agent secret, or undefined if none was
+   * configured. Sourced from either `agentSecret` (preferred)
+   * or the legacy `bearerToken` alias.
+   */
+  protected agentSecret(): string | undefined {
+    return this.config.agentSecret ?? this.config.bearerToken;
   }
 
   url(endpoint: string, init: KairoRequestInit = {}): string {
@@ -129,6 +199,90 @@ export class RuntimeConnectionService {
     return url;
   }
 
+  /**
+   * Discover the dynamic host:port the agent bound. Cached
+   * after the first successful call. If the call fails, the
+   * cache is left empty and the caller decides whether to
+   * fall back to a pre-configured baseUrl.
+   *
+   * Per docs/hotfix-windows-test-readiness.md 搂2, this is
+   * the single source of truth for the agent's address —
+   * the frontend must NOT hardcode 18099.
+   */
+  async fetchEndpoints(forceRefresh = false): Promise<RuntimeEndpoints> {
+    if (!forceRefresh && this.cachedEndpoints) {
+      return this.cachedEndpoints;
+    }
+    if (this.endpointsPromise) {
+      return this.endpointsPromise;
+    }
+    const base = this.config.baseUrl.replace(/\/$/, '');
+    const url = `${base}/api/v1/endpoints`;
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), this.config.defaultTimeoutMs ?? 5_000);
+    const promise = (async (): Promise<RuntimeEndpoints> => {
+      try {
+        const res = await fetch(url, {
+          method: 'GET',
+          headers: { Accept: 'application/json' },
+          credentials: 'omit',
+          signal: ctl.signal,
+        });
+        const text = await res.text();
+        if (!res.ok) {
+          throw new KairoError({
+            code: 'internal',
+            message: `GET /api/v1/endpoints failed: HTTP ${res.status}`,
+            httpStatus: res.status,
+            details: text.slice(0, 200),
+          });
+        }
+        let body: unknown;
+        try {
+          body = JSON.parse(text);
+        } catch (parseErr) {
+          throw new KairoError({
+            code: 'internal',
+            message: 'GET /api/v1/endpoints returned non-JSON',
+            details: text.slice(0, 200),
+            cause: parseErr,
+          });
+        }
+        const ep = (body as { payload?: RuntimeEndpoints; http?: string; events?: string } | null) ?? null;
+        // The agent returns an envelope; tolerate a bare object.
+        const payload = (ep && 'payload' in ep && ep.payload ? ep.payload : ep) as
+          | RuntimeEndpoints
+          | null;
+        if (!payload || typeof payload.http !== 'string' || typeof payload.events !== 'string') {
+          throw new KairoError({
+            code: 'internal',
+            message: 'GET /api/v1/endpoints response missing http/events',
+            details: text.slice(0, 200),
+          });
+        }
+        this.cachedEndpoints = payload;
+        return payload;
+      } finally {
+        clearTimeout(timer);
+      }
+    })();
+    this.endpointsPromise = promise;
+    try {
+      return await promise;
+    } finally {
+      this.endpointsPromise = undefined;
+    }
+  }
+
+  /**
+   * Drop the cached endpoints so the next call re-fetches.
+   * Called after a successful runtime restart, because the
+   * new agent process may have bound a different port.
+   */
+  invalidateEndpoints(): void {
+    this.cachedEndpoints = undefined;
+  }
+
   async request<E extends Endpoint | string>(
     endpoint: E,
     payload: unknown,
@@ -151,8 +305,11 @@ export class RuntimeConnectionService {
     if (this.config.csrfToken && method !== 'GET') {
       headers['X-Kairo-CSRF'] = this.config.csrfToken;
     }
-    if (this.config.bearerToken) {
-      headers['Authorization'] = 'Bearer ' + this.config.bearerToken;
+    const secret = this.agentSecret();
+    if (secret) {
+      // The contract (搂1.1) says the secret rides in
+      // `X-Kairo-Secret`, never in `Authorization: Bearer`.
+      headers['X-Kairo-Secret'] = secret;
     }
     if (method !== 'GET' && method !== 'HEAD') {
       headers['Content-Type'] = 'application/json';
@@ -211,17 +368,40 @@ export class RuntimeConnectionService {
     throw lastErr ?? new KairoError({ code: 'internal', message: 'unreachable' });
   }
 
+  /**
+   * Open the EventStream / WebSocket. The WS URL is built
+   * from the cached `RuntimeEndpoints.events` value (NOT
+   * the hardcoded 18099), and the secret rides in the
+   * subprotocol token per 搂1.2.
+   */
   openEvents(): EventStream {
-    const wsBase = this.config.baseUrl.replace(/^http/i, 'ws').replace(/\/$/, '');
+    // Fall back to the configured baseUrl if endpoints have
+    // not been fetched yet. The caller can call
+    // `fetchEndpoints()` separately to refresh.
+    const hostport = this.cachedEndpoints?.events ?? wsHostPortFromBase(this.config.baseUrl);
+    const wsBase = hostport.startsWith('ws://') || hostport.startsWith('wss://')
+      ? hostport
+      : `ws://${hostport}`;
     const wsUrl = `${wsBase}${PROTOCOL_VERSION_PATH}/events`;
-    return new EventStream(wsUrl, this.config.bearerToken);
+    return new EventStream(wsUrl, this.agentSecret());
   }
 
   // --- WebSocket event methods (from old RuntimeConnectionService) ---
 
+  /**
+   * Connect the legacy reconnecting WS used by the build /
+   * server views. The host:port is taken from the cached
+   * `RuntimeEndpoints.events` (NOT a hardcoded 18099), so
+   * this method works even when the agent bound a different
+   * port at startup.
+   */
   connectEvents(workspaceId: string, onEvent: (event: any) => void): void {
     this.disconnectEvents();
-    const wsUrl = `ws://127.0.0.1:18099/api/v1/events?workspaceId=${encodeURIComponent(workspaceId)}&after=${this.sequence}`;
+    const hostport = this.cachedEndpoints?.events ?? wsHostPortFromBase(this.config.baseUrl);
+    const wsBase = hostport.startsWith('ws://') || hostport.startsWith('wss://')
+      ? hostport
+      : `ws://${hostport}`;
+    const wsUrl = `${wsBase}${PROTOCOL_VERSION_PATH}/events?workspaceId=${encodeURIComponent(workspaceId)}&after=${this.sequence}`;
     this.eventSocket = new WebSocket(wsUrl);
     this.eventSocket.onmessage = (msg) => {
       try {
@@ -318,6 +498,19 @@ function uuidv4(): string {
 }
 
 /**
+ * Build a `host:port` string from a configured baseUrl
+ * (which is typically `http://127.0.0.1:18099` or
+ * `https://...`). Used as a fallback when
+ * `RuntimeEndpoints` is not yet cached.
+ */
+function wsHostPortFromBase(baseUrl: string): string {
+  const stripped = baseUrl
+    .replace(/^https?:\/\//i, '')
+    .replace(/\/$/, '');
+  return stripped || '127.0.0.1:0';
+}
+
+/**
  * A typed WebSocket subscription with exponential backoff
  * reconnect. The Theia side listens for log / build.progress /
  * deployment.progress / server.state events and re-emits them
@@ -334,7 +527,7 @@ export class EventStream {
   protected statusListeners = new Set<(s: 'connecting' | 'open' | 'disconnected' | 'closed') => void>();
   protected currentStatus: 'connecting' | 'open' | 'disconnected' | 'closed' = 'disconnected';
 
-  constructor(protected url: string, protected bearerToken?: string) {
+  constructor(protected url: string, protected agentSecret?: string) {
     this.connect();
   }
 
@@ -372,8 +565,15 @@ export class EventStream {
     this.setStatus('connecting');
     let ws: WebSocket;
     try {
-      ws = this.bearerToken
-        ? new WebSocket(this.url, [this.bearerToken])
+      // Per docs/hotfix-windows-test-readiness.md 搂1.2, the
+      // secret rides in a Sec-WebSocket-Protocol token. The
+      // server selects this subprotocol on upgrade and rejects
+      // anonymous connections.
+      const protocols = this.agentSecret
+        ? [KAIRO_WS_SUBPROTOCOL, this.agentSecret]
+        : [];
+      ws = protocols.length > 0
+        ? new WebSocket(this.url, protocols)
         : new WebSocket(this.url);
     } catch (_err) {
       this.scheduleReconnect();

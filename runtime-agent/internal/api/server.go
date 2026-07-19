@@ -88,6 +88,11 @@ type RestartConfig struct {
 	// OnShutdown is called after writing the 200 response.
 	// Typically this is container.Shutdown. Optional.
 	OnShutdown func(ctx context.Context) error
+	// NoExec skips the spawn-and-exit phase. Used by unit
+	// tests that want to exercise the 200-response and
+	// OnShutdown hook without actually replacing the test
+	// process. Production code MUST leave this false.
+	NoExec bool
 }
 
 // Services is the bag of dependencies the handlers use. Set
@@ -152,7 +157,13 @@ func (s *Server) SetRestartConfig(rc RestartConfig) {
 }
 
 // Handler returns the underlying http.Handler. Useful in tests.
-func (s *Server) Handler() http.Handler { return s.router }
+// Handler returns the http.Handler that should be exposed to
+// callers, including the security / logging / audit middleware.
+// Callers (tests, ListenAndServe) must use this rather than
+// s.router directly — the bare router skips secret checks and
+// request-id propagation, so production and test paths must
+// match.
+func (s *Server) Handler() http.Handler { return s.middleware(s.router) }
 
 // ListenAndServe starts the HTTP server. addr is "host:port".
 func (s *Server) ListenAndServe(addr string, tlsCert, tlsKey string) error {
@@ -164,7 +175,7 @@ func (s *Server) ListenAndServe(addr string, tlsCert, tlsKey string) error {
 	}
 	s.httpServer = &http.Server{
 		Addr:              addr,
-		Handler:           s.middleware(s.router),
+		Handler:           s.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      60 * time.Second,
@@ -331,8 +342,11 @@ func (s *Server) doRestart() {
 		s.logger.Warn("restart: http shutdown returned error", log.Fields{"err": err.Error()})
 	}
 
-	// 3. Spawn a fresh process with the original args.
-	if rc.Executable != "" || rc.Args != nil {
+	// 3. Spawn a fresh process with the original args. Skip
+	//    when NoExec is set (unit tests that don't want to
+	//    replace the test process) or when neither the
+	//    executable nor the args are configured.
+	if !rc.NoExec && (rc.Executable != "" || rc.Args != nil) {
 		exe := rc.Executable
 		if exe == "" {
 			if e, err := os.Executable(); err == nil {
@@ -367,8 +381,11 @@ func (s *Server) doRestart() {
 
 	// 4. Exit the current process cleanly so the new one takes
 	//    over the port and any other resources. A 0 exit is
-	//    what the contract expects.
-	os.Exit(0)
+	//    what the contract expects. Skipped in test mode
+	//    (NoExec) so the unit test doesn't tear itself down.
+	if !rc.NoExec {
+		os.Exit(0)
+	}
 }
 
 // ----------------- helpers -----------------

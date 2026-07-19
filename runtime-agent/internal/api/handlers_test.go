@@ -316,6 +316,7 @@ func TestRuntimeRestart_Sends200AndKicksOffAsync(t *testing.T) {
 	srv.SetRestartConfig(RestartConfig{
 		Args:            []string{"--config", "test"},
 		ShutdownTimeout: 100 * time.Millisecond,
+		NoExec:          true, // unit test: don't actually replace the test process
 		OnShutdown: func(ctx context.Context) error {
 			select {
 			case shutdownCalled <- struct{}{}:

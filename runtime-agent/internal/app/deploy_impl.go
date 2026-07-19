@@ -5,7 +5,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"syscall"
 
 	"github.com/kairo-ide/runtime-agent/internal/domain"
 	"github.com/kairo-ide/runtime-agent/internal/security"
@@ -272,5 +271,9 @@ func fsyncDir(dir string) error {
 	return f.Sync()
 }
 
-// Ensure syscall import is used (for cross-platform builds that need it)
-var _ = syscall.Flock
+// Compile-time marker: deploy_impl previously used syscall.Flock
+// for cross-platform file locking. We dropped that because
+// syscall.Flock does not exist on Windows. The deploy engine
+// now relies on os.OpenFile's exclusive semantics + retry on
+// ERROR_SHARING_VIOLATION. This comment keeps the history
+// searchable.
