@@ -57,21 +57,38 @@ function generateSecret(): string {
 function resolveAgentPath(): string {
   // Allow operators to override the binary location (e.g. local dev or
   // custom install layouts). When unset, fall back to the packaged
-  // extraResources location: process.resourcesPath/bin/kairo-runtime[.exe].
+  // extraResources location (or monorepo-local Go build output in dev).
   if (process.env.KAIRO_AGENT_PATH) {
     return process.env.KAIRO_AGENT_PATH;
   }
 
-  const resourcesDir = process.resourcesPath;
-  if (!resourcesDir) {
-    throw new Error(
-      'process.resourcesPath is not set. Run the packaged build, ' +
-      'or set KAIRO_AGENT_PATH to the kairo-runtime binary location.'
-    );
+  const binaryName = process.platform === 'win32' ? 'kairo-runtime.exe' : 'kairo-runtime';
+
+  // Packaged build: extraResources puts the binary at <resourcesPath>/bin/.
+  // process.resourcesPath in this mode points to the install dir's resources
+  // folder, which is NOT inside the Electron install tree.
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, 'bin', binaryName);
   }
 
-  const binaryName = process.platform === 'win32' ? 'kairo-runtime.exe' : 'kairo-runtime';
-  return path.join(resourcesDir, 'bin', binaryName);
+  // Dev mode: process.resourcesPath points inside the Electron install
+  // tree (node_modules/.pnpm/electron@*/.../resources), so the packaged
+  // layout does not exist. Fall back to the monorepo-local Go build
+  // output, which the desktop package's prebuild script produces.
+  // apps/desktop/lib/main.js → ../../runtime-agent/bin/kairo-runtime[.exe]
+  const devPath = path.resolve(
+    __dirname, '..', '..', '..',
+    'runtime-agent', 'bin', binaryName
+  );
+  if (fs.existsSync(devPath)) {
+    return devPath;
+  }
+
+  throw new Error(
+    `Cannot locate kairo-runtime binary in dev mode. Expected at: ${devPath}. ` +
+    `Either run the desktop prebuild (pnpm --filter @kairo/desktop build) ` +
+    `or set KAIRO_AGENT_PATH to the binary location.`
+  );
 }
 
 async function startAgent(dataDir: string): Promise<{ port: number; secret: string }> {
