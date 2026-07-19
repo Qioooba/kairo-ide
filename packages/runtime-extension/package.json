@@ -12,8 +12,8 @@
     "build": "tsc -p tsconfig.json",
     "clean": "rm -rf lib",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "test": "node --test src/browser/runtime.test.cjs",
-    "test:dynamic": "node --test src/browser/runtime-dynamic-routes.test.cjs",
+    "test": "node --require ./test-setup.cjs --test src/browser/runtime.test.cjs",
+    "test:dynamic": "node --require ./test-setup.cjs --test src/browser/runtime-dynamic-routes.test.cjs",
     "test:mocha": "mocha",
     "test:all": "pnpm run test:mocha && pnpm run test && pnpm run test:dynamic"
   },

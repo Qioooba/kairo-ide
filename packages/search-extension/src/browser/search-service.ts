@@ -3,7 +3,7 @@
  * debounced, cancellable API. The widget binds to this.
  */
 
-import { injectable, inject } from '@theia/core/shared/inversify';
+import { injectable, inject, interfaces } from '@theia/core/shared/inversify';
 import type { SearchRequest, SearchResponse } from '@kairo/protocol';
 import { RuntimeConnectionService } from '@kairo/runtime-extension';
 
@@ -65,6 +65,6 @@ export class KairoSearchService {
   }
 }
 
-export function bindSearchExtension(bind: any): void {
+export function bindSearchExtension(bind: interfaces.Bind): void {
   bind(KairoSearchService).toSelf().inSingletonScope();
 }

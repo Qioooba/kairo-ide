@@ -11,6 +11,8 @@
  * `/api/v2`.
  */
 
+export { findFreePort } from './network';
+
 export const PROTOCOL_VERSION = 'v1' as const;
 export const PROTOCOL_VERSION_PATH = '/api/v1' as const;
 
@@ -516,34 +518,66 @@ export interface AuditEvent {
 /* ------------------------------------------------------------------ */
 
 export interface EndpointMap {
+  // Workspaces
   'GET /api/v1/workspaces': { request: undefined; response: Workspace[] };
   'POST /api/v1/workspaces': {
     request: { rootPath: string; name?: string };
     response: Workspace;
   };
+  'DELETE /api/v1/workspaces/{workspaceId}': { request: undefined; response: void };
   'POST /api/v1/workspaces/{workspaceId}/scan': {
     request: { deep?: boolean };
     response: { detected: DetectedProjectLayout[] };
   };
+  'POST /api/v1/workspaces/{workspaceId}/java/prepare': {
+    request: { projectId: string };
+    response: unknown;
+  };
+  'GET /api/v1/workspaces/{workspaceId}/java/launch-descriptor': {
+    request: { projectId: string };
+    response: unknown;
+  };
+  // Projects
   'GET /api/v1/projects': { request: undefined; response: ProjectConfig[] };
   'GET /api/v1/projects/{projectId}': { request: undefined; response: ProjectConfig };
   'PUT /api/v1/projects/{projectId}': { request: { config: ProjectConfig }; response: ProjectConfig };
+  // Builds
   'GET /api/v1/builds': { request: undefined; response: BuildResult[] };
   'POST /api/v1/builds': { request: StartBuildRequest; response: BuildResult };
   'GET /api/v1/builds/{buildId}': { request: undefined; response: BuildResult };
   'DELETE /api/v1/builds/{buildId}': { request: undefined; response: BuildResult };
+  // Deployments
   'GET /api/v1/deployments': { request: undefined; response: DeploymentResult[] };
   'POST /api/v1/deployments': { request: StartDeploymentRequest; response: DeploymentResult };
   'GET /api/v1/deployments/{deploymentId}': { request: undefined; response: DeploymentResult };
+  // Servers
   'GET /api/v1/servers': { request: undefined; response: ServerInstance[] };
   'POST /api/v1/servers': { request: StartServerRequest; response: ServerInstance };
   'GET /api/v1/servers/{serverId}': { request: undefined; response: ServerInstance };
   'POST /api/v1/servers/{serverId}/restart': { request: undefined; response: ServerInstance };
-  'DELETE /api/v1/servers/{serverId}': { request: undefined; response: ServerInstance };
+  'POST /api/v1/servers/{serverId}/debug': { request: undefined; response: ServerInstance };
+  'DELETE /api/v1/servers/{serverId}': { request: { force?: boolean }; response: ServerInstance };
   'GET /api/v1/servers/{serverId}/logs': {
     request: { follow?: boolean; since?: number };
     response: { line: string; ts: string }[];
   };
+  // Search
+  'POST /api/v1/search': { request: SearchRequest; response: SearchResponse };
+  // Toolchains
+  'GET /api/v1/toolchains': { request: undefined; response: Toolchain[] };
+  'POST /api/v1/toolchains/import': {
+    request: { path: string; label?: string };
+    response: Toolchain;
+  };
+  // JDT LS
+  'GET /api/v1/jdtls': { request: undefined; response: JdtStatus };
+  'POST /api/v1/jdtls': { request: JdtStartRequest; response: JdtStatus };
+  'DELETE /api/v1/jdtls': { request: undefined; response: JdtStatus };
+  'POST /api/v1/jdtls/project': { request: JdtProjectRequest; response: JdtProjectResponse };
+  // Encoding
+  'POST /api/v1/encoding/detect': { request: EncodingDetectRequest; response: EncodingDetectResponse };
+  'POST /api/v1/encoding/recode': { request: EncodingRecodeRequest; response: void };
+  'POST /api/v1/encoding/validate': { request: EncodingValidateRequest; response: EncodingValidateResponse };
 }
 
 export interface DetectedProjectLayout {
@@ -599,6 +633,25 @@ export type WsEvent =
       fields?: Record<string, unknown>;
     }
   | { type: 'audit'; event: AuditEvent };
+
+/* ------------------------------------------------------------------ */
+/*  Shared display helpers                                             */
+/* ------------------------------------------------------------------ */
+
+export interface StateDisplay {
+    label: string;
+    icon: string;
+    color: string;
+}
+
+export function mapBuildState(state: string): StateDisplay {
+    switch (state) {
+        case 'running': return { label: 'Running', icon: 'circle-filled', color: 'var(--theia-successForeground)' };
+        case 'failed': return { label: 'Failed', icon: 'error', color: 'var(--theia-errorForeground)' };
+        case 'stopped': return { label: 'Stopped', icon: 'circle-outline', color: 'var(--theia-disabledForeground)' };
+        default: return { label: state, icon: 'circle-outline', color: 'var(--theia-foreground)' };
+    }
+}
 
 /* ------------------------------------------------------------------ */
 /*  Helpers (re-exported from index)                                   */

@@ -43,6 +43,7 @@ import type {
   DeploymentResult,
   WsEvent,
 } from '@kairo/protocol';
+import { mapBuildState } from '@kairo/protocol';
 
 /* ------------------------------------------------------------------ */
 /*  Commands                                                            */
@@ -324,7 +325,9 @@ export class KairoViewsContribution implements FrontendApplicationContribution {
     try {
       const list = (await this.runtime.request('GET /api/v1/builds', undefined)) as BuildResult[];
       if (Array.isArray(list)) {
-        this.buildStore.setBuilds(list.map(b => ({
+        this.buildStore.setBuilds(list.map(b => {
+          mapBuildState(b.state);
+          return {
           id: b.id,
           workspaceId: this.runtime.workspace(),
           projectId: '',

@@ -9,8 +9,10 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/kairo-ide/runtime-agent/internal/api"
@@ -57,6 +59,27 @@ func run() error {
 		"version": agentVersion,
 		"config":  cfg.String(),
 	})
+
+	// Dev-mode diagnostics: pprof + periodic memstats.
+	if os.Getenv("KAIRO_DEV") == "1" {
+		go func() {
+			logger.Info("pprof listening on 127.0.0.1:6060", nil)
+			http.ListenAndServe("127.0.0.1:6060", nil)
+		}()
+		go func() {
+			ticker := time.NewTicker(60 * time.Second)
+			defer ticker.Stop()
+			for range ticker.C {
+				var m runtime.MemStats
+				runtime.ReadMemStats(&m)
+				logger.Info("memstats", map[string]any{
+					"heapAllocMB":  m.HeapAlloc / 1024 / 1024,
+					"numGoroutine": runtime.NumGoroutine(),
+					"numGC":        m.NumGC,
+				})
+			}
+		}()
+	}
 
 	// Audit log: in dev we log to <DataDir>/audit.log.ndjson.
 	auditLog, err := audit.New(filepath.Join(cfg.DataDir, "audit.log.ndjson"))

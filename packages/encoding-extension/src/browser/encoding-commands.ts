@@ -18,7 +18,7 @@
  * contribution on startup.
  */
 
-import { injectable, inject } from '@theia/core/shared/inversify';
+import { injectable, inject, interfaces } from '@theia/core/shared/inversify';
 import { QuickInputService, ApplicationShell } from '@theia/core/lib/browser';
 import {
   Command,
@@ -169,6 +169,6 @@ export class KairoEncodingCommandsContribution implements CommandContribution {
   }
 }
 
-export function bindEncodingCommands(bind: any): void {
+export function bindEncodingCommands(bind: interfaces.Bind): void {
   bind(KairoEncodingCommandsContribution).toSelf().inSingletonScope();
 }

@@ -174,3 +174,15 @@ if (doc) {
     });
   }
 }
+
+// 4. Theia requires FrontendApplicationConfigProvider to be set
+//    before any browser module is loaded. The runtime-extension
+//    transitively imports @theia/core browser modules, so this
+//    must be set during the --require phase.
+const { FrontendApplicationConfigProvider } = require('@theia/core/lib/browser/frontend-application-config-provider');
+FrontendApplicationConfigProvider.set({
+  defaultTheme: 'dark',
+  defaultIconTheme: 'theia-file-icons',
+  applicationName: 'Kairo',
+  validatePreferencesSchema: true,
+});

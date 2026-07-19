@@ -11,6 +11,7 @@ package services
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -1483,10 +1484,38 @@ func (a *diskAuthenticator) Login(payload json.RawMessage, w http.ResponseWriter
 	if req.Username == "" || req.Password == "" {
 		return nil, errors.New("username and password required")
 	}
-	// Trusted-local mode: accept any non-empty pair. Real password
-	// hashing is deferred (see DELIVERY.md P2-2). Until real auth
-	// exists, this agent MUST NOT be exposed beyond trusted
-	// loopback; RequireAuth only gates the login endpoint.
+
+	// 从环境变量读取凭证配置
+	authUser := os.Getenv("KAIRO_AUTH_USER")
+	authPassHash := os.Getenv("KAIRO_AUTH_PASSWORD") // SHA256 hex hash
+	sharedSecret := os.Getenv("KAIRO_SECRET")
+
+	if authUser != "" {
+		// 配置了用户名+密码哈希验证
+		if req.Username != authUser {
+			return nil, fmt.Errorf("invalid credentials")
+		}
+		expectedHash := authPassHash
+		if expectedHash == "" {
+			// 未配置密码哈希，允许任意密码
+			a.logger.Warn("KAIRO_AUTH_USER set but KAIRO_AUTH_PASSWORD not set, accepting any password")
+		} else {
+			hash := sha256.Sum256([]byte(req.Password))
+			actualHash := hex.EncodeToString(hash[:])
+			if actualHash != expectedHash {
+				return nil, fmt.Errorf("invalid credentials")
+			}
+		}
+	} else if sharedSecret != "" {
+		// 配置了 shared secret
+		if req.Password != sharedSecret {
+			return nil, fmt.Errorf("invalid credentials")
+		}
+	} else {
+		// 开发模式：未配置任何凭证，允许任意登录但打印警告
+		a.logger.Warn("no auth credentials configured (set KAIRO_AUTH_USER/KAIRO_AUTH_PASSWORD or KAIRO_SECRET), accepting any login")
+	}
+
 	tokenBytes := make([]byte, 32)
 	if _, err := rand.Read(tokenBytes); err != nil {
 		return nil, fmt.Errorf("generate session token: %w", err)

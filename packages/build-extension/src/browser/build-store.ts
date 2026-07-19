@@ -37,6 +37,7 @@ export class BuildStore {
     private builds: BuildRun[] = [];
     private readonly onDidChangeEmitter = new Emitter<BuildRun[]>();
     readonly onDidChange: Event<BuildRun[]> = this.onDidChangeEmitter.event;
+    private eventsUnsubscribe?: () => void;
 
     @postConstruct()
     protected async init(): Promise<void> {
@@ -71,7 +72,7 @@ export class BuildStore {
 
         // Subscribe to events
         if (ctx) {
-            this.runtimeConnection.connectEvents(ctx.workspaceId, (event: any) => {
+            this.eventsUnsubscribe = this.runtimeConnection.subscribeEvents(ctx.workspaceId, (event: any) => {
                 if (event.type === 'build.progress') {
                     const state = event.state as string;
                     const mappedState = state === 'success' ? 'succeeded' as const
@@ -96,7 +97,7 @@ export class BuildStore {
     }
 
     addBuild(build: BuildRun): void {
-        this.builds = [...this.builds, build];
+        this.builds = [...this.builds, build].slice(-200);
         this.onDidChangeEmitter.fire(this.getBuilds());
     }
 
@@ -113,5 +114,10 @@ export class BuildStore {
     clearHistory(): void {
         this.builds = [];
         this.onDidChangeEmitter.fire([]);
+    }
+
+    dispose(): void {
+        this.eventsUnsubscribe?.();
+        this.onDidChangeEmitter.dispose();
     }
 }

@@ -150,7 +150,7 @@ export class KairoEncodingServiceImpl {
    */
   setEncodingFor(uri: URI, encoding: string): SetEncodingResult {
     if (!KAIRO_ENCODING_OPTIONS.includes(encoding) && !encoding.match(/^[a-z0-9-]+$/i)) {
-      throw new Error(`unknown encoding: ${encoding}`);
+      throw new KairoError({ code: 'invalid_request', message: `unknown encoding: ${encoding}` });
     }
     const prev = this.encodingRegistry.getEncodingForResource(uri);
     this.encodingRegistry.registerOverride({

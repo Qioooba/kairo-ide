@@ -7,6 +7,12 @@
  * reach into the DOM to extract the Inversify container; the
  * proper composition is done via the Theia ContainerModule
  * loaded by the product package.
+ *
+ * @deprecated configureKairoRuntime is no longer needed — the
+ * service-layer bindings are now composed inside
+ * KairoProductFrontend (loaded by the Theia browser app as the
+ * default export of @kairo/theia-product). Calling this function
+ * manually is a no-op if the module has already been loaded.
  */
 
 import { Container } from '@theia/core/shared/inversify';
@@ -17,10 +23,15 @@ import { KairoServerService } from '@kairo/tomcat-extension';
 import { KairoSearchService } from '@kairo/search-extension';
 import { KairoJavaService } from '@kairo/java-extension';
 
-// Hook used by the Theia browser app to load Kairo's frontend
-// services. The actual Theia composition happens in
-// packages/theia-product/src/browser/product.ts (which uses
-// theia/lib/browser's FrontendApplicationContribution pattern).
+/**
+ * @deprecated Since KairoProductFrontend now composes the
+ * service-layer bindings (via bindKairoProduct) and configures
+ * the RuntimeConnectionService on activation, this function is
+ * no longer required. It is kept for backward compatibility
+ * with any code that may still call it, but the DI container
+ * will already be fully populated when the Theia browser app
+ * loads @kairo/theia-product.
+ */
 export function configureKairoRuntime(container: Container, baseUrl: string = RUNTIME_BASE_URL): void {
   // Bind Kairo's product modules.
   container.load(KairoProduct);

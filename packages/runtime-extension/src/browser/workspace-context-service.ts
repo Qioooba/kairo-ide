@@ -1,7 +1,9 @@
 import { injectable, postConstruct, inject } from '@theia/core/shared/inversify';
 import { Emitter, Event } from '@theia/core/lib/common/event';
+import { Disposable } from '@theia/core/lib/common/disposable';
 import { WorkspaceService } from '@theia/workspace/lib/browser/workspace-service';
 import { RuntimeConnectionService } from './runtime-connection-service';
+import { KairoError } from './runtime-errors';
 
 export interface WorkspaceContext {
     workspaceId: string;
@@ -13,6 +15,7 @@ export class WorkspaceContextService {
     private currentContext: WorkspaceContext | undefined;
     private readonly onDidChangeContextEmitter = new Emitter<WorkspaceContext | undefined>();
     readonly onDidChangeContext: Event<WorkspaceContext | undefined> = this.onDidChangeContextEmitter.event;
+    private toDispose: Disposable | undefined;
 
     @inject(WorkspaceService)
     protected readonly workspaceService!: WorkspaceService;
@@ -22,7 +25,7 @@ export class WorkspaceContextService {
 
     @postConstruct()
     protected async init(): Promise<void> {
-        this.workspaceService.onWorkspaceChanged(async (roots) => {
+        this.toDispose = this.workspaceService.onWorkspaceChanged(async (roots) => {
             if (roots.length === 0) {
                 this.currentContext = undefined;
                 this.onDidChangeContextEmitter.fire(undefined);
@@ -75,6 +78,11 @@ export class WorkspaceContextService {
         }
     }
 
+    dispose(): void {
+        this.toDispose?.dispose();
+        this.onDidChangeContextEmitter.dispose();
+    }
+
     get context(): WorkspaceContext | undefined {
         return this.currentContext;
     }
@@ -87,7 +95,7 @@ export class WorkspaceContextService {
 
     requireContext(): WorkspaceContext {
         if (!this.currentContext) {
-            throw new Error('No workspace is open');
+            throw new KairoError({ code: 'invalid_request', message: 'No workspace is open' });
         }
         return this.currentContext;
     }

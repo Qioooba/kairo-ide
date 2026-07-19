@@ -6,7 +6,8 @@
   "main": "lib/index.js",
   "theia": {
     "target": ["browser"],
-    "frontendPrefix": "/"
+    "frontendPrefix": "/",
+    "applicationName": "Kairo IDE"
   },
   "scripts": {
     "build": "theia build --mode production",
