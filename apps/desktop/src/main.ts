@@ -32,6 +32,47 @@ let theiaPort: number = 0;
 let mainWindow: BrowserWindow | null = null;
 let isQuitting = false;
 
+// File-based logger. Electron on Windows detaches from the parent's
+// stdout when launched as a GUI app, which makes `pnpm start | tee`
+// unreliable for debugging. This mirrors every console.log/warn/error
+// to artifacts/desktop-main.log so we can post-mortem the launch.
+let mainLogPath: string | undefined;
+function flog(...args: unknown[]): void {
+  const text = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
+  if (mainLogPath) {
+    try {
+      fs.appendFileSync(mainLogPath, text + '\n');
+    } catch { /* log dir gone; just skip */ }
+  }
+}
+
+function initFileLogger(): void {
+  if (process.env.KAIRO_DESKTOP_LOG_FILE) {
+    mainLogPath = process.env.KAIRO_DESKTOP_LOG_FILE;
+  } else {
+    // Default to <repo>/artifacts/desktop-main.log when present,
+    // otherwise a temp path. Falling back to a temp path is fine
+    // because the only caller passing nothing is the packaged
+    // build, where the OS log facility takes over.
+    const candidate = path.join(__dirname, '..', '..', '..', 'artifacts', 'desktop-main.log');
+    try {
+      fs.mkdirSync(path.dirname(candidate), { recursive: true });
+      mainLogPath = candidate;
+    } catch {
+      mainLogPath = undefined;
+    }
+  }
+  // Mirror console to file for the lifetime of the main process.
+  const wrap = (orig: (...a: unknown[]) => void) => (...args: unknown[]) => {
+    orig.apply(console, args);
+    flog(...args);
+  };
+  console.log = wrap(console.log);
+  console.warn = wrap(console.warn);
+  console.error = wrap(console.error);
+  console.info = wrap(console.info);
+}
+
 // ─── Secret Generation ────────────────────────────────────────
 
 function generateSecret(): string {
@@ -184,13 +225,19 @@ function stopAgent(): void {
 // ─── Theia Backend ────────────────────────────────────────────
 
 async function startTheiaBackend(): Promise<number> {
-  const port = await findFreePort();
-
   // Theia backend entry, copied from apps/browser/lib/backend/main.js
   // into apps/desktop/lib/backend/main.js by copy-browser-artifacts.js.
   const theiaEntry = path.join(__dirname, 'backend', 'main.js');
 
-  console.log(`[kairo] Starting Theia backend: ${theiaEntry} on port ${port}`);
+  // We do NOT pre-allocate a port for Theia because the bundle
+  // entry that we spawn directly does not parse theia CLI argv on
+  // its own — it ignores THEIA_PORT (and any --port flag we pass)
+  // and binds to a port Theia itself picks (often a random
+  // ephemeral port, surfaced only via the "Theia app listening
+  // on http://127.0.0.1:NNN" log line). See MILESTONES.md N-021.
+  // We therefore spawn Theia, then discover the port from its
+  // stdout/stderr logs, then health-check that port.
+  console.log(`[kairo] Starting Theia backend: ${theiaEntry}`);
 
   theiaProcess = spawn(process.execPath, [theiaEntry], {
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -199,23 +246,34 @@ async function startTheiaBackend(): Promise<number> {
       // Run Electron as plain Node.js so the Theia backend can use
       // require() / CommonJS without the Chromium runtime overhead.
       ELECTRON_RUN_AS_NODE: '1',
-      // The Theia backend binds to THEIA_PORT. The value is also
-      // surfaced via the runtime agent's /api/v1/endpoints response
-      // (see docs/hotfix-windows-test-readiness.md §2) so the renderer
-      // discovers it dynamically.
-      THEIA_PORT: String(port),
       KAIRO_AGENT_URL: `http://127.0.0.1:${agentPort}`,
       KAIRO_AGENT_SECRET: agentSecret,
     },
   });
 
-  theiaProcess.stdout?.on('data', (data: Buffer) => {
-    process.stdout.write(`[theia] ${data}`);
-  });
+  // Capture stdout/stderr to find the port Theia picked. Theia
+  // logs `... listening on http://127.0.0.1:NNNN.` (or similar)
+  // once the HTTP server is up. We regex that out of either
+  // stream because Theia 1.73 has historically emitted it on
+  // different streams across versions.
+  let discoveredPort: number | undefined;
+  const portRegex = /listening on (?:https?:\/\/)?(?:[^\s/:]+):(\d{2,5})/i;
+  const collectData = (data: Buffer) => {
+    const text = data.toString('utf8');
+    process.stdout.write(`[theia] ${text}`);
+    if (discoveredPort === undefined) {
+      const m = portRegex.exec(text);
+      if (m) {
+        const p = Number.parseInt(m[1], 10);
+        if (Number.isInteger(p) && p > 0 && p < 65536) {
+          discoveredPort = p;
+        }
+      }
+    }
+  };
 
-  theiaProcess.stderr?.on('data', (data: Buffer) => {
-    process.stderr.write(`[theia] ${data}`);
-  });
+  theiaProcess.stdout?.on('data', collectData);
+  theiaProcess.stderr?.on('data', collectData);
 
   theiaProcess.on('error', (err: Error) => {
     console.error(`[kairo] Theia process error: ${err.message}`);
@@ -228,10 +286,10 @@ async function startTheiaBackend(): Promise<number> {
     theiaProcess = null;
   });
 
-  // Wait for Theia to be ready
-  const healthURL = `http://127.0.0.1:${port}`;
+  // Wait for Theia to be ready: discover port from logs, then
+  // poll that port's HTTP server.
   const startTime = Date.now();
-  const timeout = 30_000;
+  const timeout = 45_000;
 
   await new Promise<void>((resolve, reject) => {
     const check = () => {
@@ -239,9 +297,14 @@ async function startTheiaBackend(): Promise<number> {
         reject(new Error('Theia process died before becoming ready'));
         return;
       }
+      if (discoveredPort === undefined) {
+        retryOrReject(new Error('Waiting for Theia to log its listen port'));
+        return;
+      }
+      const healthURL = `http://127.0.0.1:${discoveredPort}`;
       const req = http.get(healthURL, (res) => {
         res.resume();
-        if (res.statusCode === 200) {
+        if (res.statusCode && res.statusCode < 500) {
           resolve();
         } else {
           retryOrReject(new Error(`Theia returned status ${res.statusCode}`));
@@ -267,9 +330,9 @@ async function startTheiaBackend(): Promise<number> {
     check();
   });
 
-  theiaPort = port;
-  console.log(`[kairo] Theia backend ready on port ${port}`);
-  return port;
+  theiaPort = discoveredPort!;
+  console.log(`[kairo] Theia backend ready on port ${theiaPort}`);
+  return theiaPort;
 }
 
 function stopTheiaBackend(): void {
@@ -320,6 +383,32 @@ async function createWindow(): Promise<void> {
     },
   });
 
+  // Auto-open DevTools in dev builds so the user can see the
+  // renderer's actual console / network / errors. Set
+  // KAIRO_NO_DEVTOOLS=1 to opt out.
+  if (!process.env.KAIRO_NO_DEVTOOLS) {
+    mainWindow.webContents.openDevTools({ mode: 'detach' });
+    flog('[kairo] DevTools auto-opened (set KAIRO_NO_DEVTOOLS=1 to disable)');
+  }
+
+  // Mirror the renderer's console + load events to the file log
+  // so we can post-mortem frontend issues (workspace-context
+  // init, runtime-connection failures, unhandled promise
+  // rejections) without DevTools being open.
+  mainWindow.webContents.on('console-message', (_event, level, message, line, sourceId) => {
+    const lvl = ['DEBUG', 'LOG', 'WARN', 'ERROR'][level] || `L${level}`;
+    flog(`[renderer:${lvl}] ${message} (${sourceId}:${line})`);
+  });
+  mainWindow.webContents.on('did-fail-load', (_e, code, desc, url) => {
+    flog(`[renderer] did-fail-load: code=${code} desc=${desc} url=${url}`);
+  });
+  mainWindow.webContents.on('render-process-gone', (_e, details) => {
+    flog(`[renderer] render-process-gone: ${JSON.stringify(details)}`);
+  });
+  mainWindow.webContents.on('preload-error', (_e, preloadPath, err) => {
+    flog(`[renderer] preload-error: path=${preloadPath} err=${err.message}`);
+  });
+
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     try {
       const u = new URL(url);
@@ -345,6 +434,13 @@ async function createWindow(): Promise<void> {
 
 // ─── App Lifecycle ────────────────────────────────────────────
 
+// Init the file logger as early as possible so subsequent
+// console output is captured even if Electron detaches from
+// the parent's stdout.
+initFileLogger();
+
+flog(`[kairo] desktop main starting; pid=${process.pid}; electron=${process.versions.electron}; node=${process.versions.node}; platform=${process.platform}`);
+
 // Prevent multiple instances
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
@@ -366,9 +462,15 @@ if (!gotLock) {
             ...details.responseHeaders,
             'Content-Security-Policy': [
               "default-src 'self'",
-              "script-src 'self' 'unsafe-inline'",
+              // Theia 1.73 ships with ajv-generated validators that
+              // use `new Function` for JSON schema compile. Without
+              // 'unsafe-eval' the very first schema validate throws
+              // EvalError and the frontend hangs in the splash. The
+              // desktop is bound to loopback, so the eval risk is
+              // localised to the Theia bundle we just served.
+              "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
               "style-src 'self' 'unsafe-inline'",
-              "connect-src 'self' http://127.0.0.1:* ws://127.0.0.1:*",
+              "connect-src 'self' data: http://127.0.0.1:* ws://127.0.0.1:*",
               "img-src 'self' data: https:",
               "font-src 'self' data:",
             ].join('; '),
