@@ -1,16 +1,16 @@
 {
     "name":  "@kairo/desktop",
     "version":  "0.1.0",
-    "description":  "Kairo IDE ï¿?desktop entry. Electron shell + Theia frontend + in-process Go Runtime Agent.",
+    "description":  "Kairo IDE â€” desktop entry. Electron shell + Theia frontend + in-process Go Runtime Agent.",
     "private":  true,
     "main":  "lib/main.js",
     "scripts":  {
                     "build":  "tsc -p tsconfig.json",
-                    "prebuild":  "pnpm bundled:prepare ; node scripts/build-agent.js \u0026\u0026 node scripts/copy-browser-artifacts.js",
-                    "build:mac":  "tsc -p tsconfig.json \u0026\u0026 electron-builder --mac",
-                    "build:win":  "tsc -p tsconfig.json \u0026\u0026 electron-builder --win",
-                    "build:linux":  "tsc -p tsconfig.json \u0026\u0026 electron-builder --linux",
-                    "build:all":  "tsc -p tsconfig.json \u0026\u0026 electron-builder --mac --win --linux",
+                    "prebuild":  "pnpm bundled:prepare ; node scripts/build-agent.js && node scripts/copy-browser-artifacts.js && node scripts/copy-bundled.js",
+                    "build:mac":  "tsc -p tsconfig.json && electron-builder --mac",
+                    "build:win":  "tsc -p tsconfig.json && electron-builder --win",
+                    "build:linux":  "tsc -p tsconfig.json && electron-builder --linux",
+                    "build:all":  "tsc -p tsconfig.json && electron-builder --mac --win --linux",
                     "prestart":  "node scripts/copy-browser-artifacts.js",
                     "start":  "electron lib/main.js",
                     "copy:browser":  "node scripts/copy-browser-artifacts.js",
@@ -54,7 +54,7 @@
                                      ],
                   "mac":  {
                               "category":  "public.app-category.developer-tools",
-                              "target":  "dmg",
+                              "target":  ["dmg", "zip"],
                               "extraResources":  [
                                                      {
                                                          "from":  "../../runtime-agent/bin/kairo-runtime",
@@ -63,10 +63,10 @@
                                                  ]
                           },
                   "win":  {
-                              "target":  "nsis"
+                              "target":  ["nsis", "zip"]
                           },
                   "linux":  {
-                                "target":  "AppImage",
+                                "target":  ["AppImage", "zip"],
                                 "extraResources":  [
                                                        {
                                                            "from":  "../../runtime-agent/bin/kairo-runtime",
@@ -76,5 +76,3 @@
                             }
               }
 }
-
-

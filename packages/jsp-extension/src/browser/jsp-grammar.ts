@@ -17,23 +17,19 @@
 
 export const JSP_LANGUAGE_ID = 'jsp';
 
-const JSP_MONARCH: any = {
+export const JSP_MONARCH: any = {
   defaultToken: '',
   tokenPostfix: '.jsp',
 
   tokenizer: {
     root: [
-      // JSP directive: <%@ ... %>
-      [/<\s*%@\s*[^%]*%>/, 'tag.jsp-directive'],
-
-      // JSP declaration: <%! ... %>
-      [/<\s*%!\s*[^%]*%>/, 'tag.jsp-decl'],
-
-      // JSP expression: <%= ... %>
-      [/<\s*%=\s*[^%]*%>/, 'tag.jsp-expr'],
-
-      // JSP scriptlet: <% ... %>
-      [/<\s*%[^%]*%>/, 'tag.jsp-scriptlet'],
+      // Use states instead of scanning the rest of every line with four
+      // overlapping `[^%]*` expressions. This is linear, supports multiline
+      // blocks, and lets Monaco resume tokenization from its cached line state.
+      [/<\s*%@/, { token: 'tag.jsp-directive', next: '@jspDirective' }],
+      [/<\s*%!/, { token: 'tag.jsp-decl', next: '@jspDeclaration' }],
+      [/<\s*%=/, { token: 'tag.jsp-expr', next: '@jspExpression' }],
+      [/<\s*%/, { token: 'tag.jsp-scriptlet', next: '@jspScriptlet' }],
 
       // EL: ${ ... } and #{ ... } (deprecated JSP EL)
       [/\$\{[^}]*\}/, 'metatag.el'],
@@ -52,6 +48,26 @@ const JSP_MONARCH: any = {
 
       // Numbers
       [/\b\d+\b/, 'number'],
+    ],
+    jspDirective: [
+      [/%>/, { token: 'tag.jsp-directive', next: '@pop' }],
+      [/[^%]+/, 'tag.jsp-directive'],
+      [/%/, 'tag.jsp-directive'],
+    ],
+    jspDeclaration: [
+      [/%>/, { token: 'tag.jsp-decl', next: '@pop' }],
+      [/[^%]+/, 'tag.jsp-decl'],
+      [/%/, 'tag.jsp-decl'],
+    ],
+    jspExpression: [
+      [/%>/, { token: 'tag.jsp-expr', next: '@pop' }],
+      [/[^%]+/, 'tag.jsp-expr'],
+      [/%/, 'tag.jsp-expr'],
+    ],
+    jspScriptlet: [
+      [/%>/, { token: 'tag.jsp-scriptlet', next: '@pop' }],
+      [/[^%]+/, 'tag.jsp-scriptlet'],
+      [/%/, 'tag.jsp-scriptlet'],
     ],
   },
 };

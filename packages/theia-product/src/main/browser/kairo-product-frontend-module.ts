@@ -25,6 +25,7 @@ import {
   WidgetFactory,
 } from '@theia/core/lib/browser';
 import { CommandContribution } from '@theia/core/lib/common';
+import { PreferenceContribution } from '@theia/core/lib/common/preferences';
 import {
   KairoDeploymentsWidget,
   KairoViewsContribution,
@@ -41,6 +42,8 @@ import {
   KairoErrorListenerImpl,
   WorkspaceContextService,
 } from '@kairo/runtime-extension';
+import { KairoLargeFileContribution } from './kairo-large-file-contribution';
+import { KairoLargeFilePreferenceContribution } from './kairo-large-file-preferences';
 
 export const KAIRO_SERVERS_FACTORY_ID = 'kairo-server-view';
 export const KAIRO_BUILDS_FACTORY_ID = 'kairo-build-view';
@@ -92,6 +95,16 @@ export function bindKairoFrontend(bind: interfaces.Bind, unbind?: interfaces.Unb
   // picks up the methods.
   bind(CommandContribution).toService(KairoViewsContribution);
   bind(CommandContribution).toService(KairoEncodingCommandsContribution);
+<<<<<<< HEAD
+  // KairoFileCommandsContribution is a defensive re-registration
+  // of the standard Theia file.* / workspace:* / core.*
+  // commands. Theia's standard modules already register
+  // these, but a missing module in a stripped build causes
+  // the menu bar to throw "No command X exists" at click
+  // time. This contribution guarantees the commands are
+  // always present (either the real handler or a friendly
+  // fallback message). See the file header for the long
+  // version of this rationale.
   // KairoFileCommandsContribution is a defensive re-registration
   // of the standard Theia file.* / workspace:* / core.*
   // commands. Theia's standard modules already register
@@ -103,6 +116,16 @@ export function bindKairoFrontend(bind: interfaces.Bind, unbind?: interfaces.Unb
   // version of this rationale.
   bind(KairoFileCommandsContribution).toSelf().inSingletonScope();
   bind(CommandContribution).toService(KairoFileCommandsContribution);
+  bind(KairoLargeFileContribution).toSelf().inSingletonScope();
+  bind(FrontendApplicationContribution).toService(KairoLargeFileContribution);
+  bind(CommandContribution).toService(KairoLargeFileContribution);
+  bind(PreferenceContribution).toConstantValue(KairoLargeFilePreferenceContribution);
+=======
+  bind(KairoLargeFileContribution).toSelf().inSingletonScope();
+  bind(FrontendApplicationContribution).toService(KairoLargeFileContribution);
+  bind(CommandContribution).toService(KairoLargeFileContribution);
+  bind(PreferenceContribution).toConstantValue(KairoLargeFilePreferenceContribution);
+>>>>>>> origin/main
 
   bind(KairoDeploymentsWidget).toSelf();
 
@@ -129,4 +152,3 @@ export function bindKairoFrontend(bind: interfaces.Bind, unbind?: interfaces.Unb
 export default new ContainerModule((bind, unbind, isBound, rebind) => {
   bindKairoFrontend(bind, unbind, isBound, rebind);
 });
-

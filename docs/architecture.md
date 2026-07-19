@@ -332,8 +332,10 @@ are not v1 release blockers:
 | First JDT completion | ≤ 1.5 s | E2E |
 | Incremental single-file compile (JDK 21 → JDK 6 source) | ≤ 2 s | E2E |
 | Full-text search 10 k files | ≤ 3 s | Go bench + E2E |
+| Large source file keystroke P95 (20 k lines) | ≤ 50 ms | Playwright + trace |
+| Large source file tab switch | ≤ 300 ms | Playwright + trace |
 | Idle RSS, empty workspace | ≤ 350 MB | Windows agent in CI |
-| JDT LS heap (configurable) | 256 MB default, 1 GB max | JDT LS config |
+| JDT LS heap (configurable) | 768 MB default, 256 MB–4 GB bounds | JDT LS config |
 
 We **measure** in CI. Numbers that miss are tracked as
 `MILESTONES.md` debt.
