@@ -27,10 +27,9 @@ type DefaultRuntimePlanResolver struct {
 	runtimes      RuntimeRegistry
 	pathPolicy    pathpolicy.PathAuthorizer
 	idGen         IDGenerator
-	ports         PortAllocator
 	dataRoot      string
 	cbPlanner     catalinabase.Planner
-	ownerTokenGen func() domain.DeploymentOwnerToken
+	ownerTokenGen func(ws domain.WorkspaceID, proj domain.ProjectID, srv domain.ServerID, root string) domain.DeploymentOwnerToken
 }
 
 type ResolverConfig struct {
@@ -41,7 +40,6 @@ type ResolverConfig struct {
 	Runtimes   RuntimeRegistry
 	PathPolicy pathpolicy.PathAuthorizer
 	IDGen      IDGenerator
-	Ports      PortAllocator
 	CBPlanner  catalinabase.Planner
 }
 
@@ -70,9 +68,6 @@ func NewDefaultRuntimePlanResolver(cfg ResolverConfig) (*DefaultRuntimePlanResol
 	if cfg.CBPlanner == nil {
 		cfg.CBPlanner = catalinabase.NewDefaultPlanner()
 	}
-	if cfg.Ports == nil {
-		cfg.Ports = NewDefaultPortAllocator(DefaultPortConfig())
-	}
 
 	absDataRoot, err := filepath.Abs(cfg.DataRoot)
 	if err != nil {
@@ -86,7 +81,6 @@ func NewDefaultRuntimePlanResolver(cfg ResolverConfig) (*DefaultRuntimePlanResol
 		runtimes:      cfg.Runtimes,
 		pathPolicy:    cfg.PathPolicy,
 		idGen:         cfg.IDGen,
-		ports:         cfg.Ports,
 		dataRoot:      absDataRoot,
 		cbPlanner:     cfg.CBPlanner,
 		ownerTokenGen: domain.NewDeploymentOwnerToken,
@@ -263,7 +257,7 @@ func (r *DefaultRuntimePlanResolver) ResolveDeploymentTarget(plan *domain.Runtim
 		ProjectID:   plan.ProjectID,
 		ServerID:    plan.ServerID,
 		Root:        plan.DeploymentRoot,
-		OwnerToken:  r.ownerTokenGen(),
+		OwnerToken:  r.ownerTokenGen(plan.WorkspaceID, plan.ProjectID, plan.ServerID, plan.DeploymentRoot),
 	}, nil
 }
 

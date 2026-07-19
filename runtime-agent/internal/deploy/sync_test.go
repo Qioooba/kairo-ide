@@ -63,8 +63,13 @@ func verifySentinel(t *testing.T, outsideRoot string) {
 	}
 }
 
+// validOwnerToken mints a token bound to a dummy identity. DeployPlan
+// execution only calls Valid() (the weak check), so the dummy
+// identity is sufficient for these tests. Sites that exercise the
+// strong Verify check (e.g. planning.Resolver.ResolveDeploy) mint
+// tokens via the real DeploymentTargetResolver.
 func validOwnerToken() domain.DeploymentOwnerToken {
-	return domain.NewDeploymentOwnerToken()
+	return domain.NewDeploymentOwnerToken("ws_test", "prj_test", "srv_test", "/test/deploy/root")
 }
 
 func executePlan(t *testing.T, engine DeployEngine, plan domain.DeployPlan, allowedSourceDirs []string) (*DeployResult, error) {

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/kairo-ide/runtime-agent/internal/atomicfile"
 	"github.com/kairo-ide/runtime-agent/internal/domain"
 )
 
@@ -66,7 +67,7 @@ func WriteOwner(baseDir string, meta OwnerMetadata) error {
 		return fmt.Errorf("marshal owner: %w", err)
 	}
 	path := ownerPath(baseDir)
-	return writeAtomicFile(path, data, 0644)
+	return atomicfile.WriteFile(path, data, 0644)
 }
 
 func VerifyOwner(baseDir string, expected OwnerMetadata) error {
@@ -88,31 +89,4 @@ func VerifyOwner(baseDir string, expected OwnerMetadata) error {
 			existing.WorkspaceID, existing.ProjectID, existing.RuntimeID)
 	}
 	return nil
-}
-
-func writeAtomicFile(path string, data []byte, perm os.FileMode) error {
-	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, ".tmp-owner-*")
-	if err != nil {
-		return fmt.Errorf("create temp: %w", err)
-	}
-	tmpName := tmp.Name()
-	defer func() {
-		_ = os.Remove(tmpName)
-	}()
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return fmt.Errorf("write temp: %w", err)
-	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		return fmt.Errorf("sync temp: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("close temp: %w", err)
-	}
-	if err := os.Chmod(tmpName, perm); err != nil {
-		return fmt.Errorf("chmod temp: %w", err)
-	}
-	return os.Rename(tmpName, path)
 }

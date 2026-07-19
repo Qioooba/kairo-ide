@@ -24,28 +24,28 @@
 //
 // Schema (.legacyflow/project.yaml):
 //
-//   projectId: legacy-sample              # required
-//   name: Legacy Sample                   # optional, defaults to projectId
-//   encoding: GBK                         # optional, default UTF-8
-//   sourceLevel: "1.6"                    # required, default "1.6"
-//   targetLevel: "1.6"                    # required, default "1.6"
-//   sourceRoots:                          # relative to rootPath
-//     - src/main/java
-//     - src/main/resources
-//   testSourceRoots:                      # optional
-//     - src/test/java
-//   outputDir: build/classes              # optional, default build/classes
-//   webappDir: WebRoot                    # optional; J2EE web project
-//   libraries:                            # optional
-//     - lib/javax.servlet-api-4.0.1.jar
-//     - lib/jstl-1.2.jar
-//   referencedLibraries:                  # optional, added as referenced libs
-//     - WEB-INF/lib/custom.jar
-//   servletApi:                          # optional, adds JSP/Servlet API
-//     version: "2.5"
-//   jstl: true                           # optional, adds JSTL API
-//   dependentProjects:                    # optional, cross-project deps
-//     - ../other-legacy
+//	projectId: legacy-sample              # required
+//	name: Legacy Sample                   # optional, defaults to projectId
+//	encoding: GBK                         # optional, default UTF-8
+//	sourceLevel: "1.6"                    # required, default "1.6"
+//	targetLevel: "1.6"                    # required, default "1.6"
+//	sourceRoots:                          # relative to rootPath
+//	  - src/main/java
+//	  - src/main/resources
+//	testSourceRoots:                      # optional
+//	  - src/test/java
+//	outputDir: build/classes              # optional, default build/classes
+//	webappDir: WebRoot                    # optional; J2EE web project
+//	libraries:                            # optional
+//	  - lib/javax.servlet-api-4.0.1.jar
+//	  - lib/jstl-1.2.jar
+//	referencedLibraries:                  # optional, added as referenced libs
+//	  - WEB-INF/lib/custom.jar
+//	servletApi:                          # optional, adds JSP/Servlet API
+//	  version: "2.5"
+//	jstl: true                           # optional, adds JSTL API
+//	dependentProjects:                    # optional, cross-project deps
+//	  - ../other-legacy
 //
 // The generator is deterministic: feeding the same input
 // produces the same output. The generated project model is
@@ -66,6 +66,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kairo-ide/runtime-agent/internal/atomicfile"
 	"gopkg.in/yaml.v3"
 )
 
@@ -85,27 +86,27 @@ type Project struct {
 	ServletAPI          *struct {
 		Version string `yaml:"version" json:"version"`
 	} `yaml:"servletApi" json:"servletApi"`
-	JSTL               bool     `yaml:"jstl" json:"jstl"`
-	DependentProjects  []string `yaml:"dependentProjects" json:"dependentProjects"`
-	RootPath           string   `yaml:"-" json:"rootPath"`
-	WorkspaceID        string   `yaml:"-" json:"workspaceId"`
+	JSTL              bool     `yaml:"jstl" json:"jstl"`
+	DependentProjects []string `yaml:"dependentProjects" json:"dependentProjects"`
+	RootPath          string   `yaml:"-" json:"rootPath"`
+	WorkspaceID       string   `yaml:"-" json:"workspaceId"`
 }
 
 // GenerateResult is the JSON the /api/v1/jdtls/project POST
 // returns to the caller.
 type GenerateResult struct {
-	WorkspaceID  string   `json:"workspaceId"`
-	ProjectID    string   `json:"projectId"`
-	ProjectModel string   `json:"projectModel"` // absolute path of the .project file
-	Classpath    string   `json:"classpath"`    // absolute path of the .classpath file
-	SourceRoots  []string `json:"sourceRoots"`  // absolute paths the JDT LS will see
+	WorkspaceID      string   `json:"workspaceId"`
+	ProjectID        string   `json:"projectId"`
+	ProjectModel     string   `json:"projectModel"`     // absolute path of the .project file
+	Classpath        string   `json:"classpath"`        // absolute path of the .classpath file
+	SourceRoots      []string `json:"sourceRoots"`      // absolute paths the JDT LS will see
 	ClasspathEntries []string `json:"classpathEntries"` // absolute paths of every referenced jar / folder
-	OutputDir    string   `json:"outputDir"`    // absolute path the JDT LS will compile into
-	Encoding     string   `json:"encoding"`
-	SourceLevel  string   `json:"sourceLevel"`
-	TargetLevel  string   `json:"targetLevel"`
-	GeneratedAt  string   `json:"generatedAt"`
-	FromCache    bool     `json:"fromCache"`
+	OutputDir        string   `json:"outputDir"`        // absolute path the JDT LS will compile into
+	Encoding         string   `json:"encoding"`
+	SourceLevel      string   `json:"sourceLevel"`
+	TargetLevel      string   `json:"targetLevel"`
+	GeneratedAt      string   `json:"generatedAt"`
+	FromCache        bool     `json:"fromCache"`
 }
 
 // Status is the JSON the /api/v1/jdtls/project GET returns.
@@ -273,35 +274,35 @@ func (g *Generator) Generate(payload []byte) (GenerateResult, error) {
 	cacheKey := sha256.Sum256(append(append(classpathBytes, projectBytes...), []byte(kairoConfig)...))
 	if !cacheChanged(dir, cacheKey[:]) {
 		return GenerateResult{
-			WorkspaceID:  req.WorkspaceID,
-			ProjectID:    proj.ProjectID,
-			ProjectModel: projPath,
-			Classpath:    cpPath,
-			SourceRoots:  srcRoots,
-			OutputDir:    outputAbs,
-			Encoding:     proj.Encoding,
-			SourceLevel:  proj.SourceLevel,
-			TargetLevel:  proj.TargetLevel,
+			WorkspaceID:      req.WorkspaceID,
+			ProjectID:        proj.ProjectID,
+			ProjectModel:     projPath,
+			Classpath:        cpPath,
+			SourceRoots:      srcRoots,
+			OutputDir:        outputAbs,
+			Encoding:         proj.Encoding,
+			SourceLevel:      proj.SourceLevel,
+			TargetLevel:      proj.TargetLevel,
 			ClasspathEntries: append(append([]string{}, libs...), refLibs...),
-			GeneratedAt:  readGeneratedStamp(dir),
-			FromCache:    true,
+			GeneratedAt:      readGeneratedStamp(dir),
+			FromCache:        true,
 		}, nil
 	}
-	if err := os.WriteFile(cpPath, classpathBytes, 0o644); err != nil {
+	if err := atomicfile.WriteFile(cpPath, classpathBytes, 0o644); err != nil {
 		return GenerateResult{}, err
 	}
-	if err := os.WriteFile(projPath, projectBytes, 0o644); err != nil {
+	if err := atomicfile.WriteFile(projPath, projectBytes, 0o644); err != nil {
 		return GenerateResult{}, err
 	}
-	if err := os.WriteFile(kairoPath, []byte(kairoConfig), 0o644); err != nil {
+	if err := atomicfile.WriteFile(kairoPath, []byte(kairoConfig), 0o644); err != nil {
 		return GenerateResult{}, err
 	}
 	stamp := time.Now().UTC().Format(time.RFC3339Nano)
-	if err := os.WriteFile(filepath.Join(dir, ".kairo-generated-at"),
+	if err := atomicfile.WriteFile(filepath.Join(dir, ".kairo-generated-at"),
 		[]byte(stamp), 0o644); err != nil {
 		return GenerateResult{}, err
 	}
-	if err := os.WriteFile(filepath.Join(dir, ".kairo-cache-key"),
+	if err := atomicfile.WriteFile(filepath.Join(dir, ".kairo-cache-key"),
 		[]byte(hex.EncodeToString(cacheKey[:])), 0o644); err != nil {
 		return GenerateResult{}, err
 	}
@@ -310,23 +311,23 @@ func (g *Generator) Generate(payload []byte) (GenerateResult, error) {
 	if err := os.MkdirAll(filepath.Join(dir, ".settings"), 0o755); err != nil {
 		return GenerateResult{}, err
 	}
-	if err := os.WriteFile(filepath.Join(dir, ".settings", "org.eclipse.jdt.core.prefs"),
+	if err := atomicfile.WriteFile(filepath.Join(dir, ".settings", "org.eclipse.jdt.core.prefs"),
 		[]byte(renderJDTCorePrefs(proj)), 0o644); err != nil {
 		return GenerateResult{}, err
 	}
 	return GenerateResult{
-		WorkspaceID:  req.WorkspaceID,
-		ProjectID:    proj.ProjectID,
-		ProjectModel: projPath,
-		Classpath:    cpPath,
-		SourceRoots:  srcRoots,
-		OutputDir:    outputAbs,
-		Encoding:     proj.Encoding,
-		SourceLevel:  proj.SourceLevel,
-		TargetLevel:  proj.TargetLevel,
+		WorkspaceID:      req.WorkspaceID,
+		ProjectID:        proj.ProjectID,
+		ProjectModel:     projPath,
+		Classpath:        cpPath,
+		SourceRoots:      srcRoots,
+		OutputDir:        outputAbs,
+		Encoding:         proj.Encoding,
+		SourceLevel:      proj.SourceLevel,
+		TargetLevel:      proj.TargetLevel,
 		ClasspathEntries: append(append([]string{}, libs...), refLibs...),
-		GeneratedAt:  stamp,
-		FromCache:    false,
+		GeneratedAt:      stamp,
+		FromCache:        false,
 	}, nil
 }
 

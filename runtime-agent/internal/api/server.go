@@ -173,7 +173,7 @@ func (s *Server) ListenAndServe(addr string, tlsCert, tlsKey string) error {
 	if n, err := strconv.Atoi(port); err == nil {
 		s.port = n
 	}
-	s.httpServer = &http.Server{
+s.httpServer = &http.Server{
 		Addr:              addr,
 		Handler:           s.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,

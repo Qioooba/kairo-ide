@@ -19,20 +19,20 @@ import (
 
 // Toolchain is a registered JDK.
 type Toolchain struct {
-	ID          string   `json:"id"`
-	Kind        string   `json:"kind"` // "jdk"
-	Home        string   `json:"home"`
-	Vendor      string   `json:"vendor"`
-	Version     string   `json:"version"`
+	ID           string   `json:"id"`
+	Kind         string   `json:"kind"` // "jdk"
+	Home         string   `json:"home"`
+	Vendor       string   `json:"vendor"`
+	Version      string   `json:"version"`
 	SourceLevels []string `json:"sourceLevels"`
-	Fingerprint string   `json:"fingerprint"`
-	ImportedAt  string   `json:"importedAt"`
+	Fingerprint  string   `json:"fingerprint"`
+	ImportedAt   string   `json:"importedAt"`
 }
 
 // Registry holds the set of known toolchains.
 type Registry struct {
-	mu sync.Mutex
-	dir string
+	mu    sync.Mutex
+	dir   string
 	items map[string]Toolchain
 }
 
@@ -163,13 +163,13 @@ func Detect(home string) (Toolchain, error) {
 
 	id := buildID(vendor, version, fp)
 	return Toolchain{
-		ID:          id,
-		Kind:        "jdk",
-		Home:        abs,
-		Vendor:      vendor,
-		Version:     version,
+		ID:           id,
+		Kind:         "jdk",
+		Home:         abs,
+		Vendor:       vendor,
+		Version:      version,
 		SourceLevels: levels,
-		Fingerprint: "sha256:" + fp,
+		Fingerprint:  "sha256:" + fp,
 	}, nil
 }
 

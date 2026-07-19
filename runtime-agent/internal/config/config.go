@@ -2,10 +2,10 @@
 //
 // Configuration sources, in increasing precedence:
 //
-//	1. Built-in defaults (compiled in).
-//	2. Config file (YAML), passed via --config or KAIRO_CONFIG.
-//	3. Environment variables prefixed KAIRO_.
-//	4. Command-line flags.
+//  1. Built-in defaults (compiled in).
+//  2. Config file (YAML), passed via --config or KAIRO_CONFIG.
+//  3. Environment variables prefixed KAIRO_.
+//  4. Command-line flags.
 package config
 
 import (

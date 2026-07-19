@@ -178,6 +178,29 @@ func (p *realOSProcess) Start(ctx context.Context, spec ProcessSpec) (ProcessObs
 	}
 	p.mu.Unlock()
 
+	// afterStartHook performs platform-specific bookkeeping that must
+	// happen after the process has been launched. On Windows it assigns
+	// the new process to the agent-wide Job Object so that the OS kills
+	// it automatically if the Agent exits. On Unix this is a no-op (we
+	// rely on the process group created via SysProcAttr and on the
+	// Agent's explicit Shutdown stopping all servers).
+	if err := afterStartHook(cmd.Process.Pid); err != nil {
+		// Failing to register with the Job Object is not fatal for the
+		// process itself, but it weakens the kill-on-exit guarantee.
+		// Force-stop the process we just started and return the error
+		// so the caller knows the lifecycle tracking is incomplete.
+		_ = killProcessGroup(cmd.Process.Pid)
+		p.mu.Lock()
+		p.state = stateStopped
+		p.stoppedAt = time.Now()
+		p.exitErr = fmt.Errorf("afterStartHook: %w", err)
+		code := -1
+		p.exitCode = &code
+		p.mu.Unlock()
+		closeWaitCh(p)
+		return ProcessObservation{}, fmt.Errorf("register process with job: %w", err)
+	}
+
 	go p.waitExit(generation, stdoutw, stderrw)
 
 	return obs, nil
@@ -467,6 +490,7 @@ type ringLogBuffer struct {
 	bytes    int
 	start    int
 	count    int
+	seq      uint64
 }
 
 func newRingLogBuffer(maxLines, maxBytes int) *ringLogBuffer {
@@ -486,6 +510,8 @@ func newRingLogBuffer(maxLines, maxBytes int) *ringLogBuffer {
 func (r *ringLogBuffer) append(line domain.LogLine) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	line.Sequence = r.seq
+	r.seq++
 	lineBytes := len(line.Text)
 
 	for r.count > 0 && (r.bytes+lineBytes > r.maxBytes || r.count == r.cap) {

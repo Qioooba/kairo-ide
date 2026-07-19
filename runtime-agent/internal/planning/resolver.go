@@ -221,7 +221,7 @@ func (r *DefaultPlanResolver) ResolveDeploy(ctx context.Context, workspaceID dom
 		return nil, fmt.Errorf("invalid server id: %w", err)
 	}
 
-	if !target.OwnerToken.Valid() {
+	if !target.OwnerToken.Verify(target.WorkspaceID, target.ProjectID, target.ServerID, target.Root) {
 		return nil, domain.ErrInvalidOwnerToken
 	}
 

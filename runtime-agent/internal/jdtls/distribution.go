@@ -47,6 +47,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/kairo-ide/runtime-agent/internal/atomicfile"
 )
 
 // Distribution files & verification pins.
@@ -127,22 +129,22 @@ type InstallReport struct {
 // start the LS when the discovered layout is below
 // LayoutMinSupported.
 const (
-	LayoutVersion   = 1
-	LayoutMinSupp   = 1
+	LayoutVersion = 1
+	LayoutMinSupp = 1
 )
 
 // layout is the result of inspecting an unpacked JDT LS
 // installation. The fields are absolute paths ready to feed to
 // the Java launcher.
 type layout struct {
-	home         string
-	launcherJAR  string
-	pluginsDir   string
-	configLinux  string
-	configWin    string
-	configMac    string
-	warnings     []string
-	launcherVer  string
+	home        string
+	launcherJAR string
+	pluginsDir  string
+	configLinux string
+	configWin   string
+	configMac   string
+	warnings    []string
+	launcherVer string
 }
 
 // DistributionStatus is the JSON returned by the /jdtls/status
@@ -175,16 +177,16 @@ var (
 // Resolution order:
 //
 //  1. KAIRO_JDTLS_HOME      → use the existing layout as-is,
-//                              validate, install-report, return.
+//     validate, install-report, return.
 //  2. KAIRO_JDTLS_ARCHIVE   → import a pre-staged archive,
-//                              verify SHA-256 (unless skipSHAVerify
-//                              is true), unpack.
+//     verify SHA-256 (unless skipSHAVerify
+//     is true), unpack.
 //  3. <DataDir>/bundled/jdtls/<archive>
-//                              if it exists and matches the
-//                              pinned SHA-256, use it.
+//     if it exists and matches the
+//     pinned SHA-256, use it.
 //  4. Download from JDTLSArchiveURL (or customURL if set,
-//                              or KAIRO_JDTLS_ARCHIVE_URL if
-//                              set), verify SHA-256, unpack.
+//     or KAIRO_JDTLS_ARCHIVE_URL if
+//     set), verify SHA-256, unpack.
 //
 // The function is idempotent: a second call with everything
 // already on disk is a near-no-op (only the install-report is
@@ -792,7 +794,7 @@ func downloadTo(ctx context.Context, url, dest string, logger func(string, map[s
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmp.Name(), dest)
+	return atomicfile.Rename(tmp.Name(), dest)
 }
 
 // progressReader wraps an io.Reader and logs progress every 10 MB.
@@ -837,7 +839,7 @@ func writeInstallReport(dataDir string, rep *InstallReport) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, "install.json"), body, 0o644)
+	return atomicfile.WriteFile(filepath.Join(dir, "install.json"), body, 0o644)
 }
 
 // readInstallReport returns the report written by

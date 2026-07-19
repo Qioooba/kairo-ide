@@ -2,6 +2,9 @@ package domain
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
 	"time"
 )
 
@@ -19,23 +22,124 @@ type LogStream int
 type DesiredServerState string
 type ServerState string
 
+// PortAllocator allocates network ports for runtime servers and returns a
+// PortLease whose Release returns the ports to the pool. Implementations must
+// be safe for concurrent use.
+type PortAllocator interface {
+	// Allocate attempts to reserve HTTP, Shutdown and Debug ports. If a
+	// preferred port is > 0 and available it is used; otherwise an unused
+	// port from the configured range is chosen. The returned PortLease must
+	// be Released when the server stops, fails or is restarted.
+	Allocate(preferredHTTP, preferredShutdown, preferredDebug int) (*PortLease, error)
+}
+
+// DeploymentOwnerToken is an unforgeable, target-bound capability
+// token issued by DeploymentTargetResolver.ResolveDeploymentTarget.
+//
+// It binds to a specific (WorkspaceID, ProjectID, ServerID, Root)
+// tuple via an HMAC-SHA256 tag computed with the process-wide
+// ownerSecret. A token minted for one target cannot be replayed
+// against a different target — call Verify at the consumption site
+// to enforce the binding.
+//
+// The nonce is 32 bytes of crypto/rand — it cannot be guessed or
+// reconstructed by callers. The previous implementation used a
+// global uint64 counter which (a) had a data race under concurrent
+// minting and (b) was trivially forgeable by any code that called
+// NewDeploymentOwnerToken(). Both defects are fixed here.
+//
+// The process-wide ownerSecret is generated at package init from
+// crypto/rand. Tokens minted in one agent run are invalid after
+// restart — which is the desired behavior, since DeploymentTarget
+// and DeployPlan are not persisted across restarts.
+//
+// See ADR-0013 (Deployment Owner Token) for the full rationale.
 type DeploymentOwnerToken struct {
-	nonce uint64
+	nonce [32]byte
+	tag   [32]byte // HMAC-SHA256 over (nonce|ws|proj|srv|root) using ownerSecret
 }
 
-func NewDeploymentOwnerToken() DeploymentOwnerToken {
-	return DeploymentOwnerToken{nonce: nextOwnerNonce()}
+// ownerSecret is a process-wide random secret key used to mint
+// and verify DeploymentOwnerToken values. It is generated at
+// package init from crypto/rand and never leaves the process.
+var ownerSecret [32]byte
+
+func init() {
+	if _, err := rand.Read(ownerSecret[:]); err != nil {
+		// rand.Read should never fail on a sane system. If it
+		// does, fall back to a deterministic key — tokens will
+		// still be minted and verified consistently within this
+		// run, just with weaker entropy. Better than panicking
+		// on startup.
+		for i := range ownerSecret {
+			ownerSecret[i] = byte(i)
+		}
+	}
 }
 
+// NewDeploymentOwnerToken issues a new token bound to the given
+// target identity. The token can later be verified against the
+// same identity via Verify.
+//
+// The identity arguments are required: a token minted with no
+// binding (the old behavior) provided no real authorization —
+// any caller could construct one and bypass the
+// DeploymentTargetResolver. With identity binding, a token
+// minted for target A fails Verify when checked against target B.
+func NewDeploymentOwnerToken(ws WorkspaceID, proj ProjectID, srv ServerID, root string) DeploymentOwnerToken {
+	var t DeploymentOwnerToken
+	if _, err := rand.Read(t.nonce[:]); err != nil {
+		// Same fallback as init — should never happen.
+		for i := range t.nonce {
+			t.nonce[i] = byte(i)
+		}
+	}
+	t.tag = computeOwnerTag(t.nonce[:], ws, proj, srv, root)
+	return t
+}
+
+func computeOwnerTag(nonce []byte, ws WorkspaceID, proj ProjectID, srv ServerID, root string) [32]byte {
+	h := hmac.New(sha256.New, ownerSecret[:])
+	h.Write(nonce)
+	h.Write([]byte(string(ws)))
+	h.Write([]byte{0})
+	h.Write([]byte(string(proj)))
+	h.Write([]byte{0})
+	h.Write([]byte(string(srv)))
+	h.Write([]byte{0})
+	h.Write([]byte(root))
+	var out [32]byte
+	copy(out[:], h.Sum(nil))
+	return out
+}
+
+// Valid reports whether the token has been initialized (i.e. a
+// nonce has been assigned). A zero-valued DeploymentOwnerToken
+// is invalid.
+//
+// Valid is the WEAK check — it does NOT verify the token's
+// binding to a specific target. Use Verify for the strong check
+// at sites where the caller knows the target identity (e.g.
+// inside DeploymentTargetResolver.ResolveDeploy).
 func (t DeploymentOwnerToken) Valid() bool {
-	return t.nonce != 0
+	var zero [32]byte
+	return t.nonce != zero
 }
 
-var ownerNonceCounter uint64
-
-func nextOwnerNonce() uint64 {
-	ownerNonceCounter++
-	return ownerNonceCounter
+// Verify reports whether the token was minted for the given
+// target identity. This is the STRONG check: it recomputes the
+// HMAC tag from the supplied identity fields and compares it to
+// the tag stored in the token using a constant-time comparison.
+//
+// A token minted for target A returns false when Verify is
+// called with target B's identity, even if both targets belong
+// to the same agent run.
+func (t DeploymentOwnerToken) Verify(ws WorkspaceID, proj ProjectID, srv ServerID, root string) bool {
+	if !t.Valid() {
+		return false
+	}
+	expected := computeOwnerTag(t.nonce[:], ws, proj, srv, root)
+	return hmac.Equal(t.tag[:], expected[:])
 }
 
 type DeploymentTarget struct {
@@ -404,6 +508,7 @@ type ServerEvent struct {
 }
 
 type LogLine struct {
+	Sequence   uint64    `json:"sequence"`
 	Stream     LogStream `json:"stream"`
 	Time       time.Time `json:"time"`
 	Text       string    `json:"text"`
@@ -449,8 +554,11 @@ type PortLease struct {
 }
 
 func (l *PortLease) Release() {
-	if l.release != nil {
+	if l != nil && l.release != nil {
 		l.release()
+		l.HTTPPort = 0
+		l.ShutdownPort = 0
+		l.DebugPort = 0
 		l.release = nil
 	}
 }
@@ -473,21 +581,26 @@ type ProcessObservation struct {
 }
 
 type ServerInstance struct {
-	ID          ServerID    `json:"id"`
-	WorkspaceID WorkspaceID `json:"workspaceId"`
-	ProjectID   ProjectID   `json:"projectId"`
-	State       ServerState `json:"state"`
-	HTTPPort    int         `json:"httpPort,omitempty"`
-	ShutdownPort int        `json:"shutdownPort,omitempty"`
-	PID         int         `json:"pid,omitempty"`
-	StartTime   time.Time   `json:"startTime,omitempty"`
-	Generation  uint64      `json:"generation"`
+	ID           ServerID    `json:"id"`
+	WorkspaceID  WorkspaceID `json:"workspaceId"`
+	ProjectID    ProjectID   `json:"projectId"`
+	State        ServerState `json:"state"`
+	HTTPPort     int         `json:"httpPort,omitempty"`
+	ShutdownPort int         `json:"shutdownPort,omitempty"`
+	PID          int         `json:"pid,omitempty"`
+	StartTime    time.Time   `json:"startTime,omitempty"`
+	Generation   uint64      `json:"generation"`
 }
 
 type RuntimeProvider interface {
 	ID() string
 	Prepare(ctx context.Context, plan RuntimePlan) error
-	Start(ctx context.Context, plan RuntimePlan, logSink func(LogLine)) (*ProcessIdentity, *PortLease, error)
+	// Start launches the runtime process described by plan. The plan must
+	// already contain allocated port numbers (HTTPPort, ShutdownPort,
+	// DebugPort). The UseCase owns the PortLease; the Provider must not
+	// allocate or release ports itself. If Start returns an error it must
+	// have already cleaned up any process it started.
+	Start(ctx context.Context, plan RuntimePlan, logSink func(LogLine)) (*ProcessIdentity, error)
 	GracefulStop(ctx context.Context, identity ProcessIdentity) error
 	ForceStop(ctx context.Context, identity ProcessIdentity) error
 	IsReady(ctx context.Context, plan RuntimePlan, identity ProcessIdentity, deadline time.Time) error

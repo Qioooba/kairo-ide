@@ -32,7 +32,6 @@ type runningInstance struct {
 	identity domain.ProcessIdentity
 	plan     domain.RuntimePlan
 	process  proc.ManagedProcess
-	lease    *domain.PortLease
 	gen      uint64
 }
 
@@ -107,15 +106,15 @@ func (p *Tomcat6Provider) Prepare(ctx context.Context, plan domain.RuntimePlan) 
 	return nil
 }
 
-func (p *Tomcat6Provider) Start(ctx context.Context, plan domain.RuntimePlan, logSink func(domain.LogLine)) (*domain.ProcessIdentity, *domain.PortLease, error) {
+func (p *Tomcat6Provider) Start(ctx context.Context, plan domain.RuntimePlan, logSink func(domain.LogLine)) (*domain.ProcessIdentity, error) {
 	if err := p.validatePlan(plan); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	p.mu.Lock()
 	if _, exists := p.instances[plan.ServerID]; exists {
 		p.mu.Unlock()
-		return nil, nil, domain.ErrServerAlreadyRunning
+		return nil, domain.ErrServerAlreadyRunning
 	}
 	p.mu.Unlock()
 
@@ -133,7 +132,7 @@ func (p *Tomcat6Provider) Start(ctx context.Context, plan domain.RuntimePlan, lo
 
 	executable, args, env, err := tomcat6.BuildCommand(tcCfg)
 	if err != nil {
-		return nil, nil, fmt.Errorf("build command: %w", err)
+		return nil, fmt.Errorf("build command: %w", err)
 	}
 
 	process := p.processFactory()
@@ -164,16 +163,13 @@ func (p *Tomcat6Provider) Start(ctx context.Context, plan domain.RuntimePlan, lo
 		if logDisp != nil {
 			logDisp.Dispose()
 		}
-		return nil, nil, fmt.Errorf("start process: %w", err)
+		return nil, fmt.Errorf("start process: %w", err)
 	}
-
-	lease := domain.NewPortLease(plan.HTTPPort, plan.ShutdownPort, plan.DebugPort, func() {})
 
 	inst := &runningInstance{
 		identity: obs.Identity,
 		plan:     plan,
 		process:  process,
-		lease:    lease,
 		gen:      gen,
 	}
 
@@ -184,6 +180,9 @@ func (p *Tomcat6Provider) Start(ctx context.Context, plan domain.RuntimePlan, lo
 	deadline := time.Now().Add(p.cfg.StartTimeout)
 	readyErr := tomcat6.WaitForReady(ctx, plan.HTTPPort, deadline)
 	if readyErr != nil {
+		// Provider contract: Start must clean up any process it started
+		// before returning an error. The UseCase owns the PortLease and
+		// releases it separately on failure.
 		_ = p.ForceStop(ctx, obs.Identity)
 		if logDisp != nil {
 			logDisp.Dispose()
@@ -191,10 +190,10 @@ func (p *Tomcat6Provider) Start(ctx context.Context, plan domain.RuntimePlan, lo
 		p.mu.Lock()
 		delete(p.instances, plan.ServerID)
 		p.mu.Unlock()
-		return nil, nil, fmt.Errorf("readiness failed: %w", readyErr)
+		return nil, fmt.Errorf("readiness failed: %w", readyErr)
 	}
 
-	return &obs.Identity, lease, nil
+	return &obs.Identity, nil
 }
 
 func (p *Tomcat6Provider) GracefulStop(ctx context.Context, identity domain.ProcessIdentity) error {
@@ -329,9 +328,6 @@ func (p *Tomcat6Provider) cleanupInstance(inst *runningInstance) {
 	defer p.mu.Unlock()
 	for sid, i := range p.instances {
 		if i == inst {
-			if i.lease != nil {
-				i.lease.Release()
-			}
 			delete(p.instances, sid)
 			return
 		}

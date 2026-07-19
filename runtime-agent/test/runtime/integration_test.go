@@ -57,13 +57,13 @@ func (p *fakeRuntimeProvider) Prepare(ctx context.Context, plan domain.RuntimePl
 	return err
 }
 
-func (p *fakeRuntimeProvider) Start(ctx context.Context, plan domain.RuntimePlan, logSink func(domain.LogLine)) (*domain.ProcessIdentity, *domain.PortLease, error) {
+func (p *fakeRuntimeProvider) Start(ctx context.Context, plan domain.RuntimePlan, logSink func(domain.LogLine)) (*domain.ProcessIdentity, error) {
 	p.mu.Lock()
 	p.startCount++
 	if p.startErr != nil {
 		err := p.startErr
 		p.mu.Unlock()
-		return nil, nil, err
+		return nil, err
 	}
 
 	var fp *proc.FakeProcess
@@ -103,7 +103,6 @@ func (p *fakeRuntimeProvider) Start(ctx context.Context, plan domain.RuntimePlan
 		})
 	}
 
-	lease := domain.NewPortLease(plan.HTTPPort, plan.ShutdownPort, plan.DebugPort, func() {})
 	spec := proc.ProcessSpec{
 		Executable:   "/fake/java",
 		Args:         []string{"-cp", "/fake/lib/*", "org.apache.catalina.startup.Bootstrap", "start"},
@@ -115,12 +114,12 @@ func (p *fakeRuntimeProvider) Start(ctx context.Context, plan domain.RuntimePlan
 	}
 	obs, err := fp.Start(context.Background(), spec)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	if readyErr != nil {
-		return &obs.Identity, lease, readyErr
+		return &obs.Identity, readyErr
 	}
-	return &obs.Identity, lease, nil
+	return &obs.Identity, nil
 }
 
 func (p *fakeRuntimeProvider) GracefulStop(ctx context.Context, identity domain.ProcessIdentity) error {
@@ -611,7 +610,7 @@ func TestR82_HugeLogs(t *testing.T) {
 		t.Fatalf("Start with huge logs failed: %v", err)
 	}
 
-	lines, nextCursor, err := uc.GetLogs(ctx, running.WorkspaceID, running.ID, 0, 100)
+	lines, nextCursor, _, err := uc.GetLogs(ctx, running.WorkspaceID, running.ID, 0, 100)
 	if err != nil {
 		t.Fatalf("GetLogs failed: %v", err)
 	}
@@ -639,7 +638,7 @@ func TestR82_PartialLine(t *testing.T) {
 		t.Fatalf("Start failed: %v", err)
 	}
 
-	lines, _, err := uc.GetLogs(ctx, running.WorkspaceID, running.ID, 0, 100)
+	lines, _, _, err := uc.GetLogs(ctx, running.WorkspaceID, running.ID, 0, 100)
 	if err != nil {
 		t.Fatalf("GetLogs failed: %v", err)
 	}
@@ -970,6 +969,12 @@ func TestR84_ReconcileAliveProcess(t *testing.T) {
 		t.Fatalf("Start failed: %v", err)
 	}
 
+	// Product rule (ADR-0011 Section 9): Reconcile treats every
+	// non-terminal record as stale because the previous Agent lifecycle
+	// is required to have stopped all managed processes. Even if the
+	// process is still alive (as in this in-process fake test),
+	// Reconcile must NOT trust the persisted identity and must mark the
+	// record as Crashed.
 	if err := uc.Reconcile(ctx); err != nil {
 		t.Fatalf("Reconcile failed: %v", err)
 	}
@@ -978,8 +983,8 @@ func TestR84_ReconcileAliveProcess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get after reconcile: %v", err)
 	}
-	if after.ObservedState != domain.ServerStateRunning {
-		t.Errorf("expected running after reconcile of alive process, got %s", after.ObservedState)
+	if after.ObservedState != domain.ServerStateCrashed {
+		t.Errorf("expected crashed after reconcile (cross-lifecycle recovery forbidden), got %s", after.ObservedState)
 	}
 }
 
@@ -1151,13 +1156,13 @@ func TestR84_GetLogs_CursorPagination(t *testing.T) {
 		t.Fatalf("Start failed: %v", err)
 	}
 
-	firstBatch, cursor, err := uc.GetLogs(ctx, fixtures.ws, running.ID, 0, 10)
+	firstBatch, cursor, _, err := uc.GetLogs(ctx, fixtures.ws, running.ID, 0, 10)
 	if err != nil {
 		t.Fatalf("GetLogs first batch: %v", err)
 	}
 	t.Logf("first batch: %d lines, cursor=%d", len(firstBatch), cursor)
 	if len(firstBatch) > 0 {
-		secondBatch, nextCursor, err := uc.GetLogs(ctx, fixtures.ws, running.ID, cursor, 10)
+		secondBatch, nextCursor, _, err := uc.GetLogs(ctx, fixtures.ws, running.ID, cursor, 10)
 		if err != nil {
 			t.Fatalf("GetLogs second batch: %v", err)
 		}
@@ -1178,6 +1183,10 @@ func TestR84_Shutdown_NoForceFlag(t *testing.T) {
 	eventPub := &recordingEventPublisher{}
 	idGen := pathpolicy.NewCryptoIDGenerator()
 
+	// Product rule (ADR-0011 Section 9): Agent exit MUST stop all Tomcat
+	// processes it manages. NewServerUseCase forces StopServersOnExit=true
+	// regardless of the config value, so this test verifies that even when
+	// the caller attempts to opt out, the shutdown still stops servers.
 	cfg := app.ServerUseCaseConfig{
 		StartTimeout:      5 * time.Second,
 		StopTimeout:       3 * time.Second,
@@ -1203,10 +1212,121 @@ func TestR84_Shutdown_NoForceFlag(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Shutdown failed: %v", err)
 	}
-	if len(unclean) == 0 {
-		t.Error("expected unclean servers when StopServersOnExit=false")
+	// StopServersOnExit is forced to true by NewServerUseCase, so shutdown
+	// MUST stop all servers and report zero unclean records.
+	if len(unclean) != 0 {
+		t.Errorf("expected 0 unclean servers (forced StopServersOnExit=true), got %d", len(unclean))
 	}
 	parentCancel()
+}
+
+func TestR85_PIDReused_ReconcileDetectsMismatch(t *testing.T) {
+	t.Parallel()
+	ctx, cancel, uc, prov, history, _, _ := setupIntegrationEnv(t)
+	defer cancel()
+
+	fixtures := genValidIDs(t)
+
+	// Start a server.
+	startCmd := domain.StartServerCommand{WorkspaceID: fixtures.ws, ProjectID: fixtures.prj}
+	running, err := uc.Start(ctx, startCmd)
+	if err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	// Simulate PID reuse: the fake process exits (crash), but
+	// the record still shows Running. Then the process identity
+	// changes (different executable, marker, etc.).
+	fp := prov.getProcess(running.ID)
+	if fp == nil {
+		t.Fatal("no process")
+	}
+
+	// Force the process to exit (simulate crash).
+	fp.SetBehavior(proc.FakeProcessBehavior{Crash: true})
+	_ = fp.ForceStop(ctx, *running.ProcessIdentity)
+
+	// Now change the identity to simulate PID reuse by a different process.
+	fp.SetIdentity(domain.ProcessIdentity{
+		PID:          running.ProcessIdentity.PID,
+		Executable:   "/usr/bin/different_program",
+		StartTime:    time.Now().Add(1 * time.Hour), // different start time
+		CatalinaBase: "/different/base",
+		MarkerToken:  "different-marker",
+	})
+
+	// Reconcile should detect the identity mismatch.
+	err = uc.Reconcile(ctx)
+	if err != nil {
+		t.Logf("Reconcile returned error: %v (non-fatal)", err)
+	}
+
+	rec, err := history.Get(ctx, fixtures.ws, running.ID)
+	if err != nil {
+		t.Fatalf("history Get failed: %v", err)
+	}
+	if rec.ObservedState != domain.ServerStateCrashed {
+		t.Errorf("expected Crashed after PID reuse reconciliation, got %s", rec.ObservedState)
+	}
+}
+
+func TestR85_CrashThenRestart_WithIdentityVerification(t *testing.T) {
+	t.Parallel()
+	ctx, cancel, uc, prov, _, _, _ := setupIntegrationEnv(t)
+	defer cancel()
+
+	fixtures := genValidIDs(t)
+
+	// Start.
+	startCmd := domain.StartServerCommand{WorkspaceID: fixtures.ws, ProjectID: fixtures.prj}
+	running, err := uc.Start(ctx, startCmd)
+	if err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	if running.ObservedState != domain.ServerStateRunning {
+		t.Fatalf("expected Running, got %s", running.ObservedState)
+	}
+	originalPID := running.ProcessIdentity.PID
+	originalMarker := running.ProcessIdentity.MarkerToken
+
+	// Crash the process.
+	fp := prov.getProcess(running.ID)
+	if fp == nil {
+		t.Fatal("no process")
+	}
+	_ = fp.ForceStop(ctx, *running.ProcessIdentity)
+
+	// Reconcile should mark as Crashed.
+	err = uc.Reconcile(ctx)
+	if err != nil {
+		t.Logf("Reconcile error: %v (non-fatal)", err)
+	}
+
+	rec, err := uc.Get(ctx, fixtures.ws, running.ID)
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	if rec.ObservedState != domain.ServerStateCrashed {
+		t.Fatalf("expected Crashed after reconcile, got %s", rec.ObservedState)
+	}
+
+	// Restart should assign a new identity (new PID, new marker).
+	restartCmd := domain.RestartServerCommand{WorkspaceID: fixtures.ws, ProjectID: fixtures.prj, ServerID: running.ID}
+	restarted, err := uc.Restart(ctx, restartCmd)
+	if err != nil {
+		t.Fatalf("Restart failed: %v", err)
+	}
+	if restarted.ObservedState != domain.ServerStateRunning {
+		t.Fatalf("expected Running after restart, got %s", restarted.ObservedState)
+	}
+
+	// Verify new identity is different from the crashed one.
+	if restarted.ProcessIdentity.PID == originalPID {
+		t.Log("Warning: restart got same PID (rare but valid in fake), checking marker")
+	}
+	if restarted.ProcessIdentity.MarkerToken == originalMarker {
+		t.Error("restart should have a different marker token than the crashed process")
+	}
 }
 
 var _ domain.RuntimeProvider = (*fakeRuntimeProvider)(nil)

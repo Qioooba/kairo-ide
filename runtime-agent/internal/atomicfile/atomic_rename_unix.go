@@ -1,6 +1,6 @@
 //go:build !windows
 
-package repository
+package atomicfile
 
 import "os"
 

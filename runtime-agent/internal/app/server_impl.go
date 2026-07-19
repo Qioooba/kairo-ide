@@ -23,8 +23,9 @@ type serverLogBuffer struct {
 	mu    sync.Mutex
 	lines []domain.LogLine
 	cap   int
-	next  int
-	full  bool
+	seq   uint64 // next sequence number to assign
+	start int    // ring buffer start index
+	count int    // number of entries in the ring
 }
 
 func newServerLogBuffer(cap int) *serverLogBuffer {
@@ -40,56 +41,74 @@ func newServerLogBuffer(cap int) *serverLogBuffer {
 func (b *serverLogBuffer) Append(line domain.LogLine) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.lines[b.next] = line
-	b.next = (b.next + 1) % b.cap
-	if b.next == 0 {
-		b.full = true
+	line.Sequence = b.seq
+	b.seq++
+
+	// Evict oldest if full
+	if b.count == b.cap {
+		b.lines[b.start] = line
+		b.start = (b.start + 1) % b.cap
+	} else {
+		b.lines[(b.start+b.count)%b.cap] = line
+		b.count++
 	}
 }
 
-func (b *serverLogBuffer) Read(cursor, limit int) ([]domain.LogLine, int) {
+// Read returns log lines starting after the given cursor (sequence number).
+// cursor=0 means "from the beginning". Returns the lines, the next cursor
+// (sequence number after the last returned line), and gap=true if the
+// requested cursor is older than the oldest entry still in the buffer
+// (meaning some log lines were lost due to ring buffer overflow).
+func (b *serverLogBuffer) Read(cursor int, limit int) ([]domain.LogLine, int, bool) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	var all []domain.LogLine
-	if !b.full {
-		all = make([]domain.LogLine, b.next)
-		copy(all, b.lines[:b.next])
-	} else {
-		all = make([]domain.LogLine, b.cap)
-		copy(all, b.lines[b.next:])
-		copy(all[b.cap-b.next:], b.lines[:b.next])
+	if b.count == 0 {
+		return nil, 0, false
 	}
 
-	if cursor < 0 {
-		cursor = 0
+	// The oldest sequence number still in the buffer.
+	minSeq := b.lines[b.start].Sequence
+	// The next sequence number (one past the newest).
+	nextSeq := b.seq
+
+	// Convert cursor (int) to uint64 for comparison.
+	cursorSeq := uint64(cursor)
+
+	var gap bool
+	if cursorSeq < minSeq {
+		// Client's cursor is older than what we have — they missed lines.
+		gap = true
+		cursorSeq = minSeq // start from the oldest available
 	}
-	if cursor > len(all) {
-		cursor = len(all)
+	if cursorSeq >= nextSeq {
+		// Client is already up to date.
+		return nil, int(nextSeq), false
 	}
 
-	end := cursor + limit
-	if limit <= 0 || end > len(all) {
-		end = len(all)
+	// Find the starting index in the ring buffer.
+	// offset from start = cursorSeq - minSeq
+	offset := int(cursorSeq - minSeq)
+	startIdx := (b.start + offset) % b.cap
+
+	// How many entries from startIdx to end?
+	available := int(nextSeq - cursorSeq)
+	if limit > 0 && limit < available {
+		available = limit
 	}
 
-	result := make([]domain.LogLine, end-cursor)
-	copy(result, all[cursor:end])
-
-	nextCursor := end
-	if nextCursor > len(all) {
-		nextCursor = len(all)
+	result := make([]domain.LogLine, available)
+	for i := 0; i < available; i++ {
+		result[i] = b.lines[(startIdx+i)%b.cap]
 	}
-	return result, nextCursor
+
+	return result, int(cursorSeq + uint64(available)), gap
 }
 
 func (b *serverLogBuffer) Len() int {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.full {
-		return b.cap
-	}
-	return b.next
+	return b.count
 }
 
 type noopEventPublisher struct{}
@@ -107,6 +126,7 @@ type serverUseCaseImpl struct {
 	eventPublisher  domain.ServerEventPublisher
 	idGenerator     IDGenerator
 	cfg             ServerUseCaseConfig
+	portAllocator   domain.PortAllocator
 
 	shutdownFlag atomic.Bool
 	opLocks      sync.Map
@@ -141,6 +161,11 @@ func NewServerUseCase(
 	if cfg.LogBufferSize <= 0 {
 		cfg.LogBufferSize = 10000
 	}
+	// Product rule: Agent exit MUST stop all Tomcat processes it manages.
+	// Cross-lifecycle process recovery is intentionally NOT supported. If
+	// an Agent starts a Tomcat, that process belongs to that Agent
+	// lifecycle only. See ADR-0011 Section 9 for the rationale.
+	cfg.StopServersOnExit = true
 	if eventPublisher == nil {
 		eventPublisher = &noopEventPublisher{}
 	}
@@ -156,6 +181,7 @@ func NewServerUseCase(
 		eventPublisher:  eventPublisher,
 		idGenerator:     idGenerator,
 		cfg:             cfg,
+		portAllocator:   defaultPortAllocator(cfg.PortAllocator),
 		activeLeases:    make(map[domain.ServerID]*domain.PortLease),
 		activeProviders: make(map[domain.ServerID]domain.RuntimeProvider),
 	}
@@ -165,6 +191,40 @@ func NewServerUseCase(
 func (uc *serverUseCaseImpl) getOpLock(serverID domain.ServerID) *sync.Mutex {
 	actual, _ := uc.opLocks.LoadOrStore(serverID, &sync.Mutex{})
 	return actual.(*sync.Mutex)
+}
+
+// storeLease records an active PortLease for a server. The lease must be
+// released when the server stops, fails, or is restarted.
+func (uc *serverUseCaseImpl) storeLease(serverID domain.ServerID, lease *domain.PortLease) {
+	uc.mu.Lock()
+	uc.activeLeases[serverID] = lease
+	uc.mu.Unlock()
+}
+
+// releaseLease releases and removes the PortLease associated with serverID,
+// if any. Safe to call when no lease is held.
+func (uc *serverUseCaseImpl) releaseLease(serverID domain.ServerID) {
+	uc.mu.Lock()
+	if lease, ok := uc.activeLeases[serverID]; ok {
+		lease.Release()
+		delete(uc.activeLeases, serverID)
+	}
+	uc.mu.Unlock()
+}
+
+// allocateAndStoreLease reserves ports for a server, overrides the plan with
+// the allocated port numbers, and stores the lease in activeLeases. If
+// allocation fails the plan is unchanged and no lease is stored.
+func (uc *serverUseCaseImpl) allocateAndStoreLease(serverID domain.ServerID, plan *domain.RuntimePlan) (*domain.PortLease, error) {
+	lease, err := uc.portAllocator.Allocate(plan.HTTPPort, plan.ShutdownPort, plan.DebugPort)
+	if err != nil {
+		return nil, fmt.Errorf("allocate ports: %w", err)
+	}
+	plan.HTTPPort = lease.HTTPPort
+	plan.ShutdownPort = lease.ShutdownPort
+	plan.DebugPort = lease.DebugPort
+	uc.storeLease(serverID, lease)
+	return lease, nil
 }
 
 func (uc *serverUseCaseImpl) getLogBuffer(serverID domain.ServerID) *serverLogBuffer {
@@ -300,6 +360,9 @@ func (uc *serverUseCaseImpl) Start(ctx context.Context, cmd domain.StartServerCo
 	}
 
 	if err := uc.saveRecord(ctx, record); err != nil {
+		uc.mu.Lock()
+		delete(uc.activeProviders, targetServerID)
+		uc.mu.Unlock()
 		return nil, fmt.Errorf("persist preparing state: %w", err)
 	}
 	uc.publishStateChange(ctx, record, oldState, domain.ServerStatePreparing, "preparing server", false)
@@ -311,27 +374,22 @@ func (uc *serverUseCaseImpl) Start(ctx context.Context, cmd domain.StartServerCo
 	}
 
 	if err := prov.Prepare(ctx, *plan); err != nil {
-		record.ObservedState = domain.ServerStateFailed
-		record.LastError = fmt.Sprintf("prepare failed: %v", err)
-		record.StoppedAt = &now
-		_ = uc.saveRecord(context.Background(), record)
-		uc.publishEvent(ctx, record, domain.ServerEventFailed, record.LastError, true)
-		uc.mu.Lock()
-		delete(uc.activeProviders, targetServerID)
-		uc.mu.Unlock()
+		uc.failStart(ctx, record, targetServerID, fmt.Sprintf("prepare failed: %v", err), true)
 		return nil, fmt.Errorf("provider prepare: %w", err)
 	}
 
+	// Allocate ports now that preparation succeeded. The lease is stored in
+	// activeLeases before Start so that any subsequent failure path can
+	// release it through releaseLease().
+	if _, err := uc.allocateAndStoreLease(targetServerID, plan); err != nil {
+		uc.failStart(ctx, record, targetServerID, fmt.Sprintf("allocate ports: %v", err), true)
+		return nil, fmt.Errorf("allocate ports: %w", err)
+	}
+	record.RuntimePlan = *plan
+
 	record.ObservedState = domain.ServerStateStarting
 	if err := uc.saveRecord(ctx, record); err != nil {
-		record.ObservedState = domain.ServerStateFailed
-		record.LastError = fmt.Sprintf("persist starting state: %v", err)
-		record.StoppedAt = &now
-		_ = uc.saveRecord(context.Background(), record)
-		uc.publishEvent(ctx, record, domain.ServerEventFailed, record.LastError, true)
-		uc.mu.Lock()
-		delete(uc.activeProviders, targetServerID)
-		uc.mu.Unlock()
+		uc.failStart(ctx, record, targetServerID, fmt.Sprintf("persist starting state: %v", err), true)
 		return nil, fmt.Errorf("persist starting state: %w", err)
 	}
 	uc.publishStateChange(ctx, record, domain.ServerStatePreparing, domain.ServerStateStarting, "starting server", false)
@@ -340,30 +398,14 @@ func (uc *serverUseCaseImpl) Start(ctx context.Context, cmd domain.StartServerCo
 	startCtx, startCancel := context.WithDeadline(ctx, startDeadline)
 	defer startCancel()
 
-	identity, lease, startErr := prov.Start(startCtx, *plan, logSink)
+	// Provider contract: Start must clean up any process it started before
+	// returning an error. The UseCase owns the PortLease and releases it
+	// separately on failure.
+	identity, startErr := prov.Start(startCtx, *plan, logSink)
 	if startErr != nil {
-		failCtx, failCancel := context.WithTimeout(context.Background(), uc.cfg.StopTimeout)
-		_ = prov.ForceStop(failCtx, domain.ProcessIdentity{})
-		failCancel()
-		if lease != nil {
-			lease.Release()
-		}
-
-		record.ObservedState = domain.ServerStateFailed
-		record.LastError = fmt.Sprintf("start failed: %v", startErr)
-		record.StoppedAt = &now
-		_ = uc.saveRecord(context.Background(), record)
-		uc.publishEvent(ctx, record, domain.ServerEventFailed, record.LastError, true)
-		uc.mu.Lock()
-		delete(uc.activeProviders, targetServerID)
-		uc.mu.Unlock()
+		uc.releaseLease(targetServerID)
+		uc.failStart(ctx, record, targetServerID, fmt.Sprintf("start failed: %v", startErr), true)
 		return nil, fmt.Errorf("provider start: %w", startErr)
-	}
-
-	if lease != nil {
-		uc.mu.Lock()
-		uc.activeLeases[targetServerID] = lease
-		uc.mu.Unlock()
 	}
 
 	readyErr := prov.IsReady(startCtx, *plan, *identity, startDeadline)
@@ -371,19 +413,8 @@ func (uc *serverUseCaseImpl) Start(ctx context.Context, cmd domain.StartServerCo
 		failCtx, failCancel := context.WithTimeout(context.Background(), uc.cfg.StopTimeout)
 		_ = prov.ForceStop(failCtx, *identity)
 		failCancel()
-		if lease != nil {
-			lease.Release()
-		}
-
-		record.ObservedState = domain.ServerStateFailed
-		record.LastError = fmt.Sprintf("readiness failed: %v", readyErr)
-		record.StoppedAt = &now
-		_ = uc.saveRecord(context.Background(), record)
-		uc.publishEvent(ctx, record, domain.ServerEventFailed, record.LastError, true)
-		uc.mu.Lock()
-		delete(uc.activeProviders, targetServerID)
-		delete(uc.activeLeases, targetServerID)
-		uc.mu.Unlock()
+		uc.releaseLease(targetServerID)
+		uc.failStart(ctx, record, targetServerID, fmt.Sprintf("readiness failed: %v", readyErr), true)
 		return nil, fmt.Errorf("readiness: %w", readyErr)
 	}
 
@@ -392,8 +423,16 @@ func (uc *serverUseCaseImpl) Start(ctx context.Context, cmd domain.StartServerCo
 	record.ProcessIdentity = identity
 	record.LastError = ""
 	if err := uc.saveRecord(ctx, record); err != nil {
-		record.LastError = fmt.Sprintf("persist running state: %v", err)
-		_ = uc.saveRecord(context.Background(), record)
+		// P0-4 fix: if we cannot persist the Running state we must not
+		// report success. Stop the process we just started and return a
+		// failure so the persisted state matches reality.
+		failMsg := fmt.Sprintf("persist running state: %v", err)
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), uc.cfg.StopTimeout)
+		_ = prov.ForceStop(stopCtx, *identity)
+		stopCancel()
+		uc.releaseLease(targetServerID)
+		uc.failStart(ctx, record, targetServerID, failMsg, true)
+		return nil, fmt.Errorf("persist running state: %w", err)
 	}
 
 	uc.publishStateChange(ctx, record, domain.ServerStateStarting, domain.ServerStateRunning, "server running", false)
@@ -401,6 +440,22 @@ func (uc *serverUseCaseImpl) Start(ctx context.Context, cmd domain.StartServerCo
 
 	result := record.DeepCopy()
 	return &result, nil
+}
+
+// failStart is the single failure path for Start: it records the Failed
+// state with the given message, publishes a Failed event, and removes the
+// server from activeProviders and activeLeases.
+func (uc *serverUseCaseImpl) failStart(ctx context.Context, record *domain.ServerRecord, serverID domain.ServerID, msg string, recoverable bool) {
+	now := domain.UTCNow()
+	record.ObservedState = domain.ServerStateFailed
+	record.LastError = msg
+	record.StoppedAt = &now
+	_ = uc.saveRecord(context.Background(), record)
+	uc.publishEvent(ctx, record, domain.ServerEventFailed, msg, recoverable)
+	uc.mu.Lock()
+	delete(uc.activeProviders, serverID)
+	uc.mu.Unlock()
+	uc.releaseLease(serverID)
 }
 
 func (uc *serverUseCaseImpl) Stop(ctx context.Context, cmd domain.StopServerCommand) (*domain.ServerRecord, error) {
@@ -596,19 +651,22 @@ func (uc *serverUseCaseImpl) Restart(ctx context.Context, cmd domain.RestartServ
 	}
 
 	if err := prov.Prepare(ctx, *newPlan); err != nil {
-		existing.ObservedState = domain.ServerStateFailed
-		existing.LastError = fmt.Sprintf("prepare after restart failed: %v", err)
-		_ = uc.saveRecord(context.Background(), existing)
-		uc.publishEvent(ctx, existing, domain.ServerEventFailed, existing.LastError, true)
+		uc.failStart(ctx, existing, cmd.ServerID, fmt.Sprintf("prepare after restart failed: %v", err), true)
 		return nil, fmt.Errorf("provider prepare during restart: %w", err)
 	}
 
+	// Allocate ports now that preparation succeeded. The lease is stored in
+	// activeLeases before Start so that any subsequent failure path can
+	// release it through releaseLease().
+	if _, err := uc.allocateAndStoreLease(cmd.ServerID, newPlan); err != nil {
+		uc.failStart(ctx, existing, cmd.ServerID, fmt.Sprintf("allocate ports during restart: %v", err), true)
+		return nil, fmt.Errorf("allocate ports during restart: %w", err)
+	}
+	existing.RuntimePlan = *newPlan
+
 	existing.ObservedState = domain.ServerStateStarting
 	if err := uc.saveRecord(ctx, existing); err != nil {
-		existing.ObservedState = domain.ServerStateFailed
-		existing.LastError = fmt.Sprintf("persist starting state: %v", err)
-		_ = uc.saveRecord(context.Background(), existing)
-		uc.publishEvent(ctx, existing, domain.ServerEventFailed, existing.LastError, true)
+		uc.failStart(ctx, existing, cmd.ServerID, fmt.Sprintf("persist starting state during restart: %v", err), true)
 		return nil, fmt.Errorf("persist starting state during restart: %w", err)
 	}
 	uc.publishStateChange(ctx, existing, domain.ServerStateRestarting, domain.ServerStateStarting, "starting after restart", false)
@@ -617,26 +675,14 @@ func (uc *serverUseCaseImpl) Restart(ctx context.Context, cmd domain.RestartServ
 	startCtx, startCancel := context.WithDeadline(ctx, startDeadline)
 	defer startCancel()
 
-	identity, lease, startErr := prov.Start(startCtx, *newPlan, logSink)
+	// Provider contract: Start must clean up any process it started before
+	// returning an error. The UseCase owns the PortLease and releases it
+	// separately on failure.
+	identity, startErr := prov.Start(startCtx, *newPlan, logSink)
 	if startErr != nil {
-		failCtx, failCancel := context.WithTimeout(context.Background(), uc.cfg.StopTimeout)
-		_ = prov.ForceStop(failCtx, domain.ProcessIdentity{})
-		failCancel()
-		if lease != nil {
-			lease.Release()
-		}
-
-		existing.ObservedState = domain.ServerStateFailed
-		existing.LastError = fmt.Sprintf("start after restart failed: %v", startErr)
-		_ = uc.saveRecord(context.Background(), existing)
-		uc.publishEvent(ctx, existing, domain.ServerEventFailed, existing.LastError, true)
+		uc.releaseLease(cmd.ServerID)
+		uc.failStart(ctx, existing, cmd.ServerID, fmt.Sprintf("start after restart failed: %v", startErr), true)
 		return nil, fmt.Errorf("provider start during restart: %w", startErr)
-	}
-
-	if lease != nil {
-		uc.mu.Lock()
-		uc.activeLeases[cmd.ServerID] = lease
-		uc.mu.Unlock()
 	}
 
 	readyErr := prov.IsReady(startCtx, *newPlan, *identity, startDeadline)
@@ -644,17 +690,8 @@ func (uc *serverUseCaseImpl) Restart(ctx context.Context, cmd domain.RestartServ
 		failCtx, failCancel := context.WithTimeout(context.Background(), uc.cfg.StopTimeout)
 		_ = prov.ForceStop(failCtx, *identity)
 		failCancel()
-		if lease != nil {
-			lease.Release()
-		}
-
-		existing.ObservedState = domain.ServerStateFailed
-		existing.LastError = fmt.Sprintf("readiness after restart failed: %v", readyErr)
-		_ = uc.saveRecord(context.Background(), existing)
-		uc.publishEvent(ctx, existing, domain.ServerEventFailed, existing.LastError, true)
-		uc.mu.Lock()
-		delete(uc.activeLeases, cmd.ServerID)
-		uc.mu.Unlock()
+		uc.releaseLease(cmd.ServerID)
+		uc.failStart(ctx, existing, cmd.ServerID, fmt.Sprintf("readiness after restart failed: %v", readyErr), true)
 		return nil, fmt.Errorf("readiness during restart: %w", readyErr)
 	}
 
@@ -667,8 +704,16 @@ func (uc *serverUseCaseImpl) Restart(ctx context.Context, cmd domain.RestartServ
 	existing.LastError = ""
 
 	if err := uc.saveRecord(ctx, existing); err != nil {
-		existing.LastError = fmt.Sprintf("persist running state: %v", err)
-		_ = uc.saveRecord(context.Background(), existing)
+		// P0-4 fix: if we cannot persist the Running state we must not
+		// report success. Stop the process we just started and return a
+		// failure so the persisted state matches reality.
+		failMsg := fmt.Sprintf("persist running state during restart: %v", err)
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), uc.cfg.StopTimeout)
+		_ = prov.ForceStop(stopCtx, *identity)
+		stopCancel()
+		uc.releaseLease(cmd.ServerID)
+		uc.failStart(ctx, existing, cmd.ServerID, failMsg, true)
+		return nil, fmt.Errorf("persist running state during restart: %w", err)
 	}
 
 	uc.publishStateChange(ctx, existing, domain.ServerStateStarting, domain.ServerStateRunning, "server running after restart", false)
@@ -795,6 +840,22 @@ func (uc *serverUseCaseImpl) List(ctx context.Context, ws domain.WorkspaceID) ([
 	return result, nil
 }
 
+// Reconcile runs at Agent startup to clean up stale state from the previous
+// Agent lifecycle.
+//
+// Product rule (ADR-0011 Section 9): Agent exit MUST stop all Tomcat
+// processes it manages. The previous Agent's Shutdown already force-stopped
+// every non-terminal server. Therefore on the next Agent startup any
+// persisted non-terminal record points to a process that was killed by the
+// previous shutdown. We do NOT attempt to "re-attach" to such processes.
+// We mark them Crashed (if desired running) or Stopped (if desired stopped)
+// and release any leftover lease state.
+//
+// This intentionally avoids PID-reuse and identity-mismatch risks across
+// Agent lifecycles. The trade-off is that an Agent crash (not a clean
+// Shutdown) may leave orphaned Tomcat processes; those are reported as
+// Crashed and must be cleaned up by the user or by a future
+// process-reaper.
 func (uc *serverUseCaseImpl) Reconcile(ctx context.Context) error {
 	records, err := uc.history.ListNonTerminal(ctx)
 	if err != nil {
@@ -806,53 +867,26 @@ func (uc *serverUseCaseImpl) Reconcile(ctx context.Context) error {
 			continue
 		}
 
-		prov, err := uc.getProviderForRuntime(rec.RuntimePlan.RuntimeID)
-		if err != nil {
+		// The previous Agent lifecycle stopped every server it owned, so
+		// this record's process is gone. Mark it accordingly and release
+		// any stale lease bookkeeping.
+		now := domain.UTCNow()
+		rec.StoppedAt = &now
+		rec.PID = 0
+		rec.ProcessIdentity = nil
+
+		if rec.DesiredState == domain.DesiredServerStateRunning {
 			rec.ObservedState = domain.ServerStateCrashed
-			rec.LastError = fmt.Sprintf("cannot get provider for reconciliation: %v", err)
-			rec.StoppedAt = timePtr(domain.UTCNow())
+			rec.LastError = "agent restarted; previously-managed process was stopped on prior agent shutdown"
 			_ = uc.saveRecord(context.Background(), rec)
+			uc.releaseLease(rec.ID)
 			uc.publishEvent(ctx, rec, domain.ServerEventCrashed, rec.LastError, true)
-			continue
-		}
-
-		inspectCtx, inspectCancel := context.WithTimeout(ctx, uc.cfg.InspectTimeout)
-		if rec.ProcessIdentity != nil {
-			obs, inspectErr := prov.Inspect(inspectCtx, *rec.ProcessIdentity)
-			inspectCancel()
-
-			if inspectErr != nil || !obs.Running {
-				if rec.DesiredState == domain.DesiredServerStateRunning {
-					rec.ObservedState = domain.ServerStateCrashed
-					rec.LastError = "process not found during reconcile"
-				} else {
-					rec.ObservedState = domain.ServerStateStopped
-				}
-				rec.StoppedAt = timePtr(domain.UTCNow())
-				rec.PID = 0
-				rec.ProcessIdentity = nil
-				_ = uc.saveRecord(context.Background(), rec)
-				uc.publishEvent(ctx, rec, domain.ServerEventReconciled, rec.LastError, true)
-			} else if obs.IdentityMismatch {
-				rec.ObservedState = domain.ServerStateFailed
-				rec.LastError = "process identity mismatch during reconcile (orphaned)"
-				rec.StoppedAt = timePtr(domain.UTCNow())
-				_ = uc.saveRecord(context.Background(), rec)
-				uc.publishEvent(ctx, rec, domain.ServerEventCrashed, rec.LastError, true)
-			} else {
-				uc.publishEvent(ctx, rec, domain.ServerEventReconciled, "server confirmed running", false)
-			}
 		} else {
-			inspectCancel()
-			if rec.DesiredState == domain.DesiredServerStateRunning {
-				rec.ObservedState = domain.ServerStateCrashed
-				rec.LastError = "no process identity during reconcile"
-			} else {
-				rec.ObservedState = domain.ServerStateStopped
-			}
-			rec.StoppedAt = timePtr(domain.UTCNow())
+			rec.ObservedState = domain.ServerStateStopped
+			rec.LastError = ""
 			_ = uc.saveRecord(context.Background(), rec)
-			uc.publishEvent(ctx, rec, domain.ServerEventCrashed, rec.LastError, true)
+			uc.releaseLease(rec.ID)
+			uc.publishEvent(ctx, rec, domain.ServerEventReconciled, "agent restarted; server marked stopped", false)
 		}
 	}
 
@@ -878,12 +912,10 @@ func (uc *serverUseCaseImpl) Shutdown(ctx context.Context) ([]*domain.ServerReco
 			continue
 		}
 
-		if !uc.cfg.StopServersOnExit {
-			cp := rec.DeepCopy()
-			unclean = append(unclean, &cp)
-			continue
-		}
-
+		// Product rule (ADR-0011 Section 9): StopServersOnExit is forced
+		// true by NewServerUseCase. Every non-terminal server MUST be
+		// stopped here so that no Kairo-managed Tomcat outlives the Agent
+		// process that started it.
 		prov, provErr := uc.getProviderForRuntime(rec.RuntimePlan.RuntimeID)
 		if provErr != nil {
 			cp := rec.DeepCopy()
@@ -917,22 +949,22 @@ func (uc *serverUseCaseImpl) Shutdown(ctx context.Context) ([]*domain.ServerReco
 	return unclean, nil
 }
 
-func (uc *serverUseCaseImpl) GetLogs(ctx context.Context, ws domain.WorkspaceID, srv domain.ServerID, cursor int, limit int) ([]domain.LogLine, int, error) {
+func (uc *serverUseCaseImpl) GetLogs(ctx context.Context, ws domain.WorkspaceID, srv domain.ServerID, cursor int, limit int) ([]domain.LogLine, int, bool, error) {
 	if err := uc.validateIDs(ws, "", &srv); err != nil {
-		return nil, 0, err
+		return nil, 0, false, err
 	}
 
 	record, err := uc.history.Get(ctx, ws, srv)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, false, err
 	}
 	if record.WorkspaceID != ws {
-		return nil, 0, domain.ErrServerNotFound
+		return nil, 0, false, domain.ErrServerNotFound
 	}
 
 	logBuf := uc.getLogBuffer(srv)
-	lines, nextCursor := logBuf.Read(cursor, limit)
-	return lines, nextCursor, nil
+	lines, nextCursor, gap := logBuf.Read(cursor, limit)
+	return lines, nextCursor, gap, nil
 }
 
 func timePtr(t time.Time) *time.Time {

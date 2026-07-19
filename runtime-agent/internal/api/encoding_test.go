@@ -13,8 +13,8 @@ import (
 	"github.com/kairo-ide/runtime-agent/internal/api/protocol"
 	"github.com/kairo-ide/runtime-agent/internal/audit"
 	"github.com/kairo-ide/runtime-agent/internal/log"
-	"github.com/kairo-ide/runtime-agent/internal/services"
 	"github.com/kairo-ide/runtime-agent/internal/security"
+	"github.com/kairo-ide/runtime-agent/internal/services"
 )
 
 // newEncodingTestServer wires a real Services (with the

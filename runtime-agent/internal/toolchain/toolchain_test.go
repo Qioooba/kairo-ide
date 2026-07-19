@@ -33,13 +33,13 @@ func TestRegistry_AddListRemove(t *testing.T) {
 		t.Fatal(err)
 	}
 	tc := Toolchain{
-		ID:          "test-jdk-1",
-		Kind:        "jdk",
-		Home:        "/tmp/jdk",
-		Vendor:      "openjdk",
-		Version:     "17.0.7",
+		ID:           "test-jdk-1",
+		Kind:         "jdk",
+		Home:         "/tmp/jdk",
+		Vendor:       "openjdk",
+		Version:      "17.0.7",
 		SourceLevels: []string{"1.8", "9", "11", "17"},
-		Fingerprint: "sha256:abc",
+		Fingerprint:  "sha256:abc",
 	}
 	if err := r.Add(tc); err != nil {
 		t.Fatal(err)

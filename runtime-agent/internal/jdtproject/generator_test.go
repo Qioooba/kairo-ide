@@ -243,14 +243,14 @@ func TestGenerator_RejectsBadRootPath(t *testing.T) {
 
 func TestEncodingIDForJDT(t *testing.T) {
 	cases := map[string]string{
-		"UTF-8":     "UTF-8",
-		"utf-8":     "UTF-8",
-		"utf8":      "UTF-8",
-		"GBK":       "GBK",
-		"gb18030":   "GBK",
-		"GB18030":   "GBK",
+		"UTF-8":      "UTF-8",
+		"utf-8":      "UTF-8",
+		"utf8":       "UTF-8",
+		"GBK":        "GBK",
+		"gb18030":    "GBK",
+		"GB18030":    "GBK",
 		"ISO-8859-1": "ISO-8859-1",
-		"":          "UTF-8",
+		"":           "UTF-8",
 	}
 	for in, want := range cases {
 		got := encodingIDForJDT(in)

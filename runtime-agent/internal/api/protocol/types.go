@@ -14,27 +14,27 @@ type KairoErrorCode string
 
 const (
 	// 4xx-style
-	ErrUnauthenticated     KairoErrorCode = "unauthenticated"
-	ErrForbidden           KairoErrorCode = "forbidden"
-	ErrNotFound            KairoErrorCode = "not_found"
-	ErrConflict            KairoErrorCode = "conflict"
-	ErrRateLimited         KairoErrorCode = "rate_limited"
-	ErrInvalidRequest      KairoErrorCode = "invalid_request"
-	ErrPathForbidden       KairoErrorCode = "path_forbidden"
-	ErrToolchainMissing    KairoErrorCode = "toolchain_missing"
-	ErrRuntimeMissing      KairoErrorCode = "runtime_missing"
+	ErrUnauthenticated      KairoErrorCode = "unauthenticated"
+	ErrForbidden            KairoErrorCode = "forbidden"
+	ErrNotFound             KairoErrorCode = "not_found"
+	ErrConflict             KairoErrorCode = "conflict"
+	ErrRateLimited          KairoErrorCode = "rate_limited"
+	ErrInvalidRequest       KairoErrorCode = "invalid_request"
+	ErrPathForbidden        KairoErrorCode = "path_forbidden"
+	ErrToolchainMissing     KairoErrorCode = "toolchain_missing"
+	ErrRuntimeMissing       KairoErrorCode = "runtime_missing"
 	ErrUnsupportedJDKTarget KairoErrorCode = "unsupported_jdk_target"
 
 	// 5xx-style
-	ErrInternal            KairoErrorCode = "internal"
-	ErrIOError             KairoErrorCode = "io_error"
-	ErrProcessSpawnFailed  KairoErrorCode = "process_spawn_failed"
-	ErrCompileFailed       KairoErrorCode = "compile_failed"
-	ErrDeployFailed        KairoErrorCode = "deploy_failed"
-	ErrDebugAttachFailed   KairoErrorCode = "debug_attach_failed"
-	ErrTimeout             KairoErrorCode = "timeout"
-	ErrPluginCrashed       KairoErrorCode = "plugin_crashed"
-	ErrUnsupported         KairoErrorCode = "unsupported"
+	ErrInternal           KairoErrorCode = "internal"
+	ErrIOError            KairoErrorCode = "io_error"
+	ErrProcessSpawnFailed KairoErrorCode = "process_spawn_failed"
+	ErrCompileFailed      KairoErrorCode = "compile_failed"
+	ErrDeployFailed       KairoErrorCode = "deploy_failed"
+	ErrDebugAttachFailed  KairoErrorCode = "debug_attach_failed"
+	ErrTimeout            KairoErrorCode = "timeout"
+	ErrPluginCrashed      KairoErrorCode = "plugin_crashed"
+	ErrUnsupported        KairoErrorCode = "unsupported"
 )
 
 // KairoError is the wire format for an error response.
@@ -65,9 +65,9 @@ type ResponseEnvelope struct {
 
 // ErrorResponse is an error response.
 type ErrorResponse struct {
-	RequestID     string    `json:"requestId"`
-	CorrelationID string    `json:"correlationId,omitempty"`
-	OK            bool      `json:"ok"`
+	RequestID     string     `json:"requestId"`
+	CorrelationID string     `json:"correlationId,omitempty"`
+	OK            bool       `json:"ok"`
 	Error         KairoError `json:"error"`
 }
 
@@ -119,12 +119,12 @@ type HealthResponse struct {
 // Encoding IDs. We keep this open: aliases registered by the user
 // are valid EncodingIDs too. These are the well-known ones.
 const (
-	EncodingUTF8    = "utf-8"
-	EncodingUTF8BOM = "utf-8-bom"
-	EncodingUTF16LE = "utf-16le"
-	EncodingUTF16BE = "utf-16be"
-	EncodingGBK     = "gbk"
-	EncodingGB18030 = "gb18030"
+	EncodingUTF8     = "utf-8"
+	EncodingUTF8BOM  = "utf-8-bom"
+	EncodingUTF16LE  = "utf-16le"
+	EncodingUTF16BE  = "utf-16be"
+	EncodingGBK      = "gbk"
+	EncodingGB18030  = "gb18030"
 	EncodingISO88591 = "iso-8859-1"
 	EncodingUSASCII  = "us-ascii"
 )
@@ -200,15 +200,15 @@ type DeploymentResult struct {
 
 // ServerInstance is the wire format for a server (mirrors TS ServerInstance).
 type ServerInstance struct {
-	ID           string       `json:"id"`
-	ProjectID    string       `json:"projectId"`
-	Type         string       `json:"type"`
-	State        string       `json:"state"` // stopped | starting | running | stopping | error | crashed
-	PID          int          `json:"pid,omitempty"`
-	Ports        ServerPorts  `json:"ports"`
-	StartedAt    string       `json:"startedAt,omitempty"`
-	LastError    string       `json:"lastError,omitempty"`
-	CatalinaBase string       `json:"catalinaBase"`
+	ID           string        `json:"id"`
+	ProjectID    string        `json:"projectId"`
+	Type         string        `json:"type"`
+	State        string        `json:"state"` // stopped | starting | running | stopping | error | crashed
+	PID          int           `json:"pid,omitempty"`
+	Ports        ServerPorts   `json:"ports"`
+	StartedAt    string        `json:"startedAt,omitempty"`
+	LastError    string        `json:"lastError,omitempty"`
+	CatalinaBase string        `json:"catalinaBase"`
 	Memory       *ServerMemory `json:"memory,omitempty"`
 }
 
@@ -239,17 +239,17 @@ type Workspace struct {
 
 // ProjectConfig is the wire format for a project configuration.
 type ProjectConfig struct {
-	SchemaVersion int                `json:"schemaVersion"`
-	ID            string             `json:"id"`
-	Name          string             `json:"name"`
-	RootPath      string             `json:"rootPath"`
-	SourceLayout  SourceLayout       `json:"sourceLayout"`
-	Encoding      EncodingConfig     `json:"encoding"`
-	Java          JavaConfig         `json:"java"`
+	SchemaVersion int                 `json:"schemaVersion"`
+	ID            string              `json:"id"`
+	Name          string              `json:"name"`
+	RootPath      string              `json:"rootPath"`
+	SourceLayout  SourceLayout        `json:"sourceLayout"`
+	Encoding      EncodingConfig      `json:"encoding"`
+	Java          JavaConfig          `json:"java"`
 	ServerRuntime ServerRuntimeConfig `json:"serverRuntime"`
-	Build         BuildConfig        `json:"build"`
-	Deploy        DeployConfig       `json:"deploy"`
-	HotReload     HotReloadConfig    `json:"hotReload"`
+	Build         BuildConfig         `json:"build"`
+	Deploy        DeployConfig        `json:"deploy"`
+	HotReload     HotReloadConfig     `json:"hotReload"`
 }
 
 // SourceLayout describes the project source layout.
@@ -287,16 +287,16 @@ type ToolchainRef struct {
 // CompilerConfig describes the Java compiler settings.
 type CompilerConfig struct {
 	ToolchainRef
-	SourceLevel  string   `json:"sourceLevel"`
-	TargetLevel  string   `json:"targetLevel"`
-	Args         []string `json:"args,omitempty"`
-	EmulatedV6   bool     `json:"emulatedV6,omitempty"`
+	SourceLevel string   `json:"sourceLevel"`
+	TargetLevel string   `json:"targetLevel"`
+	Args        []string `json:"args,omitempty"`
+	EmulatedV6  bool     `json:"emulatedV6,omitempty"`
 }
 
 // ServerRuntimeConfig describes the server runtime configuration.
 type ServerRuntimeConfig struct {
-	Type   string                 `json:"type"`
-	Config ServerRuntimeSettings  `json:"config"`
+	Type   string                `json:"type"`
+	Config ServerRuntimeSettings `json:"config"`
 }
 
 // ServerRuntimeSettings contains the detailed server runtime settings.
@@ -313,9 +313,9 @@ type ServerRuntimeSettings struct {
 
 // JVMConfig describes JVM heap and argument settings.
 type JVMConfig struct {
-	MaxHeapMb  int      `json:"maxHeapMb,omitempty"`
-	PermGenMb  int      `json:"permGenMb,omitempty"`
-	ExtraArgs  []string `json:"extraArgs,omitempty"`
+	MaxHeapMb int      `json:"maxHeapMb,omitempty"`
+	PermGenMb int      `json:"permGenMb,omitempty"`
+	ExtraArgs []string `json:"extraArgs,omitempty"`
 }
 
 // BuildConfig describes the build tool settings.

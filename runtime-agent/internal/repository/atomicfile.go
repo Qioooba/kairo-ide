@@ -6,9 +6,9 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"path/filepath"
 	"time"
 
+	"github.com/kairo-ide/runtime-agent/internal/atomicfile"
 	"gopkg.in/yaml.v3"
 )
 
@@ -34,44 +34,7 @@ func (e *CorruptionError) Unwrap() error {
 }
 
 func AtomicWriteFile(path string, data []byte, perm fs.FileMode) error {
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("mkdir %s: %w", dir, err)
-	}
-
-	tmp, err := os.CreateTemp(dir, ".tmp-*")
-	if err != nil {
-		return fmt.Errorf("create temp: %w", err)
-	}
-	tmpPath := tmp.Name()
-
-	cleanup := func() {
-		os.Remove(tmpPath)
-	}
-
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		cleanup()
-		return fmt.Errorf("write temp: %w", err)
-	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		cleanup()
-		return fmt.Errorf("sync temp: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		cleanup()
-		return fmt.Errorf("close temp: %w", err)
-	}
-	if err := os.Chmod(tmpPath, perm); err != nil {
-		cleanup()
-		return fmt.Errorf("chmod: %w", err)
-	}
-	if err := atomicRename(tmpPath, path); err != nil {
-		cleanup()
-		return fmt.Errorf("rename: %w", err)
-	}
-	return syncDir(dir)
+	return atomicfile.WriteFile(path, data, perm)
 }
 
 func AtomicWriteJSON[T any](path string, value T, perm fs.FileMode) error {
@@ -167,16 +130,4 @@ func copyFile(src, dst string) error {
 
 	_, err = io.Copy(out, in)
 	return err
-}
-
-func syncDir(dir string) error {
-	f, err := os.Open(dir)
-	if err != nil {
-		return fmt.Errorf("open parent dir %s for sync: %w", dir, err)
-	}
-	defer f.Close()
-	if err := f.Sync(); err != nil {
-		return fmt.Errorf("sync parent dir %s: %w", dir, err)
-	}
-	return nil
 }

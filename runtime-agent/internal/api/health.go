@@ -21,12 +21,12 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	port := s.port
 	s.mu.Unlock()
 	resp := protocol.HealthResponse{
-		OK:           true,
-		Version:      s.version,
-		AgentVersion: s.version,
-		UptimeSec:    uptime,
-		BindAddress:  addr,
-		Port:         port,
+		OK:             true,
+		Version:        s.version,
+		AgentVersion:   s.version,
+		UptimeSec:      uptime,
+		BindAddress:    addr,
+		Port:           port,
 		ActiveSessions: 0,
 	}
 	resp.Platform.OS = runtime.GOOS

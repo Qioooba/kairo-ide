@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/kairo-ide/runtime-agent/internal/api"
+	"github.com/kairo-ide/runtime-agent/internal/atomicfile"
 	"github.com/kairo-ide/runtime-agent/internal/build"
 	"github.com/kairo-ide/runtime-agent/internal/domain"
 	"github.com/kairo-ide/runtime-agent/internal/encoding"
@@ -76,18 +77,18 @@ func NewMemoryServices(cfg Config, sandbox *security.WorkspaceRoots) *api.Servic
 		}
 	}
 	return &api.Services{
-		WorkspaceStore:     newDiskWorkspaceStore(cfg.DataDir, sandbox),
-		ProjectStore:       newDiskProjectStore(cfg.DataDir),
-		ToolchainRegistry:  &memToolchainRegistry{reg: registry},
-		ProjectRepo:        &domainProjectRepo{store: newDiskProjectStore(cfg.DataDir)},
-		ToolchainRepo:      &domainToolchainRepo{reg: registry},
-		Searcher:           &memSearcher{sandbox: sandbox},
-		Encoder:            &memEncoder{sandbox: sandbox},
-		BuildEngine:       newAsyncBuildEngine(cfg.DataDir, registry, cfg.Logger),
-		Deployer:          newDiskDeployer(cfg.DataDir, cfg.Logger),
-		ServerRunner:      newRealServerRunner(cfg.DataDir, cfg.BundledDir, tomcat6Home, cfg.Logger),
-		Auth:              newDiskAuthenticator(cfg.DataDir, cfg.Logger),
-		JDTLS:             newJDTLSService(cfg.DataDir, cfg.BundledDir, cfg.Logger, cfg.SkipSHAVerify, cfg.JDTLSURL),
+		WorkspaceStore:      newDiskWorkspaceStore(cfg.DataDir, sandbox),
+		ProjectStore:        newDiskProjectStore(cfg.DataDir),
+		ToolchainRegistry:   &memToolchainRegistry{reg: registry},
+		ProjectRepo:         &domainProjectRepo{store: newDiskProjectStore(cfg.DataDir)},
+		ToolchainRepo:       &domainToolchainRepo{reg: registry},
+		Searcher:            &memSearcher{sandbox: sandbox},
+		Encoder:             &memEncoder{sandbox: sandbox},
+		BuildEngine:         newAsyncBuildEngine(cfg.DataDir, registry, cfg.Logger),
+		Deployer:            newDiskDeployer(cfg.DataDir, cfg.Logger),
+		ServerRunner:        newRealServerRunner(cfg.DataDir, cfg.BundledDir, tomcat6Home, cfg.Logger),
+		Auth:                newDiskAuthenticator(cfg.DataDir, cfg.Logger),
+		JDTLS:               newJDTLSService(cfg.DataDir, cfg.BundledDir, cfg.Logger, cfg.SkipSHAVerify, cfg.JDTLSURL),
 		JDTProjectGenerator: newJDTProjectService(cfg.DataDir, cfg.BundledDir, cfg.Logger),
 	}
 }
@@ -130,7 +131,7 @@ func (s *diskWorkspaceStore) save() {
 		items = append(items, w)
 	}
 	data, _ := json.MarshalIndent(items, "", "  ")
-	_ = os.WriteFile(filepath.Join(s.dir, "workspaces.json"), data, 0o600)
+	_ = atomicfile.WriteFile(filepath.Join(s.dir, "workspaces.json"), data, 0o600)
 }
 
 func (s *diskWorkspaceStore) List() []api.WorkspaceRecord {
@@ -232,7 +233,7 @@ func (s *diskProjectStore) load() {
 
 func (s *diskProjectStore) save() {
 	data, _ := json.MarshalIndent(s.data, "", "  ")
-	_ = os.WriteFile(filepath.Join(s.dir, "projects.json"), data, 0o600)
+	_ = atomicfile.WriteFile(filepath.Join(s.dir, "projects.json"), data, 0o600)
 }
 
 func (s *diskProjectStore) List() []json.RawMessage {
@@ -426,7 +427,7 @@ func (m *memEncoder) Recode(payload json.RawMessage) (json.RawMessage, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := atomicWriteFile(path, encoded, info.Mode()); err != nil {
+	if err := atomicfile.WriteFile(path, encoded, info.Mode()); err != nil {
 		return nil, err
 	}
 	return json.Marshal(map[string]any{"ok": true, "bytes": len(encoded)})
@@ -478,21 +479,21 @@ func (m *memEncoder) resolveWrite(p string) (string, error) {
 // ----------------- BuildEngine (async, disk) -----------------
 
 type buildState struct {
-	ID           string              `json:"id"`
-	State        string              `json:"state"`
-	StartedAt    string              `json:"startedAt"`
-	FinishedAt   string              `json:"finishedAt,omitempty"`
-	ProjectID    string              `json:"projectId"`
-	Toolchain    string              `json:"toolchainId"`
-	SourceLevel  string              `json:"sourceLevel"`
-	TargetLevel  string              `json:"targetLevel"`
-	OutputDir    string              `json:"outputDir"`
-	Diagnostics  []build.Diagnostic  `json:"diagnostics"`
+	ID            string             `json:"id"`
+	State         string             `json:"state"`
+	StartedAt     string             `json:"startedAt"`
+	FinishedAt    string             `json:"finishedAt,omitempty"`
+	ProjectID     string             `json:"projectId"`
+	Toolchain     string             `json:"toolchainId"`
+	SourceLevel   string             `json:"sourceLevel"`
+	TargetLevel   string             `json:"targetLevel"`
+	OutputDir     string             `json:"outputDir"`
+	Diagnostics   []build.Diagnostic `json:"diagnostics"`
 	FilesCompiled int                `json:"filesCompiled"`
-	ElapsedMs    int64               `json:"elapsedMs"`
-	Output       string              `json:"output"`
-	Error        string              `json:"error,omitempty"`
-	ExitCode     int                 `json:"exitCode"`
+	ElapsedMs     int64              `json:"elapsedMs"`
+	Output        string             `json:"output"`
+	Error         string             `json:"error,omitempty"`
+	ExitCode      int                `json:"exitCode"`
 }
 
 type asyncBuildEngine struct {
@@ -557,7 +558,7 @@ func (b *asyncBuildEngine) saveFinished() {
 		}
 	}
 	data, _ := json.MarshalIndent(items, "", "  ")
-	_ = os.WriteFile(filepath.Join(b.dir, "finished.json"), data, 0o600)
+	_ = atomicfile.WriteFile(filepath.Join(b.dir, "finished.json"), data, 0o600)
 }
 
 func (b *asyncBuildEngine) Start(payload json.RawMessage) (json.RawMessage, error) {
@@ -780,7 +781,7 @@ func (d *diskDeployer) save() {
 		items = append(items, r)
 	}
 	data, _ := json.MarshalIndent(items, "", "  ")
-	_ = os.WriteFile(filepath.Join(d.dir, "deployments.json"), data, 0o600)
+	_ = atomicfile.WriteFile(filepath.Join(d.dir, "deployments.json"), data, 0o600)
 }
 
 func (d *diskDeployer) Publish(payload json.RawMessage) (json.RawMessage, error) {
@@ -1095,6 +1096,66 @@ type serverMeta struct {
 	LastError    string         `json:"lastError,omitempty"`
 }
 
+// serverMetaResponse is the SAFE API response shape for the legacy
+// realServerRunner. It strips sensitive local filesystem paths
+// (JavaHome, WebappDir, CatalinaBase) and internal ports
+// (Shutdown, AJP) that the persisted serverMeta carries for
+// restart purposes.
+//
+// The persisted serverMeta shape is intentionally kept separate
+// from the API shape so that adding a new persisted field cannot
+// accidentally leak through the HTTP boundary. See ADR-0012
+// (Safe API DTO Boundary) and api.ServerResponse for the new
+// ServerUseCase flow.
+type serverMetaResponse struct {
+	ID          string           `json:"id"`
+	ProjectID   string           `json:"projectId"`
+	Type        string           `json:"type"`
+	State       string           `json:"state"`
+	PID         int              `json:"pid"`
+	Ports       *serverMetaPorts `json:"ports"`
+	StartedAt   time.Time        `json:"startedAt"`
+	ContextPath string           `json:"contextPath"`
+	LastError   string           `json:"lastError,omitempty"`
+	URL         string           `json:"url,omitempty"`
+}
+
+// serverMetaPorts exposes only the user-facing ports. Shutdown
+// and AJP are internal and MUST NOT be exposed.
+type serverMetaPorts struct {
+	HTTP  int `json:"http,omitempty"`
+	Debug int `json:"debug,omitempty"`
+}
+
+// toResponse maps the persisted serverMeta to the safe API
+// response shape. Sensitive fields are dropped by construction.
+func (m *serverMeta) toResponse() *serverMetaResponse {
+	if m == nil {
+		return nil
+	}
+	resp := &serverMetaResponse{
+		ID:          m.ID,
+		ProjectID:   m.ProjectID,
+		Type:        m.Type,
+		State:       m.State,
+		PID:         m.PID,
+		StartedAt:   m.StartedAt,
+		ContextPath: m.ContextPath,
+		LastError:   m.LastError,
+	}
+	if m.Ports != nil {
+		resp.Ports = &serverMetaPorts{
+			HTTP:  m.Ports.HTTP,
+			Debug: m.Ports.Debug,
+		}
+		if m.Ports.HTTP > 0 {
+			resp.URL = fmt.Sprintf("http://localhost:%d%s",
+				m.Ports.HTTP, m.ContextPath)
+		}
+	}
+	return resp
+}
+
 func newRealServerRunner(dataDir, bundledDir, tomcat6Home string, logger *log.Logger) *realServerRunner {
 	r := &realServerRunner{
 		dataDir:     dataDir,
@@ -1129,7 +1190,7 @@ func (r *realServerRunner) save() {
 		items = append(items, m)
 	}
 	data, _ := json.MarshalIndent(items, "", "  ")
-	_ = os.WriteFile(filepath.Join(r.dataDir, "servers.json"), data, 0o600)
+	_ = atomicfile.WriteFile(filepath.Join(r.dataDir, "servers.json"), data, 0o600)
 }
 
 func (r *realServerRunner) Start(payload json.RawMessage) (json.RawMessage, error) {
@@ -1170,19 +1231,19 @@ func (r *realServerRunner) Start(payload json.RawMessage) (json.RawMessage, erro
 		return nil, err
 	}
 	inst, err := tomcat6.Start(context.Background(), tomcat6.Spec{
-		ID:            id,
-		JavaHome:      req.JavaHome,
-		CatalinaHome:  r.tomcat6Home,
-		CatalinaBase:  base,
-		HTTPPort:      req.HTTPPort,
-		ShutdownPort:  req.ShutdownPort,
-		AJPPort:       req.AJPPort,
-		DebugPort:     req.DebugPort,
-		DebugSuspend:  req.DebugSuspend,
-		ContextPath:   req.ContextPath,
-		WebappDir:     req.WebappDir,
-		JVMOptions:    req.JVMOptions,
-		Logger:        r.logger,
+		ID:           id,
+		JavaHome:     req.JavaHome,
+		CatalinaHome: r.tomcat6Home,
+		CatalinaBase: base,
+		HTTPPort:     req.HTTPPort,
+		ShutdownPort: req.ShutdownPort,
+		AJPPort:      req.AJPPort,
+		DebugPort:    req.DebugPort,
+		DebugSuspend: req.DebugSuspend,
+		ContextPath:  req.ContextPath,
+		WebappDir:    req.WebappDir,
+		JVMOptions:   req.JVMOptions,
+		Logger:       r.logger,
 	})
 	if err != nil {
 		return nil, err
@@ -1206,7 +1267,7 @@ func (r *realServerRunner) Start(payload json.RawMessage) (json.RawMessage, erro
 	r.meta[id] = meta
 	r.save()
 	r.mu.Unlock()
-	return json.Marshal(meta)
+	return json.Marshal(meta.toResponse())
 }
 
 func (r *realServerRunner) Get(id string) (json.RawMessage, error) {
@@ -1222,19 +1283,19 @@ func (r *realServerRunner) Get(id string) (json.RawMessage, error) {
 		ports := inst.Ports()
 		m.Ports = &ports
 	}
-	return json.Marshal(m)
+	return json.Marshal(m.toResponse())
 }
 
 func (r *realServerRunner) List() json.RawMessage {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	items := make([]*serverMeta, 0, len(r.meta))
+	items := make([]*serverMetaResponse, 0, len(r.meta))
 	for _, m := range r.meta {
 		if inst, ok := r.instances[m.ID]; ok {
 			m.State = inst.State()
 			m.PID = inst.PID()
 		}
-		items = append(items, m)
+		items = append(items, m.toResponse())
 	}
 	data, _ := json.Marshal(items)
 	return data
@@ -1282,7 +1343,7 @@ func (r *realServerRunner) Stop(id string, payload json.RawMessage) (json.RawMes
 	if m == nil {
 		return json.Marshal(map[string]any{"id": id, "state": "stopped"})
 	}
-	return json.Marshal(m)
+	return json.Marshal(m.toResponse())
 }
 
 func (r *realServerRunner) Debug(id string) (json.RawMessage, error) {
@@ -1308,17 +1369,17 @@ func (r *realServerRunner) Debug(id string) (json.RawMessage, error) {
 		return nil, err
 	}
 	inst, err := tomcat6.Start(context.Background(), tomcat6.Spec{
-		ID:            id,
-		JavaHome:      m.JavaHome,
-		CatalinaHome:  r.tomcat6Home,
-		CatalinaBase:  m.CatalinaBase,
-		HTTPPort:      m.Ports.HTTP,
-		ShutdownPort:  m.Ports.Shutdown,
-		AJPPort:       m.Ports.AJP,
-		DebugPort:     debugPort,
-		ContextPath:   m.ContextPath,
-		WebappDir:     m.WebappDir,
-		Logger:        r.logger,
+		ID:           id,
+		JavaHome:     m.JavaHome,
+		CatalinaHome: r.tomcat6Home,
+		CatalinaBase: m.CatalinaBase,
+		HTTPPort:     m.Ports.HTTP,
+		ShutdownPort: m.Ports.Shutdown,
+		AJPPort:      m.Ports.AJP,
+		DebugPort:    debugPort,
+		ContextPath:  m.ContextPath,
+		WebappDir:    m.WebappDir,
+		Logger:       r.logger,
 	})
 	if err != nil {
 		return nil, err
@@ -1331,7 +1392,7 @@ func (r *realServerRunner) Debug(id string) (json.RawMessage, error) {
 	r.instances[id] = inst
 	r.save()
 	r.mu.Unlock()
-	return json.Marshal(m)
+	return json.Marshal(m.toResponse())
 }
 
 func (r *realServerRunner) Logs(id string, follow bool) (json.RawMessage, error) {
@@ -1607,43 +1668,6 @@ func shortID() string {
 	b := make([]byte, 4)
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
-}
-
-// atomicWriteFile writes bytes to a file atomically using
-// temp file + fsync + rename, then syncs the parent directory.
-// This prevents file corruption on crash (V-027).
-func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
-	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, ".kairo-tmp-*")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath)
-
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Chmod(tmpPath, perm); err != nil {
-		return err
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		return err
-	}
-	// Sync parent directory on Unix
-	if f, err := os.Open(dir); err == nil {
-		f.Sync()
-		f.Close()
-	}
-	return nil
 }
 
 // domainProjectRepo adapts diskProjectStore to api.ProjectRepo.

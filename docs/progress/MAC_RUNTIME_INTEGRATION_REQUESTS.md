@@ -65,14 +65,30 @@ type ServerUseCaseConfig struct {
 ```
 Maps to `domain.StartServerCommand`.
 
-**Response DTO**: `domain.ServerRecord` - serialize all fields. Important fields:
+**Response DTO**: `api.ServerResponse` — the **safe, typed API DTO** defined in
+`internal/api/dto.go`. Construct it via `api.ToServerResponse(rec)` (single) or
+`api.ToServerResponseList(records)` (list). DO NOT serialize `domain.ServerRecord`
+directly — see ADR-0012 (Safe API DTO Boundary).
+
+Important fields exposed by `ServerResponse`:
 - `id`: ServerID (persistent across restarts)
-- `observedState`: Current state ("stopped"|"preparing"|"starting"|"running"|"stopping"|"restarting"|"failed"|"crashed")
+- `workspaceId`, `projectId`: scoping IDs the UI already knows
+- `runtimeId`: e.g. `"tomcat6"`
+- `desiredState`: `"running"` or `"stopped"` — what the user asked for
+- `observedState`: Current state (`"stopped"|"preparing"|"starting"|"running"|"stopping"|"restarting"|"failed"|"crashed"`)
 - `generation`: Increments on each restart
 - `pid`: OS process ID (when running)
-- `httpPort`/`shutdownPort`: From RuntimePlan
-- `startedAt`/`stoppedAt`: Timestamps
+- `httpPort`, `debugPort`: User-facing ports only
+- `contextPath`: URL path
+- `startedAt`, `stoppedAt`, `updatedAt`: RFC3339Nano timestamps
 - `lastError`: Error message if failed/crashed
+- `url`: Convenience URL derived from `httpPort` + `contextPath`
+
+Fields explicitly EXCLUDED (sensitive — see ADR-0012):
+- `ProcessIdentity.*` (Executable, StartTime, CatalinaBase, **MarkerToken**)
+- `RuntimePlan.JavaHome`, `CatalinaHome`, `CatalinaBase`, `WebappDir`, `DeploymentRoot` (local filesystem paths)
+- `RuntimePlan.JVMOptions`, `Env` (may carry secrets like `-Ddb.password=…`)
+- `RuntimePlan.ShutdownPort` (internal; aids shutdown-packet attacks)
 
 #### StopServer
 
@@ -87,7 +103,7 @@ Maps to `domain.StartServerCommand`.
 ```
 Maps to `domain.StopServerCommand`.
 
-**Response**: `domain.ServerRecord` (should show state="stopped")
+**Response**: `api.ServerResponse` via `api.ToServerResponse(rec)` (should show state="stopped")
 
 #### RestartServer
 
@@ -101,21 +117,21 @@ Maps to `domain.StopServerCommand`.
 ```
 Maps to `domain.RestartServerCommand`.
 
-**Response**: `domain.ServerRecord` (generation+1, state="running")
+**Response**: `api.ServerResponse` via `api.ToServerResponse(rec)` (generation+1, state="running")
 
 #### GetServer
 
 **Request**: Path params `{workspaceId}/{serverId}`
 Maps to direct call `uc.Get(ctx, ws, srv)`.
 
-**Response**: `domain.ServerRecord`
+**Response**: `api.ServerResponse` via `api.ToServerResponse(rec)`
 
 #### ListServers
 
 **Request**: Path param `{workspaceId}`
 Maps to `uc.List(ctx, ws)`.
 
-**Response**: `[]*domain.ServerRecord`
+**Response**: `[]api.ServerResponse` via `api.ToServerResponseList(records)`
 
 #### GetServerLogs
 

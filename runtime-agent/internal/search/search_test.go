@@ -90,7 +90,7 @@ func TestSearch_GBK(t *testing.T) {
 	gbk := []byte{0xC4, 0xE3, 0xBA, 0xC3}
 	must(t, os.WriteFile(filepath.Join(dir, "a.txt"), append(gbk, '\n'), 0o600))
 	r, err := Search(dir, Options{
-		Query:          "你好",
+		Query:           "你好",
 		ProjectEncoding: encoding.GBK,
 	})
 	if err != nil {

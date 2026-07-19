@@ -30,21 +30,21 @@ var DefaultExcludes = []string{
 	"node_modules", ".pnpm-store",
 	"target", "build", "dist", "out",
 	"logs",
-	"work", "temp",         // Tomcat
+	"work", "temp", // Tomcat
 	".legacyflow", ".kairo", // runtime state
 }
 
 // Options configures a search.
 type Options struct {
-	Query         string
-	IsRegex       bool
-	CaseSensitive bool
-	WholeWord     bool
-	Include       []string // glob patterns
-	Exclude       []string // glob patterns
-	MaxResults    int      // 0 = unlimited
-	ContextLines  int      // lines before/after
-	PreviewReplace string  // if set, also return replacement preview
+	Query           string
+	IsRegex         bool
+	CaseSensitive   bool
+	WholeWord       bool
+	Include         []string // glob patterns
+	Exclude         []string // glob patterns
+	MaxResults      int      // 0 = unlimited
+	ContextLines    int      // lines before/after
+	PreviewReplace  string   // if set, also return replacement preview
 	ProjectEncoding encoding.ID
 	EncodingAliases encoding.Aliases
 	// Cancel is checked periodically; if it returns Done, walk aborts.
@@ -53,22 +53,22 @@ type Options struct {
 
 // Match is one match.
 type Match struct {
-	File           string `json:"file"`
-	Line           int    `json:"line"`
-	Column         int    `json:"column"`
-	MatchText      string `json:"matchText"`
-	ContextBefore  string `json:"contextBefore"`
-	ContextAfter   string `json:"contextAfter"`
-	Replacement    string `json:"replacement,omitempty"`
+	File          string `json:"file"`
+	Line          int    `json:"line"`
+	Column        int    `json:"column"`
+	MatchText     string `json:"matchText"`
+	ContextBefore string `json:"contextBefore"`
+	ContextAfter  string `json:"contextAfter"`
+	Replacement   string `json:"replacement,omitempty"`
 }
 
 // Result is the result of a search.
 type Result struct {
-	Matches      []Match                `json:"matches"`
-	TotalMatches int                    `json:"totalMatches"`
-	Truncated    bool                   `json:"truncated"`
-	ElapsedMs    int64                  `json:"elapsedMs"`
-	ErroredFiles []ErroredFile          `json:"erroredFiles"`
+	Matches      []Match       `json:"matches"`
+	TotalMatches int           `json:"totalMatches"`
+	Truncated    bool          `json:"truncated"`
+	ElapsedMs    int64         `json:"elapsedMs"`
+	ErroredFiles []ErroredFile `json:"erroredFiles"`
 	allDecoders  map[string]func() ([]byte, error)
 }
 
@@ -330,10 +330,10 @@ func buildMatch(rel string, line, start, end int, s string, m *compiledMatcher, 
 		_ = after
 	}
 	match := Match{
-		File:        rel,
-		Line:        line,
-		Column:      col,
-		MatchText:   s[start:end],
+		File:          rel,
+		Line:          line,
+		Column:        col,
+		MatchText:     s[start:end],
 		ContextBefore: before,
 		ContextAfter:  after,
 	}

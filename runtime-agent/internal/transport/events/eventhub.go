@@ -11,14 +11,14 @@ import (
 type EventType string
 
 const (
-	EventBuildStarted    EventType = "build.started"
-	EventBuildProgress   EventType = "build.progress"
-	EventBuildCompleted  EventType = "build.completed"
-	EventBuildFailed     EventType = "build.failed"
-	EventServerStarted   EventType = "server.started"
-	EventServerStopped   EventType = "server.stopped"
-	EventServerError     EventType = "server.error"
-	EventDeployComplete  EventType = "deploy.completed"
+	EventBuildStarted     EventType = "build.started"
+	EventBuildProgress    EventType = "build.progress"
+	EventBuildCompleted   EventType = "build.completed"
+	EventBuildFailed      EventType = "build.failed"
+	EventServerStarted    EventType = "server.started"
+	EventServerStopped    EventType = "server.stopped"
+	EventServerError      EventType = "server.error"
+	EventDeployComplete   EventType = "deploy.completed"
 	EventSnapshotRequired EventType = "snapshot.required"
 )
 
@@ -41,7 +41,7 @@ type subscriber struct {
 // EventHub is a publish-subscribe event bus with history and sequence tracking.
 // Multiple subscribers per workspace are supported.
 type EventHub struct {
-	mu          sync.RWMutex
+	mu sync.RWMutex
 	// workspaceID → subscriberID → subscriber
 	subscribers map[string]map[string]*subscriber
 	sequence    int64

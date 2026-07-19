@@ -5,6 +5,8 @@ import (
 	"net"
 	"sync"
 	"testing"
+
+	"github.com/kairo-ide/runtime-agent/internal/domain"
 )
 
 func TestFakePortAllocator(t *testing.T) {
@@ -14,15 +16,15 @@ func TestFakePortAllocator(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if lease.HTTP == 0 || lease.Shutdown == 0 || lease.Debug == 0 {
+	if lease.HTTPPort == 0 || lease.ShutdownPort == 0 || lease.DebugPort == 0 {
 		t.Error("ports should be non-zero")
 	}
-	if lease.HTTP == lease.Shutdown || lease.HTTP == lease.Debug || lease.Shutdown == lease.Debug {
+	if lease.HTTPPort == lease.ShutdownPort || lease.HTTPPort == lease.DebugPort || lease.ShutdownPort == lease.DebugPort {
 		t.Error("ports should be distinct")
 	}
 
 	lease.Release()
-	if lease.HTTP != 0 {
+	if lease.HTTPPort != 0 {
 		t.Error("lease should be released")
 	}
 }
@@ -36,6 +38,19 @@ func TestFakePortAllocatorFail(t *testing.T) {
 	}
 }
 
+func TestFakePortAllocatorPrefersRequestedPorts(t *testing.T) {
+	pa := NewFakePortAllocator()
+	lease, err := pa.Allocate(19090, 19091, 19092)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lease.HTTPPort != 19090 || lease.ShutdownPort != 19091 || lease.DebugPort != 19092 {
+		t.Errorf("expected requested ports, got http=%d shutdown=%d debug=%d",
+			lease.HTTPPort, lease.ShutdownPort, lease.DebugPort)
+	}
+	lease.Release()
+}
+
 func TestDefaultPortAllocator(t *testing.T) {
 	cfg := DefaultPortConfig()
 	pa := NewDefaultPortAllocator(cfg)
@@ -46,19 +61,19 @@ func TestDefaultPortAllocator(t *testing.T) {
 	}
 	defer lease.Release()
 
-	if lease.HTTP < cfg.HTTPMin || lease.HTTP > cfg.HTTPMax {
-		t.Errorf("HTTP port %d out of range", lease.HTTP)
+	if lease.HTTPPort < cfg.HTTPMin || lease.HTTPPort > cfg.HTTPMax {
+		t.Errorf("HTTP port %d out of range", lease.HTTPPort)
 	}
-	if lease.Shutdown < cfg.ShutdownMin || lease.Shutdown > cfg.ShutdownMax {
-		t.Errorf("Shutdown port %d out of range", lease.Shutdown)
+	if lease.ShutdownPort < cfg.ShutdownMin || lease.ShutdownPort > cfg.ShutdownMax {
+		t.Errorf("Shutdown port %d out of range", lease.ShutdownPort)
 	}
-	if lease.Debug < cfg.DebugMin || lease.Debug > cfg.DebugMax {
-		t.Errorf("Debug port %d out of range", lease.Debug)
+	if lease.DebugPort < cfg.DebugMin || lease.DebugPort > cfg.DebugMax {
+		t.Errorf("Debug port %d out of range", lease.DebugPort)
 	}
 
-	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", lease.HTTP))
+	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", lease.HTTPPort))
 	if err != nil {
-		t.Logf("Note: port %d may already be in use: %v", lease.HTTP, err)
+		t.Logf("Note: port %d may already be in use: %v", lease.HTTPPort, err)
 	} else {
 		ln.Close()
 	}
@@ -82,9 +97,9 @@ func TestDefaultPortAllocatorDistinct(t *testing.T) {
 	defer lease.Release()
 
 	ports := map[int]bool{
-		lease.HTTP:     true,
-		lease.Shutdown: true,
-		lease.Debug:    true,
+		lease.HTTPPort:     true,
+		lease.ShutdownPort: true,
+		lease.DebugPort:    true,
 	}
 	if len(ports) != 3 {
 		t.Errorf("ports should be distinct, got %v", ports)
@@ -128,7 +143,7 @@ func TestConcurrentPortAllocation(t *testing.T) {
 
 	var wg sync.WaitGroup
 	var mu sync.Mutex
-	allLeases := make([]*PortLease, 0)
+	allLeases := make([]*domain.PortLease, 0)
 	errs := make(chan error, 20)
 
 	for i := 0; i < 20; i++ {
@@ -155,7 +170,7 @@ func TestConcurrentPortAllocation(t *testing.T) {
 	portSet := make(map[int]bool)
 	mu.Lock()
 	for _, l := range allLeases {
-		for _, p := range []int{l.HTTP, l.Shutdown, l.Debug} {
+		for _, p := range []int{l.HTTPPort, l.ShutdownPort, l.DebugPort} {
 			if portSet[p] {
 				t.Errorf("duplicate port %d allocated", p)
 			}

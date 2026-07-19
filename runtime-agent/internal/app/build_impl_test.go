@@ -735,8 +735,8 @@ func TestBuildUseCase_ConstructorNilFailFast(t *testing.T) {
 	idGen := &fixedIDGen{id: "bld_" + testValidID26}
 
 	testCases := []struct {
-		name   string
-		setup  func()
+		name  string
+		setup func()
 	}{
 		{
 			name: "nil history",

@@ -18,6 +18,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/kairo-ide/runtime-agent/internal/atomicfile"
 )
 
 const (
@@ -169,7 +171,7 @@ func copyMinimalConf(catalinaHome, catalinaBase string) error {
 			}
 			return err
 		}
-		if err := writeAtomic(dst, data, 0644); err != nil {
+		if err := atomicfile.WriteFile(dst, data, 0644); err != nil {
 			return err
 		}
 	}
@@ -336,7 +338,7 @@ func writeServerXML(cfg Config) error {
 	content := append(xmlHeader, output...)
 
 	dst := filepath.Join(cfg.CatalinaBase, "conf", "server.xml")
-	return writeAtomic(dst, content, 0644)
+	return atomicfile.WriteFile(dst, content, 0644)
 }
 
 var defaultLoggingProps = []byte(`handlers = java.util.logging.ConsoleHandler, java.util.logging.FileHandler
@@ -355,36 +357,7 @@ func writeLoggingProperties(catalinaBase string) error {
 	if _, err := os.Stat(lp); err == nil {
 		return nil
 	}
-	return writeAtomic(lp, defaultLoggingProps, 0644)
-}
-
-func writeAtomic(path string, data []byte, perm os.FileMode) error {
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(dir, ".tmp-tomcat-*")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	defer func() { _ = os.Remove(tmpName) }()
-
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Chmod(tmpName, perm); err != nil {
-		return err
-	}
-	return os.Rename(tmpName, path)
+	return atomicfile.WriteFile(lp, defaultLoggingProps, 0644)
 }
 
 func WaitForReady(ctx context.Context, httpPort int, deadline time.Time) error {

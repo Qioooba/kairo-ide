@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kairo-ide/runtime-agent/internal/atomicfile"
 )
 
 func createFakeCatalinaHome(t *testing.T) string {
@@ -420,7 +422,7 @@ func TestWriteAtomic(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.txt")
 	data := []byte("hello atomic")
-	if err := writeAtomic(path, data, 0644); err != nil {
+	if err := atomicfile.WriteFile(path, data, 0644); err != nil {
 		t.Fatal(err)
 	}
 	read, err := os.ReadFile(path)

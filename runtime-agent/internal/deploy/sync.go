@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/kairo-ide/runtime-agent/internal/atomicfile"
 	"github.com/kairo-ide/runtime-agent/internal/domain"
 )
 
@@ -218,6 +219,9 @@ func (e *safeDeployEngine) copyEntry(ctx context.Context, vp *ValidatedPlan, ent
 	if err := atomicReplace(tmpPath, entry.ResolvedTarget); err != nil {
 		return fmt.Errorf("atomic replace: %w", err)
 	}
+
+	// Sync parent directory so the rename is durable.
+	_ = atomicfile.SyncDir(filepath.Dir(entry.ResolvedTarget))
 
 	cleanupTmp = false
 	return nil

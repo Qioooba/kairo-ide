@@ -18,12 +18,12 @@ type Classpath struct {
 // ClasspathEntry is one row of the .classpath file. The Kind
 // is the "kind" attribute: "src", "output", "lib", "con".
 type ClasspathEntry struct {
-	Kind         string `xml:"kind,attr"`
-	Path         string `xml:"path,attr,omitempty"`
-	SourcePath   string `xml:"sourcepath,attr,omitempty"`
-	Output       string `xml:"output,attr,omitempty"`
-	Including    string `xml:"including,attr,omitempty"`
-	Excluding    string `xml:"excluding,attr,omitempty"`
+	Kind       string `xml:"kind,attr"`
+	Path       string `xml:"path,attr,omitempty"`
+	SourcePath string `xml:"sourcepath,attr,omitempty"`
+	Output     string `xml:"output,attr,omitempty"`
+	Including  string `xml:"including,attr,omitempty"`
+	Excluding  string `xml:"excluding,attr,omitempty"`
 }
 
 // ProjectModel is the .project XML root. (We name it
@@ -45,7 +45,7 @@ type ProjectModel struct {
 // javac directly and writes the .class files into the
 // output dir.
 type BuildSpec struct {
-	Name     string `xml:"name"`
+	Name      string `xml:"name"`
 	Arguments string `xml:"arguments"`
 	Triggers  string `xml:"triggers,omitempty"`
 }
@@ -61,9 +61,9 @@ type Nature struct {
 // jars that are pulled from the runtime data dir (e.g.
 // Servlet API + JSTL when the project has no copy of its own).
 type LinkedResource struct {
-	Name       string `xml:"name"`
-	Type       string `xml:"type"`
-	Location   string `xml:"location"`
+	Name        string `xml:"name"`
+	Type        string `xml:"type"`
+	Location    string `xml:"location"`
 	LocationURI string `xml:"locationURI,omitempty"`
 }
 

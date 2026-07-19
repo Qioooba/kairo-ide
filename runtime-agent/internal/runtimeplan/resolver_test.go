@@ -26,7 +26,6 @@ type testEnv struct {
 	tcRepo   *FakeToolchainRepo
 	rtRepo   *FakeRuntimeRegistry
 	idGen    *FakeIDGenerator
-	ports    *FakePortAllocator
 	pp       pathpolicy.PathAuthorizer
 	cbPlan   catalinabase.Planner
 }
@@ -82,7 +81,6 @@ func setupTestEnv(t *testing.T) *testEnv {
 		tcRepo:       NewFakeToolchainRepo(),
 		rtRepo:       NewFakeRuntimeRegistry(),
 		idGen:        idGen,
-		ports:        NewFakePortAllocator(),
 		pp:           pathpolicy.NewDefaultPathPolicy(),
 		cbPlan:       catalinabase.NewDefaultPlanner(),
 	}
@@ -132,7 +130,6 @@ func (env *testEnv) newResolver(t *testing.T) (*DefaultRuntimePlanResolver, stri
 		Runtimes:   env.rtRepo,
 		PathPolicy: env.pp,
 		IDGen:      env.idGen,
-		Ports:      env.ports,
 		CBPlanner:  env.cbPlan,
 	})
 	if err != nil {
@@ -390,7 +387,6 @@ func TestConfigValidation(t *testing.T) {
 		Runtimes:   env.rtRepo,
 		PathPolicy: env.pp,
 		IDGen:      env.idGen,
-		Ports:      env.ports,
 	})
 	if err == nil {
 		t.Error("expected error for empty data root")

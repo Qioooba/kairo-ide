@@ -1,9 +1,13 @@
 package deploy
 
-import "os"
+import (
+	"os"
+
+	"github.com/kairo-ide/runtime-agent/internal/atomicfile"
+)
 
 func atomicReplace(src, dst string) error {
-	return platformAtomicReplace(src, dst)
+	return atomicfile.Rename(src, dst)
 }
 
 func fsyncFile(f *os.File) error {

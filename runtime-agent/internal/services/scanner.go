@@ -83,22 +83,22 @@ func detectLayout(root string) map[string]any {
 
 func defaultEncodingByExt() map[string]string {
 	return map[string]string{
-		".java": "utf-8",
-		".jsp":  "gbk",
-		".xml":  "utf-8",
+		".java":       "utf-8",
+		".jsp":        "gbk",
+		".xml":        "utf-8",
 		".properties": "iso-8859-1",
-		".html":  "utf-8",
-		".css":   "utf-8",
-		".js":    "utf-8",
-		".tag":   "utf-8",
-		".tld":   "utf-8",
+		".html":       "utf-8",
+		".css":        "utf-8",
+		".js":         "utf-8",
+		".tag":        "utf-8",
+		".tld":        "utf-8",
 	}
 }
 
 type webXML struct {
-	XMLName     xml.Name `xml:"web-app"`
-	Servlets    []struct {
-		ServletName string `xml:"servlet-name"`
+	XMLName  xml.Name `xml:"web-app"`
+	Servlets []struct {
+		ServletName  string `xml:"servlet-name"`
 		ServletClass string `xml:"servlet-class"`
 	} `xml:"servlet"`
 	ServletMappings []struct {

@@ -374,6 +374,23 @@ func (f *FakeProcess) removeListener(id uint64) {
 
 func (f *FakeProcess) StopCount() int  { return int(f.stopCount.Load()) }
 func (f *FakeProcess) ForceCount() int { return int(f.forceCount.Load()) }
+
+// SetBehavior updates the behavior of the fake process.
+// Used to simulate changes like crashes or unresponsiveness.
+func (f *FakeProcess) SetBehavior(b FakeProcessBehavior) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.behavior = b
+}
+
+// SetIdentity updates the process identity. Used to simulate
+// PID reuse scenarios where the PID now belongs to a different process.
+func (f *FakeProcess) SetIdentity(id domain.ProcessIdentity) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.identity = id
+}
+
 func (f *FakeProcess) IsRunning() bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()

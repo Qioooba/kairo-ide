@@ -350,7 +350,7 @@ func TestG1_FullBuildDeployFlow(t *testing.T) {
 		ProjectID:   projID,
 		ServerID:    domain.ServerID(srvIDStr),
 		Root:        deploymentRoot,
-		OwnerToken:  domain.NewDeploymentOwnerToken(),
+		OwnerToken:  domain.NewDeploymentOwnerToken(wsID, projID, domain.ServerID(srvIDStr), deploymentRoot),
 	}
 
 	deployPlan, err := resolver.ResolveDeploy(context.Background(), wsID, projID, buildID, deployTarget)

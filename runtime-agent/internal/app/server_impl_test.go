@@ -99,7 +99,7 @@ func (p *fakeRuntimeProvider) Prepare(ctx context.Context, plan domain.RuntimePl
 	return p.prepareErr
 }
 
-func (p *fakeRuntimeProvider) Start(ctx context.Context, plan domain.RuntimePlan, logSink func(domain.LogLine)) (*domain.ProcessIdentity, *domain.PortLease, error) {
+func (p *fakeRuntimeProvider) Start(ctx context.Context, plan domain.RuntimePlan, logSink func(domain.LogLine)) (*domain.ProcessIdentity, error) {
 	atomic.AddInt32(&p.startCount, 1)
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -110,13 +110,13 @@ func (p *fakeRuntimeProvider) Start(ctx context.Context, plan domain.RuntimePlan
 		case <-time.After(p.startDelay):
 		case <-ctx.Done():
 			p.mu.Lock()
-			return nil, nil, ctx.Err()
+			return nil, ctx.Err()
 		}
 		p.mu.Lock()
 	}
 
 	if p.startErr != nil {
-		return nil, nil, p.startErr
+		return nil, p.startErr
 	}
 
 	pid := int(atomic.AddInt32(&p.startCount, 1000))
@@ -130,18 +130,13 @@ func (p *fakeRuntimeProvider) Start(ctx context.Context, plan domain.RuntimePlan
 	p.lastIdentity = identity
 	p.running = true
 
-	lease := &domain.PortLease{
-		HTTPPort:     plan.HTTPPort,
-		ShutdownPort: plan.ShutdownPort,
-	}
-
 	logSink(domain.LogLine{
 		Stream: domain.LogStreamStdout,
 		Time:   time.Now(),
 		Text:   "fake server started",
 	})
 
-	return identity, lease, nil
+	return identity, nil
 }
 
 func (p *fakeRuntimeProvider) GracefulStop(ctx context.Context, identity domain.ProcessIdentity) error {
@@ -650,7 +645,7 @@ func TestServerUseCase_GetLogs(t *testing.T) {
 		t.Fatalf("Start failed: %v", err)
 	}
 
-	lines, nextCursor, err := deps.uc.GetLogs(deps.ctx, rec.WorkspaceID, rec.ID, 0, 100)
+	lines, nextCursor, _, err := deps.uc.GetLogs(deps.ctx, rec.WorkspaceID, rec.ID, 0, 100)
 	if err != nil {
 		t.Fatalf("GetLogs failed: %v", err)
 	}
@@ -756,6 +751,11 @@ func TestServerUseCase_Reconcile_AliveProcess(t *testing.T) {
 		t.Fatalf("Start failed: %v", err)
 	}
 
+	// Product rule (ADR-0011 Section 9): Reconcile assumes the previous
+	// Agent lifecycle stopped all managed processes. Even if the process
+	// is still alive in the same address space (as in this in-process
+	// test), Reconcile must NOT trust the persisted ProcessIdentity and
+	// must mark the record as Crashed so the user can explicitly restart.
 	err = deps.uc.Reconcile(deps.ctx)
 	if err != nil {
 		t.Fatalf("Reconcile failed: %v", err)
@@ -765,8 +765,11 @@ func TestServerUseCase_Reconcile_AliveProcess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get after reconcile failed: %v", err)
 	}
-	if after.ObservedState != domain.ServerStateRunning {
-		t.Errorf("expected still running after reconcile (alive process), got %s", after.ObservedState)
+	if after.ObservedState != domain.ServerStateCrashed {
+		t.Errorf("expected crashed after reconcile (cross-lifecycle recovery forbidden), got %s", after.ObservedState)
+	}
+	if after.PID != 0 || after.ProcessIdentity != nil {
+		t.Errorf("expected PID/ProcessIdentity cleared, got PID=%d Identity=%v", after.PID, after.ProcessIdentity)
 	}
 }
 
@@ -819,6 +822,11 @@ func TestServerUseCase_Reconcile_IdentityMismatch(t *testing.T) {
 		t.Fatalf("Start failed: %v", err)
 	}
 
+	// Product rule (ADR-0011 Section 9): Reconcile no longer calls
+	// Provider.Inspect on the persisted ProcessIdentity. Even when the
+	// provider would report an identity mismatch, Reconcile must mark
+	// the record as Crashed because cross-lifecycle recovery is
+	// forbidden regardless of the underlying identity state.
 	deps.prov.mu.Lock()
 	deps.prov.identityMismatch = true
 	deps.prov.mu.Unlock()
@@ -832,8 +840,8 @@ func TestServerUseCase_Reconcile_IdentityMismatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get after reconcile failed: %v", err)
 	}
-	if after.ObservedState != domain.ServerStateFailed {
-		t.Errorf("expected failed after reconcile (identity mismatch), got %s", after.ObservedState)
+	if after.ObservedState != domain.ServerStateCrashed {
+		t.Errorf("expected crashed after reconcile (cross-lifecycle recovery forbidden), got %s", after.ObservedState)
 	}
 }
 

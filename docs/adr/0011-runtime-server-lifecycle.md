@@ -316,16 +316,47 @@ Changes:
 
 ### 9. Reconciliation Flow (Agent Startup)
 
-1. List all persisted ServerRecords from history
-2. For each record:
-   a. Validate all IDs
-   b. If ObservedState is non-terminal (running/starting/etc.):
-      - If ProcessIdentity is set and PID alive + identity matches: restore to running
-      - If PID alive but identity mismatch: mark orphaned, publish event
-      - If PID dead: mark crashed, set desired state according to policy
-3. Publish reconciliation snapshot event
-4. Do NOT automatically restart servers unless explicitly configured (future policy)
-5. Do NOT scan disk for projects - only operate on persisted records
+**Product rule**: Agent exit MUST stop all Tomcat processes it manages.
+Cross-lifecycle process recovery is intentionally NOT supported.
+
+Rationale:
+- A Tomcat process started by Agent instance A "belongs" to A's lifecycle.
+- If A exits cleanly, A's `Shutdown()` force-stops every non-terminal server
+  before the Agent process terminates.
+- If A crashes, any Tomcat it started is now orphaned. Re-attaching to such
+  a process from Agent instance B is unsafe: PID reuse, marker-token loss,
+  and ownership-file divergence all make positive identity verification
+  unreliable across Agent lifecycles.
+- The product therefore forbids cross-lifecycle re-attachment in favor of
+  safer, simpler semantics: B treats every persisted non-terminal record as
+  stale, marks it Crashed (or Stopped if desired state was stopped), and
+  releases any leftover lease bookkeeping. The user (or a future
+  process-reaper) is responsible for cleaning up orphaned processes from a
+  crashed Agent.
+
+Reconcile flow at Agent startup:
+
+1. List all persisted ServerRecords from history via `ListNonTerminal`.
+2. For each non-terminal record:
+   - Clear `PID` and `ProcessIdentity` (we no longer trust them).
+   - If `DesiredState == running`: mark `ObservedState = crashed`,
+     record `LastError = "agent restarted; previously-managed process
+     was stopped on prior agent shutdown"`, publish `crashed` event.
+   - Otherwise (`DesiredState == stopped`): mark `ObservedState = stopped`,
+     publish `reconciled` event.
+   - Release any stale `PortLease` bookkeeping (defensive; on a clean
+     Shutdown the lease map is already empty).
+3. Do NOT automatically restart servers. Restart requires an explicit
+   `RestartServerCommand` from the user.
+4. Do NOT scan disk for projects - only operate on persisted records.
+5. Do NOT call `Provider.Inspect()` on the stale `ProcessIdentity` - the
+   process is assumed gone. Calling Inspect against a possibly-reused PID
+   is exactly the risk this rule avoids.
+
+`ServerUseCaseConfig.StopServersOnExit` is forced to `true` by
+`NewServerUseCase`. The field is retained in the config struct for
+documentation and forward-compatibility, but the UseCase ignores any
+`false` value the caller might set.
 
 ## Consequences
 

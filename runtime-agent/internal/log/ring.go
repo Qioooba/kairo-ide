@@ -7,11 +7,11 @@ import (
 // RingBuffer is a small in-memory ring of recent log lines, used
 // by the diagnostic center. The zero value is ready to use.
 type RingBuffer struct {
-	mu      sync.Mutex
-	lines   []string
-	cap     int
-	next    int
-	full    bool
+	mu    sync.Mutex
+	lines []string
+	cap   int
+	next  int
+	full  bool
 }
 
 // NewRingBuffer returns a ring buffer with the given capacity.

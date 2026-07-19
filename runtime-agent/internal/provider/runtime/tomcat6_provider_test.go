@@ -219,7 +219,7 @@ func TestTomcat6Provider_Prepare_CreatesLayoutAndConfig(t *testing.T) {
 func TestTomcat6Provider_Start_InvalidPlan(t *testing.T) {
 	p := NewTomcat6Provider(nil, nil, Tomcat6ProviderConfig{StartTimeout: 1 * time.Second})
 
-	_, _, err := p.Start(context.Background(), domain.RuntimePlan{}, nil)
+	_, err := p.Start(context.Background(), domain.RuntimePlan{}, nil)
 	if err == nil {
 		t.Error("expected error for invalid plan")
 	}
@@ -257,7 +257,7 @@ func TestTomcat6Provider_Start_Success(t *testing.T) {
 		capturedLogs = append(capturedLogs, line)
 	}
 
-	identity, lease, err := p.Start(context.Background(), plan, logSink)
+	identity, err := p.Start(context.Background(), plan, logSink)
 	if err != nil {
 		t.Fatalf("Start failed: %v", err)
 	}
@@ -266,12 +266,6 @@ func TestTomcat6Provider_Start_Success(t *testing.T) {
 	}
 	if identity.PID <= 0 {
 		t.Errorf("expected positive PID, got %d", identity.PID)
-	}
-	if lease == nil {
-		t.Fatal("expected non-nil port lease")
-	}
-	if lease.HTTPPort != httpPort {
-		t.Errorf("expected HTTP port %d, got %d", httpPort, lease.HTTPPort)
 	}
 
 	obs, err := p.Inspect(context.Background(), *identity)
@@ -294,7 +288,6 @@ func TestTomcat6Provider_Start_Success(t *testing.T) {
 	if err != nil {
 		t.Errorf("GracefulStop failed: %v", err)
 	}
-	lease.Release()
 
 	if startedProcess != nil && startedProcess.IsRunning() {
 		t.Error("process should be stopped after GracefulStop")
@@ -316,12 +309,12 @@ func TestTomcat6Provider_Start_AlreadyRunning(t *testing.T) {
 	p := NewTomcat6Provider(processFactory, prep, Tomcat6ProviderConfig{StartTimeout: 5 * time.Second})
 	plan := testRuntimePlan(t, home, base, httpPort, shutdownPort)
 
-	_, _, err := p.Start(context.Background(), plan, nil)
+	_, err := p.Start(context.Background(), plan, nil)
 	if err != nil {
 		t.Fatalf("first Start failed: %v", err)
 	}
 
-	_, _, err = p.Start(context.Background(), plan, nil)
+	_, err = p.Start(context.Background(), plan, nil)
 	if err != domain.ErrServerAlreadyRunning {
 		t.Errorf("expected ErrServerAlreadyRunning, got %v", err)
 	}
@@ -345,7 +338,7 @@ func TestTomcat6Provider_Start_ReadinessTimeout(t *testing.T) {
 
 	plan := testRuntimePlan(t, home, base, 1, 2)
 
-	_, _, err := p.Start(context.Background(), plan, nil)
+	_, err := p.Start(context.Background(), plan, nil)
 	if err == nil {
 		t.Fatal("expected readiness timeout error")
 	}
@@ -377,7 +370,7 @@ func TestTomcat6Provider_ForceStop(t *testing.T) {
 	})
 
 	plan := testRuntimePlan(t, home, base, httpPort, shutdownPort)
-	identity, _, err := p.Start(context.Background(), plan, nil)
+	identity, err := p.Start(context.Background(), plan, nil)
 	if err != nil {
 		t.Fatalf("Start failed: %v", err)
 	}
@@ -426,7 +419,7 @@ func TestTomcat6Provider_ProcessExitsBeforeReady(t *testing.T) {
 	})
 
 	plan := testRuntimePlan(t, home, base, 1, 2)
-	_, _, err := p.Start(context.Background(), plan, nil)
+	_, err := p.Start(context.Background(), plan, nil)
 	if err == nil {
 		t.Fatal("expected error when process exits before ready")
 	}
@@ -447,11 +440,10 @@ func TestTomcat6Provider_CleanupBase(t *testing.T) {
 	p := NewTomcat6Provider(processFactory, prep, Tomcat6ProviderConfig{StartTimeout: 5 * time.Second})
 	plan := testRuntimePlan(t, home, base, httpPort, shutdownPort)
 
-	_, lease, err := p.Start(context.Background(), plan, nil)
+	_, err := p.Start(context.Background(), plan, nil)
 	if err != nil {
 		t.Fatalf("Start failed: %v", err)
 	}
-	defer lease.Release()
 
 	err = p.CleanupBase(context.Background(), plan)
 	if err == nil {
@@ -485,7 +477,7 @@ func TestTomcat6Provider_LogsCapture(t *testing.T) {
 		mu.Unlock()
 	}
 
-	identity, _, err := p.Start(context.Background(), plan, logSink)
+	identity, err := p.Start(context.Background(), plan, logSink)
 	if err != nil {
 		t.Fatalf("Start failed: %v", err)
 	}

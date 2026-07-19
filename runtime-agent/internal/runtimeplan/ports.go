@@ -4,35 +4,13 @@ import (
 	"fmt"
 	"net"
 	"sync"
+
+	"github.com/kairo-ide/runtime-agent/internal/domain"
 )
 
-type PortLease struct {
-	HTTP     int
-	Shutdown int
-	Debug    int
-	release  func()
-}
-
-func (l *PortLease) Release() {
-	if l != nil && l.release != nil {
-		l.release()
-		l.HTTP = 0
-		l.Shutdown = 0
-		l.Debug = 0
-		l.release = nil
-	}
-}
-
-type PortAllocator interface {
-	Allocate(preferredHTTP, preferredShutdown, preferredDebug int) (*PortLease, error)
-}
-
-type DefaultPortAllocator struct {
-	mu      sync.Mutex
-	config  PortConfig
-	inUse   map[int]bool
-	counter int
-}
+// PortAllocator implementations. The PortAllocator interface itself lives in
+// package domain so that the app layer can depend on it without importing
+// runtimeplan.
 
 type PortConfig struct {
 	HTTPMin     int
@@ -54,6 +32,13 @@ func DefaultPortConfig() PortConfig {
 	}
 }
 
+type DefaultPortAllocator struct {
+	mu      sync.Mutex
+	config  PortConfig
+	inUse   map[int]bool
+	counter int
+}
+
 func NewDefaultPortAllocator(cfg PortConfig) *DefaultPortAllocator {
 	return &DefaultPortAllocator{
 		config: cfg,
@@ -61,7 +46,7 @@ func NewDefaultPortAllocator(cfg PortConfig) *DefaultPortAllocator {
 	}
 }
 
-func (a *DefaultPortAllocator) Allocate(preferredHTTP, preferredShutdown, preferredDebug int) (*PortLease, error) {
+func (a *DefaultPortAllocator) Allocate(preferredHTTP, preferredShutdown, preferredDebug int) (*domain.PortLease, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -83,12 +68,6 @@ func (a *DefaultPortAllocator) Allocate(preferredHTTP, preferredShutdown, prefer
 		return nil, fmt.Errorf("debug port: %w", err)
 	}
 
-	lease := &PortLease{
-		HTTP:     httpPort,
-		Shutdown: shutdownPort,
-		Debug:    debugPort,
-	}
-
 	release := func() {
 		a.mu.Lock()
 		defer a.mu.Unlock()
@@ -96,9 +75,8 @@ func (a *DefaultPortAllocator) Allocate(preferredHTTP, preferredShutdown, prefer
 		a.releaseOne(shutdownPort)
 		a.releaseOne(debugPort)
 	}
-	lease.release = release
 
-	return lease, nil
+	return domain.NewPortLease(httpPort, shutdownPort, debugPort, release), nil
 }
 
 func (a *DefaultPortAllocator) allocateOne(preferred, min, max int, exclude ...int) (int, error) {
@@ -148,7 +126,7 @@ type FakePortAllocator struct {
 	nextHTTP  int
 	nextShut  int
 	nextDebug int
-	leased    []*PortLease
+	leased    []*domain.PortLease
 	fail      bool
 }
 
@@ -166,7 +144,7 @@ func (f *FakePortAllocator) SetFail(fail bool) {
 	f.fail = fail
 }
 
-func (f *FakePortAllocator) Allocate(preferredHTTP, preferredShutdown, preferredDebug int) (*PortLease, error) {
+func (f *FakePortAllocator) Allocate(preferredHTTP, preferredShutdown, preferredDebug int) (*domain.PortLease, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -174,15 +152,23 @@ func (f *FakePortAllocator) Allocate(preferredHTTP, preferredShutdown, preferred
 		return nil, fmt.Errorf("port allocation failed")
 	}
 
-	f.nextHTTP++
-	f.nextShut++
-	f.nextDebug++
-
-	lease := &PortLease{
-		HTTP:     f.nextHTTP - 1,
-		Shutdown: f.nextShut - 1,
-		Debug:    f.nextDebug - 1,
+	httpPort := preferredHTTP
+	if httpPort <= 0 {
+		httpPort = f.nextHTTP
+		f.nextHTTP++
 	}
+	shutdownPort := preferredShutdown
+	if shutdownPort <= 0 {
+		shutdownPort = f.nextShut
+		f.nextShut++
+	}
+	debugPort := preferredDebug
+	if debugPort <= 0 {
+		debugPort = f.nextDebug
+		f.nextDebug++
+	}
+
+	var lease *domain.PortLease
 	release := func() {
 		f.mu.Lock()
 		defer f.mu.Unlock()
@@ -193,7 +179,16 @@ func (f *FakePortAllocator) Allocate(preferredHTTP, preferredShutdown, preferred
 			}
 		}
 	}
-	lease.release = release
+	lease = domain.NewPortLease(httpPort, shutdownPort, debugPort, release)
 	f.leased = append(f.leased, lease)
 	return lease, nil
+}
+
+// Leased returns a snapshot of currently outstanding leases for test inspection.
+func (f *FakePortAllocator) Leased() []*domain.PortLease {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]*domain.PortLease, len(f.leased))
+	copy(out, f.leased)
+	return out
 }

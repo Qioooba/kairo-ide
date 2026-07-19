@@ -39,7 +39,10 @@ func TestLogger_LevelFilter(t *testing.T) {
 	var buf bytes.Buffer
 	l := New("test").WithLevel(LevelWarn)
 	l.w = &buf
-	l.Debug("d"); l.Info("i"); l.Warn("w"); l.Error("e")
+	l.Debug("d")
+	l.Info("i")
+	l.Warn("w")
+	l.Error("e")
 
 	if bytes.Count(buf.Bytes(), []byte{'\n'}) != 2 {
 		t.Errorf("expected 2 lines, got %d:\n%s", bytes.Count(buf.Bytes(), []byte{'\n'}), buf.String())
