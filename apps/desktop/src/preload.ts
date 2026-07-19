@@ -26,6 +26,10 @@ contextBridge.exposeInMainWorld('kairoConfig', {
     agentSecret,
     platform: process.platform,
     appVersion: process.env.KAIRO_APP_VERSION || '0.1.0',
+    // Feature flags. The frontend module reads these so the
+    // user can selectively disable the Kairo extensions and
+    // fall back to the vanilla Theia shell for debugging.
+    noKairoFrontend: process.env.KAIRO_NO_KAIRO_FRONTEND === '1',
 });
 
 // Expose safe IPC channels. Only the channels listed here are
