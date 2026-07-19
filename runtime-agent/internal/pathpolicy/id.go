@@ -15,6 +15,7 @@ const (
 	prjPrefix = "prj_"
 	bldPrefix = "bld_"
 	srvPrefix = "srv_"
+	rtmPrefix = "rtm_"
 )
 
 var encoding = base32.NewEncoding("abcdefghijklmnopqrstuvwxyz234567").WithPadding(base32.NoPadding)
@@ -29,6 +30,7 @@ type IDGenerator interface {
 	NewProjectID() (string, error)
 	NewBuildID() (string, error)
 	NewServerID() (string, error)
+	NewRuntimeID() (string, error)
 }
 
 type CryptoIDGenerator struct{}
@@ -53,6 +55,10 @@ func (g *CryptoIDGenerator) NewServerID() (string, error) {
 	return generatePrefixedID(srvPrefix)
 }
 
+func (g *CryptoIDGenerator) NewRuntimeID() (string, error) {
+	return generatePrefixedID(rtmPrefix)
+}
+
 func generatePrefixedID(prefix string) (string, error) {
 	var b [idSize]byte
 	if _, err := rand.Read(b[:]); err != nil {
@@ -75,6 +81,21 @@ func ValidateBuildID(id string) error {
 
 func ValidateServerID(id string) error {
 	return validatePrefixedID(id, srvPrefix, "server")
+}
+
+func ValidateRuntimeID(id string) error {
+	return validatePrefixedID(id, rtmPrefix, "runtime")
+}
+
+// IsBuiltinRuntimeID checks if the runtime ID is a builtin identifier (e.g. "tomcat6")
+// rather than a generated crypto ID.
+func IsBuiltinRuntimeID(id string) bool {
+	switch id {
+	case "tomcat6", "tomcat7", "tomcat8", "tomcat9", "tomcat10":
+		return true
+	default:
+		return false
+	}
 }
 
 func validatePrefixedID(id, prefix, kind string) error {

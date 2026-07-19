@@ -9,11 +9,15 @@ type WorkspaceID string
 type ProjectID string
 type BuildID string
 type ServerID string
+type RuntimeID string
 type BuildToolID string
 type DeployAction string
 type DeployMode string
 type BuildEventType string
-type Stream int
+type ServerEventType string
+type LogStream int
+type DesiredServerState string
+type ServerState string
 
 type DeploymentOwnerToken struct {
 	nonce uint64
@@ -81,8 +85,35 @@ const (
 )
 
 const (
-	StreamStdout Stream = iota
-	StreamStderr
+	LogStreamStdout LogStream = iota
+	LogStreamStderr
+)
+
+const (
+	ServerStateStopped    ServerState = "stopped"
+	ServerStatePreparing  ServerState = "preparing"
+	ServerStateStarting   ServerState = "starting"
+	ServerStateRunning    ServerState = "running"
+	ServerStateStopping   ServerState = "stopping"
+	ServerStateRestarting ServerState = "restarting"
+	ServerStateFailed     ServerState = "failed"
+	ServerStateCrashed    ServerState = "crashed"
+)
+
+const (
+	DesiredServerStateRunning DesiredServerState = "running"
+	DesiredServerStateStopped DesiredServerState = "stopped"
+)
+
+const (
+	ServerEventStateChanged ServerEventType = "state-changed"
+	ServerEventStarted      ServerEventType = "started"
+	ServerEventStopped      ServerEventType = "stopped"
+	ServerEventFailed       ServerEventType = "failed"
+	ServerEventCrashed      ServerEventType = "crashed"
+	ServerEventRestarting   ServerEventType = "restarting"
+	ServerEventLog          ServerEventType = "log"
+	ServerEventReconciled   ServerEventType = "reconciled"
 )
 
 type WorkspaceRepository interface {
@@ -115,10 +146,19 @@ type BuildHistoryRepository interface {
 }
 
 type ServerHistoryRepository interface {
-	Save(ctx context.Context, instance ServerInstance) error
-	Get(ctx context.Context, workspaceID WorkspaceID, serverID ServerID) (*ServerInstance, error)
-	List(ctx context.Context, workspaceID WorkspaceID) ([]ServerInstance, error)
+	Save(ctx context.Context, record ServerRecord) error
+	Get(ctx context.Context, workspaceID WorkspaceID, serverID ServerID) (*ServerRecord, error)
+	List(ctx context.Context, workspaceID WorkspaceID) ([]ServerRecord, error)
+	ListNonTerminal(ctx context.Context) ([]*ServerRecord, error)
 	Delete(ctx context.Context, workspaceID WorkspaceID, serverID ServerID) error
+}
+
+type RuntimeProviderRegistry interface {
+	Get(id string) (RuntimeProvider, bool)
+}
+
+type ServerEventPublisher interface {
+	PublishServerEvent(ctx context.Context, event ServerEvent) error
 }
 
 type Workspace struct {
@@ -191,15 +231,35 @@ type BuildPlan struct {
 }
 
 type RuntimePlan struct {
-	ServerID     ServerID `json:"serverId"`
-	JavaHome     string   `json:"javaHome"`
-	CatalinaHome string   `json:"catalinaHome"`
-	CatalinaBase string   `json:"catalinaBase"`
-	HTTPPort     int      `json:"httpPort"`
-	ShutdownPort int      `json:"shutdownPort"`
-	ContextPath  string   `json:"contextPath"`
-	WebappDir    string   `json:"webappDir"`
-	JVMOptions   []string `json:"jvmOptions"`
+	WorkspaceID    WorkspaceID `json:"workspaceId"`
+	ProjectID      ProjectID   `json:"projectId"`
+	ServerID       ServerID    `json:"serverId"`
+	RuntimeID      string      `json:"runtimeId"`
+	JavaHome       string      `json:"javaHome,omitempty"`
+	CatalinaHome   string      `json:"catalinaHome,omitempty"`
+	CatalinaBase   string      `json:"catalinaBase"`
+	WebappDir      string      `json:"webappDir"`
+	DeploymentRoot string      `json:"deploymentRoot"`
+	ContextPath    string      `json:"contextPath"`
+	HTTPPort       int         `json:"httpPort"`
+	ShutdownPort   int         `json:"shutdownPort"`
+	DebugPort      int         `json:"debugPort,omitempty"`
+	JVMOptions     []string    `json:"jvmOptions,omitempty"`
+	Env            []string    `json:"env,omitempty"`
+	Generation     uint64      `json:"generation"`
+}
+
+func (p RuntimePlan) DeepCopy() RuntimePlan {
+	cp := p
+	if p.JVMOptions != nil {
+		cp.JVMOptions = make([]string, len(p.JVMOptions))
+		copy(cp.JVMOptions, p.JVMOptions)
+	}
+	if p.Env != nil {
+		cp.Env = make([]string, len(p.Env))
+		copy(cp.Env, p.Env)
+	}
+	return cp
 }
 
 type DeployPlan struct {
@@ -251,28 +311,103 @@ type BuildDiagnostic struct {
 	Message  string `json:"message"`
 }
 
-type ServerState string
+type ProcessIdentity struct {
+	PID          int       `json:"pid"`
+	Executable   string    `json:"executable"`
+	StartTime    time.Time `json:"startTime"`
+	CatalinaBase string    `json:"catalinaBase"`
+	MarkerToken  string    `json:"markerToken"`
+}
 
-const (
-	ServerStateStopped  ServerState = "stopped"
-	ServerStateStarting ServerState = "starting"
-	ServerStateRunning  ServerState = "running"
-	ServerStateStopping ServerState = "stopping"
-	ServerStateCrashed  ServerState = "crashed"
-	ServerStateError    ServerState = "error"
-)
+func (pi ProcessIdentity) Equal(other ProcessIdentity) bool {
+	return pi.PID == other.PID &&
+		pi.Executable == other.Executable &&
+		pi.CatalinaBase == other.CatalinaBase &&
+		pi.MarkerToken == other.MarkerToken &&
+		pi.StartTime.Equal(other.StartTime)
+}
 
-type ServerInstance struct {
-	ID          ServerID     `json:"id"`
-	WorkspaceID WorkspaceID  `json:"workspaceId"`
-	ProjectID   ProjectID    `json:"projectId"`
-	State       ServerState  `json:"state"`
-	HTTPPort    int          `json:"httpPort"`
-	PID         int          `json:"pid"`
-	StartTime   time.Time    `json:"startTime"`
-	URL         string       `json:"url,omitempty"`
-	LastPlan    *RuntimePlan `json:"lastPlan,omitempty"`
-	Error       string       `json:"error,omitempty"`
+type ServerRecord struct {
+	ID              ServerID           `json:"id"`
+	WorkspaceID     WorkspaceID        `json:"workspaceId"`
+	ProjectID       ProjectID          `json:"projectId"`
+	DesiredState    DesiredServerState `json:"desiredState"`
+	ObservedState   ServerState        `json:"observedState"`
+	Generation      uint64             `json:"generation"`
+	PID             int                `json:"pid,omitempty"`
+	ProcessIdentity *ProcessIdentity   `json:"processIdentity,omitempty"`
+	RuntimePlan     RuntimePlan        `json:"runtimePlan"`
+	LastError       string             `json:"lastError,omitempty"`
+	StartedAt       *time.Time         `json:"startedAt,omitempty"`
+	StoppedAt       *time.Time         `json:"stoppedAt,omitempty"`
+	UpdatedAt       time.Time          `json:"updatedAt"`
+}
+
+func (r ServerRecord) DeepCopy() ServerRecord {
+	cp := r
+	cp.RuntimePlan = r.RuntimePlan.DeepCopy()
+	if r.ProcessIdentity != nil {
+		pi := *r.ProcessIdentity
+		cp.ProcessIdentity = &pi
+	}
+	if r.StartedAt != nil {
+		t := *r.StartedAt
+		cp.StartedAt = &t
+	}
+	if r.StoppedAt != nil {
+		t := *r.StoppedAt
+		cp.StoppedAt = &t
+	}
+	return cp
+}
+
+type StartServerCommand struct {
+	WorkspaceID WorkspaceID `json:"workspaceId"`
+	ProjectID   ProjectID   `json:"projectId"`
+	ServerID    *ServerID   `json:"serverId,omitempty"`
+}
+
+type StopServerCommand struct {
+	WorkspaceID WorkspaceID `json:"workspaceId"`
+	ProjectID   ProjectID   `json:"projectId"`
+	ServerID    ServerID    `json:"serverId"`
+	Force       bool        `json:"force"`
+}
+
+type RestartServerCommand struct {
+	WorkspaceID WorkspaceID `json:"workspaceId"`
+	ProjectID   ProjectID   `json:"projectId"`
+	ServerID    ServerID    `json:"serverId"`
+}
+
+type GetServerQuery struct {
+	WorkspaceID WorkspaceID `json:"workspaceId"`
+	ServerID    ServerID    `json:"serverId"`
+}
+
+type ListServersQuery struct {
+	WorkspaceID WorkspaceID `json:"workspaceId"`
+}
+
+type ServerEvent struct {
+	WorkspaceID   WorkspaceID     `json:"workspaceId"`
+	ProjectID     ProjectID       `json:"projectId"`
+	ServerID      ServerID        `json:"serverId"`
+	Generation    uint64          `json:"generation"`
+	Type          ServerEventType `json:"type"`
+	OldState      *ServerState    `json:"oldState,omitempty"`
+	NewState      *ServerState    `json:"newState,omitempty"`
+	Message       string          `json:"message,omitempty"`
+	Time          time.Time       `json:"time"`
+	Recoverable   bool            `json:"recoverable"`
+	CorrelationID string          `json:"correlationId,omitempty"`
+}
+
+type LogLine struct {
+	Stream     LogStream `json:"stream"`
+	Time       time.Time `json:"time"`
+	Text       string    `json:"text"`
+	Generation uint64    `json:"generation"`
 }
 
 type BuildOutput struct {
@@ -299,26 +434,126 @@ type BuildEventPublisher interface {
 type BuildProvider interface {
 	ID() BuildToolID
 	Validate(ctx context.Context, plan BuildPlan) error
-	Build(ctx context.Context, plan BuildPlan, sink func(event BuildEvent), logLine func(stream Stream, line string)) (*BuildOutput, error)
+	Build(ctx context.Context, plan BuildPlan, sink func(event BuildEvent), logLine func(stream LogStream, line string)) (*BuildOutput, error)
 }
 
 type BuildProviderRegistry interface {
 	Get(id BuildToolID) (BuildProvider, bool)
 }
 
+type PortLease struct {
+	HTTPPort     int
+	ShutdownPort int
+	DebugPort    int
+	release      func()
+}
+
+func (l *PortLease) Release() {
+	if l.release != nil {
+		l.release()
+		l.release = nil
+	}
+}
+
+func NewPortLease(http, shutdown, debug int, release func()) *PortLease {
+	return &PortLease{
+		HTTPPort:     http,
+		ShutdownPort: shutdown,
+		DebugPort:    debug,
+		release:      release,
+	}
+}
+
+type ProcessObservation struct {
+	PID              int
+	Identity         ProcessIdentity
+	Running          bool
+	ExitCode         *int
+	IdentityMismatch bool
+}
+
+type ServerInstance struct {
+	ID          ServerID    `json:"id"`
+	WorkspaceID WorkspaceID `json:"workspaceId"`
+	ProjectID   ProjectID   `json:"projectId"`
+	State       ServerState `json:"state"`
+	HTTPPort    int         `json:"httpPort,omitempty"`
+	ShutdownPort int        `json:"shutdownPort,omitempty"`
+	PID         int         `json:"pid,omitempty"`
+	StartTime   time.Time   `json:"startTime,omitempty"`
+	Generation  uint64      `json:"generation"`
+}
+
 type RuntimeProvider interface {
 	ID() string
-	Prepare(ctx context.Context, project Project) (*RuntimePlan, error)
-	Start(ctx context.Context, plan RuntimePlan) (*ServerInstance, error)
-	Stop(ctx context.Context, id ServerID, force bool) error
-	Inspect(ctx context.Context, id ServerID) (*ServerInstance, error)
+	Prepare(ctx context.Context, plan RuntimePlan) error
+	Start(ctx context.Context, plan RuntimePlan, logSink func(LogLine)) (*ProcessIdentity, *PortLease, error)
+	GracefulStop(ctx context.Context, identity ProcessIdentity) error
+	ForceStop(ctx context.Context, identity ProcessIdentity) error
+	IsReady(ctx context.Context, plan RuntimePlan, identity ProcessIdentity, deadline time.Time) error
+	Inspect(ctx context.Context, identity ProcessIdentity) (ProcessObservation, error)
+	CleanupBase(ctx context.Context, plan RuntimePlan) error
 }
 
 type PlanResolver interface {
 	ResolveProject(ctx context.Context, workspaceID WorkspaceID, projectID ProjectID) (*ResolvedProject, error)
 	ResolveBuild(ctx context.Context, workspaceID WorkspaceID, projectID ProjectID, intent BuildIntent, clean bool, selectedFiles []string) (*BuildPlan, error)
 	ResolveDeploy(ctx context.Context, workspaceID WorkspaceID, projectID ProjectID, buildID BuildID, target DeploymentTarget) (*DeployPlan, error)
-	ResolveRuntime(ctx context.Context, workspaceID WorkspaceID, projectID ProjectID) (*RuntimePlan, error)
+	ResolveRuntime(ctx context.Context, workspaceID WorkspaceID, projectID ProjectID, existingServerID *ServerID) (*RuntimePlan, error)
+}
+
+var serverStateTransitions = map[ServerState]map[ServerState]bool{
+	ServerStateStopped: {
+		ServerStatePreparing: true,
+	},
+	ServerStatePreparing: {
+		ServerStateStarting: true,
+		ServerStateFailed:   true,
+	},
+	ServerStateStarting: {
+		ServerStateRunning: true,
+		ServerStateFailed:  true,
+	},
+	ServerStateRunning: {
+		ServerStateStopping:   true,
+		ServerStateRestarting: true,
+		ServerStateCrashed:    true,
+		ServerStateFailed:     true,
+	},
+	ServerStateStopping: {
+		ServerStateStopped: true,
+		ServerStateFailed:  true,
+	},
+	ServerStateRestarting: {
+		ServerStateStarting: true,
+		ServerStateFailed:   true,
+	},
+	ServerStateFailed: {
+		ServerStateStarting: true,
+		ServerStateStopped:  true,
+	},
+	ServerStateCrashed: {
+		ServerStateStarting: true,
+		ServerStateStopped:  true,
+	},
+}
+
+func CanTransitionServerState(from, to ServerState) bool {
+	if from == to {
+		return true
+	}
+	transitions, ok := serverStateTransitions[from]
+	if !ok {
+		return false
+	}
+	return transitions[to]
+}
+
+func TransitionServerState(from, to ServerState) error {
+	if !CanTransitionServerState(from, to) {
+		return ErrInvalidStateTransition
+	}
+	return nil
 }
 
 func (s BuildState) CanTransitionTo(target BuildState) bool {
@@ -334,6 +569,15 @@ func (s BuildState) CanTransitionTo(target BuildState) bool {
 
 func (b *BuildRun) IsTerminal() bool {
 	return b.State == BuildStateSucceeded || b.State == BuildStateFailed || b.State == BuildStateCancelled
+}
+
+func (s ServerState) IsTerminal() bool {
+	return s == ServerStateStopped || s == ServerStateFailed || s == ServerStateCrashed
+}
+
+func (s ServerState) IsTransitioning() bool {
+	return s == ServerStatePreparing || s == ServerStateStarting ||
+		s == ServerStateStopping || s == ServerStateRestarting
 }
 
 func (b BuildRun) DeepCopy() BuildRun {

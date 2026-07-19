@@ -10,6 +10,7 @@ var (
 	validPrj = "prj_zlb53e7oaqja4icecicppujqnq"
 	validBld = "bld_nzr4jjyg3rzbkev2uuapsmlqai"
 	validSrv = "srv_4m2qdgu2pl6nhwcrdgcn5ehn5u"
+	validRtm = "rtm_7k3qh5xmzpvbcwrsdfgt26noja"
 )
 
 func TestNewCryptoIDGenerator(t *testing.T) {
@@ -58,6 +59,19 @@ func TestNewCryptoIDGenerator(t *testing.T) {
 		}
 	})
 
+	t.Run("RuntimeID", func(t *testing.T) {
+		id, err := gen.NewRuntimeID()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if err := ValidateRuntimeID(id); err != nil {
+			t.Fatalf("generated runtime id should be valid: %v", err)
+		}
+		if !strings.HasPrefix(id, rtmPrefix) {
+			t.Errorf("expected prefix %s, got %s", rtmPrefix, id)
+		}
+	})
+
 	t.Run("UniqueIDs", func(t *testing.T) {
 		seen := make(map[string]bool)
 		for i := 0; i < 100; i++ {
@@ -83,12 +97,38 @@ func TestValidateID_Valid(t *testing.T) {
 		{"valid project id", validPrj, ValidateProjectID},
 		{"valid build id", validBld, ValidateBuildID},
 		{"valid server id", validSrv, ValidateServerID},
+		{"valid runtime id", validRtm, ValidateRuntimeID},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if err := tt.fn(tt.id); err != nil {
 				t.Errorf("expected %q to be valid, got error: %v", tt.id, err)
+			}
+		})
+	}
+}
+
+func TestIsBuiltinRuntimeID(t *testing.T) {
+	tests := []struct {
+		id       string
+		expected bool
+	}{
+		{"tomcat6", true},
+		{"tomcat7", true},
+		{"tomcat8", true},
+		{"tomcat9", true},
+		{"tomcat10", true},
+		{validRtm, false},
+		{"", false},
+		{"jetty", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.id, func(t *testing.T) {
+			got := IsBuiltinRuntimeID(tt.id)
+			if got != tt.expected {
+				t.Errorf("IsBuiltinRuntimeID(%q) = %v, want %v", tt.id, got, tt.expected)
 			}
 		})
 	}
@@ -104,16 +144,19 @@ func TestValidateID_Invalid(t *testing.T) {
 		{"empty project id", "", ValidateProjectID},
 		{"empty build id", "", ValidateBuildID},
 		{"empty server id", "", ValidateServerID},
+		{"empty runtime id", "", ValidateRuntimeID},
 
 		{"wrong prefix workspace", validPrj, ValidateWorkspaceID},
 		{"wrong prefix project", validWS, ValidateProjectID},
 		{"wrong prefix build", validWS, ValidateBuildID},
 		{"wrong prefix server", validWS, ValidateServerID},
+		{"wrong prefix runtime", validWS, ValidateRuntimeID},
 
 		{"short id ws_1", "ws_1", ValidateWorkspaceID},
 		{"short id prj_1", "prj_1", ValidateProjectID},
 		{"short id bld_a", "bld_a", ValidateBuildID},
 		{"short id srv_x", "srv_x", ValidateServerID},
+		{"short id rtm_x", "rtm_x", ValidateRuntimeID},
 
 		{"path traversal in id", "ws_..abcdefghijklmnopqrstuvwxyz", ValidateProjectID},
 		{"traversal in middle", "ws_abc..defghijklmnopqrstuvwxyz", ValidateProjectID},
@@ -150,6 +193,7 @@ func TestValidateID_Invalid(t *testing.T) {
 
 		{"empty suffix ws_", "ws_", ValidateWorkspaceID},
 		{"empty suffix prj_", "prj_", ValidateProjectID},
+		{"empty suffix rtm_", "rtm_", ValidateRuntimeID},
 	}
 
 	for _, tt := range tests {
