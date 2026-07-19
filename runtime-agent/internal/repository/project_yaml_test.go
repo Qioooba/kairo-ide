@@ -8,10 +8,8 @@ import (
 
 func TestLoadProjectConfig_Success(t *testing.T) {
 	dir := t.TempDir()
-	kairoDir := filepath.Join(dir, ".kairo")
-	os.MkdirAll(kairoDir, 0755)
 
-	cfg := ProjectConfig{
+	cfg := &ProjectConfig{
 		SchemaVersion: 1,
 		Name:          "test-project",
 		SourceRoots:   []string{"src/main/java"},
@@ -19,8 +17,7 @@ func TestLoadProjectConfig_Success(t *testing.T) {
 		BuildTool:     "ant",
 	}
 
-	doc := NewVersioned(cfg)
-	if err := AtomicWriteJSON(filepath.Join(kairoDir, "project.yaml"), doc, 0644); err != nil {
+	if err := SaveProjectConfig(dir, cfg); err != nil {
 		t.Fatalf("failed to write config: %v", err)
 	}
 
@@ -62,7 +59,6 @@ func TestSaveProjectConfig(t *testing.T) {
 		t.Fatalf("SaveProjectConfig failed: %v", err)
 	}
 
-	// Load it back
 	loaded, err := LoadProjectConfig(dir)
 	if err != nil {
 		t.Fatalf("LoadProjectConfig after save failed: %v", err)
@@ -77,31 +73,66 @@ func TestValidateProjectConfig_Defaults(t *testing.T) {
 		SchemaVersion: 1,
 		Name:          "test",
 	}
+	applied, err := applyProjectDefaults(cfg)
+	if err != nil {
+		t.Fatalf("applyProjectDefaults failed: %v", err)
+	}
 
-	if err := ValidateProjectConfig(cfg); err != nil {
+	if err := ValidateProjectConfig(applied); err != nil {
 		t.Fatalf("ValidateProjectConfig failed: %v", err)
 	}
 
-	if cfg.Encoding != "UTF-8" {
-		t.Errorf("expected default encoding 'UTF-8', got '%s'", cfg.Encoding)
+	if applied.Encoding != "UTF-8" {
+		t.Errorf("expected default encoding 'UTF-8', got '%s'", applied.Encoding)
 	}
-	if cfg.SourceLevel != "1.6" {
-		t.Errorf("expected default sourceLevel '1.6', got '%s'", cfg.SourceLevel)
+	if applied.SourceLevel != "1.8" {
+		t.Errorf("expected default sourceLevel '1.8', got '%s'", applied.SourceLevel)
 	}
-	if cfg.TargetLevel != "1.6" {
-		t.Errorf("expected default targetLevel '1.6', got '%s'", cfg.TargetLevel)
+	if applied.TargetLevel != "1.8" {
+		t.Errorf("expected default targetLevel '1.8', got '%s'", applied.TargetLevel)
 	}
-	if cfg.BuildTool != "javac" {
-		t.Errorf("expected default buildTool 'javac', got '%s'", cfg.BuildTool)
+	if applied.BuildTool != "javac" {
+		t.Errorf("expected default buildTool 'javac', got '%s'", applied.BuildTool)
 	}
-	if cfg.ContextPath != "/" {
-		t.Errorf("expected default contextPath '/', got '%s'", cfg.ContextPath)
+	if applied.ContextPath != "/" {
+		t.Errorf("expected default contextPath '/', got '%s'", applied.ContextPath)
+	}
+	if applied.Root != "." {
+		t.Errorf("expected default root '.', got '%s'", applied.Root)
 	}
 }
 
 func TestValidateProjectConfig_MissingName(t *testing.T) {
 	cfg := &ProjectConfig{SchemaVersion: 1}
-	if err := ValidateProjectConfig(cfg); err == nil {
+	_, err := applyProjectDefaults(cfg)
+	if err == nil {
 		t.Fatal("expected error for missing name")
+	}
+}
+
+func TestProjectConfig_YAMLFormat(t *testing.T) {
+	dir := t.TempDir()
+	cfg := &ProjectConfig{
+		SchemaVersion: 1,
+		Name:          "yaml-test",
+		BuildTool:     "javac",
+	}
+
+	if err := SaveProjectConfig(dir, cfg); err != nil {
+		t.Fatalf("SaveProjectConfig failed: %v", err)
+	}
+
+	yamlPath := filepath.Join(dir, ".kairo", "project.yaml")
+	data, err := os.ReadFile(yamlPath)
+	if err != nil {
+		t.Fatalf("failed to read project.yaml: %v", err)
+	}
+
+	content := string(data)
+	if len(content) == 0 {
+		t.Fatal("project.yaml is empty")
+	}
+	if content[0] == '{' || content[0] == '[' {
+		t.Error("project.yaml looks like JSON, expected YAML")
 	}
 }

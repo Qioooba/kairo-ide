@@ -5,68 +5,150 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/kairo-ide/runtime-agent/internal/domain"
+	"github.com/kairo-ide/runtime-agent/internal/pathpolicy"
 )
 
-// serverHistoryFileName is the file name for storing server history per workspace.
 const serverHistoryFileName = "server_history.json"
 
-// FileServerHistoryRepo implements domain.ServerHistoryRepository using a JSON file on disk.
 type FileServerHistoryRepo struct {
+	mu      sync.Mutex
 	dataDir string
 }
 
-// NewFileServerHistoryRepo creates a new FileServerHistoryRepo.
 func NewFileServerHistoryRepo(dataDir string) *FileServerHistoryRepo {
 	return &FileServerHistoryRepo{dataDir: dataDir}
 }
 
 func (r *FileServerHistoryRepo) filePath(workspaceID domain.WorkspaceID) string {
-	return filepath.Join(r.dataDir, string(workspaceID), serverHistoryFileName)
+	return filepath.Join(r.dataDir, "history", "servers", string(workspaceID)+".json")
 }
 
-// Save appends a server instance to the history.
+func cloneRuntimePlan(plan *domain.RuntimePlan) *domain.RuntimePlan {
+	if plan == nil {
+		return nil
+	}
+	cp := *plan
+	cp.JVMOptions = cloneStringSlice(plan.JVMOptions)
+	return &cp
+}
+
+func cloneServerInstance(inst domain.ServerInstance) domain.ServerInstance {
+	cp := inst
+	cp.LastPlan = cloneRuntimePlan(inst.LastPlan)
+	return cp
+}
+
+func cloneServerInstances(instances []domain.ServerInstance) []domain.ServerInstance {
+	if instances == nil {
+		return []domain.ServerInstance{}
+	}
+	out := make([]domain.ServerInstance, len(instances))
+	for i := range instances {
+		out[i] = cloneServerInstance(instances[i])
+	}
+	return out
+}
+
 func (r *FileServerHistoryRepo) Save(ctx context.Context, instance domain.ServerInstance) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := pathpolicy.ValidateWorkspaceID(string(instance.WorkspaceID)); err != nil {
+		return fmt.Errorf("invalid workspace id: %w", err)
+	}
+	if err := pathpolicy.ValidateProjectID(string(instance.ProjectID)); err != nil {
+		return fmt.Errorf("invalid project id: %w", err)
+	}
+	if err := pathpolicy.ValidateServerID(string(instance.ID)); err != nil {
+		return fmt.Errorf("invalid server id: %w", err)
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	all, err := r.loadAll(instance.WorkspaceID)
 	if err != nil {
 		return err
 	}
+
+	saved := cloneServerInstance(instance)
+
 	found := false
 	for i := range all {
 		if all[i].ID == instance.ID {
-			all[i] = instance
+			all[i] = saved
 			found = true
 			break
 		}
 	}
 	if !found {
-		all = append(all, instance)
+		all = append(all, saved)
 	}
 	return r.writeAll(instance.WorkspaceID, all)
 }
 
-// Get returns a server instance by its ID.
 func (r *FileServerHistoryRepo) Get(ctx context.Context, workspaceID domain.WorkspaceID, serverID domain.ServerID) (*domain.ServerInstance, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := pathpolicy.ValidateWorkspaceID(string(workspaceID)); err != nil {
+		return nil, fmt.Errorf("invalid workspace id: %w", err)
+	}
+	if err := pathpolicy.ValidateServerID(string(serverID)); err != nil {
+		return nil, fmt.Errorf("invalid server id: %w", err)
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	all, err := r.loadAll(workspaceID)
 	if err != nil {
 		return nil, err
 	}
 	for i := range all {
 		if all[i].ID == serverID {
-			return &all[i], nil
+			cp := cloneServerInstance(all[i])
+			return &cp, nil
 		}
 	}
-	return nil, fmt.Errorf("server instance %s not found in workspace %s", serverID, workspaceID)
+	return nil, domain.ErrServerNotFound
 }
 
-// List returns all server instances for a workspace.
 func (r *FileServerHistoryRepo) List(ctx context.Context, workspaceID domain.WorkspaceID) ([]domain.ServerInstance, error) {
-	return r.loadAll(workspaceID)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := pathpolicy.ValidateWorkspaceID(string(workspaceID)); err != nil {
+		return nil, fmt.Errorf("invalid workspace id: %w", err)
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	all, err := r.loadAll(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	return cloneServerInstances(all), nil
 }
 
-// Delete removes a server instance by its ID.
 func (r *FileServerHistoryRepo) Delete(ctx context.Context, workspaceID domain.WorkspaceID, serverID domain.ServerID) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := pathpolicy.ValidateWorkspaceID(string(workspaceID)); err != nil {
+		return fmt.Errorf("invalid workspace id: %w", err)
+	}
+	if err := pathpolicy.ValidateServerID(string(serverID)); err != nil {
+		return fmt.Errorf("invalid server id: %w", err)
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	all, err := r.loadAll(workspaceID)
 	if err != nil {
 		return err
@@ -78,7 +160,7 @@ func (r *FileServerHistoryRepo) Delete(ctx context.Context, workspaceID domain.W
 		}
 	}
 	if len(filtered) == len(all) {
-		return fmt.Errorf("server instance %s not found in workspace %s", serverID, workspaceID)
+		return domain.ErrServerNotFound
 	}
 	return r.writeAll(workspaceID, filtered)
 }

@@ -2,109 +2,256 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 
 	"github.com/kairo-ide/runtime-agent/internal/domain"
+	"github.com/kairo-ide/runtime-agent/internal/pathpolicy"
 )
 
-// FileProjectRepo implements domain.ProjectRepository using per-project
-// config files (.kairo/project.yaml) on disk.
-type FileProjectRepo struct{}
-
-// NewFileProjectRepo creates a new FileProjectRepo.
-func NewFileProjectRepo() *FileProjectRepo {
-	return &FileProjectRepo{}
+type FileProjectRepo struct {
+	dataDir    string
+	workspaces domain.WorkspaceRepository
+	catalog    *ProjectCatalog
+	policy     pathpolicy.PathAuthorizer
 }
 
-// Get returns a project by its workspace and project IDs.
-// It looks up the project config file at the project root derived from the project ID.
+func NewFileProjectRepo(dataDir string, workspaces domain.WorkspaceRepository, policy pathpolicy.PathAuthorizer) *FileProjectRepo {
+	if policy == nil {
+		policy = pathpolicy.NewDefaultPathPolicy()
+	}
+	return &FileProjectRepo{
+		dataDir:    dataDir,
+		workspaces: workspaces,
+		catalog:    NewProjectCatalog(dataDir, policy),
+		policy:     policy,
+	}
+}
+
+func cloneStringSlice(s []string) []string {
+	if s == nil {
+		return nil
+	}
+	out := make([]string, len(s))
+	copy(out, s)
+	return out
+}
+
+func cloneProject(p *domain.Project) domain.Project {
+	cp := *p
+	cp.SourceRoots = cloneStringSlice(p.SourceRoots)
+	cp.ResourceRoots = cloneStringSlice(p.ResourceRoots)
+	cp.LibraryDirs = cloneStringSlice(p.LibraryDirs)
+	cp.BuildTargets = cloneStringSlice(p.BuildTargets)
+	return cp
+}
+
 func (r *FileProjectRepo) Get(ctx context.Context, workspaceID domain.WorkspaceID, projectID domain.ProjectID) (*domain.Project, error) {
-	cfg, err := LoadProjectConfig(string(projectID))
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := pathpolicy.ValidateWorkspaceID(string(workspaceID)); err != nil {
+		return nil, fmt.Errorf("invalid workspace id: %w", err)
+	}
+	if err := pathpolicy.ValidateProjectID(string(projectID)); err != nil {
+		return nil, fmt.Errorf("invalid project id: %w", err)
+	}
+
+	ws, err := r.workspaces.Get(ctx, workspaceID)
+	if err != nil {
+		return nil, fmt.Errorf("get workspace: %w", err)
+	}
+
+	record, err := r.catalog.Get(ctx, workspaceID, projectID)
+	if err != nil {
+		return nil, err
+	}
+
+	projectRoot, err := r.policy.ResolveWithin(ws.Root, record.Root)
+	if err != nil {
+		return nil, fmt.Errorf("resolve project root: %w", err)
+	}
+
+	cfg, err := LoadProjectConfig(projectRoot)
 	if err != nil {
 		return nil, fmt.Errorf("load project config: %w", err)
 	}
-	return &domain.Project{
-		ID:            projectID,
-		WorkspaceID:   workspaceID,
-		Name:          cfg.Name,
-		SourceRoots:   cfg.SourceRoots,
-		ResourceRoots: cfg.ResourceRoots,
-		WebappDir:     cfg.WebappDir,
-		OutputDir:     cfg.OutputDir,
-		SourceLevel:   cfg.SourceLevel,
-		TargetLevel:   cfg.TargetLevel,
-		Encoding:      cfg.Encoding,
-		BuildTool:     cfg.BuildTool,
-		ContextPath:   cfg.ContextPath,
-	}, nil
+
+	project := ConfigToProject(cfg, workspaceID, projectID)
+	project.Root = record.Root
+	project.CreatedAt = record.CreatedAt
+	project.UpdatedAt = record.UpdatedAt
+
+	cp := cloneProject(project)
+	return &cp, nil
 }
 
-// List returns all projects in a workspace. It scans the workspace root
-// for directories containing .kairo/project.yaml.
 func (r *FileProjectRepo) List(ctx context.Context, workspaceID domain.WorkspaceID) ([]domain.Project, error) {
-	root := string(workspaceID)
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return []domain.Project{}, nil
-		}
-		return nil, fmt.Errorf("read workspace dir %s: %w", root, err)
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
+	if err := pathpolicy.ValidateWorkspaceID(string(workspaceID)); err != nil {
+		return nil, fmt.Errorf("invalid workspace id: %w", err)
+	}
+
+	ws, err := r.workspaces.Get(ctx, workspaceID)
+	if err != nil {
+		return nil, fmt.Errorf("get workspace: %w", err)
+	}
+
+	records, err := r.catalog.ListByWorkspace(ctx, workspaceID)
+	if err != nil {
+		return nil, fmt.Errorf("list project records: %w", err)
+	}
+
 	var projects []domain.Project
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
+	var errs []error
+	for _, record := range records {
+		if err := ctx.Err(); err != nil {
+			return nil, err
 		}
-		cfg, err := LoadProjectConfig(root + "/" + entry.Name())
+		projectRoot, err := r.policy.ResolveWithin(ws.Root, record.Root)
 		if err != nil {
-			// Skip directories without a valid project config.
+			errs = append(errs, fmt.Errorf("resolve project root for %s: %w", record.ProjectID, err))
 			continue
 		}
-		projects = append(projects, domain.Project{
-			ID:            domain.ProjectID(root + "/" + entry.Name()),
-			WorkspaceID:   workspaceID,
-			Name:          cfg.Name,
-			SourceRoots:   cfg.SourceRoots,
-			ResourceRoots: cfg.ResourceRoots,
-			WebappDir:     cfg.WebappDir,
-			OutputDir:     cfg.OutputDir,
-			SourceLevel:   cfg.SourceLevel,
-			TargetLevel:   cfg.TargetLevel,
-			Encoding:      cfg.Encoding,
-			BuildTool:     cfg.BuildTool,
-			ContextPath:   cfg.ContextPath,
-		})
+		cfg, err := LoadProjectConfig(projectRoot)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("load project config for %s at %s: %w", record.ProjectID, projectRoot, err))
+			continue
+		}
+		project := ConfigToProject(cfg, workspaceID, record.ProjectID)
+		project.Root = record.Root
+		project.CreatedAt = record.CreatedAt
+		project.UpdatedAt = record.UpdatedAt
+		projects = append(projects, cloneProject(project))
+	}
+	if len(errs) > 0 {
+		return projects, domain.NewAggregateError(errs)
 	}
 	return projects, nil
 }
 
-// Save persists a project config to disk.
 func (r *FileProjectRepo) Save(ctx context.Context, project domain.Project) error {
-	cfg := &ProjectConfig{
-		SchemaVersion: 1,
-		Name:          project.Name,
-		SourceRoots:   project.SourceRoots,
-		ResourceRoots: project.ResourceRoots,
-		WebappDir:     project.WebappDir,
-		OutputDir:     project.OutputDir,
-		SourceLevel:   project.SourceLevel,
-		TargetLevel:   project.TargetLevel,
-		Encoding:      project.Encoding,
-		BuildTool:     project.BuildTool,
-		ContextPath:   project.ContextPath,
+	if err := ctx.Err(); err != nil {
+		return err
 	}
-	return SaveProjectConfig(string(project.ID), cfg)
+	if err := pathpolicy.ValidateWorkspaceID(string(project.WorkspaceID)); err != nil {
+		return fmt.Errorf("invalid workspace id: %w", err)
+	}
+	if err := pathpolicy.ValidateProjectID(string(project.ID)); err != nil {
+		return fmt.Errorf("invalid project id: %w", err)
+	}
+
+	ws, err := r.workspaces.Get(ctx, project.WorkspaceID)
+	if err != nil {
+		return fmt.Errorf("get workspace: %w", err)
+	}
+
+	if project.Root == "" {
+		project.Root = "."
+	}
+
+	projectRoot, err := r.policy.ResolveWithin(ws.Root, project.Root)
+	if err != nil {
+		return fmt.Errorf("resolve project root: %w", err)
+	}
+
+	cfg := ProjectToConfig(&project)
+	if err := SaveProjectConfig(projectRoot, cfg); err != nil {
+		return fmt.Errorf("save project config: %w", err)
+	}
+
+	now := domain.UTCNow()
+	record := ProjectRecord{
+		WorkspaceID: project.WorkspaceID,
+		ProjectID:   project.ID,
+		Root:        project.Root,
+	}
+	existing, err := r.catalog.Get(ctx, project.WorkspaceID, project.ID)
+	if err == nil && existing != nil {
+		record.CreatedAt = existing.CreatedAt
+	}
+	if record.CreatedAt.IsZero() {
+		record.CreatedAt = now
+	}
+	record.UpdatedAt = now
+
+	if err := r.catalog.Put(ctx, record); err != nil {
+		return fmt.Errorf("put catalog record: %w", err)
+	}
+	return nil
 }
 
-// Delete removes a project's config file from disk.
 func (r *FileProjectRepo) Delete(ctx context.Context, workspaceID domain.WorkspaceID, projectID domain.ProjectID) error {
-	path := projectConfigPath(string(projectID))
-	if err := os.Remove(path); err != nil {
-		if os.IsNotExist(err) {
-			return nil
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := pathpolicy.ValidateWorkspaceID(string(workspaceID)); err != nil {
+		return fmt.Errorf("invalid workspace id: %w", err)
+	}
+	if err := pathpolicy.ValidateProjectID(string(projectID)); err != nil {
+		return fmt.Errorf("invalid project id: %w", err)
+	}
+
+	ws, err := r.workspaces.Get(ctx, workspaceID)
+	if err != nil {
+		return fmt.Errorf("get workspace: %w", err)
+	}
+
+	record, err := r.catalog.Get(ctx, workspaceID, projectID)
+	if err != nil {
+		return err
+	}
+
+	var configErr error
+	projectRoot, err := r.policy.ResolveWithin(ws.Root, record.Root)
+	if err == nil {
+		configPath := ProjectConfigPath(projectRoot)
+		if err := removeFileIfExists(configPath); err != nil {
+			configErr = fmt.Errorf("remove project config %s: %w", configPath, err)
 		}
-		return fmt.Errorf("remove project config %s: %w", path, err)
+	} else {
+		configErr = fmt.Errorf("resolve project root for config removal: %w", err)
+	}
+
+	catalogErr := r.catalog.Delete(ctx, workspaceID, projectID)
+
+	if configErr != nil && catalogErr != nil {
+		return domain.NewAggregateError([]error{configErr, catalogErr})
+	}
+	if configErr != nil {
+		return configErr
+	}
+	return catalogErr
+}
+
+func (r *FileProjectRepo) FindByRoot(ctx context.Context, workspaceID domain.WorkspaceID, root string) (*domain.Project, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := pathpolicy.ValidateWorkspaceID(string(workspaceID)); err != nil {
+		return nil, fmt.Errorf("invalid workspace id: %w", err)
+	}
+	if root == "" {
+		root = "."
+	}
+	if err := r.policy.ValidateRelativeConfigPath(root, false); err != nil {
+		return nil, fmt.Errorf("invalid root path %q: %w", root, err)
+	}
+
+	record, err := r.catalog.FindByRoot(ctx, workspaceID, root)
+	if err != nil {
+		return nil, err
+	}
+	return r.Get(ctx, workspaceID, record.ProjectID)
+}
+
+func removeFileIfExists(path string) error {
+	err := os.Remove(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
 	}
 	return nil
 }

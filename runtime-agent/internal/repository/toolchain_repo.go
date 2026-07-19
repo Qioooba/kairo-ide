@@ -5,17 +5,16 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"time"
+	"sync"
 
 	"github.com/kairo-ide/runtime-agent/internal/domain"
 )
 
-// FileToolchainRepo implements domain.ToolchainRepository using a JSON file on disk.
 type FileToolchainRepo struct {
+	mu      sync.Mutex
 	dataDir string
 }
 
-// NewFileToolchainRepo creates a new FileToolchainRepo.
 func NewFileToolchainRepo(dataDir string) *FileToolchainRepo {
 	return &FileToolchainRepo{dataDir: dataDir}
 }
@@ -24,22 +23,7 @@ func (r *FileToolchainRepo) filePath() string {
 	return filepath.Join(r.dataDir, toolchainsFileName)
 }
 
-// Get returns a toolchain by ID.
-func (r *FileToolchainRepo) Get(ctx context.Context, id string) (*domain.Toolchain, error) {
-	all, err := r.List(ctx)
-	if err != nil {
-		return nil, err
-	}
-	for i := range all {
-		if all[i].ID == id {
-			return &all[i], nil
-		}
-	}
-	return nil, fmt.Errorf("toolchain %s not found", id)
-}
-
-// List returns all toolchains.
-func (r *FileToolchainRepo) List(ctx context.Context) ([]domain.Toolchain, error) {
+func (r *FileToolchainRepo) load() ([]domain.Toolchain, error) {
 	path := r.filePath()
 	doc, err := ReadVersionedJSON[[]domain.Toolchain](path)
 	if err != nil {
@@ -51,12 +35,90 @@ func (r *FileToolchainRepo) List(ctx context.Context) ([]domain.Toolchain, error
 	return doc.Data, nil
 }
 
-// Save upserts a toolchain.
+func (r *FileToolchainRepo) save(toolchains []domain.Toolchain) error {
+	if err := os.MkdirAll(r.dataDir, 0755); err != nil {
+		return fmt.Errorf("create data dir %s: %w", r.dataDir, err)
+	}
+	path := r.filePath()
+	doc := NewVersioned(toolchains)
+	return AtomicWriteJSON(path, doc, 0644)
+}
+
+func cloneToolchains(toolchains []domain.Toolchain) []domain.Toolchain {
+	if toolchains == nil {
+		return []domain.Toolchain{}
+	}
+	out := make([]domain.Toolchain, len(toolchains))
+	copy(out, toolchains)
+	return out
+}
+
+func cloneToolchain(tc *domain.Toolchain) domain.Toolchain {
+	return *tc
+}
+
+func (r *FileToolchainRepo) Get(ctx context.Context, id string) (*domain.Toolchain, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if id == "" {
+		return nil, fmt.Errorf("toolchain id is empty")
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	all, err := r.load()
+	if err != nil {
+		return nil, err
+	}
+	for i := range all {
+		if all[i].ID == id {
+			tc := cloneToolchain(&all[i])
+			return &tc, nil
+		}
+	}
+	return nil, domain.ErrToolchainNotFound
+}
+
+func (r *FileToolchainRepo) List(ctx context.Context) ([]domain.Toolchain, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	all, err := r.load()
+	if err != nil {
+		return nil, err
+	}
+	return cloneToolchains(all), nil
+}
+
 func (r *FileToolchainRepo) Save(ctx context.Context, tc domain.Toolchain) error {
-	all, err := r.List(ctx)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if tc.ID == "" {
+		return fmt.Errorf("toolchain id is empty")
+	}
+	if tc.JavaHome == "" {
+		return fmt.Errorf("toolchain javaHome is empty")
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	all, err := r.load()
 	if err != nil {
 		return fmt.Errorf("list toolchains: %w", err)
 	}
+
+	if tc.VerifiedAt.IsZero() {
+		tc.VerifiedAt = domain.UTCNow()
+	}
+
 	found := false
 	for i := range all {
 		if all[i].ID == tc.ID {
@@ -68,33 +130,29 @@ func (r *FileToolchainRepo) Save(ctx context.Context, tc domain.Toolchain) error
 	if !found {
 		all = append(all, tc)
 	}
-	return r.writeAll(all)
+	return r.save(all)
 }
 
-// FindByJavaHome looks up a toolchain by its javaHome path.
 func (r *FileToolchainRepo) FindByJavaHome(ctx context.Context, javaHome string) (*domain.Toolchain, error) {
-	all, err := r.List(ctx)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if javaHome == "" {
+		return nil, fmt.Errorf("javaHome is empty")
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	all, err := r.load()
 	if err != nil {
 		return nil, fmt.Errorf("list toolchains: %w", err)
 	}
 	for i := range all {
 		if all[i].JavaHome == javaHome {
-			return &all[i], nil
+			tc := cloneToolchain(&all[i])
+			return &tc, nil
 		}
 	}
-	return nil, fmt.Errorf("toolchain with javaHome %s not found", javaHome)
-}
-
-func (r *FileToolchainRepo) writeAll(toolchains []domain.Toolchain) error {
-	if err := os.MkdirAll(r.dataDir, 0755); err != nil {
-		return fmt.Errorf("create data dir %s: %w", r.dataDir, err)
-	}
-	for i := range toolchains {
-		if toolchains[i].VerifiedAt.IsZero() {
-			toolchains[i].VerifiedAt = time.Now()
-		}
-	}
-	path := r.filePath()
-	doc := NewVersioned(toolchains)
-	return AtomicWriteJSON(path, doc, 0644)
+	return nil, domain.ErrToolchainNotFound
 }

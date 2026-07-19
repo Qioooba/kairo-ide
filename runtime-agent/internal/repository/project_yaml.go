@@ -1,52 +1,60 @@
 package repository
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 
+	"github.com/kairo-ide/runtime-agent/internal/domain"
+	"github.com/kairo-ide/runtime-agent/internal/pathpolicy"
 	"gopkg.in/yaml.v3"
 )
 
-// ProjectConfig is the JSON/YAML representation of .kairo/project.yaml.
 type ProjectConfig struct {
-	SchemaVersion int      `json:"schemaVersion" yaml:"schemaVersion"`
-	Name          string   `json:"name" yaml:"name"`
-	SourceRoots   []string `json:"sourceRoots" yaml:"sourceRoots"`
-	ResourceRoots []string `json:"resourceRoots" yaml:"resourceRoots"`
-	WebappDir     string   `json:"webappDir" yaml:"webappDir"`
-	OutputDir     string   `json:"outputDir" yaml:"outputDir"`
-	SourceLevel   string   `json:"sourceLevel" yaml:"sourceLevel"`
-	TargetLevel   string   `json:"targetLevel" yaml:"targetLevel"`
-	Encoding      string   `json:"encoding" yaml:"encoding"`
-	BuildTool     string   `json:"buildTool" yaml:"buildTool"`
-	ContextPath   string   `json:"contextPath" yaml:"contextPath"`
+	SchemaVersion int                `yaml:"schemaVersion"`
+	Name          string             `yaml:"name"`
+	Root          string             `yaml:"root,omitempty"`
+	SourceRoots   []string           `yaml:"sourceRoots"`
+	ResourceRoots []string           `yaml:"resourceRoots"`
+	LibraryDirs   []string           `yaml:"libraryDirs,omitempty"`
+	WebappDir     string             `yaml:"webappDir"`
+	OutputDir     string             `yaml:"outputDir"`
+	BuildFile     string             `yaml:"buildFile,omitempty"`
+	BuildTargets  []string           `yaml:"buildTargets,omitempty"`
+	SourceLevel   string             `yaml:"sourceLevel"`
+	TargetLevel   string             `yaml:"targetLevel"`
+	Encoding      string             `yaml:"encoding"`
+	BuildTool     domain.BuildToolID `yaml:"buildTool"`
+	ContextPath   string             `yaml:"contextPath"`
+	ToolchainID   string             `yaml:"toolchainId,omitempty"`
+	RuntimeID     string             `yaml:"runtimeId,omitempty"`
 }
 
 var defaultProjectConfig = ProjectConfig{
 	SchemaVersion: 1,
-	Name:          "",
 	SourceRoots:   []string{"src/main/java"},
 	ResourceRoots: []string{"src/main/resources"},
+	LibraryDirs:   []string{"lib"},
 	WebappDir:     "src/main/webapp",
 	OutputDir:     "target/classes",
-	SourceLevel:   "1.6",
-	TargetLevel:   "1.6",
+	BuildFile:     "build.xml",
+	BuildTargets:  []string{"compile"},
+	SourceLevel:   "1.8",
+	TargetLevel:   "1.8",
 	Encoding:      "UTF-8",
-	BuildTool:     "javac",
+	BuildTool:     domain.BuildToolJavac,
 	ContextPath:   "/",
+	Root:          ".",
 }
 
-// kairoProjectDir is the directory name for Kairo project configuration.
-const kairoProjectDir = ".kairo"
+const (
+	kairoProjectDir  = ".kairo"
+	legacyProjectDir = ".legacyflow"
+	projectYAMLFile  = "project.yaml"
+)
 
-// legacyProjectDir is the directory name for legacy (.legacyflow) project configuration.
-const legacyProjectDir = ".legacyflow"
-
-// projectYAMLFile is the filename for project YAML config.
-const projectYAMLFile = "project.yaml"
-
-// ProjectConfigPath returns the path to .kairo/project.yaml for the given project root.
 func ProjectConfigPath(projectRoot string) string {
 	return filepath.Join(projectRoot, kairoProjectDir, projectYAMLFile)
 }
@@ -59,78 +67,132 @@ func legacyConfigPath(projectRoot string) string {
 	return filepath.Join(projectRoot, legacyProjectDir, projectYAMLFile)
 }
 
-// LoadProjectConfig reads and parses .kairo/project.yaml from the given project root.
 func LoadProjectConfig(projectRoot string) (*ProjectConfig, error) {
 	path := projectConfigPath(projectRoot)
-	doc, err := ReadVersionedJSON[ProjectConfig](path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read project config %s: %w", path, err)
 	}
-	if err := ValidateSchemaVersion(doc.SchemaVersion); err != nil {
+
+	var cfg ProjectConfig
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	if err := dec.Decode(&cfg); err != nil {
+		return nil, &CorruptionError{Path: path, Err: fmt.Errorf("parse yaml: %w", err)}
+	}
+
+	appliedDefaults, err := applyProjectDefaults(&cfg)
+	if err != nil {
+		return nil, fmt.Errorf("apply defaults %s: %w", path, err)
+	}
+
+	if err := ValidateProjectConfig(appliedDefaults); err != nil {
 		return nil, fmt.Errorf("validate project config %s: %w", path, err)
 	}
-	cfg := doc.Data
-	if err := ValidateProjectConfig(&cfg); err != nil {
-		return nil, fmt.Errorf("validate project config %s: %w", path, err)
-	}
-	return &cfg, nil
+
+	return appliedDefaults, nil
 }
 
-// SaveProjectConfig writes the project config to .kairo/project.yaml atomically.
 func SaveProjectConfig(projectRoot string, cfg *ProjectConfig) error {
 	cfg.SchemaVersion = currentSchemaVersion
-	if err := ValidateProjectConfig(cfg); err != nil {
-		return fmt.Errorf("validate project config: %w", err)
+	applied, err := applyProjectDefaults(cfg)
+	if err != nil {
+		return fmt.Errorf("apply defaults: %w", err)
 	}
+	if err := ValidateProjectConfig(applied); err != nil {
+		return fmt.Errorf("validate: %w", err)
+	}
+
 	path := projectConfigPath(projectRoot)
-	doc := NewVersioned(*cfg)
-	return AtomicWriteJSON(path, doc, 0644)
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return fmt.Errorf("mkdir: %w", err)
+	}
+	return AtomicWriteYAML(path, applied, 0644)
 }
 
-// ValidateProjectConfig checks required fields and fills defaults.
-func ValidateProjectConfig(cfg *ProjectConfig) error {
-	if cfg.SchemaVersion == 0 {
-		cfg.SchemaVersion = currentSchemaVersion
+func applyProjectDefaults(cfg *ProjectConfig) (*ProjectConfig, error) {
+	out := *cfg
+
+	if out.SchemaVersion == 0 {
+		out.SchemaVersion = defaultProjectConfig.SchemaVersion
 	}
+	if out.Name == "" {
+		return nil, errors.New("project name is required")
+	}
+	if len(out.SourceRoots) == 0 {
+		out.SourceRoots = append([]string(nil), defaultProjectConfig.SourceRoots...)
+	}
+	if len(out.ResourceRoots) == 0 {
+		out.ResourceRoots = append([]string(nil), defaultProjectConfig.ResourceRoots...)
+	}
+	if out.WebappDir == "" {
+		out.WebappDir = defaultProjectConfig.WebappDir
+	}
+	if out.OutputDir == "" {
+		out.OutputDir = defaultProjectConfig.OutputDir
+	}
+	if out.BuildFile == "" {
+		out.BuildFile = defaultProjectConfig.BuildFile
+	}
+	if len(out.BuildTargets) == 0 {
+		out.BuildTargets = append([]string(nil), defaultProjectConfig.BuildTargets...)
+	}
+	if out.SourceLevel == "" {
+		out.SourceLevel = defaultProjectConfig.SourceLevel
+	}
+	if out.TargetLevel == "" {
+		out.TargetLevel = defaultProjectConfig.TargetLevel
+	}
+	if out.Encoding == "" {
+		out.Encoding = defaultProjectConfig.Encoding
+	}
+	if out.BuildTool == "" {
+		out.BuildTool = defaultProjectConfig.BuildTool
+	}
+	if out.ContextPath == "" {
+		out.ContextPath = defaultProjectConfig.ContextPath
+	}
+	if out.Root == "" {
+		out.Root = defaultProjectConfig.Root
+	}
+
+	return &out, nil
+}
+
+func ValidateProjectConfig(cfg *ProjectConfig) error {
 	if err := ValidateSchemaVersion(cfg.SchemaVersion); err != nil {
 		return err
 	}
 	if cfg.Name == "" {
-		return fmt.Errorf("project name is required")
+		return errors.New("name is required")
 	}
-	if len(cfg.SourceRoots) == 0 {
-		cfg.SourceRoots = defaultProjectConfig.SourceRoots
+	paths := [][]string{
+		cfg.SourceRoots,
+		cfg.ResourceRoots,
+		cfg.LibraryDirs,
 	}
-	if len(cfg.ResourceRoots) == 0 {
-		cfg.ResourceRoots = defaultProjectConfig.ResourceRoots
+	policy := pathpolicy.NewDefaultPathPolicy()
+	for _, list := range paths {
+		for _, p := range list {
+			if err := policy.ValidateRelativeConfigPath(p, false); err != nil {
+				return fmt.Errorf("invalid path %q: %w", p, err)
+			}
+		}
 	}
-	if cfg.WebappDir == "" {
-		cfg.WebappDir = defaultProjectConfig.WebappDir
+	singlePaths := []string{cfg.WebappDir, cfg.OutputDir, cfg.BuildFile, cfg.Root}
+	for _, p := range singlePaths {
+		if err := policy.ValidateRelativeConfigPath(p, false); err != nil {
+			return fmt.Errorf("invalid path %q: %w", p, err)
+		}
 	}
-	if cfg.OutputDir == "" {
-		cfg.OutputDir = defaultProjectConfig.OutputDir
-	}
-	if cfg.SourceLevel == "" {
-		cfg.SourceLevel = defaultProjectConfig.SourceLevel
-	}
-	if cfg.TargetLevel == "" {
-		cfg.TargetLevel = defaultProjectConfig.TargetLevel
-	}
-	if cfg.Encoding == "" {
-		cfg.Encoding = defaultProjectConfig.Encoding
-	}
-	if cfg.BuildTool == "" {
-		cfg.BuildTool = defaultProjectConfig.BuildTool
-	}
-	if cfg.ContextPath == "" {
-		cfg.ContextPath = defaultProjectConfig.ContextPath
+	switch cfg.BuildTool {
+	case domain.BuildToolAnt, domain.BuildToolJavac:
+	default:
+		return fmt.Errorf("unsupported build tool: %s", cfg.BuildTool)
 	}
 	return nil
 }
 
-// MigrateFromLegacy reads .legacyflow/project.yaml if it exists, converts it to the new
-// .kairo/project.yaml format, saves it, and returns the config. If no legacy config exists,
-// it returns nil without error.
 func MigrateFromLegacy(projectRoot string) (*ProjectConfig, error) {
 	legacyPath := legacyConfigPath(projectRoot)
 	data, err := os.ReadFile(legacyPath)
@@ -140,13 +202,97 @@ func MigrateFromLegacy(projectRoot string) (*ProjectConfig, error) {
 		}
 		return nil, fmt.Errorf("read legacy config %s: %w", legacyPath, err)
 	}
-	var cfg ProjectConfig
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
+
+	var legacy struct {
+		SchemaVersion int      `yaml:"schemaVersion"`
+		Name          string   `yaml:"name"`
+		SourceRoots   []string `yaml:"sourceRoots"`
+		ResourceRoots []string `yaml:"resourceRoots"`
+		WebappDir     string   `yaml:"webappDir"`
+		OutputDir     string   `yaml:"outputDir"`
+		SourceLevel   string   `yaml:"sourceLevel"`
+		TargetLevel   string   `yaml:"targetLevel"`
+		Encoding      string   `yaml:"encoding"`
+		BuildTool     string   `yaml:"buildTool"`
+		ContextPath   string   `yaml:"contextPath"`
+	}
+	if err := yaml.Unmarshal(data, &legacy); err != nil {
 		return nil, fmt.Errorf("parse legacy config %s: %w", legacyPath, err)
 	}
-	cfg.SchemaVersion = 1
-	if err := SaveProjectConfig(projectRoot, &cfg); err != nil {
+
+	newPath := projectConfigPath(projectRoot)
+	if _, err := os.Stat(newPath); err == nil {
+		return LoadProjectConfig(projectRoot)
+	}
+
+	cfg := &ProjectConfig{
+		SchemaVersion: currentSchemaVersion,
+		Name:          legacy.Name,
+		SourceRoots:   legacy.SourceRoots,
+		ResourceRoots: legacy.ResourceRoots,
+		LibraryDirs:   defaultProjectConfig.LibraryDirs,
+		WebappDir:     legacy.WebappDir,
+		OutputDir:     legacy.OutputDir,
+		BuildFile:     defaultProjectConfig.BuildFile,
+		BuildTargets:  defaultProjectConfig.BuildTargets,
+		SourceLevel:   legacy.SourceLevel,
+		TargetLevel:   legacy.TargetLevel,
+		Encoding:      legacy.Encoding,
+		BuildTool:     domain.BuildToolID(legacy.BuildTool),
+		ContextPath:   legacy.ContextPath,
+		Root:          ".",
+	}
+	if cfg.BuildTool == "" {
+		cfg.BuildTool = domain.BuildToolJavac
+	}
+
+	if err := SaveProjectConfig(projectRoot, cfg); err != nil {
 		return nil, fmt.Errorf("save migrated config: %w", err)
 	}
-	return &cfg, nil
+	return LoadProjectConfig(projectRoot)
+}
+
+func ProjectToConfig(project *domain.Project) *ProjectConfig {
+	return &ProjectConfig{
+		SchemaVersion: currentSchemaVersion,
+		Name:          project.Name,
+		Root:          project.Root,
+		SourceRoots:   project.SourceRoots,
+		ResourceRoots: project.ResourceRoots,
+		LibraryDirs:   project.LibraryDirs,
+		WebappDir:     project.WebappDir,
+		OutputDir:     project.OutputDir,
+		BuildFile:     project.BuildFile,
+		BuildTargets:  project.BuildTargets,
+		SourceLevel:   project.SourceLevel,
+		TargetLevel:   project.TargetLevel,
+		Encoding:      project.Encoding,
+		BuildTool:     project.BuildTool,
+		ContextPath:   project.ContextPath,
+		ToolchainID:   project.ToolchainID,
+		RuntimeID:     project.RuntimeID,
+	}
+}
+
+func ConfigToProject(cfg *ProjectConfig, workspaceID domain.WorkspaceID, projectID domain.ProjectID) *domain.Project {
+	return &domain.Project{
+		ID:            projectID,
+		WorkspaceID:   workspaceID,
+		Name:          cfg.Name,
+		Root:          cfg.Root,
+		SourceRoots:   cfg.SourceRoots,
+		ResourceRoots: cfg.ResourceRoots,
+		LibraryDirs:   cfg.LibraryDirs,
+		WebappDir:     cfg.WebappDir,
+		OutputDir:     cfg.OutputDir,
+		BuildFile:     cfg.BuildFile,
+		BuildTargets:  cfg.BuildTargets,
+		SourceLevel:   cfg.SourceLevel,
+		TargetLevel:   cfg.TargetLevel,
+		Encoding:      cfg.Encoding,
+		BuildTool:     cfg.BuildTool,
+		ContextPath:   cfg.ContextPath,
+		ToolchainID:   cfg.ToolchainID,
+		RuntimeID:     cfg.RuntimeID,
+	}
 }

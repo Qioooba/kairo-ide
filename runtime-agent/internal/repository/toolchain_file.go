@@ -8,14 +8,12 @@ import (
 	"github.com/kairo-ide/runtime-agent/internal/domain"
 )
 
-// toolchainsFileName is the file name for storing toolchain data.
 const toolchainsFileName = "toolchains.json"
 
 func toolchainsFilePath(dataDir string) string {
 	return filepath.Join(dataDir, toolchainsFileName)
 }
 
-// LoadToolchains reads all toolchains from toolchains.json in the data directory.
 func LoadToolchains(dataDir string) ([]domain.Toolchain, error) {
 	path := toolchainsFilePath(dataDir)
 	doc, err := ReadVersionedJSON[[]domain.Toolchain](path)
@@ -28,7 +26,6 @@ func LoadToolchains(dataDir string) ([]domain.Toolchain, error) {
 	return doc.Data, nil
 }
 
-// SaveToolchains writes the toolchains slice atomically to toolchains.json.
 func SaveToolchains(dataDir string, toolchains []domain.Toolchain) error {
 	if err := os.MkdirAll(dataDir, 0755); err != nil {
 		return fmt.Errorf("create data dir %s: %w", dataDir, err)
@@ -38,7 +35,6 @@ func SaveToolchains(dataDir string, toolchains []domain.Toolchain) error {
 	return AtomicWriteJSON(path, doc, 0644)
 }
 
-// FindToolchainByJavaHome looks up a toolchain by its javaHome path.
 func FindToolchainByJavaHome(dataDir string, javaHome string) (*domain.Toolchain, error) {
 	toolchains, err := LoadToolchains(dataDir)
 	if err != nil {
@@ -46,7 +42,8 @@ func FindToolchainByJavaHome(dataDir string, javaHome string) (*domain.Toolchain
 	}
 	for i := range toolchains {
 		if toolchains[i].JavaHome == javaHome {
-			return &toolchains[i], nil
+			tc := toolchains[i]
+			return &tc, nil
 		}
 	}
 	return nil, fmt.Errorf("toolchain with javaHome %s not found", javaHome)
