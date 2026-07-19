@@ -201,6 +201,15 @@ func Bind(args []string) (Config, string, error) {
 	dataDir := fs.String("data-dir", "", "data directory (overrides KAIRO_DATA_DIR / config)")
 	bundledDir := fs.String("bundled-dir", "", "bundled directory (overrides KAIRO_BUNDLED_DIR / config)")
 	secret := fs.String("secret", "", "local auth secret (or set KAIRO_LOCAL_SECRET)")
+	// If the flag is empty, fall back to KAIRO_LOCAL_SECRET from the
+	// environment. The Desktop host injects this when spawning the
+	// agent so renderer + agent share a per-session secret without
+	// the secret ever appearing on the command line.
+	if *secret == "" {
+		if v := os.Getenv("KAIRO_LOCAL_SECRET"); v != "" {
+			*secret = v
+		}
+	}
 	tlsCert := fs.String("tls-cert", "", "TLS certificate path")
 	tlsKey := fs.String("tls-key", "", "TLS key path")
 	skipSHAVerify := fs.Bool("skip-sha-verify", false, "skip SHA-256 verification of JDT LS archive (dev only)")

@@ -5,8 +5,10 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"time"
@@ -107,6 +109,20 @@ func run() error {
 
 	addr := fmt.Sprintf("%s:%d", cfg.BindAddress, cfg.Port)
 	if err := srv.ListenAndServe(addr, cfg.TLSCert, cfg.TLSKey); err != nil {
+		// ListenAndServe returning != nil usually means the
+		// server stopped (e.g. port in use, TLS misconfigured).
+		// But http.ErrServerClosed is the normal return value
+		// after a graceful Shutdown — including the one
+		// /api/v1/runtime/restart triggers. If we treat that
+		// as a fatal error here, we race with the restart
+		// goroutine which is about to spawn a replacement
+		// process and os.Exit(0): main.run() would os.Exit(1)
+		// first, killing the new process before it can bind
+		// the port. So treat ErrServerClosed as a clean
+		// shutdown.
+		if errors.Is(err, http.ErrServerClosed) {
+			return nil
+		}
 		// ListenAndServe returning != nil means the server
 		// stopped (e.g. port in use, TLS misconfigured).
 		// Make sure the container's resources are released

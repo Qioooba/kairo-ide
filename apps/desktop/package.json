@@ -46,7 +46,7 @@
     ],
     "extraResources": [
       {
-        "from": "../../runtime-agent/bin/kairo-runtime.exe",
+        "from": "../../runtime-agent/kairo-runtime.exe",
         "to": "bin/kairo-runtime.exe"
       }
     ],
