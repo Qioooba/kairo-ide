@@ -1,26 +1,25 @@
-import { injectable, inject } from '@theia/core/shared/inversify';
+import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
 import { ILogger } from '@theia/core/lib/common/logger';
-import { spawn, ChildProcess } from 'child_process';
+import { DisposableCollection, Disposable } from '@theia/core/lib/common/disposable';
+import { spawn, ChildProcess, SpawnOptions } from 'child_process';
 import { StreamMessageReader, StreamMessageWriter } from 'vscode-jsonrpc/node';
 import { RuntimeConnectionService } from '@kairo/runtime-extension';
-import type { Endpoint } from '@kairo/protocol';
+import type { Endpoint, JdtLaunchDescriptor } from '@kairo/protocol';
 
-export interface LaunchDescriptor {
-    command: string;
-    args: string[];
-    workingDir: string;
-    env: string[];
-}
-
+/**
+ * Kairo Java Language Server Contribution (backend).
+ *
+ * Owns the JDT LS process lifecycle. The Go Agent only provides
+ * the launch descriptor; this contribution spawns JDT LS and
+ * exposes the stdin/stdout streams for the LanguageClient.
+ *
+ * The initialize handshake is performed ONLY by the
+ * LanguageClient — the Go Agent is not involved in LSP.
+ */
 @injectable()
-export class JavaLanguageServerManager {
-    private process: ChildProcess | undefined;
-    private reader: StreamMessageReader | undefined;
-    private writer: StreamMessageWriter | undefined;
-    private crashCount: number = 0;
-    private readonly maxCrashes: number = 3;
-    private readonly crashWindow: number = 60000; // 1 minute
-    private crashTimestamps: number[] = [];
+export class KairoJavaLanguageServerContribution implements Disposable {
+    readonly id = 'kairo-java';
+    readonly name = 'Kairo Java';
 
     @inject(ILogger)
     private readonly logger!: ILogger;
@@ -28,87 +27,184 @@ export class JavaLanguageServerManager {
     @inject(RuntimeConnectionService)
     private readonly runtime!: RuntimeConnectionService;
 
-    async getLaunchDescriptor(workspaceId: string, projectId: string): Promise<LaunchDescriptor> {
+    private process: ChildProcess | undefined;
+    private reader: StreamMessageReader | undefined;
+    private writer: StreamMessageWriter | undefined;
+
+    private toDispose = new DisposableCollection();
+
+    // Crash circuit breaker: max N crashes in time window.
+    private crashCount = 0;
+    private readonly maxCrashes = 5;
+    private readonly crashWindowMs = 60000; // 1 minute
+    private crashTimestamps: number[] = [];
+
+    @postConstruct()
+    protected init(): void {
+        this.logger.info('[KairoJava] Language server contribution initialized');
+    }
+
+    dispose(): void {
+        this.toDispose.dispose();
+        this.stop().catch(err => this.logger.error(`[KairoJava] Error during disposal: ${err}`));
+    }
+
+    /**
+     * Fetch the launch descriptor from the Go Agent.
+     * The Go Agent returns the JVM command, arguments, working directory,
+     * and a minimal env allowlist (never os.Environ()).
+     */
+    async getLaunchDescriptor(workspaceId: string, projectId: string): Promise<JdtLaunchDescriptor> {
         return this.runtime.request(
             `GET /api/v1/workspaces/${workspaceId}/java/launch-descriptor` as Endpoint,
             undefined,
             { query: { projectId } },
-        ) as Promise<LaunchDescriptor>;
+        ) as Promise<JdtLaunchDescriptor>;
     }
 
-    async start(descriptor: LaunchDescriptor): Promise<{ reader: StreamMessageReader; writer: StreamMessageWriter }> {
+    /**
+     * Build the environment from the Go Agent's env allowlist.
+     * Only the variables explicitly listed by the agent are passed.
+     * Never expose the full process.env.
+     */
+    private buildEnv(envAllowlist: string[]): Record<string, string> {
+        const env: Record<string, string> = {};
+        for (const entry of envAllowlist) {
+            const eqIdx = entry.indexOf('=');
+            if (eqIdx >= 0) {
+                env[entry.substring(0, eqIdx)] = entry.substring(eqIdx + 1);
+            }
+        }
+        return env;
+    }
+
+    /**
+     * Start JDT LS using the launch descriptor.
+     * Returns the stdin/stdout streams for the LanguageClient.
+     *
+     * @throws if JDT LS is already running
+     * @throws if crash circuit breaker is tripped
+     */
+    async start(descriptor: JdtLaunchDescriptor): Promise<{
+        reader: StreamMessageReader;
+        writer: StreamMessageWriter;
+    }> {
         if (this.process) {
-            throw new Error('JDT LS is already running');
+            throw new Error('[KairoJava] JDT LS is already running');
         }
 
-        this.logger.info(`Starting JDT LS: ${descriptor.command} ${descriptor.args.join(' ')}`);
+        // Crash circuit breaker check.
+        const now = Date.now();
+        this.crashTimestamps = this.crashTimestamps.filter(t => now - t < this.crashWindowMs);
+        if (this.crashTimestamps.length >= this.maxCrashes) {
+            const msg = `[KairoJava] JDT LS crashed ${this.crashTimestamps.length} times in ` +
+                `${this.crashWindowMs / 1000}s. Please check the JDT LS installation and ` +
+                `restart the workspace. Last crashes at: ${this.crashTimestamps.map(t => new Date(t).toISOString()).join(', ')}`;
+            this.logger.error(msg);
+            throw new Error(msg);
+        }
 
-        this.process = spawn(descriptor.command, descriptor.args, {
+        this.logger.info(`[KairoJava] Starting JDT LS: ${descriptor.command} ${descriptor.args.join(' ')}`);
+
+        const options: SpawnOptions = {
             cwd: descriptor.workingDir,
-            env: this.buildEnv(descriptor.env),
+            env: this.buildEnv(descriptor.envAllowlist),
             stdio: ['pipe', 'pipe', 'pipe'],
-        });
+        };
+
+        this.process = spawn(descriptor.command, descriptor.args, options);
+        this.crashCount = 0;
 
         this.reader = new StreamMessageReader(this.process.stdout!);
         this.writer = new StreamMessageWriter(this.process.stdin!);
 
         this.process.on('exit', (code, signal) => {
-            this.logger.warn(`JDT LS exited with code ${code}, signal ${signal}`);
+            this.logger.warn(`[KairoJava] JDT LS exited with code ${code}, signal ${signal}`);
             this.reader = undefined;
             this.writer = undefined;
             this.process = undefined;
             this.handleCrash();
         });
 
-        this.process.on('error', (err) => {
-            this.logger.error(`JDT LS error: ${err.message}`);
+        this.process.on('error', err => {
+            this.logger.error(`[KairoJava] JDT LS process error: ${err.message}`);
             this.reader = undefined;
             this.writer = undefined;
             this.process = undefined;
+            this.handleCrash();
         });
 
         this.process.stderr?.on('data', (data: Buffer) => {
-            this.logger.debug(`JDT LS stderr: ${data.toString()}`);
+            this.logger.debug(`[KairoJava] JDT LS stderr: ${data.toString()}`);
         });
 
         return { reader: this.reader, writer: this.writer };
     }
 
+    /**
+     * Gracefully stop JDT LS.
+     * 1. Close the writer (stdin) to signal shutdown.
+     * 2. Wait up to 5 seconds for graceful exit.
+     * 3. Send SIGTERM if still running.
+     * 4. Wait 2 more seconds.
+     * 5. Send SIGKILL if still running.
+     */
     async stop(): Promise<void> {
         if (!this.process) {
             return;
         }
 
-        this.logger.info('Stopping JDT LS');
-        this.writer?.end();
+        this.logger.info('[KairoJava] Stopping JDT LS');
 
-        // Give it a moment to shut down gracefully
-        await new Promise<void>(resolve => {
-            const timeout = setTimeout(() => {
-                if (this.process) {
-                    this.process.kill('SIGTERM');
-                    setTimeout(() => {
-                        if (this.process) {
-                            this.process.kill('SIGKILL');
-                        }
-                        resolve();
-                    }, 2000);
-                } else {
-                    resolve();
-                }
-            }, 3000);
+        try {
+            this.writer?.end();
+        } catch {
+            // Writer may already be closed.
+        }
 
-            this.process?.on('exit', () => {
-                clearTimeout(timeout);
-                resolve();
-            });
-        });
+        const proc = this.process;
+        let killed = false;
+
+        // Wait up to 5 seconds for graceful shutdown.
+        killed = await this.waitForExit(proc, 5000);
+
+        if (!killed && proc) {
+            this.logger.warn('[KairoJava] JDT LS did not exit gracefully, sending SIGTERM');
+            proc.kill('SIGTERM');
+            killed = await this.waitForExit(proc, 2000);
+        }
+
+        if (!killed && proc) {
+            this.logger.warn('[KairoJava] JDT LS did not respond to SIGTERM, sending SIGKILL');
+            proc.kill('SIGKILL');
+        }
 
         this.reader = undefined;
         this.writer = undefined;
         this.process = undefined;
     }
 
+    /**
+     * Wait for the process to exit, with a timeout.
+     * Returns true if the process exited, false on timeout.
+     */
+    private waitForExit(proc: ChildProcess, timeoutMs: number): Promise<boolean> {
+        return new Promise<boolean>(resolve => {
+            if (!proc || proc.exitCode !== null) {
+                resolve(true);
+                return;
+            }
+            const timer = setTimeout(() => resolve(false), timeoutMs);
+            proc.once('exit', () => {
+                clearTimeout(timer);
+                resolve(true);
+            });
+        });
+    }
+
+    /**
+     * Returns the current streams, or null if JDT LS is not running.
+     */
     getStreams(): { reader: StreamMessageReader | null; writer: StreamMessageWriter | null } {
         return {
             reader: this.reader || null,
@@ -116,27 +212,25 @@ export class JavaLanguageServerManager {
         };
     }
 
-    private buildEnv(env: string[]): Record<string, string> {
-        const result: Record<string, string> = {};
-        for (const e of env) {
-            const eqIdx = e.indexOf('=');
-            if (eqIdx >= 0) {
-                result[e.substring(0, eqIdx)] = e.substring(eqIdx + 1);
-            }
-        }
-        return result;
+    /**
+     * Returns true if JDT LS is currently running.
+     */
+    isRunning(): boolean {
+        return this.process !== undefined && this.process.exitCode === null;
     }
 
     private handleCrash(): void {
         const now = Date.now();
-        this.crashTimestamps = this.crashTimestamps.filter(t => now - t < this.crashWindow);
+        this.crashTimestamps = this.crashTimestamps.filter(t => now - t < this.crashWindowMs);
         this.crashTimestamps.push(now);
+        this.crashCount++;
 
-        if (this.crashTimestamps.length > this.maxCrashes) {
-            this.logger.error(`JDT LS crashed ${this.crashTimestamps.length} times in ${this.crashWindow}ms. Not restarting.`);
-            return;
+        if (this.crashTimestamps.length >= this.maxCrashes) {
+            this.logger.error(
+                `[KairoJava] Crash circuit breaker tripped: ${this.crashTimestamps.length} crashes ` +
+                `in ${this.crashWindowMs / 1000}s. JDT LS will not be restarted automatically. ` +
+                `Check the JDT LS installation and restart the workspace.`
+            );
         }
-
-        this.logger.info('JDT LS will be restarted on next request');
     }
 }

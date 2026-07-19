@@ -18,7 +18,7 @@ func setupTestEnv(t *testing.T) (srcRoot, deployRoot, outsideRoot string) {
 
 	base := t.TempDir()
 	srcRoot = filepath.Join(base, "src")
-	deployRoot = filepath.Join(base, "deploy")
+	deployRoot = filepath.Join(base, "runtime", "servers", "webapps", "ROOT")
 	outsideRoot = filepath.Join(base, "outside")
 
 	if err := os.MkdirAll(srcRoot, 0o755); err != nil {

@@ -1,39 +1,22 @@
-// Package bootstrap is the formal composition root for the Kairo Runtime Agent.
-// Container is the single entry point that wires all dependencies together.
-// Every use case, repository, and infrastructure component is created here
-// and injected into the HTTP layer.
 package bootstrap
 
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 
-	"github.com/kairo-ide/runtime-agent/internal/api"
+	"github.com/kairo-ide/runtime-agent/internal/domain"
 	"github.com/kairo-ide/runtime-agent/internal/log"
 	"github.com/kairo-ide/runtime-agent/internal/security"
 	"github.com/kairo-ide/runtime-agent/internal/services"
 	"github.com/kairo-ide/runtime-agent/internal/transport/events"
 )
 
-// Config bundles the configuration needed to bootstrap the container.
-type Config struct {
-	DataDir     string
-	BundledDir  string
-	Logger      *log.Logger
-	Tomcat6Home string
-	Secret      string
-	// JDT LS distribution
-	SkipSHAVerify bool
-	JDTLSURL      string
-}
-
-// Container holds all wired dependencies for the Runtime Agent.
-// It is the single composition root - every component receives its
-// dependencies through constructor injection here.
+// Container holds all wired dependencies for the runtime agent.
 type Container struct {
-	// Services - the HTTP layer's bag of dependencies (transitional adapter).
-	// This will be replaced by direct use case injection in future waves.
-	Services *api.Services
+	// Services — composed service layer (transitional)
+	Services *services.MemoryServices
 
 	// Infrastructure
 	EventHub *events.EventHub
@@ -46,23 +29,43 @@ type Container struct {
 	EventBus *events.EventBusAdapter
 	Sandbox  *security.WorkspaceRoots
 
-	// Lifecycle
+	// Repositories (exposed for direct use in tests)
+	WorkspaceRepo  domain.WorkspaceRepository
+	ProjectRepo    domain.ProjectRepository
+	ToolchainRepo  domain.ToolchainRepository
+	BuildHistory   domain.BuildHistoryRepository
+	ServerHistory  domain.ServerHistoryRepository
+
 	shutdownFns []func(context.Context) error
 }
 
-// NewContainer wires all dependencies and returns a ready-to-use Container.
-// This is the ONLY place where concrete implementations are instantiated
-// and wired together.
+// Config holds bootstrap configuration.
+type Config struct {
+	DataDir       string
+	BundledDir    string
+	Logger        *log.Logger
+	Tomcat6Home   string
+	Secret        string
+	SkipSHAVerify bool
+	JDTLSURL      string
+}
+
+// NewContainer builds and wires all dependencies.
 func NewContainer(cfg Config) (*Container, error) {
-	// 1. Create sandbox
-	sandbox, err := security.NewWorkspaceRoots(cfg.DataDir)
+	if cfg.DataDir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil, fmt.Errorf("get home dir: %w", err)
+		}
+		cfg.DataDir = filepath.Join(home, ".kairo", "runtime-agent")
+	}
+
+	// === Infrastructure ===
+	eventHub := events.NewEventHub(1000, 100)
+	sandbox, err := security.NewWorkspaceRoots()
 	if err != nil {
 		return nil, fmt.Errorf("create sandbox: %w", err)
 	}
-	sandbox.WithReadOnly(cfg.BundledDir)
-
-	// 2. Create EventHub
-	eventHub := events.NewEventHub(1000, 100)
 
 	// 2a. Create the EventBus adapter that the /api/v1/events
 	//     WebSocket handler will use. Without this, the HTTP
@@ -102,14 +105,12 @@ func NewContainer(cfg Config) (*Container, error) {
 	return container, nil
 }
 
-// Shutdown gracefully shuts down all managed resources.
-// Cancels running builds, stops servers, closes subscribers.
+// Shutdown gracefully stops all services.
 func (c *Container) Shutdown(ctx context.Context) error {
-	// Call shutdown functions in reverse order
+	// Run shutdown functions in reverse order
 	for i := len(c.shutdownFns) - 1; i >= 0; i-- {
 		if err := c.shutdownFns[i](ctx); err != nil {
-			// Log but continue shutting down remaining resources
-			_ = err
+			return err
 		}
 	}
 	return nil

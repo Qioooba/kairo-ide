@@ -126,15 +126,21 @@ export class RuntimeConnectionService {
   protected init(): void {
     if (!this.config.baseUrl) {
       // Read config from preload script (available before page loads).
-      // In the desktop app, the preload exposes window.kairoConfig;
-      // in the browser app, the host page may set __KAIRO_DEFAULT_RUNTIME_URL__.
+      // Primary API: window.__kairo (desktop preload per Wave 5 spec).
+      const kairo = (window as any).__kairo;
+      if (kairo && typeof kairo.agentBaseUrl === 'string') {
+        const secret = typeof kairo.getSecret === 'function' ? kairo.getSecret() : '';
+        this.initialize(kairo.agentBaseUrl, secret);
+        return;
+      }
+      // Backward-compat: window.kairoConfig (older preload versions).
       const kairoCfg = (window as any).kairoConfig;
       if (kairoCfg && kairoCfg.agentUrl) {
         this.initialize(kairoCfg.agentUrl, kairoCfg.agentSecret);
         return;
       }
       const injected = (globalThis as unknown as { __KAIRO_DEFAULT_RUNTIME_URL__?: string }).__KAIRO_DEFAULT_RUNTIME_URL__;
-      this.config = { baseUrl: injected ?? '' };
+      this.config = { baseUrl: injected ?? DEFAULT_RUNTIME_BASE_URL };
     }
   }
 
@@ -482,7 +488,7 @@ export class RuntimeConnectionService {
       ? hostport
       : `ws://${hostport}`;
     const wsUrl = `${wsBase}${PROTOCOL_VERSION_PATH}/events`;
-    this.internalEventStream = new EventStream(wsUrl, this.agentSecret());
+    this.internalEventStream = new EventStream(wsUrl, this.agentSecret(), this.sequence);
 
     // Wire up status forwarding.
     this.internalEventStream.onStatus(s => {
@@ -496,6 +502,7 @@ export class RuntimeConnectionService {
     // subscribers across all workspaceIds.
     this.internalEventStream.on('*', (e: any) => {
       this.sequence = e.sequence ?? this.sequence;
+      this.internalEventStream?.setSequence(this.sequence);
       for (const subs of this.subscribers.values()) {
         for (const fn of subs) {
           fn(e);
@@ -595,6 +602,13 @@ function wsHostPortFromBase(baseUrl: string): string {
 }
 
 /**
+ * Dev default for the browser entry (which has no preload to
+ * inject the agent URL). Matches runtime-agent/configs/dev.yaml
+ * port 18080. The desktop app overrides this via preload.
+ */
+const DEFAULT_RUNTIME_BASE_URL = 'http://127.0.0.1:18080';
+
+/**
  * A typed WebSocket subscription with exponential backoff
  * reconnect. The Theia side listens for log / build.progress /
  * deployment.progress / server.state events and re-emits them
@@ -610,9 +624,22 @@ export class EventStream {
   protected reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   protected statusListeners = new Set<(s: 'connecting' | 'open' | 'disconnected' | 'closed') => void>();
   protected currentStatus: 'connecting' | 'open' | 'disconnected' | 'closed' = 'disconnected';
+  /** Highest sequence number seen. Sent as `?since=` on reconnect for replay. */
+  protected sequence: number = 0;
 
-  constructor(protected url: string, protected agentSecret?: string) {
+  constructor(protected url: string, protected agentSecret?: string, sequence?: number) {
+    if (sequence !== undefined) this.sequence = sequence;
     this.connect();
+  }
+
+  /** Set the last known sequence for replay on next reconnect. */
+  setSequence(seq: number): void {
+    if (seq > this.sequence) this.sequence = seq;
+  }
+
+  /** Get the current sequence number. */
+  getSequence(): number {
+    return this.sequence;
   }
 
   on(type: string, handler: (e: WsEvent) => void): () => void {
@@ -656,9 +683,14 @@ export class EventStream {
       const protocols = this.agentSecret
         ? [KAIRO_WS_SUBPROTOCOL, this.agentSecret]
         : [];
+      // Sequence replay: on reconnect, send `?since=<seq>` so the
+      // server can replay events we missed while disconnected.
+      const connectUrl = this.sequence > 0
+        ? `${this.url}?since=${this.sequence}`
+        : this.url;
       ws = protocols.length > 0
-        ? new WebSocket(this.url, protocols)
-        : new WebSocket(this.url);
+        ? new WebSocket(connectUrl, protocols)
+        : new WebSocket(connectUrl);
     } catch (_err) {
       this.scheduleReconnect();
       return;
@@ -671,6 +703,10 @@ export class EventStream {
     ws.addEventListener('message', ev => {
       try {
         const e: WsEvent = JSON.parse(typeof ev.data === 'string' ? ev.data : '');
+        // Track sequence for replay on reconnect
+        if ((e as any).sequence !== undefined) {
+          this.sequence = Math.max(this.sequence, (e as any).sequence);
+        }
         const set = this.listeners.get(e.type);
         if (set) for (const fn of set) fn(e);
         const all = this.listeners.get('*');
@@ -690,9 +726,10 @@ export class EventStream {
 
   protected scheduleReconnect(): void {
     if (this.closedByCaller) return;
-    const wait = this.backoffMs;
+    // Full jitter: wait = random(0, backoffMs)
+    const jittered = Math.random() * this.backoffMs;
     this.backoffMs = Math.min(this.maxBackoffMs, this.backoffMs * 2);
-    this.reconnectTimer = setTimeout(() => this.connect(), wait);
+    this.reconnectTimer = setTimeout(() => this.connect(), jittered);
   }
 
   protected setStatus(s: 'connecting' | 'open' | 'disconnected' | 'closed'): void {

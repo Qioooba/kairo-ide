@@ -445,23 +445,32 @@ export interface JdtStatus {
   stderrPath?: string;
   /** Number of auto-restarts since the agent started. */
   restartCount?: number;
-  /**
-   * True iff the LSP `initialize` handshake completed. The UI
-   * must NOT advertise completion / hover / etc. until this
-   * is true, even when state == "running".
-   */
-  initializeOk: boolean;
 }
 
-export interface JdtStartRequest {
-  /** Override the JRE the agent uses to run the JDT LS. */
-  jrePath?: string;
-  /** Project source level. Defaults to "1.6". */
-  sourceLevel?: '1.5' | '1.6' | '1.7' | '1.8' | '9' | '11' | '17';
-  /** Workspace root URI passed to the LSP `initialize` request. */
-  initializeRootURI?: string;
-  /** Hard timeout for the Start call. Default 30s. */
-  timeoutMs?: number;
+/**
+ * Launch descriptor returned by the Go Agent. The Theia backend
+ * uses this to spawn the JDT LS process. The descriptor does NOT
+ * include os.Environ() — only the minimal allowlist of env vars.
+ */
+export interface JdtLaunchDescriptor {
+  command: string;
+  args: string[];
+  workingDir: string;
+  envAllowlist: string[];
+}
+
+/**
+ * Distribution status returned by GET /api/v1/jdtls/distribution.
+ * Describes the JDT LS installation state (version, download status,
+ * launcher path, etc.).
+ */
+export interface JdtDistributionStatus {
+  installed: boolean;
+  version: string;
+  home: string;
+  launcherJar: string;
+  source: string;
+  message?: string;
 }
 
 export interface JdtProjectRequest {
@@ -575,9 +584,14 @@ export interface EndpointMap {
     response: Toolchain;
   };
   // JDT LS
+  // GET /api/v1/jdtls — current JDT LS process status (state, version, JRE, etc.)
+  // POST /api/v1/jdtls — trigger JDT LS distribution download/install (prepare)
   'GET /api/v1/jdtls': { request: undefined; response: JdtStatus };
-  'POST /api/v1/jdtls': { request: JdtStartRequest; response: JdtStatus };
-  'DELETE /api/v1/jdtls': { request: undefined; response: JdtStatus };
+  'POST /api/v1/jdtls': { request: undefined; response: JdtStatus };
+  // GET /api/v1/jdtls/distribution — JDT LS distribution installation status
+  'GET /api/v1/jdtls/distribution': { request: undefined; response: JdtDistributionStatus };
+  // GET /api/v1/projects/{projectId}/launch-descriptor — JDT LS launch descriptor
+  'GET /api/v1/projects/{projectId}/launch-descriptor': { request: undefined; response: JdtLaunchDescriptor };
   'POST /api/v1/jdtls/project': { request: JdtProjectRequest; response: JdtProjectResponse };
   // Encoding
   'POST /api/v1/encoding/detect': { request: EncodingDetectRequest; response: EncodingDetectResponse };

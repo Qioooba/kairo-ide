@@ -148,7 +148,7 @@ func testRuntimePlan(t *testing.T, home, base string, httpPort, shutdownPort int
 }
 
 func TestTomcat6Provider_ID(t *testing.T) {
-	p := NewTomcat6Provider(nil, nil, Tomcat6ProviderConfig{})
+	p := NewTomcat6Provider(nil, nil, nil, Tomcat6ProviderConfig{})
 	if p.ID() != "tomcat6" {
 		t.Errorf("expected ID 'tomcat6', got %s", p.ID())
 	}
@@ -156,7 +156,7 @@ func TestTomcat6Provider_ID(t *testing.T) {
 
 func TestTomcat6Provider_Prepare_ValidatesPlan(t *testing.T) {
 	prep := &fakePreparer{}
-	p := NewTomcat6Provider(nil, prep, Tomcat6ProviderConfig{})
+	p := NewTomcat6Provider(nil, prep, nil, Tomcat6ProviderConfig{})
 
 	invalidPlan := domain.RuntimePlan{
 		WorkspaceID: "ws",
@@ -175,7 +175,7 @@ func TestTomcat6Provider_Prepare_CreatesLayoutAndConfig(t *testing.T) {
 	webappDir := filepath.Join(base, "webapps", "ROOT")
 
 	prep := &fakePreparer{}
-	p := NewTomcat6Provider(nil, prep, Tomcat6ProviderConfig{})
+	p := NewTomcat6Provider(nil, prep, nil, Tomcat6ProviderConfig{})
 
 	plan := domain.RuntimePlan{
 		WorkspaceID:  "ws",
@@ -217,7 +217,7 @@ func TestTomcat6Provider_Prepare_CreatesLayoutAndConfig(t *testing.T) {
 }
 
 func TestTomcat6Provider_Start_InvalidPlan(t *testing.T) {
-	p := NewTomcat6Provider(nil, nil, Tomcat6ProviderConfig{StartTimeout: 1 * time.Second})
+	p := NewTomcat6Provider(nil, nil, nil, Tomcat6ProviderConfig{StartTimeout: 1 * time.Second})
 
 	_, err := p.Start(context.Background(), domain.RuntimePlan{}, nil)
 	if err == nil {
@@ -248,7 +248,7 @@ func TestTomcat6Provider_Start_Success(t *testing.T) {
 		StopTimeout:  5 * time.Second,
 		GraceTimeout: 2 * time.Second,
 	}
-	p := NewTomcat6Provider(processFactory, prep, cfg)
+	p := NewTomcat6Provider(processFactory, prep, nil, cfg)
 
 	plan := testRuntimePlan(t, home, base, httpPort, shutdownPort)
 
@@ -306,7 +306,7 @@ func TestTomcat6Provider_Start_AlreadyRunning(t *testing.T) {
 		return proc.NewFakeProcess(proc.FakeProcessBehavior{ExitAfter: 10 * time.Second})
 	}
 
-	p := NewTomcat6Provider(processFactory, prep, Tomcat6ProviderConfig{StartTimeout: 5 * time.Second})
+	p := NewTomcat6Provider(processFactory, prep, nil, Tomcat6ProviderConfig{StartTimeout: 5 * time.Second})
 	plan := testRuntimePlan(t, home, base, httpPort, shutdownPort)
 
 	_, err := p.Start(context.Background(), plan, nil)
@@ -331,7 +331,7 @@ func TestTomcat6Provider_Start_ReadinessTimeout(t *testing.T) {
 		})
 	}
 
-	p := NewTomcat6Provider(processFactory, prep, Tomcat6ProviderConfig{
+	p := NewTomcat6Provider(processFactory, prep, nil, Tomcat6ProviderConfig{
 		StartTimeout: 300 * time.Millisecond,
 		GraceTimeout: 200 * time.Millisecond,
 	})
@@ -364,7 +364,7 @@ func TestTomcat6Provider_ForceStop(t *testing.T) {
 		return fp
 	}
 
-	p := NewTomcat6Provider(processFactory, prep, Tomcat6ProviderConfig{
+	p := NewTomcat6Provider(processFactory, prep, nil, Tomcat6ProviderConfig{
 		StartTimeout: 5 * time.Second,
 		GraceTimeout: 100 * time.Millisecond,
 	})
@@ -386,7 +386,7 @@ func TestTomcat6Provider_ForceStop(t *testing.T) {
 }
 
 func TestTomcat6Provider_Stop_NotFound(t *testing.T) {
-	p := NewTomcat6Provider(nil, nil, Tomcat6ProviderConfig{})
+	p := NewTomcat6Provider(nil, nil, nil, Tomcat6ProviderConfig{})
 	badIdentity := domain.ProcessIdentity{PID: 99999}
 	err := p.GracefulStop(context.Background(), badIdentity)
 	if err != domain.ErrServerNotFound {
@@ -414,7 +414,7 @@ func TestTomcat6Provider_ProcessExitsBeforeReady(t *testing.T) {
 		})
 	}
 
-	p := NewTomcat6Provider(processFactory, prep, Tomcat6ProviderConfig{
+	p := NewTomcat6Provider(processFactory, prep, nil, Tomcat6ProviderConfig{
 		StartTimeout: 500 * time.Millisecond,
 	})
 
@@ -437,7 +437,7 @@ func TestTomcat6Provider_CleanupBase(t *testing.T) {
 		return proc.NewFakeProcess(proc.FakeProcessBehavior{ExitAfter: 10 * time.Second})
 	}
 
-	p := NewTomcat6Provider(processFactory, prep, Tomcat6ProviderConfig{StartTimeout: 5 * time.Second})
+	p := NewTomcat6Provider(processFactory, prep, nil, Tomcat6ProviderConfig{StartTimeout: 5 * time.Second})
 	plan := testRuntimePlan(t, home, base, httpPort, shutdownPort)
 
 	_, err := p.Start(context.Background(), plan, nil)
@@ -466,7 +466,7 @@ func TestTomcat6Provider_LogsCapture(t *testing.T) {
 		})
 	}
 
-	p := NewTomcat6Provider(processFactory, prep, Tomcat6ProviderConfig{StartTimeout: 5 * time.Second})
+	p := NewTomcat6Provider(processFactory, prep, nil, Tomcat6ProviderConfig{StartTimeout: 5 * time.Second})
 	plan := testRuntimePlan(t, home, base, httpPort, shutdownPort)
 
 	var mu sync.Mutex

@@ -1,0 +1,72 @@
+appId: com.kairo.ide
+productName: Kairo IDE
+copyright: Copyright © 2025-2026 Kairo IDE
+
+directories:
+  output: dist
+  buildResources: resources
+
+# Do NOT rebuild native modules; we ship zero native Node addons.
+npmRebuild: false
+
+# Include all compiled artifacts produced by `pnpm build`.
+# Layout after copy:
+#   lib/main.js          — desktop main process
+#   lib/preload.js       — contextBridge preload
+#   lib/frontend/**/*    — Theia frontend (copied from apps/browser)
+#   lib/backend/**/*     — Theia backend (copied from apps/browser)
+files:
+  - lib/main.js
+  - lib/preload.js
+  - lib/frontend/**/*
+  - lib/backend/**/*
+  - package.json
+
+# Platform-specific agent binary. The desktop prebuild script
+# produces the binary under runtime-agent/bin/. electron-builder
+# copies it into the platform-specific resources folder so the
+# main process can resolve it at runtime via process.resourcesPath.
+# The binary name is platform-specific (kairo-runtime vs kairo-runtime.exe),
+# so extraResources is configured per-platform below.
+
+# macOS
+mac:
+  category: public.app-category.developer-tools
+  target:
+    - dmg
+    - zip
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: resources/entitlements.mac.plist
+  entitlementsInherit: resources/entitlements.mac.plist
+  artifactName: ${name}-${version}-mac-${arch}.${ext}
+  extraResources:
+    - from: ../../runtime-agent/bin/kairo-runtime
+      to: bin/kairo-runtime
+
+# Windows
+win:
+  target:
+    - nsis
+    - zip
+  artifactName: ${name}-${version}-win-${arch}.${ext}
+  extraResources:
+    - from: ../../runtime-agent/bin/kairo-runtime.exe
+      to: bin/kairo-runtime.exe
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  # Support paths with spaces and Chinese characters.
+  unicode: true
+
+# Linux
+linux:
+  target:
+    - AppImage
+    - zip
+  artifactName: ${name}-${version}-linux-${arch}.${ext}
+  extraResources:
+    - from: ../../runtime-agent/bin/kairo-runtime
+      to: bin/kairo-runtime

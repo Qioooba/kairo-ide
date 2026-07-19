@@ -21,9 +21,6 @@ export class LogViewerWidget extends ReactWidget {
     @inject(RuntimeConnectionService)
     protected readonly runtime!: RuntimeConnectionService;
 
-    @inject(RuntimeConnectionService)
-    protected readonly runtimeConnection!: RuntimeConnectionService;
-
     @inject(WorkspaceContextService)
     protected readonly workspaceContext!: WorkspaceContextService;
 
@@ -40,7 +37,6 @@ export class LogViewerWidget extends ReactWidget {
         return React.createElement(LogViewer, {
             serverStore: this.serverStore,
             runtime: this.runtime,
-            runtimeConnection: this.runtimeConnection,
             workspaceContext: this.workspaceContext,
         });
     }
@@ -49,7 +45,6 @@ export class LogViewerWidget extends ReactWidget {
 interface LogViewerProps {
     serverStore: ServerStore;
     runtime: RuntimeConnectionService;
-    runtimeConnection: RuntimeConnectionService;
     workspaceContext: WorkspaceContextService;
 }
 
@@ -57,7 +52,7 @@ const MAX_LOG_LINES = 1000;
 const VISIBLE_LINES = 500;
 const BATCH_INTERVAL = 80;
 
-const LogViewer: React.FC<LogViewerProps> = ({ serverStore, runtime, runtimeConnection, workspaceContext }) => {
+const LogViewer: React.FC<LogViewerProps> = ({ serverStore, runtime, workspaceContext }) => {
     const [logLines, setLogLines] = React.useState<LogLine[]>([]);
     const [selectedServerId, setSelectedServerId] = React.useState<string>('');
     const containerRef = React.useRef<HTMLDivElement>(null);
@@ -140,7 +135,7 @@ const LogViewer: React.FC<LogViewerProps> = ({ serverStore, runtime, runtimeConn
     React.useEffect(() => {
         const ctx = workspaceContext.context;
         if (!ctx) return;
-        const unsub = runtimeConnection.subscribeEvents(ctx.workspaceId, (event: any) => {
+        const unsub = runtime.subscribeEvents(ctx.workspaceId, (event: any) => {
             if (event.type === 'log') {
                 if (selectedServerId && event.serverId !== selectedServerId) return;
                 const newLine: LogLine = {
@@ -154,7 +149,7 @@ const LogViewer: React.FC<LogViewerProps> = ({ serverStore, runtime, runtimeConn
         return () => {
             unsub();
         };
-    }, [selectedServerId, runtimeConnection, workspaceContext, appendLog, classifyLogLevel]);
+    }, [selectedServerId, runtime, workspaceContext, appendLog, classifyLogLevel]);
 
     // Track server list changes to update selector
     React.useEffect(() => {

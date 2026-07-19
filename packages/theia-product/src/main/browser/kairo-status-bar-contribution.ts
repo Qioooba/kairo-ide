@@ -38,6 +38,7 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
   protected unsubscribeJdtState: (() => void) | undefined;
   protected unsubscribeEditor: Disposable | undefined;
   protected unsubscribeServerStore: Disposable | undefined;
+  private runtimeStatus: 'connecting' | 'open' | 'disconnected' | 'closed' = 'disconnected';
 
   @postConstruct()
   init(): void {
@@ -80,7 +81,12 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
   }
 
   async onStart(_app: FrontendApplication): Promise<void> {
-    this.unsubscribeStatus = this.runtime.onStatusChange(s => this.setRuntimeStatus(s));
+    this.unsubscribeStatus = this.runtime.onStatusChange(s => {
+      this.runtimeStatus = s;
+      this.setRuntimeStatus(s);
+      // Re-render server status to show disconnected state if applicable
+      this.renderServerStatus();
+    });
     this.unsubscribeServerEvents = this.runtime.subscribeEvents(this.runtime.workspace(), (e: any) => {
       if (e.type === 'server.state') {
         void this.refreshServerStatus();
@@ -232,6 +238,24 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
   }
 
   protected renderServerStatus(): void {
+    if (this.runtimeStatus === 'disconnected' || this.runtimeStatus === 'closed') {
+      this.statusBar.setElement('kairo.server', {
+        text: '$(error) Server: Disconnected',
+        tooltip: 'Cannot reach the runtime agent. Server commands are unavailable.',
+        alignment: StatusBarAlignment.LEFT,
+        priority: 97,
+      });
+      return;
+    }
+    if (this.runtimeStatus === 'connecting') {
+      this.statusBar.setElement('kairo.server', {
+        text: '$(sync~spin) Server: connecting…',
+        tooltip: 'Connecting to runtime agent...',
+        alignment: StatusBarAlignment.LEFT,
+        priority: 97,
+      });
+      return;
+    }
     const servers = this.serverStore.getServers();
     const srv = servers[0];
     if (!srv) {
@@ -270,8 +294,16 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
         });
       }
       this.renderServerStatus();
-    } catch (_err) {
-      // Network blip — keep previous status from store.
+    } catch (err) {
+      // Network blip or agent unreachable — keep previous status from store,
+      // but update the runtime status bar entry to reflect the error.
+      const msg = err instanceof Error ? err.message : String(err);
+      this.statusBar.setElement('kairo.runtime', {
+        text: '$(error) Runtime: disconnected',
+        tooltip: `Cannot reach the Go Runtime Agent. ${msg}`,
+        alignment: StatusBarAlignment.RIGHT,
+        priority: 100,
+      });
     }
   }
 }

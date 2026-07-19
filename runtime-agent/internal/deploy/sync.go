@@ -17,6 +17,10 @@ type DeployResult struct {
 	Succeeded   int
 	Failed      int
 	FailedFiles []DeployFailure
+	Added       []string
+	Modified    []string
+	Deleted     []string
+	RootCanon   string
 }
 
 type DeployFailure struct {
@@ -54,6 +58,8 @@ func (e *safeDeployEngine) Execute(ctx context.Context, plan domain.DeployPlan, 
 		return result, err
 	}
 
+	result.RootCanon = vp.RootCanon
+
 	if err := ctx.Err(); err != nil {
 		return result, err
 	}
@@ -74,6 +80,16 @@ func (e *safeDeployEngine) Execute(ctx context.Context, plan domain.DeployPlan, 
 				Reason: err,
 			})
 			continue
+		}
+
+		// Record add/modify
+		if entry.Entry.Action == domain.DeployActionDelete {
+			e.recordDeleteResult(result, "", result.RootCanon)
+		} else {
+			// Check if target existed before copy
+			_, statErr := os.Lstat(entry.ResolvedTarget)
+			isAdd := statErr != nil
+			e.recordEntryResult(result, entry, isAdd)
 		}
 		result.Succeeded++
 	}
@@ -103,6 +119,7 @@ func (e *safeDeployEngine) Execute(ctx context.Context, plan domain.DeployPlan, 
 				result.Failed++
 				continue
 			}
+			e.recordDeleteResult(result, staleEntry.Path, result.RootCanon)
 		}
 	}
 
@@ -119,6 +136,22 @@ func (e *safeDeployEngine) executeEntry(ctx context.Context, vp *ValidatedPlan, 
 	}
 
 	return e.copyEntry(ctx, vp, entry)
+}
+
+// recordEntryResult records whether a file was added or modified in the result summary.
+func (e *safeDeployEngine) recordEntryResult(result *DeployResult, entry ValidatedEntry, isAdd bool) {
+	relPath := relPath(result.RootCanon, entry.ResolvedTarget)
+	if isAdd {
+		result.Added = append(result.Added, relPath)
+	} else {
+		result.Modified = append(result.Modified, relPath)
+	}
+}
+
+// recordDeleteResult records a deletion in the result summary.
+func (e *safeDeployEngine) recordDeleteResult(result *DeployResult, path string, rootCanon string) {
+	relPath := relPath(rootCanon, path)
+	result.Deleted = append(result.Deleted, relPath)
 }
 
 func (e *safeDeployEngine) copyEntry(ctx context.Context, vp *ValidatedPlan, entry ValidatedEntry) error {

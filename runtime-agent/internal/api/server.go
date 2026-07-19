@@ -8,6 +8,7 @@ package api
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -228,7 +229,7 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 			case "/api/v1/events":
 				// WebSocket auth is handled inside handleEvents.
 			default:
-				if r.Header.Get("X-Kairo-Secret") != s.secret {
+				if subtle.ConstantTimeCompare([]byte(r.Header.Get("X-Kairo-Secret")), []byte(s.secret)) != 1 {
 					writeError(w, rid, cid, protocol.KairoError{
 						Code:    protocol.ErrUnauthenticated,
 						Message: "missing or invalid auth secret",

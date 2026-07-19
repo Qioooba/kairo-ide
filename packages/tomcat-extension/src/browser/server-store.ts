@@ -5,6 +5,8 @@ import { RuntimeConnectionService } from '@kairo/runtime-extension';
 import { WorkspaceContextService } from '@kairo/runtime-extension';
 import type { ServerInstance as ProtocolServerInstance } from '@kairo/protocol';
 
+export type ConnectionState = 'loading' | 'connected' | 'disconnected' | 'empty';
+
 export interface ServerInstance {
     id: string;
     workspaceId: string;
@@ -62,9 +64,6 @@ export function isValidTransition(from: ServerInstance['state'], to: ServerInsta
 @injectable()
 export class ServerStore {
     @inject(RuntimeConnectionService)
-    private readonly runtimeConnection!: RuntimeConnectionService;
-
-    @inject(RuntimeConnectionService)
     private readonly runtime!: RuntimeConnectionService;
 
     @inject(WorkspaceContextService)
@@ -76,58 +75,106 @@ export class ServerStore {
     private servers: ServerInstance[] = [];
     private readonly onDidChangeEmitter = new Emitter<ServerInstance[]>();
     readonly onDidChange: Event<ServerInstance[]> = this.onDidChangeEmitter.event;
+    private readonly onConnectionStateChangeEmitter = new Emitter<ConnectionState>();
+    readonly onConnectionStateChange: Event<ConnectionState> = this.onConnectionStateChangeEmitter.event;
+    private connectionState: ConnectionState = 'loading';
     private eventsUnsubscribe?: () => void;
+    private statusUnsubscribe?: () => void;
+    /** Track which server IDs we've seen to make the reducer idempotent. */
+    private seenServerIds = new Set<string>();
 
     @postConstruct()
-    protected async init(): Promise<void> {
-        // Load initial snapshot
+    protected init(): void {
+        // Subscribe to connection status
+        this.statusUnsubscribe = this.runtime.onStatusChange(s => {
+            const prev = this.connectionState;
+            if (s === 'open') {
+                this.connectionState = this.servers.length === 0 ? 'empty' : 'connected';
+            } else if (s === 'disconnected' || s === 'closed') {
+                this.connectionState = 'disconnected';
+            } else {
+                this.connectionState = 'loading';
+            }
+            if (this.connectionState !== prev) {
+                this.onConnectionStateChangeEmitter.fire(this.connectionState);
+            }
+        });
+
+        // Subscribe to workspace context changes
+        this.workspaceContext.onDidChangeContext(ctx => {
+            if (ctx) {
+                void this.loadServers(ctx.workspaceId);
+                this.subscribeToEvents(ctx.workspaceId);
+            } else {
+                this.servers = [];
+                this.seenServerIds.clear();
+                this.eventsUnsubscribe?.();
+                this.eventsUnsubscribe = undefined;
+                this.onDidChangeEmitter.fire([]);
+            }
+        });
+
+        // Initial load - async, do not await in postConstruct
         const ctx = this.workspaceContext.context;
         if (ctx) {
-            try {
-                const servers = await this.runtime.request('GET /api/v1/servers', undefined) as ProtocolServerInstance[];
-                if (Array.isArray(servers)) {
-                    this.servers = servers.map(s => ({
+            void this.loadServers(ctx.workspaceId);
+            this.subscribeToEvents(ctx.workspaceId);
+        }
+    }
+
+    protected subscribeToEvents(workspaceId: string): void {
+        if (this.eventsUnsubscribe) {
+            this.eventsUnsubscribe();
+        }
+        this.eventsUnsubscribe = this.runtime.subscribeEvents(workspaceId, (event: any) => {
+            if (event.type === 'server.state') {
+                const existing = this.servers.find(s => s.id === event.serverId);
+                const nextState = event.state as ServerInstance['state'];
+                if (existing && !isValidTransition(existing.state, nextState)) {
+                    this.logger.warn(
+                        `[ServerStore] rejected out-of-order transition for ${event.serverId}: ` +
+                        `${existing.state} -> ${nextState} (snapshot may be stale)`,
+                    );
+                    return;
+                }
+                this.upsertServer({
+                    id: event.serverId,
+                    workspaceId: existing?.workspaceId || workspaceId,
+                    projectId: existing?.projectId || '',
+                    state: nextState,
+                    httpPort: event.ports?.http || existing?.httpPort || 0,
+                    pid: event.pid || existing?.pid || 0,
+                    startTime: existing?.startTime || new Date().toISOString(),
+                    url: event.ports?.http ? `http://127.0.0.1:${event.ports.http}` : existing?.url,
+                });
+            }
+        });
+    }
+
+    protected async loadServers(workspaceId: string): Promise<void> {
+        try {
+            const servers = await this.runtime.request('GET /api/v1/servers', undefined) as ProtocolServerInstance[];
+            if (Array.isArray(servers)) {
+                this.servers = servers.map(s => {
+                    this.seenServerIds.add(s.id);
+                    return {
                         id: s.id,
-                        workspaceId: ctx.workspaceId,
+                        workspaceId,
                         projectId: s.projectId,
                         state: s.state,
                         httpPort: s.ports.http || 0,
                         pid: s.pid || 0,
                         startTime: s.startedAt || '',
                         url: s.ports.http ? `http://127.0.0.1:${s.ports.http}` : undefined,
-                    }));
-                    this.onDidChangeEmitter.fire(this.getServers());
-                }
-            } catch {
-                // Agent not reachable yet — store stays empty.
+                    };
+                });
+                this.connectionState = this.servers.length === 0 ? 'empty' : 'connected';
+                this.onConnectionStateChangeEmitter.fire(this.connectionState);
+                this.onDidChangeEmitter.fire(this.getServers());
             }
-        }
-
-        // Subscribe to events
-        if (ctx) {
-            this.eventsUnsubscribe = this.runtimeConnection.subscribeEvents(ctx.workspaceId, (event: any) => {
-                if (event.type === 'server.state') {
-                    const existing = this.servers.find(s => s.id === event.serverId);
-                    const nextState = event.state as ServerInstance['state'];
-                    if (existing && !isValidTransition(existing.state, nextState)) {
-                        this.logger.warn(
-                            `[ServerStore] rejected out-of-order transition for ${event.serverId}: ` +
-                            `${existing.state} -> ${nextState} (snapshot may be stale)`,
-                        );
-                        return;
-                    }
-                    this.upsertServer({
-                        id: event.serverId,
-                        workspaceId: existing?.workspaceId || ctx.workspaceId,
-                        projectId: existing?.projectId || '',
-                        state: nextState,
-                        httpPort: event.ports?.http || existing?.httpPort || 0,
-                        pid: event.pid || existing?.pid || 0,
-                        startTime: existing?.startTime || new Date().toISOString(),
-                        url: event.ports?.http ? `http://127.0.0.1:${event.ports.http}` : existing?.url,
-                    });
-                }
-            });
+        } catch {
+            this.connectionState = 'disconnected';
+            this.onConnectionStateChangeEmitter.fire(this.connectionState);
         }
     }
 
@@ -157,8 +204,14 @@ export class ServerStore {
         }
         const idx = this.servers.findIndex(s => s.id === server.id);
         if (idx >= 0) {
+            const existing = this.servers[idx];
+            // Idempotent: skip if nothing changed
+            if (existing.state === server.state && existing.pid === server.pid && existing.httpPort === server.httpPort) {
+                return;
+            }
             this.servers = [...this.servers.slice(0, idx), server, ...this.servers.slice(idx + 1)];
         } else {
+            this.seenServerIds.add(server.id);
             this.servers = [...this.servers, server].slice(-16);
         }
         this.onDidChangeEmitter.fire(this.getServers());
@@ -166,11 +219,14 @@ export class ServerStore {
 
     removeServer(id: string): void {
         this.servers = this.servers.filter(s => s.id !== id);
+        this.seenServerIds.delete(id);
         this.onDidChangeEmitter.fire(this.getServers());
     }
 
     dispose(): void {
         this.eventsUnsubscribe?.();
+        this.statusUnsubscribe?.();
         this.onDidChangeEmitter.dispose();
+        this.onConnectionStateChangeEmitter.dispose();
     }
 }

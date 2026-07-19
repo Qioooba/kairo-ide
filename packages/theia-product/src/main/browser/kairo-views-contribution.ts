@@ -248,10 +248,15 @@ export class KairoViewsContribution implements FrontendApplicationContribution {
     registry.registerCommand(KairoCommands.RESTART_SERVER, {
       execute: async () => {
         try {
-          const list = await this.runtime.request('GET /api/v1/servers', undefined);
-          for (const srv of (list as ServerInstance[])) {
-            await this.serverSvc.stop(srv.id, true);
-            this.messages.info(`Server ${srv.id} stopped (forced).`);
+          const p = await this.activeProject.requireProject();
+          const list = await this.runtime.request('GET /api/v1/servers', undefined) as ServerInstance[];
+          for (const srv of list) {
+            const result = await this.runtime.request(
+              'POST /api/v1/servers/{serverId}/restart',
+              undefined,
+              { pathParams: { serverId: srv.id } },
+            ) as ServerInstance;
+            this.messages.info(`Server ${result.id} restarted, new PID: ${result.pid}`);
           }
         } catch (err) {
           this.messages.error(kairoErrorMessage(err, 'Server restart failed'));

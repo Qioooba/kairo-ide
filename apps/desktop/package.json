@@ -1,78 +1,78 @@
 {
-    "name":  "@kairo/desktop",
-    "version":  "0.1.0",
-    "description":  "Kairo IDE — desktop entry. Electron shell + Theia frontend + in-process Go Runtime Agent.",
-    "private":  true,
-    "main":  "lib/main.js",
-    "scripts":  {
-                    "build":  "tsc -p tsconfig.json",
-                    "prebuild":  "pnpm bundled:prepare ; node scripts/build-agent.js && node scripts/copy-browser-artifacts.js && node scripts/copy-bundled.js",
-                    "build:mac":  "tsc -p tsconfig.json && electron-builder --mac",
-                    "build:win":  "tsc -p tsconfig.json && electron-builder --win",
-                    "build:linux":  "tsc -p tsconfig.json && electron-builder --linux",
-                    "build:all":  "tsc -p tsconfig.json && electron-builder --mac --win --linux",
-                    "prestart":  "node scripts/copy-browser-artifacts.js",
-                    "start":  "electron lib/main.js",
-                    "copy:browser":  "node scripts/copy-browser-artifacts.js",
-                    "clean":  "rm -rf lib dist"
-                },
-    "dependencies":  {
-                         "@kairo/protocol":  "workspace:*",
-                         "@kairo/theia-product":  "workspace:*",
-                         "@kairo/runtime-extension":  "workspace:*",
-                         "@theia/core":  "1.73.1",
-                         "@theia/electron":  "1.73.1"
-                     },
-    "devDependencies":  {
-                            "@types/node":  "20.14.10",
-                            "electron":  "39.8.7",
-                            "electron-builder":  "25.1.8"
-                        },
-    "build":  {
-                  "appId":  "com.kairo.ide",
-                  "productName":  "Kairo IDE",
-                  "directories":  {
-                                      "output":  "dist"
-                                  },
-                  "npmRebuild":  false,
-                  "files":  [
-                                "lib/main.js",
-                                "lib/preload.js",
-                                "lib/frontend/**/*",
-                                "lib/backend/**/*",
-                                "../browser/lib/frontend/**/*",
-                                "../browser/lib/backend/**/*",
-                                "assets/**/*",
-                                "bundled/**/*",
-                                "package.json"
-                            ],
-                  "extraResources":  [
-                                         {
-                                             "from":  "../../runtime-agent/bin/kairo-runtime.exe",
-                                             "to":  "bin/kairo-runtime.exe"
-                                         }
-                                     ],
-                  "mac":  {
-                              "category":  "public.app-category.developer-tools",
-                              "target":  ["dmg", "zip"],
-                              "extraResources":  [
-                                                     {
-                                                         "from":  "../../runtime-agent/bin/kairo-runtime",
-                                                         "to":  "bin/kairo-runtime"
-                                                     }
-                                                 ]
-                          },
-                  "win":  {
-                              "target":  ["nsis", "zip"]
-                          },
-                  "linux":  {
-                                "target":  ["AppImage", "zip"],
-                                "extraResources":  [
-                                                       {
-                                                           "from":  "../../runtime-agent/bin/kairo-runtime",
-                                                           "to":  "bin/kairo-runtime"
-                                                       }
-                                                   ]
-                            }
-              }
+  "name": "@kairo/desktop",
+  "version": "0.1.0",
+  "description": "Kairo IDE — desktop entry. Electron shell + Theia frontend + in-process Go Runtime Agent.",
+  "private": true,
+  "main": "lib/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prebuild": "pnpm bundled:prepare ; node scripts/build-agent.js && node scripts/copy-browser-artifacts.js && node scripts/copy-bundled.js",
+    "build:mac": "tsc -p tsconfig.json && electron-builder --mac",
+    "build:win": "tsc -p tsconfig.json && electron-builder --win",
+    "build:linux": "tsc -p tsconfig.json && electron-builder --linux",
+    "build:all": "tsc -p tsconfig.json && electron-builder --mac --win --linux",
+    "prestart": "node scripts/copy-browser-artifacts.js",
+    "start": "electron lib/main.js",
+    "copy:browser": "node scripts/copy-browser-artifacts.js",
+    "clean": "rm -rf lib dist"
+  },
+  "dependencies": {
+    "@kairo/protocol": "workspace:*",
+    "@kairo/theia-product": "workspace:*",
+    "@kairo/runtime-extension": "workspace:*",
+    "@theia/core": "1.73.1",
+    "@theia/electron": "1.73.1"
+  },
+  "devDependencies": {
+    "@types/node": "20.14.10",
+    "electron": "39.8.7",
+    "electron-builder": "25.1.8"
+  },
+  "build": {
+    "appId": "com.kairo.ide",
+    "productName": "Kairo IDE",
+    "directories": {
+      "output": "dist"
+    },
+    "npmRebuild": false,
+    "files": [
+      "lib/main.js",
+      "lib/preload.js",
+      "lib/frontend/**/*",
+      "lib/backend/**/*",
+      "../browser/lib/frontend/**/*",
+      "../browser/lib/backend/**/*",
+      "assets/**/*",
+      "bundled/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../../runtime-agent/bin/kairo-runtime.exe",
+        "to": "bin/kairo-runtime.exe"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "target": ["dmg", "zip"],
+      "extraResources": [
+        {
+          "from": "../../runtime-agent/bin/kairo-runtime",
+          "to": "bin/kairo-runtime"
+        }
+      ]
+    },
+    "win": {
+      "target": ["nsis", "zip"]
+    },
+    "linux": {
+      "target": ["AppImage", "zip"],
+      "extraResources": [
+        {
+          "from": "../../runtime-agent/bin/kairo-runtime",
+          "to": "bin/kairo-runtime"
+        }
+      ]
+    }
+  }
 }

@@ -1,6 +1,7 @@
 import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
 import { Emitter, Event } from '@theia/core/lib/common/event';
 import { Disposable } from '@theia/core/lib/common/disposable';
+import { StorageService } from '@theia/core/lib/browser/storage-service';
 import { WorkspaceContextService } from '@kairo/runtime-extension';
 import { RuntimeConnectionService } from '@kairo/runtime-extension';
 import type { ProjectConfig } from '@kairo/protocol';
@@ -27,6 +28,9 @@ export class ActiveProjectService {
     @inject(RuntimeConnectionService)
     protected readonly runtime!: RuntimeConnectionService;
 
+    @inject(StorageService)
+    protected readonly storageService!: StorageService;
+
     @postConstruct()
     protected init(): void {
         this.toDispose = this.workspaceContext.onDidChangeContext(async (ctx) => {
@@ -46,22 +50,41 @@ export class ActiveProjectService {
                     return;
                 }
 
-                // Check localStorage for last selected project
-                const lastProjectId = localStorage.getItem(LAST_PROJECT_KEY);
+                // Check StorageService for last selected project (per workspace)
+                const lastProjectId = await this.storageService.getData<string | undefined>(
+                    `${LAST_PROJECT_KEY}:${ctx.workspaceId}`,
+                    undefined
+                );
                 const lastProject = lastProjectId
                     ? projects.find((p: ProjectConfig) => p.id === lastProjectId)
                     : undefined;
 
-                // Auto-select last selected or first project
-                const selected = lastProject || projects[0];
-                const projectInfo: ProjectInfo = {
-                    workspaceId: ctx.workspaceId,
-                    projectId: selected.id,
-                    name: selected.name,
-                    root: selected.rootPath,
-                };
-                this.currentProject = projectInfo;
-                this.onDidChangeProjectEmitter.fire(projectInfo);
+                if (projects.length === 1) {
+                    // Auto-select the only project
+                    const p = projects[0];
+                    const projectInfo: ProjectInfo = {
+                        workspaceId: ctx.workspaceId,
+                        projectId: p.id,
+                        name: p.name,
+                        root: p.rootPath,
+                    };
+                    this.currentProject = projectInfo;
+                    this.onDidChangeProjectEmitter.fire(projectInfo);
+                } else if (lastProject) {
+                    // Restore last selected project
+                    const projectInfo: ProjectInfo = {
+                        workspaceId: ctx.workspaceId,
+                        projectId: lastProject.id,
+                        name: lastProject.name,
+                        root: lastProject.rootPath,
+                    };
+                    this.currentProject = projectInfo;
+                    this.onDidChangeProjectEmitter.fire(projectInfo);
+                } else {
+                    // Multiple projects, none previously selected — UI will show QuickPick
+                    this.currentProject = undefined;
+                    this.onDidChangeProjectEmitter.fire(undefined);
+                }
             } catch {
                 // Backend not available, clear project
                 this.currentProject = undefined;
@@ -81,14 +104,17 @@ export class ActiveProjectService {
 
     async setProject(project: ProjectInfo): Promise<void> {
         this.currentProject = project;
-        // Persist selected project ID in localStorage
-        localStorage.setItem(LAST_PROJECT_KEY, project.projectId);
+        // Persist selected project ID in Theia StorageService, keyed by workspace
+        await this.storageService.setData(
+            `${LAST_PROJECT_KEY}:${project.workspaceId}`,
+            project.projectId
+        );
         this.onDidChangeProjectEmitter.fire(project);
     }
 
     async requireProject(): Promise<ProjectInfo> {
         if (!this.currentProject) {
-            throw new Error('No project is selected. Please import or select a project first.');
+            throw new Error('No project selected');
         }
         return this.currentProject;
     }

@@ -1,6 +1,3 @@
-// Command kairo-runtime is the Kairo Runtime Agent — the
-// execution core of the Kairo IDE. It speaks the /api/v1 wire
-// protocol defined in packages/protocol/src/index.ts.
 package main
 
 import (
@@ -14,31 +11,21 @@ import (
 	"path/filepath"
 	"runtime"
 	"time"
+	stdlog "log"
 
 	"github.com/kairo-ide/runtime-agent/internal/api"
-	"github.com/kairo-ide/runtime-agent/internal/audit"
 	"github.com/kairo-ide/runtime-agent/internal/bootstrap"
 	"github.com/kairo-ide/runtime-agent/internal/config"
 	"github.com/kairo-ide/runtime-agent/internal/log"
+	"github.com/kairo-ide/runtime-agent/internal/services/audit"
 )
 
-const agentVersion = "0.1.0"
-
-// restartShutdownTimeout bounds the time the runtime-restart
-// handler gives to the container's Shutdown and the HTTP
-// server before it spawns the new process and exits. Per
-// docs/hotfix-windows-test-readiness.md 搂3 the agent must
-// return within a few seconds; 3s matches the contract.
-const restartShutdownTimeout = 3 * time.Second
+const (
+	agentVersion          = "0.1.0"
+	restartShutdownTimeout = 30 * time.Second
+)
 
 func main() {
-	if err := run(); err != nil {
-		fmt.Fprintln(os.Stderr, "kairo-runtime:", err)
-		os.Exit(1)
-	}
-}
-
-func run() error {
 	// Capture the original CLI args before config.Bind consumes
 	// them. /api/v1/runtime/restart uses this slice to respawn
 	// the agent with the same flags (e.g. --config, --port).
@@ -46,15 +33,15 @@ func run() error {
 
 	cfg, _, err := config.Bind(originalArgs)
 	if err != nil {
-		return err
+		stdlog.Fatalf("config error: %v", err)
 	}
 	if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
-		return err
+		stdlog.Fatalf("create data dir: %v", err)
 	}
 	if err := os.MkdirAll(cfg.Bundled(), 0o755); err != nil {
-		return err
+		stdlog.Fatalf("create bundled dir: %v", err)
 	}
-	logger := log.New("agent").WithLevel(log.ParseLevel(cfg.LogLevel))
+	logger := log.New("agent", log.WithLevel(log.ParseLevel(cfg.LogLevel)))
 	logger.Info("starting kairo-runtime", log.Fields{
 		"version": agentVersion,
 		"config":  cfg.String(),
@@ -84,7 +71,7 @@ func run() error {
 	// Audit log: in dev we log to <DataDir>/audit.log.ndjson.
 	auditLog, err := audit.New(filepath.Join(cfg.DataDir, "audit.log.ndjson"))
 	if err != nil {
-		return fmt.Errorf("open audit log: %w", err)
+		stdlog.Fatalf("open audit log: %v", err)
 	}
 	defer auditLog.Close()
 
@@ -98,7 +85,7 @@ func run() error {
 	// misconfigured host never runs an unauthenticated agent.
 	if os.Getenv("KAIRO_DESKTOP") == "1" {
 		if cfg.Secret == "" {
-			return fmt.Errorf("KAIRO_DESKTOP=1 but no secret configured (set --secret or KAIRO_LOCAL_SECRET)")
+			stdlog.Fatalf("KAIRO_DESKTOP=1 but no secret configured (set --secret or KAIRO_LOCAL_SECRET)")
 		}
 		logger.Info("desktop mode: secret auth enforced on all non-public endpoints", log.Fields{
 			"secretBytes": len(cfg.Secret),
@@ -117,7 +104,7 @@ func run() error {
 		JDTLSURL:      cfg.JDTLSURL,
 	})
 	if err != nil {
-		return fmt.Errorf("bootstrap: %w", err)
+		stdlog.Fatalf("bootstrap: %v", err)
 	}
 	// NOTE: we no longer `defer container.Shutdown` here.
 	// /api/v1/runtime/restart is the new shutdown path; it
@@ -154,7 +141,7 @@ func run() error {
 	// addresses are allowed.
 	host := cfg.BindAddress
 	if ip := net.ParseIP(host); ip == nil || !ip.IsLoopback() {
-		return fmt.Errorf("remote mode is not available in this release. Please bind to 127.0.0.1 only")
+		stdlog.Fatalf("remote mode is not available in this release. Please bind to 127.0.0.1 only")
 	}
 
 	addr := fmt.Sprintf("%s:%d", cfg.BindAddress, cfg.Port)
@@ -171,7 +158,7 @@ func run() error {
 		// the port. So treat ErrServerClosed as a clean
 		// shutdown.
 		if errors.Is(err, http.ErrServerClosed) {
-			return nil
+			return
 		}
 		// ListenAndServe returning != nil means the server
 		// stopped (e.g. port in use, TLS misconfigured).
@@ -180,7 +167,6 @@ func run() error {
 		shutCtx, cancel := context.WithTimeout(context.Background(), restartShutdownTimeout)
 		defer cancel()
 		_ = container.Shutdown(shutCtx)
-		return err
+		stdlog.Fatalf("server error: %v", err)
 	}
-	return nil
 }

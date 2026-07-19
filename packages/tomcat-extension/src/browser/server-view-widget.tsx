@@ -2,7 +2,7 @@ import * as React from 'react';
 import { injectable, inject } from '@theia/core/shared/inversify';
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import { CommandService } from '@theia/core/lib/common';
-import { ServerStore, ServerInstance } from './server-store';
+import { ServerStore, ServerInstance, ConnectionState } from './server-store';
 
 function stateIcon(state: ServerInstance['state']): string {
     switch (state) {
@@ -33,18 +33,54 @@ interface ServerViewProps {
 
 const ServerViewComponent: React.FC<ServerViewProps> = ({ store, commandService }) => {
     const [servers, setServers] = React.useState<ServerInstance[]>(store.getServers());
+    const [connectionState, setConnectionState] = React.useState<ConnectionState>(store.getConnectionState());
 
     React.useEffect(() => {
         const sub = store.onDidChange(s => setServers([...s]));
         return () => sub.dispose();
     }, [store]);
 
+    React.useEffect(() => {
+        const sub = store.onConnectionStateChange(s => setConnectionState(s));
+        return () => sub.dispose();
+    }, [store]);
+
     const activeServer = servers.length > 0 ? servers[0] : undefined;
+    const isBusy = activeServer?.state === 'starting' || activeServer?.state === 'stopping';
+    const isDisconnected = connectionState === 'disconnected';
+    const isEmpty = servers.length === 0 && connectionState !== 'loading';
 
     const handleStart = () => commandService.executeCommand('kairo.server.start');
     const handleStop = () => commandService.executeCommand('kairo.server.stop');
     const handleRestart = () => commandService.executeCommand('kairo.server.restart');
     const handleOpenApp = () => commandService.executeCommand('kairo.app.open');
+
+    if (connectionState === 'loading') {
+        return (
+            <div className="kairo-widget" data-testid="server-view">
+                <div className="kairo-widget-header" data-testid="server-view-header">
+                    <span className="kairo-widget-title">Server</span>
+                </div>
+                <p className="kairo-empty" data-testid="server-loading">Loading...</p>
+            </div>
+        );
+    }
+
+    if (isDisconnected) {
+        return (
+            <div className="kairo-widget" data-testid="server-view">
+                <div className="kairo-widget-header" data-testid="server-view-header">
+                    <span className="kairo-widget-title">Server</span>
+                    <span className="kairo-server-state" data-testid="server-state" data-state="disconnected">
+                        Disconnected
+                    </span>
+                </div>
+                <p className="kairo-empty" data-testid="server-disconnected">
+                    Cannot reach the runtime agent. Server commands are unavailable.
+                </p>
+            </div>
+        );
+    }
 
     return (
         <div className="kairo-widget" data-testid="server-view">
@@ -70,7 +106,8 @@ const ServerViewComponent: React.FC<ServerViewProps> = ({ store, commandService 
                     className="theia-button"
                     data-testid="server-start-button"
                     onClick={handleStart}
-                    disabled={activeServer?.state === 'running' || activeServer?.state === 'starting'}
+                    disabled={activeServer?.state === 'running' || activeServer?.state === 'starting' || isDisconnected}
+                    aria-label="Start server"
                 >
                     Start
                 </button>
@@ -78,7 +115,8 @@ const ServerViewComponent: React.FC<ServerViewProps> = ({ store, commandService 
                     className="theia-button"
                     data-testid="server-stop-button"
                     onClick={handleStop}
-                    disabled={!activeServer || activeServer.state === 'stopped'}
+                    disabled={!activeServer || activeServer.state === 'stopped' || isDisconnected}
+                    aria-label="Stop server"
                 >
                     Stop
                 </button>
@@ -86,7 +124,8 @@ const ServerViewComponent: React.FC<ServerViewProps> = ({ store, commandService 
                     className="theia-button"
                     data-testid="server-restart-button"
                     onClick={handleRestart}
-                    disabled={!activeServer || activeServer.state === 'stopped'}
+                    disabled={!activeServer || activeServer.state === 'stopped' || isBusy || isDisconnected}
+                    aria-label="Restart server"
                 >
                     Restart
                 </button>
@@ -95,6 +134,7 @@ const ServerViewComponent: React.FC<ServerViewProps> = ({ store, commandService 
                     data-testid="server-open-button"
                     onClick={handleOpenApp}
                     disabled={!activeServer || activeServer.state !== 'running' || !activeServer.url}
+                    aria-label="Open application in browser"
                 >
                     Open App
                 </button>
@@ -132,7 +172,7 @@ const ServerViewComponent: React.FC<ServerViewProps> = ({ store, commandService 
 
             <div className="kairo-widget-section" data-testid="server-list-section">
                 <div className="kairo-section-title">All Servers</div>
-                {servers.length === 0 ? (
+                {isEmpty ? (
                     <p className="kairo-empty" data-testid="server-empty">
                         No servers registered. Press <strong>Start</strong> to launch one.
                     </p>

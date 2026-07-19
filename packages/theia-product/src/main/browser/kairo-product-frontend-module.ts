@@ -35,13 +35,6 @@ import { KairoFileCommandsContribution } from './kairo-file-commands';
 import { KairoEncodingCommandsContribution } from '@kairo/encoding-extension';
 import { BuildViewWidget } from '@kairo/build-extension';
 import { ServerViewWidget, LogViewerWidget } from '@kairo/tomcat-extension';
-import {
-  RuntimeConnectionService,
-  KairoRuntime,
-  KairoErrorListener,
-  KairoErrorListenerImpl,
-  WorkspaceContextService,
-} from '@kairo/runtime-extension';
 import { KairoLargeFileContribution } from './kairo-large-file-contribution';
 import { KairoLargeFilePreferenceContribution } from './kairo-large-file-preferences';
 
@@ -50,39 +43,13 @@ export const KAIRO_BUILDS_FACTORY_ID = 'kairo-build-view';
 export const KAIRO_DEPLOYMENTS_FACTORY_ID = 'kairo-deployments';
 export const KAIRO_LOGS_FACTORY_ID = 'kairo-log-viewer';
 
-export function bindKairoFrontend(bind: interfaces.Bind, unbind?: interfaces.Unbind, isBound?: interfaces.IsBound, rebind?: interfaces.Rebind): void {
-  // ── Kairo runtime client + workspace context ────────────────
-  // Mirrors KairoRuntimeModule in
-  // packages/runtime-extension/src/browser/index.ts. We have
-  // to inline the bindings here because Theia loads this
-  // module via `theiaExtensions[].frontend` and does not
-  // give us a `container.load(...)` hook to compose the
-  // existing KairoRuntimeModule ContainerModule.
-  // Bindings: RuntimeConnectionService, KairoRuntime,
-  // KairoErrorListener, WorkspaceContextService. Every
-  // per-extension service below injects at least one of
-  // these, so they must be in the frontend container
-  // (N-023 / N-026 in MILESTONES.md).
-  if (isBound && rebind && isBound(RuntimeConnectionService)) {
-    rebind(RuntimeConnectionService).toSelf().inSingletonScope();
-  } else {
-    bind(RuntimeConnectionService).toSelf().inSingletonScope();
-  }
-  if (isBound && rebind && isBound(KairoRuntime)) {
-    rebind(KairoRuntime).toService(RuntimeConnectionService);
-  } else {
-    bind(KairoRuntime).toService(RuntimeConnectionService);
-  }
-  if (isBound && rebind && isBound(KairoErrorListener)) {
-    rebind(KairoErrorListener).to(KairoErrorListenerImpl).inSingletonScope();
-  } else {
-    bind(KairoErrorListener).to(KairoErrorListenerImpl).inSingletonScope();
-  }
-  if (isBound && rebind && isBound(WorkspaceContextService)) {
-    rebind(WorkspaceContextService).toSelf().inSingletonScope();
-  } else {
-    bind(WorkspaceContextService).toSelf().inSingletonScope();
-  }
+export function bindKairoFrontend(bind: interfaces.Bind, _unbind?: interfaces.Unbind, _isBound?: interfaces.IsBound, _rebind?: interfaces.Rebind): void {
+  // NOTE: Runtime service bindings (RuntimeConnectionService,
+  // KairoRuntime, KairoErrorListener, WorkspaceContextService)
+  // are handled by bindKairoProduct() in product-bindings.ts.
+  // Do NOT duplicate them here — doing so causes "Could not
+  // unbind serviceIdentifier" and "synchronous construction
+  // with async dependencies" errors in the Theia DI container.
 
   // ── Kairo contributions ──────────────────────────────────────
   bind(KairoStatusBarContribution).toSelf().inSingletonScope();

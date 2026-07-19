@@ -24,57 +24,41 @@ export class WorkspaceContextService {
     protected readonly runtime!: RuntimeConnectionService;
 
     @postConstruct()
-    protected async init(): Promise<void> {
-        this.toDispose = this.workspaceService.onWorkspaceChanged(async (roots) => {
+    protected init(): void {
+        this.toDispose = this.workspaceService.onWorkspaceChanged(roots => {
             if (roots.length === 0) {
                 this.currentContext = undefined;
                 this.onDidChangeContextEmitter.fire(undefined);
                 return;
             }
-
-            const rootStat = roots[0];
-            const rootPath = rootStat.resource.path.toString();
-
-            try {
-                // Call backend to get/create workspace
-                const workspaces = await this.runtime.request('GET /api/v1/workspaces', undefined) as any[];
-                const existing = workspaces.find((w: any) => w.rootPath === rootPath);
-
-                if (existing) {
-                    this.setWorkspace(existing.id, existing.rootPath);
-                } else {
-                    const name = rootPath.split(/[/\\]/).filter(Boolean).pop() || 'workspace';
-                    const created = await this.runtime.request('POST /api/v1/workspaces', { rootPath, name }) as any;
-                    this.setWorkspace(created.id, created.rootPath);
-                }
-            } catch (_err) {
-                // If the backend is not available, derive workspaceId from path
-                const fallbackId = `local-${btoa(rootPath).replace(/[+/=]/g, '').slice(0, 16)}`;
-                this.setWorkspace(fallbackId, rootPath);
-            }
+            void this.resolveWorkspace(roots[0].resource.path.toString());
         });
 
-        // Initial check
-        const roots = await this.workspaceService.roots;
-        if (roots.length > 0) {
-            const rootStat = roots[0];
-            const rootPath = rootStat.resource.path.toString();
-
-            try {
-                const workspaces = await this.runtime.request('GET /api/v1/workspaces', undefined) as any[];
-                const existing = workspaces.find((w: any) => w.rootPath === rootPath);
-
-                if (existing) {
-                    this.setWorkspace(existing.id, existing.rootPath);
-                } else {
-                    const name = rootPath.split(/[/\\]/).filter(Boolean).pop() || 'workspace';
-                    const created = await this.runtime.request('POST /api/v1/workspaces', { rootPath, name }) as any;
-                    this.setWorkspace(created.id, created.rootPath);
-                }
-            } catch {
-                const fallbackId = `local-${btoa(rootPath).replace(/[+/=]/g, '').slice(0, 16)}`;
-                this.setWorkspace(fallbackId, rootPath);
+        // Initial check - async, do not await in postConstruct
+        void this.workspaceService.roots.then(roots => {
+            if (roots.length > 0) {
+                void this.resolveWorkspace(roots[0].resource.path.toString());
             }
+        });
+    }
+
+    protected async resolveWorkspace(rootPath: string): Promise<void> {
+        try {
+            // Call backend to get/create workspace
+            const workspaces = await this.runtime.request('GET /api/v1/workspaces', undefined) as any[];
+            const existing = workspaces.find((w: any) => w.root === rootPath);
+
+            if (existing) {
+                this.setWorkspace(existing.id, existing.root);
+            } else {
+                const name = rootPath.split(/[/\\]/).filter(Boolean).pop() || 'workspace';
+                const created = await this.runtime.request('POST /api/v1/workspaces', { name, root: rootPath }) as any;
+                this.setWorkspace(created.id, created.root);
+            }
+        } catch (_err) {
+            // If the backend is not available, derive workspaceId from path
+            const fallbackId = `local-${btoa(rootPath).replace(/[+/=]/g, '').slice(0, 16)}`;
+            this.setWorkspace(fallbackId, rootPath);
         }
     }
 
