@@ -47,7 +47,7 @@ func (r *fakeCommandRunner) SetOnRun(fn func(spec buildprovider.CommandSpec) (in
 	r.onRun = fn
 }
 
-func (r *fakeCommandRunner) Run(ctx context.Context, spec buildprovider.CommandSpec, onLine func(stream domain.Stream, line string)) (buildprovider.CommandResult, error) {
+func (r *fakeCommandRunner) Run(ctx context.Context, spec buildprovider.CommandSpec, onLine func(stream domain.LogStream, line string)) (buildprovider.CommandResult, error) {
 	r.mu.Lock()
 	r.commands = append(r.commands, spec)
 	fn := r.onRun
@@ -62,7 +62,7 @@ func (r *fakeCommandRunner) Run(ctx context.Context, spec buildprovider.CommandS
 	}
 
 	for _, line := range lines {
-		onLine(domain.StreamStdout, line)
+		onLine(domain.LogStreamStdout, line)
 	}
 
 	return buildprovider.CommandResult{ExitCode: exitCode}, nil
@@ -86,7 +86,7 @@ func (p *slowBuildProvider) Validate(ctx context.Context, plan domain.BuildPlan)
 	return nil
 }
 
-func (p *slowBuildProvider) Build(ctx context.Context, plan domain.BuildPlan, sink func(event domain.BuildEvent), logLine func(stream domain.Stream, line string)) (*domain.BuildOutput, error) {
+func (p *slowBuildProvider) Build(ctx context.Context, plan domain.BuildPlan, sink func(event domain.BuildEvent), logLine func(stream domain.LogStream, line string)) (*domain.BuildOutput, error) {
 	startTime := domain.UTCNow()
 	select {
 	case <-ctx.Done():

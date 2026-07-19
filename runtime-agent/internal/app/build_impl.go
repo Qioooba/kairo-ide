@@ -404,7 +404,7 @@ func (uc *buildUseCaseImpl) executeBuild(ctx context.Context, rb *runningBuild, 
 		}
 		_ = uc.publisher.PublishBuildEvent(ctx, event)
 	}
-	logLine := func(stream domain.Stream, line string) {}
+	logLine := func(stream domain.LogStream, line string) {}
 
 	output, buildErr := provider.Build(ctx, *plan, sink, logLine)
 	endTime := domain.UTCNow()

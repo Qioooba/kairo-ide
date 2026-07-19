@@ -2,458 +2,939 @@ package app
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
-	"os"
-	"path/filepath"
+	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/kairo-ide/runtime-agent/internal/domain"
-	"github.com/kairo-ide/runtime-agent/internal/proc"
-	"github.com/kairo-ide/runtime-agent/internal/repository"
-	"github.com/kairo-ide/runtime-agent/internal/transport/events"
 )
 
-// ErrRestartStopFailed indicates the restart failed during the stop phase.
-type ErrRestartStopFailed struct {
-	Phase       string
-	Recoverable bool
-	Cause       error
+type IDGenerator interface {
+	NewServerID() (string, error)
 }
 
-func (e *ErrRestartStopFailed) Error() string {
-	return fmt.Sprintf("restart failed at %s phase: %v", e.Phase, e.Cause)
+type RuntimePlanResolver interface {
+	ResolveRuntime(ctx context.Context, workspaceID domain.WorkspaceID, projectID domain.ProjectID, existingServerID *domain.ServerID) (*domain.RuntimePlan, error)
 }
 
-// ErrRestartStartFailed indicates the restart failed during the start phase.
-type ErrRestartStartFailed struct {
-	Phase       string
-	Recoverable bool
-	Cause       error
+type serverLogBuffer struct {
+	mu    sync.Mutex
+	lines []domain.LogLine
+	cap   int
+	next  int
+	full  bool
 }
 
-func (e *ErrRestartStartFailed) Error() string {
-	return fmt.Sprintf("restart failed at %s phase: %v", e.Phase, e.Cause)
+func newServerLogBuffer(cap int) *serverLogBuffer {
+	if cap <= 0 {
+		cap = 10000
+	}
+	return &serverLogBuffer{
+		lines: make([]domain.LogLine, cap),
+		cap:   cap,
+	}
 }
 
-// serverUseCaseImpl implements ServerUseCase.
+func (b *serverLogBuffer) Append(line domain.LogLine) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.lines[b.next] = line
+	b.next = (b.next + 1) % b.cap
+	if b.next == 0 {
+		b.full = true
+	}
+}
+
+func (b *serverLogBuffer) Read(cursor, limit int) ([]domain.LogLine, int) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	var all []domain.LogLine
+	if !b.full {
+		all = make([]domain.LogLine, b.next)
+		copy(all, b.lines[:b.next])
+	} else {
+		all = make([]domain.LogLine, b.cap)
+		copy(all, b.lines[b.next:])
+		copy(all[b.cap-b.next:], b.lines[:b.next])
+	}
+
+	if cursor < 0 {
+		cursor = 0
+	}
+	if cursor > len(all) {
+		cursor = len(all)
+	}
+
+	end := cursor + limit
+	if limit <= 0 || end > len(all) {
+		end = len(all)
+	}
+
+	result := make([]domain.LogLine, end-cursor)
+	copy(result, all[cursor:end])
+
+	nextCursor := end
+	if nextCursor > len(all) {
+		nextCursor = len(all)
+	}
+	return result, nextCursor
+}
+
+func (b *serverLogBuffer) Len() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.full {
+		return b.cap
+	}
+	return b.next
+}
+
+type noopEventPublisher struct{}
+
+func (n *noopEventPublisher) PublishServerEvent(ctx context.Context, event domain.ServerEvent) error {
+	return nil
+}
+
 type serverUseCaseImpl struct {
-	mu          sync.RWMutex
-	provider    domain.RuntimeProvider
-	history     domain.ServerHistoryRepository
-	eventHub    *events.EventHub
-	configDir   string
-	cfg         ServerUseCaseConfig
-	activePlans map[domain.ServerID]*domain.RuntimePlan
+	lifecycleCtx    context.Context
+	lifecycleCancel context.CancelFunc
+	planResolver    RuntimePlanResolver
+	providerReg     domain.RuntimeProviderRegistry
+	history         domain.ServerHistoryRepository
+	eventPublisher  domain.ServerEventPublisher
+	idGenerator     IDGenerator
+	cfg             ServerUseCaseConfig
+
+	shutdownFlag atomic.Bool
+	opLocks      sync.Map
+	logBuffers   sync.Map
+
+	mu              sync.Mutex
+	activeLeases    map[domain.ServerID]*domain.PortLease
+	activeProviders map[domain.ServerID]domain.RuntimeProvider
 }
 
-// NewServerUseCase creates a new ServerUseCase implementation.
 func NewServerUseCase(
-	provider domain.RuntimeProvider,
+	lifecycleCtx context.Context,
+	planResolver RuntimePlanResolver,
+	providerRegistry domain.RuntimeProviderRegistry,
 	history domain.ServerHistoryRepository,
-	eventHub *events.EventHub,
-	configDir string,
+	eventPublisher domain.ServerEventPublisher,
+	idGenerator IDGenerator,
 	cfg ServerUseCaseConfig,
 ) ServerUseCase {
 	if cfg.StartTimeout <= 0 {
-		cfg.StartTimeout = 60 * time.Second
+		cfg.StartTimeout = 120 * time.Second
 	}
 	if cfg.StopTimeout <= 0 {
 		cfg.StopTimeout = 30 * time.Second
 	}
-	return &serverUseCaseImpl{
-		provider:    provider,
-		history:     history,
-		eventHub:    eventHub,
-		configDir:   configDir,
-		cfg:         cfg,
-		activePlans: make(map[domain.ServerID]*domain.RuntimePlan),
+	if cfg.ShutdownTimeout <= 0 {
+		cfg.ShutdownTimeout = 30 * time.Second
 	}
+	if cfg.InspectTimeout <= 0 {
+		cfg.InspectTimeout = 5 * time.Second
+	}
+	if cfg.LogBufferSize <= 0 {
+		cfg.LogBufferSize = 10000
+	}
+	if eventPublisher == nil {
+		eventPublisher = &noopEventPublisher{}
+	}
+
+	ctx, cancel := context.WithCancel(lifecycleCtx)
+
+	uc := &serverUseCaseImpl{
+		lifecycleCtx:    ctx,
+		lifecycleCancel: cancel,
+		planResolver:    planResolver,
+		providerReg:     providerRegistry,
+		history:         history,
+		eventPublisher:  eventPublisher,
+		idGenerator:     idGenerator,
+		cfg:             cfg,
+		activeLeases:    make(map[domain.ServerID]*domain.PortLease),
+		activeProviders: make(map[domain.ServerID]domain.RuntimeProvider),
+	}
+	return uc
 }
 
-func (uc *serverUseCaseImpl) Start(ctx context.Context, cmd StartServerCommand) (*domain.ServerInstance, error) {
-	// Resolve the project root from the repository.
-	projectRoot, err := resolveProjectRootFromRepo(uc.configDir, string(cmd.WorkspaceID), string(cmd.ProjectID))
-	if err != nil {
-		return nil, fmt.Errorf("resolve project root: %w", err)
-	}
-
-	cfg, err := repository.LoadProjectConfig(projectRoot)
-	if err != nil {
-		cfg = &repository.ProjectConfig{}
-	}
-
-	// Build project domain object with resolved absolute paths
-	project := domain.Project{
-		ID:            cmd.ProjectID,
-		WorkspaceID:   cmd.WorkspaceID,
-		SourceRoots:   cfg.SourceRoots,
-		ResourceRoots: cfg.ResourceRoots,
-		WebappDir:     cfg.WebappDir,
-		OutputDir:     cfg.OutputDir,
-		SourceLevel:   cfg.SourceLevel,
-		Encoding:      cfg.Encoding,
-		BuildTool:     cfg.BuildTool,
-		ContextPath:   cfg.ContextPath,
-	}
-
-	// Prepare: resolve RuntimePlan from project
-	plan, err := uc.provider.Prepare(ctx, project)
-	if err != nil {
-		return nil, fmt.Errorf("prepare: %w", err)
-	}
-
-	// Resolve JavaHome from toolchain repository or environment
-	tc, err := resolveJavaHome(uc.configDir)
-	if err != nil {
-		return nil, fmt.Errorf("resolve toolchain: %w", err)
-	}
-	plan.JavaHome = tc
-
-	// Resolve WebappDir from project root
-	if cfg.WebappDir != "" {
-		plan.WebappDir = filepath.Join(projectRoot, cfg.WebappDir)
-	} else {
-		plan.WebappDir = projectRoot
-	}
-
-	// Generate a random ServerID for the CatalinaBase directory name.
-	// Never use the raw ProjectID — it may contain special characters
-	// or collide across projects.
-	serverID, err := generateServerID()
-	if err != nil {
-		return nil, fmt.Errorf("generate server id: %w", err)
-	}
-	plan.ServerID = serverID
-
-	// Set CatalinaBase - use a unique directory per server instance.
-	catalinaBase := filepath.Join(os.TempDir(), "kairo-tomcat6", string(serverID))
-	if err := os.MkdirAll(catalinaBase, 0755); err != nil {
-		return nil, fmt.Errorf("create catalina base: %w", err)
-	}
-	plan.CatalinaBase = catalinaBase
-
-	// Start the server with timeout
-	startCtx, cancel := context.WithTimeout(ctx, uc.cfg.StartTimeout)
-	defer cancel()
-
-	inst, err := uc.provider.Start(startCtx, *plan)
-	if err != nil {
-		return nil, fmt.Errorf("start server: %w", err)
-	}
-
-	inst.WorkspaceID = cmd.WorkspaceID
-	inst.ProjectID = cmd.ProjectID
-	inst.LastPlan = plan
-
-	uc.mu.Lock()
-	uc.activePlans[inst.ID] = plan
-	uc.mu.Unlock()
-
-	// Persist to history
-	if uc.history != nil {
-		_ = uc.history.Save(ctx, *inst)
-	}
-
-	// Publish event
-	uc.publishServerEvent(string(cmd.WorkspaceID), inst.ID, events.EventServerStarted, inst)
-
-	return inst, nil
+func (uc *serverUseCaseImpl) getOpLock(serverID domain.ServerID) *sync.Mutex {
+	actual, _ := uc.opLocks.LoadOrStore(serverID, &sync.Mutex{})
+	return actual.(*sync.Mutex)
 }
 
-func (uc *serverUseCaseImpl) Stop(ctx context.Context, workspaceID domain.WorkspaceID, serverID domain.ServerID, force bool) error {
-	uc.mu.Lock()
-	delete(uc.activePlans, serverID)
-	uc.mu.Unlock()
-
-	stopCtx, cancel := context.WithTimeout(ctx, uc.cfg.StopTimeout)
-	defer cancel()
-
-	err := uc.provider.Stop(stopCtx, serverID, force)
-	if err != nil {
-		// Try force stop on graceful failure
-		if !force {
-			_ = uc.provider.Stop(stopCtx, serverID, true)
-		}
-	}
-
-	// Update history
-	if uc.history != nil {
-		inst := &domain.ServerInstance{
-			ID:          serverID,
-			WorkspaceID: workspaceID,
-			State:       domain.ServerStateStopped,
-		}
-		_ = uc.history.Save(ctx, *inst)
-	}
-
-	// Publish event
-	uc.publishServerEvent(string(workspaceID), serverID, events.EventServerStopped, nil)
-
-	return err
+func (uc *serverUseCaseImpl) getLogBuffer(serverID domain.ServerID) *serverLogBuffer {
+	actual, _ := uc.logBuffers.LoadOrStore(serverID, newServerLogBuffer(uc.cfg.LogBufferSize))
+	return actual.(*serverLogBuffer)
 }
 
-func (uc *serverUseCaseImpl) Restart(ctx context.Context, workspaceID domain.WorkspaceID, serverID domain.ServerID) (*domain.ServerInstance, error) {
-	// 1. Get current server from history
-	inst, err := uc.provider.Inspect(ctx, serverID)
-	if err != nil {
-		return nil, fmt.Errorf("inspect server: %w", err)
-	}
-
-	// 2. Save the original plan for restart
-	uc.mu.RLock()
-	plan, hasPlan := uc.activePlans[serverID]
-	uc.mu.RUnlock()
-
-	if !hasPlan {
-		// Try to recover from history
-		if uc.history != nil {
-			histInst, histErr := uc.history.Get(ctx, workspaceID, serverID)
-			if histErr == nil && histInst.LastPlan != nil {
-				plan = histInst.LastPlan
-				hasPlan = true
-			}
-		}
-	}
-
-	if !hasPlan {
-		if inst.State == domain.ServerStateStopped {
-			return nil, fmt.Errorf("server %s is not running and no saved plan available", serverID)
-		}
-		// Create a minimal plan from the current instance
-		plan = &domain.RuntimePlan{
-			ServerID: serverID,
-		}
-	}
-
-	// 3. Stop gracefully
-	stopCtx, stopCancel := context.WithTimeout(ctx, uc.cfg.StopTimeout)
-	defer stopCancel()
-
-	stopErr := uc.provider.Stop(stopCtx, serverID, false)
-	if stopErr != nil {
-		// Try force stop if graceful fails
-		_ = uc.provider.Stop(stopCtx, serverID, true)
-	}
-
-	// 4. Wait for the process to actually exit
-	if err := uc.waitForStop(ctx, serverID); err != nil {
-		return nil, &ErrRestartStopFailed{
-			Phase:       "stop",
-			Recoverable: true,
-			Cause:       fmt.Errorf("stop failed: %w", err),
-		}
-	}
-
-	// 5. Generate a new ServerID for the new instance
-	newServerID, err := generateServerID()
-	if err != nil {
-		return nil, fmt.Errorf("generate new server id: %w", err)
-	}
-	plan.ServerID = newServerID
-
-	// Generate a new CatalinaBase
-	catalinaBase := filepath.Join(os.TempDir(), "kairo-tomcat6", string(newServerID))
-	if err := os.MkdirAll(catalinaBase, 0755); err != nil {
-		return nil, fmt.Errorf("create catalina base: %w", err)
-	}
-	plan.CatalinaBase = catalinaBase
-
-	// 6. Start with the same plan
-	startCtx, startCancel := context.WithTimeout(ctx, uc.cfg.StartTimeout)
-	defer startCancel()
-
-	newInst, startErr := uc.provider.Start(startCtx, *plan)
-	if startErr != nil {
-		return nil, &ErrRestartStartFailed{
-			Phase:       "start",
-			Recoverable: true,
-			Cause:       startErr,
-		}
-	}
-
-	newInst.WorkspaceID = workspaceID
-	newInst.ProjectID = inst.ProjectID
-	newInst.LastPlan = plan
-
-	uc.mu.Lock()
-	uc.activePlans[newInst.ID] = plan
-	delete(uc.activePlans, serverID)
-	uc.mu.Unlock()
-
-	// Persist to history
-	if uc.history != nil {
-		_ = uc.history.Save(ctx, *newInst)
-	}
-
-	// Publish event
-	uc.publishServerEvent(string(workspaceID), newInst.ID, events.EventServerStarted, newInst)
-
-	return newInst, nil
+func (uc *serverUseCaseImpl) saveRecord(ctx context.Context, record *domain.ServerRecord) error {
+	record.UpdatedAt = domain.UTCNow()
+	return uc.history.Save(ctx, *record)
 }
 
-func (uc *serverUseCaseImpl) Get(ctx context.Context, workspaceID domain.WorkspaceID, serverID domain.ServerID) (*domain.ServerInstance, error) {
-	inst, err := uc.provider.Inspect(ctx, serverID)
-	if err != nil {
-		return nil, fmt.Errorf("inspect server: %w", err)
+func (uc *serverUseCaseImpl) publishStateChange(ctx context.Context, record *domain.ServerRecord, oldState, newState domain.ServerState, msg string, recoverable bool) {
+	event := domain.ServerEvent{
+		WorkspaceID: record.WorkspaceID,
+		ProjectID:   record.ProjectID,
+		ServerID:    record.ID,
+		Generation:  record.Generation,
+		Type:        domain.ServerEventStateChanged,
+		OldState:    &oldState,
+		NewState:    &newState,
+		Message:     msg,
+		Time:        domain.UTCNow(),
+		Recoverable: recoverable,
 	}
-	inst.WorkspaceID = workspaceID
-	return inst, nil
+	_ = uc.eventPublisher.PublishServerEvent(ctx, event)
 }
 
-func (uc *serverUseCaseImpl) List(ctx context.Context, workspaceID domain.WorkspaceID) ([]domain.ServerInstance, error) {
-	uc.mu.RLock()
-	defer uc.mu.RUnlock()
-
-	var result []domain.ServerInstance
-	for serverID := range uc.activePlans {
-		inst, err := uc.provider.Inspect(ctx, serverID)
-		if err != nil {
-			inst = &domain.ServerInstance{
-				ID:    serverID,
-				State: domain.ServerStateStopped,
-			}
-		}
-		inst.WorkspaceID = workspaceID
-		result = append(result, *inst)
+func (uc *serverUseCaseImpl) publishEvent(ctx context.Context, record *domain.ServerRecord, eventType domain.ServerEventType, msg string, recoverable bool) {
+	event := domain.ServerEvent{
+		WorkspaceID: record.WorkspaceID,
+		ProjectID:   record.ProjectID,
+		ServerID:    record.ID,
+		Generation:  record.Generation,
+		Type:        eventType,
+		Message:     msg,
+		Time:        domain.UTCNow(),
+		Recoverable: recoverable,
 	}
-	return result, nil
+	_ = uc.eventPublisher.PublishServerEvent(ctx, event)
 }
 
-// Reconcile checks all persisted server records and marks stale ones as crashed.
-// Should be called on Agent startup.
-func (uc *serverUseCaseImpl) Reconcile(ctx context.Context) error {
-	if uc.history == nil {
-		return nil
+func (uc *serverUseCaseImpl) validateIDs(ws domain.WorkspaceID, project domain.ProjectID, srv *domain.ServerID) error {
+	if string(ws) == "" {
+		return fmt.Errorf("workspace id is required")
 	}
-
-	// Load all servers from history. We iterate over all workspaces
-	// by listing known workspace directories.
-	workspaces, err := repository.LoadWorkspaces(uc.configDir)
-	if err != nil {
-		return fmt.Errorf("load workspaces for reconciliation: %w", err)
+	if string(project) == "" && srv != nil {
+		// Get/List/Logs don't require project ID
 	}
-
-	for _, ws := range workspaces {
-		servers, listErr := uc.history.List(ctx, ws.ID)
-		if listErr != nil {
-			continue
-		}
-
-		for _, s := range servers {
-			if s.State == domain.ServerStateRunning || s.State == domain.ServerStateStarting {
-				// Check if the process is still alive
-				if s.PID > 0 && !proc.IsAlive(s.PID) {
-					s.State = domain.ServerStateCrashed
-					s.Error = "Process no longer exists"
-					_ = uc.history.Save(ctx, s)
-					uc.publishServerEvent(string(ws.ID), s.ID, events.EventServerError, &s)
-				}
-			}
-		}
+	if srv != nil && string(*srv) == "" {
+		return fmt.Errorf("server id cannot be empty when specified")
 	}
 	return nil
 }
 
-// waitForStop polls the provider until the server is stopped.
-func (uc *serverUseCaseImpl) waitForStop(ctx context.Context, serverID domain.ServerID) error {
-	deadline := time.Now().Add(uc.cfg.StopTimeout)
-	for time.Now().Before(deadline) {
-		inst, err := uc.provider.Inspect(ctx, serverID)
-		if err != nil || inst.State == domain.ServerStateStopped || inst.State == domain.ServerStateCrashed {
-			return nil
+func (uc *serverUseCaseImpl) getProviderForRuntime(runtimeID string) (domain.RuntimeProvider, error) {
+	prov, ok := uc.providerReg.Get(runtimeID)
+	if !ok {
+		return nil, fmt.Errorf("%w: %s", domain.ErrUnsupportedRuntime, runtimeID)
+	}
+	return prov, nil
+}
+
+func (uc *serverUseCaseImpl) Start(ctx context.Context, cmd domain.StartServerCommand) (*domain.ServerRecord, error) {
+	if uc.shutdownFlag.Load() {
+		return nil, fmt.Errorf("server is shutting down")
+	}
+
+	if err := uc.validateIDs(cmd.WorkspaceID, cmd.ProjectID, cmd.ServerID); err != nil {
+		return nil, err
+	}
+
+	var targetServerID domain.ServerID
+	if cmd.ServerID != nil {
+		targetServerID = *cmd.ServerID
+	} else {
+		idStr, err := uc.idGenerator.NewServerID()
+		if err != nil {
+			return nil, fmt.Errorf("generate server id: %w", err)
 		}
-		time.Sleep(200 * time.Millisecond)
+		targetServerID = domain.ServerID(idStr)
 	}
-	return fmt.Errorf("server %s did not stop within %v", serverID, uc.cfg.StopTimeout)
-}
 
-// publishServerEvent publishes a server state change event through EventHub.
-func (uc *serverUseCaseImpl) publishServerEvent(workspaceID string, serverID domain.ServerID, eventType events.EventType, data interface{}) {
-	if uc.eventHub == nil {
-		return
-	}
-	uc.eventHub.Publish(events.Event{
-		Type:        eventType,
-		WorkspaceID: workspaceID,
-		Data:        data,
-	})
-}
+	opLock := uc.getOpLock(targetServerID)
+	opLock.Lock()
+	defer opLock.Unlock()
 
-// Recoverable checks if the restart error is recoverable (server is still running).
-func Recoverable(err error) bool {
-	if e, ok := err.(*ErrRestartStopFailed); ok {
-		return e.Recoverable
+	existing, err := uc.history.Get(ctx, cmd.WorkspaceID, targetServerID)
+	if err != nil && err != domain.ErrServerNotFound {
+		return nil, fmt.Errorf("check existing server: %w", err)
 	}
-	if e, ok := err.(*ErrRestartStartFailed); ok {
-		return e.Recoverable
+	if existing != nil {
+		if existing.ObservedState == domain.ServerStateRunning || existing.ObservedState == domain.ServerStateStarting || existing.ObservedState == domain.ServerStatePreparing {
+			cp := existing.DeepCopy()
+			return &cp, fmt.Errorf("%w: %s", domain.ErrServerAlreadyRunning, targetServerID)
+		}
 	}
-	return false
-}
 
-// RestartPhase returns the phase where restart failed, or empty string.
-func RestartPhase(err error) string {
-	if e, ok := err.(*ErrRestartStopFailed); ok {
-		return e.Phase
-	}
-	if e, ok := err.(*ErrRestartStartFailed); ok {
-		return e.Phase
-	}
-	return ""
-}
-
-// generateServerID creates a random hex-encoded server ID for use as a
-// directory name. Never uses the raw ProjectID.
-func generateServerID() (domain.ServerID, error) {
-	b := make([]byte, 16)
-	if _, err := rand.Read(b); err != nil {
-		return "", fmt.Errorf("generate random server id: %w", err)
-	}
-	return domain.ServerID(hex.EncodeToString(b)), nil
-}
-
-// resolveJavaHome resolves the Java home path from toolchain repository or environment.
-func resolveJavaHome(configDir string) (string, error) {
-	// Try to find from toolchain repository
-	toolchains, err := repository.LoadToolchains(configDir)
-	if err == nil && len(toolchains) > 0 {
-		return toolchains[0].JavaHome, nil
-	}
-	// Fall back to JAVA_HOME environment variable
-	if javaHome := os.Getenv("JAVA_HOME"); javaHome != "" {
-		return javaHome, nil
-	}
-	return "", fmt.Errorf("no toolchain found and JAVA_HOME not set")
-}
-
-// resolveProjectRootFromRepo resolves the project root directory from the repository.
-func resolveProjectRootFromRepo(configDir, workspaceID, projectID string) (string, error) {
-	workspaces, err := repository.LoadWorkspaces(configDir)
+	plan, err := uc.planResolver.ResolveRuntime(ctx, cmd.WorkspaceID, cmd.ProjectID, &targetServerID)
 	if err != nil {
-		return "", fmt.Errorf("load workspaces: %w", err)
+		return nil, fmt.Errorf("resolve runtime plan: %w", err)
 	}
-	for _, ws := range workspaces {
-		if string(ws.ID) == workspaceID {
-			projectRoot := ws.Root
-			if _, err := os.Stat(repository.ProjectConfigPath(projectRoot)); err == nil {
-				return projectRoot, nil
+	plan.Generation = 1
+	if existing != nil {
+		plan.Generation = existing.Generation + 1
+	}
+
+	prov, err := uc.getProviderForRuntime(plan.RuntimeID)
+	if err != nil {
+		return nil, err
+	}
+
+	uc.mu.Lock()
+	uc.activeProviders[targetServerID] = prov
+	uc.mu.Unlock()
+
+	now := domain.UTCNow()
+	record := &domain.ServerRecord{
+		ID:            targetServerID,
+		WorkspaceID:   cmd.WorkspaceID,
+		ProjectID:     cmd.ProjectID,
+		DesiredState:  domain.DesiredServerStateRunning,
+		ObservedState: domain.ServerStatePreparing,
+		Generation:    plan.Generation,
+		RuntimePlan:   *plan,
+		StartedAt:     &now,
+		UpdatedAt:     now,
+	}
+
+	oldState := domain.ServerStateStopped
+	if existing != nil {
+		oldState = existing.ObservedState
+	}
+
+	if err := uc.saveRecord(ctx, record); err != nil {
+		return nil, fmt.Errorf("persist preparing state: %w", err)
+	}
+	uc.publishStateChange(ctx, record, oldState, domain.ServerStatePreparing, "preparing server", false)
+
+	logBuf := uc.getLogBuffer(targetServerID)
+	logSink := func(line domain.LogLine) {
+		line.Generation = record.Generation
+		logBuf.Append(line)
+	}
+
+	if err := prov.Prepare(ctx, *plan); err != nil {
+		record.ObservedState = domain.ServerStateFailed
+		record.LastError = fmt.Sprintf("prepare failed: %v", err)
+		record.StoppedAt = &now
+		_ = uc.saveRecord(context.Background(), record)
+		uc.publishEvent(ctx, record, domain.ServerEventFailed, record.LastError, true)
+		uc.mu.Lock()
+		delete(uc.activeProviders, targetServerID)
+		uc.mu.Unlock()
+		return nil, fmt.Errorf("provider prepare: %w", err)
+	}
+
+	record.ObservedState = domain.ServerStateStarting
+	if err := uc.saveRecord(ctx, record); err != nil {
+		record.ObservedState = domain.ServerStateFailed
+		record.LastError = fmt.Sprintf("persist starting state: %v", err)
+		record.StoppedAt = &now
+		_ = uc.saveRecord(context.Background(), record)
+		uc.publishEvent(ctx, record, domain.ServerEventFailed, record.LastError, true)
+		uc.mu.Lock()
+		delete(uc.activeProviders, targetServerID)
+		uc.mu.Unlock()
+		return nil, fmt.Errorf("persist starting state: %w", err)
+	}
+	uc.publishStateChange(ctx, record, domain.ServerStatePreparing, domain.ServerStateStarting, "starting server", false)
+
+	startDeadline := time.Now().Add(uc.cfg.StartTimeout)
+	startCtx, startCancel := context.WithDeadline(ctx, startDeadline)
+	defer startCancel()
+
+	identity, lease, startErr := prov.Start(startCtx, *plan, logSink)
+	if startErr != nil {
+		failCtx, failCancel := context.WithTimeout(context.Background(), uc.cfg.StopTimeout)
+		_ = prov.ForceStop(failCtx, domain.ProcessIdentity{})
+		failCancel()
+		if lease != nil {
+			lease.Release()
+		}
+
+		record.ObservedState = domain.ServerStateFailed
+		record.LastError = fmt.Sprintf("start failed: %v", startErr)
+		record.StoppedAt = &now
+		_ = uc.saveRecord(context.Background(), record)
+		uc.publishEvent(ctx, record, domain.ServerEventFailed, record.LastError, true)
+		uc.mu.Lock()
+		delete(uc.activeProviders, targetServerID)
+		uc.mu.Unlock()
+		return nil, fmt.Errorf("provider start: %w", startErr)
+	}
+
+	if lease != nil {
+		uc.mu.Lock()
+		uc.activeLeases[targetServerID] = lease
+		uc.mu.Unlock()
+	}
+
+	readyErr := prov.IsReady(startCtx, *plan, *identity, startDeadline)
+	if readyErr != nil {
+		failCtx, failCancel := context.WithTimeout(context.Background(), uc.cfg.StopTimeout)
+		_ = prov.ForceStop(failCtx, *identity)
+		failCancel()
+		if lease != nil {
+			lease.Release()
+		}
+
+		record.ObservedState = domain.ServerStateFailed
+		record.LastError = fmt.Sprintf("readiness failed: %v", readyErr)
+		record.StoppedAt = &now
+		_ = uc.saveRecord(context.Background(), record)
+		uc.publishEvent(ctx, record, domain.ServerEventFailed, record.LastError, true)
+		uc.mu.Lock()
+		delete(uc.activeProviders, targetServerID)
+		delete(uc.activeLeases, targetServerID)
+		uc.mu.Unlock()
+		return nil, fmt.Errorf("readiness: %w", readyErr)
+	}
+
+	record.ObservedState = domain.ServerStateRunning
+	record.PID = identity.PID
+	record.ProcessIdentity = identity
+	record.LastError = ""
+	if err := uc.saveRecord(ctx, record); err != nil {
+		record.LastError = fmt.Sprintf("persist running state: %v", err)
+		_ = uc.saveRecord(context.Background(), record)
+	}
+
+	uc.publishStateChange(ctx, record, domain.ServerStateStarting, domain.ServerStateRunning, "server running", false)
+	uc.publishEvent(ctx, record, domain.ServerEventStarted, "server started successfully", false)
+
+	result := record.DeepCopy()
+	return &result, nil
+}
+
+func (uc *serverUseCaseImpl) Stop(ctx context.Context, cmd domain.StopServerCommand) (*domain.ServerRecord, error) {
+	if err := uc.validateIDs(cmd.WorkspaceID, cmd.ProjectID, &cmd.ServerID); err != nil {
+		return nil, err
+	}
+
+	opLock := uc.getOpLock(cmd.ServerID)
+	opLock.Lock()
+	defer opLock.Unlock()
+
+	record, err := uc.history.Get(ctx, cmd.WorkspaceID, cmd.ServerID)
+	if err != nil {
+		return nil, fmt.Errorf("get server: %w", err)
+	}
+	if record.ProjectID != cmd.ProjectID {
+		return nil, fmt.Errorf("%w: server %s does not belong to project %s", domain.ErrDeploymentTargetMismatch, cmd.ServerID, cmd.ProjectID)
+	}
+
+	if record.ObservedState == domain.ServerStateStopped {
+		cp := record.DeepCopy()
+		return &cp, nil
+	}
+
+	if record.ObservedState == domain.ServerStateFailed || record.ObservedState == domain.ServerStateCrashed {
+		record.ObservedState = domain.ServerStateStopped
+		record.DesiredState = domain.DesiredServerStateStopped
+		now := domain.UTCNow()
+		record.StoppedAt = &now
+		if err := uc.saveRecord(ctx, record); err != nil {
+			return nil, fmt.Errorf("persist stopped state: %w", err)
+		}
+		uc.publishEvent(ctx, record, domain.ServerEventStopped, "server stopped", false)
+		cp := record.DeepCopy()
+		return &cp, nil
+	}
+
+	prov, err := uc.getProviderForRuntime(record.RuntimePlan.RuntimeID)
+	if err != nil {
+		uc.mu.Lock()
+		if cachedProv, ok := uc.activeProviders[cmd.ServerID]; ok {
+			prov = cachedProv
+		}
+		uc.mu.Unlock()
+		if prov == nil {
+			return nil, err
+		}
+	}
+
+	oldState := record.ObservedState
+	record.ObservedState = domain.ServerStateStopping
+	record.DesiredState = domain.DesiredServerStateStopped
+	if err := uc.saveRecord(ctx, record); err != nil {
+		return nil, fmt.Errorf("persist stopping state: %w", err)
+	}
+	uc.publishStateChange(ctx, record, oldState, domain.ServerStateStopping, "stopping server", false)
+
+	stopDeadline := time.Now().Add(uc.cfg.StopTimeout)
+	stopCtx, stopCancel := context.WithDeadline(ctx, stopDeadline)
+	defer stopCancel()
+
+	var stopErr error
+	if record.ProcessIdentity != nil {
+		if cmd.Force {
+			stopErr = prov.ForceStop(stopCtx, *record.ProcessIdentity)
+		} else {
+			stopErr = prov.GracefulStop(stopCtx, *record.ProcessIdentity)
+		}
+	}
+
+	if stopErr != nil && !cmd.Force {
+		forceCtx, forceCancel := context.WithTimeout(ctx, uc.cfg.StopTimeout)
+		if record.ProcessIdentity != nil {
+			_ = prov.ForceStop(forceCtx, *record.ProcessIdentity)
+		}
+		forceCancel()
+	}
+
+	uc.mu.Lock()
+	if lease, ok := uc.activeLeases[cmd.ServerID]; ok {
+		lease.Release()
+		delete(uc.activeLeases, cmd.ServerID)
+	}
+	delete(uc.activeProviders, cmd.ServerID)
+	uc.mu.Unlock()
+
+	now := domain.UTCNow()
+	record.StoppedAt = &now
+	record.ObservedState = domain.ServerStateStopped
+	record.PID = 0
+	record.ProcessIdentity = nil
+	record.LastError = ""
+	if stopErr != nil {
+		record.LastError = fmt.Sprintf("stop error: %v", stopErr)
+	}
+
+	if err := uc.saveRecord(ctx, record); err != nil {
+		return nil, fmt.Errorf("persist stopped state: %w", err)
+	}
+
+	uc.publishStateChange(ctx, record, domain.ServerStateStopping, domain.ServerStateStopped, record.LastError, stopErr != nil)
+	uc.publishEvent(ctx, record, domain.ServerEventStopped, "server stopped", stopErr != nil)
+
+	result := record.DeepCopy()
+	return &result, nil
+}
+
+func (uc *serverUseCaseImpl) Restart(ctx context.Context, cmd domain.RestartServerCommand) (*domain.ServerRecord, error) {
+	if uc.shutdownFlag.Load() {
+		return nil, fmt.Errorf("server is shutting down")
+	}
+
+	if err := uc.validateIDs(cmd.WorkspaceID, cmd.ProjectID, &cmd.ServerID); err != nil {
+		return nil, err
+	}
+
+	opLock := uc.getOpLock(cmd.ServerID)
+	opLock.Lock()
+	defer opLock.Unlock()
+
+	existing, err := uc.history.Get(ctx, cmd.WorkspaceID, cmd.ServerID)
+	if err != nil {
+		return nil, fmt.Errorf("get existing server: %w", err)
+	}
+	if existing.ProjectID != cmd.ProjectID {
+		return nil, fmt.Errorf("%w: server %s does not belong to project %s", domain.ErrDeploymentTargetMismatch, cmd.ServerID, cmd.ProjectID)
+	}
+
+	prov, err := uc.getProviderForRuntime(existing.RuntimePlan.RuntimeID)
+	if err != nil {
+		uc.mu.Lock()
+		if cachedProv, ok := uc.activeProviders[cmd.ServerID]; ok {
+			prov = cachedProv
+		}
+		uc.mu.Unlock()
+		if prov == nil {
+			return nil, err
+		}
+	}
+
+	prevObservedState := existing.ObservedState
+	existing.ObservedState = domain.ServerStateRestarting
+	existing.DesiredState = domain.DesiredServerStateRunning
+	if err := uc.saveRecord(ctx, existing); err != nil {
+		return nil, fmt.Errorf("persist restarting state: %w", err)
+	}
+	uc.publishStateChange(ctx, existing, prevObservedState, domain.ServerStateRestarting, "restarting server", false)
+
+	now := domain.UTCNow()
+	if prevObservedState != domain.ServerStateStopped && prevObservedState != domain.ServerStateFailed && prevObservedState != domain.ServerStateCrashed {
+		stopCtx, stopCancel := context.WithTimeout(ctx, uc.cfg.StopTimeout)
+		stopErr := error(nil)
+		if existing.ProcessIdentity != nil {
+			stopErr = prov.GracefulStop(stopCtx, *existing.ProcessIdentity)
+		}
+		if stopErr != nil {
+			forceCtx, forceCancel := context.WithTimeout(ctx, uc.cfg.StopTimeout)
+			if existing.ProcessIdentity != nil {
+				_ = prov.ForceStop(forceCtx, *existing.ProcessIdentity)
 			}
-			// Try subdirectory matching
-			entries, err := os.ReadDir(projectRoot)
-			if err != nil {
-				continue
+			forceCancel()
+		}
+		stopCancel()
+
+		uc.mu.Lock()
+		if lease, ok := uc.activeLeases[cmd.ServerID]; ok {
+			lease.Release()
+			delete(uc.activeLeases, cmd.ServerID)
+		}
+		uc.mu.Unlock()
+	}
+	existing.StoppedAt = &now
+	existing.ProcessIdentity = nil
+	existing.PID = 0
+
+	newPlan, err := uc.planResolver.ResolveRuntime(ctx, cmd.WorkspaceID, cmd.ProjectID, &cmd.ServerID)
+	if err != nil {
+		existing.ObservedState = domain.ServerStateFailed
+		existing.LastError = fmt.Sprintf("re-resolve plan failed: %v", err)
+		_ = uc.saveRecord(context.Background(), existing)
+		uc.publishEvent(ctx, existing, domain.ServerEventFailed, existing.LastError, true)
+		return nil, fmt.Errorf("resolve runtime plan for restart: %w", err)
+	}
+	newPlan.Generation = existing.Generation + 1
+
+	existing.RuntimePlan = *newPlan
+	existing.Generation = newPlan.Generation
+
+	logBuf := uc.getLogBuffer(cmd.ServerID)
+	logSink := func(line domain.LogLine) {
+		line.Generation = newPlan.Generation
+		logBuf.Append(line)
+	}
+
+	if err := prov.Prepare(ctx, *newPlan); err != nil {
+		existing.ObservedState = domain.ServerStateFailed
+		existing.LastError = fmt.Sprintf("prepare after restart failed: %v", err)
+		_ = uc.saveRecord(context.Background(), existing)
+		uc.publishEvent(ctx, existing, domain.ServerEventFailed, existing.LastError, true)
+		return nil, fmt.Errorf("provider prepare during restart: %w", err)
+	}
+
+	existing.ObservedState = domain.ServerStateStarting
+	if err := uc.saveRecord(ctx, existing); err != nil {
+		existing.ObservedState = domain.ServerStateFailed
+		existing.LastError = fmt.Sprintf("persist starting state: %v", err)
+		_ = uc.saveRecord(context.Background(), existing)
+		uc.publishEvent(ctx, existing, domain.ServerEventFailed, existing.LastError, true)
+		return nil, fmt.Errorf("persist starting state during restart: %w", err)
+	}
+	uc.publishStateChange(ctx, existing, domain.ServerStateRestarting, domain.ServerStateStarting, "starting after restart", false)
+
+	startDeadline := time.Now().Add(uc.cfg.StartTimeout)
+	startCtx, startCancel := context.WithDeadline(ctx, startDeadline)
+	defer startCancel()
+
+	identity, lease, startErr := prov.Start(startCtx, *newPlan, logSink)
+	if startErr != nil {
+		failCtx, failCancel := context.WithTimeout(context.Background(), uc.cfg.StopTimeout)
+		_ = prov.ForceStop(failCtx, domain.ProcessIdentity{})
+		failCancel()
+		if lease != nil {
+			lease.Release()
+		}
+
+		existing.ObservedState = domain.ServerStateFailed
+		existing.LastError = fmt.Sprintf("start after restart failed: %v", startErr)
+		_ = uc.saveRecord(context.Background(), existing)
+		uc.publishEvent(ctx, existing, domain.ServerEventFailed, existing.LastError, true)
+		return nil, fmt.Errorf("provider start during restart: %w", startErr)
+	}
+
+	if lease != nil {
+		uc.mu.Lock()
+		uc.activeLeases[cmd.ServerID] = lease
+		uc.mu.Unlock()
+	}
+
+	readyErr := prov.IsReady(startCtx, *newPlan, *identity, startDeadline)
+	if readyErr != nil {
+		failCtx, failCancel := context.WithTimeout(context.Background(), uc.cfg.StopTimeout)
+		_ = prov.ForceStop(failCtx, *identity)
+		failCancel()
+		if lease != nil {
+			lease.Release()
+		}
+
+		existing.ObservedState = domain.ServerStateFailed
+		existing.LastError = fmt.Sprintf("readiness after restart failed: %v", readyErr)
+		_ = uc.saveRecord(context.Background(), existing)
+		uc.publishEvent(ctx, existing, domain.ServerEventFailed, existing.LastError, true)
+		uc.mu.Lock()
+		delete(uc.activeLeases, cmd.ServerID)
+		uc.mu.Unlock()
+		return nil, fmt.Errorf("readiness during restart: %w", readyErr)
+	}
+
+	now = domain.UTCNow()
+	existing.ObservedState = domain.ServerStateRunning
+	existing.PID = identity.PID
+	existing.ProcessIdentity = identity
+	existing.StartedAt = &now
+	existing.StoppedAt = nil
+	existing.LastError = ""
+
+	if err := uc.saveRecord(ctx, existing); err != nil {
+		existing.LastError = fmt.Sprintf("persist running state: %v", err)
+		_ = uc.saveRecord(context.Background(), existing)
+	}
+
+	uc.publishStateChange(ctx, existing, domain.ServerStateStarting, domain.ServerStateRunning, "server running after restart", false)
+	uc.publishEvent(ctx, existing, domain.ServerEventStarted, "server restarted successfully", false)
+
+	result := existing.DeepCopy()
+	return &result, nil
+}
+
+func (uc *serverUseCaseImpl) Get(ctx context.Context, ws domain.WorkspaceID, srv domain.ServerID) (*domain.ServerRecord, error) {
+	if err := uc.validateIDs(ws, "", &srv); err != nil {
+		return nil, err
+	}
+
+	record, err := uc.history.Get(ctx, ws, srv)
+	if err != nil {
+		return nil, err
+	}
+
+	if record.WorkspaceID != ws {
+		return nil, domain.ErrServerNotFound
+	}
+
+	if !record.ObservedState.IsTerminal() && record.ProcessIdentity != nil && record.DesiredState == domain.DesiredServerStateRunning {
+		inspectCtx, inspectCancel := context.WithTimeout(ctx, uc.cfg.InspectTimeout)
+		defer inspectCancel()
+
+		prov, err := uc.getProviderForRuntime(record.RuntimePlan.RuntimeID)
+		if err == nil {
+			obs, inspectErr := prov.Inspect(inspectCtx, *record.ProcessIdentity)
+			if inspectErr != nil || !obs.Running {
+				opLock := uc.getOpLock(srv)
+				opLock.Lock()
+				fresh, getErr := uc.history.Get(ctx, ws, srv)
+				if getErr == nil && fresh.ObservedState == record.ObservedState && fresh.DesiredState == domain.DesiredServerStateRunning {
+					record.ObservedState = domain.ServerStateCrashed
+					record.StoppedAt = timePtr(domain.UTCNow())
+					record.LastError = "process not running"
+					_ = uc.saveRecord(context.Background(), record)
+				} else if getErr == nil {
+					record = fresh
+				}
+				opLock.Unlock()
+			} else if obs.IdentityMismatch {
+				opLock := uc.getOpLock(srv)
+				opLock.Lock()
+				fresh, getErr := uc.history.Get(ctx, ws, srv)
+				if getErr == nil && fresh.ObservedState == record.ObservedState {
+					record.ObservedState = domain.ServerStateFailed
+					record.LastError = "process identity mismatch"
+					_ = uc.saveRecord(context.Background(), record)
+				} else if getErr == nil {
+					record = fresh
+				}
+				opLock.Unlock()
 			}
-			for _, entry := range entries {
-				if entry.IsDir() {
-					subPath := projectRoot + "/" + entry.Name()
-					if _, err := os.Stat(repository.ProjectConfigPath(subPath)); err == nil {
-						return subPath, nil
+		}
+	}
+
+	result := record.DeepCopy()
+	return &result, nil
+}
+
+func (uc *serverUseCaseImpl) List(ctx context.Context, ws domain.WorkspaceID) ([]*domain.ServerRecord, error) {
+	if string(ws) == "" {
+		return nil, fmt.Errorf("workspace id is required")
+	}
+
+	records, err := uc.history.List(ctx, ws)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]*domain.ServerRecord, 0, len(records))
+	inspectCtx, inspectCancel := context.WithTimeout(ctx, uc.cfg.InspectTimeout)
+	defer inspectCancel()
+
+	for i := range records {
+		rec := records[i]
+		if rec.WorkspaceID != ws {
+			continue
+		}
+
+		if !rec.ObservedState.IsTerminal() && rec.ProcessIdentity != nil && rec.DesiredState == domain.DesiredServerStateRunning {
+			prov, provErr := uc.getProviderForRuntime(rec.RuntimePlan.RuntimeID)
+			if provErr == nil {
+				obs, inspectErr := prov.Inspect(inspectCtx, *rec.ProcessIdentity)
+				if inspectErr != nil || !obs.Running {
+					opLock := uc.getOpLock(rec.ID)
+					opLock.Lock()
+					fresh, getErr := uc.history.Get(ctx, ws, rec.ID)
+					if getErr == nil && fresh.ObservedState == rec.ObservedState && fresh.DesiredState == domain.DesiredServerStateRunning {
+						rec.ObservedState = domain.ServerStateCrashed
+						rec.StoppedAt = timePtr(domain.UTCNow())
+						_ = uc.saveRecord(context.Background(), &rec)
+					} else if getErr == nil {
+						rec = *fresh
 					}
+					opLock.Unlock()
+				} else if obs.IdentityMismatch {
+					opLock := uc.getOpLock(rec.ID)
+					opLock.Lock()
+					fresh, getErr := uc.history.Get(ctx, ws, rec.ID)
+					if getErr == nil && fresh.ObservedState == rec.ObservedState {
+						rec.ObservedState = domain.ServerStateFailed
+						rec.LastError = "process identity mismatch"
+						_ = uc.saveRecord(context.Background(), &rec)
+					} else if getErr == nil {
+						rec = *fresh
+					}
+					opLock.Unlock()
 				}
 			}
 		}
+
+		cp := rec.DeepCopy()
+		result = append(result, &cp)
 	}
-	return "", fmt.Errorf("project %s not found in workspace %s", projectID, workspaceID)
+
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].UpdatedAt.After(result[j].UpdatedAt)
+	})
+
+	return result, nil
+}
+
+func (uc *serverUseCaseImpl) Reconcile(ctx context.Context) error {
+	records, err := uc.history.ListNonTerminal(ctx)
+	if err != nil {
+		return err
+	}
+
+	for _, rec := range records {
+		if rec.ObservedState.IsTerminal() {
+			continue
+		}
+
+		prov, err := uc.getProviderForRuntime(rec.RuntimePlan.RuntimeID)
+		if err != nil {
+			rec.ObservedState = domain.ServerStateCrashed
+			rec.LastError = fmt.Sprintf("cannot get provider for reconciliation: %v", err)
+			rec.StoppedAt = timePtr(domain.UTCNow())
+			_ = uc.saveRecord(context.Background(), rec)
+			uc.publishEvent(ctx, rec, domain.ServerEventCrashed, rec.LastError, true)
+			continue
+		}
+
+		inspectCtx, inspectCancel := context.WithTimeout(ctx, uc.cfg.InspectTimeout)
+		if rec.ProcessIdentity != nil {
+			obs, inspectErr := prov.Inspect(inspectCtx, *rec.ProcessIdentity)
+			inspectCancel()
+
+			if inspectErr != nil || !obs.Running {
+				if rec.DesiredState == domain.DesiredServerStateRunning {
+					rec.ObservedState = domain.ServerStateCrashed
+					rec.LastError = "process not found during reconcile"
+				} else {
+					rec.ObservedState = domain.ServerStateStopped
+				}
+				rec.StoppedAt = timePtr(domain.UTCNow())
+				rec.PID = 0
+				rec.ProcessIdentity = nil
+				_ = uc.saveRecord(context.Background(), rec)
+				uc.publishEvent(ctx, rec, domain.ServerEventReconciled, rec.LastError, true)
+			} else if obs.IdentityMismatch {
+				rec.ObservedState = domain.ServerStateFailed
+				rec.LastError = "process identity mismatch during reconcile (orphaned)"
+				rec.StoppedAt = timePtr(domain.UTCNow())
+				_ = uc.saveRecord(context.Background(), rec)
+				uc.publishEvent(ctx, rec, domain.ServerEventCrashed, rec.LastError, true)
+			} else {
+				uc.publishEvent(ctx, rec, domain.ServerEventReconciled, "server confirmed running", false)
+			}
+		} else {
+			inspectCancel()
+			if rec.DesiredState == domain.DesiredServerStateRunning {
+				rec.ObservedState = domain.ServerStateCrashed
+				rec.LastError = "no process identity during reconcile"
+			} else {
+				rec.ObservedState = domain.ServerStateStopped
+			}
+			rec.StoppedAt = timePtr(domain.UTCNow())
+			_ = uc.saveRecord(context.Background(), rec)
+			uc.publishEvent(ctx, rec, domain.ServerEventCrashed, rec.LastError, true)
+		}
+	}
+
+	return nil
+}
+
+func (uc *serverUseCaseImpl) Shutdown(ctx context.Context) ([]*domain.ServerRecord, error) {
+	uc.shutdownFlag.Store(true)
+	uc.lifecycleCancel()
+
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), uc.cfg.ShutdownTimeout)
+	defer shutdownCancel()
+
+	var unclean []*domain.ServerRecord
+
+	records, err := uc.history.ListNonTerminal(shutdownCtx)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, rec := range records {
+		if rec.ObservedState.IsTerminal() {
+			continue
+		}
+
+		if !uc.cfg.StopServersOnExit {
+			cp := rec.DeepCopy()
+			unclean = append(unclean, &cp)
+			continue
+		}
+
+		prov, provErr := uc.getProviderForRuntime(rec.RuntimePlan.RuntimeID)
+		if provErr != nil {
+			cp := rec.DeepCopy()
+			unclean = append(unclean, &cp)
+			continue
+		}
+
+		stopCtx, stopCancel := context.WithTimeout(shutdownCtx, uc.cfg.StopTimeout)
+		if rec.ProcessIdentity != nil {
+			_ = prov.ForceStop(stopCtx, *rec.ProcessIdentity)
+		} else {
+			_ = prov.ForceStop(stopCtx, domain.ProcessIdentity{})
+		}
+		stopCancel()
+
+		uc.mu.Lock()
+		if lease, ok := uc.activeLeases[rec.ID]; ok {
+			lease.Release()
+			delete(uc.activeLeases, rec.ID)
+		}
+		uc.mu.Unlock()
+
+		rec.ObservedState = domain.ServerStateStopped
+		rec.DesiredState = domain.DesiredServerStateStopped
+		rec.StoppedAt = timePtr(domain.UTCNow())
+		rec.PID = 0
+		rec.ProcessIdentity = nil
+		_ = uc.saveRecord(context.Background(), rec)
+	}
+
+	return unclean, nil
+}
+
+func (uc *serverUseCaseImpl) GetLogs(ctx context.Context, ws domain.WorkspaceID, srv domain.ServerID, cursor int, limit int) ([]domain.LogLine, int, error) {
+	if err := uc.validateIDs(ws, "", &srv); err != nil {
+		return nil, 0, err
+	}
+
+	record, err := uc.history.Get(ctx, ws, srv)
+	if err != nil {
+		return nil, 0, err
+	}
+	if record.WorkspaceID != ws {
+		return nil, 0, domain.ErrServerNotFound
+	}
+
+	logBuf := uc.getLogBuffer(srv)
+	lines, nextCursor := logBuf.Read(cursor, limit)
+	return lines, nextCursor, nil
+}
+
+func timePtr(t time.Time) *time.Time {
+	return &t
 }

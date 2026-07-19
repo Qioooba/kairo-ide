@@ -27,6 +27,7 @@ func (g *fixedIDGen) NewWorkspaceID() (string, error) { return g.id, nil }
 func (g *fixedIDGen) NewProjectID() (string, error)   { return g.id, nil }
 func (g *fixedIDGen) NewBuildID() (string, error)     { return g.id, nil }
 func (g *fixedIDGen) NewServerID() (string, error)    { return g.id, nil }
+func (g *fixedIDGen) NewRuntimeID() (string, error)   { return g.id, nil }
 
 type seqIDGen struct {
 	mu  sync.Mutex
@@ -36,6 +37,7 @@ type seqIDGen struct {
 func (g *seqIDGen) NewWorkspaceID() (string, error) { return "ws_" + testValidID26, nil }
 func (g *seqIDGen) NewProjectID() (string, error)   { return "prj_" + testValidID26, nil }
 func (g *seqIDGen) NewServerID() (string, error)    { return "srv_" + testValidID26, nil }
+func (g *seqIDGen) NewRuntimeID() (string, error)   { return "rt_" + testValidID26, nil }
 func (g *seqIDGen) NewBuildID() (string, error) {
 	return testCryptoGen.NewBuildID()
 }
@@ -46,6 +48,7 @@ func (g *errorIDGen) NewWorkspaceID() (string, error) { return "", errors.New("i
 func (g *errorIDGen) NewProjectID() (string, error)   { return "", errors.New("id gen error") }
 func (g *errorIDGen) NewBuildID() (string, error)     { return "", errors.New("id gen error") }
 func (g *errorIDGen) NewServerID() (string, error)    { return "", errors.New("id gen error") }
+func (g *errorIDGen) NewRuntimeID() (string, error)   { return "", errors.New("id gen error") }
 
 type fakeResolver struct {
 	plan *domain.BuildPlan
@@ -64,7 +67,7 @@ func (r *fakeResolver) ResolveBuild(ctx context.Context, wsID domain.WorkspaceID
 func (r *fakeResolver) ResolveDeploy(ctx context.Context, wsID domain.WorkspaceID, pID domain.ProjectID, bID domain.BuildID, target domain.DeploymentTarget) (*domain.DeployPlan, error) {
 	return &domain.DeployPlan{DeploymentRoot: target.Root}, nil
 }
-func (r *fakeResolver) ResolveRuntime(ctx context.Context, wsID domain.WorkspaceID, pID domain.ProjectID) (*domain.RuntimePlan, error) {
+func (r *fakeResolver) ResolveRuntime(ctx context.Context, wsID domain.WorkspaceID, pID domain.ProjectID, existing *domain.ServerID) (*domain.RuntimePlan, error) {
 	return nil, domain.ErrRuntimeIntegrationRequired
 }
 
@@ -154,7 +157,7 @@ func (p *fakeProvider) Validate(ctx context.Context, plan domain.BuildPlan) erro
 	}
 	return p.validateErr
 }
-func (p *fakeProvider) Build(ctx context.Context, plan domain.BuildPlan, sink func(event domain.BuildEvent), logLine func(stream domain.Stream, line string)) (*domain.BuildOutput, error) {
+func (p *fakeProvider) Build(ctx context.Context, plan domain.BuildPlan, sink func(event domain.BuildEvent), logLine func(stream domain.LogStream, line string)) (*domain.BuildOutput, error) {
 	if p.buildDelay > 0 {
 		if p.ignoreCancel {
 			time.Sleep(p.buildDelay)
