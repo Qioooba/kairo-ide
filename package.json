@@ -17,7 +17,7 @@
     "dev:browser": "pnpm --filter @kairo/browser start",
     "dev:server": "pnpm --filter @kairo/theia-product start:server",
     "test": "pnpm -r --filter \"./packages/*\" test && pnpm -r --filter \"./apps/*\" test",
-    "test:agent": "cd runtime-agent && go test -timeout 120s ./...",
+    "test:agent": "node scripts/test-agent.js",
     "test:agent:race": "cd runtime-agent && go test -race -timeout 120s ./...",
     "test:agent:integration": "cd runtime-agent && go test -timeout 240s -tags=integration ./test/...",
     "lint": "pnpm -r --filter \"./packages/*\" lint && pnpm -r --filter \"./apps/*\" lint",
