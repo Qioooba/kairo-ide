@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/kairo-ide/runtime-agent/internal/api"
 	"github.com/kairo-ide/runtime-agent/internal/audit"
@@ -19,6 +20,13 @@ import (
 
 const agentVersion = "0.1.0"
 
+// restartShutdownTimeout bounds the time the runtime-restart
+// handler gives to the container's Shutdown and the HTTP
+// server before it spawns the new process and exits. Per
+// docs/hotfix-windows-test-readiness.md 搂3 the agent must
+// return within a few seconds; 3s matches the contract.
+const restartShutdownTimeout = 3 * time.Second
+
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "kairo-runtime:", err)
@@ -27,7 +35,12 @@ func main() {
 }
 
 func run() error {
-	cfg, _, err := config.Bind(os.Args[1:])
+	// Capture the original CLI args before config.Bind consumes
+	// them. /api/v1/runtime/restart uses this slice to respawn
+	// the agent with the same flags (e.g. --config, --port).
+	originalArgs := os.Args[1:]
+
+	cfg, _, err := config.Bind(originalArgs)
 	if err != nil {
 		return err
 	}
@@ -64,9 +77,26 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("bootstrap: %w", err)
 	}
-	defer container.Shutdown(context.Background())
+	// NOTE: we no longer `defer container.Shutdown` here.
+	// /api/v1/runtime/restart is the new shutdown path; it
+	// calls container.Shutdown under a 3s timeout, then
+	// os.Exit(0) — so the deferred shutdown would otherwise
+	// run twice on the happy path. The container is also
+	// explicitly shut down when ListenAndServe returns (e.g.
+	// the listener errored out) below.
 
 	srv := api.NewServer(container.Services, logger, auditLog, agentVersion, cfg.Secret)
+
+	// Wire the restart handler so POST /api/v1/runtime/restart
+	// can respawn this process. Executable is resolved lazily
+	// (os.Executable) inside api.Server.doRestart — by then
+	// any symlink/rename has settled, so the respawned process
+	// always points to the right binary.
+	srv.SetRestartConfig(api.RestartConfig{
+		Args:            originalArgs,
+		ShutdownTimeout: restartShutdownTimeout,
+		OnShutdown:      container.Shutdown,
+	})
 
 	// Remote mode is not available in this release. Only loopback
 	// addresses are allowed.
@@ -76,5 +106,15 @@ func run() error {
 	}
 
 	addr := fmt.Sprintf("%s:%d", cfg.BindAddress, cfg.Port)
-	return srv.ListenAndServe(addr, cfg.TLSCert, cfg.TLSKey)
+	if err := srv.ListenAndServe(addr, cfg.TLSCert, cfg.TLSKey); err != nil {
+		// ListenAndServe returning != nil means the server
+		// stopped (e.g. port in use, TLS misconfigured).
+		// Make sure the container's resources are released
+		// before we exit.
+		shutCtx, cancel := context.WithTimeout(context.Background(), restartShutdownTimeout)
+		defer cancel()
+		_ = container.Shutdown(shutCtx)
+		return err
+	}
+	return nil
 }

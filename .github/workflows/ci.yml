@@ -335,6 +335,66 @@ jobs:
           powershell -ExecutionPolicy Bypass -File scripts/verify-e2e.ps1 -Port 18099 -TomcatPort 61100 -RepoRoot "$env:GITHUB_WORKSPACE"
 
   # -----------------------------------------------------------------------
+  # 5b. Windows test matrix — runs the unit test + tooling checks
+  #     that don't need Tomcat 6 or a running agent. The contract
+  #     (docs/hotfix-windows-test-readiness.md §8) explicitly requires
+  #     the mocha + jsdom env in @kairo/runtime-extension to be
+  #     exercised on Windows. We pin the node matrix to the LTS line
+  #     so this job is the one that catches "works on my machine,
+  #     broken on Windows" regressions early.
+  # -----------------------------------------------------------------------
+  windows-test:
+    name: Windows test (Node ${{ matrix.node }})
+    runs-on: windows-latest
+    needs: ts-build
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['20']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.0'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: 'pnpm'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - name: Toolchain preflight (informational)
+        shell: pwsh
+        run: |
+          powershell -ExecutionPolicy Bypass -File scripts/check-env.ps1
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::warning::check-env.ps1 reported missing required tools; continuing but the run may be incomplete."
+          }
+      - name: Install (frozen lockfile, ignore native scripts)
+        shell: pwsh
+        run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Build packages
+        shell: pwsh
+        run: pnpm -r --filter './packages/*' build
+      - name: Typecheck apps
+        shell: pwsh
+        run: pnpm -r --filter './apps/*' exec tsc -p tsconfig.json --noEmit
+      - name: Runtime-extension mocha + jsdom env (contract §8)
+        shell: pwsh
+        run: pnpm --filter @kairo/runtime-extension exec mocha
+      - name: Runtime-extension node --test wire-protocol tests
+        shell: pwsh
+        run: pnpm --filter @kairo/runtime-extension exec node --test src/browser/runtime.test.cjs src/browser/runtime-dynamic-routes.test.cjs
+      - name: Package test sweep (pnp test: every packages/*)
+        shell: pwsh
+        run: pnpm -r --filter './packages/*' test
+      - name: Go unit tests on Windows
+        working-directory: runtime-agent
+        env:
+          GOPROXY: https://goproxy.cn,direct
+        run: GOTOOLCHAIN=local go test -race -timeout 180s ./...
+
+  # -----------------------------------------------------------------------
   # 6. macOS build + JDT LS installer + project generator. macOS
   #    has no JDT LS binary fetch in CI; the test imports a
   #    synthetic archive via KAIRO_JDTLS_ARCHIVE so the network

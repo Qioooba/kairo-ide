@@ -1,0 +1,8 @@
+{
+  "//": "Mocha config for @kairo/runtime-extension. Per docs/hotfix-windows-test-readiness.md §8, the .setup.cjs file pre-registers DOM globals (window/document/navigator) via jsdom-global. This is functionally equivalent to a `jsdom: 'jsdom-global'` mocha 9 / earlier option but expressed as an explicit setup file so it is portable across mocha 9/10/11 (which removed the built-in jsdom flag).",
+
+  "file": [".mocharc.setup.cjs"],
+  "spec": ["src/**/*.test.js"],
+  "timeout": 10000,
+  "reporter": "spec"
+}

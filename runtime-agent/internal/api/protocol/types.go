@@ -83,6 +83,24 @@ type EnvelopeResult struct {
 // IsError returns true if the result carries an error.
 func (r EnvelopeResult) IsError() bool { return r.Error != nil }
 
+// RuntimeEndpoints is the response of GET /api/v1/endpoints.
+// The runtime client uses it to discover the dynamic
+// host:port chosen by the agent at startup (the frontend
+// used to hardcode 18099). The shape is kept stable so the
+// same client works whether the agent binds a single port
+// for both HTTP and events, or splits them later.
+//
+// Per docs/hotfix-windows-test-readiness.md 搂2.
+type RuntimeEndpoints struct {
+	// HTTP is "host:port" for the /api/v1/* REST surface.
+	HTTP string `json:"http"`
+	// Events is "host:port" for /api/v1/events (WebSocket).
+	// Today this is the same as HTTP. Kept separate so
+	// future agents can attach the WS endpoint to a Unix
+	// socket without breaking the wire.
+	Events string `json:"events"`
+}
+
 // HealthResponse is the response of GET /api/v1/health.
 type HealthResponse struct {
 	OK           bool   `json:"ok"`

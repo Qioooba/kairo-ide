@@ -1,11 +1,14 @@
 package api
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/kairo-ide/runtime-agent/internal/api/protocol"
@@ -524,12 +527,178 @@ func (s *Server) handleAudit(w http.ResponseWriter, r *http.Request) {
 
 // ----- WebSocket -----
 
+// handleEvents upgrades the request to a WebSocket and
+// authenticates the client via the Sec-WebSocket-Protocol
+// subprotocol token (see WebSocketSubprotocol). The browser
+// API cannot set custom headers on a WebSocket upgrade, so
+// the contract (per docs/hotfix-windows-test-readiness.md
+// 搂1.2) is:
+//
+//	client: new WebSocket(url, ["kairo-secret-v1", secret])
+//	server: Sec-WebSocket-Protocol response header echoes the secret
+//	         back so the browser finishes the handshake.
+//
+// If the secret is not configured on the agent, auth is
+// skipped (dev mode). If the secret IS configured and the
+// request does not include a matching subprotocol, we
+// return 401 and never call the upgrader.
 func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	if s.Services.EventBus == nil {
 		writeError(w, "", "", protocol.KairoError{Code: protocol.ErrInternal, Message: "EventBus not configured"})
 		return
 	}
+	if s.secret != "" {
+		offered := parseSubprotocols(r.Header.Get("Sec-WebSocket-Protocol"))
+		// Find the kairo-secret-v1 entry; the token next to
+		// it is the secret. We accept both
+		//   "kairo-secret-v1, <secret>"
+		// and a single combined "kairo-secret-v1=<secret>" form.
+		var presented string
+		for i, p := range offered {
+			if p == WebSocketSubprotocol {
+				if i+1 < len(offered) {
+					presented = offered[i+1]
+				}
+				break
+			}
+			if eq := strings.SplitN(p, "=", 2); len(eq) == 2 && eq[0] == WebSocketSubprotocol {
+				presented = eq[1]
+				break
+			}
+		}
+		if presented == "" {
+			writeError(w, "", "", protocol.KairoError{
+				Code:    protocol.ErrUnauthenticated,
+				Message: "missing or invalid WebSocket subprotocol",
+			})
+			return
+		}
+		// Constant-time compare is overkill for a local
+		// desktop secret but matches the middleware's
+		// expectation that the secret never leaks via
+		// timing. We do it here too.
+		if subtle.ConstantTimeCompare([]byte(presented), []byte(s.secret)) != 1 {
+			writeError(w, "", "", protocol.KairoError{
+				Code:    protocol.ErrUnauthenticated,
+				Message: "missing or invalid WebSocket subprotocol",
+			})
+			return
+		}
+		// Echo the secret back as the selected subprotocol
+		// so the browser completes the upgrade.
+		w.Header().Set("Sec-WebSocket-Protocol", presented)
+	}
 	s.Services.EventBus.Serve(w, r)
+}
+
+// parseSubprotocols splits the Sec-WebSocket-Protocol header
+// into its tokens, trimming whitespace. Per RFC 6455 the
+// header is a comma-separated list.
+func parseSubprotocols(h string) []string {
+	if h == "" {
+		return nil
+	}
+	parts := strings.Split(h, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		t := strings.TrimSpace(p)
+		if t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// ----- Endpoints -----
+
+// handleEndpoints returns the dynamic host:port that the
+// runtime client should use to connect to the agent. Per
+// docs/hotfix-windows-test-readiness.md 搂2, the agent
+// chooses its port at startup (CLI --port or default 18080),
+// and may have retried after a port collision. The frontend
+// used to hardcode 18099 — it now calls this endpoint first
+// and uses the returned values for every WS / EventStream
+// URL.
+//
+// Response shape:
+//
+//	{ "http": "127.0.0.1:18080", "events": "127.0.0.1:18080" }
+//
+// `http` is the base URL for /api/v1/* calls; `events` is the
+// host:port for /api/v1/events (WS). They are the same today
+// but kept separate so future work can split them (e.g.
+// attach the WS port to a Unix domain socket) without
+// breaking the wire.
+func (s *Server) handleEndpoints(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, "", "", protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: "GET only"})
+		return
+	}
+	s.mu.Lock()
+	addr := s.bindAddr
+	port := s.port
+	s.mu.Unlock()
+	if port == 0 {
+		// We haven't called ListenAndServe yet; fall back
+		// to the address the router already knows about.
+		if s.httpServer != nil && s.httpServer.Addr != "" {
+			host, p, _ := splitHostPort(s.httpServer.Addr)
+			addr = host
+			if n, err := strconv.Atoi(p); err == nil {
+				port = n
+			}
+		}
+	}
+	hostport := net.JoinHostPort(addr, strconv.Itoa(port))
+	writeOK(w, protocol.RequestEnvelope{}, protocol.RuntimeEndpoints{
+		HTTP:   hostport,
+		Events: hostport,
+	})
+}
+
+// ----- Runtime Restart -----
+
+// handleRuntimeRestart responds 200 with `{status: "restarting"}`
+// and then performs the actual restart asynchronously. Per
+// docs/hotfix-windows-test-readiness.md 搂3:
+//
+//  1. Reply 200 immediately so the caller knows the agent
+//     accepted the request.
+//  2. Call the registered shutdown hook (typically
+//     container.Shutdown) with a 3s timeout.
+//  3. Shutdown the HTTP server (so the new process can bind
+//     the port).
+//  4. os.Executable() + os.Args[1:] spawn a new process.
+//  5. Current process exits 0.
+//
+// The handler is intentionally synchronous up to writing the
+// 200 (so the caller gets a real signal that the agent
+// committed to the restart) but the respawn runs in a
+// goroutine. The goroutine will call os.Exit, so the
+// listener never sees a "second" 200.
+func (s *Server) handleRuntimeRestart(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, "", "", protocol.KairoError{
+			Code:    protocol.ErrInvalidRequest,
+			Message: "POST only",
+		})
+		return
+	}
+	// No body to parse — the contract says "no body". Tolerate
+	// an empty envelope anyway in case the client sends one.
+	writeOK(w, protocol.RequestEnvelope{}, map[string]string{"status": "restarting"})
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+	if s.logger != nil {
+		s.logger.Info("runtime restart requested", log.Fields{
+			"path":   r.URL.Path,
+			"remote": r.RemoteAddr,
+		})
+	}
+	// Run the actual restart off the request goroutine so
+	// we can flush the 200 first.
+	go s.doRestart()
 }
 
 // ----- JDT Language Server -----
