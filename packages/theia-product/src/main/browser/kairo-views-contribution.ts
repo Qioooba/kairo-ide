@@ -367,7 +367,7 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
     const w = await this.widgetManager.getOrCreateWidget(id) as T;
     try {
       this.shell.addWidget(w, { area: 'main' });
-    } catch (e) {
+    } catch (_e) {
       // Already attached — that's fine.
     }
     this.shell.activateWidget(w.id);
@@ -394,7 +394,7 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
     // is a silent no-op.
     try {
       this.shell.addWidget(w, { area: 'left' });
-    } catch (e) {
+    } catch (_e) {
       // Already attached — that's fine.
     }
     this.shell.activateWidget(w.id);
