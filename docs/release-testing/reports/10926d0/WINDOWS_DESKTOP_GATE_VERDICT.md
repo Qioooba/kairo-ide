@@ -1,10 +1,32 @@
 # Kairo IDE Windows Desktop Release Gate — FINAL VERDICT
 
-> **Gate: `WINDOWS_DESKTOP_GATE=FAIL` (3 P0 blockers, cannot release)**
-> Test commit: `10926d0f7f06a5b9c24854a05c81416930c0ed85`
+> **Gate: `WINDOWS_DESKTOP_GATE=FAIL` (2 P0 blockers remaining, 1 P0 fixed at 3a4f27e)**
+> Test commit: `10926d0f7f06a5b9c24854a05c81416930c0ed85` (gate verdict snapshot)
+> Fix commit: `3a4f27e` (KAIRO-RC-WIN-022 — Theia webview CSP 'unsafe-eval')
 > Branch: `qa/windows-desktop-2026-07-20-b936dda`
-> Date: 2026-07-20
+> Date: 2026-07-20 (initial verdict 21:30; update 22:05)
 > Test machine: Windows 11 Pro build 26200, 2560×1440, 96 dpi native
+
+---
+
+## 📌 Update at 22:05 — KAIRO-RC-WIN-022 FIXED
+
+**Root cause**: `apps/desktop/src/main.ts` line 488 had `const scriptSrcExtra = process.env.KAIRO_DEV === '1' ? " 'unsafe-eval'" : '';` — packaged builds (NSIS / ZIP / win-unpacked) had CSP without `'unsafe-eval'`. Theia 1.73's `ajv` calls `new Function()` to compile JSON schemas, which is blocked by Electron 24+'s default CSP, throwing `EvalError` and hanging the renderer on the splash.
+
+**Fix (commit 3a4f27e)**: default `scriptSrcExtra` to `" 'unsafe-eval'"` in both dev and packaged builds. Also fixed a syntax error in `createWindow()` (line 384) where the BrowserWindow options object was missing its closing brace from prior partial edits.
+
+**Verification**:
+- `tsc -p apps/desktop/tsconfig.json`: 0 errors
+- Re-pack `app.asar` (204 MB) with fixed `lib/main.js`
+- Launch `Kairo IDE.exe`: window title "Kairo IDE", full menu bar (File/Edit/View/Window/Help), status bar (Project / JDT LS / Runtime) all rendered
+- Frontend lifecycle completes in 4.71s: `init → started_contributions → attached_shell → initialized_layout → ready`; "Replace loading indicator with ready workbench UI" fires
+- 0 `EvalError`, 0 CSP violations in `kairo-main.log`
+- Screenshot: `docs/release-testing/reports/10926d0/evidence/kairo-loaded-after-csp-fix.png`
+- Log: `docs/release-testing/reports/10926d0/evidence/kairo-main.log`
+
+**Gate status after fix**: still `WINDOWS_DESKTOP_GATE=FAIL` because 2 P0 blockers remain (`KAIRO-RC-WIN-014` build stub, `KAIRO-RC-WIN-021` watchdog). **But** W2 product flow + W5 independent regression are now unblocked and can be dispatched.
+
+**Unblocked**: W2 (product flow) + W5 (independent regression) can now be dispatched.
 
 ---
 
@@ -36,7 +58,7 @@ These three failures are **in the user-visible path**, not edge cases.
 
 ### W0 — Build + packaging + ZIP install matrix
 - ✅ `pnpm install/build/lint`, `go vet/build`, `go test 20/24 internal/*` all green
-- ✅ NSIS Setup `Kairo IDE Setup 0.1.0.exe` 132 MB (unsigned, KAIRO-RC-WIN-022)
+- ✅ NSIS Setup `Kairo IDE Setup 0.1.0.exe` 132 MB (unsigned, KAIRO-RC-WIN-023)
 - ✅ ZIP `Kairo IDE-0.1.0-win.zip` 180 MB
 - ✅ `win-unpacked\Kairo IDE.exe` 201 MB + bundled `kairo-runtime.exe` 8.7 MB
 - ✅ ZIP install matrix 3/7 PASS (default / Chinese-space / move-after-extract)

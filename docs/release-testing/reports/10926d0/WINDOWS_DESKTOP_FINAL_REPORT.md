@@ -24,6 +24,10 @@ To unblock: implement a runtime watchdog (poll child PID every 5 s, respawn on u
 
 ---
 
+> **UPDATE 2026-07-20 22:05** — KAIRO-RC-WIN-022 (Theia webview stuck in loading state, IDE non-usable) **FIXED** at commit `3a4f27e`. Root cause: `apps/desktop/src/main.ts` line 488 had `const scriptSrcExtra = process.env.KAIRO_DEV === '1' ? " 'unsafe-eval'" : '';` — packaged builds excluded `'unsafe-eval'`, which Theia 1.73's ajv requires to compile JSON schemas via `new Function()`. Default is now `" 'unsafe-eval'"` in both dev and packaged. Theia now loads in 4.71s with full menu bar + status bar; 0 EvalError in `kairo-main.log`. **W2 (product flow) is now unblocked; W5 (independent regression) still blocked on KAIRO-RC-WIN-021.**
+
+---
+
 ## 1. Static gates — all green
 
 | Gate | Command | Result |
@@ -37,7 +41,7 @@ To unblock: implement a runtime watchdog (poll child PID every 5 s, respawn on u
 | go test 24 internal/* | per-package 15 s | **20 / 24 pass** (4 cross-platform P1, KAIRO-RC-WIN-015) |
 | runtime-agent .exe | `go build -o bin/kairo-runtime.exe ./cmd/kairo-runtime` | 12,858,368 bytes |
 | win-unpacked Kairo IDE.exe | produced by `pnpm --filter @kairo/desktop build:win` | 210,889,728 bytes |
-| NSIS Setup .exe | same | 132 MB (unsigned, KAIRO-RC-WIN-022 P1) |
+| NSIS Setup .exe | same | 132 MB (unsigned, KAIRO-RC-WIN-023 P1) |
 
 ---
 
@@ -142,7 +146,7 @@ To unblock: implement a runtime watchdog (poll child PID every 5 s, respawn on u
 | KAIRO-RC-WIN-018 | P1 | W3 | Theia webview not accessible via Windows UIA |
 | KAIRO-RC-WIN-019 | P2 | W3 | Min window size 1280×800 enforced (1024×768 unsupported) |
 | KAIRO-RC-WIN-020 | P2 | W3 | Theia internal theme isolated from system theme |
-| KAIRO-RC-WIN-022 | P1 | root | NSIS Setup .exe not code-signed (`AuthenticodeStatus = Unknown`); users will see SmartScreen warning on first run from internet |
+| KAIRO-RC-WIN-023 | P1 | root | NSIS Setup .exe not code-signed (`AuthenticodeStatus = Unknown`); users will see SmartScreen warning on first run from internet |
 
 `KAIRO-RC-WIN-016` (NSIS install path disabled by user) is **closed** — replaced by ZIP install matrix.
 
