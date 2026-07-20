@@ -1,4 +1,4 @@
-// Package search is the workspace text search engine.
+﻿// Package search is the workspace text search engine.
 package search
 
 import (
@@ -16,7 +16,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/kairo-ide/runtime-agent/internal/encoding"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/encoding"
 )
 
 // DefaultExcludes are directories we never descend into.

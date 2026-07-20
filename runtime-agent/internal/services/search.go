@@ -1,11 +1,11 @@
-package services
+﻿package services
 
 import (
 	"encoding/json"
 
-	"github.com/kairo-ide/runtime-agent/internal/encoding"
-	"github.com/kairo-ide/runtime-agent/internal/search"
-	"github.com/kairo-ide/runtime-agent/internal/security"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/encoding"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/search"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/security"
 )
 
 // ----------------- Searcher -----------------

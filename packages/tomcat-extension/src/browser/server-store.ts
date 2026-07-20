@@ -79,7 +79,21 @@ export class ServerStore {
     private eventsUnsubscribe?: () => void;
 
     @postConstruct()
-    protected async init(): Promise<void> {
+    protected init(): void {
+        // The postConstruct must remain synchronous: ServerStore is
+        // injected by KairoStatusBarContribution and KairoViewsContribution,
+        // both bound to FrontendApplicationContribution. An async
+        // @postConstruct here would make the entire binding chain
+        // async, and Theia's synchronous getAll(FrontendApplicationContribution)
+        // in ApplicationShell.startContributions would throw
+        // `LazyInSync` for the contribution symbol. We therefore
+        // kick off the snapshot load + event subscription as
+        // fire-and-forget microtasks. The store is empty until the
+        // first emission lands — same observable behavior as before.
+        void this.bootstrap();
+    }
+
+    protected async bootstrap(): Promise<void> {
         // Load initial snapshot
         const ctx = this.workspaceContext.context;
         if (ctx) {

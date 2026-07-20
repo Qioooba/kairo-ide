@@ -1,4 +1,4 @@
-//go:build integration
+﻿//go:build integration
 // +build integration
 
 // Package integration_test exercises the Runtime Agent against
@@ -19,11 +19,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kairo-ide/runtime-agent/internal/api"
-	"github.com/kairo-ide/runtime-agent/internal/audit"
-	"github.com/kairo-ide/runtime-agent/internal/log"
-	"github.com/kairo-ide/runtime-agent/internal/security"
-	"github.com/kairo-ide/runtime-agent/internal/services"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/api"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/audit"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/log"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/security"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/services"
 )
 
 func TestSmoke_End2End(t *testing.T) {

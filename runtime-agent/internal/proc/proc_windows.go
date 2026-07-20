@@ -1,4 +1,4 @@
-//go:build windows
+﻿//go:build windows
 // +build windows
 
 package proc
@@ -14,7 +14,7 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/kairo-ide/runtime-agent/internal/domain"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/domain"
 )
 
 // Windows API constants used for process identity verification and Job

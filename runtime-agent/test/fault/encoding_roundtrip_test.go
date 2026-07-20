@@ -1,4 +1,4 @@
-//go:build fault
+﻿//go:build fault
 // +build fault
 
 package fault
@@ -6,7 +6,7 @@ package fault
 import (
 	"testing"
 
-	"github.com/kairo-ide/runtime-agent/internal/encoding"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/encoding"
 )
 
 func TestGBKRoundTrip(t *testing.T) {

@@ -1,4 +1,4 @@
-// Command kairo-runtime is the Kairo Runtime Agent — the
+﻿// Command kairo-runtime is the Kairo Runtime Agent — the
 // execution core of the Kairo IDE. It speaks the /api/v1 wire
 // protocol defined in packages/protocol/src/index.ts.
 package main
@@ -15,11 +15,11 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/kairo-ide/runtime-agent/internal/api"
-	"github.com/kairo-ide/runtime-agent/internal/audit"
-	"github.com/kairo-ide/runtime-agent/internal/bootstrap"
-	"github.com/kairo-ide/runtime-agent/internal/config"
-	"github.com/kairo-ide/runtime-agent/internal/log"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/api"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/audit"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/bootstrap"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/config"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/log"
 )
 
 const agentVersion = "0.1.0"

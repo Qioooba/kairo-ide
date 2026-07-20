@@ -39,29 +39,40 @@ export class JavaLanguageServerLifecycle {
     private toDispose: Disposable[] = [];
 
     @postConstruct()
-    protected async init(): Promise<void> {
+    protected init(): void {
+        // The postConstruct must remain synchronous: this service
+        // is bound to FrontendApplicationContribution via
+        // bindJavaLanguageClientContribution. An async @postConstruct
+        // would make the entire binding chain async, and Theia's
+        // synchronous getAll(FrontendApplicationContribution) would
+        // throw `LazyInSync` for the contribution symbol.
+        //
+        // The previous version was `async` and `await`ed nothing
+        // (only `onDidChangeProject(... async ...)` listener
+        // registrations and `onDidChangeContext(... async ...)` —
+        // listener bodies being async is independent of the listener
+        // registration itself, which is always synchronous). We
+        // therefore drop the `async` keyword.
         this.logger.info('JavaLanguageServerLifecycle initialized');
 
         // Listen for project changes
-        this.toDispose.push(this.activeProject.onDidChangeProject(async (project) => {
+        this.toDispose.push(this.activeProject.onDidChangeProject(project => {
             if (!project) {
                 this.logger.info('No project selected, skipping JDT LS launch');
                 return;
             }
-
-            await this.onProjectChanged(project);
+            void this.onProjectChanged(project);
         }));
 
         // Also listen for workspace context changes
-        this.toDispose.push(this.workspaceContext.onDidChangeContext(async (ctx) => {
+        this.toDispose.push(this.workspaceContext.onDidChangeContext(ctx => {
             if (!ctx) {
                 this.logger.info('No workspace context, skipping JDT LS launch');
                 return;
             }
-
             const project = this.activeProject.project;
             if (project) {
-                await this.onProjectChanged(project);
+                void this.onProjectChanged(project);
             }
         }));
     }

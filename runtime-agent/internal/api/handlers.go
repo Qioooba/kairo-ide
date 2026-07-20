@@ -1,4 +1,4 @@
-package api
+﻿package api
 
 import (
 	"crypto/subtle"
@@ -11,12 +11,12 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/kairo-ide/runtime-agent/internal/api/protocol"
-	"github.com/kairo-ide/runtime-agent/internal/domain"
-	"github.com/kairo-ide/runtime-agent/internal/encoding"
-	"github.com/kairo-ide/runtime-agent/internal/log"
-	"github.com/kairo-ide/runtime-agent/internal/search"
-	"github.com/kairo-ide/runtime-agent/internal/security"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/api/protocol"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/domain"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/encoding"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/log"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/search"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/security"
 )
 
 // ----- Workspaces -----

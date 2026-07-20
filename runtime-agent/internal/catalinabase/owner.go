@@ -1,4 +1,4 @@
-package catalinabase
+﻿package catalinabase
 
 import (
 	"encoding/json"
@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/kairo-ide/runtime-agent/internal/atomicfile"
-	"github.com/kairo-ide/runtime-agent/internal/domain"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/atomicfile"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/domain"
 )
 
 const (

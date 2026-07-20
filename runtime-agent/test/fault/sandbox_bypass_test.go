@@ -1,4 +1,4 @@
-//go:build fault
+﻿//go:build fault
 // +build fault
 
 // Package fault contains fault-injection tests that verify the
@@ -15,7 +15,7 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/kairo-ide/runtime-agent/internal/security"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/security"
 )
 
 func TestSandboxRejectsOutsidePath(t *testing.T) {

@@ -1,4 +1,4 @@
-// Package jdtproject — JDT LS project model generator for
+﻿// Package jdtproject — JDT LS project model generator for
 // legacy non-Maven projects.
 //
 // The Eclipse JDT Language Server needs a project model on
@@ -66,7 +66,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kairo-ide/runtime-agent/internal/atomicfile"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/atomicfile"
 	"gopkg.in/yaml.v3"
 )
 

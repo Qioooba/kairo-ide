@@ -1,10 +1,10 @@
-package services
+﻿package services
 
 import (
 	"testing"
 
-	"github.com/kairo-ide/runtime-agent/internal/api"
-	"github.com/kairo-ide/runtime-agent/internal/build"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/api"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/build"
 )
 
 func TestAsyncBuildEngineReturnsDetachedSnapshots(t *testing.T) {

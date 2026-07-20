@@ -294,17 +294,44 @@ if ($SkipAgent) {
     $script:agentProc = Start-Process -FilePath $useBin -ArgumentList $args -PassThru -NoNewWindow
     Write-Host "[agent] pid: $($script:agentProc.Id)"
 
-    # Wait for /api/v1/health.
+    # Wait for /api/v1/health. We DO NOT assume the agent binds the
+    # requested -Port: the packaged Kairo IDE may pick a free port
+    # if the requested one is busy (see the [kairo] Starting agent
+    # --port NNNNNN line in the packaged app's stdout). We probe
+    # Get-NetTCPConnection for the kairo-runtime process's LISTEN
+    # socket, then GET /api/v1/health to confirm it's the agent and
+    # not a stale socket from a prior run.
+    $script:actualPort = $null
+    $script:agentUrl   = $null
     for ($i = 0; $i -lt 80; $i++) {
+      $candidates = @()
       try {
-        $r = Invoke-WebRequest -Uri "http://127.0.0.1`:$Port/api/v1/health" -UseBasicParsing -TimeoutSec 1
-        if ($r.StatusCode -eq 200) {
-          $script:agentUrl = "http://127.0.0.1`:$Port"
-          return
+        $agentPids = @(Get-Process -Name 'kairo-runtime' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id)
+        if ($agentPids.Count -gt 0) {
+          $candidates = @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
+            Where-Object { $_.OwningProcess -in $agentPids -and
+                            ($_.LocalAddress -in @('127.0.0.1','0.0.0.0','::1','::')) } |
+            Select-Object -ExpandProperty LocalPort -Unique)
         }
-      } catch { Start-Sleep -Milliseconds 250 }
+      } catch {}
+      foreach ($port in $candidates) {
+        try {
+          $r = Invoke-WebRequest -Uri "http://127.0.0.1`:$port/api/v1/health" -UseBasicParsing -TimeoutSec 1
+          if ($r.StatusCode -eq 200) {
+            $script:actualPort = $port
+            $script:agentUrl  = "http://127.0.0.1`:$port"
+            if ($port -ne $Port) {
+              Write-Host "  agent bound fallback port $port (requested $Port was busy)" -ForegroundColor DarkYellow
+            } else {
+              Write-Host "  agent ready on port $port" -ForegroundColor DarkGray
+            }
+            return
+          }
+        } catch {}
+      }
+      Start-Sleep -Milliseconds 500
     }
-    throw "agent did not become healthy on port $Port"
+    throw "agent did not become healthy (requested port $Port, no healthy port found on any kairo-runtime process)"
   }
 }
 
@@ -317,7 +344,7 @@ if ($SkipAgent -or -not $script:agentProc) {
   Skip "ws.auth"       "agent not started"
   Skip "api.restart"   "agent not started"
 } else {
-  $baseUrl = "http://127.0.0.1`:$Port"
+  $baseUrl = "http://127.0.0.1`:$($script:actualPort)"
   $secretHdr = @{ "X-Kairo-Secret" = $Secret }
   $failuresBefore = $script:failures.Count
 
@@ -395,7 +422,7 @@ if ($SkipAgent -or -not $script:agentProc) {
     $ws.Options.AddSubProtocol($Secret)
     $cts = [System.Threading.CancellationTokenSource]::new()
     try {
-      $uri = [Uri]"ws://127.0.0.1`:$Port/api/v1/events?workspaceId=verify-e2e"
+      $uri = [Uri]"ws://127.0.0.1`:$($script:actualPort)/api/v1/events?workspaceId=verify-e2e"
       $connectTask = $ws.ConnectAsync($uri, $cts.Token)
       $connected = $connectTask.Wait(5000)
       if (-not $connected) { throw "WS connect timed out" }

@@ -1,4 +1,4 @@
-package services
+﻿package services
 
 import (
 	"context"
@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/kairo-ide/runtime-agent/internal/jdtls"
-	"github.com/kairo-ide/runtime-agent/internal/log"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/jdtls"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/log"
 )
 
 // ----------------- JDTLS (jdt-language-server distribution) -----------------

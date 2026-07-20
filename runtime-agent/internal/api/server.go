@@ -1,4 +1,4 @@
-// Package api is the HTTP layer of the Runtime Agent.
+﻿// Package api is the HTTP layer of the Runtime Agent.
 //
 // Endpoints live under /api/v1. Every endpoint takes a
 // RequestEnvelope and returns a ResponseEnvelope or an
@@ -19,9 +19,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kairo-ide/runtime-agent/internal/api/protocol"
-	"github.com/kairo-ide/runtime-agent/internal/audit"
-	"github.com/kairo-ide/runtime-agent/internal/log"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/api/protocol"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/audit"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/log"
 )
 
 // WebSocketSubprotocol is the single subprotocol that all

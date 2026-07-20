@@ -1,4 +1,4 @@
-// Package jdtls manages the Eclipse JDT Language Server
+﻿// Package jdtls manages the Eclipse JDT Language Server
 // distribution and lifecycle for the Kairo IDE.
 //
 // The JDT LS is distributed as a .tar.gz or .zip by the
@@ -39,7 +39,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/kairo-ide/runtime-agent/internal/log"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/log"
 )
 
 // Manager is the lifecycle owner for the JDT Language Server

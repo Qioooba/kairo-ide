@@ -40,7 +40,24 @@ export class BuildStore {
     private eventsUnsubscribe?: () => void;
 
     @postConstruct()
-    protected async init(): Promise<void> {
+    protected init(): void {
+        // The postConstruct must remain synchronous: BuildStore is
+        // injected by KairoViewsContribution, which is bound to
+        // FrontendApplicationContribution. An async @postConstruct
+        // here would make the entire binding chain async, and the
+        // synchronous `getAll(FrontendApplicationContribution)`
+        // that Theia performs in ApplicationShell.startContributions
+        // would throw `LazyInSync` for the contribution symbol.
+        //
+        // We therefore kick off the initial snapshot and event
+        // subscription as fire-and-forget microtasks. The store
+        // is still empty until the first emission, which is
+        // exactly the prior observable behavior — the UI shows
+        // "no builds" until the snapshot / first event lands.
+        void this.bootstrap();
+    }
+
+    protected async bootstrap(): Promise<void> {
         // Load initial snapshot
         const ctx = this.workspaceContext.context;
         if (ctx) {
