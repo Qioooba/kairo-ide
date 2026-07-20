@@ -146,3 +146,6 @@ scratchpad/
 # Local merge scratch (created by AI merge resolution)
 .merge-tmp/
 
+
+# legacy sample build output
+legacy-sample/*.war
