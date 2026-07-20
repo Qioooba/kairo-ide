@@ -48,9 +48,7 @@ function makeFakeTomcatDir() {
       : '#!/bin/sh\n' +
         'echo "INFO: Deploying web application directory"\n' +
         'echo "INFO: Server startup in 42 ms"\n' +
-        'trap "exit 0" TERM INT\n' +
-        'sleep 60 &\n' +
-        'wait\n';
+        'exec sleep 60\n';
   fs.writeFileSync(script, body);
   if (process.platform !== 'win32') {
     fs.chmodSync(script, 0o755);

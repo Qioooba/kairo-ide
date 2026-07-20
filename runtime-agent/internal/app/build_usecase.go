@@ -30,7 +30,7 @@ type BuildUseCase struct {
 	resolver      *PlanResolver
 	eventHub      *events.EventHub
 
-	mu         sync.Mutex
+	mu          sync.Mutex
 	cancelFuncs map[domain.BuildID]context.CancelFunc
 }
 

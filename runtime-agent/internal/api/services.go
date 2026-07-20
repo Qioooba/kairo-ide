@@ -68,21 +68,21 @@ type BuildRequest struct {
 
 // BuildResult is the typed build result.
 type BuildResult struct {
-	ID            string           `json:"id"`
-	State         string           `json:"state"`
-	StartedAt     string           `json:"startedAt"`
-	FinishedAt    string           `json:"finishedAt,omitempty"`
-	ProjectID     string           `json:"projectId"`
-	Toolchain     string           `json:"toolchainId"`
-	SourceLevel   string           `json:"sourceLevel"`
-	TargetLevel   string           `json:"targetLevel"`
-	OutputDir     string           `json:"outputDir"`
+	ID            string             `json:"id"`
+	State         string             `json:"state"`
+	StartedAt     string             `json:"startedAt"`
+	FinishedAt    string             `json:"finishedAt,omitempty"`
+	ProjectID     string             `json:"projectId"`
+	Toolchain     string             `json:"toolchainId"`
+	SourceLevel   string             `json:"sourceLevel"`
+	TargetLevel   string             `json:"targetLevel"`
+	OutputDir     string             `json:"outputDir"`
 	Diagnostics   []build.Diagnostic `json:"diagnostics"`
-	FilesCompiled int              `json:"filesCompiled"`
-	ElapsedMs     int64            `json:"elapsedMs"`
-	Output        string           `json:"output"`
-	Error         string           `json:"error,omitempty"`
-	ExitCode      int              `json:"exitCode"`
+	FilesCompiled int                `json:"filesCompiled"`
+	ElapsedMs     int64              `json:"elapsedMs"`
+	Output        string             `json:"output"`
+	Error         string             `json:"error,omitempty"`
+	ExitCode      int                `json:"exitCode"`
 }
 
 // DeployRequest is the typed request to publish a deployment.

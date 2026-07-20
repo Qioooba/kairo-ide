@@ -285,7 +285,24 @@ export class TomcatManager extends EventEmitter {
       }
     }, DEFAULT_STARTUP_DEADLINE_MS);
 
-    return this._instance;
+    // Wait for the startup banner before declaring success.
+    // This gives callers a deterministic API: when start()
+    // resolves, Tomcat is actually accepting traffic (or we
+    // have already rejected because it failed/crashed).
+    return new Promise<TomcatInstance>((resolve, reject) => {
+      const onEvent = (e: TomcatEvent) => {
+        if (e.kind === 'state' && e.state === 'running') {
+          this.off('event', onEvent);
+          resolve(this._instance!);
+          return;
+        }
+        if (e.kind === 'state' && (e.state === 'failed' || e.state === 'crashed' || e.state === 'stopped')) {
+          this.off('event', onEvent);
+          reject(new Error(`Tomcat failed to start (state: ${e.state})`));
+        }
+      };
+      this.on('event', onEvent);
+    });
   }
 
   /**

@@ -56,10 +56,103 @@
     justify-content: center;
     font-size: 14px;
     font-weight: 600;
+    flex-shrink: 0;
+}
+
+.kairo-wizard-step .step-label {
+    font-size: 13px;
+    white-space: nowrap;
 }
 
 .kairo-wizard-step.active .step-number {
     background: var(--kairo-primary);
+}
+
+.kairo-wizard-content {
+    margin-top: 16px;
+    min-height: 200px;
+}
+
+.kairo-wizard-step-content {
+    padding: 16px 0;
+}
+
+.kairo-wizard-header h1 {
+    font-size: 24px;
+    margin: 0 0 8px 0;
+    color: var(--kairo-primary-light);
+}
+
+.kairo-wizard-subtitle {
+    margin: 0 0 16px 0;
+    color: var(--kairo-text-secondary);
+    font-size: 14px;
+}
+
+.kairo-selected-path {
+    margin-top: 12px;
+    padding: 8px 12px;
+    background: var(--kairo-bg-secondary);
+    border-radius: 4px;
+    font-family: monospace;
+    font-size: 12px;
+    word-break: break-all;
+    color: var(--kairo-text-secondary);
+}
+
+.kairo-config-form {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    max-width: 400px;
+}
+
+.kairo-config-form label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 13px;
+    color: var(--kairo-text);
+}
+
+.kairo-config-form input,
+.kairo-config-form select {
+    padding: 6px 8px;
+    background: var(--kairo-bg);
+    color: var(--kairo-text);
+    border: 1px solid var(--kairo-border);
+    border-radius: 4px;
+    font-size: 13px;
+}
+
+.kairo-error {
+    color: var(--kairo-error);
+    background: rgba(239, 68, 68, 0.1);
+    padding: 8px 12px;
+    border-radius: 4px;
+    font-size: 13px;
+    margin: 8px 0;
+}
+
+.kairo-project-info {
+    font-size: 13px;
+}
+
+.kairo-project-info > div {
+    padding: 2px 0;
+}
+
+.kairo-project-path {
+    color: var(--kairo-text-secondary);
+    font-family: monospace;
+    font-size: 12px;
+    word-break: break-all;
+}
+
+.kairo-no-project {
+    color: var(--kairo-text-secondary);
+    font-size: 13px;
+    font-style: italic;
 }
 
 .kairo-project-selector {
@@ -262,9 +355,344 @@
     outline-offset: -1px;
 }
 
-/* A11y: ensure notification text meets WCAG AA contrast.
- * These Kairo-variable rules intentionally come after the generic
- * Theia-variable fallbacks above so they win the cascade. */
+
+/* Generic Kairo widget chrome — shared by Build/Server/Deployments/Logs */
+.kairo-widget {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-width: 0;
+    overflow: hidden;
+    color: var(--kairo-text);
+    font-size: 13px;
+}
+
+.kairo-widget-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 8px 12px;
+    background: var(--kairo-bg-secondary);
+    border-bottom: 1px solid var(--kairo-border);
+    flex-shrink: 0;
+}
+
+.kairo-widget-title {
+    font-size: 13px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--kairo-text-secondary);
+}
+
+.kairo-widget-body {
+    padding: 12px;
+    flex: 1 1 auto;
+    overflow-y: auto;
+    min-width: 0;
+}
+
+.kairo-widget-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--kairo-border);
+    background: var(--kairo-bg);
+    flex-shrink: 0;
+}
+
+.kairo-widget-toolbar .theia-button {
+    min-width: 64px;
+}
+
+.kairo-widget-section {
+    padding: 12px;
+    border-top: 1px solid var(--kairo-border);
+    min-width: 0;
+}
+
+.kairo-section-title {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--kairo-text-secondary);
+    margin-bottom: 6px;
+}
+
+.kairo-empty {
+    color: var(--kairo-text-secondary);
+    font-size: 12px;
+    font-style: italic;
+    padding: 16px 12px;
+    margin: 0;
+}
+
+/* Build view specific */
+.kairo-build-state {
+    font-size: 12px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    background: var(--kairo-bg);
+    border: 1px solid var(--kairo-border);
+}
+
+.kairo-build-state[data-state="running"] {
+    color: var(--kairo-info);
+    border-color: var(--kairo-info);
+}
+
+.kairo-build-state[data-state="succeeded"] {
+    color: var(--kairo-success);
+    border-color: var(--kairo-success);
+}
+
+.kairo-build-state[data-state="failed"] {
+    color: var(--kairo-error);
+    border-color: var(--kairo-error);
+}
+
+.kairo-build-state[data-state="cancelled"] {
+    color: var(--kairo-text-secondary);
+}
+
+.kairo-build-summary {
+    padding: 8px 12px;
+    font-size: 12px;
+    color: var(--kairo-text-secondary);
+    background: var(--kairo-bg);
+}
+
+.kairo-build-list,
+.kairo-diagnostics-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.kairo-build-item,
+.kairo-server-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 8px;
+    border-bottom: 1px solid var(--kairo-border);
+    font-size: 12px;
+}
+
+.kairo-build-item:hover,
+.kairo-server-item:hover {
+    background: var(--kairo-bg-secondary);
+}
+
+.kairo-build-state-icon,
+.kairo-server-state-icon {
+    font-size: 14px;
+    width: 18px;
+    text-align: center;
+    flex-shrink: 0;
+}
+
+.kairo-build-id,
+.kairo-server-id {
+    font-family: monospace;
+    color: var(--kairo-text);
+    flex: 1 1 auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.kairo-build-time,
+.kairo-build-end-time,
+.kairo-server-port {
+    color: var(--kairo-text-secondary);
+    font-size: 11px;
+    flex-shrink: 0;
+}
+
+.kairo-diagnostic {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    padding: 4px 8px;
+    font-size: 12px;
+    border-bottom: 1px solid var(--kairo-border);
+}
+
+.kairo-diagnostic-error {
+    color: var(--kairo-error);
+}
+
+.kairo-diagnostic-warning {
+    color: var(--kairo-warning);
+}
+
+.kairo-diagnostic-info {
+    color: var(--kairo-info);
+}
+
+.kairo-diagnostic-icon {
+    flex-shrink: 0;
+}
+
+.kairo-diagnostic-location {
+    font-family: monospace;
+    font-size: 11px;
+    flex-shrink: 0;
+}
+
+.kairo-diagnostic-message {
+    flex: 1 1 auto;
+    word-break: break-word;
+}
+
+/* Server view */
+.kairo-server-state {
+    font-size: 12px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    background: var(--kairo-bg);
+    border: 1px solid var(--kairo-border);
+}
+
+.kairo-server-state[data-state="running"] {
+    color: var(--kairo-success);
+    border-color: var(--kairo-success);
+}
+
+.kairo-server-state[data-state="starting"] {
+    color: var(--kairo-info);
+    border-color: var(--kairo-info);
+}
+
+.kairo-server-state[data-state="error"],
+.kairo-server-state[data-state="crashed"] {
+    color: var(--kairo-error);
+    border-color: var(--kairo-error);
+}
+
+.kairo-server-state[data-state="disconnected"] {
+    color: var(--kairo-warning);
+    border-color: var(--kairo-warning);
+}
+
+.kairo-server-url {
+    padding: 8px 12px;
+    font-size: 12px;
+    border-top: 1px solid var(--kairo-border);
+    word-break: break-all;
+}
+
+.kairo-server-url a {
+    color: var(--kairo-info);
+    text-decoration: none;
+    font-family: monospace;
+}
+
+.kairo-server-url a:hover {
+    text-decoration: underline;
+}
+
+.kairo-info-list {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 4px 12px;
+    margin: 0;
+    font-size: 12px;
+}
+
+.kairo-info-list dt {
+    color: var(--kairo-text-secondary);
+}
+
+.kairo-info-list dd {
+    margin: 0;
+    font-family: monospace;
+    color: var(--kairo-text);
+}
+
+/* Log viewer */
+.kairo-log-viewer {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 200px;
+}
+
+.kairo-log-viewer-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    background: var(--kairo-bg-secondary);
+    border-bottom: 1px solid var(--kairo-border);
+    flex-shrink: 0;
+}
+
+.kairo-log-viewer-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--kairo-text-secondary);
+    flex: 1 1 auto;
+}
+
+.kairo-log-viewer-server-select {
+    background: var(--kairo-bg);
+    color: var(--kairo-text);
+    border: 1px solid var(--kairo-border);
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 12px;
+}
+
+.kairo-log-viewer-content {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    background: var(--kairo-bg);
+    font-family: monospace;
+    font-size: 12px;
+    padding: 4px 0;
+    min-height: 100px;
+}
+
+.kairo-log-empty {
+    color: var(--kairo-text-secondary);
+    padding: 16px;
+    text-align: center;
+    font-style: italic;
+}
+
+/* Deployments table */
+.kairo-deployments-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+}
+
+.kairo-deployments-table th,
+.kairo-deployments-table td {
+    text-align: left;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--kairo-border);
+}
+
+.kairo-deployments-table th {
+    color: var(--kairo-text-secondary);
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 11px;
+    letter-spacing: 0.5px;
+    background: var(--kairo-bg-secondary);
+}
+
+.kairo-deployments-table td {
+    font-family: monospace;
+    color: var(--kairo-text);
+}
+/* A11y: ensure notification text meets WCAG AA contrast */
 .theia-notification-list-item {
     background: var(--kairo-bg-secondary) !important;
     color: var(--kairo-text) !important;

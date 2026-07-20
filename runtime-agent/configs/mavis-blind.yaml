@@ -1,0 +1,17 @@
+# Mavis blind test dev config — uses ports 18892 (HTTP) to avoid collisions
+# and KAIRO_QA_ROOT for dataDir/bundledDir.
+version: 0.1.0
+bindAddress: 127.0.0.1
+port: 18892
+tlsCert: ""
+tlsKey: ""
+dataDir: /tmp/kairo-mac-web-qa.HJBUyx/runtime/data
+bundledDir: /tmp/kairo-mac-web-qa.HJBUyx/runtime/bundled
+logLevel: info
+requireAuth: false
+tomcatStartTimeout: 60s
+tomcatShutdownTimeout: 15s
+buildFileTimeout: 30s
+workspaceScanMaxDepth: 8
+workspaceScanMaxFiles: 50000
+logBufferLines: 5000

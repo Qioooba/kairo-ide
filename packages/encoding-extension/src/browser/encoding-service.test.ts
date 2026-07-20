@@ -151,8 +151,24 @@ test('UTF-8-BOM: encode produces BOM prefix, decode preserves content', () => {
 });
 
 // =========================================================================
-// GBK unrepresentable character detection
+// Unrepresentable character detection
 // =========================================================================
+
+// The production KairoEncodingService.validateEncoding delegates to the
+// Go agent for non-UTF-8 encodings. Here we only sanity-check that
+// iconv-lite round-trips do not hide characters that are outside a
+// simpler encoding's range; the authoritative rejection logic is
+// exercised in the agent/integration tests.
+
+test('ISO-8859-1 unrepresentable: CJK characters cannot round-trip', () => {
+  const text = '中文';
+
+  // ISO-8859-1 cannot represent CJK; iconv-lite will replace them.
+  const bytes = iconv.encode(text, 'iso-8859-1');
+  const decoded = iconv.decode(bytes, 'iso-8859-1');
+  assert.notStrictEqual(decoded, text,
+    'ISO-8859-1 must not faithfully represent CJK characters');
+});
 
 test('GBK unrepresentable: characters outside GBK range are detected', () => {
   // Emoji is outside the GBK character set.
@@ -193,8 +209,8 @@ test('encoding byte sizes: UTF-8 vs GBK for Chinese text', () => {
   const gbkBytes = iconv.encode(text, 'gbk');
 
   // UTF-8 uses 3 bytes per Chinese char, GBK uses 2
-  assert.strictEqual(utf8Bytes.length, 12, 'UTF-8: 4 chars × 3 bytes = 12');
-  assert.strictEqual(gbkBytes.length, 8, 'GBK: 4 chars × 2 bytes = 8');
+  assert.strictEqual(utf8Bytes.length, 12, 'UTF-8: 4 chars x 3 bytes = 12');
+  assert.strictEqual(gbkBytes.length, 8, 'GBK: 4 chars x 2 bytes = 8');
 
   // Verify GBK is more compact for Chinese
   assert.ok(gbkBytes.length < utf8Bytes.length,
@@ -217,8 +233,8 @@ test('encoding byte sizes: ISO-8859-1 is 1 byte per char', () => {
 
 test('UTF-16LE: byte order verification', () => {
   const text = 'AB';
-  const bytes = Buffer.from(text, 'utf-16le');
-  // 'A' = U+0041 → LE: 0x41 0x00, 'B' = U+0042 → LE: 0x42 0x00
+  const bytes = iconv.encode(text, 'utf-16le');
+  // 'A' = U+0041 -> LE: 0x41 0x00, 'B' = U+0042 -> LE: 0x42 0x00
   assert.strictEqual(bytes[0], 0x41, 'UTF-16LE: first byte of A');
   assert.strictEqual(bytes[1], 0x00, 'UTF-16LE: second byte of A');
   assert.strictEqual(bytes[2], 0x42, 'UTF-16LE: first byte of B');

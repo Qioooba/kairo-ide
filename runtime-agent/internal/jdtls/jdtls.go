@@ -231,10 +231,10 @@ func sanitizeID(s string) string {
 // minimal allowlist of environment variables needed by the
 // JVM and the JDT LS.
 type LaunchDescriptor struct {
-	Command      string   `json:"command"`       // java or javaw executable
-	Args         []string `json:"args"`           // JVM and JDT LS arguments
-	WorkingDir   string   `json:"workingDir"`     // canonical project root from repository
-	EnvAllowlist []string `json:"envAllowlist"`   // PATH, JAVA_HOME and minimal env vars; never os.Environ()
+	Command      string   `json:"command"`      // java or javaw executable
+	Args         []string `json:"args"`         // JVM and JDT LS arguments
+	WorkingDir   string   `json:"workingDir"`   // canonical project root from repository
+	EnvAllowlist []string `json:"envAllowlist"` // PATH, JAVA_HOME and minimal env vars; never os.Environ()
 }
 
 // BuildLaunchDescriptor constructs a secure LaunchDescriptor

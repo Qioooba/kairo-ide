@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	stdlog "log"
 	"net"
 	"net/http"
 	_ "net/http/pprof"
@@ -14,7 +15,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"time"
-	stdlog "log"
 
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/api"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/audit"
@@ -24,7 +24,7 @@ import (
 )
 
 const (
-	agentVersion          = "0.1.0"
+	agentVersion           = "0.1.0"
 	restartShutdownTimeout = 30 * time.Second
 )
 

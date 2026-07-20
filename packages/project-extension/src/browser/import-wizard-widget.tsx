@@ -177,25 +177,6 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
         }
     }, [runtime, projectService, workspaceId, workspacePath, projectName, sourceLevel, encoding, buildTool, detectedConfig, activeProject, onClose, projectId]);
 
-    // handleStartIDE is intentionally unused here: the
-    // "Start IDE" button lives on the welcome widget, not
-    // in the import wizard. Kept as a documented extension
-    // point; see kairo-welcome-widget.tsx.
-    const _handleStartIDE = React.useCallback(async () => {
-        if (workspacePath && projectService) {
-            try {
-                if (projectService.currentWorkspace()) {
-                    window.location.reload();
-                } else {
-                    await projectService.openWorkspace(workspacePath, projectName);
-                    window.location.reload();
-                }
-            } catch {
-                window.location.reload();
-            }
-        }
-    }, [workspacePath, projectName, projectService]);
-
     return (
         <div className="kairo-import-wizard" data-testid="import-wizard">
             <header className="kairo-wizard-header">
