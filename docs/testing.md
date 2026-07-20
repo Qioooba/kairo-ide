@@ -15,7 +15,7 @@
                    ╱ (race + tag) ╲  TS: extensions over a real Theia shell
                   ╱───────────────╲
                  ╱    Unit tests    ╲  Go: standard `testing`
-                ╱   (deterministic)  ╲ TS: `mocha` + `chai`, fast
+                ╱   (deterministic)  ╲ TS: `node --test`, fast
                ╱─────────────────────╲
 ```
 
@@ -26,9 +26,8 @@
 | Go Runtime Agent unit | Go | `testing` | `runtime-agent/**/*_test.go` |
 | Go Runtime Agent integration | Go | `testing` + `//go:build integration` | `runtime-agent/test/integration/` |
 | Go Runtime Agent race | Go | `-race` | CI on every PR |
-| TS extension unit | TypeScript | `mocha` + `chai` (provided by Theia) | `packages/*/src/**/*.test.ts` |
-| TS component | TypeScript | `@testing-library/react` | `packages/ui-kit/test/` |
-| E2E | TypeScript | Playwright | `tests/e2e/` |
+| TS extension unit | TypeScript / JavaScript | `node --test` (built-in runner; some suites via `ts-node`) | `packages/*/src/**/*.test.{ts,cjs}` |
+| E2E | JavaScript (Node `.cjs`) | Playwright | `tests/e2e/` |
 
 ## 3. Fixtures
 

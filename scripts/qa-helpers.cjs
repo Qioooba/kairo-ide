@@ -142,8 +142,10 @@ async function openPage(browser, webUrl, opts = {}) {
   });
   const page = await context.newPage();
   const logs = [];
-  page.on('console', msg => logs.push({ type: msg.type(), text: msg.text(), time: nowIso() }));
+  page.on('console', msg => logs.push({ type: msg.type(), text: msg.text(), url: (msg.location() || {}).url || '', time: nowIso() }));
   page.on('pageerror', err => logs.push({ type: 'pageerror', text: err.message, time: nowIso() }));
+  page.on('requestfailed', req => logs.push({ type: 'requestfailed', text: `${req.failure()?.errorText || ''}`, url: req.url(), time: nowIso() }));
+  page.on('response', res => { if (res.status() >= 400) logs.push({ type: 'http' + res.status(), text: `HTTP ${res.status()}`, url: res.url(), time: nowIso() }); });
   page._kairoLogs = logs;
   await page.goto(webUrl, { timeout: 60000, waitUntil: 'domcontentloaded' });
   // Give Theia shell time to render

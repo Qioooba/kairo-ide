@@ -7,10 +7,15 @@
   "theia": {
     "target": ["browser"],
     "frontendPrefix": "/",
-    "applicationName": "Kairo IDE"
+    "applicationName": "Kairo IDE",
+    "frontend": {
+      "config": {
+        "applicationName": "Kairo IDE"
+      }
+    }
   },
   "scripts": {
-    "build": "theia build --mode production",
+    "build": "theia build --mode production && node postbuild.cjs",
     "start": "theia start /tmp/kairo-workspace --hostname=127.0.0.1 --port=3000",
     "dev": "theia start /tmp/kairo-workspace --hostname=127.0.0.1 --port=3000 --log-level=debug",
     "clean": "rm -rf lib"

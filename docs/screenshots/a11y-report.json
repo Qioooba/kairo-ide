@@ -1,0 +1,118 @@
+{
+  "url": "http://127.0.0.1:3000",
+  "testedAt": "2026-07-20T18:01:57.711Z",
+  "viewport": "1440x900",
+  "engine": "axe-core via @axe-core/playwright (wcag2a, wcag2aa, wcag21aa)",
+  "scans": [
+    {
+      "name": "01-shell",
+      "violations": [
+        {
+          "id": "aria-required-children",
+          "impact": "critical",
+          "help": "Certain ARIA roles must contain particular children",
+          "nodes": 2
+        },
+        {
+          "id": "listitem",
+          "impact": "serious",
+          "help": "<li> elements must be contained in a <ul> or <ol>",
+          "nodes": 5
+        }
+      ]
+    },
+    {
+      "name": "02-import-wizard",
+      "violations": [
+        {
+          "id": "aria-required-children",
+          "impact": "critical",
+          "help": "Certain ARIA roles must contain particular children",
+          "nodes": 2
+        },
+        {
+          "id": "listitem",
+          "impact": "serious",
+          "help": "<li> elements must be contained in a <ul> or <ol>",
+          "nodes": 5
+        }
+      ]
+    },
+    {
+      "name": "03-project-selector",
+      "violations": [
+        {
+          "id": "aria-required-children",
+          "impact": "critical",
+          "help": "Certain ARIA roles must contain particular children",
+          "nodes": 2
+        },
+        {
+          "id": "listitem",
+          "impact": "serious",
+          "help": "<li> elements must be contained in a <ul> or <ol>",
+          "nodes": 5
+        }
+      ]
+    },
+    {
+      "name": "04-build-view",
+      "violations": [
+        {
+          "id": "aria-required-children",
+          "impact": "critical",
+          "help": "Certain ARIA roles must contain particular children",
+          "nodes": 2
+        },
+        {
+          "id": "listitem",
+          "impact": "serious",
+          "help": "<li> elements must be contained in a <ul> or <ol>",
+          "nodes": 5
+        }
+      ]
+    },
+    {
+      "name": "05-server-view",
+      "violations": [
+        {
+          "id": "aria-required-children",
+          "impact": "critical",
+          "help": "Certain ARIA roles must contain particular children",
+          "nodes": 2
+        },
+        {
+          "id": "listitem",
+          "impact": "serious",
+          "help": "<li> elements must be contained in a <ul> or <ol>",
+          "nodes": 5
+        }
+      ]
+    },
+    {
+      "name": "06-deployments-view",
+      "violations": [
+        {
+          "id": "aria-required-children",
+          "impact": "critical",
+          "help": "Certain ARIA roles must contain particular children",
+          "nodes": 2
+        },
+        {
+          "id": "listitem",
+          "impact": "serious",
+          "help": "<li> elements must be contained in a <ul> or <ol>",
+          "nodes": 5
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "violations": 42,
+    "critical": 12,
+    "serious": 30,
+    "moderate": 0,
+    "minor": 0
+  },
+  "duplicateIds": []
+}
