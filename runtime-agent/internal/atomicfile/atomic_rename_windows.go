@@ -87,3 +87,13 @@ func atomicRename(src, dst string) error {
 		return err
 	}
 }
+
+// syncDir is a no-op on Windows. The POSIX `os.Open(dir).Sync()` pattern
+// is not supported on Windows (returns ERROR_ACCESS_DENIED on most
+// directory handles; the OS does not expose a real directory-fsync
+// equivalent). The atomicity guarantee we need is already provided by
+// MoveFileExW + MOVEFILE_WRITE_THROUGH in atomicRename above.
+func syncDir(dir string) error {
+	_ = dir
+	return nil
+}

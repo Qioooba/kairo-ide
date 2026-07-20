@@ -71,18 +71,10 @@ func Rename(src, dst string) error {
 
 // SyncDir fsyncs the directory at dir so that renames within it
 // are durable. Exported for callers that need it independently.
+//
+// Implementation lives in atomic_rename_unix.go (real fsync) and
+// atomic_rename_windows.go (no-op; Windows does not support dir
+// fsync through os.File.Sync).
 func SyncDir(dir string) error {
 	return syncDir(dir)
-}
-
-func syncDir(dir string) error {
-	f, err := os.Open(dir)
-	if err != nil {
-		return fmt.Errorf("open parent dir %s for sync: %w", dir, err)
-	}
-	defer f.Close()
-	if err := f.Sync(); err != nil {
-		return fmt.Errorf("sync parent dir %s: %w", dir, err)
-	}
-	return nil
 }
