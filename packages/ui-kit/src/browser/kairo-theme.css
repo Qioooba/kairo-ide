@@ -219,7 +219,6 @@
 .kairo-log-line.warning {
     color: var(--kairo-warning);
 }
-
 /* Theia shell overrides for Kairo Dark theme */
 
 /* Notification toasts: enforce dark surface so light text is readable.
@@ -261,4 +260,26 @@
 #theia-statusBar .element.hasCommand:focus-visible {
     outline: 1px solid var(--theia-focusBorder, #7c5cbf);
     outline-offset: -1px;
+}
+
+/* A11y: ensure notification text meets WCAG AA contrast.
+ * These Kairo-variable rules intentionally come after the generic
+ * Theia-variable fallbacks above so they win the cascade. */
+.theia-notification-list-item {
+    background: var(--kairo-bg-secondary) !important;
+    color: var(--kairo-text) !important;
+    border-color: var(--kairo-border) !important;
+}
+.theia-notification-message,
+.theia-notification-list-item-content-main,
+.theia-notification-list-item-content-main span {
+    color: var(--kairo-text) !important;
+}
+.theia-notification-list-item .theia-notification-list-item-content-main .theia-notification-message {
+    color: #ffffff !important;
+}
+.theia-notification-list-item .theia-button {
+    color: var(--kairo-text) !important;
+    background: var(--kairo-surface) !important;
+    border-color: var(--kairo-border) !important;
 }

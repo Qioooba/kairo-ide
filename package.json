@@ -33,12 +33,16 @@
     "agent:run": "cd runtime-agent && go run ./cmd/kairo-runtime --config ../runtime-agent/configs/dev.yaml",
     "agent:build": "cd runtime-agent && CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o bin/kairo-runtime ./cmd/kairo-runtime",
     "bundled:prepare": "if command -v pwsh >/dev/null 2>&1; then pwsh -ExecutionPolicy Bypass -File scripts/prepare-bundled.ps1; else bash scripts/prepare-bundled.sh; fi",
-    "bundled:check": "if command -v pwsh >/dev/null 2>&1; then pwsh -ExecutionPolicy Bypass -File scripts/prepare-bundled.ps1 -Strict; else bash scripts/prepare-bundled.sh --strict; fi"
+    "bundled:check": "if command -v pwsh >/dev/null 2>&1; then pwsh -ExecutionPolicy Bypass -File scripts/prepare-bundled.ps1 -Strict; else bash scripts/prepare-bundled.sh --strict; fi",
+    "qa:start": "bash scripts/start-qa-stack.sh",
+    "qa:stop": "bash scripts/stop-qa-stack.sh"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.12.1",
     "@types/node": "20.14.10",
     "@typescript-eslint/eslint-plugin": "^8.64.0",
     "@typescript-eslint/parser": "^8.64.0",
+    "axe-core": "^4.12.1",
     "eslint": "^10.7.0",
     "playwright": "^1.61.1",
     "prettier": "3.3.3",
