@@ -194,57 +194,6 @@
     color: var(--kairo-text);
 }
 
-.kairo-build-status {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px;
-    border-radius: 4px;
-    margin-bottom: 12px;
-    font-size: 14px;
-}
-
-.kairo-build-status.succeeded {
-    background: rgba(16, 185, 129, 0.1);
-    color: var(--kairo-success);
-}
-
-.kairo-build-status.failed {
-    background: rgba(239, 68, 68, 0.1);
-    color: var(--kairo-error);
-}
-
-.kairo-build-status.running {
-    background: rgba(59, 130, 246, 0.1);
-    color: var(--kairo-info);
-}
-
-.kairo-diagnostic-list {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-}
-
-.kairo-diagnostic-item {
-    padding: 4px 8px;
-    font-family: monospace;
-    font-size: 12px;
-    border-bottom: 1px solid var(--kairo-border);
-    cursor: pointer;
-}
-
-.kairo-diagnostic-item:hover {
-    background: var(--kairo-bg-secondary);
-}
-
-.kairo-diagnostic-item.error {
-    color: var(--kairo-error);
-}
-
-.kairo-diagnostic-item.warning {
-    color: var(--kairo-warning);
-}
-
 .kairo-server-view {
     padding: 12px;
     color: var(--kairo-text);
@@ -272,31 +221,6 @@
 .kairo-server-status.error {
     background: rgba(239, 68, 68, 0.1);
     color: var(--kairo-error);
-}
-
-.kairo-server-actions {
-    display: flex;
-    gap: 8px;
-    margin: 12px 0;
-}
-
-.kairo-server-url {
-    font-family: monospace;
-    font-size: 13px;
-    color: var(--kairo-info);
-    cursor: pointer;
-    text-decoration: underline;
-}
-
-.kairo-log-viewer {
-    padding: 8px;
-    font-family: monospace;
-    font-size: 12px;
-    color: var(--kairo-text);
-    max-height: 300px;
-    overflow-y: auto;
-    background: var(--kairo-bg);
-    border-radius: 4px;
 }
 
 .kairo-log-line {
@@ -334,7 +258,7 @@
 .theia-notification-list-item .theia-notification-action,
 .theia-notification-list-item .theia-notification-button {
     color: var(--theia-button-foreground, #ffffff) !important;
-    background: var(--theia-button-background, #7c5cbf) !important;
+    background: var(--theia-button-background, #7C3AED) !important;
 }
 
 /* Status bar: clickable items must show pointer cursor */
@@ -351,7 +275,7 @@
 
 /* Focus ring for interactive status bar items */
 #theia-statusBar .element.hasCommand:focus-visible {
-    outline: 1px solid var(--theia-focusBorder, #7c5cbf);
+    outline: 1px solid var(--theia-focusBorder, #7C3AED);
     outline-offset: -1px;
 }
 

@@ -25,16 +25,16 @@ const KAIRO_DARK_VARS: Record<string, string> = {
   '--theia-descriptionForeground': '#8b8f96',
 
   // ----- Brand & accent (Kairo violet) -----
-  '--theia-brand-color0': '#7c5cbf',
+  '--theia-brand-color0': '#7C3AED',
   '--theia-brand-color1': '#8d6dd0',
   '--theia-brand-color2': '#5e42a6',
   '--theia-brand-color3': '#4a3385',
-  '--theia-accent-color0': '#7c5cbf',
+  '--theia-accent-color0': '#7C3AED',
   '--theia-accent-color1': '#8d6dd0',
   '--theia-accent-color2': '#37393d',
   '--theia-accent-color3': '#3d2f5f',
-  '--theia-focusBorder': '#7c5cbf',
-  '--theia-activeBorder': '#7c5cbf',
+  '--theia-focusBorder': '#7C3AED',
+  '--theia-activeBorder': '#7C3AED',
   '--theia-selected-text-background': 'rgba(124,92,191,0.28)',
   '--theia-textLink-foreground': '#a78be0',
   '--theia-textLink-activeForeground': '#b8a0e8',
@@ -93,9 +93,9 @@ const KAIRO_DARK_VARS: Record<string, string> = {
   '--theia-editorInlayHint-background': 'rgba(255,255,255,0.05)',
   '--theia-editorLightBulb-foreground': '#f59e0b',
   '--theia-editorLightBulbAutoFix-foreground': '#60a5fa',
-  '--theia-editorBracketMatch-border': '#7c5cbf',
+  '--theia-editorBracketMatch-border': '#7C3AED',
   '--theia-editorBracketMatch-background': 'rgba(124,92,191,0.10)',
-  '--theia-editorOverviewRuler-bracketMatchForeground': '#7c5cbf',
+  '--theia-editorOverviewRuler-bracketMatchForeground': '#7C3AED',
   '--theia-editorOverviewRuler-rangeHighlightForeground': 'rgba(124,92,191,0.20)',
   '--theia-editorOverviewRuler-errorForeground': 'rgba(239,68,68,0.55)',
   '--theia-editorOverviewRuler-warningForeground': 'rgba(245,158,11,0.55)',
@@ -146,7 +146,7 @@ const KAIRO_DARK_VARS: Record<string, string> = {
   '--theia-input-foreground': '#dfe1e5',
   '--theia-input-border': '#2e3136',
   '--theia-input-placeholderForeground': '#5d6166',
-  '--theia-inputOption-activeBorder': '#7c5cbf',
+  '--theia-inputOption-activeBorder': '#7C3AED',
   '--theia-inputOption-activeBackground': 'rgba(124,92,191,0.22)',
   '--theia-dropdown-background': '#2b2c30',
   '--theia-dropdown-border': '#3d4148',
@@ -154,7 +154,7 @@ const KAIRO_DARK_VARS: Record<string, string> = {
   '--theia-dropdown-foreground': '#dfe1e5',
 
   // ----- Buttons -----
-  '--theia-button-background': '#7c5cbf',
+  '--theia-button-background': '#7C3AED',
   '--theia-button-hoverBackground': '#8d6dd0',
   '--theia-button-foreground': '#ffffff',
   '--theia-button-secondaryBackground': '#37393d',
@@ -167,9 +167,9 @@ const KAIRO_DARK_VARS: Record<string, string> = {
   '--theia-activityBar-background': '#1f2024',
   '--theia-activityBar-foreground': '#9ba0a8',
   '--theia-activityBar-inactiveForeground': '#6b7076',
-  '--theia-activityBar-activeBorder': '#7c5cbf',
+  '--theia-activityBar-activeBorder': '#7C3AED',
   '--theia-activityBar-border': 'rgba(255,255,255,0.06)',
-  '--theia-activityBarBadge-background': '#7c5cbf',
+  '--theia-activityBarBadge-background': '#7C3AED',
   '--theia-activityBarBadge-foreground': '#ffffff',
 
   // ----- Sidebar (left) -----
@@ -191,7 +191,7 @@ const KAIRO_DARK_VARS: Record<string, string> = {
   '--theia-tab-inactiveBackground': '#252629',
   '--theia-tab-inactiveForeground': '#8b8f96',
   '--theia-tab-border': 'rgba(255,255,255,0.06)',
-  '--theia-tab-activeBorder': '#7c5cbf',
+  '--theia-tab-activeBorder': '#7C3AED',
   '--theia-tab-unfocusedActiveBorder': '#5e42a6',
   '--theia-tab-hoverBackground': '#2b2c30',
   '--theia-tab-hoverForeground': '#c5c8cc',
@@ -210,7 +210,7 @@ const KAIRO_DARK_VARS: Record<string, string> = {
   '--theia-panel-border': 'rgba(255,255,255,0.06)',
   '--theia-panelTitle-foreground': '#c5c8cc',
   '--theia-panelTitle-activeForeground': '#e6e7ea',
-  '--theia-panelTitle-activeBorder': '#7c5cbf',
+  '--theia-panelTitle-activeBorder': '#7C3AED',
   '--theia-panelTitle-inactiveForeground': '#8b8f96',
 
   // ----- Status bar -----
@@ -220,9 +220,9 @@ const KAIRO_DARK_VARS: Record<string, string> = {
   '--theia-statusBar-noFolderBackground': '#1a1b1e',
   '--theia-statusBarItem-activeBackground': 'rgba(255,255,255,0.08)',
   '--theia-statusBarItem-hoverBackground': 'rgba(255,255,255,0.05)',
-  '--theia-statusBarItem-prominentBackground': '#7c5cbf',
+  '--theia-statusBarItem-prominentBackground': '#7C3AED',
   '--theia-statusBarItem-prominentHoverBackground': '#8d6dd0',
-  '--theia-statusBarItem-remoteBackground': '#7c5cbf',
+  '--theia-statusBarItem-remoteBackground': '#7C3AED',
   '--theia-statusBarItem-remoteForeground': '#ffffff',
 
   // ----- Title bar -----
@@ -260,17 +260,17 @@ const KAIRO_DARK_VARS: Record<string, string> = {
 
   // ----- Welcome page -----
   '--theia-welcomePage-background': '#1e1f22',
-  '--theia-welcomePage-buttonBackground': '#7c5cbf',
+  '--theia-welcomePage-buttonBackground': '#7C3AED',
   '--theia-welcomePage-buttonHoverBackground': '#8d6dd0',
   '--theia-welcomePage-tileBackground': '#252629',
 
   // ----- Widgets -----
   '--theia-widget-shadow': '0 8px 28px rgba(0,0,0,0.45)',
   '--theia-widget-border': 'rgba(255,255,255,0.06)',
-  '--theia-sash-hoverBorder': '#7c5cbf',
+  '--theia-sash-hoverBorder': '#7C3AED',
   '--theia-contrastBorder': 'transparent',
   '--theia-contrastActiveBorder': 'transparent',
-  '--theia-progressBar-background': '#7c5cbf',
+  '--theia-progressBar-background': '#7C3AED',
 
   // ----- Terminal -----
   '--theia-terminal-background': '#18191c',
@@ -323,13 +323,13 @@ const KAIRO_DARK_VARS: Record<string, string> = {
 
   // ----- Settings -----
   '--theia-settings-headerForeground': '#dfe1e5',
-  '--theia-settings-modifiedItemIndicator': '#7c5cbf',
+  '--theia-settings-modifiedItemIndicator': '#7C3AED',
   '--theia-settings-dropdownBackground': '#1a1b1e',
   '--theia-settings-dropdownForeground': '#dfe1e5',
   '--theia-settings-dropdownBorder': '#2e3136',
   '--theia-settings-checkboxBackground': '#1a1b1e',
   '--theia-settings-checkboxBorder': '#3d4148',
-  '--theia-settings-checkboxForeground': '#7c5cbf',
+  '--theia-settings-checkboxForeground': '#7C3AED',
   '--theia-settings-textInputBackground': '#1a1b1e',
   '--theia-settings-textInputForeground': '#dfe1e5',
   '--theia-settings-textInputBorder': '#2e3136',
@@ -429,7 +429,7 @@ export const KairoDarkTheme: Theme = {
             style.id = styleId;
             style.textContent = `
                 .theia-button {
-                    background: var(--theia-button-background, #7c5cbf) !important;
+                    background: var(--theia-button-background, #7C3AED) !important;
                     color: var(--theia-button-foreground, #ffffff) !important;
                 }
                 .theia-button:hover {

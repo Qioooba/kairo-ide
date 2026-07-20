@@ -5,6 +5,49 @@ import { ColorRegistry } from '@theia/core/lib/browser/color-registry';
 import { ColorContribution } from '@theia/core/lib/browser/color-application-contribution';
 import { WidgetManager } from '@theia/core/lib/browser/widget-manager';
 import { KairoDarkTheme } from './kairo-theme';
+import * as monaco from '@theia/monaco-editor-core';
+
+/** Monaco editor theme backing `KairoDarkTheme.editorTheme`
+ * ('kairo-dark'). Without this definition Monaco silently falls
+ * back to a stock theme and the editor drifts from the product
+ * palette (KAIRO-RC-WEB-004). Colors mirror the CSS custom
+ * properties in kairo-theme.css. */
+export const KAIRO_MONACO_THEME: monaco.editor.IStandaloneThemeData = {
+    base: 'vs-dark',
+    inherit: true,
+    rules: [
+        { token: 'comment', foreground: '7a7e85', fontStyle: 'italic' },
+        { token: 'keyword', foreground: 'c586c0' },
+        { token: 'string', foreground: 'ce9178' },
+        { token: 'number', foreground: 'b5cea8' },
+        { token: 'type', foreground: '4ec9b0' },
+        { token: 'identifier', foreground: 'dfe1e5' },
+        { token: 'delimiter', foreground: 'a9adb3' },
+        { token: 'tag', foreground: '569cd6' },
+        { token: 'attribute.name', foreground: '9cdcfe' },
+        { token: 'attribute.value', foreground: 'ce9178' },
+    ],
+    colors: {
+        'editor.background': '#1e1f22',
+        'editor.foreground': '#dfe1e5',
+        'editor.lineHighlightBackground': '#252629',
+        'editorLineNumber.foreground': '#5a5d63',
+        'editorLineNumber.activeForeground': '#c5c8cc',
+        'editorCursor.foreground': '#a78bfa',
+        'editor.selectionBackground': '#7C3AED55',
+        'editor.inactiveSelectionBackground': '#7C3AED33',
+        'editorWidget.background': '#252629',
+        'editorWidget.border': '#3a3d42',
+        'editorBracketMatch.border': '#7C3AED',
+        'editorBracketMatch.background': '#7C3AED22',
+        'editorIndentGuide.background1': '#2c2e33',
+        'editorIndentGuide.activeBackground1': '#4a4d54',
+        'editorWhitespace.foreground': '#3a3d42',
+        'scrollbarSlider.background': '#4a4d5480',
+        'scrollbarSlider.hoverBackground': '#5a5d63a0',
+        'scrollbarSlider.activeBackground': '#7C3AEDa0',
+    },
+};
 
 /** CSS variable overrides for the Kairo dark theme. These win
  * over the Theia defaults because ColorRegistry writes them as
@@ -17,7 +60,7 @@ export const KAIRO_THEME_COLOR_OVERRIDES = [
     { id: 'editor.foreground', defaults: { dark: '#dfe1e5', light: '#1f1f1f' }, description: 'Editor foreground' },
     { id: 'editorWidget.background', defaults: { dark: '#252629', light: '#ffffff' }, description: 'Editor widget background' },
     { id: 'input.background', defaults: { dark: '#1a1b1e', light: '#ffffff' }, description: 'Input background' },
-    { id: 'button.background', defaults: { dark: '#7c5cbf', light: '#1a73e8' }, description: 'Button background' },
+    { id: 'button.background', defaults: { dark: '#7C3AED', light: '#1a73e8' }, description: 'Button background' },
     { id: 'button.foreground', defaults: { dark: '#ffffff', light: '#ffffff' }, description: 'Button foreground' },
     { id: 'statusBar.background', defaults: { dark: '#1a1b1e', light: '#fafafa' }, description: 'Status bar background' },
     { id: 'statusBar.foreground', defaults: { dark: '#c5c8cc', light: '#1f1f1f' }, description: 'Status bar foreground' },
@@ -46,6 +89,9 @@ export class KairoThemeContribution implements FrontendApplicationContribution, 
     }
 
     onStart(): void {
+        // Define the Monaco editor theme BEFORE editors can be
+        // created; KairoDarkTheme.editorTheme references this id.
+        monaco.editor.defineTheme('kairo-dark', KAIRO_MONACO_THEME);
         this.themeService.register(KairoDarkTheme);
         this.themeService.setCurrentTheme(KairoDarkTheme.id);
 
