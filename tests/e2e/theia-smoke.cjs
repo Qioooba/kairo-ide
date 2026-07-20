@@ -33,10 +33,21 @@ function step(name) {
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const page = await ctx.newPage();
   const errors = [];
+  const consoleErrorWhitelist = [
+    // Third-party font/telemetry noise that does not affect product function.
+  ];
   page.on('console', m => {
-    if (m.type() === 'error') errors.push(`[console] ${m.text()}`);
+    if (m.type() === 'error') {
+      const text = m.text();
+      if (consoleErrorWhitelist.some((w) => text.includes(w))) return;
+      errors.push(`[console] ${text}`);
+    }
   });
   page.on('pageerror', e => errors.push(`[pageerror] ${e.message}`));
+  page.on('requestfailed', req => {
+    if (!req.url().startsWith('http://127.0.0.1')) return;
+    errors.push(`[request] ${req.method()} ${req.url()} — ${req.failure()?.errorText || 'unknown'}`);
+  });
 
   step(`navigating to ${theiaUrl}`);
   await page.goto(theiaUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 });
@@ -83,24 +94,23 @@ function step(name) {
     console.warn('No Kairo commands found in the command palette');
   }
 
-  step('opening the Kairo Servers view');
+  step('opening the Kairo Servers view via command palette');
   await page.keyboard.press('Escape');
   await page.waitForTimeout(300);
-  await page.evaluate(() => {
-    // The KairoCommands.REVEAL_KAIRO_SERVERS id is 'kairo.view.servers'.
-    // Theia wires the command id in the global `theia.commands`.
-    const w = window;
-    if (w.theia && w.theia.commands && typeof w.theia.commands.executeCommand === 'function') {
-      return w.theia.commands.executeCommand('kairo.view.servers');
-    }
-    return null;
-  });
+  await page.keyboard.press('F1');
+  await page.waitForSelector('.quick-input-widget input[type="text"]', { timeout: 10_000 });
+  await page.fill('.quick-input-widget input[type="text"]', 'Kairo: Open Servers View');
+  await page.waitForTimeout(500);
+  const serverRow = await page.$('.monaco-list .monaco-list-row');
+  if (serverRow) await serverRow.click();
   await page.waitForTimeout(1_000);
   await page.screenshot({ path: path.join(outDir, '03-theia-servers-view.png') });
 
   if (errors.length > 0) {
-    console.warn('console errors during smoke:');
-    for (const e of errors) console.warn('  ' + e);
+    console.error('console/page/request errors during smoke:');
+    for (const e of errors.slice(0, 20)) console.error('  ' + e);
+    await browser.close();
+    process.exit(1);
   }
 
   await browser.close();

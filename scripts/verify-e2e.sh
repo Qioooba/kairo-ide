@@ -52,10 +52,12 @@ DEPLOY_OUT="$ROOT/webapp"
 BUILD_OUT="$ROOT/build-out"
 mkdir -p "$DEPLOY_OUT" "$BUILD_OUT"
 
-# Previously this was a hard-coded path to the original author's
-# /Users/qi/.mavis/sessions/... workspace. Use the repo-relative
-# legacy-sample so the script is portable.
-LEGACY="$REPO_ROOT/legacy-sample"
+# Copy the repo fixture to a temp directory so we never modify
+# the source tree. All destructive operations happen under ROOT.
+SRC_LEGACY="$REPO_ROOT/legacy-sample"
+LEGACY="$ROOT/legacy-sample"
+rm -rf "$LEGACY"
+cp -R "$SRC_LEGACY" "$LEGACY"
 
 echo "[1/6] build"
 BUILD_RESP=$(curl -fsS -X POST "http://127.0.0.1:${PORT}/api/v1/builds" -H "Content-Type: application/json" \
