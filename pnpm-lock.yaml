@@ -126,22 +126,6 @@ importers:
         specifier: 25.1.8
         version: 25.1.8(electron-builder-squirrel-windows@25.1.8)
 
-  apps/server:
-    dependencies:
-      '@kairo/protocol':
-        specifier: workspace:*
-        version: link:../../packages/protocol
-      '@kairo/runtime-extension':
-        specifier: workspace:*
-        version: link:../../packages/runtime-extension
-      '@kairo/theia-product':
-        specifier: workspace:*
-        version: link:../../packages/theia-product
-    devDependencies:
-      '@types/node':
-        specifier: 20.14.10
-        version: 20.14.10
-
   packages/build-extension:
     dependencies:
       '@kairo/project-extension':
@@ -203,6 +187,9 @@ importers:
         specifier: 1.73.1
         version: 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.5.4)
     devDependencies:
+      iconv-lite:
+        specifier: ^0.7.3
+        version: 0.7.3
       source-map-support:
         specifier: ^0.5.21
         version: 0.5.21
@@ -3669,6 +3656,10 @@ packages:
 
   iconv-lite@0.6.3:
     resolution: {integrity: sha512-4fCk79wshMdzMp2rH06qWrJE4iolqLhCUH+OiuIgU++RB0+94NlDL81atO7GX55uUKueo0txHNtvEyI6D7WdMw==}
+    engines: {node: '>=0.10.0'}
+
+  iconv-lite@0.7.3:
+    resolution: {integrity: sha512-IKXpvIzjnC9XTAUbVBcMfGS0EPaIXtW6v+zr+RRp+hqULEpo0owZax6wyRwPOJbWbzjYspQwusTsfVr0ifh4uQ==}
     engines: {node: '>=0.10.0'}
 
   icss-utils@5.1.0:
@@ -10420,6 +10411,10 @@ snapshots:
       safer-buffer: 2.1.2
 
   iconv-lite@0.6.3:
+    dependencies:
+      safer-buffer: 2.1.2
+
+  iconv-lite@0.7.3:
     dependencies:
       safer-buffer: 2.1.2
 

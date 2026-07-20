@@ -52,10 +52,11 @@ DEPLOY_OUT="$ROOT/webapp"
 BUILD_OUT="$ROOT/build-out"
 mkdir -p "$DEPLOY_OUT" "$BUILD_OUT"
 
-# Previously this was a hard-coded path to the original author's
-# /Users/qi/.mavis/sessions/... workspace. Use the repo-relative
-# legacy-sample so the script is portable.
-LEGACY="$REPO_ROOT/legacy-sample"
+# Copy the legacy sample to a temp directory so destructive edits
+# never mutate the repository fixture.
+LEGACY_SOURCE="$REPO_ROOT/legacy-sample"
+LEGACY="$ROOT/legacy-sample"
+cp -R "$LEGACY_SOURCE" "$LEGACY"
 
 echo "[1/6] build"
 BUILD_RESP=$(curl -fsS -X POST "http://127.0.0.1:${PORT}/api/v1/builds" -H "Content-Type: application/json" \
@@ -107,10 +108,10 @@ done
 echo "  summary: $PASS passed, $FAIL failed"
 
 echo "[5/6] static sync (modify JSP)"
-# Modify hello.jsp
+# Modify hello.jsp in the temp fixture only.
 /usr/bin/python3 -c "
 old = open('${LEGACY}/WebRoot/hello.jsp','rb').read()
-new = old.replace(b'<title>\xc4\xe3\xba\xc3\xa3\xacKairo</title>', b'<title>CHANGED!</title>')
+new = old.replace(b'<title>\xc4\xe3\xba\xc3\xa3\xac,Kairo</title>', b'<title>CHANGED!</title>')
 open('${LEGACY}/WebRoot/hello.jsp','wb').write(new)
 "
 deploy d5 "${LEGACY}/WebRoot/hello.jsp" "${DEPLOY_OUT}/hello.jsp"
