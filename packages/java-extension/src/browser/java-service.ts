@@ -75,11 +75,7 @@ export class KairoJavaService {
     try {
       const st = (await this.runtime.request('GET /api/v1/jdtls', undefined)) as JdtStatus;
       this.status = st;
-      // If the wire state is `running` but the initialize
-      // handshake has not completed, the service is
-      // "initializing", not "ready". Anything other than
-      // ready is reflected locally.
-      if (st.state === 'running' && st.initializeOk) {
+      if (st.state === 'running') {
         if (
           st.sourceLevel &&
           st.sourceLevel !== '1.6' &&
@@ -90,8 +86,6 @@ export class KairoJavaService {
         } else {
           this.setState('ready', st);
         }
-      } else if (st.state === 'running') {
-        this.setState('initializing', st);
       } else {
         this.setState(st.state as JdtState, st);
       }

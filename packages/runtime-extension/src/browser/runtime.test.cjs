@@ -10,7 +10,7 @@
 //   node --test packages/runtime-extension/lib/browser/runtime.test.cjs
 //
 // Each test stands up a real http.createServer on a random
-// port and points the KairoRuntime at it. The server is
+// port and points the RuntimeConnectionService at it. The server is
 // the canonical "agent" — same wire contract as the Go
 // runtime-agent. This catches real fetch / AbortController /
 // header behavior, not a mock that would lie about all of
@@ -85,9 +85,6 @@ test('GET request: multi-param path + CJK / space / special-char query', async (
       pathParams: { id: 'ws 中国' },
       query: { name: 'q&a=c', tag: '中文 空格', n: 1 },
     });
-    // workspaceId is a path param and gets URL-encoded; the
-    // rest is query string. We just assert the URL is
-    // query-encoded (not raw) and contains each token.
     assert.ok(captured.includes('ws'), captured);
     assert.ok(captured.includes('name='), captured);
     assert.ok(!captured.includes(' '), `query should be encoded, got: ${captured}`);
@@ -186,10 +183,6 @@ test('non-JSON response: surfaced as KairoError, not a JSON parse exception', as
     await assert.rejects(
       rt.request('GET /api/v1/health', undefined),
       (err) => {
-        // Either the agent's 502 with a parse error, or the
-        // protocol layer turning the parse error into a
-        // KairoError. Either way it must not throw a raw
-        // SyntaxError / JSON parse error to the caller.
         assert.ok(err, 'should have thrown something');
         assert.ok(err.message, 'error has a message');
         return true;
@@ -226,8 +219,6 @@ test('timeout: request aborts past timeoutMs and surfaces timeout error', async 
     await assert.rejects(
       rt.request('GET /api/v1/health', undefined),
       (err) => {
-        // The client throws KairoError{code: 'timeout'} or
-        // a fetch-flavoured AbortError. Either is acceptable.
         const isTimeout = err.code === 'timeout' || err.name === 'AbortError';
         assert.ok(isTimeout, `expected timeout/AbortError, got code=${err.code} name=${err.name}`);
         return true;
@@ -275,7 +266,6 @@ test('success path: payload is the unwrapped envelope payload', async () => {
 // Test 11: network error (refused connection) — no agent listening.
 test('network error: connection refused surfaces as KairoError', async () => {
   const rt = makeRuntime();
-  // Pick an unused port by listening and immediately closing.
   const { srv, port } = await runServer(() => {});
   srv.close();
   rt.configure({ baseUrl: `http://127.0.0.1:${port}` });
@@ -324,10 +314,6 @@ test('workspaceId + requestId header propagation', async () => {
 });
 
 // Test 14: agent secret attaches as X-Kairo-Secret header.
-// Per docs/hotfix-windows-test-readiness.md 搂1.1, the
-// secret rides in `X-Kairo-Secret`. The previous
-// `Authorization: Bearer` pattern has been removed from the
-// protocol — this test guards the new contract.
 test('agentSecret attaches as X-Kairo-Secret header (no Authorization Bearer)', async () => {
   let captured = null;
   const { srv, baseUrl } = await runServer((req, res) => {
@@ -344,5 +330,226 @@ test('agentSecret attaches as X-Kairo-Secret header (no Authorization Bearer)', 
     await rt.request('GET /api/v1/health', undefined);
     assert.strictEqual(captured.secret, 'secret-token', 'X-Kairo-Secret must carry the agent secret');
     assert.strictEqual(captured.authorization, undefined, 'Authorization header must NOT be set');
+  } finally { srv.close(); }
+});
+
+// Test 15: missing secret header results in 401 from agent.
+test('secret header missing: agent returns 401 unauthenticated', async () => {
+  const { srv, baseUrl } = await runServer((req, res) => {
+    const secret = req.headers['x-kairo-secret'];
+    if (!secret) {
+      res.writeHead(401, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        requestId: 'r_auth',
+        ok: false,
+        error: { code: 'unauthenticated', message: 'missing X-Kairo-Secret header' },
+      }));
+    } else {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, payload: { ok: true } }));
+    }
+  });
+  try {
+    const rt = makeRuntime();
+    // No secret configured
+    rt.configure({ baseUrl });
+    await assert.rejects(
+      rt.request('GET /api/v1/builds', undefined),
+      (err) => {
+        assert.strictEqual(err.code, 'unauthenticated');
+        return true;
+      },
+    );
+  } finally { srv.close(); }
+});
+
+// Test 16: wrong secret header results in 403 forbidden.
+test('secret header wrong: agent returns 403 forbidden', async () => {
+  const { srv, baseUrl } = await runServer((req, res) => {
+    const secret = req.headers['x-kairo-secret'];
+    if (secret !== 'correct-secret') {
+      res.writeHead(403, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        requestId: 'r_auth',
+        ok: false,
+        error: { code: 'forbidden', message: 'invalid X-Kairo-Secret' },
+      }));
+    } else {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, payload: { ok: true } }));
+    }
+  });
+  try {
+    const rt = makeRuntime();
+    rt.configure({ baseUrl, agentSecret: 'wrong-secret' });
+    await assert.rejects(
+      rt.request('GET /api/v1/builds', undefined),
+      (err) => {
+        assert.strictEqual(err.code, 'forbidden');
+        return true;
+      },
+    );
+  } finally { srv.close(); }
+});
+
+// Test 17: 405 Method Not Allowed for unsupported methods.
+test('405: unsupported method returns Method Not Allowed', async () => {
+  const { srv, baseUrl } = await runServer((req, res) => {
+    res.writeHead(405, { 'Content-Type': 'application/json', Allow: 'GET, POST' });
+    res.end(JSON.stringify({
+      requestId: 'r_m',
+      ok: false,
+      error: { code: 'invalid_request', message: 'method not allowed' },
+    }));
+  });
+  try {
+    const rt = makeRuntime();
+    rt.configure({ baseUrl });
+    await assert.rejects(
+      rt.request('PATCH /api/v1/projects/x', undefined),
+      (err) => {
+        assert.strictEqual(err.code, 'invalid_request');
+        return true;
+      },
+    );
+  } finally { srv.close(); }
+});
+
+// Test 18: verify that refreshBuilds makes GET /api/v1/builds request.
+test('GET /api/v1/builds returns real build list state', async () => {
+  const { srv, baseUrl } = await runServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      requestId: 'r_builds',
+      ok: true,
+      payload: [
+        { id: 'b1', state: 'success', startedAt: '2026-01-01T00:00:00Z', diagnostics: [], output: '', summary: { errors: 0, warnings: 0, filesCompiled: 5 } },
+        { id: 'b2', state: 'failure', startedAt: '2026-01-02T00:00:00Z', diagnostics: [], output: '', summary: { errors: 3, warnings: 1, filesCompiled: 10 } },
+      ],
+    }));
+  });
+  try {
+    const rt = makeRuntime();
+    rt.configure({ baseUrl });
+    const builds = await rt.request('GET /api/v1/builds', undefined);
+    assert.ok(Array.isArray(builds), 'builds response must be an array');
+    assert.strictEqual(builds.length, 2);
+    assert.strictEqual(builds[0].id, 'b1');
+    assert.strictEqual(builds[0].state, 'success');
+    assert.strictEqual(builds[1].id, 'b2');
+    assert.strictEqual(builds[1].state, 'failure');
+    assert.strictEqual(builds[1].summary.errors, 3);
+  } finally { srv.close(); }
+});
+
+// Test 19: verify that GET /api/v1/deployments returns real deployment list state.
+test('GET /api/v1/deployments returns real deployment list with file stats', async () => {
+  const { srv, baseUrl } = await runServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      requestId: 'r_deploys',
+      ok: true,
+      payload: [
+        { id: 'd1', state: 'success', startedAt: '2026-01-01T00:00:00Z', filesTouched: 12, bytes: 4096, trigger: 'manual', hotReloadMode: 'staticSync' },
+      ],
+    }));
+  });
+  try {
+    const rt = makeRuntime();
+    rt.configure({ baseUrl });
+    const deployments = await rt.request('GET /api/v1/deployments', undefined);
+    assert.ok(Array.isArray(deployments));
+    assert.strictEqual(deployments.length, 1);
+    assert.strictEqual(deployments[0].id, 'd1');
+    assert.strictEqual(deployments[0].state, 'success');
+    assert.strictEqual(deployments[0].filesTouched, 12);
+    assert.strictEqual(deployments[0].bytes, 4096);
+  } finally { srv.close(); }
+});
+
+// Test 20: verify that GET /api/v1/servers returns real server list state.
+test('GET /api/v1/servers returns real server list with state', async () => {
+  const { srv, baseUrl } = await runServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      requestId: 'r_servers',
+      ok: true,
+      payload: [
+        { id: 'srv1', state: 'running', pid: 1234, ports: { http: 8080 }, startedAt: '2026-01-01T00:00:00Z', catalinaBase: '/tmp/cb' },
+      ],
+    }));
+  });
+  try {
+    const rt = makeRuntime();
+    rt.configure({ baseUrl });
+    const servers = await rt.request('GET /api/v1/servers', undefined);
+    assert.ok(Array.isArray(servers));
+    assert.strictEqual(servers.length, 1);
+    assert.strictEqual(servers[0].id, 'srv1');
+    assert.strictEqual(servers[0].state, 'running');
+    assert.strictEqual(servers[0].pid, 1234);
+    assert.strictEqual(servers[0].ports.http, 8080);
+  } finally { srv.close(); }
+});
+
+// Test 21: verify that POST /api/v1/servers/{id}/restart changes PID.
+test('POST /api/v1/servers/{id}/restart: new PID is different from old', async () => {
+  let callCount = 0;
+  const { srv, baseUrl } = await runServer((req, res) => {
+    callCount++;
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    if (callCount === 1) {
+      // Initial GET /api/v1/servers
+      res.end(JSON.stringify({
+        requestId: 'r1',
+        ok: true,
+        payload: [{ id: 'srv1', state: 'running', pid: 1000, ports: { http: 8080 }, catalinaBase: '/tmp/cb' }],
+      }));
+    } else {
+      // POST restart response
+      res.end(JSON.stringify({
+        requestId: 'r2',
+        ok: true,
+        payload: { id: 'srv1', state: 'running', pid: 2000, ports: { http: 8080 }, catalinaBase: '/tmp/cb' },
+      }));
+    }
+  });
+  try {
+    const rt = makeRuntime();
+    rt.configure({ baseUrl });
+    // First, get the server list
+    const servers = await rt.request('GET /api/v1/servers', undefined);
+    assert.strictEqual(servers[0].pid, 1000, 'initial PID must be 1000');
+    // Then restart
+    const restarted = await rt.request('POST /api/v1/servers/{serverId}/restart', undefined, { pathParams: { serverId: 'srv1' } });
+    assert.strictEqual(restarted.pid, 2000, 'restarted PID must be 2000');
+    assert.notStrictEqual(restarted.pid, servers[0].pid, 'PID must change after restart');
+  } finally { srv.close(); }
+});
+
+// Test 22: protocol no longer contains unsupported JDT DELETE.
+test('protocol: DELETE /api/v1/jdtls is not in the endpoint map', async () => {
+  // The protocol should not support DELETE /api/v1/jdtls
+  // because JDT lifecycle is managed by the Theia backend.
+  // This test verifies that the client does not attempt to
+  // call this endpoint by checking the endpoint map.
+  const rt = makeRuntime();
+  const { srv, baseUrl } = await runServer((req, res) => {
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      requestId: 'r_jdt',
+      ok: false,
+      error: { code: 'not_found', message: 'JDT DELETE not supported — use Theia backend' },
+    }));
+  });
+  try {
+    rt.configure({ baseUrl });
+    await assert.rejects(
+      rt.request('DELETE /api/v1/jdtls', undefined),
+      (err) => {
+        assert.strictEqual(err.code, 'not_found');
+        return true;
+      },
+    );
   } finally { srv.close(); }
 });

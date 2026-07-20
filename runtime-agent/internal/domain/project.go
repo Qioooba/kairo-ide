@@ -253,6 +253,7 @@ type ServerHistoryRepository interface {
 	Save(ctx context.Context, record ServerRecord) error
 	Get(ctx context.Context, workspaceID WorkspaceID, serverID ServerID) (*ServerRecord, error)
 	List(ctx context.Context, workspaceID WorkspaceID) ([]ServerRecord, error)
+	ListByProject(ctx context.Context, workspaceID WorkspaceID, projectID ProjectID, limit int) ([]*ServerRecord, error)
 	ListNonTerminal(ctx context.Context) ([]*ServerRecord, error)
 	Delete(ctx context.Context, workspaceID WorkspaceID, serverID ServerID) error
 }
@@ -265,6 +266,24 @@ type ServerEventPublisher interface {
 	PublishServerEvent(ctx context.Context, event ServerEvent) error
 }
 
+// ProjectConfig is the domain-level representation of the .kairo/project.yaml
+// content. It is the single source of truth for project configuration.
+type ProjectConfig struct {
+	SchemaVersion int        `yaml:"schemaVersion" json:"schemaVersion"`
+	Name          string     `yaml:"name" json:"name"`
+	SourceRoots   []string   `yaml:"sourceRoots" json:"sourceRoots"`
+	ResourceRoots []string   `yaml:"resourceRoots" json:"resourceRoots"`
+	WebappDir     string     `yaml:"webappDir" json:"webappDir"`
+	OutputDir     string     `yaml:"outputDir" json:"outputDir"`
+	SourceLevel   string     `yaml:"sourceLevel" json:"sourceLevel"`
+	TargetLevel   string     `yaml:"targetLevel" json:"targetLevel"`
+	Encoding      string     `yaml:"encoding" json:"encoding"`
+	BuildTool     BuildToolID `yaml:"buildTool" json:"buildTool"`
+	ContextPath   string     `yaml:"contextPath" json:"contextPath"`
+	ToolchainID   string     `yaml:"toolchainId,omitempty" json:"toolchainId,omitempty"`
+	RuntimeID     string     `yaml:"runtimeId,omitempty" json:"runtimeId,omitempty"`
+}
+
 type Workspace struct {
 	ID         WorkspaceID `json:"id"`
 	Name       string      `json:"name"`
@@ -273,27 +292,31 @@ type Workspace struct {
 	CreatedAt  time.Time   `json:"createdAt"`
 }
 
+// Project is the domain entity for a project. ProjectID is an opaque
+// identifier — it does not encode path information.
 type Project struct {
-	ID            ProjectID   `json:"id"`
-	WorkspaceID   WorkspaceID `json:"workspaceId"`
-	Name          string      `json:"name"`
-	Root          string      `json:"root"`
-	SourceRoots   []string    `json:"sourceRoots"`
-	ResourceRoots []string    `json:"resourceRoots"`
-	LibraryDirs   []string    `json:"libraryDirs"`
-	WebappDir     string      `json:"webappDir"`
-	OutputDir     string      `json:"outputDir"`
-	BuildFile     string      `json:"buildFile"`
-	BuildTargets  []string    `json:"buildTargets"`
-	SourceLevel   string      `json:"sourceLevel"`
-	TargetLevel   string      `json:"targetLevel"`
-	Encoding      string      `json:"encoding"`
-	BuildTool     BuildToolID `json:"buildTool"`
-	ContextPath   string      `json:"contextPath"`
-	ToolchainID   string      `json:"toolchainId,omitempty"`
-	RuntimeID     string      `json:"runtimeId,omitempty"`
-	CreatedAt     time.Time   `json:"createdAt"`
-	UpdatedAt     time.Time   `json:"updatedAt"`
+	ID            ProjectID     `json:"id"`
+	WorkspaceID   WorkspaceID   `json:"workspaceId"`
+	Name          string        `json:"name"`
+	RootPath      string        `json:"rootPath"`   // canonical absolute path (repository internal)
+	Root          string        `json:"root"`        // legacy — prefer RootPath
+	Config        ProjectConfig `json:"config"`
+	SourceRoots   []string      `json:"sourceRoots"`
+	ResourceRoots []string      `json:"resourceRoots"`
+	LibraryDirs   []string      `json:"libraryDirs"`
+	WebappDir     string        `json:"webappDir"`
+	OutputDir     string        `json:"outputDir"`
+	BuildFile     string        `json:"buildFile"`
+	BuildTargets  []string      `json:"buildTargets"`
+	SourceLevel   string        `json:"sourceLevel"`
+	TargetLevel   string        `json:"targetLevel"`
+	Encoding      string        `json:"encoding"`
+	BuildTool     BuildToolID   `json:"buildTool"`
+	ContextPath   string        `json:"contextPath"`
+	ToolchainID   string        `json:"toolchainId,omitempty"`
+	RuntimeID     string        `json:"runtimeId,omitempty"`
+	CreatedAt     time.Time     `json:"createdAt"`
+	UpdatedAt     time.Time     `json:"updatedAt"`
 }
 
 type ResolvedProject struct {

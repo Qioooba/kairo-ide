@@ -403,6 +403,48 @@ export const KairoDarkTheme: Theme = {
         for (const [key, value] of Object.entries(KAIRO_DARK_VARS)) {
             root.style.setProperty(key, value);
         }
+        // The Theia 1.73 ColorApplicationContribution writes the
+        // dark/light defaults from its color registry into the
+        // same inline style synchronously on `onDidColorThemeChange`,
+        // and it can race with `KairoDarkTheme.activate()` for the
+        // few slots that aren't part of KAIRO_DARK_VARS
+        // (button.background, statusBar.background, etc.). We don't
+        // know which one wins, so we re-assert our values on the
+        // next animation frame and also after a 50 ms timer to
+        // cover the lazy color registrations. See N-034.
+        const reassert = () => {
+            for (const [key, value] of Object.entries(KAIRO_DARK_VARS)) {
+                root.style.setProperty(key, value);
+            }
+        };
+        requestAnimationFrame(reassert);
+        setTimeout(reassert, 50);
+        setTimeout(reassert, 250);
+
+        // Override Theia 1.73 hard-coded button colors that ignore
+        // CSS variables. We inject a style tag with higher specificity.
+        const styleId = 'kairo-theme-overrides';
+        if (!document.getElementById(styleId)) {
+            const style = document.createElement('style');
+            style.id = styleId;
+            style.textContent = `
+                .theia-button {
+                    background: var(--theia-button-background, #7c5cbf) !important;
+                    color: var(--theia-button-foreground, #ffffff) !important;
+                }
+                .theia-button:hover {
+                    background: var(--theia-button-hoverBackground, #8d6dd0) !important;
+                }
+                .theia-button.secondary {
+                    background: var(--theia-button-secondaryBackground, #37393d) !important;
+                    color: var(--theia-button-secondaryForeground, #dfe1e5) !important;
+                }
+                .theia-button.secondary:hover {
+                    background: var(--theia-button-secondaryHoverBackground, #44464c) !important;
+                }
+            `;
+            document.head.appendChild(style);
+        }
     },
     deactivate(): void {
         // No-op for static theme

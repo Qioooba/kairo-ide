@@ -8,6 +8,7 @@
 
 import { ContainerModule } from '@theia/core/shared/inversify';
 import { FrontendApplicationContribution } from '@theia/core/lib/browser/frontend-application-contribution';
+import { ColorContribution } from '@theia/core/lib/browser/color-application-contribution';
 import { KairoUiContribution } from './kairo-ui-contribution';
 import { KairoThemeContribution } from './kairo-theme-contribution';
 
@@ -21,4 +22,11 @@ export default new ContainerModule(bind => {
   bind(FrontendApplicationContribution).toService(KairoUiContribution);
   bind(KairoThemeContribution).toSelf().inSingletonScope();
   bind(FrontendApplicationContribution).toService(KairoThemeContribution);
+  // KairoThemeContribution also implements ColorContribution so
+  // Theia's ColorApplicationContribution picks up Kairo's color
+  // overrides (button.background, statusBar.background, …) on
+  // startup. Without this, the Theia defaults (#007acc blue)
+  // leak through after KairoDarkTheme.activate() and override
+  // the values we just wrote. See N-034.
+  bind(ColorContribution).toService(KairoThemeContribution);
 });

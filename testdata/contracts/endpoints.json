@@ -1,0 +1,657 @@
+{
+  "version": "v1",
+  "description": "Golden fixtures for Kairo IDE API contract tests. Shared between Go and TypeScript test suites.",
+  "endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/v1/health",
+      "description": "Agent health check (no auth required)",
+      "request": null,
+      "successResponse": {
+        "status": 200,
+        "payload": {
+          "ok": true,
+          "version": "v1",
+          "agentVersion": "0.1.0",
+          "uptimeSec": 0,
+          "platform": { "os": "linux", "arch": "amd64" },
+          "bindAddress": "127.0.0.1",
+          "port": 18080,
+          "activeSessions": 0
+        }
+      },
+      "errorResponses": []
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspaces",
+      "description": "List workspaces",
+      "request": null,
+      "successResponse": {
+        "status": 200,
+        "payload": [
+          {
+            "id": "ws-1",
+            "name": "legacy-sample",
+            "rootPath": "/tmp/workspace/legacy-sample",
+            "createdAt": "2026-01-01T00:00:00Z",
+            "lastOpenedAt": "2026-01-01T00:00:00Z",
+            "userId": "user-1"
+          }
+        ]
+      },
+      "errorResponses": [
+        { "status": 401, "code": "unauthenticated", "message": "missing X-Kairo-Secret" },
+        { "status": 403, "code": "forbidden", "message": "access denied" }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/workspaces",
+      "description": "Import workspace",
+      "request": { "rootPath": "/tmp/legacy-sample", "name": "My Project" },
+      "successResponse": {
+        "status": 201,
+        "payload": {
+          "id": "ws-new",
+          "name": "My Project",
+          "rootPath": "/tmp/legacy-sample",
+          "createdAt": "2026-01-01T00:00:00Z",
+          "lastOpenedAt": "2026-01-01T00:00:00Z",
+          "userId": "user-1"
+        }
+      },
+      "errorResponses": [
+        { "status": 400, "code": "invalid_request", "message": "rootPath is required" },
+        { "status": 401, "code": "unauthenticated", "message": "missing X-Kairo-Secret" },
+        { "status": 405, "code": "invalid_request", "message": "method not allowed" }
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/workspaces/{workspaceId}",
+      "description": "Delete workspace",
+      "request": null,
+      "successResponse": { "status": 204, "payload": null },
+      "errorResponses": [
+        { "status": 401, "code": "unauthenticated", "message": "missing X-Kairo-Secret" },
+        { "status": 404, "code": "not_found", "message": "workspace not found" }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/workspaces/{workspaceId}/scan",
+      "description": "Scan workspace for project layout",
+      "request": { "deep": true },
+      "successResponse": {
+        "status": 200,
+        "payload": {
+          "detected": [
+            {
+              "rootPath": "/tmp/legacy-sample",
+              "layout": {
+                "src": ["src/main/java"],
+                "webRoot": "WebRoot",
+                "config": []
+              },
+              "buildSystem": "ant",
+              "encodingByExtension": { ".java": "utf-8", ".jsp": "gbk" },
+              "confidence": 0.95,
+              "warnings": []
+            }
+          ]
+        }
+      },
+      "errorResponses": [
+        { "status": 401, "code": "unauthenticated", "message": "missing X-Kairo-Secret" },
+        { "status": 404, "code": "not_found", "message": "workspace not found" }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/projects",
+      "description": "List projects",
+      "request": null,
+      "successResponse": {
+        "status": 200,
+        "payload": [
+          {
+            "id": "proj-1",
+            "name": "legacy-sample",
+            "rootPath": "legacy-sample",
+            "sourceLayout": { "src": ["src/main/java"], "webRoot": "WebRoot", "config": [] },
+            "encoding": { "default": "utf-8" },
+            "java": {
+              "languageServer": { "toolchainId": "auto", "fingerprint": "sha256:abc" },
+              "compiler": { "toolchainId": "auto", "fingerprint": "sha256:abc", "sourceLevel": "1.6", "targetLevel": "1.6" },
+              "runtime": { "toolchainId": "auto", "fingerprint": "sha256:abc" }
+            },
+            "serverRuntime": { "type": "tomcat6", "config": { "httpPort": 8080, "contextPath": "/kairo" } },
+            "build": { "mode": "ant", "antFile": "build.xml" },
+            "deploy": { "mode": "copy", "target": "bundled/tomcat6/webapps" },
+            "hotReload": { "mode": "staticSync", "debounceMs": 500 }
+          }
+        ]
+      },
+      "errorResponses": [
+        { "status": 401, "code": "unauthenticated", "message": "missing X-Kairo-Secret" }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/projects/{projectId}",
+      "description": "Get project by ID",
+      "request": null,
+      "successResponse": {
+        "status": 200,
+        "payload": {
+          "id": "proj-1",
+          "name": "legacy-sample",
+          "rootPath": "legacy-sample",
+          "sourceLayout": { "src": ["src/main/java"], "webRoot": "WebRoot", "config": [] },
+          "encoding": { "default": "utf-8" },
+          "java": {
+            "languageServer": { "toolchainId": "auto", "fingerprint": "sha256:abc" },
+            "compiler": { "toolchainId": "auto", "fingerprint": "sha256:abc", "sourceLevel": "1.6", "targetLevel": "1.6" },
+            "runtime": { "toolchainId": "auto", "fingerprint": "sha256:abc" }
+          },
+          "serverRuntime": { "type": "tomcat6", "config": { "httpPort": 8080, "contextPath": "/kairo" } },
+          "build": { "mode": "ant", "antFile": "build.xml" },
+          "deploy": { "mode": "copy", "target": "bundled/tomcat6/webapps" },
+          "hotReload": { "mode": "staticSync", "debounceMs": 500 }
+        }
+      },
+      "errorResponses": [
+        { "status": 401, "code": "unauthenticated", "message": "missing X-Kairo-Secret" },
+        { "status": 404, "code": "not_found", "message": "project not found" }
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/projects/{projectId}",
+      "description": "Update project config",
+      "request": {
+        "config": {
+          "sourceLevel": "1.8",
+          "targetLevel": "1.8"
+        }
+      },
+      "successResponse": {
+        "status": 200,
+        "payload": {
+          "id": "proj-1",
+          "name": "legacy-sample",
+          "rootPath": "legacy-sample",
+          "sourceLayout": { "src": ["src/main/java"], "webRoot": "WebRoot", "config": [] },
+          "encoding": { "default": "utf-8" },
+          "java": {
+            "languageServer": { "toolchainId": "auto", "fingerprint": "sha256:abc" },
+            "compiler": { "toolchainId": "auto", "fingerprint": "sha256:abc", "sourceLevel": "1.8", "targetLevel": "1.8" },
+            "runtime": { "toolchainId": "auto", "fingerprint": "sha256:abc" }
+          },
+          "serverRuntime": { "type": "tomcat6", "config": { "httpPort": 8080, "contextPath": "/kairo" } },
+          "build": { "mode": "ant", "antFile": "build.xml" },
+          "deploy": { "mode": "copy", "target": "bundled/tomcat6/webapps" },
+          "hotReload": { "mode": "staticSync", "debounceMs": 500 }
+        }
+      },
+      "errorResponses": [
+        { "status": 400, "code": "invalid_request", "message": "invalid config" },
+        { "status": 401, "code": "unauthenticated", "message": "missing X-Kairo-Secret" },
+        { "status": 404, "code": "not_found", "message": "project not found" }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/builds",
+      "description": "List builds",
+      "request": null,
+      "successResponse": {
+        "status": 200,
+        "payload": [
+          {
+            "id": "build-1",
+            "state": "success",
+            "startedAt": "2026-01-01T00:00:00Z",
+            "finishedAt": "2026-01-01T00:00:30Z",
+            "diagnostics": [],
+            "output": "Build successful",
+            "summary": { "errors": 0, "warnings": 0, "filesCompiled": 5 }
+          }
+        ]
+      },
+      "errorResponses": [
+        { "status": 401, "code": "unauthenticated", "message": "missing X-Kairo-Secret" }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/builds",
+      "description": "Start a build",
+      "request": { "projectId": "proj-1", "clean": true },
+      "successResponse": {
+        "status": 202,
+        "payload": {
+          "id": "build-new",
+          "state": "queued",
+          "startedAt": "2026-01-01T00:00:00Z",
+          "diagnostics": [],
+          "output": "",
+          "summary": { "errors": 0, "warnings": 0, "filesCompiled": 0 }
+        }
+      },
+      "errorResponses": [
+        { "status": 400, "code": "invalid_request", "message": "projectId is required" },
+        { "status": 401, "code": "unauthenticated", "message": "missing X-Kairo-Secret" },
+        { "status": 404, "code": "not_found", "message": "project not found" },
+        { "status": 409, "code": "conflict", "message": "build already in progress" }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/builds/{buildId}",
+      "description": "Get build by ID",
+      "request": null,
+      "successResponse": {
+        "status": 200,
+        "payload": {
+          "id": "build-1",
+          "state": "success",
+          "startedAt": "2026-01-01T00:00:00Z",
+          "finishedAt": "2026-01-01T00:00:30Z",
+          "diagnostics": [],
+          "output": "Build successful",
+          "summary": { "errors": 0, "warnings": 0, "filesCompiled": 5 }
+        }
+      },
+      "errorResponses": [
+        { "status": 401, "code": "unauthenticated", "message": "missing X-Kairo-Secret" },
+        { "status": 404, "code": "not_found", "message": "build not found" }
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/builds/{buildId}",
+      "description": "Cancel/delete a build",
+      "request": null,
+      "successResponse": {
+        "status": 200,
+        "payload": {
+          "id": "build-1",
+          "state": "cancelled",
+          "startedAt": "2026-01-01T00:00:00Z",
+          "finishedAt": "2026-01-01T00:00:05Z",
+          "diagnostics": [],
+          "output": "",
+          "summary": { "errors": 0, "warnings": 0, "filesCompiled": 0 }
+        }
+      },
+      "errorResponses": [
+        { "status": 401, "code": "unauthenticated", "message": "missing X-Kairo-Secret" },
+        { "status": 404, "code": "not_found", "message": "build not found" }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/deployments",
+      "description": "List deployments",
+      "request": null,
+      "successResponse": {
+        "status": 200,
+        "payload": [
+          {
+            "id": "deploy-1",
+            "state": "success",
+            "startedAt": "2026-01-01T00:00:00Z",
+            "filesTouched": 12,
+            "bytes": 4096,
+            "trigger": "manual",
+            "hotReloadMode": "staticSync"
+          }
+        ]
+      },
+      "errorResponses": [
+        { "status": 401, "code": "unauthenticated", "message": "missing X-Kairo-Secret" }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/deployments",
+      "description": "Start a deployment",
+      "request": { "projectId": "proj-1", "buildId": "build-1", "scope": "all" },
+      "successResponse": {
+        "status": 202,
+        "payload": {
+          "id": "deploy-new",
+          "state": "queued",
+          "startedAt": "2026-01-01T00:00:00Z",
+          "filesTouched": 0,
+          "bytes": 0,
+          "trigger": "manual",
+          "hotReloadMode": "staticSync"
+        }
+      },
+      "errorResponses": [
+        { "status": 400, "code": "invalid_request", "message": "projectId and buildId are required" },
+        { "status": 401, "code": "unauthenticated", "message": "missing X-Kairo-Secret" },
+        { "status": 404, "code": "not_found", "message": "project or build not found" }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/deployments/{deploymentId}",
+      "description": "Get deployment by ID",
+      "request": null,
+      "successResponse": {
+        "status": 200,
+        "payload": {
+          "id": "deploy-1",
+          "state": "success",
+          "startedAt": "2026-01-01T00:00:00Z",
+          "filesTouched": 12,
+          "bytes": 4096,
+          "trigger": "manual",
+          "hotReloadMode": "staticSync"
+        }
+      },
+      "errorResponses": [
+        { "status": 401, "code": "unauthenticated", "message": "missing X-Kairo-Secret" },
+        { "status": 404, "code": "not_found", "message": "deployment not found" }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/servers",
+      "description": "List servers",
+      "request": null,
+      "successResponse": {
+        "status": 200,
+        "payload": [
+          {
+            "id": "srv-1",
+            "projectId": "proj-1",
+            "type": "tomcat6",
+            "state": "running",
+            "pid": 12345,
+            "ports": { "http": 8080, "shutdown": 8005 },
+            "startedAt": "2026-01-01T00:00:00Z",
+            "catalinaBase": "/tmp/catalina-base"
+          }
+        ]
+      },
+      "errorResponses": [
+        { "status": 401, "code": "unauthenticated", "message": "missing X-Kairo-Secret" }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/servers",
+      "description": "Start a server",
+      "request": { "projectId": "proj-1" },
+      "successResponse": {
+        "status": 202,
+        "payload": {
+          "id": "srv-new",
+          "projectId": "proj-1",
+          "type": "tomcat6",
+          "state": "starting",
+          "pid": 12346,
+          "ports": { "http": 8080, "shutdown": 8005 },
+          "catalinaBase": "/tmp/catalina-base"
+        }
+      },
+      "errorResponses": [
+        { "status": 400, "code": "invalid_request", "message": "projectId is required" },
+        { "status": 401, "code": "unauthenticated", "message": "missing X-Kairo-Secret" },
+        { "status": 404, "code": "not_found", "message": "project not found" },
+        { "status": 409, "code": "conflict", "message": "server already running" }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/servers/{serverId}",
+      "description": "Get server by ID",
+      "request": null,
+      "successResponse": {
+        "status": 200,
+        "payload": {
+          "id": "srv-1",
+          "projectId": "proj-1",
+          "type": "tomcat6",
+          "state": "running",
+          "pid": 12345,
+          "ports": { "http": 8080, "shutdown": 8005 },
+          "startedAt": "2026-01-01T00:00:00Z",
+          "catalinaBase": "/tmp/catalina-base"
+        }
+      },
+      "errorResponses": [
+        { "status": 401, "code": "unauthenticated", "message": "missing X-Kairo-Secret" },
+        { "status": 404, "code": "not_found", "message": "server not found" }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/servers/{serverId}/restart",
+      "description": "Restart a server",
+      "request": null,
+      "successResponse": {
+        "status": 200,
+        "payload": {
+          "id": "srv-1",
+          "projectId": "proj-1",
+          "type": "tomcat6",
+          "state": "running",
+          "pid": 12347,
+          "ports": { "http": 8080, "shutdown": 8005 },
+          "startedAt": "2026-01-01T00:01:00Z",
+          "catalinaBase": "/tmp/catalina-base"
+        }
+      },
+      "errorResponses": [
+        { "status": 401, "code": "unauthenticated", "message": "missing X-Kairo-Secret" },
+        { "status": 404, "code": "not_found", "message": "server not found" },
+        { "status": 409, "code": "conflict", "message": "server is not running" }
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/servers/{serverId}",
+      "description": "Stop/delete a server",
+      "request": { "force": false },
+      "successResponse": {
+        "status": 200,
+        "payload": {
+          "id": "srv-1",
+          "projectId": "proj-1",
+          "type": "tomcat6",
+          "state": "stopped",
+          "ports": {},
+          "catalinaBase": "/tmp/catalina-base"
+        }
+      },
+      "errorResponses": [
+        { "status": 401, "code": "unauthenticated", "message": "missing X-Kairo-Secret" },
+        { "status": 404, "code": "not_found", "message": "server not found" }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/servers/{serverId}/logs",
+      "description": "Get server logs",
+      "request": null,
+      "successResponse": {
+        "status": 200,
+        "payload": [
+          { "line": "INFO: Server startup in 1234 ms", "ts": "2026-01-01T00:00:00Z" }
+        ]
+      },
+      "errorResponses": [
+        { "status": 401, "code": "unauthenticated", "message": "missing X-Kairo-Secret" },
+        { "status": 404, "code": "not_found", "message": "server not found" }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/jdtls",
+      "description": "Get JDT LS status",
+      "request": null,
+      "successResponse": {
+        "status": 200,
+        "payload": {
+          "state": "running",
+          "pid": 12348,
+          "version": "1.43.0",
+          "startedAt": "2026-01-01T00:00:00Z",
+          "jre": "/opt/jre17",
+          "jar": "/tmp/jdtls/plugins/org.eclipse.equinox.launcher_1.6.900.jar",
+          "workspace": "/tmp/jdtls-workspace",
+          "sourceLevel": "1.6",
+          "restartCount": 0
+        }
+      },
+      "errorResponses": [
+        { "status": 401, "code": "unauthenticated", "message": "missing X-Kairo-Secret" }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/jdtls",
+      "description": "Trigger JDT LS install/start",
+      "request": null,
+      "successResponse": {
+        "status": 202,
+        "payload": {
+          "state": "starting",
+          "version": "1.43.0",
+          "jre": "/opt/jre17",
+          "jar": "/tmp/jdtls/plugins/org.eclipse.equinox.launcher_1.6.900.jar",
+          "workspace": "/tmp/jdtls-workspace",
+          "sourceLevel": "1.6",
+          "restartCount": 0
+        }
+      },
+      "errorResponses": [
+        { "status": 401, "code": "unauthenticated", "message": "missing X-Kairo-Secret" }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/toolchains",
+      "description": "List toolchains",
+      "request": null,
+      "successResponse": {
+        "status": 200,
+        "payload": [
+          {
+            "id": "jdk-17",
+            "kind": "jdk",
+            "home": "/opt/jdk17",
+            "vendor": "Eclipse Adoptium",
+            "version": "17.0.9",
+            "sourceLevels": ["1.5", "1.6", "1.7", "1.8", "9", "11", "17"],
+            "fingerprint": "sha256:def456",
+            "importedAt": "2026-01-01T00:00:00Z"
+          }
+        ]
+      },
+      "errorResponses": [
+        { "status": 401, "code": "unauthenticated", "message": "missing X-Kairo-Secret" }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/search",
+      "description": "Search workspace",
+      "request": {
+        "workspaceId": "ws-1",
+        "query": "HelloWorld",
+        "isRegex": false,
+        "caseSensitive": true,
+        "wholeWord": false,
+        "maxResults": 50
+      },
+      "successResponse": {
+        "status": 200,
+        "payload": {
+          "query": "HelloWorld",
+          "totalMatches": 1,
+          "truncated": false,
+          "matches": [
+            {
+              "file": "src/main/java/com/example/HelloWorld.java",
+              "line": 3,
+              "column": 14,
+              "matchText": "HelloWorld",
+              "contextBefore": "public class ",
+              "contextAfter": " {"
+            }
+          ],
+          "elapsedMs": 12,
+          "erroredFiles": []
+        }
+      },
+      "errorResponses": [
+        { "status": 400, "code": "invalid_request", "message": "query is required" },
+        { "status": 401, "code": "unauthenticated", "message": "missing X-Kairo-Secret" }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/encoding/detect",
+      "description": "Detect file encoding",
+      "request": { "workspaceId": "ws-1", "file": "/tmp/hello.jsp" },
+      "successResponse": {
+        "status": 200,
+        "payload": {
+          "file": "/tmp/hello.jsp",
+          "encoding": "gbk",
+          "confidence": 0.98,
+          "candidates": ["gbk", "gb18030", "utf-8"],
+          "hasBom": false,
+          "eol": "crlf"
+        }
+      },
+      "errorResponses": [
+        { "status": 400, "code": "invalid_request", "message": "file is required" },
+        { "status": 401, "code": "unauthenticated", "message": "missing X-Kairo-Secret" },
+        { "status": 404, "code": "not_found", "message": "file not found" }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/encoding/recode",
+      "description": "Recode file to different encoding",
+      "request": { "workspaceId": "ws-1", "file": "/tmp/hello.jsp", "from": "gbk", "to": "utf-8", "eol": "lf" },
+      "successResponse": {
+        "status": 200,
+        "payload": { "ok": true, "bytes": 1024 }
+      },
+      "errorResponses": [
+        { "status": 400, "code": "invalid_request", "message": "from and to encodings are required" },
+        { "status": 401, "code": "unauthenticated", "message": "missing X-Kairo-Secret" },
+        { "status": 404, "code": "not_found", "message": "file not found" }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/encoding/validate",
+      "description": "Validate text can be encoded",
+      "request": { "text": "你好", "encoding": "gbk" },
+      "successResponse": {
+        "status": 200,
+        "payload": { "valid": true }
+      },
+      "errorResponses": [
+        { "status": 400, "code": "invalid_request", "message": "text and encoding are required" }
+      ]
+    }
+  ],
+  "protocolRules": {
+    "noJdtDelete": true,
+    "secretHeader": "X-Kairo-Secret",
+    "noAuthorizationBearer": true,
+    "envelopeOnly": true,
+    "unsupportedMethodReturns405": true
+  }
+}

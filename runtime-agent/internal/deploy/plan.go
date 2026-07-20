@@ -248,7 +248,7 @@ func (b *PlanBuilder) validateRootFilesystem(rootLexical string) (string, error)
 
 func (b *PlanBuilder) validateMirrorRoot(rootCanon string) error {
 	if !b.isKairoOwnedExplodedWebappRoot(rootCanon) {
-		return nil
+		return fmt.Errorf("%w: %s", ErrMirrorNotKairoOwned, rootCanon)
 	}
 	return nil
 }

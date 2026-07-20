@@ -11,13 +11,11 @@ import { ContainerModule } from '@theia/core/shared/inversify';
 
 import { bindProjectExtension, ActiveProjectService } from '@kairo/project-extension';
 import {
-  KairoRuntimeModule,
   RuntimeConnectionService,
   KairoRuntime,
   KairoErrorListener,
   KairoErrorListenerImpl,
   WorkspaceContextService,
-  RUNTIME_BASE_URL,
 } from '@kairo/runtime-extension';
 import { bindSearchExtension } from '@kairo/search-extension';
 import { bindJspExtension } from '@kairo/jsp-extension';
@@ -29,24 +27,6 @@ import {
 } from '@kairo/java-extension';
 import { KairoEncodingServiceImpl, bindEncodingCommands } from '@kairo/encoding-extension';
 import { bindBuildExtension } from '@kairo/build-extension';
-import { KairoThemeContribution } from '@kairo/ui-kit';
-
-/**
- * Bind an identifier to self in singleton scope, using rebind
- * if the identifier is already bound, otherwise bind.
- */
-export function bindOrRebindSelf(
-  bind: interfaces.Bind,
-  isBound: interfaces.IsBound,
-  rebind: interfaces.Rebind,
-  ident: any,
-): void {
-  if (isBound(ident)) {
-    rebind(ident).toSelf().inSingletonScope();
-  } else {
-    bind(ident).toSelf().inSingletonScope();
-  }
-}
 
 /**
  * Single-shot binder used by `KairoProduct` (theia-product
@@ -60,42 +40,21 @@ export function bindOrRebindSelf(
  */
 export function bindKairoProduct(
   bind: interfaces.Bind,
-  isBound?: interfaces.IsBound,
-  rebind?: interfaces.Rebind,
+  _isBound?: interfaces.IsBound,
+  _rebind?: interfaces.Rebind,
 ): void {
   // Runtime client — every other Kairo extension depends on
   // RuntimeConnectionService (the single HTTP client to the Go
   // Runtime Agent). These bindings mirror KairoRuntimeModule.
-  if (isBound && rebind) {
-    bindOrRebindSelf(bind, isBound, rebind, RuntimeConnectionService);
-  } else {
-    bind(RuntimeConnectionService).toSelf().inSingletonScope();
-  }
-  if (isBound && rebind && isBound(KairoRuntime)) {
-    rebind(KairoRuntime).toService(RuntimeConnectionService);
-  } else {
-    bind(KairoRuntime).toService(RuntimeConnectionService);
-  }
-  if (isBound && rebind && isBound(KairoErrorListener)) {
-    rebind(KairoErrorListener).to(KairoErrorListenerImpl).inSingletonScope();
-  } else {
-    bind(KairoErrorListener).to(KairoErrorListenerImpl).inSingletonScope();
-  }
+  bind(RuntimeConnectionService).toSelf().inSingletonScope();
+  bind(KairoRuntime).toService(RuntimeConnectionService);
+  bind(KairoErrorListener).to(KairoErrorListenerImpl).inSingletonScope();
 
   // Workspace context service
-  if (isBound && rebind) {
-    bindOrRebindSelf(bind, isBound, rebind, WorkspaceContextService);
-  } else {
-    bind(WorkspaceContextService).toSelf().inSingletonScope();
-  }
+  bind(WorkspaceContextService).toSelf().inSingletonScope();
 
   bindProjectExtension(bind);
-  // Active project service
-  if (isBound && rebind) {
-    bindOrRebindSelf(bind, isBound, rebind, ActiveProjectService);
-  } else {
-    bind(ActiveProjectService).toSelf().inSingletonScope();
-  }
+  bind(ActiveProjectService).toSelf().inSingletonScope();
   bindSearchExtension(bind);
   bindJspExtension(bind);
   bindTomcatExtension(bind);
@@ -106,12 +65,11 @@ export function bindKairoProduct(
   bind(KairoEncodingServiceImpl).toSelf().inSingletonScope();
   bindEncodingCommands(bind);
 
-  // Theme contribution
-  if (isBound && rebind) {
-    bindOrRebindSelf(bind, isBound, rebind, KairoThemeContribution);
-  } else {
-    bind(KairoThemeContribution).toSelf().inSingletonScope();
-  }
+  // Theme contribution is registered by @kairo/ui-kit (the only
+  // owner of KairoThemeContribution). Re-binding here would throw
+  // "Attempted to construct KairoThemeContribution twice" because
+  // the service is already bound to a singleton in the UI kit
+  // module that loaded before us. See N-034.
 }
 
 /**
@@ -124,20 +82,8 @@ export function bindKairoProduct(
  * runtime client is ready to use without a separate bootstrap
  * call (previously done by configureKairoRuntime).
  */
-export const KairoProduct = new ContainerModule((bind, _unbind, isBound, rebind, onActivation) => {
+export const KairoProduct = new ContainerModule((bind, _unbind, isBound, rebind, _onActivation) => {
   bindKairoProduct(bind, isBound, rebind);
-
-  // Configure the runtime client on first activation, matching
-  // the behaviour that configureKairoRuntime() previously provided.
-  // The base URL is read from the global KAIRO_RUNTIME_BASE_URL if
-  // set by the host HTML page, otherwise the empty-string default.
-  onActivation((svc: RuntimeConnectionService) => {
-    const baseUrl: string =
-      (typeof window !== 'undefined' && (window as any).KAIRO_RUNTIME_BASE_URL) ||
-      RUNTIME_BASE_URL;
-    svc.configure({ baseUrl });
-    return svc;
-  });
 });
 
 // Default export re-exports the named ContainerModule so that
@@ -150,6 +96,8 @@ export default KairoProduct;
  * Apps call this once during Theia composition.
  */
 export function loadKairoProduct(container: Container): void {
-  container.load(KairoRuntimeModule);
+  // KairoProduct already binds all runtime services via
+  // bindKairoProduct, so we no longer need to pre-load
+  // KairoRuntimeModule (which would cause duplicate bindings).
   container.load(KairoProduct);
 }

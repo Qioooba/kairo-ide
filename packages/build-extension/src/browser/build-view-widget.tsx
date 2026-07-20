@@ -2,15 +2,16 @@ import * as React from 'react';
 import { injectable, inject } from '@theia/core/shared/inversify';
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import { CommandService } from '@theia/core/lib/common';
-import { BuildStore, BuildRun, BuildDiagnostic } from './build-store';
+import { BuildStore, BuildRun, BuildDiagnostic, ConnectionState } from './build-store';
 
-function stateIcon(state: BuildRun['state']): string {
+function stateIcon(state: BuildRun['state'] | 'idle'): string {
     switch (state) {
-        case 'pending': return '\u23f3'; // hourglass
-        case 'running': return '\u2699\ufe0f'; // gear
-        case 'succeeded': return '\u2705'; // checkmark
-        case 'failed': return '\u274c'; // cross
-        case 'cancelled': return '\u23f9\ufe0f'; // stop
+        case 'pending': return '\u25CB'; // hollow circle
+        case 'running': return '\u25D0'; // half circle (left black)
+        case 'succeeded': return '\u2713'; // check mark
+        case 'failed': return '\u2717'; // ballot x
+        case 'cancelled': return '\u25A1'; // white square
+        case 'idle': return '\u25CB'; // hollow circle
     }
 }
 
@@ -29,16 +30,52 @@ interface BuildViewProps {
 
 const BuildViewComponent: React.FC<BuildViewProps> = ({ store, commandService }) => {
     const [builds, setBuilds] = React.useState<BuildRun[]>(store.getBuilds());
+    const [connectionState, setConnectionState] = React.useState<ConnectionState>(store.getConnectionState());
 
     React.useEffect(() => {
         const sub = store.onDidChange(b => setBuilds([...b]));
         return () => sub.dispose();
     }, [store]);
 
+    React.useEffect(() => {
+        const sub = store.onConnectionStateChange(s => setConnectionState(s));
+        return () => sub.dispose();
+    }, [store]);
+
     const latest = builds.length > 0 ? builds[builds.length - 1] : undefined;
+    const isBusy = latest?.state === 'running' || latest?.state === 'pending';
+    const isDisconnected = connectionState === 'disconnected';
+    const isEmpty = builds.length === 0 && connectionState !== 'loading';
 
     const handleBuild = () => commandService.executeCommand('kairo.build');
     const handleCleanBuild = () => commandService.executeCommand('kairo.buildAndDeploy');
+
+    if (connectionState === 'loading') {
+        return (
+            <div className="kairo-widget" data-testid="build-view">
+                <div className="kairo-widget-header" data-testid="build-view-header">
+                    <span className="kairo-widget-title">Build Status</span>
+                </div>
+                <p className="kairo-empty" data-testid="build-loading">Loading...</p>
+            </div>
+        );
+    }
+
+    if (isDisconnected) {
+        return (
+            <div className="kairo-widget" data-testid="build-view">
+                <div className="kairo-widget-header" data-testid="build-view-header">
+                    <span className="kairo-widget-title">Build Status</span>
+                    <span className="kairo-build-state" data-testid="build-state" data-state="disconnected">
+                        Disconnected
+                    </span>
+                </div>
+                <p className="kairo-empty" data-testid="build-disconnected">
+                    Cannot reach the runtime agent. Build commands are unavailable.
+                </p>
+            </div>
+        );
+    }
 
     return (
         <div className="kairo-widget" data-testid="build-view">
@@ -55,7 +92,7 @@ const BuildViewComponent: React.FC<BuildViewProps> = ({ store, commandService })
                 )}
                 {!latest && (
                     <span className="kairo-build-state" data-testid="build-state" data-state="idle">
-                        idle
+                        {stateIcon('idle')} idle
                     </span>
                 )}
             </div>
@@ -65,6 +102,8 @@ const BuildViewComponent: React.FC<BuildViewProps> = ({ store, commandService })
                     className="theia-button"
                     data-testid="build-button"
                     onClick={handleBuild}
+                    disabled={isBusy || isDisconnected}
+                    aria-label="Build project"
                 >
                     Build
                 </button>
@@ -72,6 +111,8 @@ const BuildViewComponent: React.FC<BuildViewProps> = ({ store, commandService })
                     className="theia-button"
                     data-testid="clean-build-button"
                     onClick={handleCleanBuild}
+                    disabled={isBusy || isDisconnected}
+                    aria-label="Clean and build project"
                 >
                     Clean Build
                 </button>
@@ -106,7 +147,7 @@ const BuildViewComponent: React.FC<BuildViewProps> = ({ store, commandService })
 
             <div className="kairo-widget-section" data-testid="build-history">
                 <div className="kairo-section-title">Build History</div>
-                {builds.length === 0 ? (
+                {isEmpty ? (
                     <p className="kairo-empty" data-testid="build-empty">
                         No builds yet. Press <strong>Build</strong> to start one.
                     </p>

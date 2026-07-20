@@ -14,8 +14,9 @@
 // provides the launch descriptor (see
 // internal/app/jdtls_descriptor.go). The Manager's Start/Stop
 // methods are kept for backward compatibility but are no longer
-// called by the production code path. The LSP frame bridge
-// (bridge.go) and the Initialize/MarkInitialized LSP handshake
+// called by the production code path. The Theia backend owns
+// the JDT LS process lifecycle, and the Go Agent only provides
+// the launch descriptor. The Initialize/MarkInitialized LSP handshake
 // methods have been removed.
 //
 // The JDT LS requires a modern JRE (17 or 21). The runtime
@@ -223,6 +224,117 @@ func sanitizeID(s string) string {
 	return s
 }
 
+// LaunchDescriptor describes how the Theia backend should
+// spawn the JDT LS process. It is returned by the Go Agent
+// over HTTP and consumed by the Theia backend contribution.
+// The descriptor MUST NOT include os.Environ() — only the
+// minimal allowlist of environment variables needed by the
+// JVM and the JDT LS.
+type LaunchDescriptor struct {
+	Command      string   `json:"command"`       // java or javaw executable
+	Args         []string `json:"args"`           // JVM and JDT LS arguments
+	WorkingDir   string   `json:"workingDir"`     // canonical project root from repository
+	EnvAllowlist []string `json:"envAllowlist"`   // PATH, JAVA_HOME and minimal env vars; never os.Environ()
+}
+
+// BuildLaunchDescriptor constructs a secure LaunchDescriptor
+// from the current installation state. It only exposes PATH,
+// JAVA_HOME, and the minimal environment needed by the JVM.
+// It does NOT return os.Environ().
+func (m *Manager) BuildLaunchDescriptor(workingDir string) (*LaunchDescriptor, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	jre := m.jrePath
+	if jre == "" {
+		jre = os.Getenv("KAIRO_JRE17_HOME")
+	}
+	if jre == "" {
+		return nil, errors.New("JDT LS requires a JRE 17+; set KAIRO_JRE17_HOME or pass --jre17")
+	}
+	javaBin := filepath.Join(jre, "bin", "java")
+	if runtime.GOOS == "windows" {
+		javaBin += ".exe"
+	}
+	if _, err := os.Stat(javaBin); err != nil {
+		return nil, fmt.Errorf("JRE 17+ not found at %s", javaBin)
+	}
+
+	rep, err := readInstallReport(m.dataDir)
+	if err != nil || rep == nil {
+		return nil, fmt.Errorf("JDT LS not installed; run prepare first")
+	}
+	hostCfg, err := hostConfigDir(rep.Home)
+	if err != nil {
+		return nil, err
+	}
+
+	ws := m.workspace
+	if ws == "" {
+		ws = filepath.Join(m.dataDir, "jdtls-workspace", "default")
+	}
+
+	heapMB := jdtlsMaxHeapMB()
+	args := []string{
+		"-Declipse.application=org.eclipse.jdt.ls.core.id1",
+		"-Dosgi.bundles.defaultStartLevel=4",
+		"-Declipse.product=org.eclipse.jdt.ls.core.product",
+		"-Dlog.protocol=false",
+		"-Dlog.level=WARN",
+		"-Xms128m",
+		"-Xmx" + fmt.Sprintf("%dm", heapMB),
+		"-XX:+UseG1GC",
+		"-XX:MaxGCPauseMillis=200",
+		"-jar", rep.LauncherJAR,
+		"-configuration", hostCfg,
+		"-data", ws,
+	}
+
+	// Build the minimal environment allowlist.
+	// Only pass PATH, JAVA_HOME, and essential JVM variables.
+	// Never expose the full os.Environ() to the caller.
+	envAllowlist := []string{
+		"PATH=" + os.Getenv("PATH"),
+		"JAVA_HOME=" + jre,
+		"JDTLS_WORKSPACE=" + ws,
+		"JDTLS_HOME=" + rep.Home,
+		"HOME=" + os.Getenv("HOME"),
+	}
+	if runtime.GOOS == "windows" {
+		envAllowlist = append(envAllowlist,
+			"SystemRoot="+os.Getenv("SystemRoot"),
+			"TEMP="+os.Getenv("TEMP"),
+			"TMP="+os.Getenv("TMP"),
+		)
+	}
+
+	return &LaunchDescriptor{
+		Command:      javaBin,
+		Args:         args,
+		WorkingDir:   workingDir,
+		EnvAllowlist: envAllowlist,
+	}, nil
+}
+
+// jdtlsMaxHeapMB returns the JDT LS heap size in MB. The
+// default is 768 MB; the user can override it with
+// KAIRO_JDTLS_MAX_HEAP_MB. The value is clamped to [256, 4096].
+func jdtlsMaxHeapMB() int {
+	const envName = "KAIRO_JDTLS_MAX_HEAP_MB"
+	const defaultMB = 768
+	const minMB = 256
+	const maxMB = 4096
+	raw := os.Getenv(envName)
+	if raw == "" {
+		return defaultMB
+	}
+	val, err := strconv.Atoi(raw)
+	if err != nil || val < minMB || val > maxMB {
+		return defaultMB
+	}
+	return val
+}
+
 // Status reports the current JDT LS state.
 type Status struct {
 	State        string `json:"state"`
@@ -366,10 +478,22 @@ func (m *Manager) Start(ctx context.Context) (*Status, error) {
 	}
 	cmd := exec.CommandContext(ctx, javaBin, args...)
 	cmd.Dir = rep.Home
-	cmd.Env = append(os.Environ(),
-		"JDTLS_WORKSPACE="+ws,
-		"JDTLS_HOME="+rep.Home,
-	)
+	// Only pass the minimal environment needed by the JVM.
+	// Never expose the full os.Environ() to the child process.
+	cmd.Env = []string{
+		"PATH=" + os.Getenv("PATH"),
+		"JAVA_HOME=" + jre,
+		"JDTLS_WORKSPACE=" + ws,
+		"JDTLS_HOME=" + rep.Home,
+		"HOME=" + os.Getenv("HOME"),
+	}
+	if runtime.GOOS == "windows" {
+		cmd.Env = append(cmd.Env,
+			"SystemRoot="+os.Getenv("SystemRoot"),
+			"TEMP="+os.Getenv("TEMP"),
+			"TMP="+os.Getenv("TMP"),
+		)
+	}
 	cmd.Stderr = stderrF
 	stdin, err := cmd.StdinPipe()
 	if err != nil {

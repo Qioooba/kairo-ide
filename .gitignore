@@ -141,3 +141,7 @@ artifacts/playwright-install.log.err
 # Local scratch files (test probes, one-off scripts)
 scratchpad/
 
+
+# Local merge scratch (created by AI merge resolution)
+.merge-tmp/
+

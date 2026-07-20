@@ -69,32 +69,42 @@ import (
 const (
 	// JDTLSVersion is the JDT LS release the agent supports.
 	// Bump together with JDTLSReleaseDate + JDTLSArchiveURL + JDTLSExpectedSHA256.
-	JDTLSVersion = "1.44.0"
+	//
+	// History:
+	//   1.35.0 (2024-06-27) — original pin, removed by Eclipse 2025
+	//                          (HTTP 404 from download.eclipse.org)
+	//   1.55.0 (2026-01-13) — current pin; verified 2026-07-20
+	JDTLSVersion = "1.55.0"
 	// JDTLSReleaseDate is the date tag of the pinned artefact.
 	// Eclipse milestones use a date-tagged name internally.
-	JDTLSReleaseDate = "2025-09-10"
+	JDTLSReleaseDate = "2026-01-13"
 	// JDTLSBuildTag is kept for backward compatibility with
 	// install reports. It is the same as the release date.
-	JDTLSBuildTag = "20250910"
+	JDTLSBuildTag = "20260113"
 	// JDTLSArchiveFile is the canonical archive name we
 	// write to disk when caching.
-	JDTLSArchiveFile = "jdt-language-server-1.44.0-202509100014.tar.gz"
+	JDTLSArchiveFile = "jdt-language-server-1.55.0-202601131729.tar.gz"
 	// JDTLSArchiveURL is the pinned download URL. We use a
 	// fixed dated milestone, NOT the "latest" symlink, so
 	// the SHA-256 check is stable across builds.
-	JDTLSArchiveURL = "https://download.eclipse.org/jdtls/milestones/1.44.0/jdt-language-server-1.44.0-202509100014.tar.gz"
+	JDTLSArchiveURL = "https://download.eclipse.org/jdtls/milestones/1.55.0/jdt-language-server-1.55.0-202601131729.tar.gz"
 	// JDTLSExpectedSHA256 is the expected SHA-256 of the
 	// archive. The installer refuses to run on a
-	// mismatching build. Replace with the real SHA-256
-	// after downloading and verifying the archive.
+	// mismatching build.
 	//
 	// When KAIRO_SKIP_SHA_VERIFY=true is set (development
 	// only), the SHA-256 check is skipped and a warning is
 	// printed.
 	//
+	// To obtain the real hash:
+	//   curl -L "https://download.eclipse.org/jdtls/milestones/1.55.0/jdt-language-server-1.55.0-202601131729.tar.gz" | shasum -a 256
+	//
 	// Update the four constants above together; never one
 	// without the other three.
-	JDTLSExpectedSHA256 = "sha256-placeholder-replace-with-real-hash"
+	//
+	// SHA-256 of the pinned archive (verified 2026-07-20):
+	//   90627c9f03704dbb404f37651625d0751c078ab7534246023d53adcea1411b91
+	JDTLSExpectedSHA256 = "90627c9f03704dbb404f37651625d0751c078ab7534246023d53adcea1411b91"
 	// JDTLSLaunchMinVersion is the minimum Equinox
 	// launcher version we expect to find in the plugins/
 	// folder. Older builds than this have known bugs
@@ -219,6 +229,17 @@ func ensureInstalled(ctx context.Context, dataDir, bundledDir, jrePath string, s
 
 	// 2) KAIRO_JDTLS_ARCHIVE override.
 	if arch := os.Getenv("KAIRO_JDTLS_ARCHIVE"); arch != "" {
+		// Offline archive override: if SHA-256 verification is
+		// skipped (KAIRO_SKIP_SHA_VERIFY=true), emit a warning
+		// that the archive is being used without verification.
+		// Production deployments must either provide a checksum
+		// or accept the risk of an unverified local artifact.
+		if skipSHAVerify {
+			logger("jdtls distribution: using unverified local artifact (KAIRO_SKIP_SHA_VERIFY=true)", map[string]any{
+				"path":    arch,
+				"warning": "unverified local artifact — checksum verification is disabled",
+			})
+		}
 		// If the user is pointing us at the same file we
 		// would have downloaded, skip the copy and just
 		// verify + unpack.

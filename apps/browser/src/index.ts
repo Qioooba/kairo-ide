@@ -54,7 +54,8 @@ declare const window: Window & {
 };
 
 // Top-level entry: if the host HTML page has set a global base
-// URL, use it. Otherwise fall back to the loopback default.
+// URL, use it. Otherwise RuntimeConnectionService.init() falls
+// back to the dev default (http://127.0.0.1:18080).
 if (typeof window !== 'undefined' && window.KAIRO_RUNTIME_BASE_URL) {
   (globalThis as any).__KAIRO_DEFAULT_RUNTIME_URL__ = window.KAIRO_RUNTIME_BASE_URL;
 }

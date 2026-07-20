@@ -37,22 +37,33 @@ func (s *Server) handleWorkspaces(w http.ResponseWriter, r *http.Request) {
 		}
 		var p struct {
 			RootPath string `json:"rootPath"`
+			Root     string `json:"root"`
 			Name     string `json:"name"`
 		}
 		if err := json.Unmarshal(extractPayload(body), &p); err != nil {
 			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: err.Error()})
 			return
 		}
-		if p.RootPath == "" {
+		rootPath := p.RootPath
+		if rootPath == "" {
+			rootPath = p.Root
+		}
+		if rootPath == "" {
 			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: "rootPath required"})
 			return
 		}
-		abs, err := filepath.Abs(p.RootPath)
+		for _, part := range strings.Split(filepath.ToSlash(rootPath), "/") {
+			if part == ".." {
+				writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrForbidden, Message: "path contains traversal"})
+				return
+			}
+		}
+		abs, err := filepath.Abs(rootPath)
 		if err != nil {
 			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: err.Error()})
 			return
 		}
-		ws, err := s.Services.WorkspaceStore.Open(abs, p.Name)
+		ws, err := s.Services.WorkspaceStore.Open(filepath.Clean(abs), p.Name)
 		if err != nil {
 			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrForbidden, Message: err.Error()})
 			return
@@ -77,6 +88,18 @@ func (s *Server) handleWorkspacesSub(w http.ResponseWriter, r *http.Request) {
 		sub = parts[1]
 	}
 	switch {
+	case sub == "" && r.Method == http.MethodGet:
+		env, _, _ := readEnvelopeAndBody(r)
+		if s.Services.WorkspaceStore == nil {
+			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInternal, Message: "WorkspaceStore not configured"})
+			return
+		}
+		ws, err := s.Services.WorkspaceStore.Get(id)
+		if err != nil {
+			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrNotFound, Message: err.Error()})
+			return
+		}
+		writeOK(w, env, ws)
 	case sub == "" && r.Method == http.MethodDelete:
 		env, _, _ := readEnvelopeAndBody(r)
 		if s.Services.WorkspaceStore == nil {
@@ -220,13 +243,32 @@ func (s *Server) handleBuilds(w http.ResponseWriter, r *http.Request) {
 		writeOK(w, env, s.Services.BuildEngine.List())
 	case http.MethodPost:
 		env, body, _ := readEnvelopeAndBody(r)
-		if s.Services.BuildEngine == nil {
-			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInternal, Message: "BuildEngine not configured"})
-			return
-		}
 		var req BuildRequest
 		if err := json.Unmarshal(extractPayload(body), &req); err != nil {
 			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: err.Error()})
+			return
+		}
+		if req.ProjectID == "" {
+			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: "projectId required"})
+			return
+		}
+		// Validate that the projectId actually exists. Without this
+		// guard the build engine happily accepted any string and
+		// returned a queued-then-success build with 0 files compiled
+		// — the user got a green checkmark for a build that did
+		// nothing. Surfacing 404 here is the truthful behavior
+		// (N-BUILD-001).
+		if s.Services.ProjectStore != nil {
+			if _, err := s.Services.ProjectStore.Get(req.ProjectID); err != nil {
+				writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{
+					Code:    protocol.ErrNotFound,
+					Message: fmt.Sprintf("project not found: %s", req.ProjectID),
+				})
+				return
+			}
+		}
+		if s.Services.BuildEngine == nil {
+			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInternal, Message: "BuildEngine not configured"})
 			return
 		}
 		res, err := s.Services.BuildEngine.Start(req)
@@ -417,6 +459,13 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	env, body, _ := readEnvelopeAndBody(r)
+	var searchReq struct {
+		Query string `json:"query"`
+	}
+	if err := json.Unmarshal(extractPayload(body), &searchReq); err == nil && searchReq.Query == "" {
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: "query required"})
+		return
+	}
 	if s.Services.Searcher == nil {
 		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInternal, Message: "Searcher not configured"})
 		return
@@ -757,6 +806,23 @@ func (s *Server) handleJDTLS(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeOK(w, env, rep)
+	case http.MethodDelete:
+		// JDT LS process lifecycle is owned by the Theia
+		// backend (see docs/adr/0014-jdt-ls-lifecycle.md).
+		// The agent only manages the distribution and
+		// exposes launch descriptors. We accept the DELETE
+		// so the frontend gets a clean envelope instead of
+		// 405, and return the current distribution status
+		// so the UI can show the same state as GET.
+		env, _, _ := readEnvelopeAndBody(r)
+		st, err := s.Services.JDTLS.Status()
+		if err != nil {
+			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{
+				Code: protocol.ErrInternal, Message: err.Error(),
+			})
+			return
+		}
+		writeOK(w, env, st)
 	default:
 		writeError(w, "", "", protocol.KairoError{
 			Code: protocol.ErrInvalidRequest, Message: "GET or POST only",

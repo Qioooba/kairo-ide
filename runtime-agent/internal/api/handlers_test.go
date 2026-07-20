@@ -61,10 +61,10 @@ func (f *fakeJDTLS) Prepare(ctx context.Context) (json.RawMessage, error) {
 
 func (f *fakeJDTLS) GetLaunchDescriptor(ctx context.Context, workspaceID string, projectID string) (json.RawMessage, error) {
 	return json.Marshal(map[string]interface{}{
-		"command":    "/path/to/java",
-		"args":       []string{"-jar", "launcher.jar"},
-		"workingDir": "/path/to/project",
-		"env":        []string{"PATH=/usr/bin"},
+		"command":      "/path/to/java",
+		"args":         []string{"-jar", "launcher.jar"},
+		"workingDir":   "/path/to/project",
+		"envAllowlist": []string{"PATH=/usr/bin", "JAVA_HOME=/path/to/jre"},
 	})
 }
 
@@ -163,7 +163,7 @@ func TestJDTLS_PostPrepareInstallsDistribution(t *testing.T) {
 	}
 }
 
-func TestJDTLS_DeleteMethodNotSupported(t *testing.T) {
+func TestJDTLS_DeleteReturnsError(t *testing.T) {
 	j := &fakeJDTLS{state: "stopped", jre: "C:/jre17", version: "1.43.0"}
 	srv := newTestServer(t, j)
 

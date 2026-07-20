@@ -156,6 +156,7 @@ export class KairoViewsContribution implements FrontendApplicationContribution {
   }
 
   async registerCommands(registry: CommandRegistry): Promise<void> {
+    console.log('[kairo] KairoViewsContribution.registerCommands called');
     registry.registerCommand(KairoCommands.SCAN_PROJECT, {
       execute: async () => {
         try {
@@ -248,10 +249,15 @@ export class KairoViewsContribution implements FrontendApplicationContribution {
     registry.registerCommand(KairoCommands.RESTART_SERVER, {
       execute: async () => {
         try {
-          const list = await this.runtime.request('GET /api/v1/servers', undefined);
-          for (const srv of (list as ServerInstance[])) {
-            await this.serverSvc.stop(srv.id, true);
-            this.messages.info(`Server ${srv.id} stopped (forced).`);
+          const p = await this.activeProject.requireProject();
+          const list = await this.runtime.request('GET /api/v1/servers', undefined) as ServerInstance[];
+          for (const srv of list) {
+            const result = await this.runtime.request(
+              'POST /api/v1/servers/{serverId}/restart',
+              undefined,
+              { pathParams: { serverId: srv.id } },
+            ) as ServerInstance;
+            this.messages.info(`Server ${result.id} restarted, new PID: ${result.pid}`);
           }
         } catch (err) {
           this.messages.error(kairoErrorMessage(err, 'Server restart failed'));
@@ -312,7 +318,26 @@ export class KairoViewsContribution implements FrontendApplicationContribution {
       w = created as T;
       setter(w);
     }
+    // `getOrCreateWidget` only creates the widget instance; it
+    // does NOT add the widget to any visible shell area. We
+    // attach it to the left sidebar (the canonical location for
+    // the Servers / Builds / Deployments / Logs views) and only
+    // then activate it. Without `addWidget`, the widget exists
+    // in memory but never appears in the DOM, and `activateWidget`
+    // is a silent no-op.
+    try {
+      this.shell.addWidget(w, { area: 'left' });
+    } catch (e) {
+      // Already attached — that's fine.
+    }
     this.shell.activateWidget(w.id);
+    // `ReactWidget` only mounts its React tree on `onUpdateRequest`,
+    // and theia 1.73 does not always fire that immediately after
+    // `addWidget`. Force a render so the React content shows up
+    // on first open (otherwise the node is just a `<div
+    // class="kairo-widget">` shell with scrollbar placeholders and
+    // no `data-testid`).
+    w.update();
   }
 
   protected async refreshBuilds(): Promise<void> {

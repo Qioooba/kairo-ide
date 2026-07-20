@@ -36,17 +36,17 @@ import {
 export namespace KairoEncodingCommands {
   export const REOPEN_WITH_ENCODING: Command = {
     id: 'kairo.encoding.reopen',
-    label: 'Kairo: Reopen with Encoding…',
+    label: 'Reopen with Encoding…',
     category: 'Kairo',
   };
   export const SAVE_WITH_ENCODING: Command = {
     id: 'kairo.encoding.save',
-    label: 'Kairo: Save with Encoding…',
+    label: 'Save with Encoding…',
     category: 'Kairo',
   };
   export const SHOW_ENCODING: Command = {
     id: 'kairo.encoding.show',
-    label: 'Kairo: Show File Encoding',
+    label: 'Show File Encoding',
     category: 'Kairo',
   };
 }

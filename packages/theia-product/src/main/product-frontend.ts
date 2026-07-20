@@ -25,7 +25,6 @@
 import { ContainerModule } from '@theia/core/shared/inversify';
 import { bindKairoFrontend } from './browser/kairo-product-frontend-module';
 import { bindKairoProduct } from './product-bindings';
-import { RuntimeConnectionService, RUNTIME_BASE_URL } from '@kairo/runtime-extension';
 
 export { bindKairoFrontend };
 
@@ -47,25 +46,25 @@ export const KairoProductFrontend: ContainerModule = (() => {
     console.log('[kairo] noKairoFrontend=true; loading empty frontend module');
     return new ContainerModule(() => { /* no-op */ });
   }
-  return new ContainerModule((bind, _unbind, isBound, rebind, onActivation) => {
+  return new ContainerModule((bind, _unbind, isBound, rebind, _onActivation) => {
     // Frontend-layer bindings (widgets, views, commands, status bar)
-    bindKairoFrontend(bind);
+    try {
+      bindKairoFrontend(bind);
+      console.log('[kairo] bindKairoFrontend OK');
+    } catch (e) {
+      console.error('[kairo] bindKairoFrontend FAILED', e);
+      throw e;
+    }
 
     // Service-layer bindings (RuntimeConnectionService, KairoServerService,
     // KairoJavaService, KairoProjectService, etc.)
-    bindKairoProduct(bind, isBound, rebind);
-
-    // Configure the runtime client on first activation, matching the
-    // behaviour that configureKairoRuntime() previously provided.
-    // The base URL is read from the global KAIRO_RUNTIME_BASE_URL if
-    // set by the host HTML page, otherwise the empty-string default.
-    onActivation((svc: RuntimeConnectionService) => {
-      const baseUrl: string =
-        (typeof window !== 'undefined' && (window as any).KAIRO_RUNTIME_BASE_URL) ||
-        RUNTIME_BASE_URL;
-      svc.configure({ baseUrl });
-      return svc;
-    });
+    try {
+      bindKairoProduct(bind, isBound, rebind);
+      console.log('[kairo] bindKairoProduct OK');
+    } catch (e) {
+      console.error('[kairo] bindKairoProduct FAILED', e);
+      throw e;
+    }
   });
 })();
 

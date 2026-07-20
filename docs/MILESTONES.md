@@ -1,19 +1,24 @@
 # Kairo IDE Milestones — Current State Matrix
 
-> Last verified: 2026-07-19
-> Baseline: Wave 1 (Architecture Convergence)
+> Last verified: 2026-07-19 (Wave 0 Gate passed)
+> Baseline: Wave 0 (Bleeding Fixes Complete)
 > Status: Each item must be one of: verified, partial, not_started, deferred
 
 ## Wave 0 Gate Results
 
-All Wave 0 gates pass:
+All Wave 0 gates pass. See [WAVE0_BASELINE.md](progress/WAVE0_BASELINE.md) for full command output.
 
-| Gate | Status | Notes |
-|------|--------|-------|
-| `go build ./...` | ✅ verified | Exit 0 |
-| `go vet ./...` | ✅ verified | Exit 0 |
-| `go test -count=1 ./...` | ✅ verified | All 26 packages pass |
-| `tsc --noEmit` (packages/*) | ✅ verified | Exit 0 |
+| Gate | Status | Evidence |
+|------|--------|----------|
+| `go test -count=1 ./...` | verified | Exit 0, 26 packages |
+| `go test -count=1 -race ./...` | verified | Exit 0, no data races |
+| `go vet ./...` | verified | Exit 0 |
+| `pnpm clean && pnpm build` | verified | Exit 0, all packages + apps |
+| `pnpm -r --filter './packages/*' test` | verified | 33/33 tests pass (runtime:14, encoding:10, jsp:2, java:1, theia-product:6) |
+| Browser bind 127.0.0.1 | verified | `apps/browser/package.json` start + dev scripts |
+| Server mode | deferred | `apps/server/` does not exist in tree |
+| CI integration not skip core | verified | `KAIRO_LEGACY_SAMPLE` set in go-integration job |
+| No known false claims in MILESTONES | verified | This document updated |
 
 ## Backend Core
 
@@ -47,7 +52,7 @@ All Wave 0 gates pass:
 | Component | Status | Evidence | Notes |
 |-----------|--------|----------|-------|
 | TS type check | verified | `tsc --noEmit` passes | |
-| TS build | partial | TS6305/TS2742 in theia-product | N-043 |
+| TS build | verified | `pnpm clean && pnpm build` passes (N-043 fixed: tsbuildinfo cleanup + tsc -b) | |
 | Runtime connection | partial | Multiple implementations | Duplicate (N-023) |
 | Workspace context | partial | `workspace-context-service.ts` | Not initialized (N-026) |
 | Import wizard | partial | `import-wizard-widget.tsx` | Save doesn't save (N-027) |

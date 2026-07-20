@@ -38,6 +38,7 @@ export class ImportWizardWidget extends ReactWidget {
             projectService: this.projectService,
             activeProject: this.activeProject,
             runtime: this.runtime,
+            onClose: () => this.close(),
         });
     }
 }
@@ -47,10 +48,11 @@ interface ImportWizardProps {
     projectService: KairoProjectService;
     activeProject: ActiveProjectService;
     runtime: RuntimeConnectionService;
+    onClose: () => void;
 }
 
 const ImportWizard: React.FC<ImportWizardProps> = ({
-    fileDialogService, projectService, activeProject, runtime,
+    fileDialogService, projectService, activeProject, runtime, onClose,
 }) => {
     const [step, setStep] = React.useState(1);
     const [workspacePath, setWorkspacePath] = React.useState('');
@@ -59,7 +61,6 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
     const [scanning, setScanning] = React.useState(false);
     const [saving, setSaving] = React.useState(false);
     const [saveError, setSaveError] = React.useState('');
-    const [saveSuccess, setSaveSuccess] = React.useState(false);
     const [projectName, setProjectName] = React.useState('my-project');
     const [sourceLevel, setSourceLevel] = React.useState('1.6');
     const [encoding, setEncoding] = React.useState('GBK');
@@ -93,10 +94,9 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
     const handleSaveConfig = React.useCallback(async () => {
         setSaving(true);
         setSaveError('');
-        setSaveSuccess(false);
 
         try {
-            // Step 1: Scan the workspace to detect project layout
+            // Step 4: Scan the workspace to detect project layout
             const scanResult = await runtime.request(
                 'POST /api/v1/workspaces/{workspaceId}/scan',
                 { deep: true },
@@ -105,7 +105,7 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
 
             const detected = scanResult?.detected || (scanResult?.detected ? null : scanResult);
 
-            // Step 2: Build the project config from the form
+            // Build the project config from the form
             const projectId = `project-${Date.now()}`;
             const projectConfig: ProjectConfig = {
                 schemaVersion: 1,
@@ -152,20 +152,15 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
                 },
             };
 
-            // Step 3: Save the project config via the service.
-            // The Save button used to issue the PUT request
-            // directly through `runtime.request`, which
-            // bypassed the project's own service layer and
-            // left the local cache unsynced. Routing through
-            // `projectService.create()` makes the wire
-            // contract the service's responsibility and
-            // keeps the projects map in step with the agent.
+            // Save the project config via the service layer.
+            // Routing through projectService.create() makes the wire
+            // contract the service's responsibility and keeps the
+            // projects map in step with the agent.
             const saved = await projectService.create(projectConfig);
 
-            // Step 4: Update the ActiveProjectService with
-            // the id the agent actually stored. Use the
-            // service return value rather than the locally
-            // generated `projectId` so we follow the agent
+            // Update the ActiveProjectService with the id the agent
+            // actually stored. Use the service return value rather than
+            // the locally generated projectId so we follow the agent
             // as the source of truth.
             await activeProject.setProject({
                 workspaceId,
@@ -174,15 +169,15 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
                 root: saved.rootPath,
             });
 
-            setSaveSuccess(true);
-            setStep(4);
+            // Close wizard, refresh views (NO reload)
+            onClose();
         } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
             setSaveError(msg);
         } finally {
             setSaving(false);
         }
-    }, [runtime, projectService, workspaceId, workspacePath, projectName, sourceLevel, encoding, buildTool, detectedConfig, activeProject]);
+    }, [runtime, projectService, workspaceId, workspacePath, projectName, sourceLevel, encoding, buildTool, detectedConfig, activeProject, onClose]);
 
     const handleStartIDE = React.useCallback(async () => {
         if (workspacePath && projectService) {
@@ -233,6 +228,7 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
                             className="theia-button main"
                             onClick={handleOpenWorkspace}
                             data-testid="open-workspace-btn"
+                            aria-label="Open workspace folder"
                         >
                             Open Workspace Folder
                         </button>
@@ -256,6 +252,7 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
                                     className="theia-button main"
                                     onClick={() => setStep(3)}
                                     data-testid="continue-to-configure"
+                                    aria-label="Continue to configuration"
                                 >
                                     Continue
                                 </button>
@@ -267,6 +264,7 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
                                     className="theia-button main"
                                     onClick={() => setStep(3)}
                                     data-testid="create-new-config"
+                                    aria-label="Create new configuration"
                                 >
                                     Create New Configuration
                                 </button>
@@ -278,22 +276,26 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
                 {step === 3 && (
                     <div className="kairo-wizard-step-content" data-testid="step-content-3">
                         <p>Configure your project settings:</p>
-                        <form className="kairo-config-form" data-testid="project-config-form">
-                            <label>
+                        <form className="kairo-config-form" data-testid="project-config-form" onSubmit={e => e.preventDefault()}>
+                            <label htmlFor="input-project-name">
                                 Project Name:
                                 <input
+                                    id="input-project-name"
                                     type="text"
                                     data-testid="input-project-name"
                                     value={projectName}
                                     onChange={e => setProjectName(e.target.value)}
+                                    aria-label="Project name"
                                 />
                             </label>
-                            <label>
+                            <label htmlFor="select-source-level">
                                 Source Level:
                                 <select
+                                    id="select-source-level"
                                     data-testid="select-source-level"
                                     value={sourceLevel}
                                     onChange={e => setSourceLevel(e.target.value)}
+                                    aria-label="Java source level"
                                 >
                                     <option value="1.5">1.5</option>
                                     <option value="1.6">1.6</option>
@@ -301,12 +303,14 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
                                     <option value="1.8">1.8</option>
                                 </select>
                             </label>
-                            <label>
+                            <label htmlFor="select-encoding">
                                 Encoding:
                                 <select
+                                    id="select-encoding"
                                     data-testid="select-encoding"
                                     value={encoding}
                                     onChange={e => setEncoding(e.target.value)}
+                                    aria-label="File encoding"
                                 >
                                     <option value="UTF-8">UTF-8</option>
                                     <option value="GBK">GBK</option>
@@ -314,12 +318,14 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
                                     <option value="ISO-8859-1">ISO-8859-1</option>
                                 </select>
                             </label>
-                            <label>
+                            <label htmlFor="select-build-tool">
                                 Build Tool:
                                 <select
+                                    id="select-build-tool"
                                     data-testid="select-build-tool"
                                     value={buildTool}
                                     onChange={e => setBuildTool(e.target.value)}
+                                    aria-label="Build tool"
                                 >
                                     <option value="ant">Ant</option>
                                     <option value="javac">javac (direct)</option>
@@ -331,33 +337,16 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
                                 onClick={handleSaveConfig}
                                 disabled={saving}
                                 data-testid="save-config-btn"
+                                aria-label="Save configuration"
                             >
                                 {saving ? 'Saving...' : 'Save Configuration'}
                             </button>
                             {saveError && (
-                                <p className="kairo-error" data-testid="save-error">
+                                <p className="kairo-error" data-testid="save-error" role="alert">
                                     Error: {saveError}
                                 </p>
                             )}
-                            {saveSuccess && (
-                                <p className="kairo-success" data-testid="save-success">
-                                    Configuration saved successfully!
-                                </p>
-                            )}
                         </form>
-                    </div>
-                )}
-
-                {step === 4 && (
-                    <div className="kairo-wizard-step-content" data-testid="step-content-4">
-                        <p>Your project is ready! Kairo IDE will now open your workspace.</p>
-                        <button
-                            className="theia-button main"
-                            onClick={handleStartIDE}
-                            data-testid="start-ide-btn"
-                        >
-                            Start Kairo IDE
-                        </button>
                     </div>
                 )}
             </div>

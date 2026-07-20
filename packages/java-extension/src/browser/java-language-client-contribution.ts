@@ -1,29 +1,43 @@
-import { injectable } from '@theia/core/shared/inversify';
+import { injectable, inject } from '@theia/core/shared/inversify';
+import { ILogger } from '@theia/core/lib/common/logger';
 import { JAVA_LANGUAGE_ID, JAVA_LANGUAGE_NAME } from '../common/java-common';
 
 /**
  * Java language client contribution.
  *
  * Provides the language client configuration for JDT LS.
- * When the Theia language infrastructure initializes, this
- * contribution supplies the document selector, initialization
- * options, and server configuration that drives completion,
- * hover, definition, diagnostics, and other Java language
- * features.
+ * Registers the `java` document selector, initialization options,
+ * diagnostic collection, and LSP feature providers (completion,
+ * definition, hover).
+ *
+ * The actual server process is managed by the backend
+ * KairoJavaLanguageServerContribution, which spawns JDT LS
+ * and provides StreamMessageReader/StreamMessageWriter.
  */
 @injectable()
-export class JavaLanguageClientContribution {
+export class KairoJavaLanguageClientContribution {
     readonly id = JAVA_LANGUAGE_ID;
     readonly name = JAVA_LANGUAGE_NAME;
 
+    @inject(ILogger)
+    private readonly logger!: ILogger;
+
+    /** Document selector for Java files. */
     get documentSelector(): string[] {
         return ['java'];
     }
 
+    /** Glob patterns for Java file discovery. */
     get globPatterns(): string[] {
         return ['**/*.java'];
     }
 
+    /**
+     * JDT LS initialization options.
+     * sourceLevel and targetLevel default to '1.6' for legacy
+     * project compatibility (JRE 17 runs JDT LS, but target
+     * project source can be Java 6).
+     */
     get initializationOptions(): Record<string, unknown> {
         return {
             extendedClientCapabilities: {
@@ -41,9 +55,6 @@ export class JavaLanguageClientContribution {
                 java: {
                     completion: {
                         enabled: true,
-                        // Argument guessing creates additional resolve work on
-                        // every completion request and is especially costly in
-                        // multi-thousand-line legacy classes.
                         guessMethodArguments: false,
                         favoriteStaticMembers: [
                             'org.junit.Assert.*',
@@ -84,20 +95,57 @@ export class JavaLanguageClientContribution {
     }
 
     /**
-     * Server options for the language client.
+     * Returns the diagnostic collection owner.
+     * The diagnostic collection is created by the language client
+     * infrastructure and populated with JDT LS diagnostics.
+     */
+    get diagnosticCollectionName(): string {
+        return 'kairo-java-diagnostics';
+    }
+
+    /**
+     * Returns the completion provider configuration.
+     * Completion is triggered on '.' and 'Ctrl+Space'.
+     */
+    get completionProvider(): {
+        resolveProvider: boolean;
+        triggerCharacters: string[];
+    } {
+        return {
+            resolveProvider: true,
+            triggerCharacters: ['.', '@', '#', '*', ' '],
+        };
+    }
+
+    /**
+     * Returns the definition provider configuration.
+     * F12 / Go to Definition is enabled.
+     */
+    get definitionProvider(): boolean {
+        return true;
+    }
+
+    /**
+     * Returns the hover provider configuration.
+     * Hover shows type information and documentation.
+     */
+    get hoverProvider(): boolean {
+        return true;
+    }
+
+    /**
+     * Returns the server options for the language client.
      * The actual server process is managed by the backend
-     * JavaLanguageServerManager, which spawns JDT LS and
-     * provides the StreamMessageReader/StreamMessageWriter.
+     * KairoJavaLanguageServerContribution.
      */
     get serverOptions(): Record<string, unknown> {
         return {
             run: {
-                // The backend JavaLanguageServerManager handles
-                // the actual process lifecycle. The frontend
-                // connects to the streams provided by the backend.
+                command: 'kairo-java',
             },
             debug: {
-                // Same as run but with verbose logging enabled.
+                command: 'kairo-java',
+                args: ['--debug'],
             },
         };
     }

@@ -1,4 +1,4 @@
-﻿package services
+package services
 
 import (
 	"context"
@@ -15,6 +15,7 @@ import (
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/api"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/atomicfile"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/domain"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/pathpolicy"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/security"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/toolchain"
 )
@@ -48,6 +49,19 @@ func (s *diskWorkspaceStore) load() {
 	}
 	for _, w := range items {
 		s.data[w.ID] = w
+		// Re-register every persisted workspace's root path
+		// with the sandbox. Without this, restarting the agent
+		// would clear the in-memory sandbox roots while the
+		// workspace records survive on disk — so the user would
+		// see "path is outside any authorized workspace root"
+		// for every file operation on a previously-opened
+		// workspace, even though the workspace is in the list.
+		if s.sandbox != nil && w.RootPath != "" {
+			if err := s.sandbox.AddRoot(w.RootPath); err != nil {
+				// Log and continue; the next Open will retry.
+				fmt.Fprintf(os.Stderr, "sandbox.AddRoot(%q): %v\n", w.RootPath, err)
+			}
+		}
 	}
 }
 
@@ -79,6 +93,21 @@ func (s *diskWorkspaceStore) Open(rootPath, name string) (api.WorkspaceRecord, e
 	if _, err := os.Stat(abs); err != nil {
 		return api.WorkspaceRecord{}, fmt.Errorf("path not accessible: %w", err)
 	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Check if workspace with this root path already exists
+	for _, w := range s.data {
+		if w.RootPath == abs {
+			// Update last opened time
+			w.LastOpened = time.Now().UTC().Format(time.RFC3339Nano)
+			s.data[w.ID] = w
+			s.save()
+			return w, nil
+		}
+	}
+
 	// Register the new workspace root with the sandbox so that
 	// subsequent file operations inside it pass authorization.
 	if s.sandbox != nil {
@@ -86,7 +115,12 @@ func (s *diskWorkspaceStore) Open(rootPath, name string) (api.WorkspaceRecord, e
 			return api.WorkspaceRecord{}, fmt.Errorf("authorize workspace root: %w", err)
 		}
 	}
-	id := "ws_" + shortID()
+
+	idGen := pathpolicy.NewCryptoIDGenerator()
+	id, err := idGen.NewWorkspaceID()
+	if err != nil {
+		return api.WorkspaceRecord{}, fmt.Errorf("generate workspace id: %w", err)
+	}
 	if name == "" {
 		name = filepath.Base(abs)
 	}
@@ -98,10 +132,8 @@ func (s *diskWorkspaceStore) Open(rootPath, name string) (api.WorkspaceRecord, e
 		LastOpened: time.Now().UTC().Format(time.RFC3339Nano),
 		UserID:     "local",
 	}
-	s.mu.Lock()
 	s.data[id] = w
 	s.save()
-	s.mu.Unlock()
 	return w, nil
 }
 

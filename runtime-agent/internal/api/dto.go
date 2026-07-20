@@ -1,4 +1,4 @@
-﻿package api
+package api
 
 import (
 	"encoding/json"
@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/app"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/domain"
 )
 
@@ -26,10 +27,13 @@ type WorkspaceResponse struct {
 }
 
 // StartBuildRequest is the request body for POST /api/v1/builds.
+// Frozen API contract: only projectId, clean?, intent?, selectedFiles?.
+// NO projectRoot, outputDir, source, target, javaHome, webappDir.
 type StartBuildRequest struct {
-	ProjectID string `json:"projectId"`
-	Clean     bool   `json:"clean,omitempty"`
-	Intent    string `json:"intent,omitempty"`
+	ProjectID     string   `json:"projectId"`
+	Clean         bool     `json:"clean,omitempty"`
+	Intent        string   `json:"intent,omitempty"`
+	SelectedFiles []string `json:"selectedFiles,omitempty"`
 }
 
 // BuildResponse is the response for build endpoints.
@@ -53,10 +57,12 @@ type BuildDiagnosticDTO struct {
 }
 
 // StartDeploymentRequest is the request body for POST /api/v1/deployments.
+// Frozen API contract: only projectId, buildId, scope.
+// NO projectRoot, outputDir, source, target, javaHome, webappDir.
 type StartDeploymentRequest struct {
 	ProjectID string `json:"projectId"`
 	BuildID   string `json:"buildId"`
-	Scope     string `json:"scope,omitempty"`
+	Scope     string `json:"scope"` // "all" | "classes" | "webapp" | "resources"
 }
 
 // DeploymentResponse is the response for deployment endpoints.
@@ -68,10 +74,13 @@ type DeploymentResponse struct {
 	Added     int    `json:"added"`
 	Modified  int    `json:"modified"`
 	Deleted   int    `json:"deleted"`
+	Bytes     int64  `json:"bytes"`
+	Error     string `json:"error,omitempty"`
 }
 
 // StartServerUseCaseRequest is the request body for POST /api/v1/servers
 // in the ServerUseCase flow (Wave 2 converge).
+// Frozen API contract: only projectId. NO projectRoot, javaHome, webappDir, etc.
 type StartServerUseCaseRequest struct {
 	ProjectID string `json:"projectId"`
 }
@@ -179,6 +188,61 @@ type ErrorResponse struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
 	Details any    `json:"details,omitempty"`
+}
+
+// ToBuildResponse converts a domain.BuildRun to a BuildResponse DTO.
+func ToBuildResponse(run domain.BuildRun) BuildResponse {
+	resp := BuildResponse{
+		ID:        string(run.ID),
+		ProjectID: string(run.ProjectID),
+		State:     string(run.State),
+		StartTime: run.QueuedAt.UTC().Format(time.RFC3339Nano),
+		Summary:   run.Summary,
+	}
+	if run.FinishedAt != nil {
+		s := run.FinishedAt.UTC().Format(time.RFC3339Nano)
+		resp.EndTime = s
+	}
+	if run.Diagnostics != nil {
+		resp.Diagnostics = make([]BuildDiagnosticDTO, len(run.Diagnostics))
+		for i, d := range run.Diagnostics {
+			resp.Diagnostics[i] = BuildDiagnosticDTO{
+				File:     d.File,
+				Line:     d.Line,
+				Column:   d.Column,
+				Severity: d.Severity,
+				Message:  d.Message,
+			}
+		}
+	}
+	return resp
+}
+
+// ToBuildResponseList converts a slice of domain.BuildRun to a slice of BuildResponse DTOs.
+func ToBuildResponseList(runs []domain.BuildRun) []BuildResponse {
+	out := make([]BuildResponse, len(runs))
+	for i, run := range runs {
+		out[i] = ToBuildResponse(run)
+	}
+	return out
+}
+
+// ToDeploymentResponse converts an app.DeployResult to a DeploymentResponse DTO.
+func ToDeploymentResponse(result *app.DeployResult) DeploymentResponse {
+	if result == nil {
+		return DeploymentResponse{}
+	}
+	return DeploymentResponse{
+		ID:        result.ID,
+		ProjectID: result.ProjectID,
+		BuildID:   result.BuildID,
+		State:     result.State,
+		Added:     result.Succeeded,
+		Modified:  result.Modified,
+		Deleted:   result.Deleted,
+		Bytes:     result.Bytes,
+		Error:     result.Error,
+	}
 }
 
 // decodeJSON decodes the request body into a typed struct.

@@ -1,4 +1,4 @@
-﻿package runtime
+package runtime
 
 import (
 	"context"
@@ -10,6 +10,7 @@ import (
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/domain"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/proc"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/tomcat6"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/transport/events"
 )
 
 type ProcessFactory func() proc.ManagedProcess
@@ -25,6 +26,7 @@ type Tomcat6Provider struct {
 	instances      map[domain.ServerID]*runningInstance
 	processFactory ProcessFactory
 	preparer       catalinabase.Preparer
+	eventHub       *events.EventHub
 	cfg            Tomcat6ProviderConfig
 }
 
@@ -35,7 +37,7 @@ type runningInstance struct {
 	gen      uint64
 }
 
-func NewTomcat6Provider(processFactory ProcessFactory, preparer catalinabase.Preparer, cfg Tomcat6ProviderConfig) *Tomcat6Provider {
+func NewTomcat6Provider(processFactory ProcessFactory, preparer catalinabase.Preparer, eventHub *events.EventHub, cfg Tomcat6ProviderConfig) *Tomcat6Provider {
 	if cfg.StartTimeout <= 0 {
 		cfg.StartTimeout = tomcat6.DefaultStartTimeout
 	}
@@ -55,11 +57,25 @@ func NewTomcat6Provider(processFactory ProcessFactory, preparer catalinabase.Pre
 		instances:      make(map[domain.ServerID]*runningInstance),
 		processFactory: processFactory,
 		preparer:       preparer,
+		eventHub:       eventHub,
 		cfg:            cfg,
 	}
 }
 
 func (p *Tomcat6Provider) ID() string { return "tomcat6" }
+
+// publishEvent publishes a server lifecycle event via EventHub if configured.
+func (p *Tomcat6Provider) publishEvent(eventType events.EventType, workspaceID, message string, data interface{}) {
+	if p.eventHub == nil {
+		return
+	}
+	p.eventHub.Publish(events.Event{
+		Type:        eventType,
+		WorkspaceID: workspaceID,
+		Message:     message,
+		Data:        data,
+	})
+}
 
 func (p *Tomcat6Provider) Prepare(ctx context.Context, plan domain.RuntimePlan) error {
 	if err := p.validatePlan(plan); err != nil {
@@ -190,8 +206,18 @@ func (p *Tomcat6Provider) Start(ctx context.Context, plan domain.RuntimePlan, lo
 		p.mu.Lock()
 		delete(p.instances, plan.ServerID)
 		p.mu.Unlock()
+		p.publishEvent(events.EventServerError, string(plan.WorkspaceID),
+			fmt.Sprintf("Server %s readiness failed: %v", plan.ServerID, readyErr), nil)
 		return nil, fmt.Errorf("readiness failed: %w", readyErr)
 	}
+
+	p.publishEvent(events.EventServerStarted, string(plan.WorkspaceID),
+		fmt.Sprintf("Server %s started on port %d", plan.ServerID, plan.HTTPPort),
+		map[string]interface{}{
+			"serverId": plan.ServerID,
+			"port":     plan.HTTPPort,
+			"pid":      obs.Identity.PID,
+		})
 
 	return &obs.Identity, nil
 }
@@ -216,6 +242,8 @@ func (p *Tomcat6Provider) GracefulStop(ctx context.Context, identity domain.Proc
 	select {
 	case <-done:
 		p.cleanupInstance(inst)
+		p.publishEvent(events.EventServerStopped, string(inst.plan.WorkspaceID),
+			fmt.Sprintf("Server %s stopped gracefully", inst.plan.ServerID), nil)
 		return nil
 	case <-waitCtx.Done():
 		if shutdownErr != nil {
@@ -234,6 +262,8 @@ func (p *Tomcat6Provider) ForceStop(ctx context.Context, identity domain.Process
 	defer cancel()
 	err = inst.process.ForceStop(stopCtx, identity)
 	p.cleanupInstance(inst)
+	p.publishEvent(events.EventServerStopped, string(inst.plan.WorkspaceID),
+		fmt.Sprintf("Server %s force stopped", inst.plan.ServerID), nil)
 	return err
 }
 

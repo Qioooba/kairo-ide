@@ -1,54 +1,52 @@
 {
-    "name":  "kairo-ide",
-    "version":  "0.1.0",
-    "private":  true,
-    "description":  "Kairo IDE â€?a cross-platform IDE for legacy Java Web projects (JDK 1.6 / Tomcat 6 / JSP / Servlet / GBK)",
-    "license":  "Apache-2.0",
-    "engines":  {
-                    "node":  "\u003e=20.10.0",
-                    "pnpm":  "\u003e=9.0.0"
-                },
-    "packageManager":  "pnpm@9.15.9",
-    "scripts":  {
-                    "bootstrap":  "pnpm install --frozen-lockfile=false",
-                    "build":  "pnpm -r --filter \"./packages/*\" build \u0026\u0026 pnpm -r --filter \"./apps/*\" build",
-                    "build:agent":  "pnpm --filter @kairo/runtime-agent build",
-                    "build:product":  "pnpm --filter @kairo/theia-product build",
-                    "dev:browser":  "pnpm --filter @kairo/browser start",
-                    "dev:server":  "pnpm --filter @kairo/theia-product start:server",
-                    "test":  "pnpm -r --filter \"./packages/*\" test \u0026\u0026 pnpm -r --filter \"./apps/*\" test",
-                    "test:agent":  "node scripts/test-agent.js",
-                    "test:agent:race":  "cd runtime-agent \u0026\u0026 go test -race -timeout 120s ./...",
-                    "test:agent:integration":  "cd runtime-agent \u0026\u0026 go test -timeout 240s -tags=integration ./test/...",
-                    "lint":  "eslint packages/*/src/**/*.{ts,tsx} --max-warnings 0",
-                    "format":  "prettier --write \u0027packages/*/src/**/*.{ts,tsx,css}\u0027",
-                    "clean":  "pnpm -r exec rm -rf lib out gen dist \u0026\u0026 rm -rf runtime-agent/bin runtime-agent/dist",
-                    "verify":  "pnpm bootstrap \u0026\u0026 pnpm build \u0026\u0026 pnpm test \u0026\u0026 pnpm test:agent \u0026\u0026 pnpm lint",
-                    "agent:run":  "cd runtime-agent \u0026\u0026 go run ./cmd/kairo-runtime --config ../runtime-agent/configs/dev.yaml",
-                    "agent:build":  "cd runtime-agent \u0026\u0026 CGO_ENABLED=0 go build -trimpath -ldflags=\u0027-s -w\u0027 -o bin/kairo-runtime ./cmd/kairo-runtime",
-                    "bundled:prepare":  "pwsh -ExecutionPolicy Bypass -File scripts/prepare-bundled.ps1",
-                    "bundled:check":  "pwsh -ExecutionPolicy Bypass -File scripts/prepare-bundled.ps1 -Strict"
-                },
-    "devDependencies":  {
-                            "@types/node":  "20.14.10",
-                            "@typescript-eslint/eslint-plugin":  "^8.64.0",
-                            "@typescript-eslint/parser":  "^8.64.0",
-                            "eslint":  "^10.7.0",
-                            "playwright":  "^1.61.1",
-                            "prettier":  "3.3.3",
-                            "rimraf":  "5.0.10",
-                            "typescript":  "5.5.4"
-                        },
-    "pnpm":  {
-                 "overrides":  {
-                                   "react-dom":  "18.3.1",
-                                   "typescript":  "5.5.4",
-                                   "drivelist":  "workspace:*",
-                                   "puppeteer-core":  "21.11.0",
-                                   "puppeteer":  "21.11.0"
-                               },
-                 "patchedDependencies":  {
-
-                                         }
-             }
+  "name": "kairo-ide",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Kairo IDE â€” a cross-platform IDE for legacy Java Web projects (JDK 1.6 / Tomcat 6 / JSP / Servlet / GBK)",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=20.10.0",
+    "pnpm": ">=9.0.0"
+  },
+  "packageManager": "pnpm@9.15.9",
+  "scripts": {
+    "bootstrap": "pnpm install --frozen-lockfile=false",
+    "build": "pnpm -r --filter \"./packages/*\" build && pnpm -r --filter \"./apps/*\" build",
+    "build:agent": "pnpm --filter @kairo/runtime-agent build",
+    "build:product": "pnpm --filter @kairo/theia-product build",
+    "dev:browser": "pnpm --filter @kairo/browser start",
+    "dev:server": "pnpm --filter @kairo/theia-product start:server",
+    "test": "pnpm -r --filter \"./packages/*\" test && pnpm -r --filter \"./apps/*\" test",
+    "test:agent": "node scripts/test-agent.js",
+    "test:agent:race": "cd runtime-agent && go test -race -timeout 120s ./...",
+    "test:agent:integration": "cd runtime-agent && go test -timeout 240s -tags=integration ./test/...",
+    "lint": "eslint 'packages/*/src/**/*.{ts,tsx}' --max-warnings 0",
+    "format": "prettier --write 'packages/*/src/**/*.{ts,tsx,css}'",
+    "clean": "pnpm -r exec rm -rf lib out gen dist && rm -rf runtime-agent/bin runtime-agent/dist && pnpm -r exec sh -c 'rm -f tsconfig.tsbuildinfo *.tsbuildinfo' 2>/dev/null; true",
+    "verify": "pnpm bootstrap && pnpm build && pnpm test && pnpm test:agent && pnpm lint",
+    "agent:run": "cd runtime-agent && go run ./cmd/kairo-runtime --config ../runtime-agent/configs/dev.yaml",
+    "agent:build": "cd runtime-agent && CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o bin/kairo-runtime ./cmd/kairo-runtime",
+    "bundled:prepare": "pwsh -ExecutionPolicy Bypass -File scripts/prepare-bundled.ps1",
+    "bundled:check": "pwsh -ExecutionPolicy Bypass -File scripts/prepare-bundled.ps1 -Strict"
+  },
+  "devDependencies": {
+    "@types/node": "20.14.10",
+    "@typescript-eslint/eslint-plugin": "^8.64.0",
+    "@typescript-eslint/parser": "^8.64.0",
+    "eslint": "^10.7.0",
+    "playwright": "^1.61.1",
+    "prettier": "3.3.3",
+    "rimraf": "5.0.10",
+    "typescript": "5.5.4"
+  },
+  "pnpm": {
+    "overrides": {
+      "react-dom": "18.3.1",
+      "typescript": "5.5.4",
+      "drivelist": "workspace:*",
+      "puppeteer-core": "21.11.0",
+      "puppeteer": "21.11.0"
+    },
+    "patchedDependencies": {}
+  }
 }

@@ -21,6 +21,7 @@ import { RuntimeConnectionService } from '@kairo/runtime-extension';
 import { ServerStore } from '@kairo/tomcat-extension';
 import { KairoJavaService, JavaServiceState } from '@kairo/java-extension';
 import { KairoEncodingServiceImpl } from '@kairo/encoding-extension';
+import { ActiveProjectService } from '@kairo/project-extension';
 import { EditorManager } from '@theia/editor/lib/browser/editor-manager';
 import type { ServerInstance } from '@kairo/protocol';
 
@@ -32,12 +33,15 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
   @inject(KairoEncodingServiceImpl) protected encodingSvc!: KairoEncodingServiceImpl;
   @inject(EditorManager) protected editorManager!: EditorManager;
   @inject(ServerStore) protected serverStore!: ServerStore;
+  @inject(ActiveProjectService) protected activeProject!: ActiveProjectService;
 
   protected unsubscribeStatus: (() => void) | undefined;
   protected unsubscribeServerEvents: (() => void) | undefined;
   protected unsubscribeJdtState: (() => void) | undefined;
   protected unsubscribeEditor: Disposable | undefined;
   protected unsubscribeServerStore: Disposable | undefined;
+  protected unsubscribeProject: Disposable | undefined;
+  private runtimeStatus: 'connecting' | 'open' | 'disconnected' | 'closed' = 'disconnected';
 
   @postConstruct()
   init(): void {
@@ -80,7 +84,12 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
   }
 
   async onStart(_app: FrontendApplication): Promise<void> {
-    this.unsubscribeStatus = this.runtime.onStatusChange(s => this.setRuntimeStatus(s));
+    this.unsubscribeStatus = this.runtime.onStatusChange(s => {
+      this.runtimeStatus = s;
+      this.setRuntimeStatus(s);
+      // Re-render server status to show disconnected state if applicable
+      this.renderServerStatus();
+    });
     this.unsubscribeServerEvents = this.runtime.subscribeEvents(this.runtime.workspace(), (e: any) => {
       if (e.type === 'server.state') {
         void this.refreshServerStatus();
@@ -98,6 +107,10 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
     this.unsubscribeServerStore = this.serverStore.onDidChange(() => this.renderServerStatus());
     // Load initial server status from store.
     this.renderServerStatus();
+    // Subscribe to ActiveProjectService so the Project status
+    // bar entry reflects the currently selected Kairo project.
+    this.unsubscribeProject = this.activeProject.onDidChangeProject(p => this.renderProjectStatus(p));
+    this.renderProjectStatus(this.activeProject.project);
   }
 
   onStop(): void {
@@ -106,6 +119,33 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
     this.unsubscribeJdtState?.();
     this.unsubscribeEditor?.dispose();
     this.unsubscribeServerStore?.dispose();
+    this.unsubscribeProject?.dispose();
+  }
+
+  /**
+   * Render the Project status entry based on the currently
+   * active Kairo project. When no project is selected (e.g.
+   * no workspace is open or the workspace contains no
+   * project), the entry shows the legacy "(no workspace)"
+   * placeholder so users get a clear hint that the Build
+   * / Run / Deploy commands will be rejected.
+   */
+  protected renderProjectStatus(p?: { workspaceId: string; projectId: string; name: string; root: string }): void {
+    if (!p) {
+      this.statusBar.setElement('kairo.project', {
+        text: '$(file-directory) Project: (no workspace)',
+        tooltip: 'Open a legacy Java Web project to get started.',
+        alignment: StatusBarAlignment.LEFT,
+        priority: 100,
+      });
+      return;
+    }
+    this.statusBar.setElement('kairo.project', {
+      text: `$(file-directory) Project: ${p.name}`,
+      tooltip: `${p.name}\n${p.root}\nWorkspace: ${p.workspaceId}\nProject: ${p.projectId}`,
+      alignment: StatusBarAlignment.LEFT,
+      priority: 100,
+    });
   }
 
   /**
@@ -232,6 +272,24 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
   }
 
   protected renderServerStatus(): void {
+    if (this.runtimeStatus === 'disconnected' || this.runtimeStatus === 'closed') {
+      this.statusBar.setElement('kairo.server', {
+        text: '$(error) Server: Disconnected',
+        tooltip: 'Cannot reach the runtime agent. Server commands are unavailable.',
+        alignment: StatusBarAlignment.LEFT,
+        priority: 97,
+      });
+      return;
+    }
+    if (this.runtimeStatus === 'connecting') {
+      this.statusBar.setElement('kairo.server', {
+        text: '$(sync~spin) Server: connecting…',
+        tooltip: 'Connecting to runtime agent...',
+        alignment: StatusBarAlignment.LEFT,
+        priority: 97,
+      });
+      return;
+    }
     const servers = this.serverStore.getServers();
     const srv = servers[0];
     if (!srv) {
@@ -270,8 +328,16 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
         });
       }
       this.renderServerStatus();
-    } catch (_err) {
-      // Network blip — keep previous status from store.
+    } catch (err) {
+      // Network blip or agent unreachable — keep previous status from store,
+      // but update the runtime status bar entry to reflect the error.
+      const msg = err instanceof Error ? err.message : String(err);
+      this.statusBar.setElement('kairo.runtime', {
+        text: '$(error) Runtime: disconnected',
+        tooltip: `Cannot reach the Go Runtime Agent. ${msg}`,
+        alignment: StatusBarAlignment.RIGHT,
+        priority: 100,
+      });
     }
   }
 }
