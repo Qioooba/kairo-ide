@@ -31,8 +31,8 @@
     "verify": "pnpm bootstrap && pnpm build && pnpm test && pnpm test:agent && pnpm lint",
     "agent:run": "cd runtime-agent && go run ./cmd/kairo-runtime --config ../runtime-agent/configs/dev.yaml",
     "agent:build": "cd runtime-agent && CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o bin/kairo-runtime ./cmd/kairo-runtime",
-    "bundled:prepare": "pwsh -ExecutionPolicy Bypass -File scripts/prepare-bundled.ps1",
-    "bundled:check": "pwsh -ExecutionPolicy Bypass -File scripts/prepare-bundled.ps1 -Strict"
+    "bundled:prepare": "bash scripts/prepare-bundled.sh",
+    "bundled:check": "bash scripts/prepare-bundled.sh -Strict"
   },
   "devDependencies": {
     "@types/node": "20.14.10",
