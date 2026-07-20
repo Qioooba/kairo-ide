@@ -39,6 +39,7 @@ import { BuildViewWidget } from '@kairo/build-extension';
 import { BuildStore } from '@kairo/build-extension';
 import { ServerViewWidget, LogViewerWidget } from '@kairo/tomcat-extension';
 import { ImportWizardWidget, ProjectSelectorWidget } from '@kairo/project-extension';
+import { KAIRO_WELCOME_FACTORY_ID } from './kairo-welcome-widget';
 import {
   KAIRO_IMPORT_WIZARD_FACTORY_ID,
   KAIRO_PROJECT_SELECTOR_FACTORY_ID,
@@ -166,6 +167,30 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
       lastStatus = s;
     });
     this.eventsUnsub = this.runtime.subscribeEvents(this.runtime.workspace(), (e: any) => this.handleEvent(e));
+
+    // KAIRO-RC-WEB-018: cold start with no active project shows
+    // the Welcome tab so the first task is discoverable; the tab
+    // closes itself once a project is selected.
+    void this.maybeOpenWelcome();
+    this.activeProject.onDidChangeProject(p => {
+      if (p) void this.closeWelcome();
+    });
+  }
+
+  protected async maybeOpenWelcome(): Promise<void> {
+    if (this.activeProject.project) {
+      return;
+    }
+    try {
+      await this.revealOrCreateMain(KAIRO_WELCOME_FACTORY_ID, () => undefined, () => { /* singleton via WidgetManager */ });
+    } catch (err) {
+      console.warn('[kairo] welcome tab failed to open', err);
+    }
+  }
+
+  protected async closeWelcome(): Promise<void> {
+    const w = this.shell.getWidgets('main').find(widget => widget.id === KAIRO_WELCOME_FACTORY_ID);
+    w?.close();
   }
 
   onStop(): void {

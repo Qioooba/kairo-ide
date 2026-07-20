@@ -5,9 +5,10 @@
     "rootDir": "src/main",
     "declaration": true,
     "composite": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "jsx": "react"
   },
-  "include": ["src/main/**/*.ts"],
+  "include": ["src/main/**/*.ts", "src/main/**/*.tsx"],
   "exclude": ["node_modules", "lib", "**/*.test.ts"],
   "references": [
     { "path": "../protocol" },

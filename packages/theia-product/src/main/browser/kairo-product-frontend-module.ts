@@ -43,6 +43,7 @@ import {
   WorkspaceContextService,
 } from '@kairo/runtime-extension';
 import { ImportWizardWidget, ProjectSelectorWidget } from '@kairo/project-extension';
+import { KairoWelcomeWidget, KAIRO_WELCOME_FACTORY_ID } from './kairo-welcome-widget';
 import { KairoLargeFileContribution } from './kairo-large-file-contribution';
 import { KairoLargeFilePreferenceContribution } from './kairo-large-file-preferences';
 import {
@@ -163,6 +164,13 @@ export function bindKairoFrontend(bind: interfaces.Bind, unbind?: interfaces.Unb
   bind(WidgetFactory).toDynamicValue(ctx => ({
     id: KAIRO_PROJECT_SELECTOR_FACTORY_ID,
     createWidget: () => ctx.container.get(ProjectSelectorWidget),
+  })).inSingletonScope();
+
+  // Welcome tab — the first-run entry point (KAIRO-RC-WEB-018).
+  bind(KairoWelcomeWidget).toSelf();
+  bind(WidgetFactory).toDynamicValue(ctx => ({
+    id: KAIRO_WELCOME_FACTORY_ID,
+    createWidget: () => ctx.container.get(KairoWelcomeWidget),
   })).inSingletonScope();
 }
 
