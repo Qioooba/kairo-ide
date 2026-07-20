@@ -59,6 +59,7 @@ export namespace KairoCommands {
   export const SELECT_PROJECT: Command = { id: 'kairo.project.select', label: 'Kairo: Select Project' };
   export const SCAN_PROJECT: Command = { id: 'kairo.project.scan', label: 'Kairo: Scan Project' };
   export const BUILD: Command = { id: 'kairo.build', label: 'Kairo: Build' };
+  export const CLEAN_BUILD: Command = { id: 'kairo.cleanBuild', label: 'Kairo: Clean Build' };
   export const BUILD_AND_DEPLOY: Command = { id: 'kairo.buildAndDeploy', label: 'Kairo: Build and Deploy' };
   export const START_SERVER: Command = { id: 'kairo.server.start', label: 'Kairo: Start Server' };
   export const DEBUG_SERVER: Command = { id: 'kairo.server.debug', label: 'Kairo: Start Server (Debug)' };
@@ -150,10 +151,19 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
     // Register commands. The commands accept a `Widget | undefined`
     // argument when triggered from a view, but most user flows
     // come from the toolbar / command palette.
+    // KAIRO-RC-WEB-017: onStatusChange fires immediately with the
+    // current status, which is 'disconnected' before the first
+    // connect — warning on that initial emission produced a stale
+    // "disconnected" toast sitting next to a "Runtime: connected"
+    // status bar. Only warn on a genuine open -> disconnected
+    // transition, and let the toast time out so it cannot linger
+    // past a reconnect.
+    let lastStatus: string | undefined;
     this.statusUnsub = this.runtime.onStatusChange(s => {
-      if (s === 'disconnected') {
-        this.messages.warn('Runtime Agent is disconnected. Buttons will retry on click.');
+      if (s === 'disconnected' && lastStatus === 'open') {
+        this.messages.warn('Runtime Agent is disconnected. Buttons will retry on click.', { timeout: 12000 });
       }
+      lastStatus = s;
     });
     this.eventsUnsub = this.runtime.subscribeEvents(this.runtime.workspace(), (e: any) => this.handleEvent(e));
   }
@@ -223,6 +233,24 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
           await this.refreshBuilds();
         } catch (err) {
           this.messages.error(kairoErrorMessage(err, 'Build failed'));
+        }
+        return undefined;
+      },
+    });
+
+    // Same as Build but with clean:true — the backend wipes the
+    // previous build output first. The Build view's "Clean Build"
+    // button must run THIS (KAIRO-RC-WEB-007: it used to fire
+    // buildAndDeploy, contradicting its label).
+    registry.registerCommand(KairoCommands.CLEAN_BUILD, {
+      execute: async () => {
+        try {
+          const p = await this.activeProject.requireProject();
+          const result = await this.runtime.request('POST /api/v1/builds', { projectId: p.projectId, clean: true });
+          this.messages.info(`Clean build ${result.state}.`);
+          await this.refreshBuilds();
+        } catch (err) {
+          this.messages.error(kairoErrorMessage(err, 'Clean build failed'));
         }
         return undefined;
       },
