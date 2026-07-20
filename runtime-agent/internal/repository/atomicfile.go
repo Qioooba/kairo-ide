@@ -8,7 +8,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/kairo-ide/runtime-agent/internal/atomicfile"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/atomicfile"
 	"gopkg.in/yaml.v3"
 )
 

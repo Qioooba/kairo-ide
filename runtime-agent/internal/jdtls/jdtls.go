@@ -39,7 +39,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/kairo-ide/runtime-agent/internal/log"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/log"
 )
 
 // Manager is the lifecycle owner for the JDT Language Server

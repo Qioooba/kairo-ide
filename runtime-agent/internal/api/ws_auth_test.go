@@ -25,9 +25,9 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/kairo-ide/runtime-agent/internal/audit"
-	"github.com/kairo-ide/runtime-agent/internal/log"
-	"github.com/kairo-ide/runtime-agent/internal/transport/events"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/audit"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/log"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/transport/events"
 )
 
 // wsAuthTestBus wires the real EventHub + EventBusAdapter

@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kairo-ide/runtime-agent/internal/atomicfile"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/atomicfile"
 )
 
 func createFakeCatalinaHome(t *testing.T) string {

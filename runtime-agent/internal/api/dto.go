@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/kairo-ide/runtime-agent/internal/domain"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/domain"
 )
 
 // All DTOs are strongly typed. No json.RawMessage at the HTTP boundary.

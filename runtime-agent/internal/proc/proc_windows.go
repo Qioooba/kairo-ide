@@ -14,7 +14,7 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/kairo-ide/runtime-agent/internal/domain"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/domain"
 )
 
 // Windows API constants used for process identity verification and Job
@@ -65,6 +65,7 @@ type jobObjectBasicLimitInformation struct {
 	PerProcessMemoryLimit   uintptr
 	PerJobMemoryLimit       uintptr
 	SchedulingClass         uint32
+	LimitFlags              uint32
 }
 
 // jobObjectExtendedLimitInformationStruct is the JOBOBJECT_EXTENDED_LIMIT_INFORMATION
@@ -142,16 +143,10 @@ func initAgentJob() {
 
 // setJobLimitFlags writes the LimitFlags value into the
 // JOBOBJECT_BASIC_LIMIT_INFORMATION struct referenced by info. The struct
-// layout is fixed by the Windows ABI; LimitFlags sits immediately after
-// SchedulingClass.
+// layout is fixed by the Windows ABI and matches the field order in
+// jobObjectBasicLimitInformation above.
 func setJobLimitFlags(info *jobObjectBasicLimitInformation, flags uint32) {
-	// Layout (x64): int64, int64, uintptr, uintptr, uint32 (SchedulingClass),
-	// uint32 (LimitFlags). We compute the address of LimitFlags via
-	// unsafe arithmetic and store flags there.
-	base := uintptr(unsafe.Pointer(info))
-	schedulingClassOffset := unsafe.Offsetof(info.SchedulingClass)
-	limitFlagsAddr := (*uint32)(unsafe.Pointer(base + schedulingClassOffset + 4))
-	*limitFlagsAddr = flags
+	info.LimitFlags = flags
 }
 
 // assignToAgentJob adds the process referenced by pid to the agent-wide

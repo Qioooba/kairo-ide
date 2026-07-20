@@ -14,7 +14,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/kairo-ide/runtime-agent/internal/domain"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/domain"
 )
 
 // clockTicksPerSecond is the value of sysconf(_SC_CLK_TCK) on essentially

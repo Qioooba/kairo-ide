@@ -1,4 +1,4 @@
-module github.com/kairo-ide/runtime-agent
+module github.com/Qioooba/kairo-ide/runtime-agent
 
 go 1.22
 
@@ -11,3 +11,7 @@ require (
 )
 
 require golang.org/x/net v0.17.0 // indirect
+
+// Monorepo: keep self-references local; do not let Go fetch the module
+// from the public GitHub repository (which is the parent repo, not this path).
+replace github.com/Qioooba/kairo-ide/runtime-agent => ./

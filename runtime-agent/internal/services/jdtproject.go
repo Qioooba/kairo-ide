@@ -3,8 +3,8 @@ package services
 import (
 	"encoding/json"
 
-	"github.com/kairo-ide/runtime-agent/internal/jdtproject"
-	"github.com/kairo-ide/runtime-agent/internal/log"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/jdtproject"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/log"
 )
 
 // ----------------- JDTProjectGenerator (project model) -----------------

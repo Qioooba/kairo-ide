@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kairo-ide/runtime-agent/internal/domain"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/domain"
 )
 
 func truePath(t *testing.T) string {

@@ -8,8 +8,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/kairo-ide/runtime-agent/internal/atomicfile"
-	"github.com/kairo-ide/runtime-agent/internal/domain"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/atomicfile"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/domain"
 )
 
 type DeployResult struct {

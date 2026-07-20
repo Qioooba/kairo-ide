@@ -25,8 +25,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kairo-ide/runtime-agent/internal/audit"
-	"github.com/kairo-ide/runtime-agent/internal/log"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/audit"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/log"
 )
 
 // TestRuntimeRestart_SpawnBranch_Helper is the helper that
@@ -108,7 +108,7 @@ func TestRuntimeRestart_SpawnBranch_Helper(t *testing.T) {
 	// 0 whether or not the spawn worked. The parent
 	// test distinguishes by checking stdout for
 	// "SPAWN_OK".
-	_ = spawnObserved
+	spawnObserved.Store(true)
 	srv.doRestart()
 }
 

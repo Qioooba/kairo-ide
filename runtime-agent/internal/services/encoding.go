@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/kairo-ide/runtime-agent/internal/atomicfile"
-	"github.com/kairo-ide/runtime-agent/internal/encoding"
-	"github.com/kairo-ide/runtime-agent/internal/security"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/atomicfile"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/encoding"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/security"
 )
 
 // ----------------- Encoder -----------------
