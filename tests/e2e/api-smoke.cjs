@@ -11,10 +11,12 @@
 //   - /api/v1/workspaces POST
 //   - /api/v1/builds POST
 //   - /api/v1/deployments POST
-//   - /api/v1/servers POST (gated on B-002, treated as a
-//     soft pass with a GATED line)
+//   - /api/v1/servers POST (gated on B-002 — the GATED line
+//     records the gap and fails the run, see below)
 //
-// Exit 0 = pass, 1 = fail. Gated steps are NOT failures.
+// Exit 0 = pass, 1 = fail. Gated steps ARE failures
+// (KAIRO-RC-WEB-012): release evidence must not hide unrun
+// coverage behind a soft pass.
 
 const path = require('path');
 const os = require('os');
@@ -146,14 +148,19 @@ async function api(method, path, body) {
   }
 
   step('summary');
-  if (failures.length === 0) {
-    console.log(`OK — API smoke passed (${gated.length} gated)`);
+  if (failures.length === 0 && gated.length === 0) {
+    console.log('OK — API smoke passed');
     process.exit(0);
-  } else {
+  }
+  if (failures.length > 0) {
     console.log(`FAIL — API smoke: ${failures.length} failure(s):`);
     for (const f of failures) console.log('  - ' + f);
-    process.exit(1);
   }
+  if (gated.length > 0) {
+    console.log(`FAIL — API smoke: ${gated.length} gated item(s) (gated = not covered, treated as failure for release evidence):`);
+    for (const g of gated) console.log('  - ' + g);
+  }
+  process.exit(1);
 })().catch(err => {
   console.error('FAIL — API smoke:', err);
   process.exit(1);
