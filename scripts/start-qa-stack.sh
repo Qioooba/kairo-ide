@@ -15,8 +15,8 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 # Defaults
 DATA_DIR=""
-PORT="18080"
-WEB_PORT="3000"
+PORT=""
+WEB_PORT=""
 SKIP_BUILD="0"
 
 while [[ $# -gt 0 ]]; do
@@ -53,6 +53,47 @@ if [[ -z "$DATA_DIR" ]]; then
 fi
 mkdir -p "$DATA_DIR"
 DATA_DIR="$(cd "$DATA_DIR" && pwd)"
+
+# ------------------------------------------------------------------
+# Port selection: avoid collisions with other worktrees / previous runs.
+# If the user passed --port/--web-port, validate it is free. Otherwise,
+# pick the first free port starting from the traditional defaults.
+# ------------------------------------------------------------------
+port_in_use() {
+  lsof -ti tcp:"$1" >/dev/null 2>&1
+}
+
+find_free_port() {
+  local start="${1:-18080}"
+  local p="$start"
+  while [[ $p -lt 65535 ]]; do
+    if ! port_in_use "$p"; then
+      echo "$p"
+      return 0
+    fi
+    p=$((p + 1))
+  done
+  echo "[start-qa-stack] ERROR: no free TCP port found starting from $start" >&2
+  return 1
+}
+
+if [[ -n "$PORT" ]]; then
+  if port_in_use "$PORT"; then
+    echo "[start-qa-stack] ERROR: agent port $PORT is already in use" >&2
+    exit 2
+  fi
+else
+  PORT="$(find_free_port 18080)"
+fi
+
+if [[ -n "$WEB_PORT" ]]; then
+  if port_in_use "$WEB_PORT"; then
+    echo "[start-qa-stack] ERROR: web port $WEB_PORT is already in use" >&2
+    exit 2
+  fi
+else
+  WEB_PORT="$(find_free_port 3000)"
+fi
 
 LEGACY_SRC="$REPO_ROOT/legacy-sample"
 LEGACY_DST="$DATA_DIR/legacy-sample"
@@ -137,6 +178,16 @@ wait_for_health() {
 if ! wait_for_health "http://127.0.0.1:${PORT}/api/v1/health" 30; then
   echo "[start-qa-stack] ERROR: Runtime Agent health check failed (port ${PORT})" >&2
   echo "Agent log tail:" >&2
+  tail -n 30 "$AGENT_LOG" >&2 || true
+  exit 3
+fi
+
+# Confirm the *recorded* PID is actually listening on this port. Without this
+# guard a stale agent on the same port can make the health check pass while
+# our newly-started agent failed to bind and exited.
+if ! lsof -ti tcp:"${PORT}" | grep -q "^${AGENT_PID}$"; then
+  echo "[start-qa-stack] ERROR: Runtime Agent pid ${AGENT_PID} is not listening on port ${PORT}" >&2
+  echo "Another process may already own this port. Agent log tail:" >&2
   tail -n 30 "$AGENT_LOG" >&2 || true
   exit 3
 fi

@@ -10,6 +10,8 @@
 
 set -euo pipefail
 
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
 DATA_DIR=""
 
 while [[ $# -gt 0 ]]; do
@@ -85,12 +87,20 @@ kill_by_port() {
   fi
   local pids=""
   pids="$(lsof -ti tcp:"$port" 2>/dev/null || true)"
-  if [[ -n "$pids" ]]; then
-    echo "[stop-qa-stack] Stopping $label processes on port $port: $pids"
-    for pid in $pids; do
-      safe_kill "$pid" "$label"
-    done
+  if [[ -z "$pids" ]]; then
+    return 0
   fi
+  # Only kill processes that actually belong to this QA data directory or
+  # this repo's build artifacts. This prevents one worktree from terminating
+  # another agent's stack when ports happen to overlap.
+  for pid in $pids; do
+    local cmdline
+    cmdline="$(ps -p "$pid" -o args= 2>/dev/null || true)"
+    if [[ "$cmdline" == *"${DATA_DIR}"* ]]; then
+      echo "[stop-qa-stack] Stopping $label process on port $port (pid $pid)"
+      safe_kill "$pid" "$label"
+    fi
+  done
 }
 
 # Stop recorded leaders first.
