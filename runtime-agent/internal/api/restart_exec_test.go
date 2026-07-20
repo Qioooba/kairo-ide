@@ -108,7 +108,6 @@ func TestRuntimeRestart_SpawnBranch_Helper(t *testing.T) {
 	// 0 whether or not the spawn worked. The parent
 	// test distinguishes by checking stdout for
 	// "SPAWN_OK".
-	_ = spawnObserved
 	srv.doRestart()
 }
 
