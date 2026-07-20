@@ -6,7 +6,7 @@
     "main":  "lib/main.js",
     "scripts":  {
                     "build":  "tsc -p tsconfig.json",
-                    "prebuild":  "pnpm bundled:prepare ; node scripts/build-agent.js && node scripts/copy-browser-artifacts.js && node scripts/copy-bundled.js",
+                    "prebuild":  "node scripts/build-agent.js && node scripts/copy-browser-artifacts.js && node scripts/copy-bundled.js",
                     "build:mac":  "tsc -p tsconfig.json && electron-builder --mac",
                     "build:win":  "tsc -p tsconfig.json && electron-builder --win",
                     "build:linux":  "tsc -p tsconfig.json && electron-builder --linux",
