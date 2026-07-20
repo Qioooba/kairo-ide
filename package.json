@@ -35,9 +35,11 @@
     "bundled:check": "bash scripts/prepare-bundled.sh -Strict"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.12.1",
     "@types/node": "20.14.10",
     "@typescript-eslint/eslint-plugin": "^8.64.0",
     "@typescript-eslint/parser": "^8.64.0",
+    "axe-core": "^4.12.1",
     "eslint": "^10.7.0",
     "playwright": "^1.61.1",
     "prettier": "3.3.3",
