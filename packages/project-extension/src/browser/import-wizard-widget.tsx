@@ -5,7 +5,22 @@ import { FileDialogService } from '@theia/filesystem/lib/browser/file-dialog';
 import { KairoProjectService } from './project-service';
 import { ActiveProjectService } from './active-project-service';
 import { RuntimeConnectionService } from '@kairo/runtime-extension';
-import type { ProjectConfig } from '@kairo/protocol';
+
+/** Normalize a user-visible encoding label to the wire encoding id. */
+function normalizeEncodingId(encoding: string): string {
+    const lower = encoding.trim().toLowerCase();
+    switch (lower) {
+        case 'utf8': return 'utf-8';
+        case 'utf-8-bom': return 'utf-8-bom';
+        case 'gb18030': return 'gb18030';
+        case 'gbk': return 'gbk';
+        case 'iso-8859-1': return 'iso-8859-1';
+        case 'us-ascii': return 'us-ascii';
+        case 'utf-16le': return 'utf-16le';
+        case 'utf-16be': return 'utf-16be';
+        default: return lower || 'utf-8';
+    }
+}
 
 @injectable()
 export class ImportWizardWidget extends ReactWidget {
@@ -65,6 +80,7 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
     const [sourceLevel, setSourceLevel] = React.useState('1.6');
     const [encoding, setEncoding] = React.useState('GBK');
     const [buildTool, setBuildTool] = React.useState('ant');
+    const [projectId, setProjectId] = React.useState('');
 
     const handleOpenWorkspace = React.useCallback(async () => {
         const dialog = await fileDialogService.showOpenDialog({
@@ -81,6 +97,7 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
             try {
                 const ws = await projectService.openWorkspace(path);
                 setWorkspaceId(ws.id);
+                setProjectId(`project-${ws.id}`);
                 const layout = await projectService.detectLayout(ws.id);
                 setDetectedConfig(layout);
             } catch {
@@ -96,6 +113,17 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
         setSaveError('');
 
         try {
+            const trimmedName = projectName.trim();
+            if (!trimmedName) {
+                throw new Error('Project name cannot be empty.');
+            }
+            if (trimmedName.length > 100) {
+                throw new Error('Project name cannot exceed 100 characters.');
+            }
+            if (!projectId) {
+                throw new Error('No workspace selected. Open a workspace folder first.');
+            }
+
             // Step 4: Scan the workspace to detect project layout
             const scanResult = await runtime.request(
                 'POST /api/v1/workspaces/{workspaceId}/scan',
@@ -104,69 +132,39 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
             ) as any;
 
             const detected = scanResult?.detected || (scanResult?.detected ? null : scanResult);
-
-            // Build the project config from the form
-            const projectId = `project-${Date.now()}`;
-            const projectConfig: ProjectConfig = {
-                schemaVersion: 1,
-                id: projectId,
-                name: projectName,
-                rootPath: workspacePath,
-                sourceLayout: detected?.layout || detectedConfig?.layout || {
-                    src: ['src'],
-                    webRoot: 'web',
-                    config: [],
-                },
-                encoding: {
-                    default: encoding as any,
-                },
-                java: {
-                    languageServer: {
-                        toolchainId: 'auto',
-                        fingerprint: '',
-                    },
-                    compiler: {
-                        toolchainId: 'auto',
-                        fingerprint: '',
-                        sourceLevel: sourceLevel as any,
-                        targetLevel: sourceLevel as any,
-                    },
-                    runtime: {
-                        toolchainId: 'auto',
-                        fingerprint: '',
-                    },
-                },
-                serverRuntime: {
-                    type: 'tomcat',
-                    config: {},
-                },
-                build: {
-                    mode: buildTool as any,
-                },
-                deploy: {
-                    mode: 'copy',
-                    target: 'webapps',
-                },
-                hotReload: {
-                    mode: 'staticSync',
-                },
+            const layout = detected?.layout || detectedConfig?.layout || {
+                src: ['src'],
+                webRoot: 'WebRoot',
+                config: [],
             };
 
-            // Save the project config via the service layer.
-            // Routing through projectService.create() makes the wire
-            // contract the service's responsibility and keeps the
-            // projects map in step with the agent.
-            const saved = await projectService.create(projectConfig);
+            // The Runtime Agent's domain.Project expects a flat shape on the
+            // PUT /api/v1/projects/{projectId} wire. Send encoding as a
+            // normalized lowercase string (not the protocol's nested object),
+            // and include workspaceId so the disk store can scope the project.
+            const domainProject = {
+                id: projectId,
+                workspaceId,
+                name: trimmedName,
+                rootPath: workspacePath,
+                sourceRoots: layout.src || ['src'],
+                resourceRoots: layout.resources || ['src/main/resources'],
+                webappDir: layout.webRoot || 'WebRoot',
+                outputDir: 'build/classes',
+                sourceLevel,
+                targetLevel: sourceLevel,
+                encoding: normalizeEncodingId(encoding),
+                buildTool,
+                contextPath: '',
+            } as any;
 
-            // Update the ActiveProjectService with the id the agent
-            // actually stored. Use the service return value rather than
-            // the locally generated projectId so we follow the agent
-            // as the source of truth.
+            const saved = await projectService.create(domainProject);
+
             await activeProject.setProject({
                 workspaceId,
                 projectId: saved.id,
                 name: saved.name,
-                root: saved.rootPath,
+                root: saved.rootPath || workspacePath,
             });
 
             // Close wizard, refresh views (NO reload)
@@ -177,7 +175,7 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
         } finally {
             setSaving(false);
         }
-    }, [runtime, projectService, workspaceId, workspacePath, projectName, sourceLevel, encoding, buildTool, detectedConfig, activeProject, onClose]);
+    }, [runtime, projectService, workspaceId, workspacePath, projectName, sourceLevel, encoding, buildTool, detectedConfig, activeProject, onClose, projectId]);
 
     const handleStartIDE = React.useCallback(async () => {
         if (workspacePath && projectService) {
