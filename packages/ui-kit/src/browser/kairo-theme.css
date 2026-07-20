@@ -219,3 +219,46 @@
 .kairo-log-line.warning {
     color: var(--kairo-warning);
 }
+
+/* Theia shell overrides for Kairo Dark theme */
+
+/* Notification toasts: enforce dark surface so light text is readable.
+ * Theia's default .theia-notification-list-item uses a light background
+ * in some builds, producing white-on-white text in Kairo Dark. */
+.theia-notification-list-item,
+.theia-notification-list-item-container,
+.theia-notification-toast {
+    background: var(--theia-notification-background, #252629) !important;
+    color: var(--theia-notification-foreground, #dfe1e5) !important;
+    border-color: var(--theia-notification-border, #3d4148) !important;
+}
+
+.theia-notification-message,
+.theia-notification-list-item-content,
+.theia-notification-list-item-content-main {
+    color: var(--theia-notification-foreground, #dfe1e5) !important;
+}
+
+.theia-notification-list-item .theia-notification-action,
+.theia-notification-list-item .theia-notification-button {
+    color: var(--theia-button-foreground, #ffffff) !important;
+    background: var(--theia-button-background, #7c5cbf) !important;
+}
+
+/* Status bar: clickable items must show pointer cursor */
+#theia-statusBar .element.hasCommand,
+#theia-statusBar .element[role="button"],
+.theia-statusbar .element.hasCommand {
+    cursor: pointer !important;
+}
+
+/* Status bar hover background should be visible */
+#theia-statusBar .element.hasCommand:hover {
+    background-color: var(--theia-statusBarItem-hoverBackground, rgba(255,255,255,0.05));
+}
+
+/* Focus ring for interactive status bar items */
+#theia-statusBar .element.hasCommand:focus-visible {
+    outline: 1px solid var(--theia-focusBorder, #7c5cbf);
+    outline-offset: -1px;
+}

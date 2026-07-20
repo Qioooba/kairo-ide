@@ -11,6 +11,7 @@ import { FrontendApplicationContribution } from '@theia/core/lib/browser/fronten
 import { ColorContribution } from '@theia/core/lib/browser/color-application-contribution';
 import { KairoUiContribution } from './kairo-ui-contribution';
 import { KairoThemeContribution } from './kairo-theme-contribution';
+import './kairo-theme.css';
 
 export * from './kairo-ui-contribution';
 export * from './kairo-theme';
