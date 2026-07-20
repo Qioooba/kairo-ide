@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -606,6 +607,7 @@ func (f *fakeProjectRepo) FindByRoot(ctx context.Context, wsID domain.WorkspaceI
 }
 
 type fakeBuildHistoryRepo struct {
+	mu   sync.Mutex
 	runs map[string][]domain.BuildRun
 }
 
@@ -614,6 +616,8 @@ func newFakeBuildHistoryRepo() *fakeBuildHistoryRepo {
 }
 
 func (f *fakeBuildHistoryRepo) Save(ctx context.Context, run domain.BuildRun) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	key := string(run.WorkspaceID) + ":" + string(run.ProjectID)
 	existing := f.runs[key]
 	replaced := false
@@ -634,6 +638,8 @@ func (f *fakeBuildHistoryRepo) Save(ctx context.Context, run domain.BuildRun) er
 }
 
 func (f *fakeBuildHistoryRepo) Get(ctx context.Context, wsID domain.WorkspaceID, buildID domain.BuildID) (*domain.BuildRun, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	key := string(wsID) + ":" + string(buildID)
 	runs, ok := f.runs[key]
 	if !ok || len(runs) == 0 {
@@ -643,6 +649,8 @@ func (f *fakeBuildHistoryRepo) Get(ctx context.Context, wsID domain.WorkspaceID,
 }
 
 func (f *fakeBuildHistoryRepo) List(ctx context.Context, wsID domain.WorkspaceID, pID domain.ProjectID, limit int) ([]domain.BuildRun, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	key := string(wsID) + ":" + string(pID)
 	runs, ok := f.runs[key]
 	if !ok {
