@@ -173,6 +173,8 @@ function buildContainer() {
 
 test('KairoCommands namespace declares the expected command ids with non-empty labels', () => {
   const expected = [
+    'kairo.project.import',
+    'kairo.project.select',
     'kairo.project.scan',
     'kairo.build',
     'kairo.buildAndDeploy',
@@ -207,6 +209,8 @@ test('KairoViewsContribution.registerCommands registers every command in a real 
   contribution.registerCommands(registry);
 
   const expectedIds = [
+    'kairo.project.import',
+    'kairo.project.select',
     'kairo.project.scan',
     'kairo.build',
     'kairo.buildAndDeploy',
@@ -229,14 +233,14 @@ test('KairoViewsContribution.registerCommands registers every command in a real 
   }
 });
 
-test('KairoViewsContribution.registerCommands registers exactly 12 commands', () => {
+test('KairoViewsContribution.registerCommands registers exactly 14 commands', () => {
   const container = buildContainer();
   const contribution = container.get(KairoViewsContribution);
   const registry = new CommandRegistry();
   contribution.registerCommands(registry);
 
-  assert.strictEqual(registry.commandIds.length, 12,
-    `Expected 12 commands, got ${registry.commandIds.length}: ${registry.commandIds.join(', ')}`);
+  assert.strictEqual(registry.commandIds.length, 14,
+    `Expected 14 commands, got ${registry.commandIds.length}: ${registry.commandIds.join(', ')}`);
 });
 
 // --------------- execution verification ---------------
@@ -371,10 +375,13 @@ test('execution: kairo.app.open calls GET /api/v1/servers then opens URL', async
   const registry = new CommandRegistry();
   contribution.registerCommands(registry);
 
-  // Override GET /api/v1/servers to return a running server with an HTTP port
+  // Override GET /api/v1/servers to return a running server with an HTTP port.
+  // The override must still record the call — the assertion below
+  // inspects callLog.
   const origRequest = runtime.request;
   runtime.request = (endpoint, payload) => {
     if (endpoint === 'GET /api/v1/servers') {
+      runtime.callLog.push({ endpoint, payload });
       return Promise.resolve([{ id: 'srv-1', state: 'running', ports: { http: 8080 } }]);
     }
     return origRequest(endpoint, payload);
@@ -386,13 +393,15 @@ test('execution: kairo.app.open calls GET /api/v1/servers then opens URL', async
   assert.ok(serverCalls.length >= 1, 'app.open must call GET /api/v1/servers');
 });
 
-test('execution: all 12 commands have executable handlers', async () => {
+test('execution: all 14 commands have executable handlers', async () => {
   const container = buildContainer();
   const contribution = container.get(KairoViewsContribution);
   const registry = new CommandRegistry();
   contribution.registerCommands(registry);
 
   const cmdIds = [
+    'kairo.project.import',
+    'kairo.project.select',
     'kairo.project.scan',
     'kairo.build',
     'kairo.buildAndDeploy',
@@ -408,9 +417,9 @@ test('execution: all 12 commands have executable handlers', async () => {
   ];
 
   for (const id of cmdIds) {
-    const handler = registry.getCommand(id);
-    assert.ok(handler, `Command '${id}' must have a registered handler`);
-    assert.ok(typeof handler.execute === 'function' || handler.isEnabled,
+    const handler = registry.getActiveHandler(id);
+    assert.ok(handler, `Command '${id}' must have an active handler`);
+    assert.ok(typeof handler.execute === 'function',
       `Command '${id}' must have an execute function`);
   }
 });

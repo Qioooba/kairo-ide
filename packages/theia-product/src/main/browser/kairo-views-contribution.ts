@@ -26,7 +26,7 @@ import {
   ApplicationShell,
 } from '@theia/core/lib/browser';
 import { Command, CommandRegistry, CommandService, MenuContribution, MenuModelRegistry, MessageService } from '@theia/core/lib/common';
-import { CommonMenus } from '@theia/core/lib/browser/common-frontend-contribution';
+import { CommonMenus } from '@theia/core/lib/browser/common-menus';
 import { RuntimeConnectionService, KairoError } from '@kairo/runtime-extension';
 import {
   KairoServerService,
@@ -42,7 +42,7 @@ import { ImportWizardWidget, ProjectSelectorWidget } from '@kairo/project-extens
 import {
   KAIRO_IMPORT_WIZARD_FACTORY_ID,
   KAIRO_PROJECT_SELECTOR_FACTORY_ID,
-} from './kairo-product-frontend-module';
+} from './kairo-factory-ids';
 import type {
   ServerInstance,
   BuildResult,

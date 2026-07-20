@@ -71,6 +71,9 @@ function makeShutdownServer() {
     });
     srv.listen(0, '127.0.0.1', () => {
       const { port } = srv.address();
+      // Don't let the fake shutdown server keep the node
+      // process alive after the tests finish.
+      srv.unref();
       resolve({ srv, port });
     });
   });

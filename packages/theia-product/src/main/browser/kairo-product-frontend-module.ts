@@ -45,13 +45,25 @@ import {
 import { ImportWizardWidget, ProjectSelectorWidget } from '@kairo/project-extension';
 import { KairoLargeFileContribution } from './kairo-large-file-contribution';
 import { KairoLargeFilePreferenceContribution } from './kairo-large-file-preferences';
+import {
+  KAIRO_SERVERS_FACTORY_ID,
+  KAIRO_BUILDS_FACTORY_ID,
+  KAIRO_DEPLOYMENTS_FACTORY_ID,
+  KAIRO_LOGS_FACTORY_ID,
+  KAIRO_IMPORT_WIZARD_FACTORY_ID,
+  KAIRO_PROJECT_SELECTOR_FACTORY_ID,
+} from './kairo-factory-ids';
 
-export const KAIRO_SERVERS_FACTORY_ID = 'kairo-server-view';
-export const KAIRO_BUILDS_FACTORY_ID = 'kairo-build-view';
-export const KAIRO_DEPLOYMENTS_FACTORY_ID = 'kairo-deployments';
-export const KAIRO_LOGS_FACTORY_ID = 'kairo-log-viewer';
-export const KAIRO_IMPORT_WIZARD_FACTORY_ID = 'kairo-import-wizard';
-export const KAIRO_PROJECT_SELECTOR_FACTORY_ID = 'kairo-project-selector';
+// Re-export so existing consumers can keep importing the IDs from
+// this module; the definitions live in kairo-factory-ids.ts.
+export {
+  KAIRO_SERVERS_FACTORY_ID,
+  KAIRO_BUILDS_FACTORY_ID,
+  KAIRO_DEPLOYMENTS_FACTORY_ID,
+  KAIRO_LOGS_FACTORY_ID,
+  KAIRO_IMPORT_WIZARD_FACTORY_ID,
+  KAIRO_PROJECT_SELECTOR_FACTORY_ID,
+} from './kairo-factory-ids';
 
 export function bindKairoFrontend(bind: interfaces.Bind, unbind?: interfaces.Unbind, isBound?: interfaces.IsBound, rebind?: interfaces.Rebind): void {
   // ── Kairo runtime client + workspace context ────────────────
