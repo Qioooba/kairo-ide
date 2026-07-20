@@ -129,6 +129,23 @@ test('composition: widget factories for all six Kairo views are registered', () 
   );
 });
 
+test('composition: JSP language contribution is bound (KAIRO-RC-WEB-002)', () => {
+  const container = compose();
+  const { KairoJspLanguageContribution } = require('@kairo/jsp-extension/lib/browser');
+  // Assert the binding exists WITHOUT getAll(FrontendApplicationContribution):
+  // that would eagerly construct every contribution and fail on Theia
+  // services (StatusBar, ApplicationShell, …) absent from this bare
+  // container. The class itself is dependency-free, so get() is safe.
+  assert.strictEqual(
+    bindingCount(container, KairoJspLanguageContribution),
+    1,
+    'KairoJspLanguageContribution must be bound exactly once (toSelf) by bindJspExtension',
+  );
+  const instance = container.get(KairoJspLanguageContribution);
+  assert.ok(instance instanceof KairoJspLanguageContribution);
+  assert.strictEqual(typeof instance.onStart, 'function', 'must implement FrontendApplicationContribution.onStart');
+});
+
 test('teardown', () => {
   disableJSDOM();
 });

@@ -2,7 +2,7 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { JSP_MONARCH } = require('../../lib/browser/jsp-grammar');
+const { JSP_MONARCH } = require('../../lib/browser/jsp-monarch');
 
 test('JSP grammar uses cached states for all server-side block types', () => {
   const states = JSP_MONARCH.tokenizer;
