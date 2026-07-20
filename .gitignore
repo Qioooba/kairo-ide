@@ -139,3 +139,12 @@ artifacts/windows-wave2-r1-prev-*/
 # Local scratch files (test probes, one-off scripts)
 scratchpad/
 
+
+# Kairo Windows Release Gate temp artifacts
+KAIRO_QA_ROOT/
+w0/
+w1/
+w2/
+w3/
+w4/
+w5/
