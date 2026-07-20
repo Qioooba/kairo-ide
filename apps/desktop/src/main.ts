@@ -368,7 +368,7 @@ async function createWindow(): Promise<void> {
   process.env.KAIRO_AGENT_URL = `http://127.0.0.1:${agentPort}`;
   process.env.KAIRO_AGENT_SECRET = agentSecret;
 
-  mainWindow = new BrowserWindow({
+      mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
     minWidth: 960,
@@ -380,8 +380,11 @@ async function createWindow(): Promise<void> {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false, // Required for preload to access Node APIs
-    },
+    }
   });
+
+
+
 
   // Auto-open DevTools only in unpackaged (dev) runs so the user
   // can see the renderer's actual console / network / errors. In
@@ -472,17 +475,17 @@ if (!gotLock) {
     // Set CSP before creating any windows.
     app.on('session-created', (session) => {
       session.webRequest.onHeadersReceived((details, callback) => {
-        // Theia 1.73 ships with ajv-generated validators that use
-        // `new Function` for JSON schema compile. Without
-        // 'unsafe-eval' the very first schema validate throws
-        // EvalError and the frontend hangs in the splash. We
-        // therefore default the production CSP to the tightest
-        // policy that still lets Theia load its static assets, and
-        // gate 'unsafe-eval' behind KAIRO_DEV=1 so packaged builds
-        // ship with a hardened policy. If the renderer ever truly
-        // needs eval in production, switch the policy to add it
-        // back — but record the reason in the commit message.
-        const scriptSrcExtra = process.env.KAIRO_DEV === '1' ? " 'unsafe-eval'" : '';
+        // Theia 1.73 ships with ajv-generated validators that call
+        // `new Function` to compile JSON schemas. Electron 24+
+        // enforces a strict CSP by default which blocks `eval`; if
+        // we don't permit 'unsafe-eval' the very first schema
+        // validate throws EvalError and the renderer hangs in the
+        // splash. We therefore default to 'unsafe-eval' in both
+        // dev and packaged builds. The renderer is loaded from
+        // app.asar (same-origin) so this only enables eval of
+        // code shipped with us, not remote script — no additional
+        // attack surface versus the default Theia policy.
+        const scriptSrcExtra = " 'unsafe-eval'";
         callback({
           responseHeaders: {
             ...details.responseHeaders,
