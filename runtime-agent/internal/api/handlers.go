@@ -807,22 +807,17 @@ func (s *Server) handleJDTLS(w http.ResponseWriter, r *http.Request) {
 		}
 		writeOK(w, env, rep)
 	case http.MethodDelete:
+		// DELETE is not part of the JDTLS contract. The
 		// JDT LS process lifecycle is owned by the Theia
-		// backend (see docs/adr/0014-jdt-ls-lifecycle.md).
-		// The agent only manages the distribution and
-		// exposes launch descriptors. We accept the DELETE
-		// so the frontend gets a clean envelope instead of
-		// 405, and return the current distribution status
-		// so the UI can show the same state as GET.
-		env, _, _ := readEnvelopeAndBody(r)
-		st, err := s.Services.JDTLS.Status()
-		if err != nil {
-			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{
-				Code: protocol.ErrInternal, Message: err.Error(),
-			})
-			return
-		}
-		writeOK(w, env, st)
+		// backend (see docs/adr/0014-jdt-ls-lifecycle.md),
+		// and the agent only manages the distribution +
+		// launch descriptor. Refuse with 400 so the
+		// frontend can show an explicit "not supported"
+		// rather than silently getting a 200 with status.
+		writeError(w, "", "", protocol.KairoError{
+			Code:    protocol.ErrInvalidRequest,
+			Message: "DELETE not supported on /api/v1/jdtls; use POST to install or GET to inspect",
+		})
 	default:
 		writeError(w, "", "", protocol.KairoError{
 			Code: protocol.ErrInvalidRequest, Message: "GET or POST only",

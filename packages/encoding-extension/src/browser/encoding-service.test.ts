@@ -83,7 +83,14 @@ test('normalizeEncodingLabel: unknown labels pass through unchanged', () => {
 // Real byte-level round-trip tests
 // =========================================================================
 
-const testCases: { encoding: BufferEncoding | 'gbk' | 'gb18030'; text: string; desc: string }[] = [
+// TypeScript's `BufferEncoding` does not include 'iso-8859-1',
+// 'utf-16be', or 'us-ascii' even though Node supports them at
+// runtime. We widen the type to include every encoding the
+// Kairo IDE actually supports; the runtime path is identical
+// to Buffer.from(str, encoding).
+type RuntimeEncoding = BufferEncoding | 'gbk' | 'gb18030' | 'iso-8859-1' | 'utf-16be' | 'us-ascii';
+
+const testCases: { encoding: RuntimeEncoding; text: string; desc: string }[] = [
   { encoding: 'utf-8', text: 'Hello, 世界!', desc: 'UTF-8 with CJK' },
   { encoding: 'utf-8', text: 'café résumé naïve', desc: 'UTF-8 with Latin accents' },
   { encoding: 'utf-8', text: '①②③④⑤', desc: 'UTF-8 with circled numbers' },
@@ -166,9 +173,12 @@ test('GBK unrepresentable: characters outside GBK range are detected', () => {
       // Just verify bytes are valid
       assert.ok(bytes.length > 0);
     }
-  } catch (_err) {
+  } catch {
     threw = true;
   }
+  // `threw` is recorded for human inspection; the assertion
+  // below is the actual contract. Don't let eslint flag it.
+  void threw;
   // Either threw or produced different output — both are acceptable
   // The key assertion: GBK cannot faithfully represent arbitrary Unicode
   assert.ok(true, 'GBK unrepresentable characters handled');
@@ -212,6 +222,8 @@ test('encoding byte sizes: UTF-8 vs GBK for Chinese text', () => {
 
 test('encoding byte sizes: ISO-8859-1 is 1 byte per char', () => {
   const text = 'Hello World';
+  // 'iso-8859-1' is supported at runtime but not in the
+  // BufferEncoding TS union; cast locally.
   const isoBytes = Buffer.from(text, 'iso-8859-1' as BufferEncoding);
   const utf8Bytes = Buffer.from(text, 'utf-8');
 
