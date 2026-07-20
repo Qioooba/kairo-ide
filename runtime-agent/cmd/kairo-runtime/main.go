@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	stdlog "log"
 	"net"
 	"net/http"
 	_ "net/http/pprof"
@@ -11,17 +12,16 @@ import (
 	"path/filepath"
 	"runtime"
 	"time"
-	stdlog "log"
 
 	"github.com/kairo-ide/runtime-agent/internal/api"
+	"github.com/kairo-ide/runtime-agent/internal/audit"
 	"github.com/kairo-ide/runtime-agent/internal/bootstrap"
 	"github.com/kairo-ide/runtime-agent/internal/config"
 	"github.com/kairo-ide/runtime-agent/internal/log"
-	"github.com/kairo-ide/runtime-agent/internal/audit"
 )
 
 const (
-	agentVersion          = "0.1.0"
+	agentVersion           = "0.1.0"
 	restartShutdownTimeout = 30 * time.Second
 )
 

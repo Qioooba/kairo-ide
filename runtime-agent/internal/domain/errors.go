@@ -9,11 +9,11 @@ import (
 // ---- HTTP-mappable error sentinels ----
 
 var (
-	ErrInvalidInput     = errors.New("invalid input")
-	ErrUnauthenticated  = errors.New("unauthenticated")
-	ErrForbidden        = errors.New("forbidden")
-	ErrNotFound         = errors.New("not found")
-	ErrConflict         = errors.New("conflict")
+	ErrInvalidInput    = errors.New("invalid input")
+	ErrUnauthenticated = errors.New("unauthenticated")
+	ErrForbidden       = errors.New("forbidden")
+	ErrNotFound        = errors.New("not found")
+	ErrConflict        = errors.New("conflict")
 )
 
 // ---- Domain sentinels ----

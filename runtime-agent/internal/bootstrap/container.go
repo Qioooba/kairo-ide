@@ -31,11 +31,11 @@ type Container struct {
 	Sandbox  *security.WorkspaceRoots
 
 	// Repositories (exposed for direct use in tests)
-	WorkspaceRepo  domain.WorkspaceRepository
-	ProjectRepo    domain.ProjectRepository
-	ToolchainRepo  domain.ToolchainRepository
-	BuildHistory   domain.BuildHistoryRepository
-	ServerHistory  domain.ServerHistoryRepository
+	WorkspaceRepo domain.WorkspaceRepository
+	ProjectRepo   domain.ProjectRepository
+	ToolchainRepo domain.ToolchainRepository
+	BuildHistory  domain.BuildHistoryRepository
+	ServerHistory domain.ServerHistoryRepository
 
 	shutdownFns []func(context.Context) error
 }

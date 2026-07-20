@@ -50,13 +50,13 @@ func DefaultServerUseCaseConfig() ServerUseCaseConfig {
 // CatalinaBase uses random ServerID (UUID), not raw ProjectID.
 // Start/stop timeout from config.
 type ServerUseCase struct {
-	projectRepo    domain.ProjectRepository
-	serverRepo     domain.ServerHistoryRepository
-	portAlloc      domain.PortAllocator
+	projectRepo     domain.ProjectRepository
+	serverRepo      domain.ServerHistoryRepository
+	portAlloc       domain.PortAllocator
 	runtimeProvider domain.RuntimeProvider
-	resolver       *PlanResolver
-	eventHub       *events.EventHub
-	cfg            ServerUseCaseConfig
+	resolver        *PlanResolver
+	eventHub        *events.EventHub
+	cfg             ServerUseCaseConfig
 }
 
 // NewServerUseCase creates a new ServerUseCase.
@@ -70,13 +70,13 @@ func NewServerUseCase(
 	cfg ServerUseCaseConfig,
 ) *ServerUseCase {
 	return &ServerUseCase{
-		projectRepo:    projectRepo,
-		serverRepo:     serverRepo,
-		portAlloc:      portAlloc,
+		projectRepo:     projectRepo,
+		serverRepo:      serverRepo,
+		portAlloc:       portAlloc,
 		runtimeProvider: runtimeProvider,
-		resolver:       resolver,
-		eventHub:       eventHub,
-		cfg:            cfg,
+		resolver:        resolver,
+		eventHub:        eventHub,
+		cfg:             cfg,
 	}
 }
 

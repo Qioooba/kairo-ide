@@ -11,15 +11,15 @@ import (
 type EventType string
 
 const (
-	EventBuildQueued     EventType = "build.queued"
-	EventBuildStarted    EventType = "build.started"
-	EventBuildProgress   EventType = "build.progress"
-	EventBuildCompleted  EventType = "build.completed"
-	EventBuildFailed     EventType = "build.failed"
-	EventBuildCancelled  EventType = "build.cancelled"
-	EventServerStarted   EventType = "server.started"
-	EventServerStopped   EventType = "server.stopped"
-	EventServerError     EventType = "server.error"
+	EventBuildQueued      EventType = "build.queued"
+	EventBuildStarted     EventType = "build.started"
+	EventBuildProgress    EventType = "build.progress"
+	EventBuildCompleted   EventType = "build.completed"
+	EventBuildFailed      EventType = "build.failed"
+	EventBuildCancelled   EventType = "build.cancelled"
+	EventServerStarted    EventType = "server.started"
+	EventServerStopped    EventType = "server.stopped"
+	EventServerError      EventType = "server.error"
 	EventDeployComplete   EventType = "deploy.completed"
 	EventDeployStarted    EventType = "deploy.started"
 	EventSnapshotRequired EventType = "snapshot.required"
@@ -37,10 +37,10 @@ type Event struct {
 }
 
 const (
-	defaultMaxHistory  = 1000
-	defaultMaxSubBuf   = 256
-	maxSubscribers     = 1000
-	maxMessageSize     = 64 * 1024 // 64KB
+	defaultMaxHistory = 1000
+	defaultMaxSubBuf  = 256
+	maxSubscribers    = 1000
+	maxMessageSize    = 64 * 1024 // 64KB
 )
 
 // EventHub is a publish-subscribe event bus with history and sequence tracking.

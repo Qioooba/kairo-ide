@@ -57,7 +57,7 @@ type RuntimePlan struct {
 
 // PlanResolver resolves domain entities into executable plans.
 type PlanResolver struct {
-	sandbox *security.WorkspaceRoots
+	sandbox   *security.WorkspaceRoots
 	portAlloc domain.PortAllocator
 }
 

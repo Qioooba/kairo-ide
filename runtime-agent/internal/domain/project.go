@@ -269,19 +269,19 @@ type ServerEventPublisher interface {
 // ProjectConfig is the domain-level representation of the .kairo/project.yaml
 // content. It is the single source of truth for project configuration.
 type ProjectConfig struct {
-	SchemaVersion int        `yaml:"schemaVersion" json:"schemaVersion"`
-	Name          string     `yaml:"name" json:"name"`
-	SourceRoots   []string   `yaml:"sourceRoots" json:"sourceRoots"`
-	ResourceRoots []string   `yaml:"resourceRoots" json:"resourceRoots"`
-	WebappDir     string     `yaml:"webappDir" json:"webappDir"`
-	OutputDir     string     `yaml:"outputDir" json:"outputDir"`
-	SourceLevel   string     `yaml:"sourceLevel" json:"sourceLevel"`
-	TargetLevel   string     `yaml:"targetLevel" json:"targetLevel"`
-	Encoding      string     `yaml:"encoding" json:"encoding"`
+	SchemaVersion int         `yaml:"schemaVersion" json:"schemaVersion"`
+	Name          string      `yaml:"name" json:"name"`
+	SourceRoots   []string    `yaml:"sourceRoots" json:"sourceRoots"`
+	ResourceRoots []string    `yaml:"resourceRoots" json:"resourceRoots"`
+	WebappDir     string      `yaml:"webappDir" json:"webappDir"`
+	OutputDir     string      `yaml:"outputDir" json:"outputDir"`
+	SourceLevel   string      `yaml:"sourceLevel" json:"sourceLevel"`
+	TargetLevel   string      `yaml:"targetLevel" json:"targetLevel"`
+	Encoding      string      `yaml:"encoding" json:"encoding"`
 	BuildTool     BuildToolID `yaml:"buildTool" json:"buildTool"`
-	ContextPath   string     `yaml:"contextPath" json:"contextPath"`
-	ToolchainID   string     `yaml:"toolchainId,omitempty" json:"toolchainId,omitempty"`
-	RuntimeID     string     `yaml:"runtimeId,omitempty" json:"runtimeId,omitempty"`
+	ContextPath   string      `yaml:"contextPath" json:"contextPath"`
+	ToolchainID   string      `yaml:"toolchainId,omitempty" json:"toolchainId,omitempty"`
+	RuntimeID     string      `yaml:"runtimeId,omitempty" json:"runtimeId,omitempty"`
 }
 
 type Workspace struct {
@@ -298,8 +298,8 @@ type Project struct {
 	ID            ProjectID     `json:"id"`
 	WorkspaceID   WorkspaceID   `json:"workspaceId"`
 	Name          string        `json:"name"`
-	RootPath      string        `json:"rootPath"`   // canonical absolute path (repository internal)
-	Root          string        `json:"root"`        // legacy — prefer RootPath
+	RootPath      string        `json:"rootPath"` // canonical absolute path (repository internal)
+	Root          string        `json:"root"`     // legacy — prefer RootPath
 	Config        ProjectConfig `json:"config"`
 	SourceRoots   []string      `json:"sourceRoots"`
 	ResourceRoots []string      `json:"resourceRoots"`
