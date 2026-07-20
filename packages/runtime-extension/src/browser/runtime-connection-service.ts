@@ -187,9 +187,9 @@ export class RuntimeConnectionService {
     this.workspaceId = id;
     if (this.internalEventStream) {
       this.closeEventStream();
-      if (this.subscribers.size > 0) {
-        this.ensureEventStream();
-      }
+    }
+    if (this.workspaceId && this.subscribers.size > 0) {
+      this.ensureEventStream();
     }
   }
 
@@ -448,27 +448,33 @@ export class RuntimeConnectionService {
    * port at startup.
    */
   subscribeEvents(workspaceId: string, onEvent: (event: any) => void): () => void {
-    let subs = this.subscribers.get(workspaceId);
+    const key = workspaceId || '__no_workspace__';
+    let subs = this.subscribers.get(key);
     if (!subs) {
       subs = new Set();
-      this.subscribers.set(workspaceId, subs);
+      this.subscribers.set(key, subs);
     }
     subs.add(onEvent);
 
-    if (!this.workspaceId) {
-      this.workspaceId = workspaceId;
-    } else if (this.workspaceId !== workspaceId && this.internalEventStream) {
-      this.closeEventStream();
+    // Only open the WebSocket once we have a real workspace id. The agent
+    // rejects event-stream connections with an empty workspaceId, so opening
+    // early produces a reconnect loop that keeps the status bar at
+    // "connecting…" forever.
+    if (workspaceId) {
+      if (!this.workspaceId) {
+        this.workspaceId = workspaceId;
+      } else if (this.workspaceId !== workspaceId && this.internalEventStream) {
+        this.closeEventStream();
+      }
+      this.ensureEventStream();
     }
 
-    this.ensureEventStream();
-
     return () => {
-      const s = this.subscribers.get(workspaceId);
+      const s = this.subscribers.get(key);
       if (s) {
         s.delete(onEvent);
         if (s.size === 0) {
-          this.subscribers.delete(workspaceId);
+          this.subscribers.delete(key);
           // If no subscribers remain, close the EventStream.
           if (this.subscribers.size === 0) {
             this.closeEventStream();
