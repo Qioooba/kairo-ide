@@ -86,7 +86,7 @@ func (a *EventBusAdapter) Serve(w http.ResponseWriter, r *http.Request) {
 	// ServeWS so the adapter and the standalone path stay
 	// in sync. Subscribe returns the unique subscriber ID,
 	// the channel of events, and an unsubscribe func.
-	_, ch, unsubscribe := a.Hub.Subscribe(workspaceID)
+	_, ch, unsubscribe := a.Hub.SubscribeWithID(workspaceID, 0)
 	defer unsubscribe()
 
 	// Drain the channel into the WebSocket connection.

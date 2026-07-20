@@ -24,6 +24,7 @@ import {
   FrontendApplicationContribution,
   WidgetFactory,
 } from '@theia/core/lib/browser';
+import { WindowTitleContribution } from '@theia/core/lib/browser/window/window-title-service';
 import { CommandContribution } from '@theia/core/lib/common';
 import { PreferenceContribution } from '@theia/core/lib/common/preferences';
 import {
@@ -43,6 +44,12 @@ export const KAIRO_BUILDS_FACTORY_ID = 'kairo-build-view';
 export const KAIRO_DEPLOYMENTS_FACTORY_ID = 'kairo-deployments';
 export const KAIRO_LOGS_FACTORY_ID = 'kairo-log-viewer';
 
+class KairoWindowTitleContribution implements WindowTitleContribution {
+  enhanceTitle(_title: string): string {
+    return 'Kairo IDE';
+  }
+}
+
 export function bindKairoFrontend(bind: interfaces.Bind, _unbind?: interfaces.Unbind, _isBound?: interfaces.IsBound, _rebind?: interfaces.Rebind): void {
   // NOTE: Runtime service bindings (RuntimeConnectionService,
   // KairoRuntime, KairoErrorListener, WorkspaceContextService)
@@ -54,6 +61,8 @@ export function bindKairoFrontend(bind: interfaces.Bind, _unbind?: interfaces.Un
   // ── Kairo contributions ──────────────────────────────────────
   bind(KairoStatusBarContribution).toSelf().inSingletonScope();
   bind(FrontendApplicationContribution).toService(KairoStatusBarContribution);
+  bind(KairoWindowTitleContribution).toSelf().inSingletonScope();
+  bind(WindowTitleContribution).toService(KairoWindowTitleContribution);
   bind(KairoViewsContribution).toSelf().inSingletonScope();
   bind(FrontendApplicationContribution).toService(KairoViewsContribution);
   // The Kairo views contribution also registers commands
@@ -62,24 +71,13 @@ export function bindKairoFrontend(bind: interfaces.Bind, _unbind?: interfaces.Un
   // picks up the methods.
   bind(CommandContribution).toService(KairoViewsContribution);
   bind(CommandContribution).toService(KairoEncodingCommandsContribution);
-<<<<<<< HEAD
   // KairoFileCommandsContribution is a defensive re-registration
-  // of the standard Theia file.* / workspace:* / core.*
-  // commands. Theia's standard modules already register
-  // these, but a missing module in a stripped build causes
-  // the menu bar to throw "No command X exists" at click
-  // time. This contribution guarantees the commands are
-  // always present (either the real handler or a friendly
-  // fallback message). See the file header for the long
-  // version of this rationale.
-  // KairoFileCommandsContribution is a defensive re-registration
-  // of the standard Theia file.* / workspace:* / core.*
-  // commands. Theia's standard modules already register
-  // these, but a missing module in a stripped build causes
-  // the menu bar to throw "No command X exists" at click
-  // time. This contribution guarantees the commands are
-  // always present (either the real handler or a friendly
-  // fallback message). See the file header for the long
+  // of the standard Theia file.* / workspace:* / core.* commands.
+  // Theia's standard modules already register these, but a missing
+  // module in a stripped build causes the menu bar to throw
+  // "No command X exists" at click time. This contribution guarantees
+  // the commands are always present (either the real handler or a
+  // friendly fallback message). See the file header for the long
   // version of this rationale.
   bind(KairoFileCommandsContribution).toSelf().inSingletonScope();
   bind(CommandContribution).toService(KairoFileCommandsContribution);
@@ -87,12 +85,6 @@ export function bindKairoFrontend(bind: interfaces.Bind, _unbind?: interfaces.Un
   bind(FrontendApplicationContribution).toService(KairoLargeFileContribution);
   bind(CommandContribution).toService(KairoLargeFileContribution);
   bind(PreferenceContribution).toConstantValue(KairoLargeFilePreferenceContribution);
-=======
-  bind(KairoLargeFileContribution).toSelf().inSingletonScope();
-  bind(FrontendApplicationContribution).toService(KairoLargeFileContribution);
-  bind(CommandContribution).toService(KairoLargeFileContribution);
-  bind(PreferenceContribution).toConstantValue(KairoLargeFilePreferenceContribution);
->>>>>>> origin/main
 
   bind(KairoDeploymentsWidget).toSelf();
 

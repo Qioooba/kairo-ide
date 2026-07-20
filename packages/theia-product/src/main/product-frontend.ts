@@ -48,11 +48,23 @@ export const KairoProductFrontend: ContainerModule = (() => {
   }
   return new ContainerModule((bind, _unbind, isBound, rebind, _onActivation) => {
     // Frontend-layer bindings (widgets, views, commands, status bar)
-    bindKairoFrontend(bind);
+    try {
+      bindKairoFrontend(bind);
+      console.log('[kairo] bindKairoFrontend OK');
+    } catch (e) {
+      console.error('[kairo] bindKairoFrontend FAILED', e);
+      throw e;
+    }
 
     // Service-layer bindings (RuntimeConnectionService, KairoServerService,
     // KairoJavaService, KairoProjectService, etc.)
-    bindKairoProduct(bind, isBound, rebind);
+    try {
+      bindKairoProduct(bind, isBound, rebind);
+      console.log('[kairo] bindKairoProduct OK');
+    } catch (e) {
+      console.error('[kairo] bindKairoProduct FAILED', e);
+      throw e;
+    }
   });
 })();
 

@@ -27,7 +27,6 @@ import {
 } from '@kairo/java-extension';
 import { KairoEncodingServiceImpl, bindEncodingCommands } from '@kairo/encoding-extension';
 import { bindBuildExtension } from '@kairo/build-extension';
-import { KairoThemeContribution } from '@kairo/ui-kit';
 
 /**
  * Single-shot binder used by `KairoProduct` (theia-product
@@ -66,8 +65,11 @@ export function bindKairoProduct(
   bind(KairoEncodingServiceImpl).toSelf().inSingletonScope();
   bindEncodingCommands(bind);
 
-  // Theme contribution
-  bind(KairoThemeContribution).toSelf().inSingletonScope();
+  // Theme contribution is registered by @kairo/ui-kit (the only
+  // owner of KairoThemeContribution). Re-binding here would throw
+  // "Attempted to construct KairoThemeContribution twice" because
+  // the service is already bound to a singleton in the UI kit
+  // module that loaded before us. See N-034.
 }
 
 /**

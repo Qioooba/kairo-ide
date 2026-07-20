@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/kairo-ide/runtime-agent/internal/api"
 	"github.com/kairo-ide/runtime-agent/internal/domain"
 	"github.com/kairo-ide/runtime-agent/internal/log"
 	"github.com/kairo-ide/runtime-agent/internal/security"
@@ -16,7 +17,7 @@ import (
 // Container holds all wired dependencies for the runtime agent.
 type Container struct {
 	// Services — composed service layer (transitional)
-	Services *services.MemoryServices
+	Services *api.Services
 
 	// Infrastructure
 	EventHub *events.EventHub

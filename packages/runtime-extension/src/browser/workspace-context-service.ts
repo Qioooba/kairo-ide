@@ -52,12 +52,15 @@ export class WorkspaceContextService {
                 this.setWorkspace(existing.id, existing.root);
             } else {
                 const name = rootPath.split(/[/\\]/).filter(Boolean).pop() || 'workspace';
-                const created = await this.runtime.request('POST /api/v1/workspaces', { name, root: rootPath }) as any;
+                const created = await this.runtime.request('POST /api/v1/workspaces', { name, rootPath: rootPath }) as any;
                 this.setWorkspace(created.id, created.root);
             }
         } catch (_err) {
             // If the backend is not available, derive workspaceId from path
-            const fallbackId = `local-${btoa(rootPath).replace(/[+/=]/g, '').slice(0, 16)}`;
+            // Must match backend format: ws_ prefix + 26 chars base32 (a-z, 2-7)
+            const encoded = btoa(rootPath).toLowerCase().replace(/[^a-z2-7]/g, '');
+            const padded = (encoded + 'a'.repeat(26)).slice(0, 26);
+            const fallbackId = `ws_${padded}`;
             this.setWorkspace(fallbackId, rootPath);
         }
     }

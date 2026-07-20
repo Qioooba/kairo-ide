@@ -70,6 +70,9 @@ func (h *EventHub) Serve(w http.ResponseWriter, r *http.Request) {
 	}
 
 	afterSeqStr := r.URL.Query().Get("afterSequence")
+	if afterSeqStr == "" {
+		afterSeqStr = r.URL.Query().Get("since")
+	}
 	afterSequence := int64(0)
 	if afterSeqStr != "" {
 		if parsed, err := strconv.ParseInt(afterSeqStr, 10, 64); err == nil {
@@ -136,6 +139,9 @@ func (h *EventHub) ServeWS(w http.ResponseWriter, r *http.Request, secretValidat
 	}
 
 	afterSeqStr := r.URL.Query().Get("afterSequence")
+	if afterSeqStr == "" {
+		afterSeqStr = r.URL.Query().Get("since")
+	}
 	afterSequence := int64(0)
 	if afterSeqStr != "" {
 		if parsed, err := strconv.ParseInt(afterSeqStr, 10, 64); err == nil {

@@ -21,6 +21,7 @@ import { RuntimeConnectionService } from '@kairo/runtime-extension';
 import { ServerStore } from '@kairo/tomcat-extension';
 import { KairoJavaService, JavaServiceState } from '@kairo/java-extension';
 import { KairoEncodingServiceImpl } from '@kairo/encoding-extension';
+import { ActiveProjectService } from '@kairo/project-extension';
 import { EditorManager } from '@theia/editor/lib/browser/editor-manager';
 import type { ServerInstance } from '@kairo/protocol';
 
@@ -32,12 +33,14 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
   @inject(KairoEncodingServiceImpl) protected encodingSvc!: KairoEncodingServiceImpl;
   @inject(EditorManager) protected editorManager!: EditorManager;
   @inject(ServerStore) protected serverStore!: ServerStore;
+  @inject(ActiveProjectService) protected activeProject!: ActiveProjectService;
 
   protected unsubscribeStatus: (() => void) | undefined;
   protected unsubscribeServerEvents: (() => void) | undefined;
   protected unsubscribeJdtState: (() => void) | undefined;
   protected unsubscribeEditor: Disposable | undefined;
   protected unsubscribeServerStore: Disposable | undefined;
+  protected unsubscribeProject: Disposable | undefined;
   private runtimeStatus: 'connecting' | 'open' | 'disconnected' | 'closed' = 'disconnected';
 
   @postConstruct()
@@ -104,6 +107,10 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
     this.unsubscribeServerStore = this.serverStore.onDidChange(() => this.renderServerStatus());
     // Load initial server status from store.
     this.renderServerStatus();
+    // Subscribe to ActiveProjectService so the Project status
+    // bar entry reflects the currently selected Kairo project.
+    this.unsubscribeProject = this.activeProject.onDidChangeProject(p => this.renderProjectStatus(p));
+    this.renderProjectStatus(this.activeProject.project);
   }
 
   onStop(): void {
@@ -112,6 +119,33 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
     this.unsubscribeJdtState?.();
     this.unsubscribeEditor?.dispose();
     this.unsubscribeServerStore?.dispose();
+    this.unsubscribeProject?.dispose();
+  }
+
+  /**
+   * Render the Project status entry based on the currently
+   * active Kairo project. When no project is selected (e.g.
+   * no workspace is open or the workspace contains no
+   * project), the entry shows the legacy "(no workspace)"
+   * placeholder so users get a clear hint that the Build
+   * / Run / Deploy commands will be rejected.
+   */
+  protected renderProjectStatus(p?: { workspaceId: string; projectId: string; name: string; root: string }): void {
+    if (!p) {
+      this.statusBar.setElement('kairo.project', {
+        text: '$(file-directory) Project: (no workspace)',
+        tooltip: 'Open a legacy Java Web project to get started.',
+        alignment: StatusBarAlignment.LEFT,
+        priority: 100,
+      });
+      return;
+    }
+    this.statusBar.setElement('kairo.project', {
+      text: `$(file-directory) Project: ${p.name}`,
+      tooltip: `${p.name}\n${p.root}\nWorkspace: ${p.workspaceId}\nProject: ${p.projectId}`,
+      alignment: StatusBarAlignment.LEFT,
+      priority: 100,
+    });
   }
 
   /**

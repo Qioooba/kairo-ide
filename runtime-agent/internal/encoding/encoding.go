@@ -214,7 +214,8 @@ func isGB18030(b []byte) bool {
 // Encoder returns an encoding.Encoder for the given ID, or nil
 // if the ID is unknown.
 func Encoder(id ID, aliases Aliases) encoding.Encoding {
-	switch aliases.Resolve(id) {
+	id = ID(strings.ToLower(string(aliases.Resolve(id))))
+	switch id {
 	case UTF8, UTF8BOM, USASCII:
 		return unicode.UTF8
 	case UTF16LE:
@@ -240,6 +241,7 @@ func Encoder(id ID, aliases Aliases) encoding.Encoding {
 // Decode decodes src using the given encoding. If id is unknown,
 // the input is returned unchanged with an error.
 func Decode(src []byte, id ID, aliases Aliases) ([]byte, error) {
+	id = ID(strings.ToLower(string(id)))
 	enc := Encoder(id, aliases)
 	if enc == nil {
 		return nil, errors.New("unknown encoding: " + id)
@@ -256,6 +258,7 @@ func Decode(src []byte, id ID, aliases Aliases) ([]byte, error) {
 
 // Encode encodes src using the given encoding.
 func Encode(src []byte, id ID, aliases Aliases) ([]byte, error) {
+	id = ID(strings.ToLower(string(id)))
 	enc := Encoder(id, aliases)
 	if enc == nil {
 		return nil, errors.New("unknown encoding: " + id)

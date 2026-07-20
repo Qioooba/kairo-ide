@@ -2,21 +2,32 @@ package services
 
 import (
 	"encoding/json"
+	"fmt"
 
+	"github.com/kairo-ide/runtime-agent/internal/api"
 	"github.com/kairo-ide/runtime-agent/internal/encoding"
 	"github.com/kairo-ide/runtime-agent/internal/search"
 	"github.com/kairo-ide/runtime-agent/internal/security"
 )
 
+// workspaceResolver is the minimal surface the searcher needs to
+// turn a workspaceId into a filesystem root. The disk-backed
+// WorkspaceStore implements it; tests can pass an in-memory stub.
+type workspaceResolver interface {
+	Get(id string) (api.WorkspaceRecord, error)
+}
+
 // ----------------- Searcher -----------------
 
 type memSearcher struct {
-	sandbox *security.WorkspaceRoots
+	sandbox    *security.WorkspaceRoots
+	workspaces workspaceResolver
 }
 
 func (m *memSearcher) Search(payload json.RawMessage) (json.RawMessage, error) {
 	var req struct {
 		WorkspaceID     string   `json:"workspaceId"`
+		RootPath        string   `json:"rootPath"`
 		Query           string   `json:"query"`
 		IsRegex         bool     `json:"isRegex"`
 		CaseSensitive   bool     `json:"caseSensitive"`
@@ -31,10 +42,26 @@ func (m *memSearcher) Search(payload json.RawMessage) (json.RawMessage, error) {
 	if err := json.Unmarshal(payload, &req); err != nil {
 		return nil, err
 	}
-	// The "workspaceId" field is actually used as a filesystem root
-	// by search.Search. Authorize it before walking it, otherwise
-	// the endpoint lists files in any directory the agent can read.
-	root := req.WorkspaceID
+	// Resolve the search root. Precedence:
+	//   1. Explicit `rootPath` field (callers that already have a path)
+	//   2. `workspaceId` lookup against the WorkspaceRepository
+	//   3. Fall back to treating `workspaceId` as a literal path
+	//      for backward compatibility with the previous behavior
+	//      (which was wrong but a few tests still pass that shape).
+	root := req.RootPath
+	if root == "" && req.WorkspaceID != "" {
+		if m != nil && m.workspaces != nil {
+			if ws, err := m.workspaces.Get(req.WorkspaceID); err == nil {
+				root = ws.RootPath
+			}
+		}
+		if root == "" {
+			root = req.WorkspaceID
+		}
+	}
+	if root == "" {
+		return nil, fmt.Errorf("rootPath or workspaceId is required")
+	}
 	if m != nil && m.sandbox != nil {
 		authorized, err := m.sandbox.AuthorizeReadAbs(root)
 		if err != nil {

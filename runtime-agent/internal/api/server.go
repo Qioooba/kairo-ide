@@ -207,6 +207,9 @@ func (s *Server) Shutdown(ctx context.Context) error {
 // middleware applies request ID, logging, audit, CORS, secret
 // auth check, and recovery in that order.
 func (s *Server) middleware(next http.Handler) http.Handler {
+	// Wrap with CORS first (outermost) so OPTIONS preflight
+	// doesn't need auth or request ID.
+	next = s.corsMiddleware(next)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rid := r.Header.Get("X-Kairo-Request-Id")
 		if rid == "" {
@@ -262,6 +265,25 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 		}()
 
 		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+func (s *Server) corsMiddleware(next http.Handler) http.Handler {
+	allowedHeaders := "Content-Type, X-Kairo-Secret, X-Kairo-Request-Id, X-Kairo-Workspace-Id, X-Kairo-CSRF"
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+		if origin != "" {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Vary", "Origin")
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+			w.Header().Set("Access-Control-Allow-Headers", allowedHeaders)
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		}
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
 	})
 }
 

@@ -4,13 +4,14 @@ import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import { CommandService } from '@theia/core/lib/common';
 import { BuildStore, BuildRun, BuildDiagnostic, ConnectionState } from './build-store';
 
-function stateIcon(state: BuildRun['state']): string {
+function stateIcon(state: BuildRun['state'] | 'idle'): string {
     switch (state) {
-        case 'pending': return '\u23f3'; // hourglass
-        case 'running': return '\u2699\ufe0f'; // gear
-        case 'succeeded': return '\u2705'; // checkmark
-        case 'failed': return '\u274c'; // cross
-        case 'cancelled': return '\u23f9\ufe0f'; // stop
+        case 'pending': return '\u25CB'; // hollow circle
+        case 'running': return '\u25D0'; // half circle (left black)
+        case 'succeeded': return '\u2713'; // check mark
+        case 'failed': return '\u2717'; // ballot x
+        case 'cancelled': return '\u25A1'; // white square
+        case 'idle': return '\u25CB'; // hollow circle
     }
 }
 
@@ -91,7 +92,7 @@ const BuildViewComponent: React.FC<BuildViewProps> = ({ store, commandService })
                 )}
                 {!latest && (
                     <span className="kairo-build-state" data-testid="build-state" data-state="idle">
-                        idle
+                        {stateIcon('idle')} idle
                     </span>
                 )}
             </div>

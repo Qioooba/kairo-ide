@@ -6,12 +6,12 @@ import { ServerStore, ServerInstance, ConnectionState } from './server-store';
 
 function stateIcon(state: ServerInstance['state']): string {
     switch (state) {
-        case 'stopped': return '\u23f9\ufe0f'; // stop
-        case 'starting': return '\u25b6\ufe0f'; // play
-        case 'running': return '\u2705'; // checkmark
-        case 'stopping': return '\u23f3'; // hourglass
-        case 'error': return '\u274c'; // cross
-        case 'crashed': return '\u274c'; // cross
+        case 'stopped': return '\u25A0'; // black square
+        case 'starting': return '\u25B6'; // play
+        case 'running': return '\u25CF'; // black circle
+        case 'stopping': return '\u25D0'; // circle with left half black
+        case 'error': return '\u2716'; // heavy multiplication x
+        case 'crashed': return '\u2716'; // heavy multiplication x
     }
 }
 

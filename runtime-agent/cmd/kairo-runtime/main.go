@@ -17,7 +17,7 @@ import (
 	"github.com/kairo-ide/runtime-agent/internal/bootstrap"
 	"github.com/kairo-ide/runtime-agent/internal/config"
 	"github.com/kairo-ide/runtime-agent/internal/log"
-	"github.com/kairo-ide/runtime-agent/internal/services/audit"
+	"github.com/kairo-ide/runtime-agent/internal/audit"
 )
 
 const (
@@ -41,7 +41,7 @@ func main() {
 	if err := os.MkdirAll(cfg.Bundled(), 0o755); err != nil {
 		stdlog.Fatalf("create bundled dir: %v", err)
 	}
-	logger := log.New("agent", log.WithLevel(log.ParseLevel(cfg.LogLevel)))
+	logger := log.New("agent").WithLevel(log.ParseLevel(cfg.LogLevel))
 	logger.Info("starting kairo-runtime", log.Fields{
 		"version": agentVersion,
 		"config":  cfg.String(),

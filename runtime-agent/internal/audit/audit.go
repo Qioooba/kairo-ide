@@ -98,10 +98,12 @@ func (l *Log) OpenReader() (*Reader, error) {
 }
 
 // Read reads up to n events. n <= 0 means "all".
+// Always returns a non-nil slice so JSON encoding produces []
+// instead of null when the log is empty.
 func (r *Reader) Read(n int) ([]Event, error) {
 	defer r.f.Close()
 	dec := json.NewDecoder(r.f)
-	var out []Event
+	out := []Event{}
 	for dec.More() {
 		var e Event
 		if err := dec.Decode(&e); err != nil {

@@ -131,17 +131,41 @@ export class RuntimeConnectionService {
       if (kairo && typeof kairo.agentBaseUrl === 'string') {
         const secret = typeof kairo.getSecret === 'function' ? kairo.getSecret() : '';
         this.initialize(kairo.agentBaseUrl, secret);
-        return;
+      } else {
+        // Backward-compat: window.kairoConfig (older preload versions).
+        const kairoCfg = (window as any).kairoConfig;
+        if (kairoCfg && kairoCfg.agentUrl) {
+          this.initialize(kairoCfg.agentUrl, kairoCfg.agentSecret);
+        } else {
+          const injected = (globalThis as unknown as { __KAIRO_DEFAULT_RUNTIME_URL__?: string }).__KAIRO_DEFAULT_RUNTIME_URL__;
+          this.config = { baseUrl: injected ?? DEFAULT_RUNTIME_BASE_URL };
+        }
       }
-      // Backward-compat: window.kairoConfig (older preload versions).
-      const kairoCfg = (window as any).kairoConfig;
-      if (kairoCfg && kairoCfg.agentUrl) {
-        this.initialize(kairoCfg.agentUrl, kairoCfg.agentSecret);
-        return;
-      }
-      const injected = (globalThis as unknown as { __KAIRO_DEFAULT_RUNTIME_URL__?: string }).__KAIRO_DEFAULT_RUNTIME_URL__;
-      this.config = { baseUrl: injected ?? DEFAULT_RUNTIME_BASE_URL };
     }
+    // Eagerly resolve the dynamic host:port the agent is actually
+    // bound to. Without this, the first ensureEventStream() call
+    // (which fires when a view subscribes to events) uses
+    // `wsHostPortFromBase(this.config.baseUrl)` as a fallback when
+    // `cachedEndpoints` is still undefined. On a dev box where
+    // the default port (18080) is already in use by another
+    // instance, the fallback points at the wrong runtime and the
+    // WebSocket fails to open with ERR_CONNECTION_REFUSED. The
+    // resolution is fire-and-forget here so the UI mounts without
+    // waiting, but the cache is populated by the time
+    // subscribeEvents() is invoked a few hundred ms later.
+    this.fetchEndpoints().catch((err) => {
+      // Logged but not rethrown — the fallback path is still
+      // functional if the endpoint discovery call fails (e.g.
+      // the agent is unreachable at startup, comes up later).
+      this.listener.onError(
+        err instanceof KairoError ? err : new KairoError({
+          code: 'internal',
+          message: 'fetchEndpoints failed: ' + (err instanceof Error ? err.message : String(err)),
+          cause: err,
+        }),
+        { endpoint: 'GET /api/v1/endpoints' as any, attempt: 0 },
+      );
+    });
   }
 
   /** Initialize the runtime with the agent URL and secret. */
@@ -157,7 +181,16 @@ export class RuntimeConnectionService {
   }
 
   setWorkspace(id: string): void {
+    if (this.workspaceId === id) {
+      return;
+    }
     this.workspaceId = id;
+    if (this.internalEventStream) {
+      this.closeEventStream();
+      if (this.subscribers.size > 0) {
+        this.ensureEventStream();
+      }
+    }
   }
 
   workspace(): string {
@@ -422,7 +455,12 @@ export class RuntimeConnectionService {
     }
     subs.add(onEvent);
 
-    // Ensure the single EventStream is started.
+    if (!this.workspaceId) {
+      this.workspaceId = workspaceId;
+    } else if (this.workspaceId !== workspaceId && this.internalEventStream) {
+      this.closeEventStream();
+    }
+
     this.ensureEventStream();
 
     return () => {
@@ -487,7 +525,10 @@ export class RuntimeConnectionService {
     const wsBase = hostport.startsWith('ws://') || hostport.startsWith('wss://')
       ? hostport
       : `ws://${hostport}`;
-    const wsUrl = `${wsBase}${PROTOCOL_VERSION_PATH}/events`;
+    let wsUrl = `${wsBase}${PROTOCOL_VERSION_PATH}/events`;
+    if (this.workspaceId) {
+      wsUrl += `?workspaceId=${encodeURIComponent(this.workspaceId)}`;
+    }
     this.internalEventStream = new EventStream(wsUrl, this.agentSecret(), this.sequence);
 
     // Wire up status forwarding.
@@ -685,8 +726,9 @@ export class EventStream {
         : [];
       // Sequence replay: on reconnect, send `?since=<seq>` so the
       // server can replay events we missed while disconnected.
+      const hasQuery = this.url.includes('?');
       const connectUrl = this.sequence > 0
-        ? `${this.url}?since=${this.sequence}`
+        ? `${this.url}${hasQuery ? '&' : '?'}since=${this.sequence}`
         : this.url;
       ws = protocols.length > 0
         ? new WebSocket(connectUrl, protocols)

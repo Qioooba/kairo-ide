@@ -78,6 +78,21 @@ export class ServerStore {
     private readonly onConnectionStateChangeEmitter = new Emitter<ConnectionState>();
     readonly onConnectionStateChange: Event<ConnectionState> = this.onConnectionStateChangeEmitter.event;
     private connectionState: ConnectionState = 'loading';
+
+    /** Read the current connection state. UI components can seed their
+     * initial render with this and then subscribe to `onConnectionStateChange`
+     * for updates. */
+    getConnectionState(): ConnectionState {
+        return this.connectionState;
+    }
+
+    /** Direct setter for the connection state. Used by tests and by
+     * init paths that don't go through `runtime.onStatusChange`. */
+    setConnectionState(state: ConnectionState): void {
+        if (this.connectionState === state) return;
+        this.connectionState = state;
+        this.onConnectionStateChangeEmitter.fire(state);
+    }
     private eventsUnsubscribe?: () => void;
     private statusUnsubscribe?: () => void;
     /** Track which server IDs we've seen to make the reducer idempotent. */

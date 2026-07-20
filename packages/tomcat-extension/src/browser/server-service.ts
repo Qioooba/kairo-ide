@@ -8,6 +8,7 @@ import type { ServerInstance } from '@kairo/protocol';
 import { RuntimeConnectionService } from '@kairo/runtime-extension';
 import { ServerStore } from './server-store';
 import { ServerViewWidget } from './server-view-widget';
+import { LogViewerWidget } from './log-viewer-widget';
 
 @injectable()
 export class KairoServerService {
@@ -32,4 +33,5 @@ export function bindTomcatExtension(bind: interfaces.Bind): void {
   bind(KairoServerService).toSelf().inSingletonScope();
   bind(ServerStore).toSelf().inSingletonScope();
   bind(ServerViewWidget).toSelf();
+  bind(LogViewerWidget).toSelf();
 }

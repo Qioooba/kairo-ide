@@ -48,13 +48,14 @@ func NewMemoryServices(cfg Config, sandbox *security.WorkspaceRoots) *api.Servic
 			cfg.Logger.Warn("tomcat6 not available", log.Fields{"err": err.Error()})
 		}
 	}
+	wsStore := newDiskWorkspaceStore(cfg.DataDir, sandbox)
 	return &api.Services{
-		WorkspaceStore:      newDiskWorkspaceStore(cfg.DataDir, sandbox),
+		WorkspaceStore:      wsStore,
 		ProjectStore:        newDiskProjectStore(cfg.DataDir),
 		ToolchainRegistry:   &memToolchainRegistry{reg: registry},
 		ProjectRepo:         &domainProjectRepo{store: newDiskProjectStore(cfg.DataDir)},
 		ToolchainRepo:       &domainToolchainRepo{reg: registry},
-		Searcher:            &memSearcher{sandbox: sandbox},
+		Searcher:            &memSearcher{sandbox: sandbox, workspaces: wsStore},
 		Encoder:             &memEncoder{sandbox: sandbox},
 		BuildEngine:         newAsyncBuildEngine(cfg.DataDir, registry, cfg.Logger),
 		Deployer:            newDiskDeployer(cfg.DataDir, cfg.Logger),
