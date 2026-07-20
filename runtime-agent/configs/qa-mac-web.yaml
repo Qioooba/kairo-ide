@@ -1,0 +1,29 @@
+# QA-specific dev config. Uses port 19090 and 3300 to avoid
+# collision with the default 18080/3000 dev runs that other
+# processes may be holding on the same machine.
+
+version: 0.1.0
+
+bindAddress: 127.0.0.1
+port: 19090
+
+tlsCert: ""
+tlsKey: ""
+
+# QA state is written into KAIRO_QA_ROOT/runtime-data, never
+# into the repo or $HOME.
+dataDir: ${KAIRO_QA_ROOT}/runtime-data
+bundledDir: ${KAIRO_QA_ROOT}/runtime-data/bundled
+
+logLevel: debug
+
+requireAuth: false
+
+tomcatStartTimeout: 60s
+tomcatShutdownTimeout: 15s
+buildFileTimeout: 30s
+
+workspaceScanMaxDepth: 8
+workspaceScanMaxFiles: 50000
+
+logBufferLines: 5000
