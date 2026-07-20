@@ -83,7 +83,7 @@ test('normalizeEncodingLabel: unknown labels pass through unchanged', () => {
 // Real byte-level round-trip tests
 // =========================================================================
 
-const testCases: { encoding: BufferEncoding | 'gbk' | 'gb18030'; text: string; desc: string }[] = [
+const testCases: { encoding: string; text: string; desc: string }[] = [
   { encoding: 'utf-8', text: 'Hello, 世界!', desc: 'UTF-8 with CJK' },
   { encoding: 'utf-8', text: 'café résumé naïve', desc: 'UTF-8 with Latin accents' },
   { encoding: 'utf-8', text: '①②③④⑤', desc: 'UTF-8 with circled numbers' },
@@ -106,13 +106,13 @@ const testCases: { encoding: BufferEncoding | 'gbk' | 'gb18030'; text: string; d
 for (const { encoding, text, desc } of testCases) {
   test(`round-trip: ${encoding} — ${desc}`, () => {
     // Encode: string → bytes using the target encoding
-    const bytes = Buffer.from(text, encoding as BufferEncoding);
+    const bytes = Buffer.from(text, encoding as any);
 
     // Verify bytes are non-empty
     assert.ok(bytes.length > 0, `Encoded ${encoding} output must not be empty for "${text.slice(0, 20)}"`);
 
     // Decode: bytes → string using the same encoding
-    const decoded = Buffer.from(bytes).toString(encoding as BufferEncoding);
+    const decoded = Buffer.from(bytes).toString(encoding as any);
 
     // Verify the round-trip produces the original text
     assert.strictEqual(decoded, text,
@@ -154,11 +154,11 @@ test('GBK unrepresentable: characters outside GBK range are detected', () => {
   const text = '日本語';
 
   // Try to encode to GBK — should throw or produce replacement chars
-  let threw = false;
+  let _threw = false;
   try {
-    const bytes = Buffer.from(text, 'gbk' as BufferEncoding);
+    const bytes = Buffer.from(text, 'gbk' as any);
     // If it doesn't throw, verify the content is not a clean round-trip
-    const decoded = Buffer.from(bytes).toString('gbk' as BufferEncoding);
+    const decoded = Buffer.from(bytes).toString('gbk' as any);
     // Either it throws or the decoded text is different from the original
     if (decoded === text) {
       // This would be unexpected for Japanese characters in GBK
@@ -167,7 +167,7 @@ test('GBK unrepresentable: characters outside GBK range are detected', () => {
       assert.ok(bytes.length > 0);
     }
   } catch (_err) {
-    threw = true;
+    _threw = true;
   }
   // Either threw or produced different output — both are acceptable
   // The key assertion: GBK cannot faithfully represent arbitrary Unicode
@@ -180,15 +180,15 @@ test('GBK unrepresentable: characters outside GBK range are detected', () => {
 
 test('GBK round-trip: common Chinese characters survive encoding', () => {
   const text = '项目构建部署成功';
-  const bytes = Buffer.from(text, 'gbk' as BufferEncoding);
-  const decoded = bytes.toString('gbk' as BufferEncoding);
+  const bytes = Buffer.from(text, 'gbk' as any);
+  const decoded = bytes.toString('gbk' as any);
   assert.strictEqual(decoded, text, 'GBK round-trip for project terms');
 });
 
 test('GBK round-trip: mixed ASCII and Chinese', () => {
   const text = 'Build 构建完成, 3 files compiled';
-  const bytes = Buffer.from(text, 'gbk' as BufferEncoding);
-  const decoded = bytes.toString('gbk' as BufferEncoding);
+  const bytes = Buffer.from(text, 'gbk' as any);
+  const decoded = bytes.toString('gbk' as any);
   assert.strictEqual(decoded, text, 'GBK round-trip for mixed content');
 });
 
@@ -199,7 +199,7 @@ test('GBK round-trip: mixed ASCII and Chinese', () => {
 test('encoding byte sizes: UTF-8 vs GBK for Chinese text', () => {
   const text = '你好世界';
   const utf8Bytes = Buffer.from(text, 'utf-8');
-  const gbkBytes = Buffer.from(text, 'gbk' as BufferEncoding);
+  const gbkBytes = Buffer.from(text, 'gbk' as any);
 
   // UTF-8 uses 3 bytes per Chinese char, GBK uses 2
   assert.strictEqual(utf8Bytes.length, 12, 'UTF-8: 4 chars × 3 bytes = 12');
@@ -212,7 +212,7 @@ test('encoding byte sizes: UTF-8 vs GBK for Chinese text', () => {
 
 test('encoding byte sizes: ISO-8859-1 is 1 byte per char', () => {
   const text = 'Hello World';
-  const isoBytes = Buffer.from(text, 'iso-8859-1' as BufferEncoding);
+  const isoBytes = Buffer.from(text, 'iso-8859-1' as any);
   const utf8Bytes = Buffer.from(text, 'utf-8');
 
   // For ASCII text, both should be identical
@@ -251,8 +251,8 @@ test('UTF-16BE: byte order verification', () => {
 test('empty string round-trip works for all encodings', () => {
   const encodings = ['utf-8', 'gbk', 'gb18030', 'iso-8859-1', 'utf-16le', 'utf-16be', 'us-ascii'];
   for (const enc of encodings) {
-    const bytes = Buffer.from('', enc as BufferEncoding);
-    const decoded = bytes.toString(enc as BufferEncoding);
+    const bytes = Buffer.from('', enc as any);
+    const decoded = bytes.toString(enc as any);
     assert.strictEqual(decoded, '', `Empty string round-trip for ${enc}`);
   }
 });

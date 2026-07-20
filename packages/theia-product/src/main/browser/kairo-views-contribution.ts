@@ -249,7 +249,7 @@ export class KairoViewsContribution implements FrontendApplicationContribution {
     registry.registerCommand(KairoCommands.RESTART_SERVER, {
       execute: async () => {
         try {
-          const p = await this.activeProject.requireProject();
+          await this.activeProject.requireProject();
           const list = await this.runtime.request('GET /api/v1/servers', undefined) as ServerInstance[];
           for (const srv of list) {
             const result = await this.runtime.request(
@@ -327,7 +327,7 @@ export class KairoViewsContribution implements FrontendApplicationContribution {
     // is a silent no-op.
     try {
       this.shell.addWidget(w, { area: 'left' });
-    } catch (e) {
+    } catch (_e) {
       // Already attached — that's fine.
     }
     this.shell.activateWidget(w.id);

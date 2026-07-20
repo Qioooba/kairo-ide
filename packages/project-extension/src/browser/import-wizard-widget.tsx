@@ -179,21 +179,6 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
         }
     }, [runtime, projectService, workspaceId, workspacePath, projectName, sourceLevel, encoding, buildTool, detectedConfig, activeProject, onClose]);
 
-    const handleStartIDE = React.useCallback(async () => {
-        if (workspacePath && projectService) {
-            try {
-                if (projectService.currentWorkspace()) {
-                    window.location.reload();
-                } else {
-                    await projectService.openWorkspace(workspacePath, projectName);
-                    window.location.reload();
-                }
-            } catch {
-                window.location.reload();
-            }
-        }
-    }, [workspacePath, projectName, projectService]);
-
     return (
         <div className="kairo-import-wizard" data-testid="import-wizard">
             <header className="kairo-wizard-header">
