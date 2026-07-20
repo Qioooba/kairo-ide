@@ -6,12 +6,12 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/kairo-ide/runtime-agent/internal/api"
-	"github.com/kairo-ide/runtime-agent/internal/domain"
-	"github.com/kairo-ide/runtime-agent/internal/log"
-	"github.com/kairo-ide/runtime-agent/internal/security"
-	"github.com/kairo-ide/runtime-agent/internal/services"
-	"github.com/kairo-ide/runtime-agent/internal/transport/events"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/api"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/domain"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/log"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/security"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/services"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/transport/events"
 )
 
 // Container holds all wired dependencies for the runtime agent.

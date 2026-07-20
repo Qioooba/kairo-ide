@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/kairo-ide/runtime-agent/internal/domain"
-	"github.com/kairo-ide/runtime-agent/internal/repository"
-	"github.com/kairo-ide/runtime-agent/internal/security"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/domain"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/repository"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/security"
 )
 
 // BuildPlan is the resolved plan for executing a build.

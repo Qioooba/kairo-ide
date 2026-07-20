@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kairo-ide/runtime-agent/internal/log"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/log"
 )
 
 // ----------------- Authenticator (disk) -----------------

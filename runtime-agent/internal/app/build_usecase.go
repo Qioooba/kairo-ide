@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kairo-ide/runtime-agent/internal/domain"
-	"github.com/kairo-ide/runtime-agent/internal/transport/events"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/domain"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/transport/events"
 )
 
 // StartBuildCommand is the typed command to start a build.

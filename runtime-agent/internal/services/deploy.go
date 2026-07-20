@@ -10,9 +10,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kairo-ide/runtime-agent/internal/api"
-	"github.com/kairo-ide/runtime-agent/internal/atomicfile"
-	"github.com/kairo-ide/runtime-agent/internal/log"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/api"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/atomicfile"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/log"
 )
 
 // ----------------- Deployer (disk, real) -----------------

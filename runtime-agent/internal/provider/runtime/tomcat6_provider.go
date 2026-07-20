@@ -6,11 +6,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kairo-ide/runtime-agent/internal/catalinabase"
-	"github.com/kairo-ide/runtime-agent/internal/domain"
-	"github.com/kairo-ide/runtime-agent/internal/proc"
-	"github.com/kairo-ide/runtime-agent/internal/tomcat6"
-	"github.com/kairo-ide/runtime-agent/internal/transport/events"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/catalinabase"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/domain"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/proc"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/tomcat6"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/transport/events"
 )
 
 type ProcessFactory func() proc.ManagedProcess

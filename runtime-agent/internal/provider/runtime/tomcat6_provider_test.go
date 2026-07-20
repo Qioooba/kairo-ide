@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kairo-ide/runtime-agent/internal/catalinabase"
-	"github.com/kairo-ide/runtime-agent/internal/domain"
-	"github.com/kairo-ide/runtime-agent/internal/proc"
-	"github.com/kairo-ide/runtime-agent/internal/tomcat6"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/catalinabase"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/domain"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/proc"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/tomcat6"
 )
 
 type fakePreparer struct {

@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kairo-ide/runtime-agent/internal/api/protocol"
-	"github.com/kairo-ide/runtime-agent/internal/audit"
-	"github.com/kairo-ide/runtime-agent/internal/log"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/api/protocol"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/audit"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/log"
 )
 
 // fakeJDTLS is an in-memory JDTLS service used by the

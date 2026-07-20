@@ -16,7 +16,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/kairo-ide/runtime-agent/internal/encoding"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/encoding"
 )
 
 // DefaultExcludes are directories we never descend into.

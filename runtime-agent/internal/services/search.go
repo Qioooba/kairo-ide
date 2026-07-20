@@ -4,10 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/kairo-ide/runtime-agent/internal/api"
-	"github.com/kairo-ide/runtime-agent/internal/encoding"
-	"github.com/kairo-ide/runtime-agent/internal/search"
-	"github.com/kairo-ide/runtime-agent/internal/security"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/api"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/encoding"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/search"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/security"
 )
 
 // workspaceResolver is the minimal surface the searcher needs to

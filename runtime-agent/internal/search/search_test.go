@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kairo-ide/runtime-agent/internal/encoding"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/encoding"
 )
 
 func TestSearch_PlainText(t *testing.T) {

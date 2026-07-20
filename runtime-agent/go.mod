@@ -1,4 +1,4 @@
-module github.com/kairo-ide/runtime-agent
+module github.com/Qioooba/kairo-ide/runtime-agent
 
 go 1.22
 

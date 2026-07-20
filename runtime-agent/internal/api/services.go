@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/kairo-ide/runtime-agent/internal/build"
-	"github.com/kairo-ide/runtime-agent/internal/domain"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/build"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/domain"
 )
 
 // WorkspaceStore manages workspace metadata.

@@ -8,11 +8,11 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/kairo-ide/runtime-agent/internal/api/protocol"
-	"github.com/kairo-ide/runtime-agent/internal/app"
-	"github.com/kairo-ide/runtime-agent/internal/domain"
-	"github.com/kairo-ide/runtime-agent/internal/security"
-	"github.com/kairo-ide/runtime-agent/internal/transport/events"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/api/protocol"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/app"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/domain"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/security"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/transport/events"
 )
 
 // APIHandler is the typed HTTP boundary for the Kairo runtime agent.

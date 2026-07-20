@@ -12,12 +12,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kairo-ide/runtime-agent/internal/api"
-	"github.com/kairo-ide/runtime-agent/internal/atomicfile"
-	"github.com/kairo-ide/runtime-agent/internal/domain"
-	"github.com/kairo-ide/runtime-agent/internal/pathpolicy"
-	"github.com/kairo-ide/runtime-agent/internal/security"
-	"github.com/kairo-ide/runtime-agent/internal/toolchain"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/api"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/atomicfile"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/domain"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/pathpolicy"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/security"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/toolchain"
 )
 
 // ----------------- WorkspaceStore (disk) -----------------

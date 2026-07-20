@@ -135,7 +135,13 @@ codex-ui-review-shots/
 artifacts/acceptance-*/
 artifacts/windows-wave2/
 artifacts/windows-wave2-r1-prev-*/
+artifacts/e2e-windows/
+artifacts/playwright-install.log.err
 
 # Local scratch files (test probes, one-off scripts)
 scratchpad/
+
+
+# Local merge scratch (created by AI merge resolution)
+.merge-tmp/
 

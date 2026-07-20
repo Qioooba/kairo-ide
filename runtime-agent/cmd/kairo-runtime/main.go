@@ -13,11 +13,11 @@ import (
 	"time"
 	stdlog "log"
 
-	"github.com/kairo-ide/runtime-agent/internal/api"
-	"github.com/kairo-ide/runtime-agent/internal/bootstrap"
-	"github.com/kairo-ide/runtime-agent/internal/config"
-	"github.com/kairo-ide/runtime-agent/internal/log"
-	"github.com/kairo-ide/runtime-agent/internal/audit"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/api"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/bootstrap"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/config"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/log"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/audit"
 )
 
 const (
