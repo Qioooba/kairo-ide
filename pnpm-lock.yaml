@@ -209,6 +209,9 @@ importers:
         specifier: 1.73.1
         version: 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.5.4)
     devDependencies:
+      iconv-lite:
+        specifier: ^0.6.3
+        version: 0.6.3
       source-map-support:
         specifier: ^0.5.21
         version: 0.5.21

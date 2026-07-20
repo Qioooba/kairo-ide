@@ -7,16 +7,17 @@
 // verifies the contract against the real implementation.
 //
 // Includes real byte-level round-trip tests for every
-// encoding the Kairo IDE supports. Uses Node.js Buffer
-// (NOT the browser TextEncoder — TextEncoder only produces
-// UTF-8) to verify that GBK, GB18030, ISO-8859-1, etc.
-// actually round-trip correctly at the byte level.
+// encoding the Kairo IDE supports. Uses iconv-lite (NOT the
+// browser TextEncoder — TextEncoder only produces UTF-8) to
+// verify that GBK, GB18030, ISO-8859-1, etc. actually
+// round-trip correctly at the byte level.
 //
 // Run with:
 //   pnpm --filter @kairo/encoding-extension test
 
 import { test } from 'node:test';
 import assert from 'node:assert';
+import * as iconv from 'iconv-lite';
 import {
   KAIRO_ENCODING_OPTIONS,
   SUPPORTS_ENCODER,
@@ -105,14 +106,14 @@ const testCases: { encoding: string; text: string; desc: string }[] = [
 
 for (const { encoding, text, desc } of testCases) {
   test(`round-trip: ${encoding} — ${desc}`, () => {
-    // Encode: string → bytes using the target encoding
-    const bytes = Buffer.from(text, encoding as any);
+    // Encode: string -> bytes using the target encoding
+    const bytes = iconv.encode(text, encoding);
 
     // Verify bytes are non-empty
     assert.ok(bytes.length > 0, `Encoded ${encoding} output must not be empty for "${text.slice(0, 20)}"`);
 
-    // Decode: bytes → string using the same encoding
-    const decoded = Buffer.from(bytes).toString(encoding as any);
+    // Decode: bytes -> string using the same encoding
+    const decoded = iconv.decode(bytes, encoding);
 
     // Verify the round-trip produces the original text
     assert.strictEqual(decoded, text,
@@ -146,23 +147,41 @@ test('UTF-8-BOM: encode produces BOM prefix, decode preserves content', () => {
 });
 
 // =========================================================================
-// GBK unrepresentable character detection
+// Unrepresentable character detection
 // =========================================================================
+
+// The production KairoEncodingService.validateEncoding delegates to the
+// Go agent for non-UTF-8 encodings. Here we only sanity-check that
+// iconv-lite round-trips do not hide characters that are outside a
+// simpler encoding's range; the authoritative rejection logic is
+// exercised in the agent/integration tests.
+
+test('ISO-8859-1 unrepresentable: CJK characters cannot round-trip', () => {
+  const text = '中文';
+
+  // ISO-8859-1 cannot represent CJK; iconv-lite will replace them.
+  const bytes = iconv.encode(text, 'iso-8859-1');
+  const decoded = iconv.decode(bytes, 'iso-8859-1');
+  assert.notStrictEqual(decoded, text,
+    'ISO-8859-1 must not faithfully represent CJK characters');
+});
 
 test('GBK unrepresentable: characters outside GBK range are detected', () => {
   // 日本語 (Japanese) contains characters not in GBK
   const text = '日本語';
 
-  // Try to encode to GBK — should throw or produce replacement chars
+  // Try to encode to GBK — should throw or produce replacement chars.
+  // iconv-lite may round-trip characters that strict GBK cannot
+  // represent, so the test tolerates either outcome without crashing.
   let _threw = false;
   try {
-    const bytes = Buffer.from(text, 'gbk' as any);
+    const bytes = iconv.encode(text, 'gbk');
     // If it doesn't throw, verify the content is not a clean round-trip
-    const decoded = Buffer.from(bytes).toString('gbk' as any);
+    const decoded = iconv.decode(bytes, 'gbk');
     // Either it throws or the decoded text is different from the original
     if (decoded === text) {
       // This would be unexpected for Japanese characters in GBK
-      // But some Node versions may handle this differently
+      // But some iconv-lite builds may handle this differently
       // Just verify bytes are valid
       assert.ok(bytes.length > 0);
     }
@@ -180,15 +199,15 @@ test('GBK unrepresentable: characters outside GBK range are detected', () => {
 
 test('GBK round-trip: common Chinese characters survive encoding', () => {
   const text = '项目构建部署成功';
-  const bytes = Buffer.from(text, 'gbk' as any);
-  const decoded = bytes.toString('gbk' as any);
+  const bytes = iconv.encode(text, 'gbk');
+  const decoded = iconv.decode(bytes, 'gbk');
   assert.strictEqual(decoded, text, 'GBK round-trip for project terms');
 });
 
 test('GBK round-trip: mixed ASCII and Chinese', () => {
   const text = 'Build 构建完成, 3 files compiled';
-  const bytes = Buffer.from(text, 'gbk' as any);
-  const decoded = bytes.toString('gbk' as any);
+  const bytes = iconv.encode(text, 'gbk');
+  const decoded = iconv.decode(bytes, 'gbk');
   assert.strictEqual(decoded, text, 'GBK round-trip for mixed content');
 });
 
@@ -198,12 +217,12 @@ test('GBK round-trip: mixed ASCII and Chinese', () => {
 
 test('encoding byte sizes: UTF-8 vs GBK for Chinese text', () => {
   const text = '你好世界';
-  const utf8Bytes = Buffer.from(text, 'utf-8');
-  const gbkBytes = Buffer.from(text, 'gbk' as any);
+  const utf8Bytes = iconv.encode(text, 'utf-8');
+  const gbkBytes = iconv.encode(text, 'gbk');
 
   // UTF-8 uses 3 bytes per Chinese char, GBK uses 2
-  assert.strictEqual(utf8Bytes.length, 12, 'UTF-8: 4 chars × 3 bytes = 12');
-  assert.strictEqual(gbkBytes.length, 8, 'GBK: 4 chars × 2 bytes = 8');
+  assert.strictEqual(utf8Bytes.length, 12, 'UTF-8: 4 chars x 3 bytes = 12');
+  assert.strictEqual(gbkBytes.length, 8, 'GBK: 4 chars x 2 bytes = 8');
 
   // Verify GBK is more compact for Chinese
   assert.ok(gbkBytes.length < utf8Bytes.length,
@@ -212,8 +231,8 @@ test('encoding byte sizes: UTF-8 vs GBK for Chinese text', () => {
 
 test('encoding byte sizes: ISO-8859-1 is 1 byte per char', () => {
   const text = 'Hello World';
-  const isoBytes = Buffer.from(text, 'iso-8859-1' as any);
-  const utf8Bytes = Buffer.from(text, 'utf-8');
+  const isoBytes = iconv.encode(text, 'iso-8859-1');
+  const utf8Bytes = iconv.encode(text, 'utf-8');
 
   // For ASCII text, both should be identical
   assert.strictEqual(isoBytes.length, text.length);
@@ -226,8 +245,8 @@ test('encoding byte sizes: ISO-8859-1 is 1 byte per char', () => {
 
 test('UTF-16LE: byte order verification', () => {
   const text = 'AB';
-  const bytes = Buffer.from(text, 'utf-16le');
-  // 'A' = U+0041 → LE: 0x41 0x00, 'B' = U+0042 → LE: 0x42 0x00
+  const bytes = iconv.encode(text, 'utf-16le');
+  // 'A' = U+0041 -> LE: 0x41 0x00, 'B' = U+0042 -> LE: 0x42 0x00
   assert.strictEqual(bytes[0], 0x41, 'UTF-16LE: first byte of A');
   assert.strictEqual(bytes[1], 0x00, 'UTF-16LE: second byte of A');
   assert.strictEqual(bytes[2], 0x42, 'UTF-16LE: first byte of B');
@@ -236,8 +255,8 @@ test('UTF-16LE: byte order verification', () => {
 
 test('UTF-16BE: byte order verification', () => {
   const text = 'AB';
-  const bytes = Buffer.from(text, 'utf-16be');
-  // 'A' = U+0041 → BE: 0x00 0x41, 'B' = U+0042 → BE: 0x00 0x42
+  const bytes = iconv.encode(text, 'utf-16be');
+  // 'A' = U+0041 -> BE: 0x00 0x41, 'B' = U+0042 -> BE: 0x00 0x42
   assert.strictEqual(bytes[0], 0x00, 'UTF-16BE: first byte of A');
   assert.strictEqual(bytes[1], 0x41, 'UTF-16BE: second byte of A');
   assert.strictEqual(bytes[2], 0x00, 'UTF-16BE: first byte of B');
@@ -251,8 +270,8 @@ test('UTF-16BE: byte order verification', () => {
 test('empty string round-trip works for all encodings', () => {
   const encodings = ['utf-8', 'gbk', 'gb18030', 'iso-8859-1', 'utf-16le', 'utf-16be', 'us-ascii'];
   for (const enc of encodings) {
-    const bytes = Buffer.from('', enc as any);
-    const decoded = bytes.toString(enc as any);
+    const bytes = iconv.encode('', enc);
+    const decoded = iconv.decode(bytes, enc);
     assert.strictEqual(decoded, '', `Empty string round-trip for ${enc}`);
   }
 });
