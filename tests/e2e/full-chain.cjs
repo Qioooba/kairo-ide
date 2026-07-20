@@ -17,8 +17,9 @@
 //      list.
 //   7. The full Tomcat 6 start/stop and JSP live-reload loop
 //      is gated on B-002 (Apache Tomcat 6.0.53 binary not
-//      vendored) — the test logs the gating reason and does
-//      not fail. The same Playwright session then does the
+//      vendored) — the test logs the gating reason and the gate
+//      FAILS the run (see exit-code note below). The same
+//      Playwright session then does the
 //      equivalent agent-only checks (POST /api/v1/servers
 //      returns a clean error envelope; the status bar shows
 //      "Server: stopped").
@@ -31,8 +32,9 @@
 // Configuration: theiaUrl + agentPort come from CLI args.
 // Defaults match scripts/dev.ps1.
 //
-// Exit code 0 = pass, 1 = fail. Gated steps do not fail the
-// test; they log a "GATED" line and move on.
+// Exit code 0 = pass, 1 = fail. Gated steps fail the test
+// (KAIRO-RC-WEB-012): they log a "GATED" line and the run
+// exits non-zero so unrun coverage is never a soft pass.
 
 const fs = require('fs');
 const path = require('path');
@@ -261,8 +263,8 @@ async function pollApiPost(path, payload) {
   step('8) Tomcat 6 server start (gated on B-002)');
   // The agent returns 500 with a process_spawn_failed
   // envelope because the binary is not vendored. The
-  // command is wired but the start is gated; the test
-  // acknowledges that and does not fail.
+  // command is wired but the start is gated; the gate is
+  // recorded and fails the run at the summary.
   const srv = await pollApiPost('/api/v1/servers', { projectId: 'p1' });
   if (srv.status === 200) {
     pass(`server started: id=${srv.json && srv.json.payload && srv.json.payload.id}`);
@@ -280,7 +282,8 @@ async function pollApiPost(path, payload) {
   if (gated.length === 0) {
     pass('no gated steps were skipped');
   } else {
-    for (const g of gated) gate(g);
+    console.log(`  GATED steps (${gated.length}) — each one fails this run:`);
+    for (const g of gated) console.log('  - ' + g);
   }
 
   if (errors.length > 0) {
@@ -291,15 +294,16 @@ async function pollApiPost(path, payload) {
   await browser.close();
 
   console.log('');
-  if (failures.length === 0) {
+  if (failures.length === 0 && gated.length === 0) {
     console.log('OK — full-chain e2e passed');
-    if (gated.length > 0) {
-      console.log(`(${gated.length} step(s) gated, see docs/progress/v0.3-full-chain.md)`);
-    }
     process.exit(0);
   } else {
     console.log('FAIL — full-chain e2e:');
     for (const f of failures) console.log('  - ' + f);
+    if (gated.length > 0) {
+      console.log(`${gated.length} gated step(s) (gated = not covered, treated as failure for release evidence):`);
+      for (const g of gated) console.log('  - ' + g);
+    }
     process.exit(1);
   }
 })().catch(err => {
