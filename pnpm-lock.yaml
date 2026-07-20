@@ -451,7 +451,11 @@ importers:
         specifier: 5.5.4
         version: 5.5.4
 
-  tests/e2e: {}
+  tests/e2e:
+    dependencies:
+      '@axe-core/playwright':
+        specifier: ^4.12.1
+        version: 4.12.1(playwright-core@1.61.1)
 
 packages:
 
