@@ -34,24 +34,39 @@ import { bindBuildExtension } from '@kairo/build-extension';
  * by hand. Binds every Kairo service, including the runtime
  * client that everything else depends on.
  *
- * Uses isBound/rebind so that `loadKairoProduct` (which loads
- * KairoRuntimeModule before KairoProduct) can safely coexist
- * with direct use of the KairoProduct ContainerModule.
+ * The four runtime-client bindings are guarded by `isBound` so
+ * this binder is idempotent when composed after
+ * `bindKairoFrontend` (which binds the same services) inside
+ * `KairoProductFrontend` — a duplicate `bind()` for one
+ * identifier makes `container.get()` throw "Ambiguous match"
+ * and kills frontend startup (KAIRO-RC-WEB-001). Standalone
+ * use (KairoProduct module / loadKairoProduct) passes a fresh
+ * container where `isBound` is false, so the bindings are
+ * still installed.
  */
 export function bindKairoProduct(
   bind: interfaces.Bind,
-  _isBound?: interfaces.IsBound,
+  isBound?: interfaces.IsBound,
   _rebind?: interfaces.Rebind,
 ): void {
   // Runtime client — every other Kairo extension depends on
   // RuntimeConnectionService (the single HTTP client to the Go
-  // Runtime Agent). These bindings mirror KairoRuntimeModule.
-  bind(RuntimeConnectionService).toSelf().inSingletonScope();
-  bind(KairoRuntime).toService(RuntimeConnectionService);
-  bind(KairoErrorListener).to(KairoErrorListenerImpl).inSingletonScope();
+  // Runtime Agent). These bindings mirror KairoRuntimeModule and
+  // the ones in bindKairoFrontend; skip any that already exist.
+  if (!isBound || !isBound(RuntimeConnectionService)) {
+    bind(RuntimeConnectionService).toSelf().inSingletonScope();
+  }
+  if (!isBound || !isBound(KairoRuntime)) {
+    bind(KairoRuntime).toService(RuntimeConnectionService);
+  }
+  if (!isBound || !isBound(KairoErrorListener)) {
+    bind(KairoErrorListener).to(KairoErrorListenerImpl).inSingletonScope();
+  }
 
   // Workspace context service
-  bind(WorkspaceContextService).toSelf().inSingletonScope();
+  if (!isBound || !isBound(WorkspaceContextService)) {
+    bind(WorkspaceContextService).toSelf().inSingletonScope();
+  }
 
   bindProjectExtension(bind);
   bind(ActiveProjectService).toSelf().inSingletonScope();

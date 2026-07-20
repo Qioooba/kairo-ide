@@ -49,7 +49,7 @@ export const KairoProductFrontend: ContainerModule = (() => {
   return new ContainerModule((bind, _unbind, isBound, rebind, _onActivation) => {
     // Frontend-layer bindings (widgets, views, commands, status bar)
     try {
-      bindKairoFrontend(bind);
+      bindKairoFrontend(bind, undefined, isBound, rebind);
       console.log('[kairo] bindKairoFrontend OK');
     } catch (e) {
       console.error('[kairo] bindKairoFrontend FAILED', e);
