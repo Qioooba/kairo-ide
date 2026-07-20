@@ -23,6 +23,8 @@ export interface BuildDiagnostic {
     message: string;
 }
 
+export type ConnectionState = 'loading' | 'connected' | 'disconnected' | 'empty';
+
 @injectable()
 export class BuildStore {
     @inject(RuntimeConnectionService)
@@ -37,10 +39,41 @@ export class BuildStore {
     private builds: BuildRun[] = [];
     private readonly onDidChangeEmitter = new Emitter<BuildRun[]>();
     readonly onDidChange: Event<BuildRun[]> = this.onDidChangeEmitter.event;
+    private readonly onConnectionStateChangeEmitter = new Emitter<ConnectionState>();
+    readonly onConnectionStateChange: Event<ConnectionState> = this.onConnectionStateChangeEmitter.event;
+    private connectionState: ConnectionState = 'loading';
+
+    /** Read the current connection state. UI components can seed their
+     * initial render with this and then subscribe to `onConnectionStateChange`
+     * for updates. */
+    getConnectionState(): ConnectionState {
+        return this.connectionState;
+    }
+
+    /** Direct setter for the connection state. Used by tests and by
+     * init paths that don't go through `runtime.onStatusChange`. */
+    setConnectionState(state: ConnectionState): void {
+        if (this.connectionState === state) return;
+        this.connectionState = state;
+        this.onConnectionStateChangeEmitter.fire(state);
+    }
     private eventsUnsubscribe?: () => void;
+    private statusUnsubscribe?: () => void;
 
     @postConstruct()
     protected init(): void {
+        // Subscribe to connection status (synchronous — safe for
+        // postConstruct; see the bootstrap comment below).
+        this.statusUnsubscribe = this.runtime.onStatusChange(s => {
+            if (s === 'open') {
+                this.setConnectionState(this.builds.length === 0 ? 'empty' : 'connected');
+            } else if (s === 'disconnected' || s === 'closed') {
+                this.setConnectionState('disconnected');
+            } else {
+                this.setConnectionState('loading');
+            }
+        });
+
         // The postConstruct must remain synchronous: BuildStore is
         // injected by KairoViewsContribution, which is bound to
         // FrontendApplicationContribution. An async @postConstruct
@@ -81,9 +114,11 @@ export class BuildStore {
                         })),
                     }));
                     this.onDidChangeEmitter.fire(this.getBuilds());
+                    this.setConnectionState(this.builds.length === 0 ? 'empty' : 'connected');
                 }
             } catch {
                 // Agent not reachable yet — store stays empty, UI shows "no builds".
+                this.setConnectionState('disconnected');
             }
         }
 
@@ -135,6 +170,8 @@ export class BuildStore {
 
     dispose(): void {
         this.eventsUnsubscribe?.();
+        this.statusUnsubscribe?.();
         this.onDidChangeEmitter.dispose();
+        this.onConnectionStateChangeEmitter.dispose();
     }
 }

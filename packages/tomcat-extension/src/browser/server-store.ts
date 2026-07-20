@@ -5,6 +5,8 @@ import { RuntimeConnectionService } from '@kairo/runtime-extension';
 import { WorkspaceContextService } from '@kairo/runtime-extension';
 import type { ServerInstance as ProtocolServerInstance } from '@kairo/protocol';
 
+export type ConnectionState = 'loading' | 'connected' | 'disconnected' | 'empty';
+
 export interface ServerInstance {
     id: string;
     workspaceId: string;
@@ -76,10 +78,41 @@ export class ServerStore {
     private servers: ServerInstance[] = [];
     private readonly onDidChangeEmitter = new Emitter<ServerInstance[]>();
     readonly onDidChange: Event<ServerInstance[]> = this.onDidChangeEmitter.event;
+    private readonly onConnectionStateChangeEmitter = new Emitter<ConnectionState>();
+    readonly onConnectionStateChange: Event<ConnectionState> = this.onConnectionStateChangeEmitter.event;
+    private connectionState: ConnectionState = 'loading';
+
+    /** Read the current connection state. UI components can seed their
+     * initial render with this and then subscribe to `onConnectionStateChange`
+     * for updates. */
+    getConnectionState(): ConnectionState {
+        return this.connectionState;
+    }
+
+    /** Direct setter for the connection state. Used by tests and by
+     * init paths that don't go through `runtime.onStatusChange`. */
+    setConnectionState(state: ConnectionState): void {
+        if (this.connectionState === state) return;
+        this.connectionState = state;
+        this.onConnectionStateChangeEmitter.fire(state);
+    }
     private eventsUnsubscribe?: () => void;
+    private statusUnsubscribe?: () => void;
 
     @postConstruct()
     protected init(): void {
+        // Subscribe to connection status (synchronous — safe for
+        // postConstruct; see the bootstrap comment below).
+        this.statusUnsubscribe = this.runtime.onStatusChange(s => {
+            if (s === 'open') {
+                this.setConnectionState(this.servers.length === 0 ? 'empty' : 'connected');
+            } else if (s === 'disconnected' || s === 'closed') {
+                this.setConnectionState('disconnected');
+            } else {
+                this.setConnectionState('loading');
+            }
+        });
+
         // The postConstruct must remain synchronous: ServerStore is
         // injected by KairoStatusBarContribution and KairoViewsContribution,
         // both bound to FrontendApplicationContribution. An async
@@ -111,9 +144,11 @@ export class ServerStore {
                         url: s.ports.http ? `http://127.0.0.1:${s.ports.http}` : undefined,
                     }));
                     this.onDidChangeEmitter.fire(this.getServers());
+                    this.setConnectionState(this.servers.length === 0 ? 'empty' : 'connected');
                 }
             } catch {
                 // Agent not reachable yet — store stays empty.
+                this.setConnectionState('disconnected');
             }
         }
 
@@ -185,6 +220,8 @@ export class ServerStore {
 
     dispose(): void {
         this.eventsUnsubscribe?.();
+        this.statusUnsubscribe?.();
         this.onDidChangeEmitter.dispose();
+        this.onConnectionStateChangeEmitter.dispose();
     }
 }
