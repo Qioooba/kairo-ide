@@ -1,4 +1,4 @@
-﻿//go:build integration_tomcat
+//go:build integration_tomcat
 // +build integration_tomcat
 
 // Package integration_test exercises the Tomcat 6 server start/stop

@@ -1,4 +1,4 @@
-﻿package catalinabase
+package catalinabase
 
 import (
 	"path/filepath"

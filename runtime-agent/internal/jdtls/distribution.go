@@ -1,4 +1,4 @@
-﻿// Package jdtls — distribution installer.
+// Package jdtls — distribution installer.
 //
 // Real Eclipse JDT Language Server is shipped as a tar.gz or zip
 // containing a "config_linux / config_win / config_mac" folder

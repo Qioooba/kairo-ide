@@ -1,4 +1,4 @@
-﻿// Package jdtproject — JDT LS project model generator for
+// Package jdtproject — JDT LS project model generator for
 // legacy non-Maven projects.
 //
 // The Eclipse JDT Language Server needs a project model on

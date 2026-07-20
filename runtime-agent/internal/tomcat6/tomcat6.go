@@ -1,4 +1,4 @@
-﻿package tomcat6
+package tomcat6
 
 import (
 	"context"

@@ -1,4 +1,4 @@
-﻿package jdtls
+package jdtls
 
 import (
 	"archive/tar"
