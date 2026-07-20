@@ -25,7 +25,8 @@ import {
   FrontendApplicationContribution,
   ApplicationShell,
 } from '@theia/core/lib/browser';
-import { Command, CommandRegistry, CommandService, MessageService } from '@theia/core/lib/common';
+import { Command, CommandRegistry, CommandService, MenuContribution, MenuModelRegistry, MessageService } from '@theia/core/lib/common';
+import { CommonMenus } from '@theia/core/lib/browser/common-frontend-contribution';
 import { RuntimeConnectionService, KairoError } from '@kairo/runtime-extension';
 import {
   KairoServerService,
@@ -37,6 +38,11 @@ import {
 import { BuildViewWidget } from '@kairo/build-extension';
 import { BuildStore } from '@kairo/build-extension';
 import { ServerViewWidget, LogViewerWidget } from '@kairo/tomcat-extension';
+import { ImportWizardWidget, ProjectSelectorWidget } from '@kairo/project-extension';
+import {
+  KAIRO_IMPORT_WIZARD_FACTORY_ID,
+  KAIRO_PROJECT_SELECTOR_FACTORY_ID,
+} from './kairo-product-frontend-module';
 import type {
   ServerInstance,
   BuildResult,
@@ -49,6 +55,8 @@ import { mapBuildState } from '@kairo/protocol';
 /* ------------------------------------------------------------------ */
 
 export namespace KairoCommands {
+  export const IMPORT_PROJECT: Command = { id: 'kairo.project.import', label: 'Kairo: Import Project' };
+  export const SELECT_PROJECT: Command = { id: 'kairo.project.select', label: 'Kairo: Select Project' };
   export const SCAN_PROJECT: Command = { id: 'kairo.project.scan', label: 'Kairo: Scan Project' };
   export const BUILD: Command = { id: 'kairo.build', label: 'Kairo: Build' };
   export const BUILD_AND_DEPLOY: Command = { id: 'kairo.buildAndDeploy', label: 'Kairo: Build and Deploy' };
@@ -114,7 +122,7 @@ export class KairoDeploymentsWidget extends Widget {
 /* ------------------------------------------------------------------ */
 
 @injectable()
-export class KairoViewsContribution implements FrontendApplicationContribution {
+export class KairoViewsContribution implements FrontendApplicationContribution, MenuContribution {
   @inject(ApplicationShell) protected shell!: ApplicationShell;
   @inject(WidgetManager) protected widgetManager!: WidgetManager;
   @inject(CommandService) protected commands!: CommandService;
@@ -157,6 +165,37 @@ export class KairoViewsContribution implements FrontendApplicationContribution {
 
   async registerCommands(registry: CommandRegistry): Promise<void> {
     console.log('[kairo] KairoViewsContribution.registerCommands called');
+
+    registry.registerCommand(KairoCommands.IMPORT_PROJECT, {
+      execute: async () => {
+        try {
+          await this.revealOrCreateMain<ImportWizardWidget>(
+            KAIRO_IMPORT_WIZARD_FACTORY_ID,
+            () => undefined,
+            _w => { /* singleton via WidgetManager */ },
+          );
+        } catch (err) {
+          this.messages.error(kairoErrorMessage(err, 'Open Import Wizard failed'));
+        }
+        return undefined;
+      },
+    });
+
+    registry.registerCommand(KairoCommands.SELECT_PROJECT, {
+      execute: async () => {
+        try {
+          await this.revealOrCreateMain<ProjectSelectorWidget>(
+            KAIRO_PROJECT_SELECTOR_FACTORY_ID,
+            () => undefined,
+            _w => { /* singleton via WidgetManager */ },
+          );
+        } catch (err) {
+          this.messages.error(kairoErrorMessage(err, 'Open Project Selector failed'));
+        }
+        return undefined;
+      },
+    });
+
     registry.registerCommand(KairoCommands.SCAN_PROJECT, {
       execute: async () => {
         try {
@@ -305,6 +344,34 @@ export class KairoViewsContribution implements FrontendApplicationContribution {
     // `kairo-product-frontend-module.ts`) and the
     // `WidgetManager.getOrCreateWidget` call below opens the
     // right panel.
+  }
+
+  registerMenus(menus: MenuModelRegistry): void {
+    menus.registerMenuAction(CommonMenus.FILE_OPEN, {
+      commandId: KairoCommands.IMPORT_PROJECT.id,
+      label: 'Import Kairo Project...',
+      order: 'a1',
+    });
+    menus.registerMenuAction(CommonMenus.FILE_OPEN, {
+      commandId: KairoCommands.SELECT_PROJECT.id,
+      label: 'Select Kairo Project...',
+      order: 'a2',
+    });
+  }
+
+  protected async revealOrCreateMain<T extends Widget>(
+    id: string,
+    _getter: () => T | undefined,
+    _setter: (w: T) => void,
+  ): Promise<void> {
+    const w = await this.widgetManager.getOrCreateWidget(id) as T;
+    try {
+      this.shell.addWidget(w, { area: 'main' });
+    } catch (e) {
+      // Already attached — that's fine.
+    }
+    this.shell.activateWidget(w.id);
+    w.update();
   }
 
   protected async revealOrCreate<T extends Widget>(
