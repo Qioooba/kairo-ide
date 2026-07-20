@@ -130,8 +130,11 @@ electron-packager outputs.
 | `pnpm test` | All TS unit + component tests in packages and apps |
 | `pnpm test:agent` | Go unit tests with `-race` |
 | `pnpm test:agent:integration` | Go integration tests (needs JDK) |
-| `pnpm test:e2e` | Playwright, requires built product |
-| `pnpm test:e2e -- --headed` | Same, with browser visible |
+| `pnpm test:e2e:api` | Runtime Agent HTTP smoke (no browser) |
+| `pnpm test:e2e:smoke` | Playwright shell smoke (headless) |
+| `pnpm test:e2e:web` | Playwright full-chain UI E2E (headless) |
+| `pnpm test:visual:web` | Headed visual regression smoke |
+| `pnpm test:a11y:web` | Headed accessibility smoke |
 | `pnpm verify` | bootstrap + build + all of the above |
 
 ## 8. What is **not** in test

@@ -107,8 +107,10 @@ func TestRuntimeRestart_SpawnBranch_Helper(t *testing.T) {
 	// We can't catch the os.Exit, so the helper exits
 	// 0 whether or not the spawn worked. The parent
 	// test distinguishes by checking stdout for
-	// "SPAWN_OK".
-	_ = spawnObserved
+	// "SPAWN_OK". spawnObserved is read in the goroutine
+	// above; don't read it here (it's a sync/atomic.Bool
+	// with noCopy semantics — assigning it to _ would
+	// fail govet).
 	srv.doRestart()
 }
 

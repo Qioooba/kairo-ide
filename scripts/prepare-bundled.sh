@@ -80,6 +80,9 @@ ensure_bundled_dir() {
 TOMCAT_SRC="$(resolve_source_dir "${KAIRO_TOMCAT6_HOME:-}" \
   "/opt/kairo/tomcat6/apache-tomcat-6.0.53" \
   "/opt/kairo/tomcat6" \
+  "/Applications/Tomcat6/apache-tomcat-6.0.53" \
+  "/opt/tomcat6/apache-tomcat-6.0.53" \
+  "/usr/local/tomcat6/apache-tomcat-6.0.53" \
   "/usr/local/share/kairo/tomcat6" \
   "/usr/share/tomcat6" \
   || true)"
@@ -88,6 +91,9 @@ ensure_bundled_dir "tomcat6" "$TOMCAT_SRC" "KAIRO_TOMCAT6_HOME or place it at /o
 
 JDTLS_SRC="$(resolve_source_dir "${KAIRO_JDTLS_HOME:-}" \
   "/opt/kairo/eclipse-jdt-ls" \
+  "/Applications/eclipse-jdt-ls" \
+  "/opt/eclipse-jdt-ls" \
+  "/usr/local/eclipse-jdt-ls" \
   "/usr/local/share/kairo/eclipse-jdt-ls" \
   "$HOME/.kairo/eclipse-jdt-ls" \
   || true)"

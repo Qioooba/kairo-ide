@@ -129,7 +129,8 @@ async function pollApiPost(path, payload) {
   // when the user uses File > Open Folder. Theia can't be
   // driven to do that through the JS bridge we have, so we
   // call the agent to record the workspace.
-  const ws = await pollApiPost('/api/v1/workspaces', { rootPath: 'F:/ideaSpace/kairo-ide/legacy-sample' });
+  const repoRoot = path.resolve(__dirname, '..', '..');
+  const ws = await pollApiPost('/api/v1/workspaces', { rootPath: path.join(repoRoot, 'legacy-sample') });
   if (ws.status !== 200) {
     fail(`workspace open failed: ${ws.status} ${ws.body}`);
   } else {

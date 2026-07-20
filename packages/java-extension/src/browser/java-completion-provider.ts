@@ -12,7 +12,7 @@ import { ILogger } from '@theia/core/lib/common/logger';
 import { Disposable } from '@theia/core/lib/common/disposable';
 import { Emitter, Event } from '@theia/core/lib/common/event';
 import { JavaLanguageClient } from './java-language-client';
-import { LSPCompletionList, LSPCompletionItem, LSPPublishDiagnosticsParams, LSPLocation } from '../common/lsp-protocol';
+import { LSPCompletionItem, LSPPublishDiagnosticsParams, LSPLocation } from '../common/lsp-protocol';
 
 export interface JavaCompletionRequest {
   uri: string;

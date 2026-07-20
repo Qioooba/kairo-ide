@@ -24,7 +24,7 @@ import {
   FrontendApplicationContribution,
   WidgetFactory,
 } from '@theia/core/lib/browser';
-import { CommandContribution } from '@theia/core/lib/common';
+import { CommandContribution, MenuContribution } from '@theia/core/lib/common';
 import { PreferenceContribution } from '@theia/core/lib/common/preferences';
 import {
   KairoDeploymentsWidget,
@@ -42,6 +42,7 @@ import {
   KairoErrorListenerImpl,
   WorkspaceContextService,
 } from '@kairo/runtime-extension';
+import { ImportWizardWidget, ProjectSelectorWidget } from '@kairo/project-extension';
 import { KairoLargeFileContribution } from './kairo-large-file-contribution';
 import { KairoLargeFilePreferenceContribution } from './kairo-large-file-preferences';
 
@@ -49,6 +50,8 @@ export const KAIRO_SERVERS_FACTORY_ID = 'kairo-server-view';
 export const KAIRO_BUILDS_FACTORY_ID = 'kairo-build-view';
 export const KAIRO_DEPLOYMENTS_FACTORY_ID = 'kairo-deployments';
 export const KAIRO_LOGS_FACTORY_ID = 'kairo-log-viewer';
+export const KAIRO_IMPORT_WIZARD_FACTORY_ID = 'kairo-import-wizard';
+export const KAIRO_PROJECT_SELECTOR_FACTORY_ID = 'kairo-project-selector';
 
 export function bindKairoFrontend(bind: interfaces.Bind, unbind?: interfaces.Unbind, isBound?: interfaces.IsBound, rebind?: interfaces.Rebind): void {
   // ── Kairo runtime client + workspace context ────────────────
@@ -94,6 +97,7 @@ export function bindKairoFrontend(bind: interfaces.Bind, unbind?: interfaces.Unb
   // it as a CommandContribution so Theia's command registry
   // picks up the methods.
   bind(CommandContribution).toService(KairoViewsContribution);
+  bind(MenuContribution).toService(KairoViewsContribution);
   bind(CommandContribution).toService(KairoEncodingCommandsContribution);
 
   // KairoFileCommandsContribution is a defensive re-registration
@@ -133,6 +137,20 @@ export function bindKairoFrontend(bind: interfaces.Bind, unbind?: interfaces.Unb
   bind(WidgetFactory).toDynamicValue(ctx => ({
     id: KAIRO_LOGS_FACTORY_ID,
     createWidget: () => ctx.container.get(LogViewerWidget),
+  })).inSingletonScope();
+
+  // Import Wizard and Project Selector are the primary entry
+  // points for the Kairo project workflow. They must be reachable
+  // from the composition root (command palette / File menu).
+  bind(ImportWizardWidget).toSelf();
+  bind(ProjectSelectorWidget).toSelf();
+  bind(WidgetFactory).toDynamicValue(ctx => ({
+    id: KAIRO_IMPORT_WIZARD_FACTORY_ID,
+    createWidget: () => ctx.container.get(ImportWizardWidget),
+  })).inSingletonScope();
+  bind(WidgetFactory).toDynamicValue(ctx => ({
+    id: KAIRO_PROJECT_SELECTOR_FACTORY_ID,
+    createWidget: () => ctx.container.get(ProjectSelectorWidget),
   })).inSingletonScope();
 }
 

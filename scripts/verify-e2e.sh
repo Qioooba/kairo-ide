@@ -52,11 +52,12 @@ DEPLOY_OUT="$ROOT/webapp"
 BUILD_OUT="$ROOT/build-out"
 mkdir -p "$DEPLOY_OUT" "$BUILD_OUT"
 
-# Copy the legacy sample to a temp directory so destructive edits
-# never mutate the repository fixture.
-LEGACY_SOURCE="$REPO_ROOT/legacy-sample"
+# Copy the repo fixture to a temp directory so we never modify
+# the source tree. All destructive operations happen under ROOT.
+SRC_LEGACY="$REPO_ROOT/legacy-sample"
 LEGACY="$ROOT/legacy-sample"
-cp -R "$LEGACY_SOURCE" "$LEGACY"
+rm -rf "$LEGACY"
+cp -R "$SRC_LEGACY" "$LEGACY"
 
 echo "[1/6] build"
 BUILD_RESP=$(curl -fsS -X POST "http://127.0.0.1:${PORT}/api/v1/builds" -H "Content-Type: application/json" \

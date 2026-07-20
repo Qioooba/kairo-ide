@@ -9,7 +9,6 @@
 
 import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
 import { ILogger } from '@theia/core/lib/common/logger';
-import { Disposable } from '@theia/core/lib/common/disposable';
 import { Emitter, Event } from '@theia/core/lib/common/event';
 import { TomcatManager, TomcatEvent, TomcatInstance, TomcatStartOptions, TomcatState } from './tomcat-manager';
 
