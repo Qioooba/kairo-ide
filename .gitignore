@@ -41,6 +41,7 @@ runtime-agent/coverage.out
 
 # Build artifacts
 build/
+!runtime-agent/internal/build/
 release/
 dist/
 *.zip

@@ -1,4 +1,4 @@
-﻿# Kairo IDE — macOS 网页版发布候选测试与修复长任务
+# Kairo IDE — macOS 网页版发布候选测试与修复长任务
 
 > - 执行机器：macOS 真机
 > - 被测产品：Kairo IDE Localhost Browser/Web 版

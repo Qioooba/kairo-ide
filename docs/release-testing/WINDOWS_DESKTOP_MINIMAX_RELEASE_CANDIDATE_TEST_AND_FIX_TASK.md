@@ -1,4 +1,4 @@
-﻿# Kairo IDE — Windows 桌面版 MiniMax Code 真机测试与修复长任务
+# Kairo IDE — Windows 桌面版 MiniMax Code 真机测试与修复长任务
 
 > - 执行机器：Windows 10/11 x64 真机，必须有可见、已解锁的交互桌面
 > - 被测产品：Kairo IDE Windows NSIS 安装版与 ZIP/portable 版
