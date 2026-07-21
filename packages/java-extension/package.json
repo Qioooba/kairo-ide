@@ -18,6 +18,7 @@
     "@kairo/project-extension": "workspace:*",
     "@kairo/protocol": "workspace:*",
     "@kairo/runtime-extension": "workspace:*",
+    "@theia/monaco-editor-core": "1.108.201",
     "vscode-jsonrpc": "8.2.0"
   },
   "peerDependencies": {
