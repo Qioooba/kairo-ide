@@ -93,8 +93,15 @@ export class KairoEncodingCommandsContribution implements CommandContribution {
         this.service.setEncodingFor(target, picked);
         // Close the open editor and re-open so the model
         // reloads from disk with the new encoding override.
+        // KAIRO-RC-WEB-233: closing is asynchronous — re-opening
+        // immediately raced the disposal and killed the editor
+        // with "Model is disposed!". Wait for onDidDispose first.
         const widget = await this.editorManager.getByUri(target);
-        if (widget) widget.close();
+        if (widget) {
+          const disposed = new Promise<void>(resolve => widget.onDidDispose(() => resolve()));
+          widget.close();
+          await disposed;
+        }
         await this.editorManager.open(target);
         this.messages.info(`Reopened ${target.displayName} as ${picked}.`);
       },
@@ -129,8 +136,13 @@ export class KairoEncodingCommandsContribution implements CommandContribution {
           return;
         }
         try {
-          await this.service.writeWithEncoding(target, text, picked);
+          // KAIRO-RC-WEB-235: the EncodingRegistry override ALWAYS
+          // wins over the write() options.encoding, so the override
+          // must be updated BEFORE writing — otherwise the bytes are
+          // encoded with the OLD encoding while the UI claims the new
+          // one (the one-way "Saved as utf-8" that stayed GBK).
           this.service.setEncodingFor(target, picked);
+          await this.service.writeWithEncoding(target, text, picked);
           // Mark the document as not dirty without re-saving
           // (we just wrote the bytes ourselves).
           (document as any).setDirty?.(false);

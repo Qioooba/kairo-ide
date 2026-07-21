@@ -109,3 +109,32 @@ test('applyProjectEncoding registers a folder-level override with normalized enc
   assert.strictEqual(typeof overrides[0].parent.isEqualOrParent, 'function', 'parent coerced to a real Theia URI');
   assert.strictEqual(overrides[0].parent.toString(), 'file:///tmp/legacy-sample');
 });
+
+const { KairoSafeEncodingService, UnrepresentableEncodingError } = require('../../lib/browser/safe-encoding-service');
+
+test('KairoSafeEncodingService refuses unrepresentable chars instead of corrupting bytes (KAIRO-RC-WEB-229)', () => {
+  const svc = new KairoSafeEncodingService();
+  const gbkText = '中文注释测试';
+  const ok = svc.encode(gbkText, { encoding: 'gbk' });
+  assert.ok(ok.byteLength > 0, 'GBK-representable text encodes fine');
+  assert.throws(
+    () => svc.encode(gbkText + ' 🔥 emoji', { encoding: 'gbk' }),
+    err => err instanceof UnrepresentableEncodingError
+      && err.message.includes('gbk')
+      && err.message.includes('NOT modified')
+      && /U\+1F525/i.test(err.message),
+    'must throw with char codepoint, encoding, and no-modification note',
+  );
+  const utf = svc.encode('中文 🔥', { encoding: 'utf8' });
+  assert.ok(utf.byteLength > 0, 'UTF-8 accepts emoji');
+});
+
+test('encodeStream validates string saves too (KAIRO-RC-WEB-229)', async () => {
+  const svc = new KairoSafeEncodingService();
+  await assert.rejects(
+    () => svc.encodeStream('中文 🔥', { encoding: 'gbk' }),
+    /not representable/,
+  );
+  const buf = await svc.encodeStream('中文测试', { encoding: 'gbk' });
+  assert.ok(buf.byteLength > 0);
+});

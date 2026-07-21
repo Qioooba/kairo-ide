@@ -149,3 +149,13 @@ test('composition: JSP language contribution is bound (KAIRO-RC-WEB-002)', () =>
 test('teardown', () => {
   disableJSDOM();
 });
+
+test('composition: Theia EncodingService is replaced by the validating one (KAIRO-RC-WEB-229)', () => {
+  const container = compose();
+  const { EncodingService } = require('@theia/core/lib/common/encoding-service');
+  const { KairoSafeEncodingService } = require('@kairo/encoding-extension/lib/browser');
+  assert.ok(bindingCount(container, EncodingService) >= 1, 'EncodingService must be bound');
+  const svc = container.get(EncodingService);
+  assert.ok(svc instanceof KairoSafeEncodingService,
+    'EncodingService must resolve to KairoSafeEncodingService (unrepresentable-char protection)');
+});

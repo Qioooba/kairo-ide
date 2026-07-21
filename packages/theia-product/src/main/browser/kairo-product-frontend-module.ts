@@ -32,7 +32,8 @@ import {
 } from './kairo-views-contribution';
 import { KairoStatusBarContribution } from './kairo-status-bar-contribution';
 import { KairoFileCommandsContribution } from './kairo-file-commands';
-import { KairoEncodingCommandsContribution } from '@kairo/encoding-extension';
+import { KairoEncodingCommandsContribution, KairoSafeEncodingService } from '@kairo/encoding-extension';
+import { EncodingService } from '@theia/core/lib/common/encoding-service';
 import { BuildViewWidget } from '@kairo/build-extension';
 import { ServerViewWidget, LogViewerWidget } from '@kairo/tomcat-extension';
 import {
@@ -115,6 +116,14 @@ export function bindKairoFrontend(bind: interfaces.Bind, unbind?: interfaces.Unb
   bind(CommandContribution).toService(KairoViewsContribution);
   bind(MenuContribution).toService(KairoViewsContribution);
   bind(CommandContribution).toService(KairoEncodingCommandsContribution);
+
+  // KAIRO-RC-WEB-229: replace Theia's lossy encoder (iconv silently
+  // rewrites unrepresentable chars to '?') with the validating one.
+  if (isBound && rebind && isBound(EncodingService)) {
+    rebind(EncodingService).to(KairoSafeEncodingService).inSingletonScope();
+  } else {
+    bind(EncodingService).to(KairoSafeEncodingService).inSingletonScope();
+  }
 
   // KairoFileCommandsContribution is a defensive re-registration
   // of the standard Theia file.* / workspace:* / core.* commands.
