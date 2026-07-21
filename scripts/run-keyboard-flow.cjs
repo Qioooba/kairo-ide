@@ -37,15 +37,11 @@ async function openCommandPalette(page, query) {
     try {
       await page.keyboard.press('F1');
       await input.waitFor({ state: 'visible', timeout: 15000 });
-      const hasFocus = await page.evaluate(() => document.activeElement?.getAttribute('aria-label') === 'Type to narrow down results.');
-      if (!hasFocus) await input.evaluate(el => el.focus());
-      await sleep(200);
-      // select-all replaces whatever the palette pre-filled (fill()
-      // fails actionability while the quick-open overlay animates).
-      await page.keyboard.down('Meta');
-      await page.keyboard.press('a');
-      await page.keyboard.up('Meta');
-      await page.keyboard.type(query, { delay: 20 });
+      // pressSequentially focuses the input itself — robust against the
+      // first-open focus race that page.keyboard.type kept losing
+      // (KAIRO-RC-WEB-249). A freshly opened palette is pre-filled with
+      // just '>', so no clearing is needed.
+      await input.pressSequentially(query, { delay: 25 });
       // wait for the filtered list to render, not a fixed sleep
       await page.waitForSelector('.monaco-list-row', { state: 'attached', timeout: 8000 }).catch(() => {});
       await sleep(400);
