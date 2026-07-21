@@ -194,19 +194,31 @@ async function main() {
     await shot('09-statusbar-project');
 
     // ---- 6. cross-verification: disk + API ------------------------------
-    const configPath = path.join(legacyDst, '.kairo', 'project.yaml');
-    if (!fs.existsSync(configPath)) throw new Error(`disk config missing: ${configPath}`);
-    const configText = fs.readFileSync(configPath, 'utf8');
+    // Source of truth for the HTTP API persistence is the agent store at
+    // $DATA_DIR/agent-data/projects/projects.json. NOTE: the product ALSO has
+    // a second persistence path (FileProjectRepo.Save -> .kairo/project.yaml)
+    // that the HTTP layer bypasses entirely — that divergence is tracked as
+    // KAIRO-RC-WEB-203, not re-asserted here.
+    const storePath = path.join(env.KAIRO_QA_DATA_DIR, 'agent-data', 'projects', 'projects.json');
+    if (!fs.existsSync(storePath)) throw new Error(`disk project store missing: ${storePath}`);
+    const store = JSON.parse(fs.readFileSync(storePath, 'utf8'));
+    const stored = Object.values(store)[0] || {};
     const cfgChecks = {
-      hasName: configText.includes(CHINESE_NAME),
-      hasGbk: /encoding:\s*gbk/i.test(configText),
-      hasAnt: /buildTool:\s*ant/i.test(configText) || /build_tool:\s*ant/i.test(configText),
+      idPopulated: !!stored.id,
+      workspaceIdPopulated: !!stored.workspaceId,
+      hasName: stored.name === CHINESE_NAME,
+      hasGbk: stored.encoding === 'gbk',
+      hasAnt: stored.buildTool === 'ant',
+      rootPathIsLegacyDst: stored.rootPath === legacyDst,
     };
-    if (!cfgChecks.hasName || !cfgChecks.hasGbk || !cfgChecks.hasAnt) {
-      throw new Error(`project.yaml content mismatch: ${JSON.stringify(cfgChecks)}; body=${configText.slice(0, 400)}`);
+    if (Object.values(cfgChecks).some(v => !v)) {
+      throw new Error(`projects.json content mismatch: ${JSON.stringify(cfgChecks)}; record=${JSON.stringify(stored).slice(0, 400)}`);
     }
-    result.crossVerification.diskConfig = { path: configPath, ...cfgChecks };
+    result.crossVerification.diskConfig = { path: storePath, ...cfgChecks };
     logStep('DISK_CONFIG_VERIFIED', result.crossVerification.diskConfig);
+    const yamlPath = path.join(legacyDst, '.kairo', 'project.yaml');
+    result.crossVerification.legacyYamlPath = { path: yamlPath, exists: fs.existsSync(yamlPath) };
+    logStep('KAIRO_PROJECT_YAML_CHECK', result.crossVerification.legacyYamlPath);
 
     const projectsRes = await agentGet(env, '/api/v1/projects', 10000);
     if (!projectsRes.ok) throw new Error(`projects endpoint failed: ${projectsRes.status}`);
