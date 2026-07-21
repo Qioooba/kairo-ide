@@ -134,6 +134,31 @@ async function main() {
     const disabledDuringRun = await page.locator('[data-testid="build-button"]').isDisabled();
     result.crossVerification.busyDisabled = disabledDuringRun;
     logStep('BUILD_STARTED', { buttonsDisabledWhileRunning: disabledDuringRun });
+    // Fast sham-check: if the UI state never leaves idle within 20s, the
+    // view/update path is broken — cross-verify via API + disk and FAIL.
+    const quickState = await waitBuildState(page, ['running', 'succeeded', 'failed'], 20000).catch(() => 'idle');
+    if (quickState === 'idle') {
+      const buildsApi = await agentGet(env, '/api/v1/builds', 10000);
+      const buildsDir = path.join(env.KAIRO_QA_DATA_DIR, 'agent-data', 'builds', 'finished.json');
+      const finished = fs.existsSync(buildsDir) ? JSON.parse(fs.readFileSync(buildsDir, 'utf8')) : null;
+      const last = Array.isArray(finished) ? finished[finished.length - 1] : null;
+      result.crossVerification.shamBuild = { apiStatus: buildsApi.status, lastBuild: last, outDirExists: fs.existsSync(outDir), classFiles: countClassFiles(outDir) };
+      appendDefect({
+        severity: 'P0',
+        title: `${FLOW}: Build view stays idle forever — build-store bootstrap crashes on agent build record shape (expects b.summary.errors/diagnostics non-null; agent returns neither)`,
+        detail: result.crossVerification.shamBuild,
+        evidence: ['logs/flow-04/console.jsonl', 'packages/build-extension/src/browser/build-store.ts:96-110'],
+      });
+      if (last && last.filesCompiled === 0) {
+        appendDefect({
+          severity: 'P0',
+          title: `${FLOW}: POST /api/v1/builds is a sham — filesCompiled=0, outputDir under agent-data (not the project), project config ignored (sourceLevel 1.8 stored, 1.6 used), instant "success"`,
+          detail: last,
+          evidence: ['flows/flow-04/result.json'],
+        });
+      }
+      throw new Error('build view never updated (sham build + broken store — defects filed)');
+    }
     const finalState = await waitBuildState(page, ['succeeded', 'failed'], 300000);
     await shot('04-build-result');
     if (finalState !== 'succeeded') {
