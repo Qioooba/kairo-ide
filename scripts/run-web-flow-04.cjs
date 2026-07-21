@@ -64,6 +64,37 @@ function countClassFiles(dir) {
   return n;
 }
 
+
+// WAVE3-RERUN: the build-store live-update path (kairo-views-contribution
+// refreshBuilds, old unsafe mapping) can still leave the UI idle; the
+// backend is the source of truth during the run, and the Build view is
+// verified after a page reload (bootstrap path is fixed).
+async function waitBackendBuild(finishedPath, minCount, timeoutMs) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (fs.existsSync(finishedPath)) {
+      try {
+        const arr = JSON.parse(fs.readFileSync(finishedPath, 'utf8'));
+        if (Array.isArray(arr) && arr.length >= minCount) {
+          const last = arr[arr.length - 1];
+          if (last && (last.state === 'success' || last.state === 'failure' || last.state === 'failed')) return arr;
+        }
+      } catch (_e) { /* partial write */ }
+    }
+    await sleep(1500);
+  }
+  throw new Error(`backend build record count did not reach ${minCount} within ${timeoutMs}ms`);
+}
+
+async function reloadAndShowBuilds(page, runCommand, waitForSelectorVisible, waitForStatusBarContains, sleep) {
+  await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
+  await sleep(8000);
+  await waitForStatusBarContains(page, 'Runtime: connected', 90000);
+  await runCommand(page, 'Kairo: Show Builds', 20000);
+  await waitForSelectorVisible(page, '[data-testid="build-view"]', 20000);
+  await sleep(1500);
+}
+
 async function main() {
   const args = process.argv.slice(2);
   let useExisting = '';
@@ -129,52 +160,63 @@ async function main() {
     logStep('BUILD_VIEW_OPEN', { state: initialState });
     await shot('03-build-view-idle');
 
+    const finishedPath = path.join(env.KAIRO_QA_DATA_DIR, 'agent-data', 'builds', 'finished.json');
     await page.locator('[data-testid="build-button"]').click();
-    // busy semantics: buttons disabled while running
     const disabledDuringRun = await page.locator('[data-testid="build-button"]').isDisabled();
     result.crossVerification.busyDisabled = disabledDuringRun;
     logStep('BUILD_STARTED', { buttonsDisabledWhileRunning: disabledDuringRun });
-    // Fast sham-check: if the UI state never leaves idle within 20s, the
-    // view/update path is broken — cross-verify via API + disk and FAIL.
-    const quickState = await waitBuildState(page, ['running', 'succeeded', 'failed'], 20000).catch(() => 'idle');
-    if (quickState === 'idle') {
-      const buildsApi = await agentGet(env, '/api/v1/builds', 10000);
-      const buildsDir = path.join(env.KAIRO_QA_DATA_DIR, 'agent-data', 'builds', 'finished.json');
-      const finished = fs.existsSync(buildsDir) ? JSON.parse(fs.readFileSync(buildsDir, 'utf8')) : null;
-      const last = Array.isArray(finished) ? finished[finished.length - 1] : null;
-      result.crossVerification.shamBuild = { apiStatus: buildsApi.status, lastBuild: last, outDirExists: fs.existsSync(outDir), classFiles: countClassFiles(outDir) };
-      appendDefect({
-        severity: 'P0',
-        title: `${FLOW}: Build view stays idle forever — build-store bootstrap crashes on agent build record shape (expects b.summary.errors/diagnostics non-null; agent returns neither)`,
-        detail: result.crossVerification.shamBuild,
-        evidence: ['logs/flow-04/console.jsonl', 'packages/build-extension/src/browser/build-store.ts:96-110'],
-      });
-      if (last && last.filesCompiled === 0) {
-        appendDefect({
-          severity: 'P0',
-          title: `${FLOW}: POST /api/v1/builds is a sham — filesCompiled=0, outputDir under agent-data (not the project), project config ignored (sourceLevel 1.8 stored, 1.6 used), instant "success"`,
-          detail: last,
-          evidence: ['flows/flow-04/result.json'],
-        });
-      }
-      throw new Error('build view never updated (sham build + broken store — defects filed)');
-    }
-    const finalState = await waitBuildState(page, ['succeeded', 'failed'], 300000);
-    await shot('04-build-result');
-    if (finalState !== 'succeeded') {
-      const summary = await page.locator('[data-testid="build-summary"]').textContent().catch(() => '');
+
+    // backend is source of truth
+    let builds = await waitBackendBuild(finishedPath, 1, 120000);
+    let lastBuild = builds[builds.length - 1];
+    result.crossVerification.lastBuild = lastBuild;
+    // UI live update: give the view a short window, then judge
+    const uiState = await waitBuildState(page, ['succeeded', 'failed'], 15000).catch(() => 'idle');
+    result.crossVerification.uiLiveUpdateWorked = uiState !== 'idle';
+    if (!result.crossVerification.uiLiveUpdateWorked) {
       appendDefect({
         severity: 'P1',
-        title: `${FLOW}: clean legacy-sample build failed (source 1.8, javac)`,
-        evidence: ['screenshots/m2/flow-04/04-build-result.png'],
-        summary: (summary || '').slice(0, 400),
+        title: `${FLOW} WAVE3-RERUN STILL_FAILING (WEB-237): Build view does not live-update — refreshBuilds in kairo-views-contribution.ts:463-490 still uses the unsafe b.summary.errors/b.diagnostics.map mapping (bootstrap path in build-store.ts IS fixed)`,
+        detail: { uiState, backendState: lastBuild.state },
+        evidence: ['flows/flow-04/result.json'],
       });
-      throw new Error(`first build failed: ${summary}`);
+      logError('build view live-update still broken (defect filed; continuing backend-driven)');
+    }
+    if (lastBuild.state !== 'success' || lastBuild.filesCompiled < 3) {
+      appendDefect({
+        severity: 'P0',
+        title: `${FLOW} WAVE3-RERUN: build still not real (filesCompiled=${lastBuild?.filesCompiled}, state=${lastBuild?.state})`,
+        detail: lastBuild,
+      });
+      throw new Error('build still sham-like');
     }
     const classCount = countClassFiles(outDir);
-    if (classCount === 0) throw new Error('build reported success but no .class artifacts on disk');
-    result.crossVerification.firstBuild = { state: finalState, classFiles: classCount, outDir };
+    result.crossVerification.firstBuild = { backendState: lastBuild.state, filesCompiled: lastBuild.filesCompiled, classFilesInProject: classCount, outDir: lastBuild.outputDir, warningsInOutput: (lastBuild.output || '').length > 0 };
+    if (classCount === 0) throw new Error('build reported success but no .class artifacts in project build/classes');
     logStep('BUILD_SUCCEEDED', result.crossVerification.firstBuild);
+    // Build view verification: reload once and check whether the bootstrap
+    // path shows the build. If not, the view is dead for the whole flow
+    // (bootstrap races workspace context; no re-bootstrap on ctx change) —
+    // file ONE consolidated defect and continue backend-verified.
+    await reloadAndShowBuilds(page, runCommand, waitForSelectorVisible, waitForStatusBarContains, sleep);
+    const viewState = await buildState(page);
+    const history1 = await page.locator('[data-testid="build-list"] li').count();
+    result.crossVerification.viewAfterReload = { state: viewState, historyEntries: history1 };
+    await shot('04-build-result');
+    const viewDead = viewState === 'idle' && history1 === 0;
+    if (viewDead) {
+      appendDefect({
+        severity: 'P1',
+        title: `${FLOW} WAVE3-RERUN STILL_FAILING (WEB-237): Build view permanently empty — build-store bootstrap races workspace context (ctx undefined at postConstruct, no re-bootstrap on context change); refreshBuilds in kairo-views-contribution.ts:463-490 also still crashes on b.summary.errors`,
+        detail: { viewAfterReload: result.crossVerification.viewAfterReload, backendBuild: { state: lastBuild.state, filesCompiled: lastBuild.filesCompiled } },
+        evidence: ['screenshots/m2/flow-04/04-build-result.png', 'flows/flow-04/result.json'],
+      });
+      logError('build view permanently empty (consolidated defect filed; backend-verified continuation)');
+      result.buildViewDead = true;
+      result.blocked.push({ item: 'Build view rendering (state/history/diagnostics/diagnostic-click)', reason: 'view permanently empty — see defect' });
+    } else {
+      logStep('BUILD_VIEW_VERIFIED_AFTER_RELOAD', result.crossVerification.viewAfterReload);
+    }
 
     // ---- 3. compile error -> failed + diagnostics -------------------------
     await quickOpenFile(page, 'HelloServlet.java');
@@ -186,24 +228,97 @@ async function main() {
     await sleep(1000);
 
     await page.locator('[data-testid="build-button"]').click();
-    const failState = await waitBuildState(page, ['succeeded', 'failed'], 300000);
-    await shot('05-build-failed');
-    if (failState !== 'failed') throw new Error('build with broken source did not fail');
-    const diagItems = page.locator('[data-testid="diagnostics-list"] li');
-    const diagCount = await diagItems.count();
-    const diagText = await page.locator('[data-testid="diagnostics-list"]').textContent().catch(() => '');
-    if (diagCount === 0 || !/HelloServlet/.test(diagText) || !/:\d+:/.test(diagText)) {
+    builds = await waitBackendBuild(finishedPath, 2, 120000);
+    lastBuild = builds[builds.length - 1];
+    result.crossVerification.failedBuild = lastBuild;
+    if (lastBuild.state !== 'failure' && lastBuild.state !== 'failed') throw new Error(`build with broken source did not fail (state=${lastBuild.state})`);
+    const diagEmpty = !Array.isArray(lastBuild.diagnostics) || lastBuild.diagnostics.length === 0;
+    const outputHasFileLine = /HelloServlet\.java:\d+/.test(lastBuild.output || '');
+    if (diagEmpty && outputHasFileLine) {
       appendDefect({
         severity: 'P1',
-        title: `${FLOW}: failed build shows no usable diagnostic (file:line)`,
-        evidence: ['screenshots/m2/flow-04/05-build-failed.png'],
-        diagText: (diagText || '').slice(0, 400),
+        title: `${FLOW} WAVE3-RERUN: diagnostics[] empty on failed build — javac diagnostic parser only matches English output; machine locale produces Chinese javac messages (错误:), raw output DOES contain file:line`,
+        detail: { diagnostics: lastBuild.diagnostics, outputSample: (lastBuild.output || '').slice(0, 300) },
+        evidence: ['flows/flow-04/result.json'],
+      });
+      logError('diagnostics empty due to locale-sensitive parser (defect filed; raw output verified)');
+    } else if (diagEmpty) {
+      appendDefect({
+        severity: 'P1',
+        title: `${FLOW} WAVE3-RERUN: failed build has no usable backend diagnostic (file:line)`,
+        detail: lastBuild.diagnostics,
       });
       throw new Error('no real diagnostic for compile error');
     }
+    if (!result.buildViewDead) {
+      await reloadAndShowBuilds(page, runCommand, waitForSelectorVisible, waitForStatusBarContains, sleep);
+      await shot('05-build-failed');
+      const diagItems0 = page.locator('[data-testid="diagnostics-list"] li');
+      const diagCount0 = await diagItems0.count();
+      if (diagCount0 === 0) {
+        appendDefect({
+          severity: 'P1',
+          title: `${FLOW} WAVE3-RERUN: Build view does not render backend diagnostics after reload`,
+          detail: { backendDiagnostics: lastBuild.diagnostics?.length },
+        });
+        throw new Error('diagnostics not rendered in view');
+      }
+    } else {
+      await shot('05-build-failed-backend');
+    }
+    const diagItems = page.locator('[data-testid="diagnostics-list"] li');
+    const diagCount = await diagItems.count();
+    const diagText = await page.locator('[data-testid="diagnostics-list"]').textContent().catch(() => '');
     logStep('BUILD_FAILED_WITH_DIAGNOSTICS', { diagnostics: diagCount, text: (diagText || '').slice(0, 200) });
 
     // click the diagnostic -> should navigate to file/line
+    if (result.buildViewDead) {
+      logStep('DIAGNOSTIC_CLICK_BLOCKED_VIEW_DEAD');
+      await shot('06-diagnostic-click');
+      // jump to fix section marker
+      await quickOpenFile(page, 'HelloServlet.java');
+      await page.locator('.monaco-editor .view-lines').first().click();
+      for (let u = 0; u < 20; u++) await page.keyboard.press('Meta+Z');
+      await page.keyboard.press('Meta+S');
+      await sleep(1000);
+      await page.locator('[data-testid="build-button"]').click();
+      builds = await waitBackendBuild(finishedPath, 3, 120000);
+      lastBuild = builds[builds.length - 1];
+      if (lastBuild.state !== 'success') throw new Error(`build after fix did not succeed (state=${lastBuild.state})`);
+      const historyCount = 0;
+      logStep('BUILD_AFTER_FIX', { state: lastBuild.state, historyEntries: 'view-dead' });
+      await shot('07-history');
+      const beforeClean2 = Date.now();
+      await page.locator('[data-testid="clean-build-button"]').click();
+      builds = await waitBackendBuild(finishedPath, 4, 120000);
+      lastBuild = builds[builds.length - 1];
+      if (lastBuild.state !== 'success') throw new Error(`clean build did not succeed (state=${lastBuild.state})`);
+      const classCountAfter2 = countClassFiles(outDir);
+      let stale2 = 0;
+      const walk2 = (d) => {
+        if (!fs.existsSync(d)) return;
+        for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+          const p2 = path.join(d, e.name);
+          if (e.isDirectory()) walk2(p2);
+          else if (e.name.endsWith('.class') && fs.statSync(p2).mtimeMs < beforeClean2 - 1000) stale2++;
+        }
+      };
+      walk2(outDir);
+      result.crossVerification.cleanBuild = { classFiles: classCountAfter2, staleFiles: stale2 };
+      if (classCountAfter2 === 0 || stale2 > 0) throw new Error('clean build semantics broken');
+      logStep('CLEAN_BUILD_VERIFIED', result.crossVerification.cleanBuild);
+      // jump to console gate
+      writeLogs(dirs.logs, page._kairoLogs || []);
+      const gate2 = consoleGate(page._kairoLogs || []);
+      result.consoleGate = { ok: gate2.ok, errorCount: gate2.errors.length, first: gate2.errors[0] || null };
+      if (!gate2.ok) {
+        logError(`console gate: ${gate2.errors.length} errors`);
+        throw new Error('console gate failed');
+      }
+      result.status = 'FAIL'; // buildViewDead => view-level assertions failed
+      logStep('FLOW_FAIL_VIEW_DEAD_BACKEND_OK');
+      throw new Error('__FLOW_DONE__');
+    }
     await diagItems.first().click();
     await sleep(2000);
     const cursorInfo = await page.evaluate(() => {
@@ -234,12 +349,15 @@ async function main() {
     // ---- 4. fix -> build succeeds, history kept ---------------------------
     await quickOpenFile(page, 'HelloServlet.java');
     await page.locator('.monaco-editor .view-lines').first().click();
-    await page.keyboard.press('Meta+Z'); // undo the garbage line
+    for (let u = 0; u < 20; u++) await page.keyboard.press('Meta+Z'); // undo every keystroke of the garbage line
     await page.keyboard.press('Meta+S');
     await sleep(1000);
     await page.locator('[data-testid="build-button"]').click();
-    const fixedState = await waitBuildState(page, ['succeeded', 'failed'], 300000);
-    if (fixedState !== 'succeeded') throw new Error('build after fix did not succeed');
+    builds = await waitBackendBuild(finishedPath, 3, 120000);
+    lastBuild = builds[builds.length - 1];
+    if (lastBuild.state !== 'success') throw new Error(`build after fix did not succeed (state=${lastBuild.state})`);
+    await reloadAndShowBuilds(page, runCommand, waitForSelectorVisible, waitForStatusBarContains, sleep);
+    const fixedState = await buildState(page);
     const historyCount = await page.locator('[data-testid="build-list"] li').count();
     if (historyCount < 3) {
       appendDefect({
@@ -254,9 +372,10 @@ async function main() {
     // ---- 5. clean build ----------------------------------------------------
     const beforeClean = Date.now();
     await page.locator('[data-testid="clean-build-button"]').click();
-    const cleanState = await waitBuildState(page, ['succeeded', 'failed'], 300000);
+    builds = await waitBackendBuild(finishedPath, 4, 120000);
+    lastBuild = builds[builds.length - 1];
     await shot('08-clean-build');
-    if (cleanState !== 'succeeded') throw new Error('clean build did not succeed');
+    if (lastBuild.state !== 'success') throw new Error(`clean build did not succeed (state=${lastBuild.state})`);
     const classCountAfter = countClassFiles(outDir);
     // every .class must have been (re)created after the clean started
     let stale = 0;
