@@ -43,9 +43,20 @@ async function createWorkspaceViaAgent(rootPath, name) {
 
 async function importViaUI(page, rootPath) {
   await page.keyboard.press('F1');
-  await sleep(600);
-  await page.keyboard.type('Kairo: Import Project');
-  await sleep(600);
+  // Same first-open race fix as run-keyboard-flow (KAIRO-RC-WEB-249):
+  // wait for the quick-open input, focus via DOM, retype until the
+  // query sticks.
+  const input = page.locator('input[aria-label="Type to narrow down results."]').first();
+  await input.waitFor({ state: 'visible', timeout: 10000 });
+  await input.evaluate(el => el.focus());
+  await sleep(300);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await input.fill('');
+    await page.keyboard.type('Kairo: Import Project', { delay: 20 });
+    await sleep(800);
+    const stuck = await input.inputValue().catch(() => '');
+    if (stuck.includes('Import Project')) break;
+  }
   await page.keyboard.press('Enter');
   await sleep(1000);
   // Wizard step 1: type path
