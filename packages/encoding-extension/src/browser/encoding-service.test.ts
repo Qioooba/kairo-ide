@@ -263,3 +263,4 @@ test('empty string round-trip works for all encodings', () => {
     assert.strictEqual(decoded, '', `Empty string round-trip for ${enc}`);
   }
 });
+

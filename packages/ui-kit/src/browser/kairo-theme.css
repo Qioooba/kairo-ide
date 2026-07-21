@@ -674,3 +674,18 @@
     font-size: 12px;
     color: var(--kairo-text-secondary);
 }
+
+/* KAIRO-RC-WEB-101: at narrow widths / 200% zoom the status bar
+ * clipped right-side items (Runtime, notification bell, panel
+ * toggle) off-screen with no way to reach them. Let each area
+ * shrink (min-width: 0) and scroll horizontally instead of
+ * clipping; the scrollbar stays hidden to keep the 22px bar clean. */
+#theia-statusBar .area {
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+
+#theia-statusBar .area::-webkit-scrollbar {
+    display: none;
+}
