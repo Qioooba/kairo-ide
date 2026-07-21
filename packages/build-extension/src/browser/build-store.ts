@@ -25,6 +25,34 @@ export interface BuildDiagnostic {
 
 export type ConnectionState = 'loading' | 'connected' | 'disconnected' | 'empty';
 
+/**
+ * Map a wire BuildResult to the view model. Tolerates null /
+ * missing summary and diagnostics — the agent emits both as
+ * null for builds that never ran a compiler (KAIRO-RC-WEB-237:
+ * the unguarded access used to kill the whole bootstrap and
+ * leave the Build view idle forever).
+ */
+export function mapBuildResult(b: BuildResult, workspaceId: string): BuildRun {
+    const summary = b.summary as { errors?: number; warnings?: number } | null | undefined;
+    const diagnostics = Array.isArray(b.diagnostics) ? b.diagnostics : [];
+    return {
+        id: b.id,
+        workspaceId,
+        projectId: (b as unknown as { projectId?: string }).projectId ?? '',
+        state: b.state === 'success' ? 'succeeded' : b.state === 'failure' ? 'failed' : b.state === 'queued' ? 'pending' : b.state,
+        startTime: b.startedAt,
+        endTime: b.finishedAt,
+        summary: summary ? `${summary.errors ?? 0} errors, ${summary.warnings ?? 0} warnings` : '',
+        diagnostics: diagnostics.map(d => ({
+            file: d.file,
+            line: d.line,
+            column: d.column,
+            severity: d.severity === 'hint' ? 'info' : d.severity,
+            message: d.message,
+        })),
+    };
+}
+
 @injectable()
 export class BuildStore {
     @inject(RuntimeConnectionService)
@@ -97,22 +125,7 @@ export class BuildStore {
             try {
                 const builds = await this.runtime.request('GET /api/v1/builds', undefined) as BuildResult[];
                 if (Array.isArray(builds)) {
-                    this.builds = builds.map(b => ({
-                        id: b.id,
-                        workspaceId: ctx.workspaceId,
-                        projectId: '',
-                        state: b.state === 'success' ? 'succeeded' : b.state === 'failure' ? 'failed' : b.state === 'queued' ? 'pending' : b.state,
-                        startTime: b.startedAt,
-                        endTime: b.finishedAt,
-                        summary: `${b.summary.errors} errors, ${b.summary.warnings} warnings`,
-                        diagnostics: b.diagnostics.map(d => ({
-                            file: d.file,
-                            line: d.line,
-                            column: d.column,
-                            severity: d.severity === 'hint' ? 'info' : d.severity,
-                            message: d.message,
-                        })),
-                    }));
+                    this.builds = builds.map(b => mapBuildResult(b, ctx.workspaceId));
                     this.onDidChangeEmitter.fire(this.getBuilds());
                     this.setConnectionState(this.builds.length === 0 ? 'empty' : 'connected');
                 }
