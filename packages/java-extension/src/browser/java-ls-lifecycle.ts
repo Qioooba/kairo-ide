@@ -169,7 +169,7 @@ export class JavaLanguageServerLifecycle {
             const home = extractJdtLsHome(descriptor);
             const startKey = `${rootUri}|${workspaceDataDir}|${home ?? ''}`;
 
-            const state = this.javaClient.state();
+            const state = await this.javaClient.fetchState();
             if (state === 'starting' || state === 'initializing' || state === 'ready') {
                 if (this.lastStartKey === startKey) {
                     this.logger.info(`JDT LS already ${state} for ${rootUri}, not restarting`);

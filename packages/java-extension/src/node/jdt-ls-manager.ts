@@ -456,11 +456,13 @@ export class JdtLsManager implements Disposable {
     if (!this.connection || this.state !== 'ready') {
       throw new Error(`JDT LS not ready (state=${this.state})`);
     }
-    return this.connection.sendRequest<LSPCompletionList>('textDocument/completion', {
+    const list = await this.connection.sendRequest<LSPCompletionList>('textDocument/completion', {
       textDocument: { uri: params.uri },
       position: { line: params.line, character: params.character },
       context: { triggerKind: params.triggerKind ?? 1, triggerCharacter: params.triggerCharacter },
     });
+    this.logger?.info(`[JDT LS] completion result items=${list?.items?.length ?? -1} uri=${params.uri} pos=${params.line}:${params.character}`);
+    return list;
   }
 
   /** Drive the LSP `textDocument/definition` request. */
@@ -468,19 +470,35 @@ export class JdtLsManager implements Disposable {
     if (!this.connection || this.state !== 'ready') {
       throw new Error(`JDT LS not ready (state=${this.state})`);
     }
-    return this.connection.sendRequest<LSPLocation | LSPLocation[] | null>(
+    const result = await this.connection.sendRequest<LSPLocation | LSPLocation[] | null>(
       'textDocument/definition',
       {
         textDocument: { uri: params.uri },
         position: { line: params.line, character: params.character },
       },
     );
+    this.logger?.info(`[JDT LS] definition result=${JSON.stringify(result)?.slice(0, 200) ?? 'null'} uri=${params.uri} pos=${params.line}:${params.character}`);
+    return result;
+  }
+
+  /**
+   * Fetch the contents of a class file (JDT LS extension
+   * request `java/classFileContents`) — this is what makes
+   * go-to-definition into library jars viewable: the LS
+   * returns jdt:// URIs, and this fetches their (decompiled
+   * or source-attached) text.
+   */
+  async classFileContents(uri: string): Promise<string> {
+    if (!this.connection || this.state !== 'ready') {
+      throw new Error(`JDT LS not ready (state=${this.state})`);
+    }
+    const result = await this.connection.sendRequest<string>('java/classFileContents', { uri });
+    return typeof result === 'string' ? result : '';
   }
 
   /** Stop the process; the `stopped` state fires when the child
    *  actually exits. */
-  async stop(): Promise<void> {
-    if (this.state === 'stopped' || this.state === 'uninitialized') {
+  async stop(): Promise<void> {    if (this.state === 'stopped' || this.state === 'uninitialized') {
       return;
     }
     this.setState('stopping');

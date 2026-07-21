@@ -86,6 +86,9 @@ function makeMocks(descriptor) {
     },
     javaClient: {
       state: () => (started ? 'ready' : 'uninitialized'),
+      async fetchState() {
+        return started ? 'ready' : 'uninitialized';
+      },
       async start(opts) {
         calls.push({ kind: 'start', opts });
         started = true;

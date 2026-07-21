@@ -1,15 +1,17 @@
 # MAC-WEB QA 交接与进度快照（持续更新）
 
-> 最后更新：2026-07-22（flow-03 第 7 轮进行中）。任何 AI 接手时先读本文件 + `docs/release-testing/MAC_WEB_KIMI_RC_TEST_PLAN.md`。
+> 最后更新：2026-07-22（flow-03 PASS、flow-05 PASS、flow-02 修复后复跑中）。任何 AI 接手时先读本文件 + `docs/release-testing/MAC_WEB_KIMI_RC_TEST_PLAN.md`。
 > 本文件是权威断点记录；每次完成一个可验证步骤就追加更新。
 
 ## 0. 一分钟现状
 
 - QA 分支：`qa/kimi-mac-web-20260720-65210d5`（基线 65210d5）。**干活前先 `git branch --show-current` 确认在此分支**（曾被人误切 main）。
-- flow-03 两个剩余 FAIL 点均已修复并**单独实证**：
-  1. emoji 拒绝通知：**KairoFileService 实证有效**——探针 `_probe-emoji-notify.cjs` 确认 write 抛 UnrepresentableEncodingError 且通知中心出现 "Cannot save: character '😀' … not representable in gbk"。flow-03 检测已改为同时读通知中心 textContent（toast 会自动收起，isVisible 不可靠）。
-  2. JDT LS home 竞态：`start-qa-stack.sh` 现在把 bundled/jdtls 拷到 `$DATA_DIR/jdtls-home` 作稳定副本导出。
-- flow-03 第 7 轮（决胜轮）正在后台跑，PASS 后 commit §3 全部改动。
+- **flow-03 GBK 编码安全：PASS（第 15 轮，console gate clean）**，全部修复已 commit `5fe148f`。
+- **flow-05 Tomcat 生命周期：PASS**（deploy/HTTP200/restart 新 PID/logs/stop 全活体实证；脚本选择器修复未 commit）。
+- **flow-02 复跑中**：上轮 FAIL 根因 = `KairoSafeEncodingService.encodeStream` 对 undefined 崩溃（空文件创建静默失败），已修复+单测，正在后台重跑。
+- JDT LS 已在 web 产品真实启动（browser→Theia 后端 RPC 拆分完成；config_mac_arm、launcher jar、workingDir 三处修复）。
+- 剩余：flow-02 PASS 确认 → commit 批次 → 性能基线 → M4 回归 → 全量门禁 → 台账翻 FIXED_VERIFIED → 最终报告+MAC_WEB_GATE → **合并 main + push（用户已明确要求）**。
+- 台账 75 条。OPEN 剩：WEB-248（backend target[e] P3）、WEB-262（server 视图按钮 disabled P2）、WEB-263（日志无实时 tail P3）、WEB-210（rename 刷新待 flow-02 复验）、WEB-015 残余（desktop，范围外）。
 
 ## 1. 环境与操作要点（血泪教训）
 

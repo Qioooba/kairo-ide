@@ -64,6 +64,21 @@ export class JavaDocumentSync {
     private readonly debounceMs: number = JAVA_DOCUMENT_SYNC_DEBOUNCE_MS,
   ) {}
 
+  /**
+   * Last state reported through handleStateChange, or undefined
+   * until the first transition arrives. The client's sync
+   * `state()` reads the in-process service — permanently
+   * 'uninitialized' in the web product (backend RPC hosting,
+   * KAIRO-RC-WEB-251) — so guards prefer this tracked value
+   * (fed by RPC-delivered onState events) and only fall back to
+   * the client before the first event.
+   */
+  protected currentState: string | undefined;
+
+  protected effectiveState(): string {
+    return this.currentState ?? this.client.state();
+  }
+
   /** A Java model appeared in the editor. */
   openDocument(snapshot: JavaDocumentSnapshot): void {
     const existing = this.docs.get(snapshot.uri);
@@ -107,7 +122,7 @@ export class JavaDocumentSync {
       clearTimeout(doc.timer);
     }
     this.docs.delete(uri);
-    if (doc.openSent && this.client.state() === 'ready') {
+    if (doc.openSent && this.effectiveState() === 'ready') {
       try {
         this.client.didClose(uri);
       } catch (err) {
@@ -122,6 +137,7 @@ export class JavaDocumentSync {
    * opened so a later 'ready' re-sends them (server restart).
    */
   handleStateChange(state: string): void {
+    this.currentState = state;
     if (state === 'ready') {
       for (const uri of this.docs.keys()) {
         this.flushOpen(uri);
@@ -149,7 +165,7 @@ export class JavaDocumentSync {
 
   private flushOpen(uri: string): void {
     const doc = this.docs.get(uri);
-    if (!doc || doc.openSent || this.client.state() !== 'ready') {
+    if (!doc || doc.openSent || this.effectiveState() !== 'ready') {
       return;
     }
     try {
@@ -162,7 +178,7 @@ export class JavaDocumentSync {
 
   private flushChange(uri: string): void {
     const doc = this.docs.get(uri);
-    if (!doc || this.client.state() !== 'ready') {
+    if (!doc || this.effectiveState() !== 'ready') {
       return;
     }
     if (!doc.openSent) {

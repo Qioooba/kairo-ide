@@ -140,6 +140,22 @@ export class JavaLanguageClient implements JdtLsFrontendClient, Disposable {
     return this.backend.state();
   }
 
+  /**
+   * Current state, preferring the backend RPC proxy (the web
+   * product's source of truth) over the in-process service.
+   */
+  async fetchState(): Promise<JdtLsState> {
+    const proxy = this.proxy();
+    if (proxy) {
+      try {
+        return await proxy.$state();
+      } catch (err) {
+        this.markRpcFailed(err);
+      }
+    }
+    return this.backend.state();
+  }
+
   didOpen(p: { uri: string; languageId: string; version: number; text: string }): void {
     const proxy = this.proxy();
     if (proxy) {
@@ -189,6 +205,23 @@ export class JavaLanguageClient implements JdtLsFrontendClient, Disposable {
       }
     }
     return this.backend.definition(p);
+  }
+
+  /**
+   * Contents of a jdt:// class-file URI (source or decompiled),
+   * used by the monaco jdt:// content provider so F12 into
+   * library jars actually opens.
+   */
+  async classFileContents(uri: string): Promise<string> {
+    const proxy = this.proxy();
+    if (proxy) {
+      try {
+        return await proxy.$classFileContents(uri);
+      } catch (err) {
+        this.markRpcFailed(err);
+      }
+    }
+    return this.backend.$classFileContents(uri);
   }
 
   // --- JdtLsFrontendClient (called from backend) ---

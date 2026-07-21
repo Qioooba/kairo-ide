@@ -397,8 +397,16 @@ async function main() {
     logStep('STOP_VERIFIED', result.crossVerification.stop);
 
     // start again
-    if (await page.locator('[data-testid="server-start-button"]').isEnabled().catch(() => false)) {
-      await page.locator('[data-testid="server-start-button"]').click();
+    // isEnabled() is not enough: the button stays enabled in the DOM even
+    // when the Servers view is hidden (e.g. the Server Logs view replaced
+    // it in the sidebar after stop) — click() then times out on
+    // "element is not visible". Gate on visibility and fall back to the
+    // command, same as the restart path above.
+    const startAgainBtn = page.locator('[data-testid="server-start-button"]');
+    const startAgainClickable = (await startAgainBtn.isVisible().catch(() => false))
+      && (await startAgainBtn.isEnabled().catch(() => false));
+    if (startAgainClickable) {
+      await startAgainBtn.click();
     } else {
       await runCommand(page, 'Kairo: Start Server', 20000);
     }

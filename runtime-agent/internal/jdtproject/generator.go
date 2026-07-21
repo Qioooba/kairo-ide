@@ -70,11 +70,41 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// EncodingValue accepts either a plain string ("gbk") or the
+// richer nested form used by .legacyflow/project.yaml:
+//   encoding:
+//     default: utf-8
+//     aliases: {...}
+//     perExtension: {...}
+// The nested form collapses to its `default` — per-extension
+// nuance is handled by the IDE's encoding extension, not the
+// compiler model. A schema mismatch here used to fail Generate
+// outright, silently dropping JDT LS into standalone-file mode
+// where completion/definition die (KAIRO-RC-WEB-251).
+type EncodingValue string
+
+// UnmarshalYAML implements yaml.Unmarshaler.
+func (e *EncodingValue) UnmarshalYAML(value *yaml.Node) error {
+	var s string
+	if err := value.Decode(&s); err == nil {
+		*e = EncodingValue(s)
+		return nil
+	}
+	var nested struct {
+		Default string `yaml:"default"`
+	}
+	if err := value.Decode(&nested); err == nil {
+		*e = EncodingValue(nested.Default)
+		return nil
+	}
+	return fmt.Errorf("invalid encoding value at line %d", value.Line)
+}
+
 // Project is the in-memory shape of .legacyflow/project.yaml.
 type Project struct {
-	ProjectID           string   `yaml:"projectId" json:"projectId"`
-	Name                string   `yaml:"name" json:"name"`
-	Encoding            string   `yaml:"encoding" json:"encoding"`
+	ProjectID           string        `yaml:"projectId" json:"projectId"`
+	Name                string        `yaml:"name" json:"name"`
+	Encoding            EncodingValue `yaml:"encoding" json:"encoding"`
 	SourceLevel         string   `yaml:"sourceLevel" json:"sourceLevel"`
 	TargetLevel         string   `yaml:"targetLevel" json:"targetLevel"`
 	SourceRoots         []string `yaml:"sourceRoots" json:"sourceRoots"`
@@ -160,6 +190,14 @@ func (g *Generator) Generate(payload []byte) (GenerateResult, error) {
 		WorkspaceID string `json:"workspaceId"`
 		ProjectID   string `json:"projectId"`
 		RootPath    string `json:"rootPath"`
+		// IntoProjectRoot writes .project/.classpath into the
+		// project root itself (Eclipse convention) instead of the
+		// data-dir model dir. Required for the JDT LS: relative
+		// .classpath src entries only resolve against the project
+		// location, and ABSOLUTE src entries are not valid
+		// Eclipse — an external model dir therefore always left
+		// the LS in standalone-file mode (KAIRO-RC-WEB-251).
+		IntoProjectRoot bool `json:"intoProjectRoot"`
 	}
 	if len(payload) > 0 {
 		if err := jsonUnmarshal(payload, &req); err != nil {
@@ -207,6 +245,30 @@ func (g *Generator) Generate(payload []byte) (GenerateResult, error) {
 	}
 	if proj.OutputDir == "" {
 		proj.OutputDir = "build/classes"
+	}
+	// Legacy layout default: when the config names no libraries,
+	// pick up the conventional jar dirs (lib/, WebRoot/WEB-INF/lib/)
+	// — the .kairo/project.yaml written by the import wizard has
+	// no libraries field, and without these jars javax.servlet.*
+	// is unresolvable for the JDT LS (KAIRO-RC-WEB-251).
+	if len(proj.Libraries) == 0 {
+		if entries, err := os.ReadDir(filepath.Join(rootAbs, "lib")); err == nil {
+			for _, e := range entries {
+				if !e.IsDir() && strings.HasSuffix(e.Name(), ".jar") {
+					proj.Libraries = append(proj.Libraries, filepath.Join("lib", e.Name()))
+				}
+			}
+		}
+	}
+	if len(proj.ReferencedLibraries) == 0 {
+		if entries, err := os.ReadDir(filepath.Join(rootAbs, "WebRoot", "WEB-INF", "lib")); err == nil {
+			for _, e := range entries {
+				if !e.IsDir() && strings.HasSuffix(e.Name(), ".jar") {
+					proj.ReferencedLibraries = append(proj.ReferencedLibraries,
+						filepath.Join("WebRoot", "WEB-INF", "lib", e.Name()))
+				}
+			}
+		}
 	}
 
 	// Build the absolute source roots + classpath.
@@ -265,6 +327,9 @@ func (g *Generator) Generate(payload []byte) (GenerateResult, error) {
 
 	// Decide whether to short-circuit (cache hit).
 	dir := g.projectModelDir(req.WorkspaceID)
+	if req.IntoProjectRoot {
+		dir = rootAbs
+	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return GenerateResult{}, err
 	}
@@ -280,7 +345,7 @@ func (g *Generator) Generate(payload []byte) (GenerateResult, error) {
 			Classpath:        cpPath,
 			SourceRoots:      srcRoots,
 			OutputDir:        outputAbs,
-			Encoding:         proj.Encoding,
+			Encoding:         string(proj.Encoding),
 			SourceLevel:      proj.SourceLevel,
 			TargetLevel:      proj.TargetLevel,
 			ClasspathEntries: append(append([]string{}, libs...), refLibs...),
@@ -322,7 +387,7 @@ func (g *Generator) Generate(payload []byte) (GenerateResult, error) {
 		Classpath:        cpPath,
 		SourceRoots:      srcRoots,
 		OutputDir:        outputAbs,
-		Encoding:         proj.Encoding,
+		Encoding:         string(proj.Encoding),
 		SourceLevel:      proj.SourceLevel,
 		TargetLevel:      proj.TargetLevel,
 		ClasspathEntries: append(append([]string{}, libs...), refLibs...),
@@ -381,30 +446,62 @@ func (g *Generator) AllWorkspaces() ([]string, error) {
 
 // ---- helpers ----
 
-// readProjectConfig reads .legacyflow/project.yaml. A missing
+// readProjectConfig reads the project's config. Preference
+// order: .kairo/project.yaml (what the Kairo import wizard
+// writes, KAIRO-RC-WEB-203), then .legacyflow/project.yaml
+// (older convention, nested sourceLayout block). A missing
 // file is NOT an error: we synthesise a default config that
 // matches the legacy-sample layout, so a developer who has
 // not customised anything still gets a working JDT project.
 func readProjectConfig(root string) (Project, error) {
-	p := filepath.Join(root, ".legacyflow", "project.yaml")
-	data, err := os.ReadFile(p)
-	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return defaultProject(root), nil
+	for _, rel := range []string{
+		filepath.Join(".kairo", "project.yaml"),
+		filepath.Join(".legacyflow", "project.yaml"),
+	} {
+		data, err := os.ReadFile(filepath.Join(root, rel))
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				continue
+			}
+			return Project{}, err
 		}
-		return Project{}, err
+		var proj Project
+		if err := yaml.Unmarshal(data, &proj); err != nil {
+			return Project{}, err
+		}
+		// The .legacyflow schema nests the layout under
+		// `sourceLayout:`; map it onto the flat fields when
+		// they are empty (KAIRO-RC-WEB-251: sourceRoots came
+		// out empty and the generated model had no sources).
+		var aux struct {
+			SourceLayout struct {
+				Src      []string `yaml:"src"`
+				TestSrc  []string `yaml:"testSrc"`
+				WebRoot  string   `yaml:"webRoot"`
+				Lib      string   `yaml:"lib"`
+				BuildXml string   `yaml:"buildXml"`
+			} `yaml:"sourceLayout"`
+		}
+		if err := yaml.Unmarshal(data, &aux); err == nil {
+			if len(proj.SourceRoots) == 0 && len(aux.SourceLayout.Src) > 0 {
+				proj.SourceRoots = aux.SourceLayout.Src
+			}
+			if len(proj.TestSourceRoots) == 0 && len(aux.SourceLayout.TestSrc) > 0 {
+				proj.TestSourceRoots = aux.SourceLayout.TestSrc
+			}
+			if proj.WebappDir == "" && aux.SourceLayout.WebRoot != "" {
+				proj.WebappDir = aux.SourceLayout.WebRoot
+			}
+		}
+		if proj.ProjectID == "" {
+			// Recover the project id from the parent directory
+			// name — better than an empty field that would
+			// break Status rendering.
+			proj.ProjectID = filepath.Base(root)
+		}
+		return proj, nil
 	}
-	var proj Project
-	if err := yaml.Unmarshal(data, &proj); err != nil {
-		return Project{}, err
-	}
-	if proj.ProjectID == "" {
-		// Try to recover the project id from the parent
-		// directory name. Better than an empty field that
-		// would break Status rendering.
-		proj.ProjectID = filepath.Base(root)
-	}
-	return proj, nil
+	return defaultProject(root), nil
 }
 
 // defaultProject returns the legacy-sample-style defaults.

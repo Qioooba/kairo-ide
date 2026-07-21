@@ -30,22 +30,61 @@
  * for opening it AFTER the LS is ready.
  */
 
-import { injectable, inject, interfaces } from '@theia/core/shared/inversify';
+import { injectable, inject, interfaces, postConstruct } from '@theia/core/shared/inversify';
 import type {
   JdtState,
   JdtStatus,
   JavaServiceState,
 } from '@kairo/protocol';
 import { RuntimeConnectionService, KairoError } from '@kairo/runtime-extension';
+import { JavaLanguageClient } from './java-language-client';
+import type { JdtLsState } from '../node/jdt-ls-manager';
 
 @injectable()
 export class KairoJavaService {
   @inject(RuntimeConnectionService) protected runtime!: RuntimeConnectionService;
+  @inject(JavaLanguageClient) protected languageClient!: JavaLanguageClient;
 
   protected state: JavaServiceState = 'uninitialized';
   protected status: JdtStatus | undefined;
   protected lastError: string | undefined;
   protected listeners = new Set<(s: JavaServiceState, st?: JdtStatus) => void>();
+
+  @postConstruct()
+  protected init(): void {
+    // KAIRO-RC-WEB-251: the JDT LS process lives in the THEIA
+    // backend now — the Go agent's /api/v1/jdtls state refers to
+    // its own (never-started) manager and is permanently
+    // 'stopped'. The language client's state (backend RPC) is the
+    // source of truth; subscribe and mirror it.
+    this.languageClient.onState(s => this.applyClientState(s));
+  }
+
+  protected applyClientState(s: JdtLsState): void {
+    const status = { ...(this.status ?? { state: 'stopped' as JdtState }) } as JdtStatus;
+    switch (s) {
+      case 'ready':
+        status.state = 'running';
+        this.setState('ready', status);
+        break;
+      case 'starting':
+      case 'initializing':
+        status.state = 'starting' as JdtState;
+        this.setState('starting', status);
+        break;
+      case 'crashed':
+        status.state = 'crashed' as JdtState;
+        this.setState('crashed', status);
+        break;
+      case 'stopped':
+      case 'stopping':
+        status.state = 'stopped' as JdtState;
+        this.setState('stopped' as JdtState, status);
+        break;
+      default:
+        break;
+    }
+  }
 
   state$(): JavaServiceState {
     return this.state;
@@ -89,7 +128,10 @@ export class KairoJavaService {
       } else {
         this.setState(st.state as JdtState, st);
       }
-      return st;
+      // The agent's state refers to its own (unused) manager;
+      // the Theia-backend-hosted LS is the truth — overlay it.
+      this.applyClientState(await this.languageClient.fetchState());
+      return this.status;
     } catch (err) {
       if (err instanceof KairoError) {
         this.lastError = err.message;

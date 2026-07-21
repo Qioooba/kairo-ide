@@ -14,17 +14,48 @@ import * as monaco from '@theia/monaco-editor-core';
 import { FrontendApplicationContribution } from '@theia/core/lib/browser';
 import { injectable, inject } from '@theia/core/shared/inversify';
 import { Disposable } from '@theia/core/lib/common/disposable';
+import { FileService } from '@theia/filesystem/lib/browser/file-service';
 import { JAVA_LANGUAGE_ID } from '../common/java-common';
+import { JAVA_MONARCH } from './java-monarch';
+import { JavaLanguageClient } from './java-language-client';
+import { JdtClassFileFsProvider } from './jdt-fs-provider';
 import { JavaCompletionProvider, JavaCompletionResponseItem, JavaDefinitionResponse } from './java-completion-provider';
 
 @injectable()
 export class JavaMonacoRegistrationContribution implements FrontendApplicationContribution, Disposable {
   @inject(JavaCompletionProvider)
   protected readonly provider!: JavaCompletionProvider;
+  @inject(JavaLanguageClient)
+  protected readonly client!: JavaLanguageClient;
+  @inject(JdtClassFileFsProvider)
+  protected readonly jdtFs!: JdtClassFileFsProvider;
+  @inject(FileService)
+  protected readonly fileService!: FileService;
 
   protected subs: Disposable[] = [];
 
   onStart(): void {
+    // Theia's monaco-editor-core ships no basic-languages, so
+    // .java opened as Plain Text: no highlighting, and the
+    // completion/definition providers below never fired
+    // (KAIRO-RC-WEB-251). Register the language first.
+    if (!monaco.languages.getLanguages().some(l => l.id === JAVA_LANGUAGE_ID)) {
+      monaco.languages.register({
+        id: JAVA_LANGUAGE_ID,
+        extensions: ['.java'],
+        aliases: ['Java', 'java'],
+        mimetypes: ['text/x-java-source', 'text/x-java'],
+      });
+    }
+    monaco.languages.setMonarchTokensProvider(JAVA_LANGUAGE_ID, JAVA_MONARCH as monaco.languages.IMonarchLanguage);
+
+    // jdt:// content: the LS answers go-to-definition into
+    // library jars with jdt:// URIs; without an fs provider for
+    // the scheme, monaco cannot open them and F12 appears dead
+    // (KAIRO-RC-WEB-251 live evidence: definition resolved to
+    // jdt://…/HttpServletResponse.class, nothing opened).
+    this.subs.push(this.fileService.registerProvider('jdt', this.jdtFs));
+
     this.subs.push(
       monaco.languages.registerCompletionItemProvider(JAVA_LANGUAGE_ID, {
         triggerCharacters: ['.', '@', '#', '*', ' '],
@@ -38,6 +69,7 @@ export class JavaMonacoRegistrationContribution implements FrontendApplicationCo
             triggerKind: context.triggerKind + 1 as 1 | 2 | 3,
             triggerCharacter: context.triggerCharacter,
           });
+          console.info(`[kairo-java] monaco provideCompletionItems lang=${model.getLanguageId()} items=${response.items.length}`);
           const word = model.getWordUntilPosition(position);
           const range = new monaco.Range(
             position.lineNumber,

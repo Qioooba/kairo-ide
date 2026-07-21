@@ -225,3 +225,13 @@ test('KairoEncodingRegistry applies folder overrides to descendants (KAIRO-RC-WE
   assert.equal(reg.getEncodingOverride(new URI('file:///srv/legacy/other/x.jsp')), undefined);
   assert.equal(reg.getEncodingOverride(new URI('file:///srv/legacy/app2/y.jsp')), undefined);
 });
+
+test('encodeStream tolerates undefined (empty New File via FileService.doCreate, flow-02)', async () => {
+  const { KairoSafeEncodingService } = require('../../lib/browser/safe-encoding-service');
+  const svc = new KairoSafeEncodingService();
+  // Stock Theia accepts undefined for empty creates; the validating
+  // override must not crash on it either (used to throw
+  // "Cannot read properties of undefined (reading 'read')").
+  const out = await svc.encodeStream(undefined, { encoding: 'gbk' });
+  assert.ok(out !== undefined);
+});

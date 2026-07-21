@@ -1067,8 +1067,32 @@ func (s *Server) handleJDTLSLaunchDescriptor(w http.ResponseWriter, r *http.Requ
 		projectRoot = projectID // last-resort fallback
 	}
 
+	// Give JDT LS a real Eclipse project model to import. Without
+	// one it treats every file as standalone, and its fake
+	// compilation-unit creation collides ("Resource
+	// '/jdt.ls-java-project/src/com' already exists") — completion
+	// and definition then fail inside the LS (KAIRO-RC-WEB-251,
+	// captured from the child's own log). The model is written
+	// INTO the project root: Eclipse resolves .classpath src
+	// entries against the project location and rejects absolute
+	// ones, so an external model dir can never work.
+	workingDir := projectRoot
+	if s.Services.JDTProjectGenerator != nil {
+		genPayload, _ := json.Marshal(map[string]any{
+			"workspaceId":     workspaceID,
+			"projectId":       projectID,
+			"rootPath":        projectRoot,
+			"intoProjectRoot": true,
+		})
+		if _, gerr := s.Services.JDTProjectGenerator.Generate(genPayload); gerr != nil {
+			if s.logger != nil {
+				s.logger.Warn("jdt project model generation failed; falling back to standalone mode", log.Fields{"err": gerr.Error()})
+			}
+		}
+	}
+
 	// Build the launch descriptor.
-	desc, err := s.Services.JDTLS.GetLaunchDescriptor(r.Context(), workspaceID, projectID, projectRoot)
+	desc, err := s.Services.JDTLS.GetLaunchDescriptor(r.Context(), workspaceID, projectID, workingDir)
 	if err != nil {
 		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{
 			Code: protocol.ErrInternal, Message: fmt.Sprintf("build launch descriptor: %s", err.Error()),

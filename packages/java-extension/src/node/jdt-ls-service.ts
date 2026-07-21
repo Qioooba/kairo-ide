@@ -192,6 +192,11 @@ export class JdtLsService implements JdtLsBackendService {
     return this.definition(p);
   }
 
+  async $classFileContents(uri: string): Promise<string> {
+    if (!this.manager) return '';
+    return this.manager.classFileContents(uri);
+  }
+
   async $recentLogs(): Promise<{ level: 'stdout' | 'stderr'; line: string; ts: number }[]> {
     return this.recentLogs();
   }

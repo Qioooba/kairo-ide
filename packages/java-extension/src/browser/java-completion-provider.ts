@@ -71,11 +71,16 @@ export class JavaCompletionProvider {
    * `JavaCompletionProviderRegistration`).
    */
   async provideCompletions(req: JavaCompletionRequest): Promise<JavaCompletionResponse> {
-    if (this.client.state() !== 'ready') {
+    // fetchState() prefers the backend RPC proxy — the sync
+    // client.state() reads the in-process service, which is
+    // permanently 'uninitialized' in the web product and made
+    // every provider short-circuit (KAIRO-RC-WEB-251).
+    if (await this.client.fetchState() !== 'ready') {
       return { isIncomplete: false, items: [] };
     }
     try {
       const list = await this.client.completion(req);
+      this.logger.info(`[JavaCompletionProvider] completion: ${list.items.length} items from client`);
       return {
         isIncomplete: list.isIncomplete,
         items: list.items.map(adaptLspCompletion),
@@ -88,7 +93,7 @@ export class JavaCompletionProvider {
 
   /** Provide Go-to-Definition locations. */
   async provideDefinition(uri: string, line: number, character: number): Promise<JavaDefinitionResponse[]> {
-    if (this.client.state() !== 'ready') {
+    if (await this.client.fetchState() !== 'ready') {
       return [];
     }
     try {

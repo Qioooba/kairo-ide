@@ -28,6 +28,7 @@ export interface JdtLsBackendService {
   $didClose(uri: string): Promise<void>;
   $completion(p: { uri: string; line: number; character: number; triggerKind?: 1 | 2 | 3; triggerCharacter?: string }): Promise<LSPCompletionList>;
   $definition(p: { uri: string; line: number; character: number }): Promise<LSPLocation | LSPLocation[] | null>;
+  $classFileContents(uri: string): Promise<string>;
   $recentLogs(): Promise<{ level: 'stdout' | 'stderr'; line: string; ts: number }[]>;
 }
 

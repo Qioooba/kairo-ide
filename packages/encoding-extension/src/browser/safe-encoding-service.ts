@@ -38,6 +38,13 @@ export class KairoSafeEncodingService extends EncodingService {
   }
 
   override async encodeStream(value: string | Readable<string>, options?: ResourceEncoding): Promise<BinaryBuffer | BinaryBufferReadable> {
+    // Stock Theia's encodeStream tolerates undefined (FileService.doCreate
+    // passes it for an empty "New File"); without the same guard the
+    // validation path below crashed on `.read()` and empty-file creation
+    // silently failed in every non-UTF-8 project (flow-02 live evidence).
+    if (value === undefined || value === null) {
+      return super.encodeStream(value as string, options);
+    }
     if (typeof value === 'string') {
       // Validate the round trip first (throws UnrepresentableEncodingError
       // on data loss), then return Theia's own encodeStream result so the

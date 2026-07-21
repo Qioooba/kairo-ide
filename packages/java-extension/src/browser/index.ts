@@ -6,6 +6,7 @@ export type { JdtLsLaunchDescriptor } from './java-ls-lifecycle';
 export { JavaLanguageClient } from './java-language-client';
 export { JavaCompletionProvider } from './java-completion-provider';
 export { JavaMonacoRegistrationContribution } from './java-monaco-registration';
+export { JdtClassFileFsProvider } from './jdt-fs-provider';
 export { JavaDocumentSyncContribution } from './java-document-sync';
 export { JavaDocumentSync, lspDiagnosticsToMarkers, toMonacoMarkerSeverity, JAVA_DOCUMENT_SYNC_DEBOUNCE_MS } from './java-document-sync-core';
 export type { JavaDocumentSnapshot, JavaMarkerData } from './java-document-sync-core';
@@ -18,6 +19,7 @@ import { JavaLanguageServerLifecycle } from './java-ls-lifecycle';
 import { JavaLanguageClient } from './java-language-client';
 import { JavaCompletionProvider } from './java-completion-provider';
 import { JavaMonacoRegistrationContribution } from './java-monaco-registration';
+import { JdtClassFileFsProvider } from './jdt-fs-provider';
 import { JavaDocumentSyncContribution } from './java-document-sync';
 
 export function bindJavaLanguageClientContribution(bind: interfaces.Bind): void {
@@ -33,6 +35,7 @@ export function bindJavaLanguageClientContribution(bind: interfaces.Bind): void 
     bind(JavaLanguageClient).toSelf().inSingletonScope();
     bind(JavaCompletionProvider).toSelf().inSingletonScope();
     bind(JavaMonacoRegistrationContribution).toSelf().inSingletonScope();
+    bind(JdtClassFileFsProvider).toSelf().inSingletonScope();
     // Registers the Java completion + definition providers with
     // Monaco at application start.
     bind(FrontendApplicationContribution).toService(JavaMonacoRegistrationContribution);

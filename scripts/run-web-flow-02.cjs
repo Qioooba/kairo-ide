@@ -397,22 +397,40 @@ async function main() {
     await quickOpenFile(page, 'HelloServlet.java');
     await sleep(1500);
     const sbBeforeCompletion = await getStatusBarText(page);
-    // put cursor at end of the class body and type a member access
-    await page.locator('.monaco-editor .view-lines').first().click();
-    await page.keyboard.press('Meta+ArrowDown').catch(() => {});
-    await page.keyboard.press('Control+End').catch(() => {});
+    // Put the cursor INSIDE the doGet method (valid code context —
+    // JDT LS legitimately returns zero proposals at class-body
+    // level, verified against the LS directly). Click the
+    // getParameter line, go to line end, new line, type 'req.'.
+    const anchor = page.locator('.monaco-editor .view-lines span', { hasText: 'getParameter' }).first();
+    await anchor.waitFor({ state: 'visible', timeout: 15000 });
+    await anchor.click();
+    await page.keyboard.press('End');
     await page.keyboard.press('Enter');
-    await page.keyboard.type('System.', { delay: 20 });
+    await page.keyboard.type('req.', { delay: 20 });
     await page.keyboard.press('Control+Space');
     const suggest = page.locator('.monaco-editor .suggest-widget.visible, .suggest-widget.visible').first();
     const suggestVisible = await suggest.waitFor({ state: 'visible', timeout: 150000 }).then(() => true).catch(() => false); // JDT LS first start can take 1-2 min
     if (suggestVisible) {
-      const rows = await page.locator('.suggest-widget.visible .monaco-list-row').count();
-      // capture JDT LS state on the success path too (coordinator request)
+      const rowTexts = await page.locator('.suggest-widget.visible .monaco-list-row').allInnerTexts();
+      const rows = rowTexts.length;
+      // JDT-semantic evidence: real LSP completions carry types
+      // ('name : String', 'equals(Object obj) : boolean') —
+      // word-based fallback NEVER does. (An earlier version
+      // required specific HttpServletRequest members in the
+      // visible scroll window — too strict: JDT ranks locals
+      // first, so getParameter et al. sit below the fold.)
+      const semanticHits = rowTexts.filter(t => /\)\s*:\s*\w|\s:\s*(String|long|int|boolean|void|Http|Date)/.test(t)).length;
       const jdtlsOk = await agentGet(env, '/api/v1/jdtls', 10000);
       result.crossVerification.jdtlsAtCompletion = { ok: jdtlsOk.ok, status: jdtlsOk.status, body: (jdtlsOk.text || '').slice(0, 400) };
-      logStep('JAVA_COMPLETION_OK', { suggestions: rows, jdtls: result.crossVerification.jdtlsAtCompletion });
+      result.crossVerification.completionSemantic = { rows, semanticHits, sample: rowTexts.slice(0, 8) };
+      logStep('JAVA_COMPLETION_OK', { suggestions: rows, semanticHits, jdtls: result.crossVerification.jdtlsAtCompletion });
       await shot('13-java-completion');
+      if (semanticHits === 0) {
+        markBlocked('Java semantic completion', {
+          reason: 'suggestions are word-based fallback only — no HttpServletRequest members from JDT LS',
+          sample: rowTexts.slice(0, 8),
+        });
+      }
       await page.keyboard.press('Escape');
     } else {
       const jdtls = await agentGet(env, '/api/v1/jdtls', 10000);
@@ -436,39 +454,61 @@ async function main() {
       await maybeDialog.locator('button', { hasText: /Don'?t Save/i }).first().click().catch(() => {});
     }
 
-    // F12 go-to-definition on 'HttpServletRequest' in HelloServlet.java —
-    // click the symbol occurrence directly (no find widget needed).
+    // F12 go-to-definition on 'HttpServletRequest' in the doGet
+    // signature. Monaco span splitting is tokenization-dependent,
+    // so position the cursor with the keyboard instead: in-editor
+    // Find selects the match; Left collapses the selection to its
+    // START — inside the class name — where F12 resolves the type.
     logStep('JAVA_F12');
     await quickOpenFile(page, 'HelloServlet.java');
     await sleep(1200);
-    const symbol = page.locator('.monaco-editor .view-lines span', { hasText: 'HttpServletRequest' }).first();
-    await symbol.waitFor({ state: 'visible', timeout: 15000 });
-    await symbol.click();
-    await sleep(400);
+    await page.locator('.monaco-editor .view-lines').first().click();
+    await page.keyboard.press('Meta+f');
+    await sleep(600);
+    await page.keyboard.type('HttpServletRequest req', { delay: 15 });
+    await page.keyboard.press('Enter');
+    await sleep(600);
+    await page.keyboard.press('Escape');
+    await sleep(300);
+    await page.keyboard.press('ArrowLeft');
     await page.keyboard.press('F12');
-    await sleep(3000);
+    await sleep(3500);
     const f12Peek = await page.locator('.monaco-editor .peekview-widget, .zone-widget').count();
     const f12Tab = await activeTabLabel(page);
+    // With the jdt:// content provider, definition into a library
+    // jar OPENS the class file in a new editor tab (label contains
+    // the class name) instead of a peek — accept both.
+    const openTabs = await page.locator('#theia-main-content-panel .lm-TabBar-tab .lm-TabBar-tabLabel').allInnerTexts().catch(() => []);
+    const jdtTabOpened = openTabs.some(t => /HttpServlet|\.class/i.test(t));
+    const f12Ok = f12Peek > 0 || jdtTabOpened;
+    result.crossVerification.f12 = { peekWidgets: f12Peek, activeTab: f12Tab, openTabs: openTabs.slice(0, 8), jdtTabOpened };
     const jdtlsAtF12 = await agentGet(env, '/api/v1/jdtls', 10000);
-    const jdtlsState = (() => { try { return JSON.parse(jdtlsAtF12.text).payload.state; } catch (_e) { return 'unknown'; } })();
-    if (f12Peek > 0) {
-      logStep('JAVA_F12_RESULT', { peekWidgets: f12Peek, activeTab: f12Tab, jdtlsState });
+    const agentJdtlsState = (() => { try { return JSON.parse(jdtlsAtF12.text).payload.state; } catch (_e) { return 'unknown'; } })();
+    // KAIRO-RC-WEB-251: JDT LS is hosted by the THEIA backend; the
+    // agent's /api/v1/jdtls refers to its own unused manager and is
+    // permanently 'stopped'. The status bar (fed by the backend RPC
+    // client state) is the source of truth.
+    const sbJdt = await getStatusBarText(page);
+    const theiaJdtlsState = (sbJdt.match(/JDT LS:\s*(\w+)/) || [])[1] || 'unknown';
+    if (f12Ok) {
+      logStep('JAVA_F12_RESULT', { peekWidgets: f12Peek, activeTab: f12Tab, jdtTabOpened, theiaJdtlsState, agentJdtlsState });
       await shot('14-java-f12');
     } else {
       await shot('14-java-f12-blocked');
-      markBlocked('Java F12 go-to-definition', { activeTab: f12Tab, peekWidgets: f12Peek, jdtlsState });
+      markBlocked('Java F12 go-to-definition', { activeTab: f12Tab, peekWidgets: f12Peek, openTabs: openTabs.slice(0, 8), theiaJdtlsState, agentJdtlsState });
     }
-    // JDT LS never started in this build (state=stopped at completion AND
-    // F12): the 12 completion rows are a non-JDT fallback. Java language
-    // intelligence is BLOCKED for release — evidence: jdtls API snapshots
-    // + agent log (copied in teardown).
-    if (jdtlsState === 'stopped') {
+    // JDT LS must be RUNNING on the Theia side — otherwise any
+    // completion rows are a non-JDT fallback and Java language
+    // intelligence is BLOCKED for release.
+    if (theiaJdtlsState !== 'running') {
       markBlocked('Java language server (JDT LS)', {
-        state: 'stopped at completion and F12 time',
-        completionRowsWereNonJdt: true,
-        jdtlsApi: (jdtlsAtF12.text || '').slice(0, 300),
+        state: `theia-side state=${theiaJdtlsState} at F12 time`,
+        agentState: agentJdtlsState,
+        statusBar: sbJdt.slice(0, 250),
         agentLog: 'logs/flow-02/agent.log',
       });
+    } else {
+      logStep('JDT_LS_RUNNING', { theiaJdtlsState, agentJdtlsState });
     }
 
     // ---- 9. large files ----------------------------------------------------
