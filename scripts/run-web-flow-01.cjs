@@ -1,266 +1,305 @@
-// WEB-FLOW-01 — 首次导入（First Import）
+// WEB-FLOW-01 — 首次导入（First Import），M2 release-blocking driver.
 //
-// 通过真实 UI 完成：冷启动 → 打开 Import Wizard → 选择 legacy-sample →
-// 检测/扫描 → 配置校验（空名称/超长/中文/选项） → 保存 → 验证状态栏与磁盘配置。
+// Real headed Chromium, UI-only operations (agent API used only for
+// pre-flight health + post-hoc cross-verification):
+//   cold start -> Welcome tab -> Import Wizard (4 steps) ->
+//   name validation (empty / 101-char / Chinese) -> every Source Level /
+//   Encoding / Build Tool option selectable -> save (GBK/ant/1.6, realistic
+//   for legacy-sample) -> wizard closes -> status bar shows project ->
+//   disk config (.kairo/project.yaml) + agent API cross-check ->
+//   page reload -> project restored from disk.
 //
-// Usage:
-//   node scripts/run-web-flow-01.cjs [--use-existing DATA_DIR]
-//   KAIRO_QA_DATA_DIR can also point to an existing stack.
+// Usage: node scripts/run-web-flow-01.cjs [--use-existing DATA_DIR]
 
 const fs = require('fs');
 const path = require('path');
 const {
-  ensureDir, startStack, stopStack, loadEnv, launchBrowser, openPage,
+  startStack, stopStack, loadEnv, launchBrowser, openPage,
   dismissTrustDialog, runCommand, screenshot, waitForSelectorVisible,
   waitForText, waitForStatusBarContains, agentGet,
   writeResult, writeLogs, sleep,
 } = require('./qa-helpers.cjs');
+const {
+  flowDirs, recordFlowResult, appendDefect, ensurePort18080, consoleGate,
+  selectFolderInTheiaFileDialog,
+} = require('./m2-common.cjs');
 
+const FLOW = 'WEB-FLOW-01';
 const LONG_NAME = 'a'.repeat(101);
 const CHINESE_NAME = '中文遗产项目';
+// Final saved config: realistic for legacy-sample (Ant build, GBK JSPs).
+const FINAL = { sourceLevel: '1.6', encoding: 'GBK', buildTool: 'ant' };
+
+async function selectEveryOption(page, testid, values, logStep) {
+  const sel = page.locator(`[data-testid="${testid}"]`);
+  const actual = await sel.locator('option').allTextContents();
+  for (const v of values) {
+    await sel.selectOption(v);
+    const cur = await sel.inputValue();
+    if (cur !== v) throw new Error(`${testid}: could not select "${v}" (got "${cur}")`);
+  }
+  logStep(`OPTIONS_${testid.toUpperCase()}`, { offered: actual, cycled: values });
+}
 
 async function main() {
   const args = process.argv.slice(2);
   let useExisting = '';
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--use-existing' && args[i + 1]) {
-      useExisting = args[i + 1];
-      i++;
-    }
+    if (args[i] === '--use-existing' && args[i + 1]) { useExisting = args[i + 1]; i++; }
   }
 
-  const runId = `web-flow-01-${Date.now()}`;
-  const artifactsRoot = path.resolve('/tmp', 'kairo-mac-web-qa-m2-flow01', runId);
-  ensureDir(artifactsRoot);
+  const runId = `flow01-${Date.now()}`;
+  const dirs = flowDirs('flow-01');
+  const OUT = dirs.flow;
 
   const result = {
-    flow: 'WEB-FLOW-01',
-    runId,
-    startedAt: new Date().toISOString(),
-    status: 'RUNNING',
-    steps: [],
-    screenshots: {},
-    errors: [],
+    flow: FLOW, runId, startedAt: new Date().toISOString(),
+    status: 'RUNNING', steps: [], screenshots: {}, errors: [], crossVerification: {},
   };
 
   let stackInfo = null;
   let browser = null;
   let page = null;
 
-  function logStep(name, detail) {
-    const entry = { name, time: new Date().toISOString(), detail };
-    result.steps.push(entry);
-    console.log(`[${entry.time}] ${name}`, detail || '');
-  }
-
-  function logError(msg) {
+  const shot = async (name) => {
+    const p = path.join(dirs.shots, `${name}.png`);
+    await screenshot(page, p);
+    result.screenshots[name] = path.relative(OUT, p);
+  };
+  const logStep = (name, detail) => {
+    result.steps.push({ name, time: new Date().toISOString(), detail });
+    console.log(`[${new Date().toISOString()}] ${name}`, detail ? JSON.stringify(detail).slice(0, 300) : '');
+  };
+  const logError = (msg) => {
     result.errors.push({ time: new Date().toISOString(), message: msg });
     console.error(`  ERROR  ${msg}`);
-  }
+  };
 
   try {
-    // ------------------------------------------------------------------
-    // 1. 启动 QA stack（或复用已有）
-    // ------------------------------------------------------------------
+    // ---- 1. stack ------------------------------------------------------
     if (useExisting) {
       stackInfo = { dataDir: useExisting, env: loadEnv(useExisting) };
       logStep('USE_EXISTING_STACK', { dataDir: useExisting });
     } else {
+      ensurePort18080();
       logStep('START_STACK');
-      stackInfo = await startStack({ skipBuild: true });
+      stackInfo = await startStack({ skipBuild: true, port: 18080 });
       logStep('STACK_READY', { dataDir: stackInfo.dataDir, webPort: stackInfo.env.KAIRO_QA_WEB_PORT });
     }
-
     const env = stackInfo.env;
+    if (String(env.KAIRO_QA_AGENT_PORT) !== '18080') {
+      throw new Error(`agent port must be 18080 (frontend hard default), got ${env.KAIRO_QA_AGENT_PORT}`);
+    }
     const webUrl = `http://127.0.0.1:${env.KAIRO_QA_WEB_PORT || 3000}/`;
     const legacyDst = env.KAIRO_QA_LEGACY_DST;
-    if (!legacyDst || !fs.existsSync(legacyDst)) {
-      throw new Error(`legacy-sample copy missing: ${legacyDst}`);
-    }
+    if (!legacyDst || !fs.existsSync(legacyDst)) throw new Error(`legacy-sample copy missing: ${legacyDst}`);
 
-    // ------------------------------------------------------------------
-    // 2. 打开浏览器
-    // ------------------------------------------------------------------
+    // Pre-flight health (API allowed here)
+    const health = await agentGet(env, '/api/v1/health', 10000);
+    if (!health.ok) throw new Error(`agent health failed: ${health.status}`);
+    logStep('PREFLIGHT_HEALTH_OK');
+
+    // ---- 2. browser ----------------------------------------------------
     logStep('LAUNCH_BROWSER');
     browser = await launchBrowser({ slowMo: 40 });
     page = await openPage(browser, webUrl);
-    logStep('PAGE_LOADED', { url: webUrl });
-
-    await screenshot(page, path.join(artifactsRoot, '01-initial.png'));
-
-    // ------------------------------------------------------------------
-    // 3. 处理 Workspace Trust 对话框
-    // ------------------------------------------------------------------
     const trusted = await dismissTrustDialog(page);
     logStep('TRUST_DIALOG', { dismissed: trusted });
 
-    // ------------------------------------------------------------------
-    // 4. 等待 workbench shell 就绪（无 workspace 状态）
-    // ------------------------------------------------------------------
+    // Welcome tab auto-opens on cold start (welcome-import button affordance)
+    const welcomeImport = page.locator('[data-testid="welcome-import"], button:has-text("Import")').first();
+    const welcomeVisible = await welcomeImport.isVisible().catch(() => false);
+    logStep('WELCOME_TAB', { importAffordanceVisible: welcomeVisible });
+    await shot('01-cold-start');
+
     const initialStatus = await waitForStatusBarContains(page, 'Project: (no workspace)', 60000);
     logStep('SHELL_READY', { statusBar: initialStatus.slice(0, 200) });
-    await screenshot(page, path.join(artifactsRoot, '02-shell-ready.png'));
 
-    // ------------------------------------------------------------------
-    // 5. 打开命令面板并执行 "Kairo: Import Project"
-    // ------------------------------------------------------------------
+    // ---- 3. wizard -----------------------------------------------------
     logStep('OPEN_IMPORT_WIZARD');
     await runCommand(page, 'Kairo: Import Project', 20000);
+    await waitForSelectorVisible(page, '[data-testid="import-wizard"]', 20000);
+    await waitForSelectorVisible(page, '[data-testid="step-content-1"]', 10000);
+    await shot('02-wizard-step1');
 
-    const wizard = await waitForSelectorVisible(page, '[data-testid="import-wizard"]', 20000);
-    logStep('WIZARD_VISIBLE');
-    await screenshot(page, path.join(artifactsRoot, '03-wizard-open.png'));
-
-    // ------------------------------------------------------------------
-    // 6. 选择 workspace 目录
-    // ------------------------------------------------------------------
-    logStep('SELECT_WORKSPACE', { path: legacyDst });
-
-    const fileChooserPromise = page.waitForEvent('filechooser', { timeout: 30000 });
+    // Step 1 "Open Workspace Folder" opens Theia's server-side FileDialog
+    // widget (NOT a native picker and NOT an HTML file input). It opens at
+    // the Theia workspace dir ($DATA_DIR/workspace); the legacy-sample copy
+    // is its sibling — navigate up once, select it, confirm with Open.
     await page.locator('[data-testid="open-workspace-btn"]').click();
-    const fileChooser = await fileChooserPromise;
-    await fileChooser.setFiles(legacyDst);
+    await selectFolderInTheiaFileDialog(page, 'legacy-sample', { upCount: 1 });
+    logStep('WORKSPACE_SELECTED', { path: legacyDst });
 
-    // 等待扫描或 detect 结果出现
-    await sleep(3000);
-    const step2 = page.locator('[data-testid="step-content-2"]');
-    await step2.waitFor({ state: 'visible', timeout: 30000 });
-    await screenshot(page, path.join(artifactsRoot, '04-detect-result.png'));
-    logStep('DETECT_RESULT_VISIBLE');
+    await page.locator('[data-testid="step-content-2"]').waitFor({ state: 'visible', timeout: 30000 });
+    // wait for scan to settle: either detected-config or the create-new branch
+    await page.locator('[data-testid="continue-to-configure"], [data-testid="create-new-config"]').first()
+      .waitFor({ state: 'visible', timeout: 30000 });
+    const detectedText = await page.locator('[data-testid="detected-config"]').textContent().catch(() => null);
+    logStep('DETECT_RESULT', { detected: detectedText ? detectedText.slice(0, 400) : '(none — create-new branch)' });
+    await shot('03-wizard-step2-detect');
+    await page.locator('[data-testid="continue-to-configure"], [data-testid="create-new-config"]').first().click();
 
-    // 无论是 Continue 还是 Create New Configuration，都进入配置页
-    const continueBtn = page.locator('[data-testid="continue-to-configure"], [data-testid="create-new-config"]').first();
-    await continueBtn.waitFor({ state: 'visible', timeout: 10000 });
-    await continueBtn.click();
+    await waitForSelectorVisible(page, '[data-testid="step-content-3"]', 20000);
+    await shot('04-wizard-step3-form');
 
-    const step3 = await waitForSelectorVisible(page, '[data-testid="step-content-3"]', 20000);
-    logStep('CONFIG_FORM_VISIBLE');
-    await screenshot(page, path.join(artifactsRoot, '05-config-form.png'));
-
-    // ------------------------------------------------------------------
-    // 7. 表单校验
-    // ------------------------------------------------------------------
+    // ---- 4. validation -------------------------------------------------
     const nameInput = page.locator('[data-testid="input-project-name"]');
     const saveBtn = page.locator('[data-testid="save-config-btn"]');
 
-    // 7a. 空名称
-    logStep('VALIDATE_EMPTY_NAME');
     await nameInput.fill('');
     await saveBtn.click();
     await waitForText(page, '[data-testid="save-error"]', 'empty', 10000);
-    await screenshot(page, path.join(artifactsRoot, '06-error-empty-name.png'));
+    logStep('VALIDATION_EMPTY_NAME_OK');
+    await shot('05-validation-empty-name');
 
-    // 7b. 超长名称
-    logStep('VALIDATE_LONG_NAME');
     await nameInput.fill(LONG_NAME);
     await saveBtn.click();
     await waitForText(page, '[data-testid="save-error"]', '100', 10000);
-    await screenshot(page, path.join(artifactsRoot, '07-error-long-name.png'));
+    logStep('VALIDATION_LONG_NAME_OK');
+    await shot('06-validation-long-name');
 
-    // 7c. 中文名称 + 切换 Source Level / Encoding / Build Tool
-    logStep('SET_CHINESE_NAME_AND_OPTIONS');
+    // every option of each select must be selectable
+    await selectEveryOption(page, 'select-source-level', ['1.5', '1.6', '1.7', '1.8'], logStep);
+    await selectEveryOption(page, 'select-encoding', ['UTF-8', 'GBK', 'GB18030', 'ISO-8859-1'], logStep);
+    await selectEveryOption(page, 'select-build-tool', ['ant', 'javac'], logStep);
+
+    // final realistic config
     await nameInput.fill(CHINESE_NAME);
+    await page.locator('[data-testid="select-source-level"]').selectOption(FINAL.sourceLevel);
+    await page.locator('[data-testid="select-encoding"]').selectOption(FINAL.encoding);
+    await page.locator('[data-testid="select-build-tool"]').selectOption(FINAL.buildTool);
+    await shot('07-final-config');
 
-    await page.locator('[data-testid="select-source-level"]').selectOption('1.8');
-    await page.locator('[data-testid="select-encoding"]').selectOption('UTF-8');
-    await page.locator('[data-testid="select-build-tool"]').selectOption('javac');
-    await screenshot(page, path.join(artifactsRoot, '08-options-set.png'));
-
-    // ------------------------------------------------------------------
-    // 8. 保存配置
-    // ------------------------------------------------------------------
-    logStep('SAVE_CONFIGURATION');
+    // ---- 5. save --------------------------------------------------------
+    logStep('SAVE_CONFIGURATION', { name: CHINESE_NAME, ...FINAL });
     await saveBtn.click();
-
-    // 等待 wizard 关闭
-    await page.locator('[data-testid="import-wizard"]').waitFor({ state: 'hidden', timeout: 30000 });
+    await page.locator('[data-testid="import-wizard"]').waitFor({ state: 'hidden', timeout: 60000 });
     logStep('WIZARD_CLOSED');
-    await screenshot(page, path.join(artifactsRoot, '09-after-save.png'));
+    await shot('08-after-save');
 
-    // ------------------------------------------------------------------
-    // 9. 验证状态栏/selector 更新
-    // ------------------------------------------------------------------
+    // Live agent-liveness probe right after save (WEB-201 evidence):
+    // proves whether the agent process died vs a UI-only disconnect.
+    const probes = [];
+    for (let i = 0; i < 3; i++) {
+      const h = await agentGet(env, '/api/v1/health', 5000);
+      probes.push({ t: new Date().toISOString(), ok: h.ok, status: h.status, error: h.error || null });
+      if (i < 2) await sleep(5000);
+    }
+    result.crossVerification.agentLivenessAfterSave = probes;
+    logStep('AGENT_LIVENESS_AFTER_SAVE', probes);
+
     const afterStatus = await waitForStatusBarContains(page, CHINESE_NAME, 60000);
-    logStep('STATUS_BAR_UPDATED', { statusBar: afterStatus.slice(0, 300) });
-    await screenshot(page, path.join(artifactsRoot, '10-statusbar-project.png'));
+    logStep('STATUS_BAR_PROJECT_ACTIVE', { statusBar: afterStatus.slice(0, 300) });
+    await waitForStatusBarContains(page, 'Runtime: connected', 30000);
+    await shot('09-statusbar-project');
 
-    // 验证 Runtime 已连接
-    const runtimeStatus = await waitForStatusBarContains(page, 'Runtime: connected', 30000);
-    logStep('RUNTIME_CONNECTED', { statusBar: runtimeStatus.slice(0, 200) });
-
-    // 验证 Project Selector 可打开并包含项目
-    logStep('OPEN_PROJECT_SELECTOR');
-    const selectorTrigger = page.locator('[data-testid="project-selector-trigger"]').first();
-    if (await selectorTrigger.isVisible().catch(() => false)) {
-      await selectorTrigger.click();
-      await sleep(1000);
-      await screenshot(page, path.join(artifactsRoot, '11-project-selector.png'));
-      await page.keyboard.press('Escape');
-    } else {
-      logStep('NO_SELECTOR_TRIGGER', { note: 'project selector trigger not found; status bar only' });
-    }
-
-    // ------------------------------------------------------------------
-    // 10. API 交叉验证磁盘配置
-    // ------------------------------------------------------------------
-    logStep('VERIFY_DISK_CONFIG');
-    const projectsRes = await agentGet(env, '/api/v1/projects', 10000);
-    result.apiCheck = {
-      endpoint: '/api/v1/projects',
-      ok: projectsRes.ok,
-      status: projectsRes.status,
-      payload: projectsRes.json,
+    // ---- 6. cross-verification: disk + API ------------------------------
+    // Source of truth for the HTTP API persistence is the agent store at
+    // $DATA_DIR/agent-data/projects/projects.json. NOTE: the product ALSO has
+    // a second persistence path (FileProjectRepo.Save -> .kairo/project.yaml)
+    // that the HTTP layer bypasses entirely — that divergence is tracked as
+    // KAIRO-RC-WEB-203, not re-asserted here.
+    const storePath = path.join(env.KAIRO_QA_DATA_DIR, 'agent-data', 'projects', 'projects.json');
+    if (!fs.existsSync(storePath)) throw new Error(`disk project store missing: ${storePath}`);
+    const store = JSON.parse(fs.readFileSync(storePath, 'utf8'));
+    const stored = Object.values(store)[0] || {};
+    const cfgChecks = {
+      idPopulated: !!stored.id,
+      workspaceIdPopulated: !!stored.workspaceId,
+      hasName: stored.name === CHINESE_NAME,
+      hasGbk: stored.encoding === 'gbk',
+      hasAnt: stored.buildTool === 'ant',
+      rootPathIsLegacyDst: stored.rootPath === legacyDst,
     };
-    if (!projectsRes.ok) {
-      throw new Error(`Agent projects endpoint failed: ${projectsRes.status} ${projectsRes.error || projectsRes.text}`);
+    if (Object.values(cfgChecks).some(v => !v)) {
+      throw new Error(`projects.json content mismatch: ${JSON.stringify(cfgChecks)}; record=${JSON.stringify(stored).slice(0, 400)}`);
     }
+    result.crossVerification.diskConfig = { path: storePath, ...cfgChecks };
+    logStep('DISK_CONFIG_VERIFIED', result.crossVerification.diskConfig);
+    const yamlPath = path.join(legacyDst, '.kairo', 'project.yaml');
+    result.crossVerification.legacyYamlPath = { path: yamlPath, exists: fs.existsSync(yamlPath) };
+    logStep('KAIRO_PROJECT_YAML_CHECK', result.crossVerification.legacyYamlPath);
+
+    const projectsRes = await agentGet(env, '/api/v1/projects', 10000);
+    if (!projectsRes.ok) throw new Error(`projects endpoint failed: ${projectsRes.status}`);
     const payload = projectsRes.json?.payload || projectsRes.json || [];
     const projects = Array.isArray(payload) ? payload : [payload];
-    const found = projects.find(p => p.name === CHINESE_NAME || p.id?.includes('project-'));
-    if (!found) {
-      throw new Error(`Project not found in agent response: ${JSON.stringify(projectsRes.json)}`);
-    }
-    logStep('DISK_CONFIG_VERIFIED', { projectId: found.id, name: found.name, encoding: found.encoding });
+    const found = projects.find(p => p.name === CHINESE_NAME);
+    if (!found) throw new Error(`project not in agent response: ${JSON.stringify(projects).slice(0, 400)}`);
+    result.crossVerification.agentProjects = { id: found.id, name: found.name, encoding: found.encoding, buildTool: found.buildTool };
+    logStep('API_PROJECT_VERIFIED', result.crossVerification.agentProjects);
 
-    // ------------------------------------------------------------------
-    // 11. 停止 stack（仅当本脚本启动时）
-    // ------------------------------------------------------------------
+    // ---- 7. reopen (reload) -> project restored --------------------------
+    logStep('RELOAD_PAGE');
+    await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
+    await sleep(6000);
+    await dismissTrustDialog(page, 5000).catch(() => false);
+    const restoredStatus = await waitForStatusBarContains(page, CHINESE_NAME, 60000);
+    logStep('PROJECT_RESTORED_AFTER_RELOAD', { statusBar: restoredStatus.slice(0, 300) });
+    await shot('10-after-reload');
+
+    // ---- 8. console gate -------------------------------------------------
+    writeLogs(dirs.logs, page._kairoLogs || []);
+    const gate = consoleGate(page._kairoLogs || []);
+    result.consoleGate = { ok: gate.ok, errorCount: gate.errors.length, first: gate.errors[0] || null };
+    if (!gate.ok) {
+      logError(`console gate: ${gate.errors.length} errors, first: ${JSON.stringify(gate.errors[0]).slice(0, 300)}`);
+      appendDefect({
+        severity: 'P2',
+        title: `${FLOW}: console/page errors during first import (${gate.errors.length})`,
+        evidence: [`logs/flow-01/console.jsonl`],
+        first: gate.errors[0],
+      });
+      throw new Error('console gate failed');
+    }
+    logStep('CONSOLE_GATE_CLEAN');
+
     result.status = 'PASS';
     logStep('FLOW_PASS');
   } catch (err) {
     result.status = 'FAIL';
     logError(err.message);
-    logStep('FLOW_FAIL', { error: err.message });
-    if (page) {
-      await screenshot(page, path.join(artifactsRoot, '99-fail.png')).catch(() => {});
+    // Failure-time process diagnostics (agent dead? port still bound?)
+    if (stackInfo) {
+      try {
+        const { execFileSync } = require('child_process');
+        const portPids = execFileSync('bash', ['-c', 'lsof -ti tcp:18080 2>/dev/null || true'], { encoding: 'utf8' }).trim();
+        const agentPid = stackInfo.env.KAIRO_QA_AGENT_PID;
+        let agentAlive = false;
+        try { process.kill(parseInt(agentPid, 10), 0); agentAlive = true; } catch (_e) { /* dead */ }
+        result.failureDiagnostics = { port18080Pids: portPids, agentPid, agentAlive };
+        logStep('FAILURE_DIAGNOSTICS', result.failureDiagnostics);
+      } catch (_e) { /* best effort */ }
     }
-    throw err;
+    if (page) await shot('99-fail').catch(() => {});
   } finally {
     if (page) {
-      await screenshot(page, path.join(artifactsRoot, 'final.png')).catch(() => {});
-      writeLogs(artifactsRoot, page._kairoLogs || []);
-    }
-    if (browser) {
-      await browser.close().catch(() => {});
+      writeLogs(dirs.logs, page._kairoLogs || []);
+      if (browser) await browser.close().catch(() => {});
     }
     result.finishedAt = new Date().toISOString();
-
     if (stackInfo && !useExisting) {
       logStep('STOP_STACK');
-      const stopRes = await stopStack(stackInfo.dataDir);
-      result.stopResult = stopRes;
+      const agentLogSrc = stackInfo.env.KAIRO_QA_AGENT_LOG;
+      result.stopResult = await stopStack(stackInfo.dataDir);
+      if (agentLogSrc && fs.existsSync(agentLogSrc)) {
+        fs.copyFileSync(agentLogSrc, path.join(dirs.logs, 'agent.log'));
+      }
+      // keep dataDir for post-hoc inspection
+      result.dataDir = stackInfo.dataDir;
     }
-
-    writeResult(artifactsRoot, result);
-    console.log(`\nArtifacts: ${artifactsRoot}`);
+    writeResult(OUT, result);
+    recordFlowResult(FLOW, {
+      status: result.status, runId,
+      errors: result.errors.map(e => e.message),
+      crossVerification: result.crossVerification,
+      screenshots: result.screenshots,
+      consoleGate: result.consoleGate,
+    });
+    console.log(`\nArtifacts: ${OUT}`);
     console.log(`Result: ${result.status}`);
-    if (result.errors.length) {
-      console.log('Errors:', result.errors.map(e => e.message).join('; '));
-    }
   }
+  if (result.status !== 'PASS') process.exit(1);
 }
 
-main().then(() => process.exit(0)).catch(err => {
-  console.error(err);
-  process.exit(1);
-});
+main().catch(err => { console.error(err); process.exit(1); });
