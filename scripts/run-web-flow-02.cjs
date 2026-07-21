@@ -73,9 +73,10 @@ async function distinctTokenClasses(page) {
   });
 }
 
-/** Click a tree node by its exact caption text (deepest match wins). */
+/** Click a tree node by caption (case-insensitive substring; deepest match wins). */
 async function treeNode(page, caption) {
-  const nodes = page.locator('#files .theia-TreeNode', { hasText: caption });
+  const re = caption instanceof RegExp ? caption : new RegExp(caption.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+  const nodes = page.locator('.theia-TreeNode').filter({ hasText: re });
   const count = await nodes.count();
   if (count === 0) throw new Error(`tree node not found: ${caption}`);
   return nodes.nth(count - 1);
@@ -172,8 +173,8 @@ async function main() {
     await shot('03-after-import');
 
     // Evidence: does the tree show project files right after import?
-    await page.locator('#files').waitFor({ state: 'visible', timeout: 10000 }).catch(() => {});
-    const treeTextAfterImport = await page.locator('#files').textContent().catch(() => '');
+    await page.locator('#explorer-view-container').waitFor({ state: 'visible', timeout: 10000 }).catch(() => {});
+    const treeTextAfterImport = await page.locator('#explorer-view-container').textContent().catch(() => '');
     result.crossVerification.treeAfterImport = (treeTextAfterImport || '').slice(0, 200);
     logStep('TREE_AFTER_IMPORT', { text: result.crossVerification.treeAfterImport });
     await shot('04-tree-after-import');
@@ -189,27 +190,34 @@ async function main() {
 
     // The primary side bar starts collapsed (theia-mod-collapsed, 49px) in
     // this product; expand it by clicking the Explorer activity item.
-    const filesVisible = await page.locator('#files .theia-TreeNode').first().isVisible().catch(() => false);
+    const filesVisible = await page.locator('.theia-TreeNode').first().isVisible().catch(() => false);
     if (!filesVisible) {
       await page.locator('[aria-label="Explorer"]').first().click().catch(() => {});
       await sleep(1500);
     }
-    await page.locator('#files .theia-TreeNode').first().waitFor({ state: 'visible', timeout: 30000 });
+    await page.locator('.theia-TreeNode').first().waitFor({ state: 'visible', timeout: 30000 });
     await shot('05b-explorer-panel');
 
     // ---- 5. tree expand/collapse ----------------------------------------
+    // Theia renders the workspace root UPPERCASE (e.g. LEGACY-SAM…) and
+    // starts expanded. Toggle-based collapse/expand via the chevron.
     logStep('TREE_EXPAND_COLLAPSE');
-    const rootNode = await treeNode(page, 'legacy-sample');
-    await rootNode.dblclick(); // expand
-    await sleep(700);
-    const srcNode = await treeNode(page, 'src');
-    await srcNode.dblclick(); // expand src
-    await sleep(700);
-    await shot('06-tree-expanded');
-    const expandedOk = (await page.locator('#files').textContent()).includes('main');
-    if (!expandedOk) throw new Error('tree did not expand to reveal src/main');
-    await srcNode.dblclick(); // collapse
-    await sleep(500);
+    const rootNode = await treeNode(page, /legacy-sam/i);
+    const srcNodeVisible = await (await treeNode(page, 'src')).isVisible().catch(() => false);
+    if (!srcNodeVisible) throw new Error('workspace root not expanded: src not visible');
+    // collapse via the expansion toggle
+    await rootNode.locator('.theia-ExpansionToggle').first().click();
+    await sleep(800);
+    const srcGone = !(await (await treeNode(page, 'src')).isVisible().catch(() => false));
+    if (!srcGone) throw new Error('collapse did not hide children');
+    await shot('06-tree-collapsed');
+    // expand again
+    await rootNode.locator('.theia-ExpansionToggle').first().click();
+    await sleep(800);
+    if (!(await (await treeNode(page, 'src')).isVisible().catch(() => false))) {
+      throw new Error('expand did not restore children');
+    }
+    await shot('06b-tree-expanded');
     logStep('TREE_EXPAND_COLLAPSE_OK');
 
     // ---- 6. open files ---------------------------------------------------
