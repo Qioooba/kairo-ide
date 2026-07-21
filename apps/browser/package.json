@@ -10,7 +10,10 @@
     "applicationName": "Kairo IDE",
     "frontend": {
       "config": {
-        "applicationName": "Kairo IDE"
+        "applicationName": "Kairo IDE",
+        "preferences": {
+          "files.autoSave": "off"
+        }
       }
     }
   },
