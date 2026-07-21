@@ -203,6 +203,9 @@ echo "[start-qa-stack] Starting Web product on 127.0.0.1:${WEB_PORT} ..."
 # no orphans.
 (
   cd "$REPO_ROOT"
+  # The backend JdtLsManager resolves the JDT LS install from
+  # KAIRO_JDT_LS_HOME when the agent descriptor does not supply one.
+  export KAIRO_JDT_LS_HOME="${KAIRO_JDT_LS_HOME:-$REPO_ROOT/bundled/jdtls}"
   nohup pnpm --filter @kairo/browser exec theia start "$WORKSPACE_DIR" \
     --hostname=127.0.0.1 --port="$WEB_PORT" > "$WEB_LOG" 2>&1 &
   echo $! > "$WEB_PID_FILE"
