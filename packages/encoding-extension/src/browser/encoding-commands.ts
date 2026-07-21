@@ -28,6 +28,7 @@ import {
   MessageService,
 } from '@theia/core/lib/common';
 import { EditorManager } from '@theia/editor/lib/browser/editor-manager';
+import { reloadEditorWithEncoding } from './reopen-strategy';
 import URI from '@theia/core/lib/common/uri';
 import {
   KairoEncodingServiceImpl,
@@ -87,22 +88,23 @@ export class KairoEncodingCommandsContribution implements CommandContribution {
           this.messages.info(`Already using ${current}, nothing to do.`);
           return;
         }
-        // Register the override BEFORE reading so the
-        // subsequent read picks it up. The override is per-URI
-        // and survives editor close/reopen.
+        // Register the override BEFORE reloading so both the
+        // re-decode and any later save pick it up. The override is
+        // per-URI and survives editor close/reopen.
         this.service.setEncodingFor(target, picked);
-        // Close the open editor and re-open so the model
-        // reloads from disk with the new encoding override.
-        // KAIRO-RC-WEB-233: closing is asynchronous — re-opening
-        // immediately raced the disposal and killed the editor
-        // with "Model is disposed!". Wait for onDidDispose first.
+        // Reload strategy lives in reopen-strategy.ts (DOM-free,
+        // unit-tested): prefer setEncoding(Decode) on the live
+        // editor, fall back to close/reopen. The old unconditional
+        // close/reopen silently reused the still-cached Monaco
+        // model, so the file was never re-decoded (KAIRO-RC-WEB-206
+        // follow-up).
         const widget = await this.editorManager.getByUri(target);
         if (widget) {
-          const disposed = new Promise<void>(resolve => widget.onDidDispose(() => resolve()));
-          widget.close();
-          await disposed;
+          const outcome = await reloadEditorWithEncoding(widget, target, picked, this.editorManager, this.messages);
+          if (outcome === 'refused-dirty') {
+            return;
+          }
         }
-        await this.editorManager.open(target);
         this.messages.info(`Reopened ${target.displayName} as ${picked}.`);
       },
     });

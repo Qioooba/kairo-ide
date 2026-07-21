@@ -43,6 +43,7 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
   protected unsubscribeServerEvents: (() => void) | undefined;
   protected unsubscribeJdtState: (() => void) | undefined;
   protected unsubscribeEditor: Disposable | undefined;
+  protected unsubscribeEncoding: Disposable | undefined;
   protected unsubscribeServerStore: Disposable | undefined;
   protected unsubscribeProject: Disposable | undefined;
   private runtimeStatus: 'connecting' | 'open' | 'disconnected' | 'closed' = 'disconnected';
@@ -99,6 +100,13 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
     this.unsubscribeEditor = this.editorManager.onCurrentEditorChanged(() =>
       this.refreshEncodingStatus(),
     );
+    // "Reopen/Save with Encoding" keeps the same editor alive, so
+    // onCurrentEditorChanged never fires — refresh explicitly when
+    // the encoding service reports a change (stale 'utf8' shown
+    // after a GBK reopen otherwise).
+    this.unsubscribeEncoding = this.encodingSvc.onDidChangeEncoding(() =>
+      this.refreshEncodingStatus(),
+    );
     // Pull the current JDT LS state once on start so the
     // status bar shows truth after a reconnect / window reload.
     void this.refreshJdtStatus();
@@ -118,6 +126,7 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
     this.unsubscribeServerEvents?.();
     this.unsubscribeJdtState?.();
     this.unsubscribeEditor?.dispose();
+    this.unsubscribeEncoding?.dispose();
     this.unsubscribeServerStore?.dispose();
     this.unsubscribeProject?.dispose();
   }

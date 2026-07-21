@@ -35,6 +35,7 @@ import URI from '@theia/core/lib/common/uri';
 import { EncodingRegistry } from '@theia/core/lib/browser/encoding-registry';
 import { FileService } from '@theia/filesystem/lib/browser/file-service';
 import { MessageService } from '@theia/core/lib/common';
+import { Emitter, Event } from '@theia/core/lib/common/event';
 import { RuntimeConnectionService, KairoError } from '@kairo/runtime-extension';
 import type {
   EncodingDetectRequest,
@@ -91,6 +92,17 @@ export class KairoEncodingServiceImpl {
    * exists to keep the UI snappy.
    */
   protected cache = new Map<string, string>();
+
+  /**
+   * Fired whenever the effective encoding for a URI changes
+   * (override registered, save-with-encoding, project default).
+   * The Kairo status bar subscribes to this: without it the
+   * "Encoding:" element only refreshed on current-editor change,
+   * so after "Reopen with Encoding" (which now keeps the same
+   * editor alive) it kept showing the STALE pre-reopen encoding.
+   */
+  protected readonly onDidChangeEncodingEmitter = new Emitter<string>();
+  readonly onDidChangeEncoding: Event<string> = this.onDidChangeEncodingEmitter.event;
 
   async detect(args: DetectArgs): Promise<EncodingDetectResponse> {
     const payload: EncodingDetectRequest = {
@@ -176,6 +188,7 @@ export class KairoEncodingServiceImpl {
       encoding,
     });
     this.cache.set(theiaUri.toString(), encoding);
+    this.onDidChangeEncodingEmitter.fire(encoding);
     return { encoding, changed: prev !== encoding };
   }
 
@@ -207,6 +220,7 @@ export class KairoEncodingServiceImpl {
       parent: this.asTheiaUri(rootUri),
       encoding: normalized,
     });
+    this.onDidChangeEncodingEmitter.fire(normalized);
   }
 
   /**

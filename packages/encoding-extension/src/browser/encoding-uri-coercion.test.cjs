@@ -66,6 +66,7 @@ test('getEncodingFor tolerates a Monaco-style Uri lacking Theia URI methods (KAI
 test('setEncodingFor coerces Monaco-style Uri before registerOverride (KAIRO-RC-WEB-020)', () => {
   const svc = Object.create(KairoEncodingServiceImpl.prototype);
   svc.cache = new Map();
+  svc.onDidChangeEncodingEmitter = new (require('@theia/core/lib/common/event').Emitter)();
   const overrides = [];
   svc.encodingRegistry = {
     getEncodingForResource: () => 'utf-8',
@@ -94,6 +95,7 @@ test('teardown', () => {
 test('applyProjectEncoding registers a folder-level override with normalized encoding (KAIRO-RC-WEB-206)', () => {
   const svc = Object.create(KairoEncodingServiceImpl.prototype);
   svc.cache = new Map();
+  svc.onDidChangeEncodingEmitter = new (require('@theia/core/lib/common/event').Emitter)();
   const overrides = [];
   svc.encodingRegistry = {
     registerOverride: o => overrides.push(o),

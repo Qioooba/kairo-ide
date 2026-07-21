@@ -23,13 +23,16 @@ import URI from '@theia/core/lib/common/uri';
 @injectable()
 export class KairoEncodingRegistry extends EncodingRegistry {
   protected override getEncodingOverride(resource: URI): string | undefined {
-    const overrides = (this as unknown as { encodingOverrides?: { parent?: URI; encoding: string }[] }).encodingOverrides;
+    const overrides = (this as unknown as { encodingOverrides?: { parent?: URI; extension?: string; scheme?: string; encoding: string }[] }).encodingOverrides;
     if (overrides && overrides.length) {
       for (const override of overrides) {
         if (override.parent && override.parent.isEqualOrParent(resource)) {
           return override.encoding;
         }
-        if (!override.parent) {
+        if (override.extension && resource.path.ext === `.${override.extension}`) {
+          return override.encoding;
+        }
+        if (override.scheme && override.scheme === resource.scheme) {
           return override.encoding;
         }
       }
