@@ -119,7 +119,7 @@ async function main() {
     await waitForStatusBarContains(page, 'Project: (no workspace)', 60000);
     await importProjectViaWizard(page, legacyDst, { name: PROJECT_NAME, sourceLevel: '1.8' });
     logStep('PROJECT_IMPORTED');
-    await openProjectAsWorkspace(page);
+    page = await openProjectAsWorkspace(page);
     logStep('WORKSPACE_OPENED');
 
     // ---- 2. build view: idle -> build -> succeeded ------------------------

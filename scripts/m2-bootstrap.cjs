@@ -59,23 +59,34 @@ async function openProjectAsWorkspace(page) {
     popup.on('requestfailed', req => logs.push({ type: 'requestfailed', text: `${req.failure()?.errorText || ''}`, url: req.url(), time: new Date().toISOString() }));
     popup.on('response', res => { if (res.status() >= 400) logs.push({ type: 'http' + res.status(), text: `HTTP ${res.status()}`, url: res.url(), time: new Date().toISOString() }); });
   }
+  if (!target.url().includes('legacy-sample')) {
+    throw new Error(`workspace open did not land on legacy-sample (popup=${!!popup}, url=${target.url()})`);
+  }
   return target;
 }
 
 /** Open a file via Theia Quick Open (Meta+P, type name, Enter). */
 async function quickOpenFile(page, fileName, timeoutMs = 20000) {
-  await page.keyboard.press('Meta+P');
-  const widget = page.locator('.quick-input-widget');
-  await widget.waitFor({ state: 'visible', timeout: timeoutMs });
-  const input = page.locator('.quick-input-widget .quick-input-box input');
-  await input.fill('');
-  await input.type(fileName, { delay: 25 });
-  await sleep(900);
-  const row = page.locator('.quick-input-widget .monaco-list .monaco-list-row').first();
-  await row.waitFor({ state: 'visible', timeout: timeoutMs });
-  await page.keyboard.press('Enter');
-  await sleep(800);
-  await page.locator('.monaco-editor').first().waitFor({ state: 'visible', timeout: timeoutMs });
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await page.keyboard.press('Meta+P');
+    const widget = page.locator('.quick-input-widget');
+    await widget.waitFor({ state: 'visible', timeout: timeoutMs });
+    const input = page.locator('.quick-input-widget .quick-input-box input');
+    await input.fill('');
+    await input.type(fileName, { delay: 25 });
+    await sleep(1200);
+    const row = page.locator('.quick-input-widget .monaco-list .monaco-list-row').first();
+    const found = await row.waitFor({ state: 'visible', timeout: timeoutMs }).then(() => true).catch(() => false);
+    if (found) {
+      await page.keyboard.press('Enter');
+      await sleep(800);
+      await page.locator('.monaco-editor').first().waitFor({ state: 'visible', timeout: timeoutMs });
+      return;
+    }
+    await page.keyboard.press('Escape').catch(() => {});
+    await sleep(1500); // fresh workspaces may still be indexing
+  }
+  throw new Error(`quickOpenFile: no results for ${fileName}`);
 }
 
 /** Visible text of the active monaco editor (view-lines). */
