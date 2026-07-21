@@ -187,7 +187,7 @@ async function main() {
       const lines = ed.querySelector('.view-lines');
       return { hasEditor: !!ed, text: (lines?.textContent || '').slice(0, 120) };
     });
-    const activeTab = (await page.locator('.lm-TabBar-tab.lm-mod-current .lm-TabBar-tabLabel').first().textContent().catch(() => '')) || '';
+    const activeTab = (await page.locator('#theia-main-content-panel .lm-TabBar-tab.lm-mod-current .lm-TabBar-tabLabel').first().textContent().catch(() => '')) || '';
     const cursorLine = await page.evaluate(() => {
       const el = document.querySelector('.monaco-editor .cursor');
       return el ? el.getAttribute('style') : null;

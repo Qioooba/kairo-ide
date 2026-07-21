@@ -85,7 +85,7 @@ async function editorText(page) {
 
 /** Close the current tab; if a save-confirm dialog appears, click "Don't Save". */
 async function closeCurrentTabDiscarding(page) {
-  const close = page.locator('.lm-TabBar-tab.lm-mod-current .lm-TabBar-tabCloseIcon').first();
+  const close = page.locator('#theia-main-content-panel .lm-TabBar-tab.lm-mod-current .lm-TabBar-tabCloseIcon').first();
   await close.click().catch(() => {});
   await sleep(600);
   const dialog = page.locator('#theia-dialog-shell .dialogBlock');
