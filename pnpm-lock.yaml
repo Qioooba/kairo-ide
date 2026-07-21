@@ -180,6 +180,9 @@ importers:
 
   packages/encoding-extension:
     dependencies:
+      '@kairo/project-extension':
+        specifier: workspace:*
+        version: link:../project-extension
       '@kairo/protocol':
         specifier: workspace:*
         version: link:../protocol

@@ -90,3 +90,22 @@ test('setEncodingFor coerces Monaco-style Uri before registerOverride (KAIRO-RC-
 test('teardown', () => {
   disableJSDOM();
 });
+
+test('applyProjectEncoding registers a folder-level override with normalized encoding (KAIRO-RC-WEB-206)', () => {
+  const svc = Object.create(KairoEncodingServiceImpl.prototype);
+  svc.cache = new Map();
+  const overrides = [];
+  svc.encodingRegistry = {
+    registerOverride: o => overrides.push(o),
+  };
+  const monacoStyleUri = {
+    scheme: 'file',
+    path: '/tmp/legacy-sample',
+    toString: () => 'file:///tmp/legacy-sample',
+  };
+  svc.applyProjectEncoding(monacoStyleUri, 'GBK');
+  assert.strictEqual(overrides.length, 1);
+  assert.strictEqual(overrides[0].encoding, 'gbk', 'encoding normalized');
+  assert.strictEqual(typeof overrides[0].parent.isEqualOrParent, 'function', 'parent coerced to a real Theia URI');
+  assert.strictEqual(overrides[0].parent.toString(), 'file:///tmp/legacy-sample');
+});

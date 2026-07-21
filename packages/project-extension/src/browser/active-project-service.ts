@@ -11,6 +11,10 @@ export interface ProjectInfo {
     projectId: string;
     name: string;
     root: string;
+    /** Project default encoding (e.g. 'gbk'); applied as a
+     * folder-level override so files under the project root open
+     * with the right encoding (KAIRO-RC-WEB-206). */
+    encoding?: string;
 }
 
 const LAST_PROJECT_KEY = 'kairo.lastSelectedProjectId';
@@ -67,6 +71,7 @@ export class ActiveProjectService {
                         projectId: p.id,
                         name: p.name,
                         root: p.rootPath,
+                        encoding: (p as unknown as { encoding?: string }).encoding,
                     };
                     this.currentProject = projectInfo;
                     this.onDidChangeProjectEmitter.fire(projectInfo);
@@ -77,6 +82,7 @@ export class ActiveProjectService {
                         projectId: lastProject.id,
                         name: lastProject.name,
                         root: lastProject.rootPath,
+                        encoding: (lastProject as unknown as { encoding?: string }).encoding,
                     };
                     this.currentProject = projectInfo;
                     this.onDidChangeProjectEmitter.fire(projectInfo);

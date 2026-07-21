@@ -19,7 +19,8 @@
  */
 
 import { injectable, inject, interfaces } from '@theia/core/shared/inversify';
-import { QuickInputService, ApplicationShell } from '@theia/core/lib/browser';
+import { QuickInputService, ApplicationShell, FrontendApplicationContribution } from '@theia/core/lib/browser';
+import { KairoProjectEncodingContribution } from './project-encoding-contribution';
 import {
   Command,
   CommandContribution,
@@ -171,4 +172,7 @@ export class KairoEncodingCommandsContribution implements CommandContribution {
 
 export function bindEncodingCommands(bind: interfaces.Bind): void {
   bind(KairoEncodingCommandsContribution).toSelf().inSingletonScope();
+  // Project default encoding -> folder-level override (WEB-206).
+  bind(KairoProjectEncodingContribution).toSelf().inSingletonScope();
+  bind(FrontendApplicationContribution).toService(KairoProjectEncodingContribution);
 }

@@ -165,6 +165,7 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
                 projectId: saved.id,
                 name: saved.name,
                 root: saved.rootPath || workspacePath,
+                encoding: normalizeEncodingId(encoding),
             });
 
             // Close wizard, refresh views (NO reload)

@@ -195,6 +195,21 @@ export class KairoEncodingServiceImpl {
   }
 
   /**
+   * Apply a project-wide default encoding: every file under
+   * rootUri resolves to `encoding` unless a more specific
+   * per-file override exists (KAIRO-RC-WEB-206 — previously a
+   * GBK project's files opened as UTF-8 mojibake because only
+   * explicit per-file overrides were ever registered).
+   */
+  applyProjectEncoding(rootUri: URI, encoding: string): void {
+    const normalized = normalizeEncodingLabel(encoding.toLowerCase());
+    this.encodingRegistry.registerOverride({
+      parent: this.asTheiaUri(rootUri),
+      encoding: normalized,
+    });
+  }
+
+  /**
    * Read the file with the chosen encoding. The override
    * must have been registered first (see setEncodingFor) so
    * the next FileService.read also picks it up. This
