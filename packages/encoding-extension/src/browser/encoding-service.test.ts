@@ -264,3 +264,15 @@ test('empty string round-trip works for all encodings', () => {
   }
 });
 
+
+test('toTheiaEncodingId maps every Kairo label to a Theia SUPPORTED_ENCODINGS id (KAIRO-RC-WEB-260)', async () => {
+  const { toTheiaEncodingId } = await import('./encoding-utils');
+  const { SUPPORTED_ENCODINGS } = await import('@theia/core/lib/common/supported-encodings');
+  for (const label of KAIRO_ENCODING_OPTIONS) {
+    const id = toTheiaEncodingId(label);
+    assert.ok(SUPPORTED_ENCODINGS[id], `${label} maps to ${id}, which Theia does not know`);
+  }
+  assert.strictEqual(toTheiaEncodingId('utf-8'), 'utf8');
+  assert.strictEqual(toTheiaEncodingId('gbk'), 'gbk');
+  assert.strictEqual(toTheiaEncodingId('GBK'), 'gbk');
+});

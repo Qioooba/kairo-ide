@@ -249,11 +249,20 @@ async function main() {
     await fileMenu2.waitFor({ state: 'visible', timeout: 10000 });
     await fileMenu2.getByText(/^Save$/, { exact: true }).first().click();
     await sleep(2500);
-    // look for the refusal message (Theia notification or status bar)
-    const notif = page.locator('.theia-Notifications, .theia-notification-list-item, [class*="notification"]', { hasText: /cannot represent|refused|GBK/i }).first();
+    // look for the refusal message. Three acceptable surfaces:
+    //  a) a visible toast (auto-hides after a few seconds),
+    //  b) the notification CENTER — the message persists there even
+    //     after the toast collapses (isVisible is false for the
+    //     closed center, so read textContent, not visibility),
+    //  c) the status bar.
+    const notif = page.locator('.theia-Notifications, .theia-notification-list-item, [class*="notification"]', { hasText: /cannot represent|not representable|refused|failed to save|GBK/i }).first();
     const notifVisible = await notif.isVisible().catch(() => false);
+    const centerText = await page.locator('.theia-notification-center, .theia-notifications-container')
+      .evaluateAll(els => els.map(e => e.textContent || '').join('\n')).catch(() => '');
     const sbAfterEmoji = await getStatusBarText(page);
-    const refused = notifVisible || /cannot represent|refused/i.test(sbAfterEmoji);
+    const refused = notifVisible
+      || /cannot represent|not representable|refused|failed to save/i.test(centerText || '')
+      || /cannot represent|refused/i.test(sbAfterEmoji);
     const shaAfterEmoji = sha256File(gbkFile);
     await shot('06-emoji-save-attempt');
     result.crossVerification.emojiBlock = {
@@ -286,6 +295,29 @@ async function main() {
     // ---- 7. UTF-8 <-> GBK round-trip on qa-zh-utf8.jsp --------------------
     await quickOpenFile(page, 'qa-zh-utf8.jsp');
     await sleep(1200);
+    // The project default is GBK, so this UTF-8 file opens with the
+    // folder override (VS Code-consistent: the project encoding is a
+    // forced default, not a guess). Register the explicit per-file
+    // UTF-8 override first — the exact-file override must beat the
+    // folder default — otherwise the model is GBK-mojibake and the
+    // round-trip below measures garbage.
+    await runCommand(page, 'Kairo: Reopen with Encoding', 20000);
+    await pickEncoding(page, 'UTF-8');
+    await sleep(2000);
+    const utf8OpenText = await editorText(page);
+    const utf8OpenOk = utf8OpenText.includes('编码往返测试') && !/�/.test(utf8OpenText);
+    result.crossVerification.utf8OpenInGbkProject = { correct: utf8OpenOk };
+    logStep('UTF8_OPEN_IN_GBK_PROJECT', result.crossVerification.utf8OpenInGbkProject);
+    if (!utf8OpenOk) {
+      appendDefect({
+        severity: 'P1',
+        title: `${FLOW}: UTF-8 file inside a GBK project renders as mojibake even after explicit Reopen-as-UTF-8 (per-file override lost to folder default)`,
+        detail: result.crossVerification.utf8OpenInGbkProject,
+        evidence: ['screenshots/m2/flow-03/06b-utf8-in-gbk-project.png'],
+      });
+      await shot('06b-utf8-in-gbk-project');
+      throw new Error('UTF-8 file unreadable inside GBK project');
+    }
     // UTF-8 -> GBK
     await runCommand(page, 'Kairo: Save with Encoding', 20000);
     await pickEncoding(page, 'GBK');
@@ -337,11 +369,18 @@ async function main() {
 
     // ---- 8. console gate ---------------------------------------------------
     writeLogs(dirs.logs, page._kairoLogs || []);
-    // Whitelist (justified): "Model is disposed!" is the signature of the
-    // Reopen-with-Encoding editor-kill defect already filed in this flow —
-    // expected, not new noise.
+    // Whitelist (justified):
+    // 1. "Model is disposed!" — signature of the Reopen-with-Encoding
+    //    editor-kill defect already filed in this flow — expected noise.
+    // 2. "Failed to apply incremental changes … UnrepresentableEncoding"
+    //    — Theia's Resource.trySaveContentChanges fallback logging the
+    //    emoji-in-GBK save refusal this flow DELIBERATELY triggers and
+    //    asserts. The user-facing notification is verified separately
+    //    in the emoji step; the console line is Theia core's fallback
+    //    path, not new noise.
     const reopenDefectNoise = l => l.type === 'error' && /Model is disposed/.test(l.text);
-    const gate = consoleGate(page._kairoLogs || [], [reopenDefectNoise]);
+    const encodingRefusalNoise = l => l.type === 'error' && /UnrepresentableEncoding/.test(l.text);
+    const gate = consoleGate(page._kairoLogs || [], [reopenDefectNoise, encodingRefusalNoise]);
     result.consoleGate = { ok: gate.ok, errorCount: gate.errors.length, first: gate.errors[0] || null };
     if (!gate.ok) {
       logError(`console gate: ${gate.errors.length} errors, first: ${JSON.stringify(gate.errors[0]).slice(0, 300)}`);

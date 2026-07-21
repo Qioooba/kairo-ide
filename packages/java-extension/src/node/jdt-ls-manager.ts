@@ -143,9 +143,16 @@ export class JdtLsManager implements Disposable {
     }
     const homeAbs = resolve(home);
     if (!existsSync(homeAbs)) {
+      let diag = '';
+      try {
+        statSync(homeAbs);
+      } catch (e) {
+        const proc = typeof process !== 'undefined' ? `pid=${process.pid}, cwd=${process.cwd()}` : 'no-process';
+        diag = ` (stat error: ${(e as NodeJS.ErrnoException).code}, ${proc}, home=${JSON.stringify(home)})`;
+      }
       return {
         kind: 'env',
-        message: `KAIRO_JDT_LS_HOME points to a path that does not exist: ${homeAbs}`,
+        message: `KAIRO_JDT_LS_HOME points to a path that does not exist: ${homeAbs}${diag}`,
       };
     }
     const pluginsDir = join(homeAbs, 'plugins');
@@ -158,11 +165,16 @@ export class JdtLsManager implements Disposable {
 
     // Find the equinox launcher jar. The name pattern is
     // `org.eclipse.equinox.launcher_<version>.jar` and there
-    // is normally exactly one.
+    // is normally exactly one. Native FRAGMENT jars also match
+    // a naive /equinox.launcher/ test (e.g.
+    // `org.eclipse.equinox.launcher.cocoa.macosx.aarch64_*.jar`)
+    // and readdir order can return them first — spawning with
+    // one makes the JVM die with "no main manifest attribute"
+    // (KAIRO-RC-WEB-251, captured from the child's stderr).
     const plugins = readdirSync(pluginsDir)
       .filter(n => n.endsWith('.jar'))
       .map(n => join(pluginsDir, n));
-    const launcherJar = plugins.find(p => /equinox\.launcher/i.test(p));
+    const launcherJar = plugins.find(p => /equinox\.launcher_\d/.test(p));
     if (!launcherJar) {
       return {
         kind: 'env',
@@ -574,16 +586,19 @@ export class JdtLsManager implements Disposable {
  *  `config_linux`, `config_mac`, `config_win` and a generic
  *  `config` directory. */
 function pickConfigDir(home: string): string | undefined {
-  const want =
+  // JDT LS ships per-arch configs (config_mac, config_mac_arm,
+  // config_linux, config_linux_arm). Picking the x86 config on an
+  // arm64 host makes the Equinox launcher exit code=1 immediately
+  // (KAIRO-RC-WEB-251, reproduced live: config_mac_arm starts fine).
+  const os =
     process.platform === 'win32'
       ? 'config_win'
       : process.platform === 'darwin'
         ? 'config_mac'
         : 'config_linux';
-  const candidates = [
-    join(home, want),
-    join(home, 'config'),
-  ];
+  const candidates = process.arch === 'arm64' && os !== 'config_win'
+    ? [join(home, `${os}_arm`), join(home, os), join(home, 'config')]
+    : [join(home, os), join(home, 'config')];
   for (const c of candidates) {
     if (existsSync(c)) return c;
   }

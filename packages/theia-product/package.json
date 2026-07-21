@@ -10,7 +10,8 @@
   ],
   "theiaExtensions": [
     {
-      "frontend": "lib/index"
+      "frontend": "lib/index",
+      "backend": "lib/node/kairo-product-backend-module"
     }
   ],
   "scripts": {

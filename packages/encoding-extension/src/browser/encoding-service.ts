@@ -46,9 +46,10 @@ import type {
 import {
   KAIRO_ENCODING_OPTIONS,
   normalizeEncodingLabel,
+  toTheiaEncodingId,
 } from './encoding-utils';
 
-export { KAIRO_ENCODING_OPTIONS, SUPPORTS_ENCODER, normalizeEncodingLabel } from './encoding-utils';
+export { KAIRO_ENCODING_OPTIONS, SUPPORTS_ENCODER, normalizeEncodingLabel, toTheiaEncodingId } from './encoding-utils';
 
 export const KairoEncodingService = Symbol('KairoEncodingService');
 
@@ -173,6 +174,16 @@ export class KairoEncodingServiceImpl {
   }
 
   /**
+   * Registered override disposables keyed by URI string. A URI
+   * must have AT MOST ONE per-file override: the registry's
+   * exact-match pass returns the first registration, so a second
+   * "Save with Encoding" on the same file would keep writing the
+   * OLD encoding while the UI claims the new one (flow-03 live
+   * evidence: Save-as-GBK reported success, bytes stayed UTF-8).
+   */
+  protected overrideDisposables = new Map<string, { dispose(): void }>();
+
+  /**
    * Register a per-URI encoding override with Theia's
    * EncodingRegistry and update the local cache. This is the
    * single point where "this file uses X" is recorded.
@@ -181,15 +192,21 @@ export class KairoEncodingServiceImpl {
     if (!KAIRO_ENCODING_OPTIONS.includes(encoding) && !encoding.match(/^[a-z0-9-]+$/i)) {
       throw new KairoError({ code: 'invalid_request', message: `unknown encoding: ${encoding}` });
     }
+    // Store Theia encoding ids in the registry — Kairo display
+    // labels like 'utf-8' crash Theia's encoding status bar
+    // (SUPPORTED_ENCODINGS lookup, KAIRO-RC-WEB-260).
+    const theiaEncoding = toTheiaEncodingId(encoding);
     const theiaUri = this.asTheiaUri(uri);
+    const key = theiaUri.toString();
     const prev = this.encodingRegistry.getEncodingForResource(theiaUri);
-    this.encodingRegistry.registerOverride({
+    this.overrideDisposables.get(key)?.dispose();
+    this.overrideDisposables.set(key, this.encodingRegistry.registerOverride({
       parent: theiaUri,
-      encoding,
-    });
-    this.cache.set(theiaUri.toString(), encoding);
-    this.onDidChangeEncodingEmitter.fire(encoding);
-    return { encoding, changed: prev !== encoding };
+      encoding: theiaEncoding,
+    }));
+    this.cache.set(key, theiaEncoding);
+    this.onDidChangeEncodingEmitter.fire(theiaEncoding);
+    return { encoding: theiaEncoding, changed: prev !== theiaEncoding };
   }
 
   /**
@@ -215,7 +232,7 @@ export class KairoEncodingServiceImpl {
    * explicit per-file overrides were ever registered).
    */
   applyProjectEncoding(rootUri: URI, encoding: string): void {
-    const normalized = normalizeEncodingLabel(encoding.toLowerCase());
+    const normalized = toTheiaEncodingId(normalizeEncodingLabel(encoding.toLowerCase()));
     this.encodingRegistry.registerOverride({
       parent: this.asTheiaUri(rootUri),
       encoding: normalized,

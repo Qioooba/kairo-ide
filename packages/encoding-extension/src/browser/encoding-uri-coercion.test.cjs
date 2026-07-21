@@ -66,6 +66,7 @@ test('getEncodingFor tolerates a Monaco-style Uri lacking Theia URI methods (KAI
 test('setEncodingFor coerces Monaco-style Uri before registerOverride (KAIRO-RC-WEB-020)', () => {
   const svc = Object.create(KairoEncodingServiceImpl.prototype);
   svc.cache = new Map();
+  svc.overrideDisposables = new Map();
   svc.onDidChangeEncodingEmitter = new (require('@theia/core/lib/common/event').Emitter)();
   const overrides = [];
   svc.encodingRegistry = {
@@ -86,6 +87,40 @@ test('setEncodingFor coerces Monaco-style Uri before registerOverride (KAIRO-RC-
   assert.strictEqual(result.encoding, 'gbk');
   assert.strictEqual(overrides.length, 1);
   assert.strictEqual(overrides[0].parent.toString(), 'file:///tmp/hello.jsp');
+});
+
+test('setEncodingFor replaces a previous override for the same URI — last wins', () => {
+  const svc = Object.create(KairoEncodingServiceImpl.prototype);
+  svc.cache = new Map();
+  svc.overrideDisposables = new Map();
+  svc.onDidChangeEncodingEmitter = new (require('@theia/core/lib/common/event').Emitter)();
+  const overrides = [];
+  svc.encodingRegistry = {
+    getEncodingForResource: () => 'utf-8',
+    registerOverride: o => {
+      overrides.push(o);
+      return { dispose() { const i = overrides.indexOf(o); if (i >= 0) overrides.splice(i, 1); } };
+    },
+  };
+  const URI = require('@theia/core/lib/common/uri').default;
+  const uri = new URI('file:///tmp/a.jsp');
+  svc.setEncodingFor(uri, 'utf-8');
+  svc.setEncodingFor(uri, 'gbk');
+  assert.strictEqual(overrides.length, 1, 'stale override for the same URI must be disposed');
+  assert.strictEqual(overrides[0].encoding, 'gbk', 'the newest encoding wins');
+});
+
+test('KairoFileService.isEncodingRefusal detects both live and RPC-serialized refusals', () => {
+  const { isEncodingRefusal } = require('../../lib/browser/kairo-file-service');
+  const live = new Error('Cannot save: character 😀 is not representable in gbk');
+  live.name = 'UnrepresentableEncodingError';
+  assert.ok(isEncodingRefusal(live), 'live error instance');
+  // The backend (incremental update path) serializes the error over
+  // RPC — the name is mangled into the message.
+  const rpc = new Error("Unable to write file 'a.jsp' (Unknown (FileSystemError): UnrepresentableEncodingError: Cannot save: ... is not representable in gbk ...)");
+  assert.ok(isEncodingRefusal(rpc), 'RPC-serialized error');
+  assert.ok(!isEncodingRefusal(new Error('permission denied')));
+  assert.ok(!isEncodingRefusal(undefined));
 });
 
 test('teardown', () => {
@@ -142,6 +177,24 @@ test('encodeStream validates string saves too (KAIRO-RC-WEB-229)', async () => {
   // (BinaryBuffer | BinaryBufferReadable) — accept either.
   const byteLength = buf.byteLength ?? (typeof buf.read === 'function' ? (buf.read()?.byteLength ?? 0) : 0);
   assert.ok(byteLength > 0);
+});
+
+test('encodeStream validates READABLE saves too — the plain-save corruption hole (KAIRO-RC-WEB-229)', async () => {
+  // The editor's save path hands encodeStream a Readable, not a
+  // string. Before this fix the stream branch skipped validation,
+  // so an emoji in a GBK file was silently written as '?'.
+  const { Readable } = require('@theia/core/lib/common/stream');
+  const svc = new KairoSafeEncodingService();
+  await assert.rejects(
+    () => svc.encodeStream(Readable.fromString('中文 😀'), { encoding: 'gbk' }),
+    /not representable/,
+  );
+  const ok = await svc.encodeStream(Readable.fromString('中文注释'), { encoding: 'gbk' });
+  const byteLength = ok.byteLength ?? (typeof ok.read === 'function' ? (ok.read()?.byteLength ?? 0) : 0);
+  assert.ok(byteLength > 0);
+  // Lossless encodings skip the consume-and-validate path entirely.
+  const utf = await svc.encodeStream(Readable.fromString('中文 😀'), { encoding: 'utf8' });
+  assert.ok((utf.byteLength ?? 0) > 0 || typeof utf.read === 'function');
 });
 
 test('toProjectRootUri produces a file-scheme URI for bare paths (KAIRO-RC-WEB-206)', () => {

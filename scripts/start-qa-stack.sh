@@ -120,6 +120,23 @@ if [[ -d "$REPO_ROOT/bundled" && -n "$(ls -A "$REPO_ROOT/bundled" 2>/dev/null)" 
   AGENT_BUNDLED_DIR="$REPO_ROOT/bundled"
 fi
 
+# Give BOTH the agent and the Theia backend a stable, iCloud-free
+# JDT LS home. Two failure modes seen in flow-03 rounds 5-8:
+#  1. Without KAIRO_JDTLS_HOME the agent's prepare deleted and
+#     re-extracted bundled/jdtls mid-run, and the launch
+#     descriptor's home vanished under the Theia-side check.
+#  2. With the repo path pinned, the Theia backend's existsSync
+#     on ~/Documents (iCloud file-provider) flapped ENOENT for a
+#     directory that provably existed 36ms earlier.
+# A per-stack copy under $DATA_DIR (/tmp) avoids both: the agent
+# ADOPTS it (no re-extract) and the descriptor home is stable.
+if [[ -d "$REPO_ROOT/bundled/jdtls" ]]; then
+  rm -rf "$DATA_DIR/jdtls-home"
+  cp -R "$REPO_ROOT/bundled/jdtls" "$DATA_DIR/jdtls-home"
+  export KAIRO_JDTLS_HOME="${KAIRO_JDTLS_HOME:-$DATA_DIR/jdtls-home}"
+  echo "[start-qa-stack] KAIRO_JDTLS_HOME=$KAIRO_JDTLS_HOME"
+fi
+
 cat > "$AGENT_CONFIG" <<EOF
 version: 0.1.0
 bindAddress: 127.0.0.1
@@ -157,6 +174,27 @@ fi
 AGENT_LOG="$LOG_DIR/agent.log"
 AGENT_PID_FILE="$PID_DIR/agent.pid"
 echo "[start-qa-stack] Starting Runtime Agent on 127.0.0.1:${PORT} ..."
+# JDT LS needs a JRE 17+; resolve it from the system when the caller
+# did not pin one (java_home on macOS, JAVA_HOME elsewhere).
+if [[ -z "${KAIRO_JRE17_HOME:-}" ]]; then
+  if command -v /usr/libexec/java_home >/dev/null 2>&1; then
+    KAIRO_JRE17_HOME="$(/usr/libexec/java_home 2>/dev/null || true)"
+  fi
+  KAIRO_JRE17_HOME="${KAIRO_JRE17_HOME:-${JAVA_HOME:-}}"
+fi
+if [[ -n "$KAIRO_JRE17_HOME" ]]; then
+  export KAIRO_JRE17_HOME
+  echo "[start-qa-stack] KAIRO_JRE17_HOME=$KAIRO_JRE17_HOME"
+else
+  echo "[start-qa-stack] WARN: no JRE found; JDT LS launch-descriptor will fail" >&2
+fi
+# Pin the agent's JDT LS home to the bundled install so prepare
+# ADOPTS it (no delete+re-extract). Without this, prepare
+# re-extracted bundled/jdtls on every run and the launch
+# descriptor's home pointed at a directory that vanished
+# mid-flight — the Theia-side check then failed with
+# "KAIRO_JDT_LS_HOME points to a path that does not exist"
+# (flow-03 rounds 5-7).
 nohup "$AGENT_BIN" --config "$AGENT_CONFIG" > "$AGENT_LOG" 2>&1 &
 AGENT_PID=$!
 echo "$AGENT_PID" > "$AGENT_PID_FILE"
@@ -203,8 +241,9 @@ echo "[start-qa-stack] Starting Web product on 127.0.0.1:${WEB_PORT} ..."
 # no orphans.
 (
   cd "$REPO_ROOT"
-  # The backend JdtLsManager resolves the JDT LS install from
-  # KAIRO_JDT_LS_HOME when the agent descriptor does not supply one.
+  # KAIRO_JDT_LS_HOME was already exported above (stable per-stack
+  # copy under $DATA_DIR); the backend JdtLsManager uses it when
+  # the agent descriptor does not supply a home.
   export KAIRO_JDT_LS_HOME="${KAIRO_JDT_LS_HOME:-$REPO_ROOT/bundled/jdtls}"
   nohup pnpm --filter @kairo/browser exec theia start "$WORKSPACE_DIR" \
     --hostname=127.0.0.1 --port="$WEB_PORT" > "$WEB_LOG" 2>&1 &

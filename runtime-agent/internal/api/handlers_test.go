@@ -64,11 +64,15 @@ func (f *fakeJDTLS) Prepare(ctx context.Context) (json.RawMessage, error) {
 	})
 }
 
-func (f *fakeJDTLS) GetLaunchDescriptor(ctx context.Context, workspaceID string, projectID string) (json.RawMessage, error) {
+func (f *fakeJDTLS) GetLaunchDescriptor(ctx context.Context, workspaceID string, projectID string, workingDir string) (json.RawMessage, error) {
+	dir := workingDir
+	if dir == "" {
+		dir = "/path/to/project"
+	}
 	return json.Marshal(map[string]interface{}{
 		"command":      "/path/to/java",
 		"args":         []string{"-jar", "launcher.jar"},
-		"workingDir":   "/path/to/project",
+		"workingDir":   dir,
 		"envAllowlist": []string{"PATH=/usr/bin", "JAVA_HOME=/path/to/jre"},
 	})
 }

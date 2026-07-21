@@ -112,6 +112,18 @@ test('KairoEncodingRegistry: per-file override still matches the file itself', (
   assert.strictEqual(getOverride(FileUri.create('/proj/other.jsp')), undefined);
 });
 
+test('KairoEncodingRegistry: exact per-file override beats folder default regardless of order', () => {
+  const reg = new KairoEncodingRegistry();
+  // Folder default registered FIRST (project activation), explicit
+  // per-file override second (Reopen with Encoding). Registration
+  // order alone would let the folder default shadow the file choice.
+  reg.registerOverride({ parent: FileUri.create('/proj'), encoding: 'gbk' });
+  reg.registerOverride({ parent: FileUri.create('/proj/WebRoot/qa-zh-utf8.jsp'), encoding: 'utf-8' });
+  const getOverride = (reg as unknown as { getEncodingOverride(u: URI): string | undefined }).getEncodingOverride.bind(reg);
+  assert.strictEqual(getOverride(FileUri.create('/proj/WebRoot/qa-zh-utf8.jsp')), 'utf-8', 'exact file override must win');
+  assert.strictEqual(getOverride(FileUri.create('/proj/WebRoot/hello.jsp')), 'gbk', 'other files keep the folder default');
+});
+
 test('KairoEncodingRegistry: stock extension and scheme branches preserved', () => {
   const reg = new KairoEncodingRegistry();
   reg.registerOverride({ extension: 'jsp', encoding: 'gbk' });

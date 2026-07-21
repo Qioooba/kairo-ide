@@ -219,7 +219,7 @@ type EventBus interface {
 type JDTLS interface {
 	Status() (json.RawMessage, error)
 	Prepare(ctx context.Context) (json.RawMessage, error)
-	GetLaunchDescriptor(ctx context.Context, workspaceID string, projectID string) (json.RawMessage, error)
+	GetLaunchDescriptor(ctx context.Context, workspaceID string, projectID string, workingDir string) (json.RawMessage, error)
 }
 
 // JDTProjectGenerator writes the JDT LS-readable project

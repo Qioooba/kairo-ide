@@ -18,7 +18,7 @@
 import { injectable } from '@theia/core/shared/inversify';
 import { EncodingService, ResourceEncoding } from '@theia/core/lib/common/encoding-service';
 import { BinaryBuffer, BinaryBufferReadable } from '@theia/core/lib/common/buffer';
-import { Readable } from '@theia/core/lib/common/stream';
+import { Readable, consumeReadable } from '@theia/core/lib/common/stream';
 
 export class UnrepresentableEncodingError extends Error {
   constructor(message: string) {
@@ -50,7 +50,20 @@ export class KairoSafeEncodingService extends EncodingService {
       this.assertRoundTrip(value, encoded, options?.encoding);
       return super.encodeStream(value, options);
     }
-    return super.encodeStream(value, options);
+    const encoding = options?.encoding;
+    if (!encoding || LOSSLESS_ENCODINGS.has(encoding.toLowerCase())) {
+      return super.encodeStream(value, options);
+    }
+    // The save path passes a Readable, not a string — validate it too.
+    // Consume the stream, run the same round-trip check, then encode
+    // via the string path. Without this, an unrepresentable char
+    // (e.g. an emoji typed into a GBK file) sailed through a plain
+    // Ctrl/Cmd+S and iconv silently wrote '?' over it — the exact
+    // corruption WEB-229 was filed for (flow-03 live evidence).
+    const text = consumeReadable(value, strings => strings.join(''));
+    const encoded = super.encode(text, options);
+    this.assertRoundTrip(text, encoded, encoding);
+    return super.encodeStream(text, options);
   }
 
   protected assertRoundTrip(value: string, encoded: BinaryBuffer, encoding?: string): void {

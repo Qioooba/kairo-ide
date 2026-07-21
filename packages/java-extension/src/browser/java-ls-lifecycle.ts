@@ -112,18 +112,26 @@ export class JavaLanguageServerLifecycle {
     private async onProjectChanged(project: { workspaceId: string; projectId: string }): Promise<void> {
         try {
             const ctx = this.workspaceContext.requireContext();
+            // The project knows the workspace it was imported into —
+            // use it. The workspace CONTEXT can point at a different
+            // workspace (e.g. right after the import wizard, when the
+            // UI opens the project root as a fresh Theia workspace);
+            // sending project A's id to workspace B's URL made the
+            // agent answer 404 "project not found" and JDT LS never
+            // started (flow-03 live evidence).
+            const workspaceId = project.workspaceId || ctx.workspaceId;
 
             this.logger.info(`Project changed: ${project.projectId}, ensuring JDT LS is prepared`);
 
             // First, ensure JDT LS is prepared on the agent side
             await this.runtime.request(
-                `POST /api/v1/workspaces/${ctx.workspaceId}/java/prepare` as Endpoint,
+                `POST /api/v1/workspaces/${workspaceId}/java/prepare` as Endpoint,
                 { projectId: project.projectId },
             );
 
             // Then get the launch descriptor
             this.launchDescriptor = await this.runtime.request(
-                `GET /api/v1/workspaces/${ctx.workspaceId}/java/launch-descriptor` as Endpoint,
+                `GET /api/v1/workspaces/${workspaceId}/java/launch-descriptor` as Endpoint,
                 undefined,
                 { query: { projectId: project.projectId } },
             ) as JdtLsLaunchDescriptor;

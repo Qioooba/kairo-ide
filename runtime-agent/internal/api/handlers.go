@@ -1026,41 +1026,49 @@ func (s *Server) handleJDTLSLaunchDescriptor(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// Resolve toolchain.
-	if project.ToolchainID == "" {
-		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{
-			Code: protocol.ErrToolchainMissing, Message: "project has no toolchain configured",
-		})
-		return
-	}
-	if s.Services.ToolchainRegistry == nil {
-		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{
-			Code: protocol.ErrInternal, Message: "ToolchainRegistry not configured",
-		})
-		return
-	}
-	toolchain, err := s.Services.ToolchainRepo.Get(r.Context(), project.ToolchainID)
-	if err != nil {
-		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{
-			Code: protocol.ErrToolchainMissing, Message: fmt.Sprintf("toolchain not found: %s", err.Error()),
-		})
-		return
+	// Resolve the toolchain only when the project pins one.
+	// Projects without a ToolchainID must NOT be blocked: the JDT
+	// LS manager launches with its own JRE (KAIRO_JRE17_HOME or
+	// --jre17), and the import wizard never sets ToolchainID, so
+	// requiring one made JDT LS unreachable for every imported
+	// project (KAIRO-RC-WEB-258, flow-03 live evidence: HTTP 400
+	// "project has no toolchain configured").
+	var toolchain *domain.Toolchain
+	if project.ToolchainID != "" {
+		if s.Services.ToolchainRegistry == nil {
+			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{
+				Code: protocol.ErrInternal, Message: "ToolchainRegistry not configured",
+			})
+			return
+		}
+		t, err := s.Services.ToolchainRepo.Get(r.Context(), project.ToolchainID)
+		if err != nil {
+			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{
+				Code: protocol.ErrToolchainMissing, Message: fmt.Sprintf("toolchain not found: %s", err.Error()),
+			})
+			return
+		}
+		toolchain = t
 	}
 
-	// Resolve workspace root for the project working directory.
-	var projectRoot string
-	if s.Services.WorkspaceStore != nil {
+	// Resolve the project working directory: prefer the project's
+	// own root (from the repository), then the workspace root.
+	projectRoot := project.RootPath
+	if projectRoot == "" {
+		projectRoot = project.Root
+	}
+	if projectRoot == "" && s.Services.WorkspaceStore != nil {
 		ws, err := s.Services.WorkspaceStore.Get(workspaceID)
 		if err == nil {
 			projectRoot = ws.RootPath
 		}
 	}
 	if projectRoot == "" {
-		projectRoot = projectID // fallback
+		projectRoot = projectID // last-resort fallback
 	}
 
 	// Build the launch descriptor.
-	desc, err := s.Services.JDTLS.GetLaunchDescriptor(r.Context(), workspaceID, projectID)
+	desc, err := s.Services.JDTLS.GetLaunchDescriptor(r.Context(), workspaceID, projectID, projectRoot)
 	if err != nil {
 		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{
 			Code: protocol.ErrInternal, Message: fmt.Sprintf("build launch descriptor: %s", err.Error()),

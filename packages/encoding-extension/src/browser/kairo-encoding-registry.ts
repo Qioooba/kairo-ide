@@ -25,10 +25,21 @@ export class KairoEncodingRegistry extends EncodingRegistry {
   protected override getEncodingOverride(resource: URI): string | undefined {
     const overrides = (this as unknown as { encodingOverrides?: { parent?: URI; extension?: string; scheme?: string; encoding: string }[] }).encodingOverrides;
     if (overrides && overrides.length) {
+      // Most specific first: an exact per-file override (from
+      // "Reopen with Encoding") beats a folder-level project
+      // default registered earlier. Registration order alone
+      // would let the folder default shadow the explicit choice.
+      for (const override of overrides) {
+        if (override.parent && override.parent.isEqual(resource)) {
+          return override.encoding;
+        }
+      }
       for (const override of overrides) {
         if (override.parent && override.parent.isEqualOrParent(resource)) {
           return override.encoding;
         }
+      }
+      for (const override of overrides) {
         if (override.extension && resource.path.ext === `.${override.extension}`) {
           return override.encoding;
         }

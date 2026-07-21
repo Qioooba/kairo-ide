@@ -1,0 +1,38 @@
+/**
+ * KairoSaveableService — surfaces save failures to the user.
+ *
+ * Stock Theia's SAVE command handler lets a rejected save
+ * propagate to the command registry, which only logs to the
+ * console: the user presses Cmd+S, nothing happens, and the
+ * dirty dot silently stays. For Kairo this is the common path
+ * for ENCODING refusals (e.g. an emoji typed into a GBK file
+ * is rejected by the validating EncodingService) — a silent
+ * refusal is indistinguishable from a successful save at a
+ * glance (flow-03 live evidence: bytes correctly unchanged,
+ * zero user-visible feedback).
+ *
+ * This subclass shows an error notification with the failure
+ * reason, then rethrows so the model keeps its dirty state.
+ */
+
+import { injectable, inject } from '@theia/core/shared/inversify';
+import { MessageService } from '@theia/core/lib/common';
+import { SaveableService } from '@theia/core/lib/browser/saveable-service';
+import { Widget } from '@theia/core/lib/browser/widgets/widget';
+import { SaveOptions } from '@theia/core/lib/browser/saveable';
+import URI from '@theia/core/lib/common/uri';
+
+@injectable()
+export class KairoSaveableService extends SaveableService {
+  @inject(MessageService) protected readonly messages!: MessageService;
+
+  override async save(widget: Widget, options?: SaveOptions): Promise<URI | undefined> {
+    try {
+      return await super.save(widget, options);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.messages.error(`Save failed: ${message}`);
+      throw err;
+    }
+  }
+}

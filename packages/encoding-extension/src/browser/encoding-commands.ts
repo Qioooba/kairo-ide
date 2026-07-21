@@ -33,6 +33,7 @@ import URI from '@theia/core/lib/common/uri';
 import {
   KairoEncodingServiceImpl,
   KAIRO_ENCODING_OPTIONS,
+  toTheiaEncodingId,
 } from './encoding-service';
 
 export namespace KairoEncodingCommands {
@@ -100,7 +101,7 @@ export class KairoEncodingCommandsContribution implements CommandContribution {
         // follow-up).
         const widget = await this.editorManager.getByUri(target);
         if (widget) {
-          const outcome = await reloadEditorWithEncoding(widget, target, picked, this.editorManager, this.messages);
+          const outcome = await reloadEditorWithEncoding(widget, target, toTheiaEncodingId(picked), this.editorManager, this.messages);
           if (outcome === 'refused-dirty') {
             return;
           }
