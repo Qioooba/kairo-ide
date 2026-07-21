@@ -120,7 +120,6 @@ func (p *realOSProcess) Start(ctx context.Context, spec ProcessSpec) (ProcessObs
 	// missing server logs). The log buffer still resets per
 	// generation; subscribers live as long as the process object.
 
-
 	exePath, err := filepath.EvalSymlinks(spec.Executable)
 	if err != nil {
 		exePath = spec.Executable
