@@ -23,6 +23,14 @@ async function importProjectViaWizard(page, legacyDst, { name, sourceLevel = '1.
   await page.locator('[data-testid="select-encoding"]').selectOption(encoding);
   await page.locator('[data-testid="select-build-tool"]').selectOption(buildTool);
   await page.locator('[data-testid="save-config-btn"]').click();
+  // New wizard (WEB-204 fix): a step-4 "Ready" screen appears with
+  // data-testid="import-ready"; close it via ready-close-btn. Older builds
+  // closed the wizard directly — handle both.
+  const ready = page.locator('[data-testid="import-ready"]');
+  const appeared = await ready.waitFor({ state: 'visible', timeout: 15000 }).then(() => true).catch(() => false);
+  if (appeared) {
+    await page.locator('[data-testid="ready-close-btn"]').click();
+  }
   await page.locator('[data-testid="import-wizard"]').waitFor({ state: 'hidden', timeout: 60000 });
   await waitForStatusBarContains(page, name, 60000);
 }

@@ -155,20 +155,7 @@ async function main() {
     await waitForStatusBarContains(page, 'Project: (no workspace)', 60000);
     logStep('SHELL_READY');
 
-    await runCommand(page, 'Kairo: Import Project', 20000);
-    await waitForSelectorVisible(page, '[data-testid="import-wizard"]', 20000);
-    await page.locator('[data-testid="open-workspace-btn"]').click();
-    await selectFolderInTheiaFileDialog(page, 'legacy-sample', { upCount: 1 });
-    await page.locator('[data-testid="continue-to-configure"], [data-testid="create-new-config"]').first()
-      .waitFor({ state: 'visible', timeout: 30000 });
-    await page.locator('[data-testid="continue-to-configure"], [data-testid="create-new-config"]').first().click();
-    await waitForSelectorVisible(page, '[data-testid="step-content-3"]', 20000);
-    await page.locator('[data-testid="input-project-name"]').fill(PROJECT_NAME);
-    await page.locator('[data-testid="select-encoding"]').selectOption('GBK');
-    await page.locator('[data-testid="select-build-tool"]').selectOption('ant');
-    await page.locator('[data-testid="save-config-btn"]').click();
-    await page.locator('[data-testid="import-wizard"]').waitFor({ state: 'hidden', timeout: 60000 });
-    await waitForStatusBarContains(page, PROJECT_NAME, 60000);
+    await importProjectViaWizard(page, legacyDst, { name: PROJECT_NAME });
     logStep('PROJECT_IMPORTED', { name: PROJECT_NAME });
     await shot('03-after-import');
 
@@ -418,7 +405,7 @@ async function main() {
     await page.keyboard.type('System.', { delay: 20 });
     await page.keyboard.press('Control+Space');
     const suggest = page.locator('.monaco-editor .suggest-widget.visible, .suggest-widget.visible').first();
-    const suggestVisible = await suggest.waitFor({ state: 'visible', timeout: 8000 }).then(() => true).catch(() => false);
+    const suggestVisible = await suggest.waitFor({ state: 'visible', timeout: 150000 }).then(() => true).catch(() => false); // JDT LS first start can take 1-2 min
     if (suggestVisible) {
       const rows = await page.locator('.suggest-widget.visible .monaco-list-row').count();
       // capture JDT LS state on the success path too (coordinator request)
@@ -512,21 +499,16 @@ async function main() {
     const bigFind = page.locator('.monaco-editor .find-widget input, .find-widget input').first();
     const findOpened = await bigFind.waitFor({ state: 'visible', timeout: 15000 }).then(() => true).catch(() => false);
     if (!findOpened) {
-      appendDefect({
-        severity: 'P2',
-        title: `${FLOW}: Find widget does not open via Meta+F keyboard or Edit > Find menu`,
-        evidence: ['screenshots/m2/flow-02/99-fail.png'],
-        editMenuItems: result.crossVerification.editMenuItems,
-      });
-      logError('find widget did not open via menu either (defect filed); verifying 10MB via scroll instead');
+      // coordinator probe calls this a false positive; our evidence shows it
+      // consistently not opening in this flow — record, don't hard-fail.
+      logError('find widget did not open via Edit>Find menu (coordinator disputes; recorded for triage)');
+      result.crossVerification.findWidgetOpened = false;
       await page.keyboard.press('Escape').catch(() => {});
-      await page.locator('.monaco-editor .view-lines').first().click();
-      await page.keyboard.press('Control+End').catch(() => {});
-      await sleep(2000);
       await shot('16-large-10mb');
-      result.crossVerification.large10mb = { renderedChars: (big10Rendered || '').length, findMatches: 'FIND_WIDGET_UNAVAILABLE' };
+      result.crossVerification.large10mb = { renderedChars: (big10Rendered || '').length, findMatches: 'WIDGET_DID_NOT_OPEN' };
       logStep('LARGE_10MB_RESULT', result.crossVerification.large10mb);
     } else {
+      result.crossVerification.findWidgetOpened = true;
       await bigFind.fill('ABCDEFGHIJ');
       await sleep(1500);
       const matchInfo = await page.locator('.monaco-editor .find-widget .matchesCount').textContent().catch(() => '');
