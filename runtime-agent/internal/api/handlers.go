@@ -383,6 +383,21 @@ func (s *Server) handleServers(w http.ResponseWriter, r *http.Request) {
 			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: err.Error()})
 			return
 		}
+		// KAIRO-RC-WEB-240: the frontend sends only {projectId, debug};
+		// resolve webappDir/contextPath from the stored project instead
+		// of failing with "webappDir is required" (a 500 the UI used to
+		// swallow silently).
+		if req.WebappDir == "" && req.ProjectID != "" && s.Services.ProjectStore != nil {
+			p, err := s.Services.ProjectStore.Get(req.ProjectID)
+			if err != nil {
+				writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrNotFound, Message: "project not found: " + req.ProjectID})
+				return
+			}
+			req.WebappDir = filepath.Join(p.RootPath, p.WebappDir)
+			if req.ContextPath == "" {
+				req.ContextPath = p.ContextPath
+			}
+		}
 		srv, err := s.Services.ServerRunner.Start(req)
 		if err != nil {
 			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrProcessSpawnFailed, Message: err.Error()})

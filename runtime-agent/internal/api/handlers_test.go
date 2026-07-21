@@ -585,3 +585,52 @@ func TestProjectPut_WritesKairoProjectYAML(t *testing.T) {
 		t.Fatalf("project.yaml missing name/encoding:\n%s", string(data))
 	}
 }
+
+// fakeServerRunner records the Start request it was given.
+type fakeServerRunner struct {
+	lastReq StartServerRequest
+}
+
+func (f *fakeServerRunner) Start(req StartServerRequest) (*ServerResponse, error) {
+	f.lastReq = req
+	return &ServerResponse{ID: "srv_1", ProjectID: req.ProjectID, State: "starting"}, nil
+}
+func (f *fakeServerRunner) Get(id string) (*ServerResponse, error) { return nil, nil }
+func (f *fakeServerRunner) List() []*ServerResponse                { return nil }
+func (f *fakeServerRunner) Stop(id string, force bool) (*ServerResponse, error) {
+	return nil, nil
+}
+func (f *fakeServerRunner) Debug(id string) (*ServerResponse, error) { return nil, nil }
+func (f *fakeServerRunner) Logs(id string, follow bool) ([]ServerLogEntry, error) {
+	return nil, nil
+}
+
+// KAIRO-RC-WEB-240: POST /api/v1/servers with only {projectId} must
+// resolve webappDir/contextPath from the stored project.
+func TestServerStart_ResolvesWebappDirFromProject(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	store := &fakeProjectStore{saved: domain.Project{
+		ID:        "proj-1",
+		Name:      "legacy",
+		RootPath:  "/tmp/legacy-sample",
+		WebappDir: "WebRoot",
+	}}
+	runner := &fakeServerRunner{}
+	srv := NewServer(&Services{ProjectStore: store, ServerRunner: runner}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/servers", strings.NewReader(`{"projectId":"proj-1"}`))
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rr.Code, rr.Body.String())
+	}
+	if runner.lastReq.WebappDir != "/tmp/legacy-sample/WebRoot" {
+		t.Fatalf("WebappDir = %q, want /tmp/legacy-sample/WebRoot", runner.lastReq.WebappDir)
+	}
+}
