@@ -95,10 +95,23 @@ async function closeCurrentTabDiscarding(page) {
   }
 }
 
+/** Expand the primary side bar's Explorer panel ONLY if it is collapsed. */
+async function ensureExplorerExpanded(page) {
+  const collapsed = await page.evaluate(() => {
+    const left = document.getElementById('theia-left-content-panel');
+    return left ? left.className.includes('theia-mod-collapsed') : false;
+  });
+  if (collapsed) {
+    await page.locator('[aria-label="Explorer"]').first().click().catch(() => {});
+    await sleep(1500);
+  }
+}
+
 module.exports = {
   importProjectViaWizard,
   openProjectAsWorkspace,
   quickOpenFile,
   editorText,
   closeCurrentTabDiscarding,
+  ensureExplorerExpanded,
 };

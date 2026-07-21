@@ -31,7 +31,7 @@ const {
 } = require('./m2-common.cjs');
 
 const {
-  importProjectViaWizard, openProjectAsWorkspace,
+  importProjectViaWizard, openProjectAsWorkspace, ensureExplorerExpanded,
 } = require('./m2-bootstrap.cjs');
 
 const FLOW = 'WEB-FLOW-02';
@@ -188,13 +188,8 @@ async function main() {
     logStep('WORKSPACE_OPENED', { statusBar: statusAfterOpen.slice(0, 250), url: page.url() });
     await shot('05-workspace-opened');
 
-    // The primary side bar starts collapsed (theia-mod-collapsed, 49px) in
-    // this product; expand it by clicking the Explorer activity item.
-    const filesVisible = await page.locator('.theia-TreeNode').first().isVisible().catch(() => false);
-    if (!filesVisible) {
-      await page.locator('[aria-label="Explorer"]').first().click().catch(() => {});
-      await sleep(1500);
-    }
+    // The primary side bar may start collapsed; expand Explorer only if needed.
+    await ensureExplorerExpanded(page);
     await page.locator('.theia-TreeNode').first().waitFor({ state: 'visible', timeout: 30000 });
     await shot('05b-explorer-panel');
 
@@ -260,41 +255,25 @@ async function main() {
     // ---- 7. File/Edit ops on temp file -----------------------------------
     logStep('FILE_OPS');
     // File menu -> "New File..."; the menu path proved flaky once (menu
-    // closed without opening the dialog), so retry once via the navigator
-    // context menu if the dialog does not appear.
+    // Context menu on 'src' -> New File... opens a WorkspaceInputDialog
+    // (name prompt + OK). Deterministic path: file lands in src/.
+    const TEMP_DIR = path.join(legacyDst, 'src');
     const createDialog = page.locator('#theia-dialog-shell .dialogBlock');
-    for (let attempt = 0; attempt < 2; attempt++) {
-      if (attempt === 0) {
-        await page.locator('.lm-MenuBar-item', { hasText: 'File' }).first().click();
-        await sleep(600);
-        const nfMenu = page.locator('.lm-Menu').first();
-        await nfMenu.waitFor({ state: 'visible', timeout: 10000 });
-        await nfMenu.getByText('New File...', { exact: true }).first().click();
-      } else {
-        logStep('FILE_OPS_RETRY_CONTEXT_MENU');
-        const anyNode = await treeNode(page, 'src');
-        await anyNode.click({ button: 'right' });
-        const ctx = page.locator('.lm-Menu, .p-Menu').first();
-        await ctx.waitFor({ state: 'visible', timeout: 10000 });
-        await ctx.getByText('New File...', { exact: true }).first().click();
-      }
-      const appeared = await createDialog.waitFor({ state: 'visible', timeout: 12000 }).then(() => true).catch(() => false);
-      if (appeared) break;
-      if (attempt === 1) {
-        await shot('11-new-file-dialog-missing');
-        throw new Error('New File dialog did not appear via menu or context menu');
-      }
-    }
-    await createDialog.locator('.theia-NavigationUp').click();
-    await sleep(800);
-    const nameInput = createDialog.locator('input.theia-input, input[type="text"]').last();
+    const srcForNew = await treeNode(page, /^src$/i);
+    await srcForNew.click({ button: 'right' });
+    const nfCtx = page.locator('.lm-Menu, .p-Menu').first();
+    await nfCtx.waitFor({ state: 'visible', timeout: 10000 });
+    await nfCtx.getByText('New File...', { exact: true }).first().click();
+    await createDialog.waitFor({ state: 'visible', timeout: 15000 });
+    await shot('11-create-file-dialog');
+    const nameInput = createDialog.locator('input.theia-input').last();
     await nameInput.waitFor({ state: 'visible', timeout: 10000 });
     await nameInput.fill('qa-temp.txt');
-    await createDialog.locator('button', { hasText: /Create File|OK|Save/i }).first().click();
+    await createDialog.locator('button', { hasText: /^(OK|Create)/i }).first().click();
     await createDialog.waitFor({ state: 'hidden', timeout: 15000 });
     await sleep(1500);
-    if (!fs.existsSync(path.join(legacyDst, 'qa-temp.txt'))) {
-      throw new Error('New File did not create qa-temp.txt on disk');
+    if (!fs.existsSync(path.join(TEMP_DIR, 'qa-temp.txt'))) {
+      throw new Error('New File did not create src/qa-temp.txt on disk');
     }
     logStep('NEW_FILE_ON_DISK');
 
@@ -303,24 +282,39 @@ async function main() {
     await page.keyboard.type('hello kairo flow02', { delay: 5 });
     await page.keyboard.press('Meta+S');
     await sleep(1000);
-    const saved = fs.readFileSync(path.join(legacyDst, 'qa-temp.txt'), 'utf8');
+    const saved = fs.readFileSync(path.join(TEMP_DIR, 'qa-temp.txt'), 'utf8');
     if (!saved.includes('hello kairo flow02')) throw new Error(`save did not persist: "${saved.slice(0, 80)}"`);
     logStep('SAVE_VERIFIED_ON_DISK');
 
-    // dirty + close-confirm (new edit, then close tab)
+    // dirty + close: Theia default shows a save/discard confirmation. This
+    // product silently PERSISTS on close with no dialog (no autoSave pref is
+    // set anywhere) — record the divergence, don't hard-fail the flow.
     await page.keyboard.type(' DIRTY', { delay: 5 });
     await sleep(500);
     await shot('09-dirty-tab');
     await page.locator('#theia-main-content-panel .lm-TabBar-tab.lm-mod-current .lm-TabBar-tabCloseIcon').first().click();
     const confirmDialog = page.locator('#theia-dialog-shell .dialogBlock');
-    await confirmDialog.waitFor({ state: 'visible', timeout: 10000 });
-    await shot('10-close-confirm');
-    const dontSave = confirmDialog.locator('button', { hasText: /Don'?t Save/i }).first();
-    await dontSave.click();
-    await sleep(800);
-    const afterDiscard = fs.readFileSync(path.join(legacyDst, 'qa-temp.txt'), 'utf8');
-    if (afterDiscard.includes('DIRTY')) throw new Error('discard failed: DIRTY content persisted');
-    logStep('DIRTY_DISCARD_VERIFIED', { diskContent: afterDiscard.slice(0, 60) });
+    const dialogShown = await confirmDialog.waitFor({ state: 'visible', timeout: 8000 }).then(() => true).catch(() => false);
+    if (dialogShown) {
+      await shot('10-close-confirm');
+      await confirmDialog.locator('button', { hasText: /Don'?t Save/i }).first().click();
+      await sleep(800);
+      const afterDiscard = fs.readFileSync(path.join(TEMP_DIR, 'qa-temp.txt'), 'utf8');
+      if (afterDiscard.includes('DIRTY')) throw new Error('discard failed: DIRTY content persisted');
+      logStep('DIRTY_DISCARD_VERIFIED', { diskContent: afterDiscard.slice(0, 60) });
+    } else {
+      await sleep(800);
+      const afterClose = fs.readFileSync(path.join(TEMP_DIR, 'qa-temp.txt'), 'utf8');
+      const tabGone = (await page.locator('#theia-main-content-panel .lm-TabBar-tab', { hasText: 'qa-temp.txt' }).count()) === 0;
+      result.crossVerification.dirtyClose = { dialogShown: false, tabGone, dirtyPersisted: afterClose.includes('DIRTY') };
+      appendDefect({
+        severity: 'P2',
+        title: `${FLOW}: closing a dirty editor gives no save/discard confirmation — changes are silently persisted`,
+        detail: result.crossVerification.dirtyClose,
+        evidence: ['screenshots/m2/flow-02/09-dirty-tab.png'],
+      });
+      logStep('DIRTY_CLOSE_NO_CONFIRM', result.crossVerification.dirtyClose);
+    }
 
     // rename + delete via navigator context menu
     const tempNode = await treeNode(page, 'qa-temp.txt');
@@ -328,26 +322,88 @@ async function main() {
     const ctxMenu = page.locator('.lm-Menu, .p-Menu').first();
     await ctxMenu.waitFor({ state: 'visible', timeout: 10000 });
     await shot('11-context-menu');
-    await ctxMenu.locator('.lm-Menu-item, .p-Menu-item', { hasText: 'Rename' }).first().click();
-    const renameInput = page.locator('#theia-dialog-shell input.theia-input, .quick-input-widget input').first();
+    await ctxMenu.getByText('Rename', { exact: true }).first().click();
+    const renameInput = page.locator('#theia-dialog-shell .dialogBlock input.theia-input').last();
     await renameInput.waitFor({ state: 'visible', timeout: 10000 });
     await renameInput.fill('qa-temp-renamed.txt');
-    await page.keyboard.press('Enter');
+    await page.locator('#theia-dialog-shell .dialogBlock button', { hasText: /^OK$/i }).first().click().catch(async () => {
+      await page.keyboard.press('Enter');
+    });
     await sleep(1200);
-    if (!fs.existsSync(path.join(legacyDst, 'qa-temp-renamed.txt'))) throw new Error('rename did not land on disk');
+    if (!fs.existsSync(path.join(TEMP_DIR, 'qa-temp-renamed.txt'))) throw new Error('rename did not land on disk');
     logStep('RENAME_VERIFIED_ON_DISK');
 
-    const renamedNode = await treeNode(page, 'qa-temp-renamed.txt');
+    // tree must reflect the rename; if not, try the explorer Refresh action
+    let renamedNode = null;
+    for (let i = 0; i < 10 && !renamedNode; i++) {
+      renamedNode = await treeNode(page, 'qa-temp-renamed.txt').catch(() => null);
+      if (!renamedNode) await sleep(1000);
+    }
+    if (!renamedNode) {
+      await page.locator('#navigator\\.refresh, [id*="navigator.refresh"]').first().click().catch(() => {});
+      for (let i = 0; i < 5 && !renamedNode; i++) {
+        renamedNode = await treeNode(page, 'qa-temp-renamed.txt').catch(() => null);
+        if (!renamedNode) await sleep(1000);
+      }
+      if (!renamedNode) {
+        appendDefect({
+          severity: 'P2',
+          title: `${FLOW}: navigator does not reflect a UI rename (old name shown) even after Refresh`,
+          evidence: ['screenshots/m2/flow-02/99-fail.png'],
+        });
+        logError('tree did not reflect rename even after Refresh (defect filed)');
+      }
+    }
+    if (!renamedNode) {
+      // The tree did not reflect the rename even after Refresh (defect
+      // already filed above). Reload the page to rebuild the tree from disk
+      // so the Delete step can run against the real file.
+      logStep('RELOAD_FOR_TREE_SYNC');
+      await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
+      await sleep(8000);
+      await waitForStatusBarContains(page, 'Runtime: connected', 90000);
+      await ensureExplorerExpanded(page);
+      await sleep(1500);
+      // re-expand src (conditional: only when its children are not visible)
+      for (let i = 0; i < 10 && !renamedNode; i++) {
+        renamedNode = await treeNode(page, 'qa-temp-renamed.txt').catch(() => null);
+        if (!renamedNode) await sleep(1000);
+      }
+      if (renamedNode && !(await renamedNode.isVisible().catch(() => false))) {
+        const srcAgain = await treeNode(page, /^src$/i).catch(() => null);
+        if (srcAgain) await srcAgain.locator('.theia-ExpansionToggle').first().click().catch(() => {});
+        await sleep(1200);
+      }
+      renamedNode = await treeNode(page, 'qa-temp-renamed.txt').catch(() => null);
+    }
+    if (!renamedNode) {
+      appendDefect({
+        severity: 'P1',
+        title: `${FLOW}: navigator does not show renamed file even after full page reload (disk has it)`,
+        evidence: ['screenshots/m2/flow-02/99-fail.png'],
+      });
+      throw new Error('tree never showed renamed file even after reload');
+    }
     await renamedNode.click({ button: 'right' });
     await ctxMenu.waitFor({ state: 'visible', timeout: 10000 });
-    await ctxMenu.locator('.lm-Menu-item, .p-Menu-item', { hasText: 'Delete' }).first().click();
+    await ctxMenu.getByText('Delete', { exact: true }).first().click();
     const delDialog = page.locator('#theia-dialog-shell .dialogBlock');
     await delDialog.waitFor({ state: 'visible', timeout: 10000 });
     await shot('12-delete-confirm');
     await delDialog.locator('button', { hasText: /^(OK|Delete|Move to Trash)$/i }).first().click();
-    await sleep(1200);
-    if (fs.existsSync(path.join(legacyDst, 'qa-temp-renamed.txt'))) throw new Error('delete did not remove file from disk');
-    logStep('DELETE_VERIFIED_ON_DISK');
+    await sleep(1500);
+    await shot('13-after-delete');
+    if (fs.existsSync(path.join(TEMP_DIR, 'qa-temp-renamed.txt'))) {
+      appendDefect({
+        severity: 'P1',
+        title: `${FLOW}: Delete via navigator context menu ("Move File to Trash" -> OK) silently does nothing — file remains on disk, no error shown`,
+        evidence: ['screenshots/m2/flow-02/12-delete-confirm.png', 'screenshots/m2/flow-02/13-after-delete.png'],
+      });
+      logError('delete via UI silently no-op (defect filed); removing fixture via shell to continue evidence collection');
+      fs.rmSync(path.join(TEMP_DIR, 'qa-temp-renamed.txt'), { force: true });
+    } else {
+      logStep('DELETE_VERIFIED_ON_DISK');
+    }
 
     // ---- 8. Java completion + F12 ----------------------------------------
     logStep('JAVA_COMPLETION');
@@ -394,9 +450,11 @@ async function main() {
     logStep('JAVA_F12');
     await quickOpenFile(page, 'HelloServlet.java');
     await sleep(1200);
+    await page.locator('.monaco-editor .view-lines').first().click();
+    await sleep(300);
     await page.keyboard.press('Meta+F');
-    const findInput = page.locator('.monaco-editor .find-widget input').first();
-    await findInput.waitFor({ state: 'visible', timeout: 10000 });
+    const findInput = page.locator('.monaco-editor .find-widget input, .find-widget input').first();
+    await findInput.waitFor({ state: 'visible', timeout: 15000 });
     await findInput.fill('HttpServletRequest');
     await page.keyboard.press('Escape'); // closes find, cursor lands on match
     await page.keyboard.press('F12');
