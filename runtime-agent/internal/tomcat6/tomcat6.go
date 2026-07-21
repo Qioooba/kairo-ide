@@ -501,13 +501,24 @@ func Start(ctx context.Context, spec Spec) (*Instance, error) {
 		Env:          spec.Env,
 	}
 
-	// 2. Build command
+	// 2. Prepare the catalina base (conf/, server.xml, logging.properties).
+	// KAIRO-RC-WEB-247: Start used to skip this when invoked via the
+	// /api/v1/servers service path (only the runtime provider prepared the
+	// base), so Tomcat came up with no server.xml, died immediately and the
+	// caller waited out the full readiness timeout for a "readiness timeout"
+	// error with zero diagnostics. PrepareCatalinaBase is idempotent and
+	// never overwrites existing files.
+	if err := PrepareCatalinaBase(cfg); err != nil {
+		return nil, fmt.Errorf("prepare catalina base: %w", err)
+	}
+
+	// 3. Build command
 	executable, args, env, err := BuildCommand(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("build command: %w", err)
 	}
 
-	// 3. Create managed process
+	// 4. Create managed process
 	process := proc.New()
 	procSpec := proc.ProcessSpec{
 		Executable:   executable,
@@ -518,8 +529,34 @@ func Start(ctx context.Context, spec Spec) (*Instance, error) {
 		CatalinaBase: spec.CatalinaBase,
 	}
 
+	// KAIRO-RC-WEB-247: persist stdout/stderr to kairo-stdout.log (the path
+	// Instance.LogPath advertises) and keep an in-memory tail so readiness
+	// failures can report what Tomcat actually said instead of a bare
+	// "readiness timeout".
+	logPath := filepath.Join(spec.CatalinaBase, "logs", "kairo-stdout.log")
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
+		return nil, fmt.Errorf("create log dir: %w", err)
+	}
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return nil, fmt.Errorf("open server log: %w", err)
+	}
+	tail := newLogTail(40)
+	var logMu sync.Mutex
+	process.SubscribeLogs(func(line domain.LogLine) {
+		logMu.Lock()
+		defer logMu.Unlock()
+		stream := "stdout"
+		if line.Stream == domain.LogStreamStderr {
+			stream = "stderr"
+		}
+		fmt.Fprintf(logFile, "[%s] %s\n", stream, line.Text)
+		tail.add(line.Text)
+	})
+
 	obs, err := process.Start(ctx, procSpec)
 	if err != nil {
+		logFile.Close()
 		return nil, fmt.Errorf("start process: %w", err)
 	}
 
@@ -535,7 +572,7 @@ func Start(ctx context.Context, spec Spec) (*Instance, error) {
 			AJP:      spec.AJPPort,
 			Debug:    spec.DebugPort,
 		},
-		logPath:         filepath.Join(spec.CatalinaBase, "logs", "kairo-stdout.log"),
+		logPath:         logPath,
 		stopped:         make(chan struct{}),
 		process:         process,
 		processIdentity: obs.Identity,
@@ -550,7 +587,14 @@ func Start(ctx context.Context, spec Spec) (*Instance, error) {
 	if err := WaitForReady(ctx, spec.HTTPPort, deadline); err != nil {
 		// Clean up on failure
 		process.ForceStop(context.Background(), obs.Identity)
-		return nil, fmt.Errorf("readiness: %w", err)
+		logMu.Lock()
+		tailText := tail.String()
+		logFile.Close()
+		logMu.Unlock()
+		if tailText != "" {
+			return nil, fmt.Errorf("readiness: %w; last server output:\n%s", err, tailText)
+		}
+		return nil, fmt.Errorf("readiness: %w (server produced no output; see %s)", err, logPath)
 	}
 
 	// 6. Monitor process exit in background
@@ -559,10 +603,37 @@ func Start(ctx context.Context, spec Spec) (*Instance, error) {
 		inst.mu.Lock()
 		inst.state = "stopped"
 		inst.mu.Unlock()
+		logMu.Lock()
+		logFile.Close()
+		logMu.Unlock()
 		close(inst.stopped)
 	}()
 
 	return inst, nil
+}
+
+// logTail keeps the last n lines of process output for diagnostics.
+type logTail struct {
+	mu    sync.Mutex
+	max   int
+	lines []string
+}
+
+func newLogTail(max int) *logTail { return &logTail{max: max} }
+
+func (t *logTail) add(line string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if len(t.lines) >= t.max {
+		t.lines = t.lines[1:]
+	}
+	t.lines = append(t.lines, line)
+}
+
+func (t *logTail) String() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return strings.Join(t.lines, "\n")
 }
 
 func (i *Instance) Stop(timeout time.Duration) error {

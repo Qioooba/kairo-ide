@@ -14,6 +14,7 @@ import (
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/api"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/atomicfile"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/log"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/runtimeplan"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/tomcat6"
 )
 
@@ -27,6 +28,7 @@ type realServerRunner struct {
 	logger      *log.Logger
 	instances   map[string]*tomcat6.Instance
 	meta        map[string]*serverMeta
+	ports       *runtimeplan.DefaultPortAllocator
 }
 
 type serverMeta struct {
@@ -81,6 +83,7 @@ func newRealServerRunner(dataDir, bundledDir, tomcat6Home string, logger *log.Lo
 		logger:      logger,
 		instances:   map[string]*tomcat6.Instance{},
 		meta:        map[string]*serverMeta{},
+		ports:       runtimeplan.NewDefaultPortAllocator(runtimeplan.DefaultPortConfig()),
 	}
 	r.load()
 	return r
@@ -128,6 +131,20 @@ func (r *realServerRunner) Start(req api.StartServerRequest) (*api.ServerRespons
 	}
 	if _, err := os.Stat(req.WebappDir); err != nil {
 		return nil, fmt.Errorf("webappDir not found: %w", err)
+	}
+
+	// KAIRO-RC-WEB-246: auto-allocate ports when the caller does not
+	// pin them — the UI sends only {projectId}, and failing with
+	// "http port is required" is useless to a user who never heard
+	// of ports.
+	if req.HTTPPort == 0 {
+		lease, err := r.ports.Allocate(0, req.ShutdownPort, req.DebugPort)
+		if err != nil {
+			return nil, fmt.Errorf("allocate ports: %w", err)
+		}
+		req.HTTPPort = lease.HTTPPort
+		req.ShutdownPort = lease.ShutdownPort
+		req.DebugPort = lease.DebugPort
 	}
 
 	id := "srv_" + shortID()
