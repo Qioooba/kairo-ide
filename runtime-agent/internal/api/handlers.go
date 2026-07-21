@@ -550,6 +550,21 @@ func (s *Server) handleServerSub(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeOK(w, env, srv)
+	case "restart":
+		if r.Method != http.MethodPost {
+			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: "POST only"})
+			return
+		}
+		srv, err := s.Services.ServerRunner.Restart(id)
+		if err != nil {
+			code := protocol.ErrProcessSpawnFailed
+			if strings.HasPrefix(err.Error(), "server not found") {
+				code = protocol.ErrNotFound
+			}
+			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: code, Message: err.Error()})
+			return
+		}
+		writeOK(w, env, srv)
 	case "logs":
 		s.handleServerLogs(w, r, id, env)
 	default:
@@ -562,11 +577,32 @@ func (s *Server) handleServerLogs(w http.ResponseWriter, r *http.Request, id str
 		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInternal, Message: "ServerRunner not configured"})
 		return
 	}
-	follow := r.URL.Query().Get("follow") == "true"
-	lines, err := s.Services.ServerRunner.Logs(id, follow)
+	// The payload stays [{line, ts}] per the endpoint contract; the
+	// server's state/pid ride along as headers so the Logs view can
+	// show liveness without a second request.
+	if srv, err := s.Services.ServerRunner.Get(id); err == nil && srv != nil {
+		w.Header().Set("X-Kairo-Server-State", srv.State)
+		w.Header().Set("X-Kairo-Server-Pid", strconv.Itoa(srv.PID))
+	}
+	tail := 0
+	if v := r.URL.Query().Get("tail"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			tail = n
+		}
+	}
+	lines, err := s.Services.ServerRunner.Logs(id, tail)
 	if err != nil {
-		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrIOError, Message: err.Error()})
+		code := protocol.ErrIOError
+		if strings.HasPrefix(err.Error(), "server not found") {
+			code = protocol.ErrNotFound
+		}
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: code, Message: err.Error()})
 		return
+	}
+	if len(lines) == 0 {
+		// No log file (or no output) yet — an empty result, not
+		// an error.
+		w.Header().Set("X-Kairo-Log-Note", "no log output yet")
 	}
 	writeOK(w, env, lines)
 }

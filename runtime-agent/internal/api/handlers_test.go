@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -588,7 +589,12 @@ func TestProjectPut_WritesKairoProjectYAML(t *testing.T) {
 
 // fakeServerRunner records the Start request it was given.
 type fakeServerRunner struct {
-	lastReq StartServerRequest
+	lastReq    StartServerRequest
+	restartID  string
+	restartErr error
+	logs       []ServerLogEntry
+	logsErr    error
+	lastTail   int
 }
 
 func (f *fakeServerRunner) Start(req StartServerRequest) (*ServerResponse, error) {
@@ -601,9 +607,17 @@ func (f *fakeServerRunner) List() []*ServerResponse                { return nil 
 func (f *fakeServerRunner) Stop(id string, force bool) (*ServerResponse, error) {
 	return nil, nil
 }
+func (f *fakeServerRunner) Restart(id string) (*ServerResponse, error) {
+	f.restartID = id
+	if f.restartErr != nil {
+		return nil, f.restartErr
+	}
+	return &ServerResponse{ID: id, State: "running"}, nil
+}
 func (f *fakeServerRunner) Debug(id string) (*ServerResponse, error) { return nil, nil }
-func (f *fakeServerRunner) Logs(id string, follow bool) ([]ServerLogEntry, error) {
-	return nil, nil
+func (f *fakeServerRunner) Logs(id string, tail int) ([]ServerLogEntry, error) {
+	f.lastTail = tail
+	return f.logs, f.logsErr
 }
 
 // KAIRO-RC-WEB-240: POST /api/v1/servers with only {projectId} must
@@ -633,6 +647,96 @@ func TestServerStart_ResolvesWebappDirFromProject(t *testing.T) {
 	}
 	if runner.lastReq.WebappDir != "/tmp/legacy-sample/WebRoot" {
 		t.Fatalf("WebappDir = %q, want /tmp/legacy-sample/WebRoot", runner.lastReq.WebappDir)
+	}
+}
+
+// POST /api/v1/servers/{id}/restart must route to ServerRunner.Restart
+// (previously the sub-path fell through to "unknown subpath" → 404).
+func TestServerRestart_RoutesToRunner(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	runner := &fakeServerRunner{}
+	srv := NewServer(&Services{ServerRunner: runner}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/servers/srv_1/restart", strings.NewReader(`{}`))
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rr.Code, rr.Body.String())
+	}
+	if runner.restartID != "srv_1" {
+		t.Fatalf("restart id = %q, want srv_1", runner.restartID)
+	}
+
+	// GET on the restart sub-path is method-not-allowed.
+	rr = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/servers/srv_1/restart", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code == http.StatusOK {
+		t.Fatalf("GET restart should not succeed, body=%s", rr.Body.String())
+	}
+
+	// Unknown server → 404 not_found.
+	runner.restartErr = errors.New("server not found: srv_x")
+	rr = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/servers/srv_x/restart", strings.NewReader(`{}`))
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// GET /api/v1/servers/{id}/logs must return the [{line, ts}]
+// contract shape and pass ?tail=N through to the runner.
+func TestServerLogs_ReturnsEntriesAndTail(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	runner := &fakeServerRunner{
+		logs: []ServerLogEntry{{Line: "INFO: Server startup in 1234 ms", TS: "2026-01-01T00:00:00Z"}},
+	}
+	srv := NewServer(&Services{ServerRunner: runner}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/servers/srv_1/logs?tail=50", nil)
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rr.Code, rr.Body.String())
+	}
+	if runner.lastTail != 50 {
+		t.Fatalf("tail = %d, want 50", runner.lastTail)
+	}
+	var env struct {
+		OK      bool            `json:"ok"`
+		Payload json.RawMessage `json:"payload"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &env); err != nil {
+		t.Fatalf("decode envelope: %v", err)
+	}
+	var entries []ServerLogEntry
+	if err := json.Unmarshal(env.Payload, &entries); err != nil {
+		t.Fatalf("payload is not a log entry array: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Line == "" || entries[0].TS == "" {
+		t.Fatalf("unexpected entries: %#v", entries)
+	}
+
+	// Unknown server → 404 not_found.
+	runner.logsErr = errors.New("server not found: srv_x")
+	rr = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/servers/srv_x/logs", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404, body=%s", rr.Code, rr.Body.String())
 	}
 }
 

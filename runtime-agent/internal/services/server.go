@@ -263,6 +263,95 @@ func (r *realServerRunner) Stop(id string, force bool) (*api.ServerResponse, err
 	return m.toResponse(), nil
 }
 
+// Restart stops the server (gracefully, falling back to a force
+// stop) and starts it again with the same stored parameters
+// (projectId, webappDir, contextPath, javaHome, catalinaBase).
+// The previous ports are reused when they are free after the
+// stop; if the old HTTP or shutdown port is still bound, fresh
+// ports are taken from the allocator instead.
+func (r *realServerRunner) Restart(id string) (*api.ServerResponse, error) {
+	r.mu.Lock()
+	inst := r.instances[id]
+	m := r.meta[id]
+	r.mu.Unlock()
+	if m == nil {
+		return nil, fmt.Errorf("server not found: %s", id)
+	}
+	if m.JavaHome == "" || m.CatalinaBase == "" {
+		return nil, errors.New("server is missing restart metadata")
+	}
+	if inst != nil {
+		if err := inst.Stop(15 * time.Second); err != nil {
+			if ferr := inst.ForceStop(); ferr != nil {
+				m.State = "error"
+				m.LastError = ferr.Error()
+				r.mu.Lock()
+				r.save()
+				r.mu.Unlock()
+				return nil, fmt.Errorf("stop server %s: %w (force stop: %v)", id, err, ferr)
+			}
+		}
+		r.mu.Lock()
+		delete(r.instances, id)
+		r.mu.Unlock()
+	}
+	var httpPort, shutdownPort, ajpPort, debugPort int
+	if m.Ports != nil {
+		httpPort = m.Ports.HTTP
+		shutdownPort = m.Ports.Shutdown
+		ajpPort = m.Ports.AJP
+		debugPort = m.Ports.Debug
+	}
+	if httpPort == 0 || tomcat6.IsPortBound(httpPort) || tomcat6.IsPortBound(shutdownPort) {
+		lease, err := r.ports.Allocate(0, 0, 0)
+		if err != nil {
+			return nil, fmt.Errorf("allocate ports: %w", err)
+		}
+		httpPort = lease.HTTPPort
+		shutdownPort = lease.ShutdownPort
+		debugPort = lease.DebugPort
+		ajpPort = 0
+	} else if debugPort != 0 && tomcat6.IsPortBound(debugPort) {
+		if p, err := pickFreePort(); err == nil {
+			debugPort = p
+		} else {
+			debugPort = 0
+		}
+	}
+	newInst, err := tomcat6.Start(context.Background(), tomcat6.Spec{
+		ID:           id,
+		JavaHome:     m.JavaHome,
+		CatalinaHome: r.tomcat6Home,
+		CatalinaBase: m.CatalinaBase,
+		HTTPPort:     httpPort,
+		ShutdownPort: shutdownPort,
+		AJPPort:      ajpPort,
+		DebugPort:    debugPort,
+		ContextPath:  m.ContextPath,
+		WebappDir:    m.WebappDir,
+		Logger:       r.logger,
+	})
+	if err != nil {
+		m.State = "error"
+		m.LastError = err.Error()
+		r.mu.Lock()
+		r.save()
+		r.mu.Unlock()
+		return nil, err
+	}
+	ports := newInst.Ports()
+	m.PID = newInst.PID()
+	m.Ports = &ports
+	m.State = newInst.State()
+	m.StartedAt = newInst.StartedAt()
+	m.LastError = ""
+	r.mu.Lock()
+	r.instances[id] = newInst
+	r.save()
+	r.mu.Unlock()
+	return m.toResponse(), nil
+}
+
 func (r *realServerRunner) Debug(id string) (*api.ServerResponse, error) {
 	r.mu.Lock()
 	m, ok := r.meta[id]
@@ -312,32 +401,33 @@ func (r *realServerRunner) Debug(id string) (*api.ServerResponse, error) {
 	return m.toResponse(), nil
 }
 
-func (r *realServerRunner) Logs(id string, follow bool) ([]api.ServerLogEntry, error) {
+// defaultLogTail is the number of lines returned by Logs when the
+// caller does not pass an explicit ?tail=N.
+const defaultLogTail = 500
+
+// Logs returns the tail of <catalinaBase>/logs/kairo-stdout.log —
+// the file every started server streams stdout/stderr into since
+// KAIRO-RC-WEB-247. Reading the file (rather than the live
+// instance) works for running servers, stopped servers, and
+// servers restored from disk after an agent restart. A missing
+// log file yields an empty slice, not an error: the server may
+// simply not have produced output yet.
+func (r *realServerRunner) Logs(id string, tail int) ([]api.ServerLogEntry, error) {
+	if tail <= 0 {
+		tail = defaultLogTail
+	}
 	r.mu.Lock()
-	inst, ok := r.instances[id]
+	m, ok := r.meta[id]
 	r.mu.Unlock()
 	if !ok {
-		m, ok2 := r.meta[id]
-		if !ok2 {
-			return nil, fmt.Errorf("server not found: %s", id)
-		}
-		logPath := filepath.Join(m.CatalinaBase, "logs", "kairo-stdout.log")
-		data, err := os.ReadFile(logPath)
-		if err != nil {
-			return []api.ServerLogEntry{}, nil
-		}
-		lines := splitLines(string(data), 200)
-		out := make([]api.ServerLogEntry, 0, len(lines))
-		now := time.Now().UTC().Format(time.RFC3339Nano)
-		for _, l := range lines {
-			out = append(out, api.ServerLogEntry{Line: l, TS: now})
-		}
-		return out, nil
+		return nil, fmt.Errorf("server not found: %s", id)
 	}
-	lines, err := inst.TailLog(200)
+	logPath := filepath.Join(m.CatalinaBase, "logs", "kairo-stdout.log")
+	data, err := os.ReadFile(logPath)
 	if err != nil {
 		return []api.ServerLogEntry{}, nil
 	}
+	lines := splitLines(string(data), tail)
 	out := make([]api.ServerLogEntry, 0, len(lines))
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	for _, l := range lines {

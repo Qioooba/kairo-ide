@@ -180,8 +180,14 @@ type ServerRunner interface {
 	Start(req StartServerRequest) (*ServerResponse, error)
 	Get(id string) (*ServerResponse, error)
 	Stop(id string, force bool) (*ServerResponse, error)
+	// Restart stops the server (graceful, with force fallback)
+	// and starts it again with the stored parameters.
+	Restart(id string) (*ServerResponse, error)
 	Debug(id string) (*ServerResponse, error)
-	Logs(id string, follow bool) ([]ServerLogEntry, error)
+	// Logs returns the last tail lines of the server's stdout
+	// log (tail <= 0 means a sensible default). A missing log
+	// file yields an empty slice, not an error.
+	Logs(id string, tail int) ([]ServerLogEntry, error)
 	List() []*ServerResponse
 }
 
