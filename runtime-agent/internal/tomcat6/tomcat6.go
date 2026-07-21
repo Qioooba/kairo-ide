@@ -47,7 +47,10 @@ func (c Config) Validate() error {
 		return fmt.Errorf("java home is required")
 	}
 	if c.CatalinaHome == "" {
-		return fmt.Errorf("catalina home is required")
+		// KAIRO-RC-WEB-205: give the user an actionable recovery instead
+		// of a bare 500 — the product is offline/air-gapped, so the fix
+		// is to materialize the bundled directory, not to "check network".
+		return fmt.Errorf("tomcat 6 not available: run `pnpm bundled:prepare` (or set KAIRO_TOMCAT6_HOME) to materialize bundled/tomcat6")
 	}
 	if c.CatalinaBase == "" {
 		return fmt.Errorf("catalina base is required")
