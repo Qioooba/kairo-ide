@@ -138,12 +138,18 @@ async function main() {
     }
     await shot('03-after-build-and-deploy');
     if (!deployments) {
-      await failBlocked('Build and Deploy produced no deployment record within 300s', {
-        note: 'check build state + agent log',
+      appendDefect({
+        severity: 'P0',
+        title: `${FLOW}: Build and Deploy produced no deployment record within 300s (downstream of sham-build P0)`,
+        evidence: ['screenshots/m2/flow-05/03-after-build-and-deploy.png'],
       });
+      logError('no deployment record (defect filed) — continuing to test the Tomcat lifecycle without a deployment');
+      result.blocked.push({ item: 'deploy record', reason: 'no deployment within 300s' });
+      result.deployBlocked = true;
+    } else {
+      result.crossVerification.deployments = deployments.slice(0, 3);
+      logStep('DEPLOYMENT_RECORDED', { count: deployments.length, first: deployments[0] });
     }
-    result.crossVerification.deployments = deployments.slice(0, 3);
-    logStep('DEPLOYMENT_RECORDED', { count: deployments.length, first: deployments[0] });
 
     // ---- 4. Start server ----------------------------------------------------
     await runCommand(page, 'Kairo: Show Servers', 20000);
@@ -206,40 +212,47 @@ async function main() {
         title: `${FLOW}: server running but app URLs do not serve (tried ${candidates.length} candidates)`,
         evidence: ['screenshots/m2/flow-05/06-open-app-tab.png'],
       });
-      throw new Error('no served content on any candidate URL');
+      logError('no served content on any candidate URL (defect filed) — continuing with lifecycle tests');
+      result.deployBlocked = true;
+    } else {
+      result.crossVerification.served = served;
+      logStep('APP_SERVED', served);
     }
-    result.crossVerification.served = served;
-    logStep('APP_SERVED', served);
 
     // ---- 6. edit JSP -> redeploy -> new content -----------------------------
-    await quickOpenFile(page, 'hello.jsp');
-    await page.locator('.monaco-editor .view-lines').first().click();
-    await page.keyboard.press('Control+End').catch(() => {});
-    await page.keyboard.press('Enter');
-    const MARKER = 'QA-FLOW05-MARKER';
-    await page.keyboard.type(`<!-- ${MARKER} -->`, { delay: 5 });
-    await page.keyboard.press('Meta+S');
-    await sleep(1000);
-    await runCommand(page, 'Kairo: Build and Deploy', 20000);
-    // poll served page for the marker
-    let redeployed = false;
-    const redeployStart = Date.now();
-    while (Date.now() - redeployStart < 300000) {
-      const r = await httpGet(served.url, 10000);
-      if (r.ok && r.text.includes(MARKER)) { redeployed = true; break; }
-      await sleep(4000);
+    if (served) {
+      await quickOpenFile(page, 'hello.jsp');
+      await page.locator('.monaco-editor .view-lines').first().click();
+      await page.keyboard.press('Control+End').catch(() => {});
+      await page.keyboard.press('Enter');
+      const MARKER = 'QA-FLOW05-MARKER';
+      await page.keyboard.type(`<!-- ${MARKER} -->`, { delay: 5 });
+      await page.keyboard.press('Meta+S');
+      await sleep(1000);
+      await runCommand(page, 'Kairo: Build and Deploy', 20000);
+      // poll served page for the marker
+      let redeployed = false;
+      const redeployStart = Date.now();
+      while (Date.now() - redeployStart < 300000) {
+        const r = await httpGet(served.url, 10000);
+        if (r.ok && r.text.includes(MARKER)) { redeployed = true; break; }
+        await sleep(4000);
+      }
+      result.crossVerification.redeploy = { markerServed: redeployed, url: served.url };
+      await shot('07-after-redeploy');
+      if (!redeployed) {
+        appendDefect({
+          severity: 'P1',
+          title: `${FLOW}: edit-JSP -> Build and Deploy does not refresh served content (marker absent after 300s)`,
+          evidence: ['screenshots/m2/flow-05/07-after-redeploy.png'],
+        });
+        throw new Error('redeploy did not serve new content');
+      }
+      logStep('REDEPLOY_SERVES_NEW_CONTENT');
+    } else {
+      result.blocked.push({ item: 'JSP edit -> redeploy -> new content', reason: 'nothing served (deploy broken upstream)' });
+      logStep('REDEPLOY_BLOCKED_UPSTREAM');
     }
-    result.crossVerification.redeploy = { markerServed: redeployed, url: served.url };
-    await shot('07-after-redeploy');
-    if (!redeployed) {
-      appendDefect({
-        severity: 'P1',
-        title: `${FLOW}: edit-JSP -> Build and Deploy does not refresh served content (marker absent after 300s)`,
-        evidence: ['screenshots/m2/flow-05/07-after-redeploy.png'],
-      });
-      throw new Error('redeploy did not serve new content');
-    }
-    logStep('REDEPLOY_SERVES_NEW_CONTENT');
 
     // ---- 7. restart: same logical id, new PID --------------------------------
     await page.locator('[data-testid="server-restart-button"]').click();
@@ -343,8 +356,8 @@ async function main() {
     }
     logStep('CONSOLE_GATE_CLEAN');
 
-    result.status = 'PASS';
-    logStep('FLOW_PASS');
+    result.status = (result.deployBlocked || result.blocked.length) ? 'FAIL' : 'PASS';
+    logStep(`FLOW_${result.status}`);
   } catch (err) {
     if (result.status !== 'BLOCKED') result.status = 'FAIL';
     logError(err.message);
