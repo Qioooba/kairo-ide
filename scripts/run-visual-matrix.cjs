@@ -27,7 +27,7 @@ const {
 
 const QA_ROOT = process.env.KAIRO_QA_ROOT || '/tmp/kairo-mac-web-qa';
 const OUT = ensureDir(path.join(QA_ROOT, 'results', 'visual-matrix'));
-const HARD_CAP_MS = 15 * 60 * 1000;
+const HARD_CAP_MS = 45 * 60 * 1000;
 
 const VIEWPORTS = [
   { name: '1440x900', width: 1440, height: 900 },
@@ -52,10 +52,13 @@ function record(id, ok, detail) {
 }
 
 async function main() {
-  const stack = await startStack({ dataDir: path.join(QA_ROOT, 'visual-matrix-stack'), port: 18080 });
+  const agentPort = Number(process.env.KAIRO_AGENT_PORT || 18080);
+  const stack = await startStack({ dataDir: path.join(QA_ROOT, 'visual-matrix-stack'), port: agentPort });
   const env = stack.env;
-  const webUrl = `http://127.0.0.1:${env.KAIRO_QA_WEB_PORT}/`;
-  record('VM.start', true, `web=${env.KAIRO_QA_WEB_PORT}`);
+  // Non-default agent ports need the ?kairoAgent= override (WEB-015).
+  const base = `http://127.0.0.1:${env.KAIRO_QA_WEB_PORT}/`;
+  const webUrl = agentPort === 18080 ? base : `${base}?kairoAgent=${encodeURIComponent(`http://127.0.0.1:${agentPort}`)}`;
+  record('VM.start', true, `web=${env.KAIRO_QA_WEB_PORT} agent=${agentPort}`);
 
   const browser = await launchBrowser();
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });

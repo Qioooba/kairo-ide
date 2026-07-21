@@ -15,6 +15,7 @@ import (
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/domain"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/encoding"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/log"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/repository"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/search"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/security"
 )
@@ -177,6 +178,21 @@ func (s *Server) handleProjectByID(w http.ResponseWriter, r *http.Request) {
 		if s.Services.ProjectStore == nil {
 			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInternal, Message: "ProjectStore not configured"})
 			return
+		}
+		// KAIRO-RC-WEB-203: also persist <root>/.kairo/project.yaml.
+		// jdtproject.Generate and FileProjectRepo read that file, but
+		// the HTTP store alone never wrote it — Java language support
+		// silently lost the project model. A yaml failure is a real
+		// save failure, so it aborts the PUT before the catalog write.
+		yamlRoot := project.RootPath
+		if yamlRoot == "" {
+			yamlRoot = project.Root
+		}
+		if yamlRoot != "" {
+			if err := repository.SaveProjectConfig(yamlRoot, repository.ProjectToConfig(&project)); err != nil {
+				writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInternal, Message: "save .kairo/project.yaml: " + err.Error()})
+				return
+			}
 		}
 		updated, err := s.Services.ProjectStore.Update(rest, &project)
 		if err != nil {

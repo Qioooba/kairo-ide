@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -14,6 +17,7 @@ import (
 
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/api/protocol"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/audit"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/domain"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/log"
 )
 
@@ -528,4 +532,56 @@ func (f *fakeEventBus) Serve(w http.ResponseWriter, r *http.Request) {
 	// deliberately do NOT, so the tests stay single-threaded
 	// and the recorder does not have to model a real upgrade.
 	w.WriteHeader(http.StatusSwitchingProtocols)
+}
+
+// fakeProjectStore is a minimal in-memory ProjectStore for
+// handler tests.
+type fakeProjectStore struct {
+	saved domain.Project
+}
+
+func (f *fakeProjectStore) List() []domain.Project { return []domain.Project{f.saved} }
+func (f *fakeProjectStore) Get(id string) (domain.Project, error) {
+	if f.saved.ID != domain.ProjectID(id) {
+		return domain.Project{}, fmt.Errorf("project not found: %s", id)
+	}
+	return f.saved, nil
+}
+func (f *fakeProjectStore) Update(id string, cfg *domain.Project) (domain.Project, error) {
+	f.saved = *cfg
+	return *cfg, nil
+}
+
+// KAIRO-RC-WEB-203: PUT /api/v1/projects/{id} must persist
+// <root>/.kairo/project.yaml — jdtproject.Generate reads it.
+func TestProjectPut_WritesKairoProjectYAML(t *testing.T) {
+	root := t.TempDir()
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	store := &fakeProjectStore{}
+	srv := NewServer(&Services{ProjectStore: store}, logger, auditLog, "test-0.1.0", "")
+
+	body := `{"id":"proj-1","workspaceId":"ws-1","name":"Legacy 中文项目","rootPath":"` + root + `","sourceRoots":["src"],"webappDir":"WebRoot","outputDir":"build/classes","sourceLevel":"1.8","targetLevel":"1.8","encoding":"gbk","buildTool":"ant"}`
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/projects/proj-1", strings.NewReader(body))
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rr.Code, rr.Body.String())
+	}
+	if store.saved.Name != "Legacy 中文项目" {
+		t.Fatalf("catalog stored name = %q, want %q", store.saved.Name, "Legacy 中文项目")
+	}
+	yamlPath := filepath.Join(root, ".kairo", "project.yaml")
+	data, err := os.ReadFile(yamlPath)
+	if err != nil {
+		t.Fatalf("expected %s to exist: %v", yamlPath, err)
+	}
+	if !strings.Contains(string(data), "Legacy 中文项目") || !strings.Contains(string(data), "gbk") {
+		t.Fatalf("project.yaml missing name/encoding:\n%s", string(data))
+	}
 }
