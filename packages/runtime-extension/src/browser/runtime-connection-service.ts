@@ -137,8 +137,17 @@ export class RuntimeConnectionService {
         if (kairoCfg && kairoCfg.agentUrl) {
           this.initialize(kairoCfg.agentUrl, kairoCfg.agentSecret);
         } else {
+          // KAIRO-RC-WEB-015: the browser build has no preload to
+          // inject the agent URL, so it used to hard-default to
+          // 127.0.0.1:18080. Allow an explicit override via the
+          // ?kairoAgent= query parameter (localhost dev/QA tool —
+          // it only ever talks to a local agent). Preload/desktop
+          // channels above keep priority.
+          const fromQuery = typeof window.location?.search === 'string'
+            ? new URLSearchParams(window.location.search).get('kairoAgent')
+            : null;
           const injected = (globalThis as unknown as { __KAIRO_DEFAULT_RUNTIME_URL__?: string }).__KAIRO_DEFAULT_RUNTIME_URL__;
-          this.config = { baseUrl: injected ?? DEFAULT_RUNTIME_BASE_URL };
+          this.config = { baseUrl: fromQuery ?? injected ?? DEFAULT_RUNTIME_BASE_URL };
         }
       }
     }

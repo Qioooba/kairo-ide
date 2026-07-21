@@ -319,7 +319,12 @@
 
 .kairo-widget-toolbar {
     display: flex;
-    flex-wrap: wrap;
+    /* KAIRO-RC-WEB-009: no wrapping — at narrow widths / 200% zoom
+     * the wrapped second row crowded out the view content. Keep a
+     * single row and scroll horizontally (hidden scrollbar) instead. */
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
     gap: 6px;
     padding: 8px 12px;
     border-bottom: 1px solid var(--kairo-border);
@@ -327,8 +332,14 @@
     flex-shrink: 0;
 }
 
+.kairo-widget-toolbar::-webkit-scrollbar {
+    display: none;
+}
+
 .kairo-widget-toolbar .theia-button {
-    min-width: 64px;
+    flex-shrink: 0;
+    min-width: 0;
+    white-space: nowrap;
 }
 
 .kairo-widget-section {
