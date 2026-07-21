@@ -174,7 +174,7 @@ async function main() {
       const r = await agentGet(env, '/api/v1/servers', 10000);
       await failBlocked('server did not reach running within 300s', { serversApi: (r.text || '').slice(0, 500) });
     }
-    const serverPort = serverInfo.httpPort || serverInfo.port;
+    const serverPort = (serverInfo.ports && serverInfo.ports.http) || serverInfo.httpPort || serverInfo.port;
     const serverPid = serverInfo.pid;
     result.crossVerification.server = { id: serverInfo.id, pid: serverPid, port: serverPort, startedAt: serverInfo.startTime || serverInfo.startedAt };
     logStep('SERVER_RUNNING', result.crossVerification.server);
@@ -255,10 +255,28 @@ async function main() {
     }
 
     // ---- 7. restart: same logical id, new PID --------------------------------
-    await page.locator('[data-testid="server-restart-button"]').click();
+    const restartBtn = page.locator('[data-testid="server-restart-button"]');
+    const restartEnabled = await restartBtn.isEnabled().catch(() => false);
+    const stopEnabled = await page.locator('[data-testid="server-stop-button"]').isEnabled().catch(() => false);
+    const openEnabled = await page.locator('[data-testid="server-open-button"]').isEnabled().catch(() => false);
+    result.crossVerification.serverViewButtons = { restartEnabled, stopEnabled, openEnabled };
+    if (!restartEnabled || !stopEnabled) {
+      appendDefect({
+        severity: 'P1',
+        title: `${FLOW} WAVE3-RERUN: Server view does not reflect the running server — Stop/Restart/Open App buttons stay disabled while the server IS running (store sync gap, same class as Build view)`,
+        detail: result.crossVerification.serverViewButtons,
+        evidence: ['screenshots/m2/flow-05/08-after-restart.png'],
+      });
+      logError('server view buttons disabled despite running server (defect filed; driving lifecycle via commands)');
+    }
+    if (restartEnabled) {
+      await restartBtn.click();
+    } else {
+      await runCommand(page, 'Kairo: Restart Server', 20000);
+    }
     let restarted = null;
     const restartStart = Date.now();
-    while (Date.now() - restartStart < 300000) {
+    while (Date.now() - restartStart < 60000) {
       const r = await agentGet(env, '/api/v1/servers', 10000);
       const payload = r.json?.payload || r.json;
       const list = Array.isArray(payload) ? payload : (payload ? [payload] : []);
@@ -266,7 +284,41 @@ async function main() {
       if (running && String(running.pid) !== String(serverPid)) { restarted = running; break; }
       await sleep(3000);
     }
-    if (!restarted) throw new Error('restart did not produce a running server with a new PID within 300s');
+    if (!restarted) {
+      // Restart is UNIMPLEMENTED agent-side: POST /api/v1/servers/{id}/restart
+      // hits "unknown subpath" (404) — verified in handleServerSub
+      // (internal/api/handlers.go:501-556, no restart case).
+      appendDefect({
+        severity: 'P1',
+        title: `${FLOW} WAVE3-RERUN: Server Restart does nothing — frontend calls POST /api/v1/servers/{id}/restart but the agent has NO restart subpath (404 "unknown subpath")`,
+        evidence: ['logs/flow-05/agent.log', 'runtime-agent/internal/api/handlers.go:501-556'],
+      });
+      logError('restart endpoint unimplemented (defect filed); falling back to Stop+Start for lifecycle evidence');
+      // workaround: explicit stop + start to keep testing stop/start semantics
+      if (await page.locator('[data-testid="server-stop-button"]').isEnabled().catch(() => false)) {
+        await page.locator('[data-testid="server-stop-button"]').click();
+      } else {
+        await runCommand(page, 'Kairo: Stop Server', 20000);
+      }
+      const stopT = Date.now();
+      while (Date.now() - stopT < 60000) { if (!portPids(serverPort)) break; await sleep(2000); }
+      if (await page.locator('[data-testid="server-start-button"]').isEnabled().catch(() => false)) {
+        await page.locator('[data-testid="server-start-button"]').click();
+      } else {
+        await runCommand(page, 'Kairo: Start Server', 20000);
+      }
+      const startT2 = Date.now();
+      while (Date.now() - startT2 < 180000) {
+        const r = await agentGet(env, '/api/v1/servers', 10000);
+        const payload = r.json?.payload || r.json;
+        const list = Array.isArray(payload) ? payload : (payload ? [payload] : []);
+        const running = list.find(s2 => /running/i.test(s2.status || s2.state || ''));
+        if (running) { restarted = running; break; }
+        await sleep(3000);
+      }
+      if (!restarted) throw new Error('stop+start fallback also failed');
+      result.crossVerification.restartViaFallback = true;
+    }
     result.crossVerification.restart = {
       sameLogicalId: restarted.id === serverInfo.id,
       oldPid: serverPid, newPid: restarted.pid,
@@ -302,18 +354,36 @@ async function main() {
       result.crossVerification.logs.afterClearLength = (logText3 || '').length;
       await shot('10-logs-after-clear');
     }
+    if (!grew) {
+      appendDefect({
+        severity: 'P1',
+        title: `${FLOW} WAVE3-RERUN: Tomcat Logs viewer shows no history and no live tail (historyLines=${result.crossVerification.logs.historyLines}) — agent log API returns empty (api_handler.go: log streaming unimplemented, stdout goes only to kairo-stdout.log file)`,
+        detail: result.crossVerification.logs,
+        evidence: ['screenshots/m2/flow-05/09-logs-history.png'],
+      });
+      logError('log viewer empty/no live tail (defect filed)');
+    }
     logStep('LOGS_VERIFIED', result.crossVerification.logs);
 
     // ---- 9. stop: port freed, process gone; start again -----------------------
-    await page.locator('[data-testid="server-stop-button"]').click();
+    if (await page.locator('[data-testid="server-stop-button"]').isEnabled().catch(() => false)) {
+      await page.locator('[data-testid="server-stop-button"]').click();
+    } else {
+      await runCommand(page, 'Kairo: Stop Server', 20000);
+    }
     let portFreed = false;
     const stopStart = Date.now();
     while (Date.now() - stopStart < 120000) {
       if (!portPids(serverPort)) { portFreed = true; break; }
       await sleep(2000);
     }
+    // graceful Tomcat shutdown + reaping can take tens of seconds — poll
     let pidGone = false;
-    try { process.kill(parseInt(restarted.pid, 10), 0); } catch (_e) { pidGone = true; }
+    const pidT = Date.now();
+    while (Date.now() - pidT < 45000) {
+      try { process.kill(parseInt(restarted.pid, 10), 0); } catch (_e) { pidGone = true; break; }
+      await sleep(2000);
+    }
     result.crossVerification.stop = { portFreed, pidGone, port: serverPort };
     await shot('11-after-stop');
     if (!portFreed || !pidGone) {
@@ -327,7 +397,11 @@ async function main() {
     logStep('STOP_VERIFIED', result.crossVerification.stop);
 
     // start again
-    await page.locator('[data-testid="server-start-button"]').click();
+    if (await page.locator('[data-testid="server-start-button"]').isEnabled().catch(() => false)) {
+      await page.locator('[data-testid="server-start-button"]').click();
+    } else {
+      await runCommand(page, 'Kairo: Start Server', 20000);
+    }
     let again = null;
     const againStart = Date.now();
     while (Date.now() - againStart < 300000) {
