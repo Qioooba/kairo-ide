@@ -113,7 +113,13 @@ func (p *realOSProcess) Start(ctx context.Context, spec ProcessSpec) (ProcessObs
 	p.exitCode = nil
 	p.exitErr = nil
 	p.logBuf = newRingLogBuffer(MaxLogLines, MaxLogBytes)
-	p.listeners = make(map[uint64]LogListener)
+	// KAIRO-RC-WEB-245: do NOT reset p.listeners here — both
+	// production call sites (build compiler, tomcat provider)
+	// subscribe BEFORE Start, and wiping the map silently killed
+	// all log capture (empty build output, filesCompiled=0,
+	// missing server logs). The log buffer still resets per
+	// generation; subscribers live as long as the process object.
+
 
 	exePath, err := filepath.EvalSymlinks(spec.Executable)
 	if err != nil {

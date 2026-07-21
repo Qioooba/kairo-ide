@@ -150,7 +150,15 @@ func (c *Compiler) Compile(ctx context.Context, req Request) (*Result, error) {
 		res.Diagnostics = []Diagnostic{}
 	}
 	res.Success = res.ExitCode == 0
-	res.FilesCompiled = countCompiled(res.Output)
+	// KAIRO-RC-WEB-238 follow-up: modern javac prints no
+	// "Note: N files" line, so countCompiled always returned 0
+	// even for successful builds. A zero exit means every source
+	// passed to javac compiled — report that honestly.
+	if res.Success {
+		res.FilesCompiled = len(req.Sources)
+	} else {
+		res.FilesCompiled = countCompiled(res.Output)
+	}
 	return res, nil
 }
 
