@@ -595,6 +595,7 @@ func (f *fakeServerRunner) Start(req StartServerRequest) (*ServerResponse, error
 	f.lastReq = req
 	return &ServerResponse{ID: "srv_1", ProjectID: req.ProjectID, State: "starting"}, nil
 }
+func (f *fakeServerRunner) CatalinaHome() string                   { return "/tmp/catalina" }
 func (f *fakeServerRunner) Get(id string) (*ServerResponse, error) { return nil, nil }
 func (f *fakeServerRunner) List() []*ServerResponse                { return nil }
 func (f *fakeServerRunner) Stop(id string, force bool) (*ServerResponse, error) {
@@ -632,5 +633,52 @@ func TestServerStart_ResolvesWebappDirFromProject(t *testing.T) {
 	}
 	if runner.lastReq.WebappDir != "/tmp/legacy-sample/WebRoot" {
 		t.Fatalf("WebappDir = %q, want /tmp/legacy-sample/WebRoot", runner.lastReq.WebappDir)
+	}
+}
+
+// fakeDeployer records the Publish request.
+type fakeDeployer struct {
+	lastReq DeployRequest
+}
+
+func (f *fakeDeployer) Publish(req DeployRequest) (*DeployResult, error) {
+	f.lastReq = req
+	return &DeployResult{ID: "dep_1", State: "success"}, nil
+}
+func (f *fakeDeployer) Get(id string) (*DeployResult, error) { return nil, nil }
+func (f *fakeDeployer) List() []*DeployResult                { return nil }
+
+// KAIRO-RC-WEB-239: POST /api/v1/deployments {projectId, buildId}
+// must resolve source (project webapp) and target (catalina webapps).
+func TestDeployment_ResolvesSourceAndTargetFromProject(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	store := &fakeProjectStore{saved: domain.Project{
+		ID:          "proj-1",
+		Name:        "Legacy Sample",
+		RootPath:    "/tmp/legacy-sample",
+		WebappDir:   "WebRoot",
+		SourceRoots: []string{"src"},
+	}}
+	runner := &fakeServerRunner{}
+	deployer := &fakeDeployer{}
+	srv := NewServer(&Services{ProjectStore: store, ServerRunner: runner, Deployer: deployer}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/deployments", strings.NewReader(`{"projectId":"proj-1","buildId":"b1","scope":"all"}`))
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rr.Code, rr.Body.String())
+	}
+	if deployer.lastReq.Source != "/tmp/legacy-sample/WebRoot" {
+		t.Fatalf("Source = %q, want /tmp/legacy-sample/WebRoot", deployer.lastReq.Source)
+	}
+	if deployer.lastReq.Target != "/tmp/catalina/webapps/legacy-sample" {
+		t.Fatalf("Target = %q, want /tmp/catalina/webapps/legacy-sample", deployer.lastReq.Target)
 	}
 }

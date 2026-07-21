@@ -335,6 +335,25 @@ func (s *Server) handleDeployments(w http.ResponseWriter, r *http.Request) {
 			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: err.Error()})
 			return
 		}
+		// KAIRO-RC-WEB-239: the frontend sends {projectId, buildId,
+		// scope} — resolve source (the project's webapp dir) and
+		// target (the runner's Catalina webapps) instead of failing
+		// with "source is required".
+		if req.Source == "" && req.ProjectID != "" && s.Services.ProjectStore != nil {
+			p, err := s.Services.ProjectStore.Get(req.ProjectID)
+			if err != nil {
+				writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrNotFound, Message: "project not found: " + req.ProjectID})
+				return
+			}
+			req.Source = filepath.Join(p.RootPath, p.WebappDir)
+			if req.Target == "" && s.Services.ServerRunner != nil && s.Services.ServerRunner.CatalinaHome() != "" {
+				ctx := strings.TrimPrefix(p.ContextPath, "/")
+				if ctx == "" {
+					ctx = sanitizeContextName(p.Name)
+				}
+				req.Target = filepath.Join(s.Services.ServerRunner.CatalinaHome(), "webapps", ctx)
+			}
+		}
 		res, err := s.Services.Deployer.Publish(req)
 		if err != nil {
 			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrDeployFailed, Message: err.Error()})
@@ -359,6 +378,30 @@ func (s *Server) handleDeploymentByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeOK(w, env, res)
+}
+
+// sanitizeContextName turns a project name into a Tomcat webapps
+// directory name (lowercase, spaces to '-', alnum and -_. only).
+func sanitizeContextName(name string) string {
+	var b strings.Builder
+	prevDash := false
+	for _, r := range strings.ToLower(name) {
+		switch {
+		case r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-' || r == '_' || r == '.':
+			b.WriteRune(r)
+			prevDash = false
+		case r == ' ' || r == '/':
+			if !prevDash && b.Len() > 0 {
+				b.WriteByte('-')
+				prevDash = true
+			}
+		}
+	}
+	out := strings.Trim(b.String(), "-")
+	if out == "" {
+		return "app"
+	}
+	return out
 }
 
 // ----- Servers -----

@@ -173,6 +173,9 @@ type ServerLogEntry struct {
 
 // ServerRunner starts/stops a server runtime.
 type ServerRunner interface {
+	// CatalinaHome returns the Tomcat 6 home the runner deploys
+	// into ("" when no Tomcat is available).
+	CatalinaHome() string
 	Start(req StartServerRequest) (*ServerResponse, error)
 	Get(id string) (*ServerResponse, error)
 	Stop(id string, force bool) (*ServerResponse, error)

@@ -101,6 +101,9 @@ func (r *realServerRunner) load() {
 	}
 }
 
+// CatalinaHome implements api.ServerRunner.
+func (r *realServerRunner) CatalinaHome() string { return r.tomcat6Home }
+
 func (r *realServerRunner) save() {
 	items := make([]*serverMeta, 0, len(r.meta))
 	for _, m := range r.meta {
