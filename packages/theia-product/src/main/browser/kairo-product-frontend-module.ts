@@ -46,6 +46,7 @@ import { ImportWizardWidget, ProjectSelectorWidget } from '@kairo/project-extens
 import { KairoWelcomeWidget, KAIRO_WELCOME_FACTORY_ID } from './kairo-welcome-widget';
 import { KairoWindowTitleContribution } from './kairo-window-title-contribution';
 import { WindowTitleContribution } from '@theia/core/lib/browser/window/window-title-service';
+import { KairoA11yPatchContribution } from './kairo-a11y-patch-contribution';
 import { KairoLargeFileContribution } from './kairo-large-file-contribution';
 import { KairoLargeFilePreferenceContribution } from './kairo-large-file-preferences';
 import {
@@ -177,6 +178,10 @@ export function bindKairoFrontend(bind: interfaces.Bind, unbind?: interfaces.Unb
 
   // Branded window title: "<widget> - <workspace> - Kairo IDE".
   bind(WindowTitleContribution).to(KairoWindowTitleContribution).inSingletonScope();
+
+  // Runtime ARIA patch for stock Theia/Lumino chrome (WEB-019).
+  bind(KairoA11yPatchContribution).toSelf().inSingletonScope();
+  bind(FrontendApplicationContribution).toService(KairoA11yPatchContribution);
 }
 
 export default new ContainerModule((bind, unbind, isBound, rebind) => {

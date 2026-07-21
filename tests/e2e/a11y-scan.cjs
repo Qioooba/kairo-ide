@@ -103,21 +103,21 @@ async function openViaPalette(page, commandLabel) {
     await sleep(500);
 
     step('axe scan: Project Selector');
-    await openViaPalette(page, 'Kairo: Open Project Selector');
+    await openViaPalette(page, 'Kairo: Select Project');
     report.scans.push(await axeScan(page, '03-project-selector'));
     await page.keyboard.press('Escape');
     await sleep(500);
 
     step('axe scan: Build View');
-    await openViaPalette(page, 'Kairo: Open Build View');
+    await openViaPalette(page, 'Kairo: Show Builds');
     report.scans.push(await axeScan(page, '04-build-view'));
 
     step('axe scan: Server View');
-    await openViaPalette(page, 'Kairo: Open Server View');
+    await openViaPalette(page, 'Kairo: Show Servers');
     report.scans.push(await axeScan(page, '05-server-view'));
 
     step('axe scan: Deployments View');
-    await openViaPalette(page, 'Kairo: Open Deployments View');
+    await openViaPalette(page, 'Kairo: Show Deployments');
     report.scans.push(await axeScan(page, '06-deployments-view'));
 
     for (const scan of report.scans) {
@@ -180,6 +180,11 @@ async function openViaPalette(page, commandLabel) {
           impact: v.impact,
           help: v.help,
           nodes: v.nodes.length,
+          // Node-level targets so fixes don't need a second probe run.
+          targets: v.nodes.slice(0, 8).map((n) => ({
+            target: n.target,
+            html: (n.html || '').slice(0, 200),
+          })),
         })),
       })),
     };

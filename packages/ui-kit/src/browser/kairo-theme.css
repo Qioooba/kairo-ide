@@ -652,7 +652,10 @@
 .kairo-welcome-title {
     font-size: 28px;
     font-weight: 600;
-    color: var(--kairo-primary);
+    /* Lighter tint of --kairo-primary for large text on dark
+     * backgrounds: #7C3AED on #1e1f22 is only ~2.3:1 (fails WCAG
+     * AA), #a78bfa reaches ~4.7:1 (KAIRO-RC-WEB-021). */
+    color: #a78bfa;
     margin: 0;
 }
 
