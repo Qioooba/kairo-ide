@@ -53,7 +53,7 @@ test('KairoProjectService.create() issues PUT /api/v1/projects/{projectId} with 
     setWorkspace: () => {},
     request: async (endpoint: string, payload: any, init: any) => {
       calls.push({ endpoint, payload, init });
-      return { ...payload.config, _saved: true };
+      return { ...payload, _saved: true };
     },
   };
   const svc = new KairoProjectService();
@@ -67,14 +67,15 @@ test('KairoProjectService.create() issues PUT /api/v1/projects/{projectId} with 
   assert.equal(calls.length, 1, 'create() must make exactly one runtime call');
   assert.equal(calls[0].endpoint, 'PUT /api/v1/projects/{projectId}');
   assert.equal(calls[0].init.pathParams.projectId, config.id);
-  assert.equal(calls[0].payload.config, config, 'config must be wrapped in { config } envelope');
+  assert.deepEqual(calls[0].payload, config, 'payload must be the FLAT project — the agent unmarshals into domain.Project directly (KAIRO-RC-WEB-202)');
+  assert.equal((calls[0].payload as any).config, undefined, 'payload must NOT be wrapped in { config }');
   assert.equal((result as any)._saved, true, 'create() must return the runtime response');
 });
 
 test('KairoProjectService.create() caches the saved config under its id', async () => {
   const fakeRuntime: any = {
     setWorkspace: () => {},
-    request: async (_endpoint: string, payload: any) => ({ ...payload.config, _saved: true }),
+    request: async (_endpoint: string, payload: any) => ({ ...payload, _saved: true }),
   };
   const svc = new KairoProjectService();
   (svc as any).runtime = fakeRuntime;

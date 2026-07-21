@@ -35,6 +35,11 @@ export class KairoProjectService {
    * calling the runtime client directly, so the service
    * owns the wire contract and the local cache.
    *
+   * The agent unmarshals the body directly into domain.Project
+   * (flat). Sending `{ config }` used to nest everything under
+   * Project.Config and store EMPTY top-level id/name/rootPath
+   * (KAIRO-RC-WEB-202) — always send the flat project.
+   *
    * The returned value is the canonical ProjectConfig as
    * stored by the agent; callers should treat it as the new
    * source of truth (e.g. the wizard's success step reads
@@ -46,7 +51,7 @@ export class KairoProjectService {
     }
     const saved = await this.runtime.request(
       'PUT /api/v1/projects/{projectId}',
-      { config },
+      config,
       { pathParams: { projectId: config.id } },
     ) as ProjectConfig;
     this.projects.set(saved.id, saved);
