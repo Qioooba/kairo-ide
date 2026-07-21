@@ -63,6 +63,7 @@ type BuildRequest struct {
 	ProjectRoot string   `json:"projectRoot"`
 	OutputDir   string   `json:"outputDir"`
 	Classpath   []string `json:"classpath"`
+	Encoding    string   `json:"encoding"`
 	Clean       bool     `json:"clean"`
 }
 

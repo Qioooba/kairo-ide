@@ -8,7 +8,7 @@ import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
 /**
- * HelloServlet — the canonical first Servlet a developer writes
+ * HelloServlet - the canonical first Servlet a developer writes
  * against a legacy Java Web project.
  *
  * The Kairo IDE uses this as the smoke-test endpoint for the

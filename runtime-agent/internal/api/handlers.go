@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -274,14 +275,21 @@ func (s *Server) handleBuilds(w http.ResponseWriter, r *http.Request) {
 		// — the user got a green checkmark for a build that did
 		// nothing. Surfacing 404 here is the truthful behavior
 		// (N-BUILD-001).
+		// KAIRO-RC-WEB-238: also HYDRATE the request from the stored
+		// project — the UI sends only {projectId[, clean]}, and
+		// without the project's root/levels/encoding/outputDir the
+		// engine compiled 0 files into agent-data with defaults
+		// (the "sham build").
 		if s.Services.ProjectStore != nil {
-			if _, err := s.Services.ProjectStore.Get(req.ProjectID); err != nil {
+			p, err := s.Services.ProjectStore.Get(req.ProjectID)
+			if err != nil {
 				writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{
 					Code:    protocol.ErrNotFound,
 					Message: fmt.Sprintf("project not found: %s", req.ProjectID),
 				})
 				return
 			}
+			hydrateBuildRequest(&req, p)
 		}
 		if s.Services.BuildEngine == nil {
 			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInternal, Message: "BuildEngine not configured"})
@@ -378,6 +386,44 @@ func (s *Server) handleDeploymentByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeOK(w, env, res)
+}
+
+// hydrateBuildRequest fills build-request fields the UI does not
+// send from the stored project (KAIRO-RC-WEB-238).
+func hydrateBuildRequest(req *BuildRequest, p domain.Project) {
+	if req.ProjectRoot == "" {
+		req.ProjectRoot = p.RootPath
+	}
+	if req.SourceLevel == "" && p.SourceLevel != "" {
+		req.SourceLevel = p.SourceLevel
+	}
+	if req.TargetLevel == "" && p.TargetLevel != "" {
+		req.TargetLevel = p.TargetLevel
+	}
+	if req.Encoding == "" && p.Encoding != "" {
+		req.Encoding = p.Encoding
+	}
+	if req.OutputDir == "" && p.OutputDir != "" {
+		req.OutputDir = filepath.Join(p.RootPath, p.OutputDir)
+	}
+	if len(req.Classpath) == 0 {
+		// Legacy layout convention: jars under <root>/lib and
+		// <webapp>/WEB-INF/lib form the compile classpath.
+		for _, dir := range []string{
+			filepath.Join(p.RootPath, "lib"),
+			filepath.Join(p.RootPath, p.WebappDir, "WEB-INF", "lib"),
+		} {
+			entries, err := os.ReadDir(dir)
+			if err != nil {
+				continue
+			}
+			for _, e := range entries {
+				if !e.IsDir() && strings.HasSuffix(strings.ToLower(e.Name()), ".jar") {
+					req.Classpath = append(req.Classpath, filepath.Join(dir, e.Name()))
+				}
+			}
+		}
+	}
 }
 
 // sanitizeContextName turns a project name into a Tomcat webapps

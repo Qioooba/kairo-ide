@@ -682,3 +682,32 @@ func TestDeployment_ResolvesSourceAndTargetFromProject(t *testing.T) {
 		t.Fatalf("Target = %q, want /tmp/catalina/webapps/legacy-sample", deployer.lastReq.Target)
 	}
 }
+
+// KAIRO-RC-WEB-238: POST /api/v1/builds {projectId} must hydrate
+// root/levels/encoding/outputDir/classpath from the project.
+func TestBuildStart_HydratesFromProject(t *testing.T) {
+	proj := domain.Project{
+		ID:          "proj-1",
+		Name:        "legacy",
+		RootPath:    "/tmp/legacy-sample",
+		WebappDir:   "WebRoot",
+		OutputDir:   "build/classes",
+		SourceLevel: "1.8",
+		TargetLevel: "1.8",
+		Encoding:    "gbk",
+	}
+	req := BuildRequest{ProjectID: "proj-1"}
+	hydrateBuildRequest(&req, proj)
+	if req.ProjectRoot != "/tmp/legacy-sample" {
+		t.Fatalf("ProjectRoot = %q", req.ProjectRoot)
+	}
+	if req.SourceLevel != "1.8" || req.TargetLevel != "1.8" {
+		t.Fatalf("levels = %q/%q", req.SourceLevel, req.TargetLevel)
+	}
+	if req.Encoding != "gbk" {
+		t.Fatalf("Encoding = %q", req.Encoding)
+	}
+	if req.OutputDir != "/tmp/legacy-sample/build/classes" {
+		t.Fatalf("OutputDir = %q", req.OutputDir)
+	}
+}
