@@ -198,8 +198,34 @@ async function main() {
     await page.keyboard.type(COMMENT, { delay: 10 });
     await page.keyboard.press('Meta+S');
     await sleep(1500);
-    const shaAfterEdit = sha256File(gbkFile);
-    if (shaAfterEdit === sha0Gbk) throw new Error('save did not change bytes');
+    let shaAfterEdit = sha256File(gbkFile);
+    if (shaAfterEdit === sha0Gbk) {
+      // Meta+S did not persist — try the File menu's Save before judging.
+      const notif1 = await page.locator('.theia-Notifications').textContent().catch(() => '');
+      await page.locator('.lm-MenuBar-item', { hasText: 'File' }).first().click();
+      await sleep(600);
+      const fileMenu = page.locator('.lm-Menu').first();
+      await fileMenu.waitFor({ state: 'visible', timeout: 10000 });
+      await fileMenu.getByText(/^Save$/, { exact: true }).first().click();
+      await sleep(1500);
+      shaAfterEdit = sha256File(gbkFile);
+      result.crossVerification.metaSSaveFailed = { notifications: (notif1 || '').slice(0, 300), menuSaveWorked: shaAfterEdit !== sha0Gbk };
+      if (shaAfterEdit === sha0Gbk) {
+        appendDefect({
+          severity: 'P1',
+          title: `${FLOW} WAVE3-RERUN: plain save (Meta+S AND File>Save) does not persist a GBK-representable edit — no error shown, editor stays dirty`,
+          detail: result.crossVerification.metaSSaveFailed,
+          evidence: ['screenshots/m2/flow-03/99-fail.png'],
+        });
+        throw new Error('save did not change bytes via Meta+S or menu');
+      }
+      appendDefect({
+        severity: 'P2',
+        title: `${FLOW} WAVE3-RERUN: Meta+S does not save (File>Save menu works)`,
+        detail: result.crossVerification.metaSSaveFailed,
+      });
+      logError('Meta+S save failed but menu Save worked (defect filed)');
+    }
     const decoded = gbkDecode(fs.readFileSync(gbkFile));
     if (!decoded.includes('测试注释QA')) {
       appendDefect({
@@ -216,7 +242,12 @@ async function main() {
 
     // ---- 6. unrepresentable char -> save must be refused ------------------
     await page.keyboard.type('😀', { delay: 10 });
-    await page.keyboard.press('Meta+S');
+    // use File > Save (Meta+S proved unreliable in this build — see defect)
+    await page.locator('.lm-MenuBar-item', { hasText: 'File' }).first().click();
+    await sleep(600);
+    const fileMenu2 = page.locator('.lm-Menu').first();
+    await fileMenu2.waitFor({ state: 'visible', timeout: 10000 });
+    await fileMenu2.getByText(/^Save$/, { exact: true }).first().click();
     await sleep(2500);
     // look for the refusal message (Theia notification or status bar)
     const notif = page.locator('.theia-Notifications, .theia-notification-list-item, [class*="notification"]', { hasText: /cannot represent|refused|GBK/i }).first();
