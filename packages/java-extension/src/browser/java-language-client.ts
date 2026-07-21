@@ -58,9 +58,13 @@ export class JavaLanguageClient implements JdtLsFrontendClient, Disposable {
    * Start the JDT LS for a given workspace. The Theia
    * backend process is the owner of the LSP child process;
    * the browser only drives it.
+   *
+   * `home` is the JDT LS install root derived from the Go
+   * agent's launch descriptor; when present it wins over
+   * the KAIRO_JDT_LS_HOME env fallback in the backend.
    */
-  async start(opts: { rootUri: string; workspaceDataDir: string; sourceLevel?: string }): Promise<{ ok: true } | { ok: false; reason: string }> {
-    const inspect = this.backend.inspect();
+  async start(opts: { rootUri: string; workspaceDataDir: string; sourceLevel?: string; home?: string }): Promise<{ ok: true } | { ok: false; reason: string }> {
+    const inspect = this.backend.inspect(opts.home);
     if (!inspect.ok) {
       this.logger.warn(`[JavaLanguageClient] cannot start: ${inspect.reason}`);
       return { ok: false, reason: inspect.reason };

@@ -158,7 +158,8 @@ export class JavaLanguageServerLifecycle {
                 return;
             }
             const rootUri = pathToFileUri(descriptor.workingDir);
-            const startKey = `${rootUri}|${workspaceDataDir}`;
+            const home = extractJdtLsHome(descriptor);
+            const startKey = `${rootUri}|${workspaceDataDir}|${home ?? ''}`;
 
             const state = this.javaClient.state();
             if (state === 'starting' || state === 'initializing' || state === 'ready') {
@@ -168,7 +169,7 @@ export class JavaLanguageServerLifecycle {
                 }
             }
 
-            const result = await this.javaClient.start({ rootUri, workspaceDataDir });
+            const result = await this.javaClient.start({ rootUri, workspaceDataDir, home });
             if (result.ok) {
                 this.lastStartKey = startKey;
                 this.logger.info(`JDT LS start requested for ${rootUri}`);
@@ -218,4 +219,31 @@ export function pathToFileUri(p: string): string {
     const normalized = p.replace(/\\/g, '/');
     const withSlash = normalized.startsWith('/') ? normalized : `/${normalized}`;
     return `file://${withSlash}`;
+}
+
+/**
+ * Extract the JDT LS install home from the launch descriptor.
+ * The agent's args reference the Equinox launcher jar as
+ * `<home>/plugins/org.eclipse.equinox.launcher_<version>.jar`
+ * (the value following `-jar`); the install home is the
+ * parent of `plugins/`. Returns undefined when the descriptor
+ * does not carry a launcher path — the backend then falls
+ * back to KAIRO_JDT_LS_HOME.
+ */
+export function extractJdtLsHome(descriptor: JdtLsLaunchDescriptor): string | undefined {
+    if (!Array.isArray(descriptor.args)) {
+        return undefined;
+    }
+    const jarIdx = descriptor.args.indexOf('-jar');
+    const candidates = jarIdx >= 0 && jarIdx + 1 < descriptor.args.length
+        ? [descriptor.args[jarIdx + 1]]
+        : descriptor.args;
+    for (const arg of candidates) {
+        const normalized = String(arg).replace(/\\/g, '/');
+        const m = /^(.*)\/plugins\/org\.eclipse\.equinox\.launcher_[^/]*\.jar$/i.exec(normalized);
+        if (m && m[1]) {
+            return m[1];
+        }
+    }
+    return undefined;
 }

@@ -41,16 +41,18 @@ export class JdtLsService {
   }
 
   /** Inspect the install without starting it. Returns
-   *  `{ ok: true, dist }` or `{ ok: false, reason }`. */
-  inspect(): { ok: true; dist: JdtLsDistribution } | { ok: false; reason: string } {
-    const r = JdtLsManager.resolveDistribution({});
+   *  `{ ok: true, dist }` or `{ ok: false, reason }`.
+   *  `home` (from the agent's launch descriptor) wins over
+   *  the KAIRO_JDT_LS_HOME env fallback. */
+  inspect(home?: string): { ok: true; dist: JdtLsDistribution } | { ok: false; reason: string } {
+    const r = JdtLsManager.resolveDistribution({ home });
     if ('kind' in r) {
       return { ok: false, reason: r.message };
     }
     return { ok: true, dist: r };
   }
 
-  async start(opts: { rootUri: string; workspaceDataDir: string; sourceLevel?: string }): Promise<void> {
+  async start(opts: { rootUri: string; workspaceDataDir: string; sourceLevel?: string; home?: string }): Promise<void> {
     if (!this.manager) {
       this.manager = new JdtLsManager(this.logger);
       this.subscription = this.manager.onEvent(e => this.handleManagerEvent(e));

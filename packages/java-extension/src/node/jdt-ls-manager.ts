@@ -215,11 +215,14 @@ export class JdtLsManager implements Disposable {
    * be resolved; the caller should catch and report the
    * `{ kind, message }` error to the UI.
    */
-  async start(opts: { rootUri: string; workspaceDataDir: string; sourceLevel?: string }): Promise<void> {
+  async start(opts: { rootUri: string; workspaceDataDir: string; sourceLevel?: string; home?: string }): Promise<void> {
     if (this.state === 'starting' || this.state === 'initializing' || this.state === 'ready') {
       throw new Error(`JDT LS already in state ${this.state}`);
     }
-    const dist = JdtLsManager.resolveDistribution({});
+    // opts.home (derived from the Go agent's launch descriptor)
+    // wins over the KAIRO_JDT_LS_HOME env fallback inside
+    // resolveDistribution.
+    const dist = JdtLsManager.resolveDistribution({ home: opts.home });
     if ('kind' in dist) {
       this.setState('failed');
       throw new Error(dist.message);
@@ -403,14 +406,24 @@ export class JdtLsManager implements Disposable {
     if (!this.connection || this.state !== 'ready') {
       throw new Error(`JDT LS not ready (state=${this.state})`);
     }
-    this.connection.sendNotification('textDocument/didOpen', params);
+    this.connection.sendNotification('textDocument/didOpen', {
+      textDocument: {
+        uri: params.uri,
+        languageId: params.languageId,
+        version: params.version,
+        text: params.text,
+      },
+    });
   }
 
   didChange(params: { uri: string; version: number; changes: { text: string; rangeLength?: number }[] }): void {
     if (!this.connection || this.state !== 'ready') {
       throw new Error(`JDT LS not ready (state=${this.state})`);
     }
-    this.connection.sendNotification('textDocument/didChange', params);
+    this.connection.sendNotification('textDocument/didChange', {
+      textDocument: { uri: params.uri, version: params.version },
+      contentChanges: params.changes,
+    });
   }
 
   didClose(uri: string): void {

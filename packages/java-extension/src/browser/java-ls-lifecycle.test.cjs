@@ -46,6 +46,7 @@ const assert = require('node:assert/strict');
 const {
   JavaLanguageServerLifecycle,
   extractWorkspaceDataDir,
+  extractJdtLsHome,
   pathToFileUri,
 } = require('../../lib/browser/java-ls-lifecycle');
 
@@ -130,7 +131,11 @@ async function flush() {
 
 const DESCRIPTOR = {
   command: '/jre17/bin/java',
-  args: ['-jar', '/jdtls/launcher.jar', '-data', '/data/ws1_p1'],
+  args: [
+    '-jar', '/jdtls-home/plugins/org.eclipse.equinox.launcher_1.6.900.v20240613-2009.jar',
+    '-configuration', '/jdtls-home/config_mac',
+    '-data', '/data/ws1_p1',
+  ],
   workingDir: '/repo/proj',
   envAllowlist: ['PATH=/usr/bin', 'JAVA_HOME=/jre17', 'JDTLS_WORKSPACE=/data/ws1_p1'],
 };
@@ -151,6 +156,7 @@ test('project change runs prepare -> descriptor -> client.start in order', async
   assert.deepEqual(mocks.calls[2].opts, {
     rootUri: 'file:///repo/proj',
     workspaceDataDir: '/data/ws1_p1',
+    home: '/jdtls-home',
   });
   assert.deepEqual(mocks.logs.error, []);
   svc.dispose();
@@ -212,4 +218,23 @@ test('extractWorkspaceDataDir prefers envAllowlist, falls back to -data arg', ()
 test('pathToFileUri handles posix and windows paths', () => {
   assert.equal(pathToFileUri('/repo/proj'), 'file:///repo/proj');
   assert.equal(pathToFileUri('C:\\repo\\proj'), 'file:///C:/repo/proj');
+});
+
+test('extractJdtLsHome finds the install home from the -jar launcher path', () => {
+  assert.equal(extractJdtLsHome(DESCRIPTOR), '/jdtls-home');
+  // Windows-style separators are normalized.
+  assert.equal(
+    extractJdtLsHome({
+      command: 'java',
+      args: ['-jar', 'C:\\tools\\jdtls\\plugins\\org.eclipse.equinox.launcher_1.6.9.jar'],
+      workingDir: 'C:\\repo',
+      envAllowlist: [],
+    }),
+    'C:/tools/jdtls',
+  );
+  // No launcher path -> undefined (backend falls back to KAIRO_JDT_LS_HOME).
+  assert.equal(
+    extractJdtLsHome({ command: 'java', args: ['-data', '/x'], workingDir: '/r', envAllowlist: [] }),
+    undefined,
+  );
 });

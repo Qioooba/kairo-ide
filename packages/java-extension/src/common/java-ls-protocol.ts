@@ -19,7 +19,7 @@ export const JdtLsBackendPath = '/services/jdt-ls-backend';
  *  Theia backend's JdtLsService implements this. */
 export const JdtLsBackendService = Symbol('JdtLsBackendService');
 export interface JdtLsBackendService {
-  $start(opts: { rootUri: string; workspaceDataDir: string; sourceLevel?: string }): Promise<{ ok: true } | { ok: false; reason: string }>;
+  $start(opts: { rootUri: string; workspaceDataDir: string; sourceLevel?: string; home?: string }): Promise<{ ok: true } | { ok: false; reason: string }>;
   $stop(): Promise<void>;
   $state(): Promise<JdtLsState>;
   $inspect(): Promise<{ ok: true; home: string; jre: string; launcherJar: string } | { ok: false; reason: string }>;
