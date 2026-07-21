@@ -421,7 +421,10 @@ async function main() {
     const suggestVisible = await suggest.waitFor({ state: 'visible', timeout: 8000 }).then(() => true).catch(() => false);
     if (suggestVisible) {
       const rows = await page.locator('.suggest-widget.visible .monaco-list-row').count();
-      logStep('JAVA_COMPLETION_OK', { suggestions: rows });
+      // capture JDT LS state on the success path too (coordinator request)
+      const jdtlsOk = await agentGet(env, '/api/v1/jdtls', 10000);
+      result.crossVerification.jdtlsAtCompletion = { ok: jdtlsOk.ok, status: jdtlsOk.status, body: (jdtlsOk.text || '').slice(0, 400) };
+      logStep('JAVA_COMPLETION_OK', { suggestions: rows, jdtls: result.crossVerification.jdtlsAtCompletion });
       await shot('13-java-completion');
       await page.keyboard.press('Escape');
     } else {
@@ -446,27 +449,39 @@ async function main() {
       await maybeDialog.locator('button', { hasText: /Don'?t Save/i }).first().click().catch(() => {});
     }
 
-    // F12 go-to-definition on 'HttpServletRequest' in HelloServlet.java
+    // F12 go-to-definition on 'HttpServletRequest' in HelloServlet.java —
+    // click the symbol occurrence directly (no find widget needed).
     logStep('JAVA_F12');
     await quickOpenFile(page, 'HelloServlet.java');
     await sleep(1200);
-    await page.locator('.monaco-editor .view-lines').first().click();
-    await sleep(300);
-    await page.keyboard.press('Meta+F');
-    const findInput = page.locator('.monaco-editor .find-widget input, .find-widget input').first();
-    await findInput.waitFor({ state: 'visible', timeout: 15000 });
-    await findInput.fill('HttpServletRequest');
-    await page.keyboard.press('Escape'); // closes find, cursor lands on match
+    const symbol = page.locator('.monaco-editor .view-lines span', { hasText: 'HttpServletRequest' }).first();
+    await symbol.waitFor({ state: 'visible', timeout: 15000 });
+    await symbol.click();
+    await sleep(400);
     await page.keyboard.press('F12');
-    await sleep(2500);
+    await sleep(3000);
     const f12Peek = await page.locator('.monaco-editor .peekview-widget, .zone-widget').count();
     const f12Tab = await activeTabLabel(page);
-    if (f12Peek > 0 || f12Tab.includes('HelloServlet')) {
-      logStep('JAVA_F12_RESULT', { peekWidgets: f12Peek, activeTab: f12Tab });
+    const jdtlsAtF12 = await agentGet(env, '/api/v1/jdtls', 10000);
+    const jdtlsState = (() => { try { return JSON.parse(jdtlsAtF12.text).payload.state; } catch (_e) { return 'unknown'; } })();
+    if (f12Peek > 0) {
+      logStep('JAVA_F12_RESULT', { peekWidgets: f12Peek, activeTab: f12Tab, jdtlsState });
       await shot('14-java-f12');
     } else {
-      markBlocked('Java F12 go-to-definition', { activeTab: f12Tab, peekWidgets: f12Peek });
       await shot('14-java-f12-blocked');
+      markBlocked('Java F12 go-to-definition', { activeTab: f12Tab, peekWidgets: f12Peek, jdtlsState });
+    }
+    // JDT LS never started in this build (state=stopped at completion AND
+    // F12): the 12 completion rows are a non-JDT fallback. Java language
+    // intelligence is BLOCKED for release — evidence: jdtls API snapshots
+    // + agent log (copied in teardown).
+    if (jdtlsState === 'stopped') {
+      markBlocked('Java language server (JDT LS)', {
+        state: 'stopped at completion and F12 time',
+        completionRowsWereNonJdt: true,
+        jdtlsApi: (jdtlsAtF12.text || '').slice(0, 300),
+        agentLog: 'logs/flow-02/agent.log',
+      });
     }
 
     // ---- 9. large files ----------------------------------------------------
@@ -483,16 +498,43 @@ async function main() {
     await quickOpenFile(page, 'qa-big-10mb.txt', 60000);
     await sleep(3000);
     const big10Rendered = await page.locator('.monaco-editor .view-lines').first().textContent().catch(() => '');
-    await page.keyboard.press('Meta+F');
-    const bigFind = page.locator('.monaco-editor .find-widget input').first();
-    await bigFind.waitFor({ state: 'visible', timeout: 10000 });
-    await bigFind.fill('ABCDEFGHIJ');
-    await sleep(1500);
-    const matchInfo = await page.locator('.monaco-editor .find-widget .matchesCount').textContent().catch(() => '');
-    await page.keyboard.press('Escape');
-    await shot('16-large-10mb');
-    result.crossVerification.large10mb = { renderedChars: (big10Rendered || '').length, findMatches: matchInfo };
-    logStep('LARGE_10MB_RESULT', result.crossVerification.large10mb);
+    // Meta+F never opened the find widget in repeated runs (see run19/20
+    // logs) — try the Edit menu's Find entry instead.
+    await page.locator('.monaco-editor .view-lines').first().click();
+    await sleep(300);
+    await page.locator('.lm-MenuBar-item', { hasText: 'Edit' }).first().click();
+    await sleep(600);
+    const editMenu = page.locator('.lm-Menu').first();
+    await editMenu.waitFor({ state: 'visible', timeout: 10000 });
+    const editItems = await editMenu.locator('.lm-Menu-itemLabel').allTextContents();
+    result.crossVerification.editMenuItems = editItems.filter(Boolean).slice(0, 20);
+    await editMenu.getByText(/^Find/, { exact: false }).first().click();
+    const bigFind = page.locator('.monaco-editor .find-widget input, .find-widget input').first();
+    const findOpened = await bigFind.waitFor({ state: 'visible', timeout: 15000 }).then(() => true).catch(() => false);
+    if (!findOpened) {
+      appendDefect({
+        severity: 'P2',
+        title: `${FLOW}: Find widget does not open via Meta+F keyboard or Edit > Find menu`,
+        evidence: ['screenshots/m2/flow-02/99-fail.png'],
+        editMenuItems: result.crossVerification.editMenuItems,
+      });
+      logError('find widget did not open via menu either (defect filed); verifying 10MB via scroll instead');
+      await page.keyboard.press('Escape').catch(() => {});
+      await page.locator('.monaco-editor .view-lines').first().click();
+      await page.keyboard.press('Control+End').catch(() => {});
+      await sleep(2000);
+      await shot('16-large-10mb');
+      result.crossVerification.large10mb = { renderedChars: (big10Rendered || '').length, findMatches: 'FIND_WIDGET_UNAVAILABLE' };
+      logStep('LARGE_10MB_RESULT', result.crossVerification.large10mb);
+    } else {
+      await bigFind.fill('ABCDEFGHIJ');
+      await sleep(1500);
+      const matchInfo = await page.locator('.monaco-editor .find-widget .matchesCount').textContent().catch(() => '');
+      await page.keyboard.press('Escape');
+      await shot('16-large-10mb');
+      result.crossVerification.large10mb = { renderedChars: (big10Rendered || '').length, findMatches: matchInfo };
+      logStep('LARGE_10MB_RESULT', result.crossVerification.large10mb);
+    }
 
     // ---- 10. console gate ---------------------------------------------------
     writeLogs(dirs.logs, page._kairoLogs || []);
