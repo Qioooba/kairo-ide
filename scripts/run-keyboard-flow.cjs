@@ -29,25 +29,44 @@ async function waitForShell(page) {
 }
 
 async function openCommandPalette(page, query) {
-  await page.keyboard.press('F1');
-  // Wait for the quick-open input to be visible AND focused — on the
-  // first palette open after page load, typing before focus lands
-  // loses the whole query (KAIRO-RC-WEB-249).
+  // Fully retry-based: under parallel load the first F1 can be
+  // swallowed or the quick-open can vanish mid-interaction. Any
+  // failure → Escape, settle, retry from scratch (KAIRO-RC-WEB-249).
   const input = page.locator('input[aria-label="Type to narrow down results."]').first();
-  await input.waitFor({ state: 'visible', timeout: 10000 });
-  await input.click();
-  await sleep(300);
-  await page.keyboard.type(query, { delay: 20 });
-  await sleep(800);
-  // Assert the command is actually listed before executing it — a
-  // mistyped label must FAIL the step, not silently "pass" because
-  // the palette input still has focus (KAIRO-RC-WEB-249).
-  const items = await page.locator('.monaco-list-row').allTextContents().catch(() => []);
-  const needle = query.replace(/^Kairo: /, '');
-  const matched = items.some(t => t.includes(needle));
-  await page.keyboard.press('Enter');
-  await sleep(1500);
-  return matched;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      await page.keyboard.press('F1');
+      await input.waitFor({ state: 'visible', timeout: 15000 });
+      const hasFocus = await page.evaluate(() => document.activeElement?.getAttribute('aria-label') === 'Type to narrow down results.');
+      if (!hasFocus) await input.evaluate(el => el.focus());
+      await sleep(200);
+      // select-all replaces whatever the palette pre-filled (fill()
+      // fails actionability while the quick-open overlay animates).
+      await page.keyboard.down('Meta');
+      await page.keyboard.press('a');
+      await page.keyboard.up('Meta');
+      await page.keyboard.type(query, { delay: 20 });
+      // wait for the filtered list to render, not a fixed sleep
+      await page.waitForSelector('.monaco-list-row', { state: 'attached', timeout: 8000 }).catch(() => {});
+      await sleep(400);
+      const stuck = await input.inputValue().catch(() => '');
+      if (!stuck.includes(query)) throw new Error(`query did not stick: "${stuck}"`);
+      const items = await page.locator('.monaco-list-row').allTextContents().catch(() => []);
+      const needle = query.replace(/^Kairo: /, '');
+      const matched = items.some(t => t.includes(needle));
+      await page.keyboard.press('Enter');
+      await sleep(1500);
+      return matched;
+    } catch (err) {
+      await page.keyboard.press('Escape').catch(() => {});
+      await sleep(1000 + attempt * 1000);
+    }
+  }
+  await page.screenshot({ path: path.join(SCREENSHOTS, `palette-fail-${Date.now()}.png`) }).catch(() => {});
+  // one last Enter so the caller's flow is consistent
+  await page.keyboard.press('Enter').catch(() => {});
+  await sleep(1000);
+  return false;
 }
 
 // Waits until a tab whose id contains `tabHint` exists, returns true/false.
