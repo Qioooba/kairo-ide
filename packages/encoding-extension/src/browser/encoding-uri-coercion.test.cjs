@@ -136,5 +136,37 @@ test('encodeStream validates string saves too (KAIRO-RC-WEB-229)', async () => {
     /not representable/,
   );
   const buf = await svc.encodeStream('中文测试', { encoding: 'gbk' });
-  assert.ok(buf.byteLength > 0);
+  // KAIRO-RC-WEB-250: for non-UTF-8 the result keeps Theia's wire shape
+  // (BinaryBuffer | BinaryBufferReadable) — accept either.
+  const byteLength = buf.byteLength ?? (typeof buf.read === 'function' ? (buf.read()?.byteLength ?? 0) : 0);
+  assert.ok(byteLength > 0);
+});
+
+test('toProjectRootUri produces a file-scheme URI for bare paths (KAIRO-RC-WEB-206)', () => {
+  const { toProjectRootUri } = require('../../lib/browser/project-encoding-contribution');
+  const posix = toProjectRootUri('/srv/legacy/app');
+  assert.equal(posix.scheme, 'file');
+  assert.equal(posix.path.toString(), '/srv/legacy/app');
+  // A scheme-less URI used to be registered as the override parent and
+  // never matched file:// resources, so the project encoding did nothing.
+  // Note Theia's direction: a.isEqualOrParent(b) === "a is ancestor-or-equal of b".
+  const fileResource = toProjectRootUri('file:///srv/legacy/app/WebRoot/hello.jsp');
+  assert.ok(posix.isEqualOrParent(fileResource), 'override parent must be an ancestor of project files');
+  const win = toProjectRootUri('D:\\legacy\\app');
+  assert.equal(win.scheme, 'file');
+});
+
+test('KairoEncodingRegistry applies folder overrides to descendants (KAIRO-RC-WEB-206)', () => {
+  const { KairoEncodingRegistry } = require('../../lib/browser/kairo-encoding-registry');
+  const URI = require('@theia/core/lib/common/uri').default;
+  const reg = Object.create(KairoEncodingRegistry.prototype);
+  reg.encodingOverrides = [];
+  reg.registerOverride({ parent: new URI('file:///srv/legacy/app'), encoding: 'gbk' });
+  // A file INSIDE the folder must match (stock Theia returns undefined here).
+  assert.equal(reg.getEncodingOverride(new URI('file:///srv/legacy/app/WebRoot/hello.jsp')), 'gbk');
+  // The folder itself matches.
+  assert.equal(reg.getEncodingOverride(new URI('file:///srv/legacy/app')), 'gbk');
+  // Sibling paths must NOT match.
+  assert.equal(reg.getEncodingOverride(new URI('file:///srv/legacy/other/x.jsp')), undefined);
+  assert.equal(reg.getEncodingOverride(new URI('file:///srv/legacy/app2/y.jsp')), undefined);
 });

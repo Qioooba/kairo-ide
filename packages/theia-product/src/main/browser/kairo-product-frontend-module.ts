@@ -32,8 +32,9 @@ import {
 } from './kairo-views-contribution';
 import { KairoStatusBarContribution } from './kairo-status-bar-contribution';
 import { KairoFileCommandsContribution } from './kairo-file-commands';
-import { KairoEncodingCommandsContribution, KairoSafeEncodingService } from '@kairo/encoding-extension';
+import { KairoEncodingCommandsContribution, KairoEncodingRegistry, KairoSafeEncodingService } from '@kairo/encoding-extension';
 import { EncodingService } from '@theia/core/lib/common/encoding-service';
+import { EncodingRegistry } from '@theia/core/lib/browser/encoding-registry';
 import { BuildViewWidget } from '@kairo/build-extension';
 import { ServerViewWidget, LogViewerWidget } from '@kairo/tomcat-extension';
 import {
@@ -123,6 +124,16 @@ export function bindKairoFrontend(bind: interfaces.Bind, unbind?: interfaces.Unb
     rebind(EncodingService).to(KairoSafeEncodingService).inSingletonScope();
   } else {
     bind(EncodingService).to(KairoSafeEncodingService).inSingletonScope();
+  }
+
+  // KAIRO-RC-WEB-206: stock Theia's EncodingRegistry tests folder
+  // overrides with the comparison backwards (resource.isEqualOrParent(parent)),
+  // so a file inside the folder never matches — project-level GBK was
+  // dead. Replace it with the hierarchy-correct registry.
+  if (isBound && rebind && isBound(EncodingRegistry)) {
+    rebind(EncodingRegistry).to(KairoEncodingRegistry).inSingletonScope();
+  } else {
+    bind(EncodingRegistry).to(KairoEncodingRegistry).inSingletonScope();
   }
 
   // KairoFileCommandsContribution is a defensive re-registration

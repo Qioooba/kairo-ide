@@ -98,6 +98,7 @@ export class ServerStore {
     }
     private eventsUnsubscribe?: () => void;
     private statusUnsubscribe?: () => void;
+    private contextUnsubscribe?: { dispose(): void };
 
     @postConstruct()
     protected init(): void {
@@ -123,6 +124,19 @@ export class ServerStore {
         // kick off the snapshot load + event subscription as
         // fire-and-forget microtasks. The store is empty until the
         // first emission lands — same observable behavior as before.
+        // KAIRO-RC-WEB-237 (same root cause as BuildStore): bootstrap
+        // ran once at postConstruct when workspaceContext.context is
+        // almost always still undefined — no snapshot, no event
+        // subscription, no retry: the Server view stayed empty and its
+        // buttons permanently disabled. Re-bootstrap when the context
+        // appears.
+        this.contextUnsubscribe = this.workspaceContext.onDidChangeContext(ctx => {
+            if (ctx) {
+                this.eventsUnsubscribe?.();
+                this.eventsUnsubscribe = undefined;
+                void this.bootstrap();
+            }
+        });
         void this.bootstrap();
     }
 
@@ -221,6 +235,7 @@ export class ServerStore {
     dispose(): void {
         this.eventsUnsubscribe?.();
         this.statusUnsubscribe?.();
+        this.contextUnsubscribe?.dispose();
         this.onDidChangeEmitter.dispose();
         this.onConnectionStateChangeEmitter.dispose();
     }

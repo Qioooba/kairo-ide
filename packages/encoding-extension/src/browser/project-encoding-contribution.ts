@@ -15,8 +15,23 @@
 import { injectable, inject } from '@theia/core/shared/inversify';
 import { FrontendApplicationContribution } from '@theia/core/lib/browser';
 import URI from '@theia/core/lib/common/uri';
+import { FileUri } from '@theia/core/lib/common/file-uri';
 import { ActiveProjectService, ProjectInfo } from '@kairo/project-extension';
 import { KairoEncodingServiceImpl } from './encoding-service';
+
+/**
+ * Normalize a project root to a file-scheme Theia URI. The agent
+ * reports roots as bare paths ('/srv/app' or 'D:\\legacy\\app');
+ * `new URI(barePath)` produces a SCHEME-LESS uri whose override
+ * never matches the file:// resources the FileService reads, so
+ * the project encoding silently did nothing (KAIRO-RC-WEB-206).
+ */
+export function toProjectRootUri(root: string): URI {
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(root)) {
+    return new URI(root);
+  }
+  return FileUri.create(root);
+}
 
 @injectable()
 export class KairoProjectEncodingContribution implements FrontendApplicationContribution {
@@ -31,7 +46,7 @@ export class KairoProjectEncodingContribution implements FrontendApplicationCont
   protected apply(p: ProjectInfo | undefined): void {
     if (p?.encoding && p.root) {
       try {
-        this.encodingSvc.applyProjectEncoding(new URI(p.root), p.encoding);
+        this.encodingSvc.applyProjectEncoding(toProjectRootUri(p.root), p.encoding);
       } catch (err) {
         console.warn('[kairo] failed to apply project encoding', err);
       }

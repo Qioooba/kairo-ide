@@ -36,7 +36,7 @@ import {
   ActiveProjectService,
 } from '@kairo/project-extension';
 import { BuildViewWidget } from '@kairo/build-extension';
-import { BuildStore } from '@kairo/build-extension';
+import { BuildStore, mapBuildResult } from '@kairo/build-extension';
 import { ServerViewWidget, LogViewerWidget } from '@kairo/tomcat-extension';
 import { ImportWizardWidget, ProjectSelectorWidget } from '@kairo/project-extension';
 import { KAIRO_WELCOME_FACTORY_ID } from './kairo-welcome-widget';
@@ -49,7 +49,6 @@ import type {
   BuildResult,
   DeploymentResult,
 } from '@kairo/protocol';
-import { mapBuildState } from '@kairo/protocol';
 
 /* ------------------------------------------------------------------ */
 /*  Commands                                                            */
@@ -326,10 +325,27 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
     registry.registerCommand(KairoCommands.STOP_SERVER, {
       execute: async () => {
         try {
-          const list = await this.runtime.request('GET /api/v1/servers', undefined);
-          for (const srv of (list as ServerInstance[])) {
-            await this.serverSvc.stop(srv.id, false);
-            this.messages.info(`Server ${srv.id} stopped.`);
+          const list = (await this.runtime.request('GET /api/v1/servers', undefined)) as ServerInstance[];
+          // Only stop servers that are actually up — the agent
+          // persists server metadata across sessions, so the list
+          // contains stale stopped/error entries whose ids are dead
+          // (stopping them used to fail the whole command).
+          const alive = list.filter(s => s.state !== 'stopped' && s.state !== 'error' && s.state !== 'crashed');
+          if (alive.length === 0) {
+            this.messages.info('No running server.');
+            return undefined;
+          }
+          const failures: string[] = [];
+          for (const srv of alive) {
+            try {
+              await this.serverSvc.stop(srv.id, false);
+              this.messages.info(`Server ${srv.id} stopped.`);
+            } catch (err) {
+              failures.push(`${srv.id}: ${(err as Error).message}`);
+            }
+          }
+          if (failures.length > 0) {
+            this.messages.error(`Failed to stop: ${failures.join('; ')}`);
           }
         } catch (err) {
           this.messages.error(kairoErrorMessage(err, 'Server stop failed'));
@@ -464,26 +480,12 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
     try {
       const list = (await this.runtime.request('GET /api/v1/builds', undefined)) as BuildResult[];
       if (Array.isArray(list)) {
-        const builds = list.map(b => {
-          mapBuildState(b.state);
-          return {
-            id: b.id,
-            workspaceId: this.runtime.workspace(),
-            projectId: '',
-            state: (b.state === 'success' ? 'succeeded' : b.state === 'failure' ? 'failed' : b.state === 'queued' ? 'pending' : b.state) as 'succeeded' | 'failed' | 'pending' | 'running' | 'cancelled',
-            startTime: b.startedAt,
-            endTime: b.finishedAt,
-            summary: `${b.summary.errors} errors, ${b.summary.warnings} warnings`,
-            diagnostics: b.diagnostics.map(d => ({
-              file: d.file,
-              line: d.line,
-              column: d.column,
-              severity: d.severity === 'hint' ? 'info' : d.severity,
-              message: d.message,
-            })),
-          };
-        });
-        this.buildStore.setBuilds(builds);
+        // KAIRO-RC-WEB-237: delegate to the null-tolerant mapper —
+        // the inline version crashed on b.summary.errors for builds
+        // whose compiler never ran (summary: null), killing the
+        // whole refresh and leaving the Build view empty.
+        const ws = this.runtime.workspace() ?? '';
+        this.buildStore.setBuilds(list.map(b => mapBuildResult(b, ws)));
       }
     } catch (err) {
       this.messages.error(kairoErrorMessage(err, 'Refresh builds failed'));

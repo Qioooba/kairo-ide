@@ -87,6 +87,7 @@ export class BuildStore {
     }
     private eventsUnsubscribe?: () => void;
     private statusUnsubscribe?: () => void;
+    private contextUnsubscribe?: { dispose(): void };
 
     @postConstruct()
     protected init(): void {
@@ -115,6 +116,20 @@ export class BuildStore {
         // is still empty until the first emission, which is
         // exactly the prior observable behavior — the UI shows
         // "no builds" until the snapshot / first event lands.
+        // KAIRO-RC-WEB-237: bootstrap used to run exactly once at
+        // postConstruct, when workspaceContext.context is almost
+        // always still undefined (the agent connection and workspace
+        // arrive later) — no snapshot, no event subscription, and no
+        // retry: the Build view stayed permanently empty. Re-bootstrap
+        // whenever the workspace context appears (and after a change),
+        // tearing down the previous event subscription first.
+        this.contextUnsubscribe = this.workspaceContext.onDidChangeContext(ctx => {
+            if (ctx) {
+                this.eventsUnsubscribe?.();
+                this.eventsUnsubscribe = undefined;
+                void this.bootstrap();
+            }
+        });
         void this.bootstrap();
     }
 
@@ -184,6 +199,7 @@ export class BuildStore {
     dispose(): void {
         this.eventsUnsubscribe?.();
         this.statusUnsubscribe?.();
+        this.contextUnsubscribe?.dispose();
         this.onDidChangeEmitter.dispose();
         this.onConnectionStateChangeEmitter.dispose();
     }

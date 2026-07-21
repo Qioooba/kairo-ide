@@ -39,10 +39,16 @@ export class KairoSafeEncodingService extends EncodingService {
 
   override async encodeStream(value: string | Readable<string>, options?: ResourceEncoding): Promise<BinaryBuffer | BinaryBufferReadable> {
     if (typeof value === 'string') {
-      // Reuse encode(): it already performs the round-trip check
-      // (super.encodeStream's return type varies and broke the
-      // validation in the first version).
-      return this.encode(value, options);
+      // Validate the round trip first (throws UnrepresentableEncodingError
+      // on data loss), then return Theia's own encodeStream result so the
+      // on-the-wire shape is EXACTLY what stock Theia produces. Returning
+      // a BinaryBuffer here broke saves for non-UTF-8 encodings: the file
+      // service's readable-oriented RPC path mangled it, the backend logged
+      // "Could not find typed array for code 255", and the editor cleared
+      // its dirty flag without a single byte written (KAIRO-RC-WEB-250).
+      const encoded = super.encode(value, options);
+      this.assertRoundTrip(value, encoded, options?.encoding);
+      return super.encodeStream(value, options);
     }
     return super.encodeStream(value, options);
   }
