@@ -1,6 +1,6 @@
 # MAC-WEB QA 交接与进度快照（持续更新）
 
-> 最后更新：2026-07-22（flow-02/03/05 + 性能基线全部 PASS，M4 回归进行中）。任何 AI 接手时先读本文件 + `docs/release-testing/MAC_WEB_KIMI_RC_TEST_PLAN.md`。
+> 最后更新：2026-07-22（flow-02/03/05、性能基线、M4 独立回归 29/29 全部 PASS）。任何 AI 接手时先读本文件 + `docs/release-testing/MAC_WEB_KIMI_RC_TEST_PLAN.md`。
 > 本文件是权威断点记录；每次完成一个可验证步骤就追加更新。
 
 ## 0. 一分钟现状
@@ -8,8 +8,8 @@
 - QA 分支：`qa/kimi-mac-web-20260720-65210d5`（基线 65210d5）。**干活前先 `git branch --show-current` 确认在此分支**（曾被人误切 main）。
 - **flow-03 GBK：PASS**（5fe148f）。**flow-05 Tomcat 生命周期：PASS**。**flow-02 JDT：PASS**（f58df3c：JDT LS 经 Theia 后端 RPC 真实运行，Java 语义补全带类型、F12 打开 jdt:// 类文件、.java Monarch 高亮）。
 - **性能基线：PASS**（PERF_RC=0：cold-start 1708ms≤8000、1000 行 Java 打开 94ms≤1000、longtask=0）。性能脚本修了 4 处 harness 问题（trust 对话框、URL hash 工作区、树节点点击、计时点）。
-- **M4 回归 run-regression-suite 正在后台跑**（TESTED_COMMIT=f58df3c）。
-- 剩余：M4 → 全量门禁（pnpm test/gofmt/go vet+race）→ 台账翻 FIXED_VERIFIED → 最终报告+MAC_WEB_GATE → **合并 main + push（用户已明确要求）**。
+- **M4 回归：29/29 PASS**（最终重跑；包括构建、单测、gofmt、vet、race、真实 Tomcat、UI、视觉、a11y、重连）。
+- 已完成：全量门禁、台账复验、最终报告；待执行 **合并 main + push（用户已明确要求）**。
 - 台账 75 条。OPEN 剩：WEB-248（backend target[e] P3）、WEB-262（server 视图按钮 disabled P2）、WEB-263（日志无实时 tail P3）、WEB-210（rename 刷新待复验）、WEB-015 残余（desktop 范围外）。已知限制：agent /api/v1/jdtls state 指其自身未用 manager（Theia 侧状态才是真相）；JDT 无 hover/rename。
 
 ## 1. 环境与操作要点（血泪教训）
