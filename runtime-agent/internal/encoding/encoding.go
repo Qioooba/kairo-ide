@@ -260,6 +260,14 @@ func Decode(src []byte, id ID, aliases Aliases) ([]byte, error) {
 func Encode(src []byte, id ID, aliases Aliases) ([]byte, error) {
 	id = ID(strings.ToLower(string(id)))
 	enc := Encoder(id, aliases)
+	// GBK encode must be strict: GB18030 (the decode choice, a
+	// superset) can encode any Unicode rune, which would let
+	// unrepresentable characters (e.g. emoji) silently pass
+	// validation and corrupt the file on save. Strict GBK
+	// returns a RepertoireError for such runes.
+	if ID(strings.ToLower(string(aliases.Resolve(id)))) == GBK {
+		enc = simplifiedchinese.GBK
+	}
 	if enc == nil {
 		return nil, errors.New("unknown encoding: " + id)
 	}

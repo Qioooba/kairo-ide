@@ -90,6 +90,8 @@ jstl: false
 	hasSrc := false
 	hasLib := false
 	for _, e := range cp.ClasspathEntries {
+		// src entries are relative to the project location
+		// (Eclipse convention; absolute src paths are invalid).
 		if e.Kind == "src" && filepath.Clean(e.Path) == filepath.Join("src", "main", "java") {
 			hasSrc = true
 		}

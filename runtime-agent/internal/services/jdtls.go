@@ -1,4 +1,4 @@
-﻿package services
+package services
 
 import (
 	"context"
@@ -84,7 +84,7 @@ func (s *jdtlsService) Prepare(ctx context.Context) (json.RawMessage, error) {
 //
 // The descriptor does NOT include os.Environ() — only the minimal
 // allowlist of PATH, JAVA_HOME, and essential JVM variables.
-func (s *jdtlsService) GetLaunchDescriptor(ctx context.Context, workspaceID string, projectID string) (json.RawMessage, error) {
+func (s *jdtlsService) GetLaunchDescriptor(ctx context.Context, workspaceID string, projectID string, workingDir string) (json.RawMessage, error) {
 	// Ensure the distribution is installed first
 	_, err := s.mgr.EnsureInstalled(ctx)
 	if err != nil {
@@ -96,8 +96,11 @@ func (s *jdtlsService) GetLaunchDescriptor(ctx context.Context, workspaceID stri
 	s.mgr.SetWorkspace(workspaceID + "_" + projectID)
 
 	// Build the launch descriptor. workingDir is the project root
-	// resolved by the caller (handlers.go resolves from repository).
-	desc, err := s.mgr.BuildLaunchDescriptor(projectID)
+	// resolved by the caller (handlers.go resolves from repository);
+	// passing the raw projectID here produced the bogus rootUri
+	// file:///project-ws_... and JDT LS opened the wrong workspace
+	// (KAIRO-RC-WEB-251 follow-up).
+	desc, err := s.mgr.BuildLaunchDescriptor(workingDir)
 	if err != nil {
 		return nil, fmt.Errorf("build launch descriptor: %w", err)
 	}

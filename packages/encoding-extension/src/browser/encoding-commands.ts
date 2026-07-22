@@ -19,7 +19,8 @@
  */
 
 import { injectable, inject, interfaces } from '@theia/core/shared/inversify';
-import { QuickInputService, ApplicationShell } from '@theia/core/lib/browser';
+import { QuickInputService, ApplicationShell, FrontendApplicationContribution } from '@theia/core/lib/browser';
+import { KairoProjectEncodingContribution } from './project-encoding-contribution';
 import {
   Command,
   CommandContribution,
@@ -27,10 +28,12 @@ import {
   MessageService,
 } from '@theia/core/lib/common';
 import { EditorManager } from '@theia/editor/lib/browser/editor-manager';
+import { reloadEditorWithEncoding } from './reopen-strategy';
 import URI from '@theia/core/lib/common/uri';
 import {
   KairoEncodingServiceImpl,
   KAIRO_ENCODING_OPTIONS,
+  toTheiaEncodingId,
 } from './encoding-service';
 
 export namespace KairoEncodingCommands {
@@ -86,15 +89,23 @@ export class KairoEncodingCommandsContribution implements CommandContribution {
           this.messages.info(`Already using ${current}, nothing to do.`);
           return;
         }
-        // Register the override BEFORE reading so the
-        // subsequent read picks it up. The override is per-URI
-        // and survives editor close/reopen.
+        // Register the override BEFORE reloading so both the
+        // re-decode and any later save pick it up. The override is
+        // per-URI and survives editor close/reopen.
         this.service.setEncodingFor(target, picked);
-        // Close the open editor and re-open so the model
-        // reloads from disk with the new encoding override.
+        // Reload strategy lives in reopen-strategy.ts (DOM-free,
+        // unit-tested): prefer setEncoding(Decode) on the live
+        // editor, fall back to close/reopen. The old unconditional
+        // close/reopen silently reused the still-cached Monaco
+        // model, so the file was never re-decoded (KAIRO-RC-WEB-206
+        // follow-up).
         const widget = await this.editorManager.getByUri(target);
-        if (widget) widget.close();
-        await this.editorManager.open(target);
+        if (widget) {
+          const outcome = await reloadEditorWithEncoding(widget, target, toTheiaEncodingId(picked), this.editorManager, this.messages);
+          if (outcome === 'refused-dirty') {
+            return;
+          }
+        }
         this.messages.info(`Reopened ${target.displayName} as ${picked}.`);
       },
     });
@@ -128,8 +139,13 @@ export class KairoEncodingCommandsContribution implements CommandContribution {
           return;
         }
         try {
-          await this.service.writeWithEncoding(target, text, picked);
+          // KAIRO-RC-WEB-235: the EncodingRegistry override ALWAYS
+          // wins over the write() options.encoding, so the override
+          // must be updated BEFORE writing — otherwise the bytes are
+          // encoded with the OLD encoding while the UI claims the new
+          // one (the one-way "Saved as utf-8" that stayed GBK).
           this.service.setEncodingFor(target, picked);
+          await this.service.writeWithEncoding(target, text, picked);
           // Mark the document as not dirty without re-saving
           // (we just wrote the bytes ourselves).
           (document as any).setDirty?.(false);
@@ -171,4 +187,7 @@ export class KairoEncodingCommandsContribution implements CommandContribution {
 
 export function bindEncodingCommands(bind: interfaces.Bind): void {
   bind(KairoEncodingCommandsContribution).toSelf().inSingletonScope();
+  // Project default encoding -> folder-level override (WEB-206).
+  bind(KairoProjectEncodingContribution).toSelf().inSingletonScope();
+  bind(FrontendApplicationContribution).toService(KairoProjectEncodingContribution);
 }

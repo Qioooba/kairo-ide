@@ -1,4 +1,4 @@
-﻿//go:build fault
+//go:build fault
 // +build fault
 
 package fault

@@ -554,7 +554,8 @@ export interface EndpointMap {
   // Projects
   'GET /api/v1/projects': { request: undefined; response: ProjectConfig[] };
   'GET /api/v1/projects/{projectId}': { request: undefined; response: ProjectConfig };
-  'PUT /api/v1/projects/{projectId}': { request: { config: ProjectConfig }; response: ProjectConfig };
+  // The agent unmarshals the body directly into a flat domain.Project (KAIRO-RC-WEB-202).
+  'PUT /api/v1/projects/{projectId}': { request: ProjectConfig; response: ProjectConfig };
   // Builds
   'GET /api/v1/builds': { request: undefined; response: BuildResult[] };
   'POST /api/v1/builds': { request: StartBuildRequest; response: BuildResult };

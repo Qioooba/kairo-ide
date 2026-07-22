@@ -177,6 +177,7 @@ test('KairoCommands namespace declares the expected command ids with non-empty l
     'kairo.project.select',
     'kairo.project.scan',
     'kairo.build',
+    'kairo.cleanBuild',
     'kairo.buildAndDeploy',
     'kairo.server.start',
     'kairo.server.debug',
@@ -213,6 +214,7 @@ test('KairoViewsContribution.registerCommands registers every command in a real 
     'kairo.project.select',
     'kairo.project.scan',
     'kairo.build',
+    'kairo.cleanBuild',
     'kairo.buildAndDeploy',
     'kairo.server.start',
     'kairo.server.debug',
@@ -233,14 +235,14 @@ test('KairoViewsContribution.registerCommands registers every command in a real 
   }
 });
 
-test('KairoViewsContribution.registerCommands registers exactly 14 commands', () => {
+test('KairoViewsContribution.registerCommands registers exactly 15 commands', () => {
   const container = buildContainer();
   const contribution = container.get(KairoViewsContribution);
   const registry = new CommandRegistry();
   contribution.registerCommands(registry);
 
-  assert.strictEqual(registry.commandIds.length, 14,
-    `Expected 14 commands, got ${registry.commandIds.length}: ${registry.commandIds.join(', ')}`);
+  assert.strictEqual(registry.commandIds.length, 15,
+    `Expected 15 commands, got ${registry.commandIds.length}: ${registry.commandIds.join(', ')}`);
 });
 
 // --------------- execution verification ---------------
@@ -259,6 +261,25 @@ test('execution: kairo.build calls runtime.request POST /api/v1/builds', async (
 
   const buildCalls = runtime.callLog.filter(c => c.endpoint === 'POST /api/v1/builds');
   assert.ok(buildCalls.length >= 1, `Expected POST /api/v1/builds call, got ${buildCalls.length}`);
+});
+
+test('execution: kairo.cleanBuild posts clean:true (KAIRO-RC-WEB-007)', async () => {
+  const container = buildContainer();
+  const contribution = container.get(KairoViewsContribution);
+  const runtime = container.get(RuntimeConnectionService);
+  const registry = new CommandRegistry();
+  contribution.registerCommands(registry);
+
+  const handler = registry.getCommand('kairo.cleanBuild');
+  assert.ok(handler, 'kairo.cleanBuild command handler must exist');
+
+  await registry.executeCommand('kairo.cleanBuild');
+
+  const buildCalls = runtime.callLog.filter(c => c.endpoint === 'POST /api/v1/builds');
+  assert.ok(buildCalls.length >= 1, `Expected POST /api/v1/builds call, got ${buildCalls.length}`);
+  const payload = buildCalls[0].payload || buildCalls[0].body || {};
+  assert.strictEqual(payload.clean, true,
+    `cleanBuild must post clean:true, got payload ${JSON.stringify(payload)}`);
 });
 
 test('execution: kairo.buildAndDeploy calls both build and deploy', async () => {
@@ -404,6 +425,7 @@ test('execution: all 14 commands have executable handlers', async () => {
     'kairo.project.select',
     'kairo.project.scan',
     'kairo.build',
+    'kairo.cleanBuild',
     'kairo.buildAndDeploy',
     'kairo.server.start',
     'kairo.server.debug',

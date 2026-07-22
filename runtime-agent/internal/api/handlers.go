@@ -1,4 +1,4 @@
-﻿package api
+package api
 
 import (
 	"crypto/subtle"
@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/domain"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/encoding"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/log"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/repository"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/search"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/security"
 )
@@ -178,6 +180,21 @@ func (s *Server) handleProjectByID(w http.ResponseWriter, r *http.Request) {
 			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInternal, Message: "ProjectStore not configured"})
 			return
 		}
+		// KAIRO-RC-WEB-203: also persist <root>/.kairo/project.yaml.
+		// jdtproject.Generate and FileProjectRepo read that file, but
+		// the HTTP store alone never wrote it — Java language support
+		// silently lost the project model. A yaml failure is a real
+		// save failure, so it aborts the PUT before the catalog write.
+		yamlRoot := project.RootPath
+		if yamlRoot == "" {
+			yamlRoot = project.Root
+		}
+		if yamlRoot != "" {
+			if err := repository.SaveProjectConfig(yamlRoot, repository.ProjectToConfig(&project)); err != nil {
+				writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInternal, Message: "save .kairo/project.yaml: " + err.Error()})
+				return
+			}
+		}
 		updated, err := s.Services.ProjectStore.Update(rest, &project)
 		if err != nil {
 			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: err.Error()})
@@ -258,14 +275,21 @@ func (s *Server) handleBuilds(w http.ResponseWriter, r *http.Request) {
 		// — the user got a green checkmark for a build that did
 		// nothing. Surfacing 404 here is the truthful behavior
 		// (N-BUILD-001).
+		// KAIRO-RC-WEB-238: also HYDRATE the request from the stored
+		// project — the UI sends only {projectId[, clean]}, and
+		// without the project's root/levels/encoding/outputDir the
+		// engine compiled 0 files into agent-data with defaults
+		// (the "sham build").
 		if s.Services.ProjectStore != nil {
-			if _, err := s.Services.ProjectStore.Get(req.ProjectID); err != nil {
+			p, err := s.Services.ProjectStore.Get(req.ProjectID)
+			if err != nil {
 				writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{
 					Code:    protocol.ErrNotFound,
 					Message: fmt.Sprintf("project not found: %s", req.ProjectID),
 				})
 				return
 			}
+			hydrateBuildRequest(&req, p)
 		}
 		if s.Services.BuildEngine == nil {
 			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInternal, Message: "BuildEngine not configured"})
@@ -319,6 +343,25 @@ func (s *Server) handleDeployments(w http.ResponseWriter, r *http.Request) {
 			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: err.Error()})
 			return
 		}
+		// KAIRO-RC-WEB-239: the frontend sends {projectId, buildId,
+		// scope} — resolve source (the project's webapp dir) and
+		// target (the runner's Catalina webapps) instead of failing
+		// with "source is required".
+		if req.Source == "" && req.ProjectID != "" && s.Services.ProjectStore != nil {
+			p, err := s.Services.ProjectStore.Get(req.ProjectID)
+			if err != nil {
+				writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrNotFound, Message: "project not found: " + req.ProjectID})
+				return
+			}
+			req.Source = filepath.Join(p.RootPath, p.WebappDir)
+			if req.Target == "" && s.Services.ServerRunner != nil && s.Services.ServerRunner.CatalinaHome() != "" {
+				ctx := strings.TrimPrefix(p.ContextPath, "/")
+				if ctx == "" {
+					ctx = sanitizeContextName(p.Name)
+				}
+				req.Target = filepath.Join(s.Services.ServerRunner.CatalinaHome(), "webapps", ctx)
+			}
+		}
 		res, err := s.Services.Deployer.Publish(req)
 		if err != nil {
 			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrDeployFailed, Message: err.Error()})
@@ -345,6 +388,68 @@ func (s *Server) handleDeploymentByID(w http.ResponseWriter, r *http.Request) {
 	writeOK(w, env, res)
 }
 
+// hydrateBuildRequest fills build-request fields the UI does not
+// send from the stored project (KAIRO-RC-WEB-238).
+func hydrateBuildRequest(req *BuildRequest, p domain.Project) {
+	if req.ProjectRoot == "" {
+		req.ProjectRoot = p.RootPath
+	}
+	if req.SourceLevel == "" && p.SourceLevel != "" {
+		req.SourceLevel = p.SourceLevel
+	}
+	if req.TargetLevel == "" && p.TargetLevel != "" {
+		req.TargetLevel = p.TargetLevel
+	}
+	if req.Encoding == "" && p.Encoding != "" {
+		req.Encoding = p.Encoding
+	}
+	if req.OutputDir == "" && p.OutputDir != "" {
+		req.OutputDir = filepath.Join(p.RootPath, p.OutputDir)
+	}
+	if len(req.Classpath) == 0 {
+		// Legacy layout convention: jars under <root>/lib and
+		// <webapp>/WEB-INF/lib form the compile classpath.
+		for _, dir := range []string{
+			filepath.Join(p.RootPath, "lib"),
+			filepath.Join(p.RootPath, p.WebappDir, "WEB-INF", "lib"),
+		} {
+			entries, err := os.ReadDir(dir)
+			if err != nil {
+				continue
+			}
+			for _, e := range entries {
+				if !e.IsDir() && strings.HasSuffix(strings.ToLower(e.Name()), ".jar") {
+					req.Classpath = append(req.Classpath, filepath.Join(dir, e.Name()))
+				}
+			}
+		}
+	}
+}
+
+// sanitizeContextName turns a project name into a Tomcat webapps
+// directory name (lowercase, spaces to '-', alnum and -_. only).
+func sanitizeContextName(name string) string {
+	var b strings.Builder
+	prevDash := false
+	for _, r := range strings.ToLower(name) {
+		switch {
+		case r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-' || r == '_' || r == '.':
+			b.WriteRune(r)
+			prevDash = false
+		case r == ' ' || r == '/':
+			if !prevDash && b.Len() > 0 {
+				b.WriteByte('-')
+				prevDash = true
+			}
+		}
+	}
+	out := strings.Trim(b.String(), "-")
+	if out == "" {
+		return "app"
+	}
+	return out
+}
+
 // ----- Servers -----
 
 func (s *Server) handleServers(w http.ResponseWriter, r *http.Request) {
@@ -366,6 +471,21 @@ func (s *Server) handleServers(w http.ResponseWriter, r *http.Request) {
 		if err := json.Unmarshal(extractPayload(body), &req); err != nil {
 			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: err.Error()})
 			return
+		}
+		// KAIRO-RC-WEB-240: the frontend sends only {projectId, debug};
+		// resolve webappDir/contextPath from the stored project instead
+		// of failing with "webappDir is required" (a 500 the UI used to
+		// swallow silently).
+		if req.WebappDir == "" && req.ProjectID != "" && s.Services.ProjectStore != nil {
+			p, err := s.Services.ProjectStore.Get(req.ProjectID)
+			if err != nil {
+				writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrNotFound, Message: "project not found: " + req.ProjectID})
+				return
+			}
+			req.WebappDir = filepath.Join(p.RootPath, p.WebappDir)
+			if req.ContextPath == "" {
+				req.ContextPath = p.ContextPath
+			}
 		}
 		srv, err := s.Services.ServerRunner.Start(req)
 		if err != nil {
@@ -430,6 +550,21 @@ func (s *Server) handleServerSub(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeOK(w, env, srv)
+	case "restart":
+		if r.Method != http.MethodPost {
+			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: "POST only"})
+			return
+		}
+		srv, err := s.Services.ServerRunner.Restart(id)
+		if err != nil {
+			code := protocol.ErrProcessSpawnFailed
+			if strings.HasPrefix(err.Error(), "server not found") {
+				code = protocol.ErrNotFound
+			}
+			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: code, Message: err.Error()})
+			return
+		}
+		writeOK(w, env, srv)
 	case "logs":
 		s.handleServerLogs(w, r, id, env)
 	default:
@@ -442,11 +577,32 @@ func (s *Server) handleServerLogs(w http.ResponseWriter, r *http.Request, id str
 		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInternal, Message: "ServerRunner not configured"})
 		return
 	}
-	follow := r.URL.Query().Get("follow") == "true"
-	lines, err := s.Services.ServerRunner.Logs(id, follow)
+	// The payload stays [{line, ts}] per the endpoint contract; the
+	// server's state/pid ride along as headers so the Logs view can
+	// show liveness without a second request.
+	if srv, err := s.Services.ServerRunner.Get(id); err == nil && srv != nil {
+		w.Header().Set("X-Kairo-Server-State", srv.State)
+		w.Header().Set("X-Kairo-Server-Pid", strconv.Itoa(srv.PID))
+	}
+	tail := 0
+	if v := r.URL.Query().Get("tail"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			tail = n
+		}
+	}
+	lines, err := s.Services.ServerRunner.Logs(id, tail)
 	if err != nil {
-		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrIOError, Message: err.Error()})
+		code := protocol.ErrIOError
+		if strings.HasPrefix(err.Error(), "server not found") {
+			code = protocol.ErrNotFound
+		}
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: code, Message: err.Error()})
 		return
+	}
+	if len(lines) == 0 {
+		// No log file (or no output) yet — an empty result, not
+		// an error.
+		w.Header().Set("X-Kairo-Log-Note", "no log output yet")
 	}
 	writeOK(w, env, lines)
 }
@@ -870,41 +1026,73 @@ func (s *Server) handleJDTLSLaunchDescriptor(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// Resolve toolchain.
-	if project.ToolchainID == "" {
-		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{
-			Code: protocol.ErrToolchainMissing, Message: "project has no toolchain configured",
-		})
-		return
-	}
-	if s.Services.ToolchainRegistry == nil {
-		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{
-			Code: protocol.ErrInternal, Message: "ToolchainRegistry not configured",
-		})
-		return
-	}
-	toolchain, err := s.Services.ToolchainRepo.Get(r.Context(), project.ToolchainID)
-	if err != nil {
-		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{
-			Code: protocol.ErrToolchainMissing, Message: fmt.Sprintf("toolchain not found: %s", err.Error()),
-		})
-		return
+	// Resolve the toolchain only when the project pins one.
+	// Projects without a ToolchainID must NOT be blocked: the JDT
+	// LS manager launches with its own JRE (KAIRO_JRE17_HOME or
+	// --jre17), and the import wizard never sets ToolchainID, so
+	// requiring one made JDT LS unreachable for every imported
+	// project (KAIRO-RC-WEB-258, flow-03 live evidence: HTTP 400
+	// "project has no toolchain configured").
+	var toolchain *domain.Toolchain
+	if project.ToolchainID != "" {
+		if s.Services.ToolchainRegistry == nil {
+			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{
+				Code: protocol.ErrInternal, Message: "ToolchainRegistry not configured",
+			})
+			return
+		}
+		t, err := s.Services.ToolchainRepo.Get(r.Context(), project.ToolchainID)
+		if err != nil {
+			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{
+				Code: protocol.ErrToolchainMissing, Message: fmt.Sprintf("toolchain not found: %s", err.Error()),
+			})
+			return
+		}
+		toolchain = t
 	}
 
-	// Resolve workspace root for the project working directory.
-	var projectRoot string
-	if s.Services.WorkspaceStore != nil {
+	// Resolve the project working directory: prefer the project's
+	// own root (from the repository), then the workspace root.
+	projectRoot := project.RootPath
+	if projectRoot == "" {
+		projectRoot = project.Root
+	}
+	if projectRoot == "" && s.Services.WorkspaceStore != nil {
 		ws, err := s.Services.WorkspaceStore.Get(workspaceID)
 		if err == nil {
 			projectRoot = ws.RootPath
 		}
 	}
 	if projectRoot == "" {
-		projectRoot = projectID // fallback
+		projectRoot = projectID // last-resort fallback
+	}
+
+	// Give JDT LS a real Eclipse project model to import. Without
+	// one it treats every file as standalone, and its fake
+	// compilation-unit creation collides ("Resource
+	// '/jdt.ls-java-project/src/com' already exists") — completion
+	// and definition then fail inside the LS (KAIRO-RC-WEB-251,
+	// captured from the child's own log). The model is written
+	// INTO the project root: Eclipse resolves .classpath src
+	// entries against the project location and rejects absolute
+	// ones, so an external model dir can never work.
+	workingDir := projectRoot
+	if s.Services.JDTProjectGenerator != nil {
+		genPayload, _ := json.Marshal(map[string]any{
+			"workspaceId":     workspaceID,
+			"projectId":       projectID,
+			"rootPath":        projectRoot,
+			"intoProjectRoot": true,
+		})
+		if _, gerr := s.Services.JDTProjectGenerator.Generate(genPayload); gerr != nil {
+			if s.logger != nil {
+				s.logger.Warn("jdt project model generation failed; falling back to standalone mode", log.Fields{"err": gerr.Error()})
+			}
+		}
 	}
 
 	// Build the launch descriptor.
-	desc, err := s.Services.JDTLS.GetLaunchDescriptor(r.Context(), workspaceID, projectID)
+	desc, err := s.Services.JDTLS.GetLaunchDescriptor(r.Context(), workspaceID, projectID, workingDir)
 	if err != nil {
 		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{
 			Code: protocol.ErrInternal, Message: fmt.Sprintf("build launch descriptor: %s", err.Error()),

@@ -29,12 +29,50 @@ async function waitForShell(page) {
 }
 
 async function openCommandPalette(page, query) {
-  await page.keyboard.press('F1');
-  await sleep(600);
-  await page.keyboard.type(query);
-  await sleep(600);
-  await page.keyboard.press('Enter');
+  // Fully retry-based: under parallel load the first F1 can be
+  // swallowed or the quick-open can vanish mid-interaction. Any
+  // failure → Escape, settle, retry from scratch (KAIRO-RC-WEB-249).
+  const input = page.locator('input[aria-label="Type to narrow down results."]').first();
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      await page.keyboard.press('F1');
+      await input.waitFor({ state: 'visible', timeout: 15000 });
+      // pressSequentially focuses the input itself — robust against the
+      // first-open focus race that page.keyboard.type kept losing
+      // (KAIRO-RC-WEB-249). A freshly opened palette is pre-filled with
+      // just '>', so no clearing is needed.
+      await input.pressSequentially(query, { delay: 25 });
+      // wait for the filtered list to render, not a fixed sleep
+      await page.waitForSelector('.monaco-list-row', { state: 'attached', timeout: 8000 }).catch(() => {});
+      await sleep(400);
+      const stuck = await input.inputValue().catch(() => '');
+      if (!stuck.includes(query)) throw new Error(`query did not stick: "${stuck}"`);
+      const items = await page.locator('.monaco-list-row').allTextContents().catch(() => []);
+      const needle = query.replace(/^Kairo: /, '');
+      const matched = items.some(t => t.includes(needle));
+      await page.keyboard.press('Enter');
+      await sleep(1500);
+      return matched;
+    } catch (err) {
+      await page.keyboard.press('Escape').catch(() => {});
+      await sleep(1000 + attempt * 1000);
+    }
+  }
+  await page.screenshot({ path: path.join(SCREENSHOTS, `palette-fail-${Date.now()}.png`) }).catch(() => {});
+  // one last Enter so the caller's flow is consistent
+  await page.keyboard.press('Enter').catch(() => {});
   await sleep(1000);
+  return false;
+}
+
+// Waits until a tab whose id contains `tabHint` exists, returns true/false.
+async function waitForTab(page, tabHint, timeoutMs = 8000) {
+  try {
+    await page.waitForSelector(`[id^="shell-tab-"][id*="${tabHint}"]`, { state: 'attached', timeout: timeoutMs });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function capture(page, name) {
@@ -73,58 +111,70 @@ async function run() {
   try {
     await page.goto(URL, { waitUntil: 'networkidle', timeout: 60000 });
     await waitForShell(page);
+    // Kairo commands register after the runtime connection comes up;
+    // opening the palette too early lists nothing (false FAIL).
+    await page.waitForSelector('#theia-statusBar >> text=/Runtime/', { timeout: 90000 }).catch(() => {});
+    await sleep(2000);
     await capture(page, '00-shell');
 
-    // 1. Open Import Wizard via keyboard
-    await openCommandPalette(page, 'Kairo: Import Project');
+    // 1. Open Import Wizard via keyboard — the palette must list the
+    // command and the wizard tab must appear.
+    const importMatched = await openCommandPalette(page, 'Kairo: Import Project');
+    const importTab = await waitForTab(page, 'kairo-import-wizard');
     await capture(page, '01-import-wizard-open');
-    const importFocused = await activeElementInfo(page);
-    logStep('open-import-wizard', importFocused.tag !== 'BODY', { focused: importFocused });
+    logStep('open-import-wizard', importMatched && importTab, { paletteMatch: importMatched, tabVisible: importTab });
 
-    // Tab through wizard and Escape
-    const trapStart = await activeElementInfo(page);
+    // Escape must not leave the app in a broken state (tab may stay —
+    // Theia widgets are not modal dialogs — but the shell must remain).
     await page.keyboard.press('Escape');
     await sleep(500);
-    const afterEscape = await activeElementInfo(page);
-    logStep('escape-import-wizard', trapStart.tag !== afterEscape.tag, { before: trapStart, after: afterEscape });
+    const shellAlive = await page.locator('#theia-app-shell').isVisible();
+    logStep('escape-import-wizard', shellAlive, { shellAlive });
     await capture(page, '02-after-escape');
 
-    // 2. Open Project Selector
-    await openCommandPalette(page, 'Kairo: Open Project Selector');
+    // 2. Open Project Selector (real label: 'Kairo: Select Project')
+    const psMatched = await openCommandPalette(page, 'Kairo: Select Project');
+    const psTab = await waitForTab(page, 'kairo-project-selector');
     await capture(page, '03-project-selector');
-    const psFocused = await activeElementInfo(page);
-    logStep('open-project-selector', psFocused.tag !== 'BODY', { focused: psFocused });
-    await page.keyboard.press('Escape');
-    await sleep(500);
+    logStep('open-project-selector', psMatched && psTab, { paletteMatch: psMatched, tabVisible: psTab });
 
-    // 3. Open a file in explorer via keyboard (Tab to file tree)
-    // Try Ctrl+0 to focus explorer
-    await page.keyboard.down('Control');
-    await page.keyboard.press('0');
-    await page.keyboard.up('Control');
-    await sleep(800);
+    // 3. Focus explorer via keyboard shortcut (Cmd+Shift+E on macOS)
+    await page.keyboard.down('Meta');
+    await page.keyboard.down('Shift');
+    await page.keyboard.press('e');
+    await page.keyboard.up('Shift');
+    await page.keyboard.up('Meta');
+    await sleep(1000);
     const explorerFocus = await activeElementInfo(page);
-    logStep('focus-explorer', explorerFocus.tag !== 'BODY', { focused: explorerFocus });
+    const explorerVisible = await page.locator('#explorer-view-container, [id*="explorer"]').first().isVisible().catch(() => false);
+    logStep('focus-explorer', explorerVisible && explorerFocus.tag !== 'BODY', { focused: explorerFocus, explorerVisible });
     await capture(page, '04-explorer-focus');
 
-    // 4. Open Build View via keyboard
-    await openCommandPalette(page, 'Kairo: Open Build View');
+    // 4. Open Build View via keyboard (real label: 'Kairo: Show Builds')
+    const buildMatched = await openCommandPalette(page, 'Kairo: Show Builds');
+    const buildTab = await waitForTab(page, 'kairo-build-view');
     await capture(page, '05-build-view');
-    const buildFocus = await activeElementInfo(page);
-    logStep('open-build-view', buildFocus.tag !== 'BODY', { focused: buildFocus });
+    logStep('open-build-view', buildMatched && buildTab, { paletteMatch: buildMatched, tabVisible: buildTab });
 
-    // Try to Tab to Build button and activate with Enter/Space
-    for (let i = 0; i < 8; i++) await page.keyboard.press('Tab');
-    await sleep(300);
-    const buildBtn = await activeElementInfo(page);
-    logStep('tab-to-build-button', buildBtn.tag === 'BUTTON' || buildBtn.role === 'button', { focused: buildBtn });
+    // Tab into the build view; a focusable control must be reachable.
+    // The Lumino menu bar and status bar are also Tab stops, so loop
+    // adaptively instead of pressing a fixed count.
+    let buildBtn = await activeElementInfo(page);
+    let tabReached = buildBtn.tag === 'BUTTON' || buildBtn.role === 'button';
+    for (let i = 0; i < 30 && !tabReached; i++) {
+      await page.keyboard.press('Tab');
+      await sleep(150);
+      buildBtn = await activeElementInfo(page);
+      tabReached = buildBtn.tag === 'BUTTON' || buildBtn.role === 'button';
+    }
+    logStep('tab-to-build-button', tabReached, { focused: buildBtn });
     await capture(page, '06-build-button-focus');
 
-    // 5. Open Server View
-    await openCommandPalette(page, 'Kairo: Open Server View');
+    // 5. Open Server View (real label: 'Kairo: Show Servers')
+    const svMatched = await openCommandPalette(page, 'Kairo: Show Servers');
+    const svTab = await waitForTab(page, 'kairo-server-view');
     await capture(page, '07-server-view');
-    const svFocus = await activeElementInfo(page);
-    logStep('open-server-view', svFocus.tag !== 'BODY', { focused: svFocus });
+    logStep('open-server-view', svMatched && svTab, { paletteMatch: svMatched, tabVisible: svTab });
 
     // 6. Check focus not lost after status update by waiting and re-checking active element
     const before = await activeElementInfo(page);

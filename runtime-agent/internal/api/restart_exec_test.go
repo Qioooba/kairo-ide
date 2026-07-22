@@ -1,4 +1,4 @@
-﻿// Tests for the actual exec.Command spawn step in
+// Tests for the actual exec.Command spawn step in
 // /api/v1/runtime/restart. Because doRestart calls
 // os.Exit(0) at the end, we cannot exercise the spawn
 // in-process without killing the test runner. Instead we

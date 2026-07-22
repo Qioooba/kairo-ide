@@ -21,6 +21,7 @@ import (
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/bootstrap"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/config"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/log"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/tomcat6"
 )
 
 const (
@@ -97,11 +98,22 @@ func main() {
 
 	// Bootstrap the composition root container.
 	// This is the single entry point that wires all dependencies.
+	// KAIRO-RC-WEB-242: fall back to the bundled Tomcat 6 when
+	// KAIRO_TOMCAT6_HOME is unset — previously the server runner
+	// received an empty home and every Start failed with
+	// "Tomcat 6 not bundled" even when bundled/tomcat6 was prepared.
+	tomcat6Home := os.Getenv("KAIRO_TOMCAT6_HOME")
+	if tomcat6Home == "" {
+		if home, err := tomcat6.FindCatalinaHome(cfg.Bundled()); err == nil {
+			tomcat6Home = home
+		}
+	}
+
 	container, err := bootstrap.NewContainer(bootstrap.Config{
 		DataDir:       cfg.DataDir,
 		BundledDir:    cfg.Bundled(),
 		Logger:        logger,
-		Tomcat6Home:   os.Getenv("KAIRO_TOMCAT6_HOME"),
+		Tomcat6Home:   tomcat6Home,
 		Secret:        cfg.Secret,
 		SkipSHAVerify: cfg.SkipSHAVerify,
 		JDTLSURL:      cfg.JDTLSURL,

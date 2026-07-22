@@ -1,4 +1,4 @@
-﻿// Tests for /api/v1/events WebSocket authentication. Per
+// Tests for /api/v1/events WebSocket authentication. Per
 // docs/hotfix-windows-test-readiness.md 搂1.2, the WS auth
 // contract is:
 //
@@ -24,10 +24,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gorilla/websocket"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/audit"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/log"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/transport/events"
+	"github.com/gorilla/websocket"
 )
 
 // wsAuthTestBus wires the real EventHub + EventBusAdapter

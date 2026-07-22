@@ -180,6 +180,9 @@ importers:
 
   packages/encoding-extension:
     dependencies:
+      '@kairo/project-extension':
+        specifier: workspace:*
+        version: link:../project-extension
       '@kairo/protocol':
         specifier: workspace:*
         version: link:../protocol
@@ -220,6 +223,12 @@ importers:
       '@theia/core':
         specifier: 1.73.1
         version: 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@theia/filesystem':
+        specifier: 1.73.1
+        version: 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.5.4)
+      '@theia/monaco-editor-core':
+        specifier: 1.108.201
+        version: 1.108.201
       vscode-jsonrpc:
         specifier: 8.2.0
         version: 8.2.0
@@ -242,6 +251,9 @@ importers:
       '@theia/monaco':
         specifier: 1.73.1
         version: 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.5.4)
+      '@theia/monaco-editor-core':
+        specifier: 1.108.201
+        version: 1.108.201
     devDependencies:
       typescript:
         specifier: 5.5.4
@@ -264,6 +276,12 @@ importers:
       '@theia/core':
         specifier: 1.73.1
         version: 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@theia/filesystem':
+        specifier: 1.73.1
+        version: 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.5.4)
+      '@theia/workspace':
+        specifier: 1.73.1
+        version: 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.5.4)
       react:
         specifier: 18.3.1
         version: 18.3.1
@@ -443,6 +461,9 @@ importers:
       '@theia/core':
         specifier: 1.73.1
         version: 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@theia/monaco-editor-core':
+        specifier: 1.108.201
+        version: 1.108.201
       react:
         specifier: 18.3.1
         version: 18.3.1
@@ -451,7 +472,11 @@ importers:
         specifier: 5.5.4
         version: 5.5.4
 
-  tests/e2e: {}
+  tests/e2e:
+    dependencies:
+      '@axe-core/playwright':
+        specifier: ^4.12.1
+        version: 4.12.1(playwright-core@1.61.1)
 
 packages:
 

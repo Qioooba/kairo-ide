@@ -1,0 +1,40 @@
+{
+  "url": "http://127.0.0.1:3000",
+  "testedAt": "2026-07-22T14:01:07.973Z",
+  "viewport": "1440x900",
+  "engine": "axe-core via @axe-core/playwright (wcag2a, wcag2aa, wcag21aa)",
+  "scans": [
+    {
+      "name": "01-shell",
+      "violations": []
+    },
+    {
+      "name": "02-import-wizard",
+      "violations": []
+    },
+    {
+      "name": "03-project-selector",
+      "violations": []
+    },
+    {
+      "name": "04-build-view",
+      "violations": []
+    },
+    {
+      "name": "05-server-view",
+      "violations": []
+    },
+    {
+      "name": "06-deployments-view",
+      "violations": []
+    }
+  ],
+  "summary": {
+    "violations": 0,
+    "critical": 0,
+    "serious": 0,
+    "moderate": 0,
+    "minor": 0
+  },
+  "duplicateIds": []
+}

@@ -17,10 +17,10 @@ if [ $# -ne 1 ]; then
 fi
 PORT="$1"
 
-# Tear down any previous agent + tomcat from this script.
-pkill -f kairo-runtime 2>/dev/null || true
-sleep 0.3
-# Force-free the test port. `xargs -r` is GNU-only; macOS BSD
+# Force-free only this script's test port. Do not use a global
+# `pkill -f kairo-runtime`: M4 intentionally runs this verifier next to an
+# independently managed agent on a different port.
+# `xargs -r` is GNU-only; macOS BSD
 # xargs doesn't support it and would invoke `kill` with no args
 # (which sends SIGTERM to the calling shell). Filter explicitly.
 lsof -ti :"$PORT" 2>/dev/null | grep -E '^[0-9]+$' | xargs kill -9 2>/dev/null || true
@@ -40,6 +40,21 @@ mkdir -p "$ROOT"
 # any developer's machine, not just the original author's.
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT/runtime-agent"
+
+# The build/server APIs deliberately reject unregistered project IDs. Seed the
+# isolated agent catalog before it starts; the fixture is copied immediately
+# below and all paths remain under this script's disposable root.
+mkdir -p "$ROOT/data/projects"
+cat > "$ROOT/data/projects/projects.json" <<EOF
+{
+  "p1": {
+    "id": "p1", "workspaceId": "e2e", "name": "legacy-sample",
+    "rootPath": "$ROOT/legacy-sample", "webappDir": "WebRoot",
+    "outputDir": "build/classes", "sourceLevel": "8", "targetLevel": "8",
+    "encoding": "gbk", "contextPath": "/kairo"
+  }
+}
+EOF
 
 KAIRO_DATA_DIR="$ROOT/data" \
 KAIRO_TOMCAT6_HOME="${KAIRO_TOMCAT6_HOME:-/tmp/tomcat6-home/apache-tomcat-6.0.53}" \
@@ -61,7 +76,7 @@ cp -R "$SRC_LEGACY" "$LEGACY"
 
 echo "[1/6] build"
 BUILD_RESP=$(curl -fsS -X POST "http://127.0.0.1:${PORT}/api/v1/builds" -H "Content-Type: application/json" \
-  -d "{\"requestId\":\"b1\",\"payload\":{\"projectRoot\":\"${LEGACY}\",\"sourceLevel\":\"8\",\"targetLevel\":\"8\",\"outputDir\":\"${BUILD_OUT}\",\"classpath\":[\"${LEGACY}/lib/javax.servlet-api-4.0.1.jar\"]}}")
+  -d "{\"requestId\":\"b1\",\"payload\":{\"projectId\":\"p1\",\"projectRoot\":\"${LEGACY}\",\"sourceLevel\":\"8\",\"targetLevel\":\"8\",\"outputDir\":\"${BUILD_OUT}\",\"classpath\":[\"${LEGACY}/lib/javax.servlet-api-4.0.1.jar\"]}}")
 BUILD_ID=$(echo "$BUILD_RESP" | /usr/bin/python3 -c "import json,sys; print(json.load(sys.stdin)['payload']['id'])")
 echo "  build id: $BUILD_ID"
 # Poll for completion

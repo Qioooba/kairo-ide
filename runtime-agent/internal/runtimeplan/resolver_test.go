@@ -1,4 +1,4 @@
-﻿package runtimeplan
+package runtimeplan
 
 import (
 	"context"

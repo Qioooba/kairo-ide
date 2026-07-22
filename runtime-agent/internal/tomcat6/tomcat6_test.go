@@ -1,4 +1,4 @@
-﻿package tomcat6
+package tomcat6
 
 import (
 	"context"
@@ -65,8 +65,12 @@ func TestConfig_Validate_MissingCatalinaHome(t *testing.T) {
 		ShutdownPort: 8005,
 	}
 	err := cfg.Validate()
-	if err == nil || !strings.Contains(err.Error(), "catalina home") {
-		t.Errorf("expected catalina home error, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "tomcat 6 not available") {
+		t.Errorf("expected actionable tomcat-missing error, got %v", err)
+	}
+	// The message must tell the user how to recover (KAIRO-RC-WEB-205).
+	if !strings.Contains(err.Error(), "bundled:prepare") {
+		t.Errorf("error must name the recovery command, got %v", err)
 	}
 }
 

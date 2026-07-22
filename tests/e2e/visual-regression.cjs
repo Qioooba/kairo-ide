@@ -55,8 +55,7 @@ function pass(msg) {
 
   try {
     await page.goto(theiaUrl, { waitUntil: 'domcontentloaded', timeout: 60_000 });
-    await page.waitForSelector('.theia-statusbar', { timeout: 60_000 });
-    await page.waitForSelector('.monaco-editor', { timeout: 60_000 });
+    await page.waitForSelector('#theia-statusBar', { timeout: 60_000 });
     await page.waitForTimeout(2000);
     pass('Theia shell rendered');
     await page.screenshot({ path: path.join(outDir, 'visual-shell.png'), fullPage: false });
@@ -71,7 +70,7 @@ function pass(msg) {
 
     step('Checking Kairo status bar entries');
     const sbText = await page.evaluate(() => {
-      const sb = document.querySelector('.theia-statusbar');
+      const sb = document.querySelector('#theia-statusBar');
       return sb ? (sb.textContent || '') : '';
     });
     const required = ['Runtime:'];

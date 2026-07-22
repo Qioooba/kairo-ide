@@ -183,7 +183,7 @@ async function getServerViewState(page) {
 
 async function getStatusBarText(page) {
   return page.evaluate(() => {
-    const sb = document.querySelector('.theia-statusbar');
+    const sb = document.querySelector('#theia-statusBar');
     return sb ? (sb.textContent || '') : '';
   });
 }
@@ -289,7 +289,7 @@ async function waitForServerRunning(page, timeoutMs = 120_000) {
     // ---------- Step 1: Navigate to Theia ----------
     step('1. Navigate to Theia Browser');
     await page.goto(theiaUrl, { waitUntil: 'domcontentloaded', timeout: 60_000 });
-    await page.waitForSelector('.theia-statusbar', { timeout: 60_000 });
+    await page.waitForSelector('#theia-statusBar', { timeout: 60_000 });
     await page.waitForSelector('.monaco-editor', { timeout: 60_000 });
     await page.waitForTimeout(2000);
     await screenshot(page, '01-theia-shell.png');

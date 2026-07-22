@@ -2,6 +2,8 @@ import * as React from 'react';
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import { injectable, inject } from '@theia/core/shared/inversify';
 import { FileDialogService } from '@theia/filesystem/lib/browser/file-dialog';
+import { WorkspaceService } from '@theia/workspace/lib/browser';
+import URI from '@theia/core/lib/common/uri';
 import { KairoProjectService } from './project-service';
 import { ActiveProjectService } from './active-project-service';
 import { RuntimeConnectionService } from '@kairo/runtime-extension';
@@ -38,6 +40,9 @@ export class ImportWizardWidget extends ReactWidget {
     @inject(RuntimeConnectionService)
     protected readonly runtime!: RuntimeConnectionService;
 
+    @inject(WorkspaceService)
+    protected readonly workspaceService!: WorkspaceService;
+
     constructor() {
         super();
         this.id = ImportWizardWidget.ID;
@@ -53,6 +58,7 @@ export class ImportWizardWidget extends ReactWidget {
             projectService: this.projectService,
             activeProject: this.activeProject,
             runtime: this.runtime,
+            workspaceService: this.workspaceService,
             onClose: () => this.close(),
         });
     }
@@ -63,11 +69,12 @@ interface ImportWizardProps {
     projectService: KairoProjectService;
     activeProject: ActiveProjectService;
     runtime: RuntimeConnectionService;
+    workspaceService: WorkspaceService;
     onClose: () => void;
 }
 
 const ImportWizard: React.FC<ImportWizardProps> = ({
-    fileDialogService, projectService, activeProject, runtime, onClose,
+    fileDialogService, projectService, activeProject, runtime, workspaceService, onClose,
 }) => {
     const [step, setStep] = React.useState(1);
     const [workspacePath, setWorkspacePath] = React.useState('');
@@ -76,6 +83,7 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
     const [scanning, setScanning] = React.useState(false);
     const [saving, setSaving] = React.useState(false);
     const [saveError, setSaveError] = React.useState('');
+    const [savedProject, setSavedProject] = React.useState<{ name: string; root: string; encoding: string } | null>(null);
     const [projectName, setProjectName] = React.useState('my-project');
     const [sourceLevel, setSourceLevel] = React.useState('1.6');
     const [encoding, setEncoding] = React.useState('GBK');
@@ -165,10 +173,14 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
                 projectId: saved.id,
                 name: saved.name,
                 root: saved.rootPath || workspacePath,
+                encoding: normalizeEncodingId(encoding),
             });
 
-            // Close wizard, refresh views (NO reload)
-            onClose();
+            // KAIRO-RC-WEB-204: don't drop the user back into an
+            // empty shell — land on the Ready step with the saved
+            // project summary and a way to open the project.
+            setSavedProject({ name: saved.name || trimmedName, root: saved.rootPath || workspacePath, encoding: normalizeEncodingId(encoding) });
+            setStep(4);
         } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
             setSaveError(msg);
@@ -330,6 +342,44 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
                                 </p>
                             )}
                         </form>
+                    </div>
+                )}
+                {step === 4 && savedProject && (
+                    <div className="kairo-wizard-step-content" data-testid="step-content-4">
+                        <p className="kairo-wizard-ready" data-testid="import-ready">
+                            Project <strong>{savedProject.name}</strong> is ready.
+                        </p>
+                        <dl className="kairo-info-list">
+                            <dt>Location</dt>
+                            <dd data-testid="ready-root">{savedProject.root}</dd>
+                            <dt>Encoding</dt>
+                            <dd data-testid="ready-encoding">{savedProject.encoding}</dd>
+                        </dl>
+                        <p>
+                            Open the project folder to see its files in the Explorer,
+                            then use <strong>Kairo: Build</strong> to compile it.
+                        </p>
+                        <div className="kairo-wizard-actions">
+                            <button
+                                type="button"
+                                className="theia-button main"
+                                data-testid="open-project-btn"
+                                onClick={() => {
+                                    void workspaceService.open(new URI(savedProject.root));
+                                    onClose();
+                                }}
+                            >
+                                Open Project Folder
+                            </button>
+                            <button
+                                type="button"
+                                className="theia-button secondary"
+                                data-testid="ready-close-btn"
+                                onClick={() => onClose()}
+                            >
+                                Close
+                            </button>
+                        </div>
                     </div>
                 )}
             </div>

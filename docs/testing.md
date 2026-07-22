@@ -15,7 +15,7 @@
                    ╱ (race + tag) ╲  TS: extensions over a real Theia shell
                   ╱───────────────╲
                  ╱    Unit tests    ╲  Go: standard `testing`
-                ╱   (deterministic)  ╲ TS: `mocha` + `chai`, fast
+                ╱   (deterministic)  ╲ TS: `node --test`, fast
                ╱─────────────────────╲
 ```
 
@@ -26,9 +26,8 @@
 | Go Runtime Agent unit | Go | `testing` | `runtime-agent/**/*_test.go` |
 | Go Runtime Agent integration | Go | `testing` + `//go:build integration` | `runtime-agent/test/integration/` |
 | Go Runtime Agent race | Go | `-race` | CI on every PR |
-| TS extension unit | TypeScript | `mocha` + `chai` (provided by Theia) | `packages/*/src/**/*.test.ts` |
-| TS component | TypeScript | `@testing-library/react` | `packages/ui-kit/test/` |
-| E2E | TypeScript | Playwright | `tests/e2e/` |
+| TS extension unit | TypeScript / JavaScript | `node --test` (built-in runner; some suites via `ts-node`) | `packages/*/src/**/*.test.{ts,cjs}` |
+| E2E | JavaScript (Node `.cjs`) | Playwright | `tests/e2e/` |
 
 ## 3. Fixtures
 
@@ -39,11 +38,8 @@
   - 1 JSP at `WebRoot/utf8.jsp` (UTF-8)
   - 1 properties file at `src/main/resources/messages.properties`
   - 1 JSTL taglib usage
-  - 1 custom tag declaration in `WebRoot/WEB-INF/tags/hello.tag`
   - 1 Ant `build.xml`
   - 1 `web.xml`
-  - A pre-prepared `curl` request that hits `/hello` and is used by
-    the debug E2E.
 - **`bundled/tomcat6/`** — a directory ready to receive a verified
   Tomcat 6.0.53 archive. The build script downloads + checksums it
   from Apache archives. The fixture test asserts checksum.
@@ -127,24 +123,25 @@ electron-packager outputs.
 
 | Command | What it does |
 |---------|--------------|
-| `pnpm test` | All TS unit + component tests in packages and apps |
-| `pnpm test:agent` | Go unit tests with `-race` |
+| `pnpm test` | All TS unit tests in packages and apps (`node --test`) |
+| `pnpm test:agent` | Go unit tests (cross-platform wrapper; skips 53 known Windows-only file-I/O failures on Windows) |
+| `pnpm test:agent:race` | Go unit tests with `-race` |
 | `pnpm test:agent:integration` | Go integration tests (needs JDK) |
 | `pnpm test:e2e:api` | Runtime Agent HTTP smoke (no browser) |
 | `pnpm test:e2e:smoke` | Playwright shell smoke (headless) |
 | `pnpm test:e2e:web` | Playwright full-chain UI E2E (headless) |
 | `pnpm test:visual:web` | Headed visual regression smoke |
-| `pnpm test:a11y:web` | Headed accessibility smoke |
-| `pnpm verify` | bootstrap + build + all of the above |
+| `pnpm test:a11y:web` | axe-core accessibility scan (headed, `@axe-core/playwright`) |
+| `pnpm verify` | `pnpm install --frozen-lockfile` + build + `pnpm test` + `pnpm test:agent` + lint |
 
 ## 8. What is **not** in test
 
 - We do not test against Oracle JDK 6 in CI (license + availability).
-  The integration test that requires JDK 6 is **skipped** unless
-  `KAIRO_JDK6_HOME` is set, in which case it runs.
+  There is currently no opt-in JDK 6 test path.
 - We do not run a real Tomcat 6 in CI. The wrapper is unit-tested;
-  a smoke E2E with a stubbed `catalina.sh` is the v1 substitute,
-  gated by a flag.
+  the E2E server-start step is gated on B-002 (Tomcat 6 binary not
+  vendored), and gated items fail the run — they are recorded, not
+  silently passed (see KAIRO-RC-WEB-012).
 - We do not fuzz the LSP/DAP layer. JDT LS has its own fuzzers
   upstream; we trust it.
 
@@ -163,4 +160,4 @@ electron-packager outputs.
   keep `it.skip`s around as a tax.
 - Test failures write a diagnostic bundle (logs, screenshots,
   network capture) to the CI artifact store. Locally,
-  `pnpm test:e2e -- --reporter=line` keeps output small.
+  `pnpm test:e2e:api` is the fastest loop and keeps output small.

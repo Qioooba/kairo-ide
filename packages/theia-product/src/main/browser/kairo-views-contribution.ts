@@ -36,9 +36,10 @@ import {
   ActiveProjectService,
 } from '@kairo/project-extension';
 import { BuildViewWidget } from '@kairo/build-extension';
-import { BuildStore } from '@kairo/build-extension';
+import { BuildStore, mapBuildResult } from '@kairo/build-extension';
 import { ServerViewWidget, LogViewerWidget } from '@kairo/tomcat-extension';
 import { ImportWizardWidget, ProjectSelectorWidget } from '@kairo/project-extension';
+import { KAIRO_WELCOME_FACTORY_ID } from './kairo-welcome-widget';
 import {
   KAIRO_IMPORT_WIZARD_FACTORY_ID,
   KAIRO_PROJECT_SELECTOR_FACTORY_ID,
@@ -48,7 +49,6 @@ import type {
   BuildResult,
   DeploymentResult,
 } from '@kairo/protocol';
-import { mapBuildState } from '@kairo/protocol';
 
 /* ------------------------------------------------------------------ */
 /*  Commands                                                            */
@@ -59,6 +59,7 @@ export namespace KairoCommands {
   export const SELECT_PROJECT: Command = { id: 'kairo.project.select', label: 'Kairo: Select Project' };
   export const SCAN_PROJECT: Command = { id: 'kairo.project.scan', label: 'Kairo: Scan Project' };
   export const BUILD: Command = { id: 'kairo.build', label: 'Kairo: Build' };
+  export const CLEAN_BUILD: Command = { id: 'kairo.cleanBuild', label: 'Kairo: Clean Build' };
   export const BUILD_AND_DEPLOY: Command = { id: 'kairo.buildAndDeploy', label: 'Kairo: Build and Deploy' };
   export const START_SERVER: Command = { id: 'kairo.server.start', label: 'Kairo: Start Server' };
   export const DEBUG_SERVER: Command = { id: 'kairo.server.debug', label: 'Kairo: Start Server (Debug)' };
@@ -150,12 +151,45 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
     // Register commands. The commands accept a `Widget | undefined`
     // argument when triggered from a view, but most user flows
     // come from the toolbar / command palette.
+    // KAIRO-RC-WEB-017: onStatusChange fires immediately with the
+    // current status, which is 'disconnected' before the first
+    // connect — warning on that initial emission produced a stale
+    // "disconnected" toast sitting next to a "Runtime: connected"
+    // status bar. Only warn on a genuine open -> disconnected
+    // transition, and let the toast time out so it cannot linger
+    // past a reconnect.
+    let lastStatus: string | undefined;
     this.statusUnsub = this.runtime.onStatusChange(s => {
-      if (s === 'disconnected') {
-        this.messages.warn('Runtime Agent is disconnected. Buttons will retry on click.');
+      if (s === 'disconnected' && lastStatus === 'open') {
+        this.messages.warn('Runtime Agent is disconnected. Buttons will retry on click.', { timeout: 12000 });
       }
+      lastStatus = s;
     });
     this.eventsUnsub = this.runtime.subscribeEvents(this.runtime.workspace(), (e: any) => this.handleEvent(e));
+
+    // KAIRO-RC-WEB-018: cold start with no active project shows
+    // the Welcome tab so the first task is discoverable; the tab
+    // closes itself once a project is selected.
+    void this.maybeOpenWelcome();
+    this.activeProject.onDidChangeProject(p => {
+      if (p) void this.closeWelcome();
+    });
+  }
+
+  protected async maybeOpenWelcome(): Promise<void> {
+    if (this.activeProject.project) {
+      return;
+    }
+    try {
+      await this.revealOrCreateMain(KAIRO_WELCOME_FACTORY_ID, () => undefined, () => { /* singleton via WidgetManager */ });
+    } catch (err) {
+      console.warn('[kairo] welcome tab failed to open', err);
+    }
+  }
+
+  protected async closeWelcome(): Promise<void> {
+    const w = this.shell.getWidgets('main').find(widget => widget.id === KAIRO_WELCOME_FACTORY_ID);
+    w?.close();
   }
 
   onStop(): void {
@@ -228,6 +262,24 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
       },
     });
 
+    // Same as Build but with clean:true — the backend wipes the
+    // previous build output first. The Build view's "Clean Build"
+    // button must run THIS (KAIRO-RC-WEB-007: it used to fire
+    // buildAndDeploy, contradicting its label).
+    registry.registerCommand(KairoCommands.CLEAN_BUILD, {
+      execute: async () => {
+        try {
+          const p = await this.activeProject.requireProject();
+          const result = await this.runtime.request('POST /api/v1/builds', { projectId: p.projectId, clean: true });
+          this.messages.info(`Clean build ${result.state}.`);
+          await this.refreshBuilds();
+        } catch (err) {
+          this.messages.error(kairoErrorMessage(err, 'Clean build failed'));
+        }
+        return undefined;
+      },
+    });
+
     registry.registerCommand(KairoCommands.BUILD_AND_DEPLOY, {
       execute: async () => {
         try {
@@ -273,10 +325,27 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
     registry.registerCommand(KairoCommands.STOP_SERVER, {
       execute: async () => {
         try {
-          const list = await this.runtime.request('GET /api/v1/servers', undefined);
-          for (const srv of (list as ServerInstance[])) {
-            await this.serverSvc.stop(srv.id, false);
-            this.messages.info(`Server ${srv.id} stopped.`);
+          const list = (await this.runtime.request('GET /api/v1/servers', undefined)) as ServerInstance[];
+          // Only stop servers that are actually up — the agent
+          // persists server metadata across sessions, so the list
+          // contains stale stopped/error entries whose ids are dead
+          // (stopping them used to fail the whole command).
+          const alive = list.filter(s => s.state !== 'stopped' && s.state !== 'error' && s.state !== 'crashed');
+          if (alive.length === 0) {
+            this.messages.info('No running server.');
+            return undefined;
+          }
+          const failures: string[] = [];
+          for (const srv of alive) {
+            try {
+              await this.serverSvc.stop(srv.id, false);
+              this.messages.info(`Server ${srv.id} stopped.`);
+            } catch (err) {
+              failures.push(`${srv.id}: ${(err as Error).message}`);
+            }
+          }
+          if (failures.length > 0) {
+            this.messages.error(`Failed to stop: ${failures.join('; ')}`);
           }
         } catch (err) {
           this.messages.error(kairoErrorMessage(err, 'Server stop failed'));
@@ -411,26 +480,12 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
     try {
       const list = (await this.runtime.request('GET /api/v1/builds', undefined)) as BuildResult[];
       if (Array.isArray(list)) {
-        const builds = list.map(b => {
-          mapBuildState(b.state);
-          return {
-            id: b.id,
-            workspaceId: this.runtime.workspace(),
-            projectId: '',
-            state: (b.state === 'success' ? 'succeeded' : b.state === 'failure' ? 'failed' : b.state === 'queued' ? 'pending' : b.state) as 'succeeded' | 'failed' | 'pending' | 'running' | 'cancelled',
-            startTime: b.startedAt,
-            endTime: b.finishedAt,
-            summary: `${b.summary.errors} errors, ${b.summary.warnings} warnings`,
-            diagnostics: b.diagnostics.map(d => ({
-              file: d.file,
-              line: d.line,
-              column: d.column,
-              severity: d.severity === 'hint' ? 'info' : d.severity,
-              message: d.message,
-            })),
-          };
-        });
-        this.buildStore.setBuilds(builds);
+        // KAIRO-RC-WEB-237: delegate to the null-tolerant mapper —
+        // the inline version crashed on b.summary.errors for builds
+        // whose compiler never ran (summary: null), killing the
+        // whole refresh and leaving the Build view empty.
+        const ws = this.runtime.workspace() ?? '';
+        this.buildStore.setBuilds(list.map(b => mapBuildResult(b, ws)));
       }
     } catch (err) {
       this.messages.error(kairoErrorMessage(err, 'Refresh builds failed'));

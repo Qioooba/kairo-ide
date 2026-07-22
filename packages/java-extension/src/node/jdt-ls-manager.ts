@@ -143,9 +143,16 @@ export class JdtLsManager implements Disposable {
     }
     const homeAbs = resolve(home);
     if (!existsSync(homeAbs)) {
+      let diag = '';
+      try {
+        statSync(homeAbs);
+      } catch (e) {
+        const proc = typeof process !== 'undefined' ? `pid=${process.pid}, cwd=${process.cwd()}` : 'no-process';
+        diag = ` (stat error: ${(e as NodeJS.ErrnoException).code}, ${proc}, home=${JSON.stringify(home)})`;
+      }
       return {
         kind: 'env',
-        message: `KAIRO_JDT_LS_HOME points to a path that does not exist: ${homeAbs}`,
+        message: `KAIRO_JDT_LS_HOME points to a path that does not exist: ${homeAbs}${diag}`,
       };
     }
     const pluginsDir = join(homeAbs, 'plugins');
@@ -158,11 +165,16 @@ export class JdtLsManager implements Disposable {
 
     // Find the equinox launcher jar. The name pattern is
     // `org.eclipse.equinox.launcher_<version>.jar` and there
-    // is normally exactly one.
+    // is normally exactly one. Native FRAGMENT jars also match
+    // a naive /equinox.launcher/ test (e.g.
+    // `org.eclipse.equinox.launcher.cocoa.macosx.aarch64_*.jar`)
+    // and readdir order can return them first — spawning with
+    // one makes the JVM die with "no main manifest attribute"
+    // (KAIRO-RC-WEB-251, captured from the child's stderr).
     const plugins = readdirSync(pluginsDir)
       .filter(n => n.endsWith('.jar'))
       .map(n => join(pluginsDir, n));
-    const launcherJar = plugins.find(p => /equinox\.launcher/i.test(p));
+    const launcherJar = plugins.find(p => /equinox\.launcher_\d/.test(p));
     if (!launcherJar) {
       return {
         kind: 'env',
@@ -215,11 +227,14 @@ export class JdtLsManager implements Disposable {
    * be resolved; the caller should catch and report the
    * `{ kind, message }` error to the UI.
    */
-  async start(opts: { rootUri: string; workspaceDataDir: string; sourceLevel?: string }): Promise<void> {
+  async start(opts: { rootUri: string; workspaceDataDir: string; sourceLevel?: string; home?: string }): Promise<void> {
     if (this.state === 'starting' || this.state === 'initializing' || this.state === 'ready') {
       throw new Error(`JDT LS already in state ${this.state}`);
     }
-    const dist = JdtLsManager.resolveDistribution({});
+    // opts.home (derived from the Go agent's launch descriptor)
+    // wins over the KAIRO_JDT_LS_HOME env fallback inside
+    // resolveDistribution.
+    const dist = JdtLsManager.resolveDistribution({ home: opts.home });
     if ('kind' in dist) {
       this.setState('failed');
       throw new Error(dist.message);
@@ -403,14 +418,24 @@ export class JdtLsManager implements Disposable {
     if (!this.connection || this.state !== 'ready') {
       throw new Error(`JDT LS not ready (state=${this.state})`);
     }
-    this.connection.sendNotification('textDocument/didOpen', params);
+    this.connection.sendNotification('textDocument/didOpen', {
+      textDocument: {
+        uri: params.uri,
+        languageId: params.languageId,
+        version: params.version,
+        text: params.text,
+      },
+    });
   }
 
   didChange(params: { uri: string; version: number; changes: { text: string; rangeLength?: number }[] }): void {
     if (!this.connection || this.state !== 'ready') {
       throw new Error(`JDT LS not ready (state=${this.state})`);
     }
-    this.connection.sendNotification('textDocument/didChange', params);
+    this.connection.sendNotification('textDocument/didChange', {
+      textDocument: { uri: params.uri, version: params.version },
+      contentChanges: params.changes,
+    });
   }
 
   didClose(uri: string): void {
@@ -431,11 +456,13 @@ export class JdtLsManager implements Disposable {
     if (!this.connection || this.state !== 'ready') {
       throw new Error(`JDT LS not ready (state=${this.state})`);
     }
-    return this.connection.sendRequest<LSPCompletionList>('textDocument/completion', {
+    const list = await this.connection.sendRequest<LSPCompletionList>('textDocument/completion', {
       textDocument: { uri: params.uri },
       position: { line: params.line, character: params.character },
       context: { triggerKind: params.triggerKind ?? 1, triggerCharacter: params.triggerCharacter },
     });
+    this.logger?.info(`[JDT LS] completion result items=${list?.items?.length ?? -1} uri=${params.uri} pos=${params.line}:${params.character}`);
+    return list;
   }
 
   /** Drive the LSP `textDocument/definition` request. */
@@ -443,19 +470,35 @@ export class JdtLsManager implements Disposable {
     if (!this.connection || this.state !== 'ready') {
       throw new Error(`JDT LS not ready (state=${this.state})`);
     }
-    return this.connection.sendRequest<LSPLocation | LSPLocation[] | null>(
+    const result = await this.connection.sendRequest<LSPLocation | LSPLocation[] | null>(
       'textDocument/definition',
       {
         textDocument: { uri: params.uri },
         position: { line: params.line, character: params.character },
       },
     );
+    this.logger?.info(`[JDT LS] definition result=${JSON.stringify(result)?.slice(0, 200) ?? 'null'} uri=${params.uri} pos=${params.line}:${params.character}`);
+    return result;
+  }
+
+  /**
+   * Fetch the contents of a class file (JDT LS extension
+   * request `java/classFileContents`) — this is what makes
+   * go-to-definition into library jars viewable: the LS
+   * returns jdt:// URIs, and this fetches their (decompiled
+   * or source-attached) text.
+   */
+  async classFileContents(uri: string): Promise<string> {
+    if (!this.connection || this.state !== 'ready') {
+      throw new Error(`JDT LS not ready (state=${this.state})`);
+    }
+    const result = await this.connection.sendRequest<string>('java/classFileContents', { uri });
+    return typeof result === 'string' ? result : '';
   }
 
   /** Stop the process; the `stopped` state fires when the child
    *  actually exits. */
-  async stop(): Promise<void> {
-    if (this.state === 'stopped' || this.state === 'uninitialized') {
+  async stop(): Promise<void> {    if (this.state === 'stopped' || this.state === 'uninitialized') {
       return;
     }
     this.setState('stopping');
@@ -561,16 +604,19 @@ export class JdtLsManager implements Disposable {
  *  `config_linux`, `config_mac`, `config_win` and a generic
  *  `config` directory. */
 function pickConfigDir(home: string): string | undefined {
-  const want =
+  // JDT LS ships per-arch configs (config_mac, config_mac_arm,
+  // config_linux, config_linux_arm). Picking the x86 config on an
+  // arm64 host makes the Equinox launcher exit code=1 immediately
+  // (KAIRO-RC-WEB-251, reproduced live: config_mac_arm starts fine).
+  const os =
     process.platform === 'win32'
       ? 'config_win'
       : process.platform === 'darwin'
         ? 'config_mac'
         : 'config_linux';
-  const candidates = [
-    join(home, want),
-    join(home, 'config'),
-  ];
+  const candidates = process.arch === 'arm64' && os !== 'config_win'
+    ? [join(home, `${os}_arm`), join(home, os), join(home, 'config')]
+    : [join(home, os), join(home, 'config')];
   for (const c of candidates) {
     if (existsSync(c)) return c;
   }

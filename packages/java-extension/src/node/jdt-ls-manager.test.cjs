@@ -124,6 +124,45 @@ test('JdtLsManager: starts in uninitialized', () => {
   m.dispose();
 });
 
+test('resolveDistribution: native launcher FRAGMENT jars are not picked as the launcher (KAIRO-RC-WEB-251)', () => {
+  // readdir order can return the native fragment
+  // (org.eclipse.equinox.launcher.cocoa.macosx.aarch64_*.jar)
+  // before the real launcher — spawning with it dies with
+  // "no main manifest attribute".
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'kairo-jdt-ls-'));
+  const jre = path.join(tmp, 'fake-jre');
+  fs.mkdirSync(path.join(tmp, 'plugins'));
+  // Fragment FIRST (alphabetical-ish order fooled the old regex).
+  fs.writeFileSync(path.join(tmp, 'plugins', 'org.eclipse.equinox.launcher.cocoa.macosx.aarch64_1.2.1400.jar'), 'x');
+  fs.writeFileSync(path.join(tmp, 'plugins', 'org.eclipse.equinox.launcher_1.7.100.jar'), 'x');
+  const cfgDirName =
+    process.platform === 'win32'
+      ? 'config_win'
+      : process.platform === 'darwin'
+        ? (process.arch === 'arm64' ? 'config_mac_arm' : 'config_mac')
+        : 'config_linux';
+  fs.mkdirSync(path.join(tmp, cfgDirName));
+  fs.mkdirSync(path.join(jre, 'bin'), { recursive: true });
+  const javaName = process.platform === 'win32' ? 'java.exe' : 'java';
+  fs.writeFileSync(path.join(jre, 'bin', javaName), '');
+  const savedHome = process.env.KAIRO_JDT_LS_HOME;
+  const savedJre = process.env.KAIRO_JDT_LS_JRE;
+  process.env.KAIRO_JDT_LS_HOME = tmp;
+  process.env.KAIRO_JDT_LS_JRE = jre;
+  try {
+    const r = JdtLsManager.resolveDistribution({});
+    assert.equal('kind' in r, false, 'expected a valid distribution, got: ' + JSON.stringify(r));
+    if (!('kind' in r)) {
+      assert.match(r.launcherJar, /equinox\.launcher_1\.7\.100\.jar$/, 'must pick the real launcher, not the native fragment');
+      assert.equal(r.configDir, path.join(tmp, cfgDirName), 'arm64 hosts must use the *_arm config dir');
+    }
+  } finally {
+    if (savedHome !== undefined) process.env.KAIRO_JDT_LS_HOME = savedHome; else delete process.env.KAIRO_JDT_LS_HOME;
+    if (savedJre !== undefined) process.env.KAIRO_JDT_LS_JRE = savedJre; else delete process.env.KAIRO_JDT_LS_JRE;
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('JdtLsManager: appendLog and recentLogs round-trip', () => {
   const m = new JdtLsManager();
   m.appendLog('stdout', 'hello');

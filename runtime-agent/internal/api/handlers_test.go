@@ -1,12 +1,16 @@
-﻿package api
+package api
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -14,6 +18,7 @@ import (
 
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/api/protocol"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/audit"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/domain"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/log"
 )
 
@@ -59,11 +64,15 @@ func (f *fakeJDTLS) Prepare(ctx context.Context) (json.RawMessage, error) {
 	})
 }
 
-func (f *fakeJDTLS) GetLaunchDescriptor(ctx context.Context, workspaceID string, projectID string) (json.RawMessage, error) {
+func (f *fakeJDTLS) GetLaunchDescriptor(ctx context.Context, workspaceID string, projectID string, workingDir string) (json.RawMessage, error) {
+	dir := workingDir
+	if dir == "" {
+		dir = "/path/to/project"
+	}
 	return json.Marshal(map[string]interface{}{
 		"command":      "/path/to/java",
 		"args":         []string{"-jar", "launcher.jar"},
-		"workingDir":   "/path/to/project",
+		"workingDir":   dir,
 		"envAllowlist": []string{"PATH=/usr/bin", "JAVA_HOME=/path/to/jre"},
 	})
 }
@@ -528,4 +537,285 @@ func (f *fakeEventBus) Serve(w http.ResponseWriter, r *http.Request) {
 	// deliberately do NOT, so the tests stay single-threaded
 	// and the recorder does not have to model a real upgrade.
 	w.WriteHeader(http.StatusSwitchingProtocols)
+}
+
+// fakeProjectStore is a minimal in-memory ProjectStore for
+// handler tests.
+type fakeProjectStore struct {
+	saved domain.Project
+}
+
+func (f *fakeProjectStore) List() []domain.Project { return []domain.Project{f.saved} }
+func (f *fakeProjectStore) Get(id string) (domain.Project, error) {
+	if f.saved.ID != domain.ProjectID(id) {
+		return domain.Project{}, fmt.Errorf("project not found: %s", id)
+	}
+	return f.saved, nil
+}
+func (f *fakeProjectStore) Update(id string, cfg *domain.Project) (domain.Project, error) {
+	f.saved = *cfg
+	return *cfg, nil
+}
+
+// KAIRO-RC-WEB-203: PUT /api/v1/projects/{id} must persist
+// <root>/.kairo/project.yaml — jdtproject.Generate reads it.
+func TestProjectPut_WritesKairoProjectYAML(t *testing.T) {
+	root := t.TempDir()
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	store := &fakeProjectStore{}
+	srv := NewServer(&Services{ProjectStore: store}, logger, auditLog, "test-0.1.0", "")
+
+	body := `{"id":"proj-1","workspaceId":"ws-1","name":"Legacy 中文项目","rootPath":"` + root + `","sourceRoots":["src"],"webappDir":"WebRoot","outputDir":"build/classes","sourceLevel":"1.8","targetLevel":"1.8","encoding":"gbk","buildTool":"ant"}`
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/projects/proj-1", strings.NewReader(body))
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rr.Code, rr.Body.String())
+	}
+	if store.saved.Name != "Legacy 中文项目" {
+		t.Fatalf("catalog stored name = %q, want %q", store.saved.Name, "Legacy 中文项目")
+	}
+	yamlPath := filepath.Join(root, ".kairo", "project.yaml")
+	data, err := os.ReadFile(yamlPath)
+	if err != nil {
+		t.Fatalf("expected %s to exist: %v", yamlPath, err)
+	}
+	if !strings.Contains(string(data), "Legacy 中文项目") || !strings.Contains(string(data), "gbk") {
+		t.Fatalf("project.yaml missing name/encoding:\n%s", string(data))
+	}
+}
+
+// fakeServerRunner records the Start request it was given.
+type fakeServerRunner struct {
+	lastReq    StartServerRequest
+	restartID  string
+	restartErr error
+	logs       []ServerLogEntry
+	logsErr    error
+	lastTail   int
+}
+
+func (f *fakeServerRunner) Start(req StartServerRequest) (*ServerResponse, error) {
+	f.lastReq = req
+	return &ServerResponse{ID: "srv_1", ProjectID: req.ProjectID, State: "starting"}, nil
+}
+func (f *fakeServerRunner) CatalinaHome() string                   { return "/tmp/catalina" }
+func (f *fakeServerRunner) Get(id string) (*ServerResponse, error) { return nil, nil }
+func (f *fakeServerRunner) List() []*ServerResponse                { return nil }
+func (f *fakeServerRunner) Stop(id string, force bool) (*ServerResponse, error) {
+	return nil, nil
+}
+func (f *fakeServerRunner) Restart(id string) (*ServerResponse, error) {
+	f.restartID = id
+	if f.restartErr != nil {
+		return nil, f.restartErr
+	}
+	return &ServerResponse{ID: id, State: "running"}, nil
+}
+func (f *fakeServerRunner) Debug(id string) (*ServerResponse, error) { return nil, nil }
+func (f *fakeServerRunner) Logs(id string, tail int) ([]ServerLogEntry, error) {
+	f.lastTail = tail
+	return f.logs, f.logsErr
+}
+
+// KAIRO-RC-WEB-240: POST /api/v1/servers with only {projectId} must
+// resolve webappDir/contextPath from the stored project.
+func TestServerStart_ResolvesWebappDirFromProject(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	store := &fakeProjectStore{saved: domain.Project{
+		ID:        "proj-1",
+		Name:      "legacy",
+		RootPath:  "/tmp/legacy-sample",
+		WebappDir: "WebRoot",
+	}}
+	runner := &fakeServerRunner{}
+	srv := NewServer(&Services{ProjectStore: store, ServerRunner: runner}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/servers", strings.NewReader(`{"projectId":"proj-1"}`))
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rr.Code, rr.Body.String())
+	}
+	if runner.lastReq.WebappDir != "/tmp/legacy-sample/WebRoot" {
+		t.Fatalf("WebappDir = %q, want /tmp/legacy-sample/WebRoot", runner.lastReq.WebappDir)
+	}
+}
+
+// POST /api/v1/servers/{id}/restart must route to ServerRunner.Restart
+// (previously the sub-path fell through to "unknown subpath" → 404).
+func TestServerRestart_RoutesToRunner(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	runner := &fakeServerRunner{}
+	srv := NewServer(&Services{ServerRunner: runner}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/servers/srv_1/restart", strings.NewReader(`{}`))
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rr.Code, rr.Body.String())
+	}
+	if runner.restartID != "srv_1" {
+		t.Fatalf("restart id = %q, want srv_1", runner.restartID)
+	}
+
+	// GET on the restart sub-path is method-not-allowed.
+	rr = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/servers/srv_1/restart", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code == http.StatusOK {
+		t.Fatalf("GET restart should not succeed, body=%s", rr.Body.String())
+	}
+
+	// Unknown server → 404 not_found.
+	runner.restartErr = errors.New("server not found: srv_x")
+	rr = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/servers/srv_x/restart", strings.NewReader(`{}`))
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// GET /api/v1/servers/{id}/logs must return the [{line, ts}]
+// contract shape and pass ?tail=N through to the runner.
+func TestServerLogs_ReturnsEntriesAndTail(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	runner := &fakeServerRunner{
+		logs: []ServerLogEntry{{Line: "INFO: Server startup in 1234 ms", TS: "2026-01-01T00:00:00Z"}},
+	}
+	srv := NewServer(&Services{ServerRunner: runner}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/servers/srv_1/logs?tail=50", nil)
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rr.Code, rr.Body.String())
+	}
+	if runner.lastTail != 50 {
+		t.Fatalf("tail = %d, want 50", runner.lastTail)
+	}
+	var env struct {
+		OK      bool            `json:"ok"`
+		Payload json.RawMessage `json:"payload"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &env); err != nil {
+		t.Fatalf("decode envelope: %v", err)
+	}
+	var entries []ServerLogEntry
+	if err := json.Unmarshal(env.Payload, &entries); err != nil {
+		t.Fatalf("payload is not a log entry array: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Line == "" || entries[0].TS == "" {
+		t.Fatalf("unexpected entries: %#v", entries)
+	}
+
+	// Unknown server → 404 not_found.
+	runner.logsErr = errors.New("server not found: srv_x")
+	rr = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/servers/srv_x/logs", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// fakeDeployer records the Publish request.
+type fakeDeployer struct {
+	lastReq DeployRequest
+}
+
+func (f *fakeDeployer) Publish(req DeployRequest) (*DeployResult, error) {
+	f.lastReq = req
+	return &DeployResult{ID: "dep_1", State: "success"}, nil
+}
+func (f *fakeDeployer) Get(id string) (*DeployResult, error) { return nil, nil }
+func (f *fakeDeployer) List() []*DeployResult                { return nil }
+
+// KAIRO-RC-WEB-239: POST /api/v1/deployments {projectId, buildId}
+// must resolve source (project webapp) and target (catalina webapps).
+func TestDeployment_ResolvesSourceAndTargetFromProject(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	store := &fakeProjectStore{saved: domain.Project{
+		ID:          "proj-1",
+		Name:        "Legacy Sample",
+		RootPath:    "/tmp/legacy-sample",
+		WebappDir:   "WebRoot",
+		SourceRoots: []string{"src"},
+	}}
+	runner := &fakeServerRunner{}
+	deployer := &fakeDeployer{}
+	srv := NewServer(&Services{ProjectStore: store, ServerRunner: runner, Deployer: deployer}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/deployments", strings.NewReader(`{"projectId":"proj-1","buildId":"b1","scope":"all"}`))
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rr.Code, rr.Body.String())
+	}
+	if deployer.lastReq.Source != "/tmp/legacy-sample/WebRoot" {
+		t.Fatalf("Source = %q, want /tmp/legacy-sample/WebRoot", deployer.lastReq.Source)
+	}
+	if deployer.lastReq.Target != "/tmp/catalina/webapps/legacy-sample" {
+		t.Fatalf("Target = %q, want /tmp/catalina/webapps/legacy-sample", deployer.lastReq.Target)
+	}
+}
+
+// KAIRO-RC-WEB-238: POST /api/v1/builds {projectId} must hydrate
+// root/levels/encoding/outputDir/classpath from the project.
+func TestBuildStart_HydratesFromProject(t *testing.T) {
+	proj := domain.Project{
+		ID:          "proj-1",
+		Name:        "legacy",
+		RootPath:    "/tmp/legacy-sample",
+		WebappDir:   "WebRoot",
+		OutputDir:   "build/classes",
+		SourceLevel: "1.8",
+		TargetLevel: "1.8",
+		Encoding:    "gbk",
+	}
+	req := BuildRequest{ProjectID: "proj-1"}
+	hydrateBuildRequest(&req, proj)
+	if req.ProjectRoot != "/tmp/legacy-sample" {
+		t.Fatalf("ProjectRoot = %q", req.ProjectRoot)
+	}
+	if req.SourceLevel != "1.8" || req.TargetLevel != "1.8" {
+		t.Fatalf("levels = %q/%q", req.SourceLevel, req.TargetLevel)
+	}
+	if req.Encoding != "gbk" {
+		t.Fatalf("Encoding = %q", req.Encoding)
+	}
+	if req.OutputDir != "/tmp/legacy-sample/build/classes" {
+		t.Fatalf("OutputDir = %q", req.OutputDir)
+	}
 }

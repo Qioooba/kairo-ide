@@ -35,6 +35,7 @@ import URI from '@theia/core/lib/common/uri';
 import { EncodingRegistry } from '@theia/core/lib/browser/encoding-registry';
 import { FileService } from '@theia/filesystem/lib/browser/file-service';
 import { MessageService } from '@theia/core/lib/common';
+import { Emitter, Event } from '@theia/core/lib/common/event';
 import { RuntimeConnectionService, KairoError } from '@kairo/runtime-extension';
 import type {
   EncodingDetectRequest,
@@ -45,9 +46,10 @@ import type {
 import {
   KAIRO_ENCODING_OPTIONS,
   normalizeEncodingLabel,
+  toTheiaEncodingId,
 } from './encoding-utils';
 
-export { KAIRO_ENCODING_OPTIONS, SUPPORTS_ENCODER, normalizeEncodingLabel } from './encoding-utils';
+export { KAIRO_ENCODING_OPTIONS, SUPPORTS_ENCODER, normalizeEncodingLabel, toTheiaEncodingId } from './encoding-utils';
 
 export const KairoEncodingService = Symbol('KairoEncodingService');
 
@@ -91,6 +93,17 @@ export class KairoEncodingServiceImpl {
    * exists to keep the UI snappy.
    */
   protected cache = new Map<string, string>();
+
+  /**
+   * Fired whenever the effective encoding for a URI changes
+   * (override registered, save-with-encoding, project default).
+   * The Kairo status bar subscribes to this: without it the
+   * "Encoding:" element only refreshed on current-editor change,
+   * so after "Reopen with Encoding" (which now keeps the same
+   * editor alive) it kept showing the STALE pre-reopen encoding.
+   */
+  protected readonly onDidChangeEncodingEmitter = new Emitter<string>();
+  readonly onDidChangeEncoding: Event<string> = this.onDidChangeEncodingEmitter.event;
 
   async detect(args: DetectArgs): Promise<EncodingDetectResponse> {
     const payload: EncodingDetectRequest = {
@@ -144,6 +157,33 @@ export class KairoEncodingServiceImpl {
   }
 
   /**
+   * The status bar passes `editor.document.uri`, which is a
+   * Monaco Uri — same string form but NOT a Theia URI instance,
+   * so EncodingRegistry lookups crashed with
+   * "e.isEqualOrParent is not a function" (KAIRO-RC-WEB-020).
+   * Coerce at the boundary so every caller is safe.
+   */
+  protected asTheiaUri(uri: URI): URI {
+    if (uri instanceof URI) {
+      return uri;
+    }
+    // Monaco Uri (or any string-coercible uri-like) — rebuild a
+    // real Theia URI. TS narrows the else branch to never because
+    // the declared type is already URI, hence the cast.
+    return new URI(String(uri as unknown as { toString(): string }));
+  }
+
+  /**
+   * Registered override disposables keyed by URI string. A URI
+   * must have AT MOST ONE per-file override: the registry's
+   * exact-match pass returns the first registration, so a second
+   * "Save with Encoding" on the same file would keep writing the
+   * OLD encoding while the UI claims the new one (flow-03 live
+   * evidence: Save-as-GBK reported success, bytes stayed UTF-8).
+   */
+  protected overrideDisposables = new Map<string, { dispose(): void }>();
+
+  /**
    * Register a per-URI encoding override with Theia's
    * EncodingRegistry and update the local cache. This is the
    * single point where "this file uses X" is recorded.
@@ -152,13 +192,21 @@ export class KairoEncodingServiceImpl {
     if (!KAIRO_ENCODING_OPTIONS.includes(encoding) && !encoding.match(/^[a-z0-9-]+$/i)) {
       throw new KairoError({ code: 'invalid_request', message: `unknown encoding: ${encoding}` });
     }
-    const prev = this.encodingRegistry.getEncodingForResource(uri);
-    this.encodingRegistry.registerOverride({
-      parent: uri,
-      encoding,
-    });
-    this.cache.set(uri.toString(), encoding);
-    return { encoding, changed: prev !== encoding };
+    // Store Theia encoding ids in the registry — Kairo display
+    // labels like 'utf-8' crash Theia's encoding status bar
+    // (SUPPORTED_ENCODINGS lookup, KAIRO-RC-WEB-260).
+    const theiaEncoding = toTheiaEncodingId(encoding);
+    const theiaUri = this.asTheiaUri(uri);
+    const key = theiaUri.toString();
+    const prev = this.encodingRegistry.getEncodingForResource(theiaUri);
+    this.overrideDisposables.get(key)?.dispose();
+    this.overrideDisposables.set(key, this.encodingRegistry.registerOverride({
+      parent: theiaUri,
+      encoding: theiaEncoding,
+    }));
+    this.cache.set(key, theiaEncoding);
+    this.onDidChangeEncodingEmitter.fire(theiaEncoding);
+    return { encoding: theiaEncoding, changed: prev !== theiaEncoding };
   }
 
   /**
@@ -168,11 +216,28 @@ export class KairoEncodingServiceImpl {
    * and save override should trust.
    */
   getEncodingFor(uri: URI): string {
-    const cached = this.cache.get(uri.toString());
+    const theiaUri = this.asTheiaUri(uri);
+    const cached = this.cache.get(theiaUri.toString());
     if (cached) return cached;
-    const v = this.encodingRegistry.getEncodingForResource(uri);
-    this.cache.set(uri.toString(), v);
+    const v = this.encodingRegistry.getEncodingForResource(theiaUri);
+    this.cache.set(theiaUri.toString(), v);
     return v;
+  }
+
+  /**
+   * Apply a project-wide default encoding: every file under
+   * rootUri resolves to `encoding` unless a more specific
+   * per-file override exists (KAIRO-RC-WEB-206 — previously a
+   * GBK project's files opened as UTF-8 mojibake because only
+   * explicit per-file overrides were ever registered).
+   */
+  applyProjectEncoding(rootUri: URI, encoding: string): void {
+    const normalized = toTheiaEncodingId(normalizeEncodingLabel(encoding.toLowerCase()));
+    this.encodingRegistry.registerOverride({
+      parent: this.asTheiaUri(rootUri),
+      encoding: normalized,
+    });
+    this.onDidChangeEncodingEmitter.fire(normalized);
   }
 
   /**

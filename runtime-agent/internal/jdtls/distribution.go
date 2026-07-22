@@ -1,4 +1,4 @@
-﻿// Package jdtls — distribution installer.
+// Package jdtls — distribution installer.
 //
 // Real Eclipse JDT Language Server is shipped as a tar.gz or zip
 // containing a "config_linux / config_win / config_mac" folder
@@ -322,6 +322,28 @@ func installFromFile(ctx context.Context, archivePath, home, dataDir string, ski
 		sum = s
 	}
 
+	// KAIRO-RC-WEB-241: the archive cache lives INSIDE `home`
+	// (cached := home/JDTLSArchiveFile), and the layout wipe below
+	// would delete the archive itself before unpack — making every
+	// install fail and the next run re-download. Move the archive
+	// to a sibling dir (keeping its extension so the format
+	// sniffer still works) and restore it afterwards.
+	keepDir := home + ".keep"
+	if err := os.MkdirAll(keepDir, 0o755); err != nil {
+		return InstallReport{}, fmt.Errorf("preserve jdtls archive before layout wipe: %w", err)
+	}
+	keep := filepath.Join(keepDir, filepath.Base(archivePath))
+	if err := os.Rename(archivePath, keep); err != nil {
+		return InstallReport{}, fmt.Errorf("preserve jdtls archive before layout wipe: %w", err)
+	}
+	restored := false
+	defer func() {
+		if !restored {
+			_ = os.Rename(keep, archivePath)
+		}
+		_ = os.RemoveAll(keepDir)
+	}()
+
 	// Wipe the existing layout so we never start the LS
 	// against a half-upgraded tree. This is the same behaviour
 	// as the .tar.gz installer in many Go projects: better to
@@ -336,9 +358,16 @@ func installFromFile(ctx context.Context, archivePath, home, dataDir string, ski
 	// Unpack. The unpacking code is .tar.gz + .zip aware and
 	// refuses to write outside `home` regardless of what the
 	// archive contains.
-	if err := unpackArchive(ctx, archivePath, home, logger); err != nil {
+	if err := unpackArchive(ctx, keep, home, logger); err != nil {
 		return InstallReport{}, err
 	}
+
+	// Restore the archive into the wiped layout for the next
+	// run's cache check (cached := home/JDTLSArchiveFile).
+	if err := os.Rename(keep, archivePath); err != nil {
+		return InstallReport{}, fmt.Errorf("restore jdtls archive after unpack: %w", err)
+	}
+	restored = true
 
 	// Discover the layout.
 	l, err := discoverLayout(home)

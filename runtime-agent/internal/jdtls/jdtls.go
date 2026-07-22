@@ -1,4 +1,4 @@
-﻿// Package jdtls manages the Eclipse JDT Language Server
+// Package jdtls manages the Eclipse JDT Language Server
 // distribution and lifecycle for the Kairo IDE.
 //
 // The JDT LS is distributed as a .tar.gz or .zip by the
@@ -272,6 +272,13 @@ func (m *Manager) BuildLaunchDescriptor(workingDir string) (*LaunchDescriptor, e
 	ws := m.workspace
 	if ws == "" {
 		ws = filepath.Join(m.dataDir, "jdtls-workspace", "default")
+	} else if !filepath.IsAbs(ws) {
+		// A relative workspace name would resolve against the
+		// (arbitrary) server CWD, leaking stale Eclipse state
+		// across runs and machines — JDT LS then failed with
+		// "Resource '/jdt.ls-java-project/src/com' already
+		// exists" on every completion (KAIRO-RC-WEB-251).
+		ws = filepath.Join(m.dataDir, "jdtls-workspace", ws)
 	}
 
 	heapMB := jdtlsMaxHeapMB()

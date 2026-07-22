@@ -1,4 +1,4 @@
-﻿//go:build integration
+//go:build integration
 // +build integration
 
 // Package integration_test exercises the Runtime Agent against

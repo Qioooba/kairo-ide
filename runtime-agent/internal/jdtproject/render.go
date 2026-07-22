@@ -26,18 +26,20 @@ type ClasspathEntry struct {
 	Excluding  string `xml:"excluding,attr,omitempty"`
 }
 
-// ProjectModel is the .project XML root. (We name it
-// ProjectModel rather than Project to avoid collision with
-// the .legacyflow/project.yaml schema struct in the
-// generator's package.)
+// ProjectModel is the .project XML root. Eclipse requires the
+// <projectDescription> root — a <project> root fails with
+// "Failed to read project description file" on import
+// (KAIRO-RC-WEB-251). (We name it ProjectModel rather than
+// Project to avoid collision with the .legacyflow/project.yaml
+// schema struct in the generator's package.)
 type ProjectModel struct {
-	XMLName         xml.Name         `xml:"project"`
+	XMLName         xml.Name         `xml:"projectDescription"`
 	ProjectID       string           `xml:"-" json:"projectId"`
 	Name            string           `xml:"name"`
 	Description     string           `xml:"comment"`
 	LinkedResources []LinkedResource `xml:"linkedResources,omitempty"`
 	BuildSpec       []BuildSpec      `xml:"buildSpec>buildCommand"`
-	Natures         []Nature         `xml:"natures>nature"`
+	Natures         []string         `xml:"natures>nature"`
 }
 
 // BuildSpec is one Eclipse build command. We only enable
@@ -46,14 +48,8 @@ type ProjectModel struct {
 // output dir.
 type BuildSpec struct {
 	Name      string `xml:"name"`
-	Arguments string `xml:"arguments"`
+	Arguments string `xml:"arguments,omitempty"`
 	Triggers  string `xml:"triggers,omitempty"`
-}
-
-// Nature is the Eclipse nature a project has. The JDT nature
-// is the one that triggers the Java tooling.
-type Nature struct {
-	Name string `xml:"name"`
 }
 
 // LinkedResource maps a classpath entry that lives outside
@@ -69,6 +65,12 @@ type LinkedResource struct {
 
 func renderClasspath(proj Project, srcRoots, testSrcRoots []string, output string, libs, refLibs []string) Classpath {
 	cp := Classpath{ProjectID: proj.ProjectID}
+	// Eclipse resolves src/output paths against the PROJECT
+	// LOCATION (the directory holding .project) and does not
+	// accept absolute src entries — so these stay relative to
+	// the project root. (The launcher flow writes the model
+	// into the project root via IntoProjectRoot; the data-dir
+	// model dir only feeds Status reporting.)
 	for _, s := range srcRoots {
 		cp.ClasspathEntries = append(cp.ClasspathEntries, ClasspathEntry{
 			Kind: "src",
@@ -86,9 +88,14 @@ func renderClasspath(proj Project, srcRoots, testSrcRoots []string, output strin
 		Kind: "output",
 		Path: relPathOrAbs(output, proj.RootPath),
 	})
+	// The JRE container must use Eclipse's full EE form
+	// (…/StandardVMType/JavaSE-x.y): a bare "JRE_CONTAINER/1.6"
+	// resolves to NOTHING, leaving the project with no JDK at
+	// all — the LS logged "Unable to locate JDK types" and
+	// returned zero completions everywhere (KAIRO-RC-WEB-251).
 	jreName := "org.eclipse.jdt.launching.JRE_CONTAINER"
 	if proj.SourceLevel != "" {
-		jreName += "/" + proj.SourceLevel
+		jreName += "/org.eclipse.jdt.internal.debug.ui.launcher.StandardVMType/JavaSE-" + proj.SourceLevel
 	}
 	cp.ClasspathEntries = append(cp.ClasspathEntries, ClasspathEntry{
 		Kind: "con",
@@ -116,11 +123,9 @@ func renderProject(proj Project) ProjectModel {
 		Name:        proj.Name,
 		Description: "Kairo IDE managed project for " + proj.ProjectID,
 	}
-	p.Natures = append(p.Natures, Nature{Name: "org.eclipse.jdt.core.javanature"})
+	p.Natures = append(p.Natures, "org.eclipse.jdt.core.javanature")
 	p.BuildSpec = append(p.BuildSpec, BuildSpec{
-		Name:      "org.eclipse.jdt.core.javabuilder",
-		Arguments: "",
-		Triggers:  "clean,full,incremental,",
+		Name: "org.eclipse.jdt.core.javabuilder",
 	})
 	return p
 }
@@ -148,7 +153,7 @@ func renderJDTCorePrefs(proj Project) string {
 	fmt.Fprintf(&b, "org.eclipse.jdt.core.compiler.compliance=%s\n", proj.SourceLevel)
 	fmt.Fprintf(&b, "org.eclipse.jdt.core.compiler.source=%s\n", proj.SourceLevel)
 	fmt.Fprintf(&b, "org.eclipse.jdt.core.compiler.target=%s\n", proj.TargetLevel)
-	fmt.Fprintf(&b, "org.eclipse.jdt.core.compiler.encoding=%s\n", encodingIDForJDT(proj.Encoding))
+	fmt.Fprintf(&b, "org.eclipse.jdt.core.compiler.encoding=%s\n", encodingIDForJDT(string(proj.Encoding)))
 	fmt.Fprintf(&b, "org.eclipse.jdt.core.compiler.codegen.targetPlatform=%s\n", proj.TargetLevel)
 	b.WriteString("org.eclipse.jdt.core.compiler.problem.assertIdentifier=error\n")
 	return b.String()

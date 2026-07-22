@@ -9,5 +9,8 @@
     "test:smoke": "node theia-smoke.cjs",
     "test:visual": "node visual-regression.cjs",
     "test:a11y": "node a11y-scan.cjs"
+  },
+  "dependencies": {
+    "@axe-core/playwright": "^4.12.1"
   }
 }

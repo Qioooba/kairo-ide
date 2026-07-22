@@ -32,7 +32,10 @@ import {
 } from './kairo-views-contribution';
 import { KairoStatusBarContribution } from './kairo-status-bar-contribution';
 import { KairoFileCommandsContribution } from './kairo-file-commands';
-import { KairoEncodingCommandsContribution } from '@kairo/encoding-extension';
+import { KairoEncodingCommandsContribution, KairoEncodingRegistry, KairoFileService, KairoSafeEncodingService } from '@kairo/encoding-extension';
+import { EncodingService } from '@theia/core/lib/common/encoding-service';
+import { EncodingRegistry } from '@theia/core/lib/browser/encoding-registry';
+import { FileService } from '@theia/filesystem/lib/browser/file-service';
 import { BuildViewWidget } from '@kairo/build-extension';
 import { ServerViewWidget, LogViewerWidget } from '@kairo/tomcat-extension';
 import {
@@ -43,6 +46,12 @@ import {
   WorkspaceContextService,
 } from '@kairo/runtime-extension';
 import { ImportWizardWidget, ProjectSelectorWidget } from '@kairo/project-extension';
+import { KairoWelcomeWidget, KAIRO_WELCOME_FACTORY_ID } from './kairo-welcome-widget';
+import { KairoWindowTitleContribution } from './kairo-window-title-contribution';
+import { WindowTitleContribution } from '@theia/core/lib/browser/window/window-title-service';
+import { KairoA11yPatchContribution } from './kairo-a11y-patch-contribution';
+import { KairoSaveableService } from './kairo-saveable-service';
+import { SaveableService } from '@theia/core/lib/browser/saveable-service';
 import { KairoLargeFileContribution } from './kairo-large-file-contribution';
 import { KairoLargeFilePreferenceContribution } from './kairo-large-file-preferences';
 import {
@@ -112,6 +121,24 @@ export function bindKairoFrontend(bind: interfaces.Bind, unbind?: interfaces.Unb
   bind(MenuContribution).toService(KairoViewsContribution);
   bind(CommandContribution).toService(KairoEncodingCommandsContribution);
 
+  // KAIRO-RC-WEB-229: replace Theia's lossy encoder (iconv silently
+  // rewrites unrepresentable chars to '?') with the validating one.
+  if (isBound && rebind && isBound(EncodingService)) {
+    rebind(EncodingService).to(KairoSafeEncodingService).inSingletonScope();
+  } else {
+    bind(EncodingService).to(KairoSafeEncodingService).inSingletonScope();
+  }
+
+  // KAIRO-RC-WEB-206: stock Theia's EncodingRegistry tests folder
+  // overrides with the comparison backwards (resource.isEqualOrParent(parent)),
+  // so a file inside the folder never matches — project-level GBK was
+  // dead. Replace it with the hierarchy-correct registry.
+  if (isBound && rebind && isBound(EncodingRegistry)) {
+    rebind(EncodingRegistry).to(KairoEncodingRegistry).inSingletonScope();
+  } else {
+    bind(EncodingRegistry).to(KairoEncodingRegistry).inSingletonScope();
+  }
+
   // KairoFileCommandsContribution is a defensive re-registration
   // of the standard Theia file.* / workspace:* / core.* commands.
   // Theia's standard modules already register these, but a
@@ -164,6 +191,37 @@ export function bindKairoFrontend(bind: interfaces.Bind, unbind?: interfaces.Unb
     id: KAIRO_PROJECT_SELECTOR_FACTORY_ID,
     createWidget: () => ctx.container.get(ProjectSelectorWidget),
   })).inSingletonScope();
+
+  // Welcome tab — the first-run entry point (KAIRO-RC-WEB-018).
+  bind(KairoWelcomeWidget).toSelf();
+  bind(WidgetFactory).toDynamicValue(ctx => ({
+    id: KAIRO_WELCOME_FACTORY_ID,
+    createWidget: () => ctx.container.get(KairoWelcomeWidget),
+  })).inSingletonScope();
+
+  // Branded window title: "<widget> - <workspace> - Kairo IDE".
+  bind(WindowTitleContribution).to(KairoWindowTitleContribution).inSingletonScope();
+
+  // Runtime ARIA patch for stock Theia/Lumino chrome (WEB-019).
+  bind(KairoA11yPatchContribution).toSelf().inSingletonScope();
+  bind(FrontendApplicationContribution).toService(KairoA11yPatchContribution);
+
+  // MonacoEditorModel.run() swallows save errors with a bare
+  // console.error — encoding refusals would never reach the user.
+  // KairoFileService reports them as error notifications.
+  if (isBound && rebind && isBound(FileService)) {
+    rebind(FileService).to(KairoFileService).inSingletonScope();
+  } else {
+    bind(FileService).to(KairoFileService).inSingletonScope();
+  }
+
+  // Surface save failures (notably encoding refusals) as error
+  // notifications — stock Theia only logs them to the console.
+  if (isBound && rebind && isBound(SaveableService)) {
+    rebind(SaveableService).to(KairoSaveableService).inSingletonScope();
+  } else {
+    bind(SaveableService).to(KairoSaveableService).inSingletonScope();
+  }
 }
 
 export default new ContainerModule((bind, unbind, isBound, rebind) => {

@@ -1,4 +1,4 @@
-﻿package jdtls
+package jdtls
 
 import (
 	"archive/tar"
@@ -501,5 +501,33 @@ func TestReadHeaders_ParsesContentLength(t *testing.T) {
 	}
 	if h.contentType == "" {
 		t.Fatal("content-type should be set")
+	}
+}
+
+// KAIRO-RC-WEB-241: the cached archive lives INSIDE home
+// (home/JDTLSArchiveFile). Before the fix, installFromFile wiped
+// home — deleting the archive itself — so every install failed
+// and the next run re-downloaded.
+func TestEnsureInstalled_CachedArchiveInsideHomeSurvivesWipe(t *testing.T) {
+	layout := makeLayout(t)
+	bundled := t.TempDir()
+	dataDir := t.TempDir()
+	home := filepath.Join(bundled, "jdtls")
+	mustMkdir(t, home)
+	archivePath := filepath.Join(home, JDTLSArchiveFile)
+	writeTarGzFromDir(t, archivePath, layout)
+	want, _ := fileSHA256(archivePath)
+	pinChecksum(t, want)
+
+	m := New(dataDir, bundled, "", false, "", log.New("test"))
+	rep, err := m.EnsureInstalled(context.Background())
+	if err != nil {
+		t.Fatalf("EnsureInstalled with cached archive inside home: %v", err)
+	}
+	if rep.LauncherJAR == "" {
+		t.Fatal("LauncherJAR empty")
+	}
+	if _, err := os.Stat(archivePath); err != nil {
+		t.Fatalf("cached archive must survive the layout wipe: %v", err)
 	}
 }

@@ -1,4 +1,4 @@
-﻿//go:build fault
+//go:build fault
 // +build fault
 
 // Package fault contains fault-injection tests that verify the

@@ -194,57 +194,6 @@
     color: var(--kairo-text);
 }
 
-.kairo-build-status {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px;
-    border-radius: 4px;
-    margin-bottom: 12px;
-    font-size: 14px;
-}
-
-.kairo-build-status.succeeded {
-    background: rgba(16, 185, 129, 0.1);
-    color: var(--kairo-success);
-}
-
-.kairo-build-status.failed {
-    background: rgba(239, 68, 68, 0.1);
-    color: var(--kairo-error);
-}
-
-.kairo-build-status.running {
-    background: rgba(59, 130, 246, 0.1);
-    color: var(--kairo-info);
-}
-
-.kairo-diagnostic-list {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-}
-
-.kairo-diagnostic-item {
-    padding: 4px 8px;
-    font-family: monospace;
-    font-size: 12px;
-    border-bottom: 1px solid var(--kairo-border);
-    cursor: pointer;
-}
-
-.kairo-diagnostic-item:hover {
-    background: var(--kairo-bg-secondary);
-}
-
-.kairo-diagnostic-item.error {
-    color: var(--kairo-error);
-}
-
-.kairo-diagnostic-item.warning {
-    color: var(--kairo-warning);
-}
-
 .kairo-server-view {
     padding: 12px;
     color: var(--kairo-text);
@@ -272,31 +221,6 @@
 .kairo-server-status.error {
     background: rgba(239, 68, 68, 0.1);
     color: var(--kairo-error);
-}
-
-.kairo-server-actions {
-    display: flex;
-    gap: 8px;
-    margin: 12px 0;
-}
-
-.kairo-server-url {
-    font-family: monospace;
-    font-size: 13px;
-    color: var(--kairo-info);
-    cursor: pointer;
-    text-decoration: underline;
-}
-
-.kairo-log-viewer {
-    padding: 8px;
-    font-family: monospace;
-    font-size: 12px;
-    color: var(--kairo-text);
-    max-height: 300px;
-    overflow-y: auto;
-    background: var(--kairo-bg);
-    border-radius: 4px;
 }
 
 .kairo-log-line {
@@ -334,7 +258,7 @@
 .theia-notification-list-item .theia-notification-action,
 .theia-notification-list-item .theia-notification-button {
     color: var(--theia-button-foreground, #ffffff) !important;
-    background: var(--theia-button-background, #7c5cbf) !important;
+    background: var(--theia-button-background, #7C3AED) !important;
 }
 
 /* Status bar: clickable items must show pointer cursor */
@@ -351,7 +275,7 @@
 
 /* Focus ring for interactive status bar items */
 #theia-statusBar .element.hasCommand:focus-visible {
-    outline: 1px solid var(--theia-focusBorder, #7c5cbf);
+    outline: 1px solid var(--theia-focusBorder, #7C3AED);
     outline-offset: -1px;
 }
 
@@ -395,7 +319,12 @@
 
 .kairo-widget-toolbar {
     display: flex;
-    flex-wrap: wrap;
+    /* KAIRO-RC-WEB-009: no wrapping — at narrow widths / 200% zoom
+     * the wrapped second row crowded out the view content. Keep a
+     * single row and scroll horizontally (hidden scrollbar) instead. */
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
     gap: 6px;
     padding: 8px 12px;
     border-bottom: 1px solid var(--kairo-border);
@@ -403,8 +332,14 @@
     flex-shrink: 0;
 }
 
+.kairo-widget-toolbar::-webkit-scrollbar {
+    display: none;
+}
+
 .kairo-widget-toolbar .theia-button {
-    min-width: 64px;
+    flex-shrink: 0;
+    min-width: 0;
+    white-space: nowrap;
 }
 
 .kairo-widget-section {
@@ -539,6 +474,10 @@
 }
 
 .kairo-diagnostic-location {
+    /* File positions are metadata, not an error-status indicator. Keeping
+       them at the normal secondary foreground meets contrast requirements
+       on the dark Kairo surface. */
+    color: var(--kairo-text-secondary);
     font-family: monospace;
     font-size: 11px;
     flex-shrink: 0;
@@ -710,4 +649,61 @@
     color: var(--kairo-text) !important;
     background: var(--kairo-surface) !important;
     border-color: var(--kairo-border) !important;
+}
+
+/* Welcome tab (KAIRO-RC-WEB-018) */
+.kairo-welcome-body {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    gap: 8px;
+    padding: 32px;
+    color: var(--kairo-text);
+    text-align: center;
+}
+
+.kairo-welcome-title {
+    font-size: 28px;
+    font-weight: 600;
+    /* Lighter tint of --kairo-primary for large text on dark
+     * backgrounds: #7C3AED on #1e1f22 is only ~2.3:1 (fails WCAG
+     * AA), #a78bfa reaches ~4.7:1 (KAIRO-RC-WEB-021). */
+    color: #a78bfa;
+    margin: 0;
+}
+
+.kairo-welcome-tagline {
+    color: var(--kairo-text-secondary);
+    margin: 0 0 16px;
+    max-width: 480px;
+}
+
+.kairo-welcome-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 280px;
+}
+
+.kairo-welcome-hint {
+    margin-top: 24px;
+    font-size: 12px;
+    color: var(--kairo-text-secondary);
+}
+
+/* KAIRO-RC-WEB-101: at narrow widths / 200% zoom the status bar
+ * clipped right-side items (Runtime, notification bell, panel
+ * toggle) off-screen with no way to reach them. Let each area
+ * shrink (min-width: 0) and scroll horizontally instead of
+ * clipping; the scrollbar stays hidden to keep the 22px bar clean. */
+#theia-statusBar .area {
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+
+#theia-statusBar .area::-webkit-scrollbar {
+    display: none;
 }

@@ -12,9 +12,10 @@
     "build": "tsc -p tsconfig.json",
     "clean": "rm -rf lib",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "test": "node --require ts-node/register --require source-map-support/register --test src/browser/encoding-service.test.ts"
+    "test": "node --require ts-node/register --require source-map-support/register --test src/browser/encoding-service.test.ts src/browser/encoding-reopen.test.ts && pnpm build && node --import ./test/register-hooks.mjs --test src/browser/encoding-uri-coercion.test.cjs"
   },
   "dependencies": {
+    "@kairo/project-extension": "workspace:*",
     "@kairo/protocol": "workspace:*",
     "@kairo/runtime-extension": "workspace:*",
     "@theia/core": "1.73.1",

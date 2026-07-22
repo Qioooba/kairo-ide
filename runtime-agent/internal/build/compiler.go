@@ -150,14 +150,38 @@ func (c *Compiler) Compile(ctx context.Context, req Request) (*Result, error) {
 		res.Diagnostics = []Diagnostic{}
 	}
 	res.Success = res.ExitCode == 0
-	res.FilesCompiled = countCompiled(res.Output)
+	// KAIRO-RC-WEB-238 follow-up: modern javac prints no
+	// "Note: N files" line, so countCompiled always returned 0
+	// even for successful builds. A zero exit means every source
+	// passed to javac compiled — report that honestly.
+	if res.Success {
+		res.FilesCompiled = len(req.Sources)
+	} else {
+		res.FilesCompiled = countCompiled(res.Output)
+	}
 	return res, nil
 }
 
 var (
-	javacLineRE = regexp.MustCompile(`^(.+?):(\d+):(?:\s*(\d+):)?\s*(error|warning):\s*(.*)$`)
+	// Locale-tolerant javac diagnostic line. The <path>:<line>: prefix
+	// is universal; the severity word is localized by the JDK, so match
+	// both English (error/warning) and Chinese (错误/警告) markers, with
+	// either an ASCII or a fullwidth colon after the marker.
+	javacLineRE = regexp.MustCompile(`^(.+?):(\d+):(?:\s*(\d+):)?\s*(error|warning|错误|警告)[:：]\s*(.*)$`)
 	javacCodeRE = regexp.MustCompile(`\[(\w+\.\w+(?:\.\w+)*)\]`)
 )
+
+// normalizeSeverity maps localized javac severity markers to the
+// canonical English severities used in Diagnostic.
+func normalizeSeverity(s string) string {
+	switch s {
+	case "错误":
+		return "error"
+	case "警告":
+		return "warning"
+	}
+	return s
+}
 
 func parseDiagnostics(output, projectRoot string) []Diagnostic {
 	var out []Diagnostic
@@ -184,7 +208,7 @@ func parseDiagnostics(output, projectRoot string) []Diagnostic {
 				File:     file,
 				Line:     ln,
 				Column:   col,
-				Severity: m[4],
+				Severity: normalizeSeverity(m[4]),
 				Message:  m[5],
 			}
 			if cm := javacCodeRE.FindStringSubmatch(m[5]); cm != nil {

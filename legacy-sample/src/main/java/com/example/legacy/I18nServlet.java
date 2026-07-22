@@ -8,7 +8,7 @@ import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
 /**
- * I18nServlet — reads a GBK-encoded properties file and
+ * I18nServlet - reads a GBK-encoded properties file and
  * renders a localized greeting. Demonstrates that the IDE
  * must preserve GBK on save and load it correctly on read.
  */

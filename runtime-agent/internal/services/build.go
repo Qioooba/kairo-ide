@@ -1,4 +1,4 @@
-﻿package services
+package services
 
 import (
 	"context"
@@ -177,6 +177,7 @@ func (b *asyncBuildEngine) Start(req api.BuildRequest) (*api.BuildResult, error)
 		TargetLevel: req.TargetLevel,
 		Sources:     sources,
 		Classpath:   req.Classpath,
+		Encoding:    req.Encoding,
 		OutputDir:   req.OutputDir,
 	})
 

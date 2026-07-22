@@ -1,4 +1,4 @@
-﻿package api
+package api
 
 import (
 	"context"
@@ -63,6 +63,7 @@ type BuildRequest struct {
 	ProjectRoot string   `json:"projectRoot"`
 	OutputDir   string   `json:"outputDir"`
 	Classpath   []string `json:"classpath"`
+	Encoding    string   `json:"encoding"`
 	Clean       bool     `json:"clean"`
 }
 
@@ -173,11 +174,20 @@ type ServerLogEntry struct {
 
 // ServerRunner starts/stops a server runtime.
 type ServerRunner interface {
+	// CatalinaHome returns the Tomcat 6 home the runner deploys
+	// into ("" when no Tomcat is available).
+	CatalinaHome() string
 	Start(req StartServerRequest) (*ServerResponse, error)
 	Get(id string) (*ServerResponse, error)
 	Stop(id string, force bool) (*ServerResponse, error)
+	// Restart stops the server (graceful, with force fallback)
+	// and starts it again with the stored parameters.
+	Restart(id string) (*ServerResponse, error)
 	Debug(id string) (*ServerResponse, error)
-	Logs(id string, follow bool) ([]ServerLogEntry, error)
+	// Logs returns the last tail lines of the server's stdout
+	// log (tail <= 0 means a sensible default). A missing log
+	// file yields an empty slice, not an error.
+	Logs(id string, tail int) ([]ServerLogEntry, error)
 	List() []*ServerResponse
 }
 
@@ -209,7 +219,7 @@ type EventBus interface {
 type JDTLS interface {
 	Status() (json.RawMessage, error)
 	Prepare(ctx context.Context) (json.RawMessage, error)
-	GetLaunchDescriptor(ctx context.Context, workspaceID string, projectID string) (json.RawMessage, error)
+	GetLaunchDescriptor(ctx context.Context, workspaceID string, projectID string, workingDir string) (json.RawMessage, error)
 }
 
 // JDTProjectGenerator writes the JDT LS-readable project

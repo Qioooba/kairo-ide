@@ -1,4 +1,4 @@
-﻿package services
+package services
 
 import (
 	"os/exec"
@@ -49,11 +49,18 @@ func NewMemoryServices(cfg Config, sandbox *security.WorkspaceRoots) *api.Servic
 		}
 	}
 	wsStore := newDiskWorkspaceStore(cfg.DataDir, sandbox)
+	// KAIRO-RC-WEB-258: ProjectStore and ProjectRepo MUST share one
+	// diskProjectStore instance. Two instances load the same dir but
+	// keep separate in-memory maps, so a project saved through the
+	// HTTP PUT (instance A) was invisible to the JDT LS
+	// launch-descriptor lookup (instance B) — "project not found"
+	// and JDT LS never started (flow-03 live evidence).
+	projectStore := newDiskProjectStore(cfg.DataDir)
 	return &api.Services{
 		WorkspaceStore:      wsStore,
-		ProjectStore:        newDiskProjectStore(cfg.DataDir),
+		ProjectStore:        projectStore,
 		ToolchainRegistry:   &memToolchainRegistry{reg: registry},
-		ProjectRepo:         &domainProjectRepo{store: newDiskProjectStore(cfg.DataDir)},
+		ProjectRepo:         &domainProjectRepo{store: projectStore},
 		ToolchainRepo:       &domainToolchainRepo{reg: registry},
 		Searcher:            &memSearcher{sandbox: sandbox, workspaces: wsStore},
 		Encoder:             &memEncoder{sandbox: sandbox},

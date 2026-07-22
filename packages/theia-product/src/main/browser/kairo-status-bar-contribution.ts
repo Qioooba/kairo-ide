@@ -5,8 +5,12 @@
  * We use the Theia `StatusBar` API to add a few left-aligned
  * entries and one right-aligned "runtime agent" indicator:
  *
- *   [Project: legacy-sample]  [Java: 1.8 → 1.6]  [Encoding: GBK]
+ *   [Project: legacy-sample]  [Encoding: GBK]  [JDT LS: running]
  *   [Server: running  :61100]  [Runtime: connected]
+ *
+ * Clickable entries carry a real command; purely informational
+ * entries (JDT LS, Runtime) stay inert on purpose
+ * (KAIRO-RC-WEB-006).
  */
 
 import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
@@ -39,6 +43,7 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
   protected unsubscribeServerEvents: (() => void) | undefined;
   protected unsubscribeJdtState: (() => void) | undefined;
   protected unsubscribeEditor: Disposable | undefined;
+  protected unsubscribeEncoding: Disposable | undefined;
   protected unsubscribeServerStore: Disposable | undefined;
   protected unsubscribeProject: Disposable | undefined;
   private runtimeStatus: 'connecting' | 'open' | 'disconnected' | 'closed' = 'disconnected';
@@ -47,15 +52,10 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
   init(): void {
     this.statusBar.setElement('kairo.project', {
       text: '$(file-directory) Project: (no workspace)',
-      tooltip: 'Open a legacy Java Web project to get started.',
+      tooltip: 'Open a legacy Java Web project to get started. Click to select a project.',
       alignment: StatusBarAlignment.LEFT,
       priority: 100,
-    });
-    this.statusBar.setElement('kairo.java', {
-      text: '$(coffee) Java: -',
-      tooltip: 'Java compiler configuration',
-      alignment: StatusBarAlignment.LEFT,
-      priority: 99,
+      command: 'kairo.project.select',
     });
     this.statusBar.setElement('kairo.jdtls', {
       text: '$(coffee) JDT LS: idle',
@@ -65,9 +65,10 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
     });
     this.statusBar.setElement('kairo.encoding', {
       text: '$(text) Encoding: -',
-      tooltip: 'Encoding of the active editor (UTF-8 default)',
+      tooltip: 'Encoding of the active editor (UTF-8 default). Click to reopen with a different encoding.',
       alignment: StatusBarAlignment.LEFT,
       priority: 98,
+      command: 'kairo.encoding.reopen',
     });
     this.statusBar.setElement('kairo.server', {
       text: '$(server-process) Server: stopped',
@@ -99,6 +100,13 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
     this.unsubscribeEditor = this.editorManager.onCurrentEditorChanged(() =>
       this.refreshEncodingStatus(),
     );
+    // "Reopen/Save with Encoding" keeps the same editor alive, so
+    // onCurrentEditorChanged never fires — refresh explicitly when
+    // the encoding service reports a change (stale 'utf8' shown
+    // after a GBK reopen otherwise).
+    this.unsubscribeEncoding = this.encodingSvc.onDidChangeEncoding(() =>
+      this.refreshEncodingStatus(),
+    );
     // Pull the current JDT LS state once on start so the
     // status bar shows truth after a reconnect / window reload.
     void this.refreshJdtStatus();
@@ -118,6 +126,7 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
     this.unsubscribeServerEvents?.();
     this.unsubscribeJdtState?.();
     this.unsubscribeEditor?.dispose();
+    this.unsubscribeEncoding?.dispose();
     this.unsubscribeServerStore?.dispose();
     this.unsubscribeProject?.dispose();
   }
@@ -134,17 +143,19 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
     if (!p) {
       this.statusBar.setElement('kairo.project', {
         text: '$(file-directory) Project: (no workspace)',
-        tooltip: 'Open a legacy Java Web project to get started.',
+        tooltip: 'Open a legacy Java Web project to get started. Click to select a project.',
         alignment: StatusBarAlignment.LEFT,
         priority: 100,
+        command: 'kairo.project.select',
       });
       return;
     }
     this.statusBar.setElement('kairo.project', {
       text: `$(file-directory) Project: ${p.name}`,
-      tooltip: `${p.name}\n${p.root}\nWorkspace: ${p.workspaceId}\nProject: ${p.projectId}`,
+      tooltip: `${p.name}\n${p.root}\nWorkspace: ${p.workspaceId}\nProject: ${p.projectId}\nClick to select a different project.`,
       alignment: StatusBarAlignment.LEFT,
       priority: 100,
+      command: 'kairo.project.select',
     });
   }
 
@@ -218,6 +229,7 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
         tooltip: 'No active editor',
         alignment: StatusBarAlignment.LEFT,
         priority: 98,
+        command: 'kairo.encoding.reopen',
       });
       return;
     }
@@ -228,9 +240,10 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
       tooltip:
         `${uri.toString()}\n` +
         `Encoding: ${enc}${isOverride ? ' (override)' : ' (default)'}\n` +
-        'Kairo: Reopen with Encoding / Save with Encoding to change.',
+        'Kairo: Reopen with Encoding / Save with Encoding to change. Click to reopen with encoding.',
       alignment: StatusBarAlignment.LEFT,
       priority: 98,
+      command: 'kairo.encoding.reopen',
     });
   }
 
@@ -275,18 +288,20 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
     if (this.runtimeStatus === 'disconnected' || this.runtimeStatus === 'closed') {
       this.statusBar.setElement('kairo.server', {
         text: '$(error) Server: Disconnected',
-        tooltip: 'Cannot reach the runtime agent. Server commands are unavailable.',
+        tooltip: 'Cannot reach the runtime agent. Server commands are unavailable. Click to open the Servers view.',
         alignment: StatusBarAlignment.LEFT,
         priority: 97,
+        command: 'kairo.view.servers',
       });
       return;
     }
     if (this.runtimeStatus === 'connecting') {
       this.statusBar.setElement('kairo.server', {
         text: '$(sync~spin) Server: connecting…',
-        tooltip: 'Connecting to runtime agent...',
+        tooltip: 'Connecting to runtime agent... Click to open the Servers view.',
         alignment: StatusBarAlignment.LEFT,
         priority: 97,
+        command: 'kairo.view.servers',
       });
       return;
     }
@@ -295,9 +310,10 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
     if (!srv) {
       this.statusBar.setElement('kairo.server', {
         text: '$(server-process) Server: stopped',
-        tooltip: 'No running Tomcat server',
+        tooltip: 'No running Tomcat server Click to open the Servers view.',
         alignment: StatusBarAlignment.LEFT,
         priority: 97,
+        command: 'kairo.view.servers',
       });
       return;
     }
@@ -305,9 +321,10 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
     const icon = srv.state === 'running' ? '$(server-process~spin)' : '$(server-process)';
     this.statusBar.setElement('kairo.server', {
       text: `${icon} Server: ${srv.state} ${port}`.trim(),
-      tooltip: `Tomcat ${srv.state} (id=${srv.id})`,
+      tooltip: `Tomcat ${srv.state} (id=${srv.id}). Click to open the Servers view.`,
       alignment: StatusBarAlignment.LEFT,
       priority: 97,
+      command: 'kairo.view.servers',
     });
   }
 

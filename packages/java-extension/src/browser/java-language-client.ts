@@ -16,7 +16,8 @@ import { injectable, inject, optional, postConstruct } from '@theia/core/shared/
 import { ILogger } from '@theia/core/lib/common/logger';
 import { Emitter, Event } from '@theia/core/lib/common/event';
 import { Disposable } from '@theia/core/lib/common/disposable';
-import { JdtLsBackendService, JdtLsFrontendClient } from '../common/java-ls-protocol';
+import { WebSocketConnectionProvider } from '@theia/core/lib/browser/messaging/ws-connection-provider';
+import { JdtLsBackendService, JdtLsFrontendClient, JdtLsBackendPath } from '../common/java-ls-protocol';
 import { JdtLsService } from '../node/jdt-ls-service';
 import { JdtLsState } from '../node/jdt-ls-manager';
 import { LSPPublishDiagnosticsParams, LSPCompletionList, LSPLocation } from '../common/lsp-protocol';
@@ -29,9 +30,9 @@ export class JavaLanguageClient implements JdtLsFrontendClient, Disposable {
   @inject(JdtLsService)
   protected readonly backend!: JdtLsService;
 
-  @inject(JdtLsBackendService)
+  @inject(WebSocketConnectionProvider)
   @optional()
-  protected readonly backendProxy?: JdtLsBackendService;
+  protected readonly connectionProvider?: WebSocketConnectionProvider;
 
   protected readonly onDiagnosticsEmitter = new Emitter<LSPPublishDiagnosticsParams>();
   readonly onDiagnostics: Event<LSPPublishDiagnosticsParams> = this.onDiagnosticsEmitter.event;
@@ -40,6 +41,14 @@ export class JavaLanguageClient implements JdtLsFrontendClient, Disposable {
   protected readonly onLogEmitter = new Emitter<{ level: 'stdout' | 'stderr'; line: string }>();
   readonly onLog: Event<{ level: 'stdout' | 'stderr'; line: string }> = this.onLogEmitter.event;
   protected subs: Disposable[] = [];
+  /**
+   * JSON-RPC proxy to the backend-hosted JdtLsService. Created
+   * lazily; undefined in single-process mode (unit tests). If a
+   * call through it fails, we permanently fall back to the
+   * in-process service for this session.
+   */
+  protected rpcProxy: JdtLsBackendService | undefined;
+  protected rpcFailed = false;
 
   @postConstruct()
   protected init(): void {
@@ -55,12 +64,53 @@ export class JavaLanguageClient implements JdtLsFrontendClient, Disposable {
   }
 
   /**
+   * The backend proxy, when the Theia backend hosts the JDT LS
+   * service (web product and desktop). In single-process test
+   * containers there is no WebSocket layer — undefined, and the
+   * caller uses the in-process service.
+   */
+  protected proxy(): JdtLsBackendService | undefined {
+    if (this.rpcFailed || !this.connectionProvider) {
+      return undefined;
+    }
+    if (!this.rpcProxy) {
+      try {
+        this.rpcProxy = this.connectionProvider.createProxy<JdtLsBackendService>(JdtLsBackendPath, this);
+      } catch (err) {
+        this.logger.warn(`[JavaLanguageClient] backend proxy unavailable, using in-process service: ${String(err)}`);
+        this.rpcFailed = true;
+        return undefined;
+      }
+    }
+    return this.rpcProxy;
+  }
+
+  /** Mark the RPC path broken (backend has no handler) and fall back. */
+  protected markRpcFailed(err: unknown): void {
+    this.rpcFailed = true;
+    this.rpcProxy = undefined;
+    this.logger.warn(`[JavaLanguageClient] backend RPC failed, falling back to in-process service: ${String(err)}`);
+  }
+
+  /**
    * Start the JDT LS for a given workspace. The Theia
    * backend process is the owner of the LSP child process;
    * the browser only drives it.
+   *
+   * `home` is the JDT LS install root derived from the Go
+   * agent's launch descriptor; when present it wins over
+   * the KAIRO_JDT_LS_HOME env fallback in the backend.
    */
-  async start(opts: { rootUri: string; workspaceDataDir: string; sourceLevel?: string }): Promise<{ ok: true } | { ok: false; reason: string }> {
-    const inspect = this.backend.inspect();
+  async start(opts: { rootUri: string; workspaceDataDir: string; sourceLevel?: string; home?: string }): Promise<{ ok: true } | { ok: false; reason: string }> {
+    const proxy = this.proxy();
+    if (proxy) {
+      try {
+        return await proxy.$start(opts);
+      } catch (err) {
+        this.markRpcFailed(err);
+      }
+    }
+    const inspect = this.backend.inspect(opts.home);
     if (!inspect.ok) {
       this.logger.warn(`[JavaLanguageClient] cannot start: ${inspect.reason}`);
       return { ok: false, reason: inspect.reason };
@@ -75,6 +125,14 @@ export class JavaLanguageClient implements JdtLsFrontendClient, Disposable {
   }
 
   async stop(): Promise<void> {
+    const proxy = this.proxy();
+    if (proxy) {
+      try {
+        return await proxy.$stop();
+      } catch (err) {
+        this.markRpcFailed(err);
+      }
+    }
     await this.backend.stop();
   }
 
@@ -82,30 +140,88 @@ export class JavaLanguageClient implements JdtLsFrontendClient, Disposable {
     return this.backend.state();
   }
 
+  /**
+   * Current state, preferring the backend RPC proxy (the web
+   * product's source of truth) over the in-process service.
+   */
+  async fetchState(): Promise<JdtLsState> {
+    const proxy = this.proxy();
+    if (proxy) {
+      try {
+        return await proxy.$state();
+      } catch (err) {
+        this.markRpcFailed(err);
+      }
+    }
+    return this.backend.state();
+  }
+
   didOpen(p: { uri: string; languageId: string; version: number; text: string }): void {
+    const proxy = this.proxy();
+    if (proxy) {
+      proxy.$didOpen(p).catch(err => this.markRpcFailed(err));
+      return;
+    }
     this.backend.didOpen(p);
   }
 
   didChange(p: { uri: string; version: number; changes: { text: string; rangeLength?: number }[] }): void {
+    const proxy = this.proxy();
+    if (proxy) {
+      proxy.$didChange(p).catch(err => this.markRpcFailed(err));
+      return;
+    }
     this.backend.didChange(p);
   }
 
   didClose(uri: string): void {
+    const proxy = this.proxy();
+    if (proxy) {
+      proxy.$didClose(uri).catch(err => this.markRpcFailed(err));
+      return;
+    }
     this.backend.didClose(uri);
   }
 
   async completion(p: { uri: string; line: number; character: number; triggerKind?: 1 | 2 | 3; triggerCharacter?: string }): Promise<LSPCompletionList> {
-    if (this.backendProxy) {
-      return this.backendProxy.$completion(p);
+    const proxy = this.proxy();
+    if (proxy) {
+      try {
+        return await proxy.$completion(p);
+      } catch (err) {
+        this.markRpcFailed(err);
+      }
     }
     return this.backend.completion(p);
   }
 
   async definition(p: { uri: string; line: number; character: number }): Promise<LSPLocation | LSPLocation[] | null> {
-    if (this.backendProxy) {
-      return this.backendProxy.$definition(p);
+    const proxy = this.proxy();
+    if (proxy) {
+      try {
+        return await proxy.$definition(p);
+      } catch (err) {
+        this.markRpcFailed(err);
+      }
     }
     return this.backend.definition(p);
+  }
+
+  /**
+   * Contents of a jdt:// class-file URI (source or decompiled),
+   * used by the monaco jdt:// content provider so F12 into
+   * library jars actually opens.
+   */
+  async classFileContents(uri: string): Promise<string> {
+    const proxy = this.proxy();
+    if (proxy) {
+      try {
+        return await proxy.$classFileContents(uri);
+      } catch (err) {
+        this.markRpcFailed(err);
+      }
+    }
+    return this.backend.$classFileContents(uri);
   }
 
   // --- JdtLsFrontendClient (called from backend) ---

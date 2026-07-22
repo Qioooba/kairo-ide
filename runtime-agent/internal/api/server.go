@@ -1,4 +1,4 @@
-﻿// Package api is the HTTP layer of the Runtime Agent.
+// Package api is the HTTP layer of the Runtime Agent.
 //
 // Endpoints live under /api/v1. Every endpoint takes a
 // RequestEnvelope and returns a ResponseEnvelope or an

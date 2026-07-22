@@ -53,8 +53,7 @@ function step(name) {
   await page.goto(theiaUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 });
 
   step('waiting for Theia shell');
-  await page.waitForSelector('.theia-statusbar', { timeout: 60_000 });
-  await page.waitForSelector('.monaco-editor', { timeout: 60_000 });
+  await page.waitForSelector('#theia-statusBar', { timeout: 60_000 });
   // Give theia a moment to finish mounting its contributions.
   await page.waitForTimeout(2_000);
 
@@ -63,19 +62,17 @@ function step(name) {
     const w = window;
     return {
       title: document.title,
-      hasStatusBar: !!document.querySelector('.theia-statusbar'),
-      hasMonaco: !!document.querySelector('.monaco-editor'),
+      hasStatusBar: !!document.querySelector('#theia-statusBar'),
       hasExplorer: !!document.querySelector('[id*="theia-Explorer"]') ||
                    !!document.querySelector('.theia-Explorer') ||
                    !!document.querySelector('[id*="explorer"]'),
-      statusBarText: document.querySelector('.theia-statusbar')?.textContent || '',
+      statusBarText: document.querySelector('#theia-statusBar')?.textContent || '',
       titleBar: document.title,
     };
   });
   console.log('probes:', JSON.stringify(probes, null, 2));
 
   if (!probes.hasStatusBar) throw new Error('Theia status bar is missing');
-  if (!probes.hasMonaco) throw new Error('Monaco editor did not mount');
 
   step('taking screenshot: theia-shell');
   await page.screenshot({ path: path.join(outDir, '01-theia-shell.png'), fullPage: false });

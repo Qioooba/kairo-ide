@@ -1,4 +1,4 @@
-﻿// Package search is the workspace text search engine.
+// Package search is the workspace text search engine.
 package search
 
 import (

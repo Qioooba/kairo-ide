@@ -48,7 +48,7 @@ const BuildViewComponent: React.FC<BuildViewProps> = ({ store, commandService })
     const isEmpty = builds.length === 0 && connectionState !== 'loading';
 
     const handleBuild = () => commandService.executeCommand('kairo.build');
-    const handleCleanBuild = () => commandService.executeCommand('kairo.buildAndDeploy');
+    const handleCleanBuild = () => commandService.executeCommand('kairo.cleanBuild');
 
     if (connectionState === 'loading') {
         return (

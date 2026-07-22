@@ -32,6 +32,17 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
 
+      - name: gofmt check
+        working-directory: runtime-agent
+        # gofmt -l always exits 0, so fail on any listed file.
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt-clean:"
+            echo "$unformatted"
+            exit 1
+          fi
+
       - name: Vet
         working-directory: runtime-agent
         run: go vet ./...
@@ -97,11 +108,11 @@ jobs:
         with:
           version: 9.15.9
 
-      - name: Clean install
-        run: pnpm clean
-
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Clean build outputs
+        run: pnpm clean
 
       - name: Build all packages
         run: pnpm build
@@ -282,7 +293,7 @@ jobs:
           TOMCAT_URL="https://archive.apache.org/dist/tomcat/tomcat-6/v${FIXED_TOMCAT_VERSION}/bin/apache-tomcat-${FIXED_TOMCAT_VERSION}.tar.gz"
           mkdir -p dist/tomcat
           curl -fsSL "$TOMCAT_URL" -o dist/tomcat/apache-tomcat.tar.gz
-          echo "${FIXED_TOMCAT_CHECKSUM}  dist/tomcat/apache-tomcat.tar.gz" > dist/tomcat/checksum
+          echo "${FIXED_TOMCAT_CHECKSUM#sha256:}  dist/tomcat/apache-tomcat.tar.gz" > dist/tomcat/checksum
           sha256sum -c dist/tomcat/checksum
           tar -xzf dist/tomcat/apache-tomcat.tar.gz -C dist/tomcat/
 
@@ -406,7 +417,7 @@ jobs:
           mkdir -p dist/jdtls
           JDTLS_URL="https://download.eclipse.org/jdtls/milestones/${FIXED_JDTLS_VERSION}/jdt-language-server-${FIXED_JDTLS_VERSION}-20240125.tar.gz"
           curl -fsSL "$JDTLS_URL" -o dist/jdtls/jdtls.tar.gz
-          echo "${FIXED_JDTLS_CHECKSUM}  dist/jdtls/jdtls.tar.gz" > dist/jdtls/checksum
+          echo "${FIXED_JDTLS_CHECKSUM#sha256:}  dist/jdtls/jdtls.tar.gz" > dist/jdtls/checksum
           sha256sum -c dist/jdtls/checksum
           tar -xzf dist/jdtls/jdtls.tar.gz -C dist/jdtls/
 
@@ -417,6 +428,11 @@ jobs:
           sleep 3
 
       - name: Start Theia
+        env:
+          # The frontend reads KAIRO_RUNTIME_URL to address the
+          # Runtime Agent (see scripts/dev.sh); without it API
+          # calls go to the Theia origin (port 3000) and 404.
+          KAIRO_RUNTIME_URL: http://127.0.0.1:18080
         run: |
           cd packages/theia-product
           npx theia start --hostname=127.0.0.1 --port=3000 &
