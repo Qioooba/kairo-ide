@@ -1,6 +1,6 @@
 # Kairo IDE accessibility report (axe-core)
-- **URL:** http://127.0.0.1:3001
-- **Tested at:** 2026-07-21T00:25:28.512Z
+- **URL:** http://127.0.0.1:3000
+- **Tested at:** 2026-07-22T14:01:07.973Z
 - **Engine:** axe-core via @axe-core/playwright (wcag2a, wcag2aa, wcag21aa)
 
 ## Summary
