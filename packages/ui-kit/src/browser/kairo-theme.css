@@ -474,6 +474,10 @@
 }
 
 .kairo-diagnostic-location {
+    /* File positions are metadata, not an error-status indicator. Keeping
+       them at the normal secondary foreground meets contrast requirements
+       on the dark Kairo surface. */
+    color: var(--kairo-text-secondary);
     font-family: monospace;
     font-size: 11px;
     flex-shrink: 0;
