@@ -336,15 +336,45 @@ async function main() {
     await runCommand(page, 'Kairo: Show Tomcat Logs', 20000);
     const logViewer = page.locator('[data-testid="log-viewer"]');
     await logViewer.waitFor({ state: 'visible', timeout: 30000 });
+    // Make the exercised server explicit: the store can retain historical
+    // stopped servers, so a default selection is not sufficient evidence for
+    // the live instance started above.
+    const liveServerId = restarted.id;
+    const logServerSelect = page.locator('[data-testid="log-server-select"]');
+    if (await logServerSelect.isVisible().catch(() => false)) {
+      await logServerSelect.selectOption(liveServerId);
+      await sleep(1200);
+    }
+    const agentLogs1Response = await agentGet(env, `/api/v1/servers/${liveServerId}/logs`, 10000);
+    const agentLogs1 = agentLogs1Response.json?.payload || agentLogs1Response.json || [];
     const logText1 = await page.locator('[data-testid="log-viewer-content"]').textContent().catch(() => '');
+    const domLines1 = await page.locator('[data-testid^="log-line-"]').count().catch(() => 0);
     const historyLines = (logText1 || '').split('\n').filter(Boolean).length;
     await shot('09-logs-history');
     // trigger a request to generate new log output
     await httpGet(`${served.url}?qa=tail`, 10000);
-    await sleep(4000);
+    let agentLogs2 = agentLogs1;
+    const liveTailDeadline = Date.now() + 10000;
+    while (Date.now() < liveTailDeadline) {
+      await sleep(1000);
+      const response = await agentGet(env, `/api/v1/servers/${liveServerId}/logs`, 10000);
+      const candidate = response.json?.payload || response.json || [];
+      if (Array.isArray(candidate)) agentLogs2 = candidate;
+      if (Array.isArray(agentLogs2) && Array.isArray(agentLogs1) && agentLogs2.length > agentLogs1.length) break;
+    }
     const logText2 = await page.locator('[data-testid="log-viewer-content"]').textContent().catch(() => '');
+    const domLines2 = await page.locator('[data-testid^="log-line-"]').count().catch(() => 0);
     const grew = (logText2 || '').length > (logText1 || '').length;
-    result.crossVerification.logs = { historyLines, liveTailGrew: grew };
+    result.crossVerification.logs = {
+      historyLines,
+      domLines1,
+      domLines2,
+      liveTailGrew: grew,
+      agentHistoryLines: Array.isArray(agentLogs1) ? agentLogs1.length : 0,
+      agentLiveTailGrew: Array.isArray(agentLogs2) && Array.isArray(agentLogs1) && agentLogs2.length > agentLogs1.length,
+      agentLastBefore: Array.isArray(agentLogs1) ? agentLogs1.at(-1)?.line : '',
+      agentLastAfter: Array.isArray(agentLogs2) ? agentLogs2.at(-1)?.line : '',
+    };
     // clear semantics
     const clearBtn = page.locator('[data-testid="log-clear-btn"]');
     if (await clearBtn.isVisible().catch(() => false)) {
@@ -361,13 +391,14 @@ async function main() {
         detail: result.crossVerification.logs,
         evidence: ['screenshots/m2/flow-05/09-logs-history.png'],
       });
-      logError('log viewer empty/no live tail (defect filed)');
+      throw new Error('log viewer did not show history plus live tail');
     }
     logStep('LOGS_VERIFIED', result.crossVerification.logs);
 
     // ---- 9. stop: port freed, process gone; start again -----------------------
-    if (await page.locator('[data-testid="server-stop-button"]').isEnabled().catch(() => false)) {
-      await page.locator('[data-testid="server-stop-button"]').click();
+    const visibleStopButton = page.locator('[data-testid="server-stop-button"]');
+    if (await visibleStopButton.isVisible().catch(() => false) && await visibleStopButton.isEnabled().catch(() => false)) {
+      await visibleStopButton.click();
     } else {
       await runCommand(page, 'Kairo: Stop Server', 20000);
     }

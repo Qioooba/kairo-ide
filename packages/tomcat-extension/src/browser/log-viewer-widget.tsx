@@ -55,10 +55,19 @@ const BATCH_INTERVAL = 80;
 const LogViewer: React.FC<LogViewerProps> = ({ serverStore, runtime, workspaceContext }) => {
     const [logLines, setLogLines] = React.useState<LogLine[]>([]);
     const [selectedServerId, setSelectedServerId] = React.useState<string>('');
+    const [, setServerVersion] = React.useState(0);
     const containerRef = React.useRef<HTMLDivElement>(null);
     const autoScrollRef = React.useRef(true);
     const pendingBatch = React.useRef<LogLine[]>([]);
     const batchTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    // Re-render when lifecycle commands update ServerStore; otherwise this
+    // widget keeps the server list from its first render and tails a stale
+    // stopped instance after a restart.
+    React.useEffect(() => {
+        const sub = serverStore.onDidChange(() => setServerVersion(version => version + 1));
+        return () => sub.dispose();
+    }, [serverStore]);
 
     const classifyLogLevel = React.useCallback((line: string): LogLine['level'] => {
         const lower = line.toLowerCase();
@@ -103,8 +112,14 @@ const LogViewer: React.FC<LogViewerProps> = ({ serverStore, runtime, workspaceCo
 
     React.useEffect(() => {
         const servers = serverStore.getServers();
-        if (servers.length > 0 && !selectedServerId) {
-            setSelectedServerId(servers[0].id);
+        const running = servers.find(server => server.state === 'running');
+        const selected = servers.find(server => server.id === selectedServerId);
+        // Prefer the live instance even when this widget was opened while a
+        // persisted stopped server was still first in the store.
+        if (running && selected?.state !== 'running') {
+            setSelectedServerId(running.id);
+        } else if (servers.length > 0 && !selectedServerId) {
+            setSelectedServerId((running ?? servers[0]).id);
         }
     }, [serverStore, selectedServerId]);
 
@@ -131,6 +146,23 @@ const LogViewer: React.FC<LogViewerProps> = ({ serverStore, runtime, workspaceCo
             });
     }, [selectedServerId, runtime, classifyLogLevel]);
 
+    // EventHub is the low-latency path, but older agents and reconnect windows
+    // can miss log events. Polling the authoritative history while a server is
+    // selected provides a bounded live-tail fallback (KAIRO-RC-WEB-263).
+    React.useEffect(() => {
+        if (!selectedServerId) return undefined;
+        let disposed = false;
+        const refresh = () => runtime.request(
+            'GET /api/v1/servers/{serverId}/logs', { follow: false }, { pathParams: { serverId: selectedServerId } },
+        ).then((data: any) => {
+            if (disposed || !Array.isArray(data)) return;
+            const lines = data.map((entry: any) => ({ line: entry.line, ts: entry.ts, level: classifyLogLevel(entry.line) }));
+            setLogLines(previous => lines.length >= previous.length ? lines.slice(-MAX_LOG_LINES) : previous);
+        }).catch(() => undefined);
+        const timer = setInterval(refresh, 1000);
+        return () => { disposed = true; clearInterval(timer); };
+    }, [selectedServerId, runtime, classifyLogLevel]);
+
     // Subscribe to EventHub for live log tailing
     React.useEffect(() => {
         const ctx = workspaceContext.context;
@@ -154,10 +186,14 @@ const LogViewer: React.FC<LogViewerProps> = ({ serverStore, runtime, workspaceCo
     // Track server list changes to update selector
     React.useEffect(() => {
         const sub = serverStore.onDidChange(servers => {
-            if (selectedServerId && !servers.find(s => s.id === selectedServerId)) {
-                setSelectedServerId(servers.length > 0 ? servers[0].id : '');
+            const running = servers.find(server => server.state === 'running');
+            const selected = servers.find(server => server.id === selectedServerId);
+            if (running && selected?.state !== 'running') {
+                setSelectedServerId(running.id);
+            } else if (selectedServerId && !selected) {
+                setSelectedServerId((running ?? servers[0])?.id ?? '');
             } else if (!selectedServerId && servers.length > 0) {
-                setSelectedServerId(servers[0].id);
+                setSelectedServerId((servers.find(server => server.state === 'running') ?? servers[0]).id);
             }
         });
         return () => sub.dispose();

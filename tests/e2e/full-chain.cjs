@@ -120,7 +120,7 @@ async function pollApiPost(path, payload) {
   await page.goto(theiaUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 });
 
   step('waiting for Theia shell');
-  await page.waitForSelector('.theia-statusbar', { timeout: 60_000 });
+  await page.waitForSelector('#theia-statusBar', { timeout: 60_000 });
   await page.waitForSelector('.monaco-editor', { timeout: 60_000 });
   await page.waitForTimeout(2_000);
   pass('status bar + monaco editor mounted');
@@ -150,7 +150,7 @@ async function pollApiPost(path, payload) {
   // exists, then verify the status bar text on a real open
   // via the Theia explorer.
   const encBeforeOpen = await page.evaluate(() => {
-    const sb = document.querySelector('.theia-statusbar');
+    const sb = document.querySelector('#theia-statusBar');
     return sb ? sb.textContent || '' : '';
   });
   if (!/Encoding/.test(encBeforeOpen)) {
@@ -185,7 +185,7 @@ async function pollApiPost(path, payload) {
 
   step('4) verify the Kairo status bar entries are present');
   const sbState = await page.evaluate(() => {
-    const sb = document.querySelector('.theia-statusbar');
+    const sb = document.querySelector('#theia-statusBar');
     if (!sb) return null;
     const text = sb.textContent || '';
     return {

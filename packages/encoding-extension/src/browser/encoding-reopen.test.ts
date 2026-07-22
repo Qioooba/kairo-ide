@@ -40,7 +40,7 @@ function makeWidget(editor: { setEncoding?: (e: string, m: number) => Promise<vo
   return widget;
 }
 
-function makeHarness(widget: ReturnType<typeof makeWidget>) {
+function makeHarness(_widget: ReturnType<typeof makeWidget>) {
   const opened: unknown[] = [];
   const warns: string[] = [];
   const editorManager = { open: async (uri: unknown) => { opened.push(uri); } };

@@ -19,7 +19,7 @@
 // coverage behind a soft pass.
 
 const path = require('path');
-const os = require('os');
+const fs = require('fs');
 
 const port = parseInt(process.argv[2] || '18080', 10);
 
@@ -57,31 +57,32 @@ async function api(method, path, body) {
   if (g1.status !== 200) fail(`GET jdtls: ${g1.status}`);
   else pass(`state=${g1.json.payload.state} version=${g1.json.payload.version} initializeOk=${g1.json.payload.initializeOk}`);
 
-  step('jdtls: POST start without JRE (must report process_spawn_failed or no-JRE)');
+  step('jdtls: POST prepare distribution');
   const p1 = await api('POST', '/api/v1/jdtls', { sourceLevel: '1.6' });
-  // We accept either 500 (no JRE configured) or 200 (already
-  // running with the JRE). The agent always reports a clean
-  // envelope — never a panic.
-  if (p1.status === 200) {
-    pass(`jdtls started: state=${p1.json.payload.state} pid=${p1.json.payload.pid}`);
-  } else if (p1.status === 500 && p1.json && p1.json.error && p1.json.error.code === 'process_spawn_failed') {
-    pass('jdtls start failed cleanly: ' + p1.json.error.message.slice(0, 80));
+  if (p1.status === 200 && p1.json?.payload?.home) {
+    pass(`jdtls prepared: ${p1.json.payload.home}`);
   } else {
-    fail(`jdtls start: status=${p1.status} body=${p1.body.slice(0, 200)}`);
+    fail(`jdtls prepare: status=${p1.status} body=${p1.body.slice(0, 200)}`);
   }
 
-  step('jdtls: GET (after start attempt)');
+  step('jdtls: GET (after prepare)');
   const g2 = await api('GET', '/api/v1/jdtls');
   if (g2.status !== 200) fail(`GET jdtls: ${g2.status}`);
   else pass(`state=${g2.json.payload.state}`);
 
-  step('jdtls: DELETE');
+  step('jdtls: DELETE is explicitly unsupported (Theia owns lifecycle)');
   const d1 = await api('DELETE', '/api/v1/jdtls');
-  if (d1.status !== 200) fail(`DELETE jdtls: ${d1.status}`);
-  else pass(`state=${d1.json.payload.state}`);
+  if (d1.status === 400 && d1.json?.error?.code === 'invalid_request') pass('DELETE rejected by current contract');
+  else fail(`DELETE jdtls: ${d1.status}`);
+
+  const legacyRoot = path.resolve(__dirname, '..', '..', 'legacy-sample');
+  step('workspaces: open legacy-sample before file operations');
+  const w = await api('POST', '/api/v1/workspaces', { rootPath: legacyRoot });
+  if (w.status !== 200) fail(`workspace open: ${w.status} ${w.body.slice(0, 200)}`);
+  else pass(`workspace id=${w.json.payload.id}`);
 
   step('encoding: detect GBK file (legacy-sample hello.jsp)');
-  const e1 = await api('POST', '/api/v1/encoding/detect', { file: path.resolve(__dirname, '..', '..', 'legacy-sample', 'WebRoot', 'hello.jsp') });
+  const e1 = await api('POST', '/api/v1/encoding/detect', { file: path.join(legacyRoot, 'WebRoot', 'hello.jsp') });
   if (e1.status !== 200) fail(`detect: ${e1.status} ${e1.body.slice(0, 200)}`);
   else {
     const enc = e1.json.payload.encoding;
@@ -93,11 +94,10 @@ async function api(method, path, body) {
   }
 
   step('encoding: recode utf-8 -> gbk -> utf-8 round-trip');
-  // We use a temp file path inside the agent's data dir to
-  // not muck with the source tree. The agent restricts
-  // writes to its data dir, so we use a temp filename.
-  const tmp = path.join(os.tmpdir(), `kairo-api-smoke-${Date.now()}.txt`);
-  require('fs').writeFileSync(tmp, Buffer.from('Round trip: 你好', 'utf-8'));
+  // The encoder accepts only authorised workspace roots. Keep the
+  // disposable probe inside the workspace and remove it afterwards.
+  const tmp = path.join(legacyRoot, `.kairo-api-smoke-${Date.now()}.txt`);
+  fs.writeFileSync(tmp, Buffer.from('Round trip: 你好', 'utf-8'));
   const r1 = await api('POST', '/api/v1/encoding/recode', { file: tmp, from: 'utf-8', to: 'gbk' });
   if (r1.status !== 200) fail(`recode utf-8->gbk: ${r1.status} ${r1.body.slice(0, 200)}`);
   else {
@@ -105,29 +105,22 @@ async function api(method, path, body) {
     const r2 = await api('POST', '/api/v1/encoding/recode', { file: tmp, from: 'gbk', to: 'utf-8' });
     if (r2.status !== 200) fail(`recode gbk->utf-8: ${r2.status}`);
     else {
-      const back = require('fs').readFileSync(tmp, 'utf-8');
+      const back = fs.readFileSync(tmp, 'utf-8');
       if (!back.includes('你好')) fail(`round-trip lost Chinese text: ${back}`);
       else pass(`round-trip preserves Chinese: ${back}`);
     }
   }
-  require('fs').unlinkSync(tmp);
+  fs.unlinkSync(tmp);
 
-  step('workspaces: open legacy-sample');
-  const w = await api('POST', '/api/v1/workspaces', { rootPath: path.resolve(__dirname, '..', '..', 'legacy-sample') });
-  if (w.status !== 200) fail(`workspace open: ${w.status} ${w.body.slice(0, 200)}`);
-  else pass(`workspace id=${w.json.payload.id}`);
-
-  step('builds: trigger (will fail without a JDK — clean envelope)');
+  step('builds: unknown project is rejected truthfully');
   const b = await api('POST', '/api/v1/builds', { projectId: 'p1' });
-  if (b.status === 200) {
-    pass(`build: state=${b.json.payload.state}`);
-  } else if (b.json && b.json.error && (b.json.error.code === 'compile_failed' || b.json.error.code === 'toolchain_missing')) {
-    pass(`build refused cleanly: ${b.json.error.code}`);
+  if (b.status === 404 && b.json?.error?.code === 'not_found') {
+    pass('unknown project rejected');
   } else {
     fail(`build: status=${b.status} body=${b.body.slice(0, 200)}`);
   }
 
-  step('deployments: trigger (will fail without a build)');
+  step('deployments: unknown project is rejected truthfully');
   const dep = await api('POST', '/api/v1/deployments', { projectId: 'p1', what: 'all' });
   if (dep.status === 200) {
     pass(`deploy: state=${dep.json.payload.state}`);
@@ -137,12 +130,10 @@ async function api(method, path, body) {
     fail(`deploy: status=${dep.status}`);
   }
 
-  step('servers: start (gated on B-002 — Tomcat 6 not vendored)');
+  step('servers: unknown project is rejected truthfully');
   const s = await api('POST', '/api/v1/servers', { projectId: 'p1' });
-  if (s.status === 200) {
-    pass(`server started: id=${s.json.payload.id}`);
-  } else if (s.json && s.json.error && s.json.error.code === 'process_spawn_failed') {
-    gate('Tomcat 6 server start: gated on B-002 (binary not vendored)');
+  if (s.status === 404 && s.json?.error?.code === 'not_found') {
+    pass('unknown project rejected');
   } else {
     fail(`server: status=${s.status} body=${s.body.slice(0, 200)}`);
   }

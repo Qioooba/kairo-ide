@@ -91,6 +91,31 @@ func TestEncodeDecodeRoundTrip(t *testing.T) {
 	}
 }
 
+func TestEncode_GBKUnrepresentable(t *testing.T) {
+	// GBK cannot represent emoji — encode must fail (strict GBK),
+	// not silently succeed via the GB18030 superset.
+	if _, err := Encode([]byte("你好 🔥"), GBK, Aliases{}); err == nil {
+		t.Errorf("GBK encode of emoji should fail")
+	}
+	// The same text must still encode under GB18030.
+	if _, err := Encode([]byte("你好 🔥"), GB18030, Aliases{}); err != nil {
+		t.Errorf("GB18030 encode of emoji should succeed: %v", err)
+	}
+	// Pure GBK-representable text still encodes fine.
+	if _, err := Encode([]byte("你好"), GBK, Aliases{}); err != nil {
+		t.Errorf("GBK encode of Chinese text should succeed: %v", err)
+	}
+	// Decoding GBK bytes keeps using the GB18030 superset.
+	gbkBytes, err := Encode([]byte("你好"), GBK, Aliases{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := Decode(gbkBytes, GBK, Aliases{})
+	if err != nil || string(decoded) != "你好" {
+		t.Errorf("GBK decode roundtrip: got %q, err=%v", string(decoded), err)
+	}
+}
+
 func TestPropertiesEncode(t *testing.T) {
 	in := []byte("hello=\u4f60\u597d") // 你好
 	out, err := PropertiesEncode(in)

@@ -13,19 +13,30 @@ import { LogViewerWidget } from './log-viewer-widget';
 @injectable()
 export class KairoServerService {
   @inject(RuntimeConnectionService) protected runtime!: RuntimeConnectionService;
+  @inject(ServerStore) protected store!: ServerStore;
 
   protected cache = new Map<string, ServerInstance>();
 
   async start(projectId: string, debug = false): Promise<ServerInstance> {
     const s = await this.runtime.request('POST /api/v1/servers', { projectId, debug });
     this.cache.set(s.id, s);
+    this.store.upsertServer(this.toStoreServer(s), { force: true });
     return s;
   }
 
   async stop(id: string, force = false): Promise<ServerInstance> {
     const s = await this.runtime.request('DELETE /api/v1/servers/{serverId}', { force }, { pathParams: { serverId: id } });
     this.cache.set(id, s);
+    this.store.upsertServer(this.toStoreServer(s), { force: true });
     return s;
+  }
+
+  private toStoreServer(s: ServerInstance) {
+    return {
+      id: s.id, workspaceId: '', projectId: s.projectId, state: s.state,
+      httpPort: s.ports.http || 0, pid: s.pid || 0, startTime: s.startedAt || '',
+      url: s.ports.http ? `http://127.0.0.1:${s.ports.http}` : undefined,
+    } as import('./server-store').ServerInstance;
   }
 }
 

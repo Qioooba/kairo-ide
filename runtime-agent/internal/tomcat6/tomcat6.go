@@ -242,6 +242,15 @@ type Host struct {
 	UnpackWARs bool      `xml:"unpackWARs,attr,omitempty"`
 	AutoDeploy bool      `xml:"autoDeploy,attr,omitempty"`
 	Contexts   []Context `xml:"Context"`
+	Valves     []Valve   `xml:"Valve"`
+}
+
+type Valve struct {
+	ClassName string `xml:"className,attr"`
+	Directory string `xml:"directory,attr,omitempty"`
+	Prefix    string `xml:"prefix,attr,omitempty"`
+	Suffix    string `xml:"suffix,attr,omitempty"`
+	Pattern   string `xml:"pattern,attr,omitempty"`
 }
 
 type Context struct {
@@ -300,6 +309,11 @@ func defaultServerXML() ServerConfig {
 								AppBase:    "webapps",
 								UnpackWARs: true,
 								AutoDeploy: true,
+								Valves: []Valve{{
+									ClassName: "org.apache.catalina.valves.AccessLogValve",
+									Directory: "logs", Prefix: "kairo-access.", Suffix: ".log",
+									Pattern: "%h %l %u %t \"%r\" %s %b",
+								}},
 							},
 						},
 					},

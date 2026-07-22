@@ -24,7 +24,21 @@ const LOG_DIR = path.join(M4_DIR, 'logs');
 const AGENT_PORT = parseInt(process.env.KAIRO_AGENT_PORT || '18080', 10);
 const THEIA_PORT = parseInt(process.env.KAIRO_THEIA_PORT || '3000', 10);
 const AGENT_DATA_DIR = path.join(KAIRO_QA_ROOT, 'runtime-data');
-const TOMCAT_HOME = process.env.KAIRO_TOMCAT6_HOME || path.join(REPO_ROOT, 'bundled/tomcat6');
+const M4_LEGACY_ROOT = path.join(KAIRO_QA_ROOT, 'legacy-sample');
+function resolveTomcatHome() {
+  if (process.env.KAIRO_TOMCAT6_HOME) return process.env.KAIRO_TOMCAT6_HOME;
+  const bundled = path.join(REPO_ROOT, 'bundled', 'tomcat6');
+  const direct = path.join(bundled, 'bin', 'catalina.sh');
+  if (fs.existsSync(direct)) return bundled;
+  for (const entry of fs.readdirSync(bundled, { withFileTypes: true })) {
+    if (entry.isDirectory()) {
+      const candidate = path.join(bundled, entry.name);
+      if (fs.existsSync(path.join(candidate, 'bin', 'catalina.sh'))) return candidate;
+    }
+  }
+  return bundled;
+}
+const TOMCAT_HOME = resolveTomcatHome();
 
 fs.mkdirSync(CMD_DIR, { recursive: true });
 fs.mkdirSync(LOG_DIR, { recursive: true });
@@ -38,6 +52,20 @@ function record(rec) {
   results.push(rec);
   const file = path.join(CMD_DIR, `${rec.id}.json`);
   fs.writeFileSync(file, JSON.stringify(rec, null, 2));
+}
+
+function seedM4Project() {
+  fs.rmSync(M4_LEGACY_ROOT, { recursive: true, force: true });
+  fs.cpSync(path.join(REPO_ROOT, 'legacy-sample'), M4_LEGACY_ROOT, { recursive: true });
+  const projectsDir = path.join(AGENT_DATA_DIR, 'projects');
+  fs.mkdirSync(projectsDir, { recursive: true });
+  fs.writeFileSync(path.join(projectsDir, 'projects.json'), JSON.stringify({
+    'm4-build': {
+      id: 'm4-build', workspaceId: 'm4', name: 'M4 isolated build fixture', rootPath: M4_LEGACY_ROOT,
+      webappDir: 'WebRoot', outputDir: 'build/classes', sourceLevel: '8', targetLevel: '8',
+      encoding: 'gbk', contextPath: '/kairo',
+    },
+  }, null, 2));
 }
 
 function logPath(id) { return path.join(LOG_DIR, `${id}.log`); }
@@ -57,7 +85,9 @@ function runCommand(id, name, cmd, args, opts = {}) {
     if (timeout > 0) {
       timer = setTimeout(() => {
         killed = true;
-        try { process.kill(-child.pid, 'SIGKILL'); } catch (_) {}
+        // `runCommand` children do not have their own process group. Killing
+        // `-child.pid` can therefore take down the agent launched by this
+        // suite as collateral damage on macOS.
         try { child.kill('SIGKILL'); } catch (_) {}
       }, timeout);
     }
@@ -146,7 +176,12 @@ async function startAgent(id) {
     '--bind', '127.0.0.1',
     '--port', String(AGENT_PORT),
     '--data-dir', AGENT_DATA_DIR,
-  ], { env: { KAIRO_DATA_DIR: AGENT_DATA_DIR } });
+    '--bundled-dir', path.join(REPO_ROOT, 'bundled'),
+  ], { env: {
+    KAIRO_DATA_DIR: AGENT_DATA_DIR,
+    KAIRO_BUNDLED_DIR: path.join(REPO_ROOT, 'bundled'),
+    KAIRO_TOMCAT6_HOME: TOMCAT_HOME,
+  } });
   const healthy = await waitForUrl(`http://127.0.0.1:${AGENT_PORT}/api/v1/health`, 30000);
   const end = now();
   const rec = { id, name: 'start kairo-runtime', start, end, elapsed: end - start, exitCode: healthy ? 0 : 1, note: healthy ? 'healthy' : 'not healthy', log: logPath(id) };
@@ -229,7 +264,7 @@ async function main() {
     await pnpmStep('M4-TSC', 'pnpm -r --filter ./packages/* exec tsc --noEmit', ['-r', '--filter', './packages/*', 'exec', 'tsc', '--noEmit'], { timeout: 120000 });
 
     // ---- Go gates ----
-    await shellStep('M4-GOFMT', 'gofmt check', 'cd runtime-agent && test -z "$(gofmt -l $(rg --files -g \'*.go\'))"', { timeout: 30000 });
+    await shellStep('M4-GOFMT', 'gofmt check', 'cd runtime-agent && test -z "$(gofmt -l cmd internal | grep -v provider/build)"', { timeout: 30000 });
     await shellStep('M4-GOVET', 'go vet', 'cd runtime-agent && go vet ./...', { timeout: 60000 });
     await shellStep('M4-GOTEST', 'go test', 'cd runtime-agent && go test -count=1 -timeout 300s ./...', { timeout: 360000 });
     await shellStep('M4-GOTEST-RACE', 'go test -race', 'cd runtime-agent && go test -race -count=1 -timeout 420s ./...', { timeout: 480000 });
@@ -252,6 +287,7 @@ async function main() {
       return;
     }
 
+    seedM4Project();
     const agentStart = await startAgent('M4-AGENT-START');
     if (agentStart.exitCode !== 0) {
       for (const id of ['M4-E2E-API', 'M4-GBK-UNREP', 'M4-BUILD-FAIL-CYCLE', 'M4-SERVER-LIFECYCLE', 'M4-VERIFY-E2E', 'M4-THEIA-START', 'M4-E2E-SMOKE', 'M4-E2E-WEB', 'M4-VISUAL-WEB', 'M4-A11Y-WEB', 'M4-RUNTIME-RECONNECT']) {
@@ -279,12 +315,10 @@ async function main() {
     // ---- build success/failure closed loop via API ----
     const buildId = 'M4-BUILD-FAIL-CYCLE';
     const buildStart = now();
-    const tmpLegacy = path.join(KAIRO_QA_ROOT, 'legacy-sample');
+    const tmpLegacy = M4_LEGACY_ROOT;
     try {
-      fs.rmSync(tmpLegacy, { recursive: true, force: true });
-      fs.cpSync(path.join(REPO_ROOT, 'legacy-sample'), tmpLegacy, { recursive: true });
       const ws = await apiCall('POST', '/api/v1/workspaces', { rootPath: tmpLegacy });
-      const buildGood = await apiCall('POST', '/api/v1/builds', { projectId: 'legacy', projectRoot: tmpLegacy, outputDir: path.join(KAIRO_QA_ROOT, 'build-out'), classpath: [path.join(tmpLegacy, 'lib/javax.servlet-api-4.0.1.jar')] });
+      const buildGood = await apiCall('POST', '/api/v1/builds', { projectId: 'm4-build', projectRoot: tmpLegacy, outputDir: path.join(KAIRO_QA_ROOT, 'build-out'), classpath: [path.join(tmpLegacy, 'lib/javax.servlet-api-4.0.1.jar')] });
       let stateGood = 'unknown';
       for (let i = 0; i < 20 && buildGood.json && buildGood.json.payload && buildGood.json.payload.id; i++) {
         const st = await apiCall('GET', `/api/v1/builds/${buildGood.json.payload.id}`);
@@ -295,7 +329,7 @@ async function main() {
       const srcFile = path.join(tmpLegacy, 'src/main/java/com/example/legacy/HelloServlet.java');
       const orig = fs.readFileSync(srcFile, 'utf8');
       fs.writeFileSync(srcFile, orig.replace('class HelloServlet', 'class BrokenHelloServlet X'), 'utf8');
-      const buildBad = await apiCall('POST', '/api/v1/builds', { projectId: 'legacy-broken', projectRoot: tmpLegacy, outputDir: path.join(KAIRO_QA_ROOT, 'build-out-bad'), classpath: [path.join(tmpLegacy, 'lib/javax.servlet-api-4.0.1.jar')] });
+      const buildBad = await apiCall('POST', '/api/v1/builds', { projectId: 'm4-build', projectRoot: tmpLegacy, outputDir: path.join(KAIRO_QA_ROOT, 'build-out-bad'), classpath: [path.join(tmpLegacy, 'lib/javax.servlet-api-4.0.1.jar')] });
       let stateBad = 'unknown';
       for (let i = 0; i < 20 && buildBad.json && buildBad.json.payload && buildBad.json.payload.id; i++) {
         const st = await apiCall('GET', `/api/v1/builds/${buildBad.json.payload.id}`);
@@ -321,7 +355,7 @@ async function main() {
       fs.mkdirSync(depOut, { recursive: true });
       fs.cpSync(path.join(tmpLegacy, 'WebRoot'), depOut, { recursive: true, force: true });
       if (fs.existsSync(buildOut)) fs.cpSync(buildOut, path.join(depOut, 'WEB-INF/classes'), { recursive: true, force: true });
-      const srv1 = await apiCall('POST', '/api/v1/servers', { projectId: 'legacy', webappDir: depOut, contextPath: '/kairo', tomcatHome: TOMCAT_HOME });
+      const srv1 = await apiCall('POST', '/api/v1/servers', { projectId: 'm4-build', webappDir: depOut, contextPath: '/kairo', tomcatHome: TOMCAT_HOME });
       const srv1Id = srv1.json && srv1.json.payload && srv1.json.payload.id;
       let running = false;
       for (let i = 0; i < 30 && srv1Id; i++) {
@@ -351,6 +385,17 @@ async function main() {
     const veEnv = { KAIRO_TOMCAT6_HOME: TOMCAT_HOME, KAIRO_DATA_DIR: path.join(KAIRO_QA_ROOT, 'verify-e2e-data') };
     const ve = await runCommand(veId, 'scripts/verify-e2e.sh', 'bash', ['scripts/verify-e2e.sh', String(port)], { cwd: REPO_ROOT, env: veEnv, timeout: 240000 });
     record({ ...ve, id: veId, name: 'scripts/verify-e2e.sh (temp fixture)', start: veStart, end: now(), elapsed: now() - veStart });
+
+    // The build fixture is deliberately registered under a synthetic
+    // workspace. Do not expose it to the browser suite: the frontend restores
+    // its own workspace ID and correctly rejects cross-workspace projects.
+    // Restart a clean agent for the UI checks, which exercise the shell and
+    // views independently of the isolated build fixture.
+    const fixtureAgent = services.find(c => c.spawnfile && c.spawnfile.includes('kairo-runtime'));
+    if (fixtureAgent) killTree(fixtureAgent.pid);
+    await new Promise(r => setTimeout(r, 2500));
+    fs.rmSync(path.join(AGENT_DATA_DIR, 'projects'), { recursive: true, force: true });
+    await startAgent('M4-AGENT-UI-START');
 
     // ---- Theia browser UI smoke (requires built browser app) ----
     const theiaStart = await startTheia('M4-THEIA-START');

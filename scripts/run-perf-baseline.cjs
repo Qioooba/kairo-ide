@@ -82,7 +82,7 @@ async function run() {
   // 1. Cold start
   const cold = [];
   for (let i = 0; i < 5; i++) {
-    const browser = await chromium.launch({ headless: true });
+    const browser = await chromium.launch({ headless: false });
     const context = await browser.newContext(contextOptions);
     const page = await context.newPage();
     const t0 = performance.now();
@@ -108,20 +108,68 @@ async function run() {
   let fileOpenBlocked = true;
   try {
     await createWorkspaceViaAgent(ws, 'perf-workspace');
-    const browser = await chromium.launch({ headless: true });
+    const browser = await chromium.launch({ headless: false });
     const page = await browser.newPage(contextOptions);
-    await page.goto(URL, { waitUntil: 'networkidle', timeout: 60000 });
+    // Theia opens NO workspace for a bare URL (welcome screen
+    // only — no explorer, no files). Open the workspace root via
+    // the URL hash, which is how Theia routes workspaces.
+    await page.goto(`${URL}/#${encodeURIComponent(ws)}`, { waitUntil: 'networkidle', timeout: 60000 });
     await page.waitForSelector('#theia-app-shell', { state: 'visible', timeout: 30000 });
+    // Workspace-trust dialog blocks the explorer until dismissed.
+    const trustBtn = page.locator('button', { hasText: /Yes, I trust the authors/i }).first();
+    if (await trustBtn.isVisible().catch(() => false)) {
+      await trustBtn.click();
+      await sleep(1500);
+    }
     await sleep(3000);
-    await importViaUI(page, ws);
+    // When the file already lives in the Theia workspace root
+    // (KAIRO_SKIP_IMPORT=1 + KAIRO_WORKSPACE=<stack workspace>),
+    // skip the import wizard — its F1/focus dance is flaky in
+    // automation and irrelevant to what we measure.
+    if (!process.env.KAIRO_SKIP_IMPORT) {
+      await importViaUI(page, ws);
+    }
 
-    // Try to click the file in explorer
-    const t0 = performance.now();
-    const fileNode = page.locator('#files .theia-TreeNode').getByText('Large1000.java').first();
-    if (await fileNode.count() > 0) {
-      await fileNode.click();
-      await page.locator('.p-TabBar-tabLabel').getByText('Large1000.java').first().waitFor({ state: 'visible', timeout: 10000 });
+    // Open the file. The file sits in the Theia workspace root
+    // (KAIRO_SKIP_IMPORT=1 + KAIRO_WORKSPACE=<stack workspace>),
+    // so the explorer has it at top level — click it there.
+    // Indexing (file watcher) is NOT part of the measurement:
+    // the clock starts once the node is visible.
+    let opened = false;
+    await sleep(2500);
+    const treeNode = page.locator('.theia-TreeNode', { hasText: 'Large1000.java' }).first();
+    if (await treeNode.waitFor({ state: 'visible', timeout: 15000 }).then(() => true).catch(() => false)) {
+      const t0 = performance.now();
+      await treeNode.dblclick();
+      await page.locator('.monaco-editor .view-lines').first().waitFor({ state: 'visible', timeout: 15000 });
       openTimes.push(performance.now() - t0);
+      opened = true;
+    } else {
+      // fallback: Quick Open (m2 pattern)
+      for (let attempt = 0; attempt < 2 && !opened; attempt++) {
+        await page.keyboard.press('Meta+P');
+        const widget = page.locator('.quick-input-widget');
+        const widgetUp = await widget.waitFor({ state: 'visible', timeout: 10000 }).then(() => true).catch(() => false);
+        if (!widgetUp) continue;
+        const input = page.locator('.quick-input-widget .quick-input-box input');
+        await input.fill('');
+        await input.type('Large1000.java', { delay: 25 });
+        await sleep(1200);
+        const row = page.locator('.quick-input-widget .monaco-list .monaco-list-row').first();
+        const found = await row.waitFor({ state: 'visible', timeout: 10000 }).then(() => true).catch(() => false);
+        if (found) {
+          const t0 = performance.now();
+          await page.keyboard.press('Enter');
+          await page.locator('.monaco-editor .view-lines').first().waitFor({ state: 'visible', timeout: 15000 });
+          openTimes.push(performance.now() - t0);
+          opened = true;
+          break;
+        }
+        await page.keyboard.press('Escape').catch(() => {});
+        await sleep(1500);
+      }
+    }
+    if (opened) {
       fileOpenBlocked = false;
     }
     await browser.close();
@@ -135,7 +183,7 @@ async function run() {
   }
 
   // 3. Long task during DOM log injection
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({ headless: false });
   const page = await browser.newPage(contextOptions);
   await page.goto(URL, { waitUntil: 'networkidle', timeout: 60000 });
   await page.waitForSelector('#theia-app-shell', { state: 'visible', timeout: 30000 });

@@ -405,13 +405,9 @@ func (r *realServerRunner) Debug(id string) (*api.ServerResponse, error) {
 // caller does not pass an explicit ?tail=N.
 const defaultLogTail = 500
 
-// Logs returns the tail of <catalinaBase>/logs/kairo-stdout.log —
-// the file every started server streams stdout/stderr into since
-// KAIRO-RC-WEB-247. Reading the file (rather than the live
-// instance) works for running servers, stopped servers, and
-// servers restored from disk after an agent restart. A missing
-// log file yields an empty slice, not an error: the server may
-// simply not have produced output yet.
+// Logs returns the combined tail of regular files in <catalinaBase>/logs.
+// Reading the persisted files works for running and stopped servers alike;
+// it includes both Tomcat startup output and access-log traffic.
 func (r *realServerRunner) Logs(id string, tail int) ([]api.ServerLogEntry, error) {
 	if tail <= 0 {
 		tail = defaultLogTail
@@ -422,12 +418,28 @@ func (r *realServerRunner) Logs(id string, tail int) ([]api.ServerLogEntry, erro
 	if !ok {
 		return nil, fmt.Errorf("server not found: %s", id)
 	}
-	logPath := filepath.Join(m.CatalinaBase, "logs", "kairo-stdout.log")
-	data, err := os.ReadFile(logPath)
+	logDir := filepath.Join(m.CatalinaBase, "logs")
+	entries, err := os.ReadDir(logDir)
 	if err != nil {
 		return []api.ServerLogEntry{}, nil
 	}
-	lines := splitLines(string(data), tail)
+	// Tomcat records actual HTTP traffic in localhost_access_log.* rather
+	// than stdout. Combine regular log files so the live viewer contains both
+	// startup output and requests made after the server is ready.
+	var all []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		data, readErr := os.ReadFile(filepath.Join(logDir, entry.Name()))
+		if readErr == nil {
+			all = append(all, splitLines(string(data), 0)...)
+		}
+	}
+	if len(all) > tail {
+		all = all[len(all)-tail:]
+	}
+	lines := all
 	out := make([]api.ServerLogEntry, 0, len(lines))
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	for _, l := range lines {
@@ -448,7 +460,7 @@ func splitLines(s string, max int) []string {
 	if start < len(s) {
 		out = append(out, s[start:])
 	}
-	if len(out) > max {
+	if max > 0 && len(out) > max {
 		out = out[len(out)-max:]
 	}
 	return out

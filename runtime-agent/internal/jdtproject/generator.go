@@ -72,10 +72,12 @@ import (
 
 // EncodingValue accepts either a plain string ("gbk") or the
 // richer nested form used by .legacyflow/project.yaml:
-//   encoding:
-//     default: utf-8
-//     aliases: {...}
-//     perExtension: {...}
+//
+//	encoding:
+//	  default: utf-8
+//	  aliases: {...}
+//	  perExtension: {...}
+//
 // The nested form collapses to its `default` — per-extension
 // nuance is handled by the IDE's encoding extension, not the
 // compiler model. A schema mismatch here used to fail Generate
@@ -105,14 +107,14 @@ type Project struct {
 	ProjectID           string        `yaml:"projectId" json:"projectId"`
 	Name                string        `yaml:"name" json:"name"`
 	Encoding            EncodingValue `yaml:"encoding" json:"encoding"`
-	SourceLevel         string   `yaml:"sourceLevel" json:"sourceLevel"`
-	TargetLevel         string   `yaml:"targetLevel" json:"targetLevel"`
-	SourceRoots         []string `yaml:"sourceRoots" json:"sourceRoots"`
-	TestSourceRoots     []string `yaml:"testSourceRoots" json:"testSourceRoots"`
-	OutputDir           string   `yaml:"outputDir" json:"outputDir"`
-	WebappDir           string   `yaml:"webappDir" json:"webappDir"`
-	Libraries           []string `yaml:"libraries" json:"libraries"`
-	ReferencedLibraries []string `yaml:"referencedLibraries" json:"referencedLibraries"`
+	SourceLevel         string        `yaml:"sourceLevel" json:"sourceLevel"`
+	TargetLevel         string        `yaml:"targetLevel" json:"targetLevel"`
+	SourceRoots         []string      `yaml:"sourceRoots" json:"sourceRoots"`
+	TestSourceRoots     []string      `yaml:"testSourceRoots" json:"testSourceRoots"`
+	OutputDir           string        `yaml:"outputDir" json:"outputDir"`
+	WebappDir           string        `yaml:"webappDir" json:"webappDir"`
+	Libraries           []string      `yaml:"libraries" json:"libraries"`
+	ReferencedLibraries []string      `yaml:"referencedLibraries" json:"referencedLibraries"`
 	ServletAPI          *struct {
 		Version string `yaml:"version" json:"version"`
 	} `yaml:"servletApi" json:"servletApi"`

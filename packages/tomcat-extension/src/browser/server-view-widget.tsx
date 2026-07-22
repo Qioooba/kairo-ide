@@ -45,7 +45,12 @@ const ServerViewComponent: React.FC<ServerViewProps> = ({ store, commandService 
         return () => sub.dispose();
     }, [store]);
 
-    const activeServer = servers.length > 0 ? servers[0] : undefined;
+    // The API retains stopped server history. Prefer the currently live
+    // instance so historical rows cannot leave Stop/Restart/Open disabled
+    // while a later server is running (KAIRO-RC-WEB-262).
+    const activeServer = servers.find(server =>
+        server.state === 'running' || server.state === 'starting' || server.state === 'stopping',
+    ) ?? servers[0];
     const isBusy = activeServer?.state === 'starting' || activeServer?.state === 'stopping';
     const isDisconnected = connectionState === 'disconnected';
     const isEmpty = servers.length === 0 && connectionState !== 'loading';
