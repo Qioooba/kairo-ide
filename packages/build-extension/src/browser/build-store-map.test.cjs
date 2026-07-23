@@ -35,7 +35,7 @@ require('reflect-metadata');
 
 const { test } = require('node:test');
 const assert = require('node:assert');
-const { mapBuildResult } = require('../../lib/browser/build-store');
+const { BuildStore, mapBuildResult } = require('../../lib/browser/build-store');
 
 test('mapBuildResult tolerates null summary and null diagnostics (KAIRO-RC-WEB-237)', () => {
   const wire = {
@@ -66,6 +66,35 @@ test('mapBuildResult maps state aliases and hint severity', () => {
   assert.strictEqual(r.state, 'succeeded');
   assert.strictEqual(r.summary, '0 errors, 1 warnings');
   assert.strictEqual(r.diagnostics[0].severity, 'info');
+});
+
+test('cancelBuild calls DELETE once and stores cancelled end time', async () => {
+  const calls = [];
+  let resolveRequest;
+  const store = new BuildStore();
+  store.runtime = {
+    request: (endpoint, payload, options) => {
+      calls.push({ endpoint, payload, options });
+      return new Promise(resolve => { resolveRequest = resolve; });
+    },
+  };
+  store.workspaceContext = { context: { workspaceId: 'ws-1' } };
+  store.setBuilds([{ id: 'build-3', workspaceId: 'ws-1', projectId: 'p1', state: 'running', startTime: 't0' }]);
+
+  const first = store.cancelBuild('build-3');
+  const second = store.cancelBuild('build-3');
+  assert.strictEqual(calls.length, 1);
+  resolveRequest({
+    id: 'build-3', state: 'cancelled', startedAt: 't0', finishedAt: 't1',
+    diagnostics: [], output: '', summary: { errors: 0, warnings: 0, filesCompiled: 0 },
+  });
+  const [result, duplicateResult] = await Promise.all([first, second]);
+  assert.deepStrictEqual(duplicateResult, result);
+  assert.strictEqual(calls[0].endpoint, 'DELETE /api/v1/builds/{buildId}');
+  assert.deepStrictEqual(calls[0].options.pathParams, { buildId: 'build-3' });
+  assert.strictEqual(result.state, 'cancelled');
+  assert.strictEqual(result.endTime, 't1');
+  assert.strictEqual(store.getLatestBuild().state, 'cancelled');
 });
 
 test('teardown', () => { disableJSDOM(); });

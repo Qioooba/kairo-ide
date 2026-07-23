@@ -7,14 +7,18 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/api"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/atomicfile"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/build"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/log"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/pathpolicy"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/toolchain"
 )
 
@@ -23,11 +27,26 @@ import (
 type asyncBuildEngine struct {
 	mu       sync.Mutex
 	dir      string
-	running  map[string]context.CancelFunc
+	running  map[string]*runningBuild
 	finished map[string]*api.BuildResult
 	logger   *log.Logger
 	registry *toolchain.Registry
+	compile  func(context.Context, build.Request) (*build.Result, error)
 }
+
+type runningBuild struct {
+	cancel context.CancelFunc
+	done   chan struct{}
+}
+
+const (
+	buildCancelTimeout  = 10 * time.Second
+	maxBuildSourceFiles = 100000
+	maxBuildOutputBytes = 512 * 1024
+	maxBuildErrorBytes  = 16 * 1024
+)
+
+var buildSecretAssignmentPattern = regexp.MustCompile(`(?i)\b(password|passwd|token|secret|api[_-]?key)\s*=\s*[^\s]+`)
 
 // cloneBuildResult returns a detached snapshot that callers may safely encode
 // or inspect after the engine lock has been released. BuildResult instances in
@@ -47,7 +66,7 @@ func newAsyncBuildEngine(dataDir string, reg *toolchain.Registry, logger *log.Lo
 	_ = os.MkdirAll(dir, 0o755)
 	b := &asyncBuildEngine{
 		dir:      dir,
-		running:  map[string]context.CancelFunc{},
+		running:  map[string]*runningBuild{},
 		finished: map[string]*api.BuildResult{},
 		logger:   logger,
 		registry: reg,
@@ -67,6 +86,9 @@ func (b *asyncBuildEngine) loadFinished() {
 		return
 	}
 	for _, bs := range items {
+		if bs.State == "failed" {
+			bs.State = "failure"
+		}
 		b.finished[bs.ID] = bs
 	}
 }
@@ -99,6 +121,9 @@ func (b *asyncBuildEngine) saveFinished() {
 }
 
 func (b *asyncBuildEngine) Start(req api.BuildRequest) (*api.BuildResult, error) {
+	if err := validateTrustedBuildRequest(&req); err != nil {
+		return nil, err
+	}
 	if req.SourceLevel == "" {
 		req.SourceLevel = "1.6"
 	}
@@ -107,15 +132,20 @@ func (b *asyncBuildEngine) Start(req api.BuildRequest) (*api.BuildResult, error)
 	}
 	var tcHome string
 	if req.Toolchain != "" {
+		if b.registry == nil {
+			return nil, errors.New("toolchain registry is not configured")
+		}
 		tc, ok := b.registry.Get(req.Toolchain)
 		if !ok {
 			return nil, fmt.Errorf("toolchain not found: %s", req.Toolchain)
 		}
 		tcHome = tc.Home
 	} else {
-		for _, t := range b.registry.List() {
-			tcHome = t.Home
-			break
+		if b.registry != nil {
+			for _, t := range b.registry.List() {
+				tcHome = t.Home
+				break
+			}
 		}
 		if tcHome == "" {
 			tcHome = os.Getenv("JAVA_HOME")
@@ -125,28 +155,27 @@ func (b *asyncBuildEngine) Start(req api.BuildRequest) (*api.BuildResult, error)
 		return nil, errors.New("no JDK registered; import a toolchain or set JAVA_HOME")
 	}
 
-	if req.OutputDir == "" {
-		req.OutputDir = filepath.Join(b.dir, "out")
+	sources := req.Files
+	if len(sources) == 0 && req.ProjectRoot != "" {
+		var err error
+		sources, err = collectAuthorizedJavaSources(req.ProjectRoot, req.OutputDir)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if len(sources) == 0 {
+		return nil, errors.New("no Java source files found; build was not started")
 	}
 	if err := os.MkdirAll(req.OutputDir, 0o755); err != nil {
 		return nil, err
 	}
 	if req.Clean {
-		_ = os.RemoveAll(req.OutputDir)
-		_ = os.MkdirAll(req.OutputDir, 0o755)
-	}
-
-	sources := req.Files
-	if len(sources) == 0 && req.ProjectRoot != "" {
-		_ = filepath.WalkDir(req.ProjectRoot, func(p string, d os.DirEntry, err error) error {
-			if err != nil || d.IsDir() {
-				return nil
-			}
-			if filepath.Ext(p) == ".java" {
-				sources = append(sources, p)
-			}
-			return nil
-		})
+		if err := os.RemoveAll(req.OutputDir); err != nil {
+			return nil, fmt.Errorf("clean output directory: %w", err)
+		}
+		if err := os.MkdirAll(req.OutputDir, 0o755); err != nil {
+			return nil, fmt.Errorf("recreate output directory: %w", err)
+		}
 	}
 
 	id := "build_" + shortID()
@@ -159,6 +188,7 @@ func (b *asyncBuildEngine) Start(req api.BuildRequest) (*api.BuildResult, error)
 		SourceLevel: req.SourceLevel,
 		TargetLevel: req.TargetLevel,
 		OutputDir:   req.OutputDir,
+		TraceID:     req.TraceID,
 	}
 	b.mu.Lock()
 	b.finished[id] = bs
@@ -166,11 +196,15 @@ func (b *asyncBuildEngine) Start(req api.BuildRequest) (*api.BuildResult, error)
 	b.mu.Unlock()
 
 	ctx, cancel := context.WithCancel(context.Background())
+	running := &runningBuild{cancel: cancel, done: make(chan struct{})}
 	b.mu.Lock()
-	b.running[id] = cancel
+	b.running[id] = running
 	b.mu.Unlock()
+	if b.logger != nil {
+		b.logger.Info("build queued", log.Fields{"buildId": id, "projectId": req.ProjectID, "traceId": req.TraceID})
+	}
 
-	go b.run(ctx, id, bs, build.Request{
+	go b.run(ctx, id, bs, running, build.Request{
 		ProjectRoot: req.ProjectRoot,
 		Toolchain:   tcHome,
 		SourceLevel: req.SourceLevel,
@@ -187,40 +221,69 @@ func (b *asyncBuildEngine) Start(req api.BuildRequest) (*api.BuildResult, error)
 	return snapshot, nil
 }
 
-func (b *asyncBuildEngine) run(ctx context.Context, id string, bs *api.BuildResult, req build.Request) {
+func (b *asyncBuildEngine) run(ctx context.Context, id string, bs *api.BuildResult, running *runningBuild, req build.Request) {
 	defer func() {
 		b.mu.Lock()
 		delete(b.running, id)
 		b.mu.Unlock()
+		close(running.done)
 	}()
 	b.mu.Lock()
 	bs.State = "running"
 	b.saveFinished()
 	b.mu.Unlock()
 
-	compiler := build.New(req.Toolchain)
-	res, err := compiler.Compile(ctx, req)
+	compile := b.compile
+	if compile == nil {
+		compile = build.New(req.Toolchain).Compile
+	}
+	res, err := compile(ctx, req)
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if err != nil {
-		bs.State = "failed"
-		bs.Error = err.Error()
+	if ctx.Err() != nil {
+		bs.State = "cancelled"
+		bs.Error = ""
 		bs.FinishedAt = time.Now().UTC().Format(time.RFC3339Nano)
 		b.saveFinished()
+		if b.logger != nil {
+			b.logger.Warn("build finished", log.Fields{"buildId": id, "projectId": bs.ProjectID, "traceId": bs.TraceID, "state": bs.State})
+		}
 		return
 	}
-	bs.Output = res.Output
-	bs.Diagnostics = res.Diagnostics
+	if err != nil {
+		switch {
+		case errors.Is(err, context.Canceled), errors.Is(ctx.Err(), context.Canceled):
+			bs.State = "cancelled"
+			bs.Error = ""
+		case errors.Is(err, context.DeadlineExceeded):
+			bs.State = "failure"
+			bs.Error = "build timed out"
+		default:
+			bs.State = "failure"
+			bs.Error = sanitizeBuildText(err.Error(), req.ProjectRoot, req.Toolchain, maxBuildErrorBytes)
+		}
+		bs.FinishedAt = time.Now().UTC().Format(time.RFC3339Nano)
+		b.saveFinished()
+		if b.logger != nil {
+			b.logger.Warn("build finished", log.Fields{"buildId": id, "projectId": bs.ProjectID, "traceId": bs.TraceID, "state": bs.State})
+		}
+		return
+	}
+	bs.Output = sanitizeBuildText(res.Output, req.ProjectRoot, req.Toolchain, maxBuildOutputBytes)
+	bs.Diagnostics = normalizeBuildDiagnostics(res.Diagnostics, req.ProjectRoot, req.Toolchain)
 	bs.FilesCompiled = res.FilesCompiled
 	bs.ElapsedMs = res.ElapsedMs
 	bs.ExitCode = res.ExitCode
 	if res.Success {
 		bs.State = "success"
 	} else {
-		bs.State = "failed"
+		bs.State = "failure"
 	}
 	bs.FinishedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	b.saveFinished()
+	if b.logger != nil {
+		b.logger.Info("build finished", log.Fields{"buildId": id, "projectId": bs.ProjectID, "traceId": bs.TraceID, "state": bs.State, "exitCode": bs.ExitCode})
+	}
 }
 
 func (b *asyncBuildEngine) Get(id string) (*api.BuildResult, error) {
@@ -229,7 +292,7 @@ func (b *asyncBuildEngine) Get(id string) (*api.BuildResult, error) {
 	if bs, ok := b.finished[id]; ok {
 		return cloneBuildResult(bs), nil
 	}
-	return nil, fmt.Errorf("build not found: %s", id)
+	return nil, fmt.Errorf("%w: %s", api.ErrBuildNotFound, id)
 }
 
 func (b *asyncBuildEngine) List() []*api.BuildResult {
@@ -240,4 +303,259 @@ func (b *asyncBuildEngine) List() []*api.BuildResult {
 		items = append(items, cloneBuildResult(bs))
 	}
 	return items
+}
+
+// Cancel is idempotent. Cancelling a terminal build returns its unchanged
+// snapshot; cancelling a queued/running build waits for the compiler process
+// tree to exit and for the terminal state to be persisted.
+func (b *asyncBuildEngine) Cancel(ctx context.Context, id string) (*api.BuildResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	b.mu.Lock()
+	bs, exists := b.finished[id]
+	if !exists {
+		b.mu.Unlock()
+		return nil, fmt.Errorf("%w: %s", api.ErrBuildNotFound, id)
+	}
+	running := b.running[id]
+	if running == nil {
+		snapshot := cloneBuildResult(bs)
+		b.mu.Unlock()
+		return snapshot, nil
+	}
+	running.cancel()
+	done := running.done
+	b.mu.Unlock()
+
+	timer := time.NewTimer(buildCancelTimeout)
+	defer timer.Stop()
+	select {
+	case <-done:
+		return b.Get(id)
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-timer.C:
+		return nil, fmt.Errorf("%w after %s", api.ErrBuildCancelTimeout, buildCancelTimeout)
+	}
+}
+
+func validateTrustedBuildRequest(req *api.BuildRequest) error {
+	if req.ProjectID == "" {
+		return errors.New("projectId is required")
+	}
+	if req.ProjectRoot == "" {
+		return errors.New("trusted project root is required")
+	}
+	root, err := filepath.Abs(req.ProjectRoot)
+	if err != nil {
+		return fmt.Errorf("resolve project root: %w", err)
+	}
+	root, err = filepath.EvalSymlinks(root)
+	if err != nil {
+		return fmt.Errorf("canonicalize project root: %w", err)
+	}
+	info, err := os.Stat(root)
+	if err != nil {
+		return fmt.Errorf("stat project root: %w", err)
+	}
+	if !info.IsDir() {
+		return errors.New("project root is not a directory")
+	}
+	req.ProjectRoot = root
+	if req.OutputDir == "" {
+		return errors.New("trusted output directory is required")
+	}
+	output, err := authorizeAbsoluteWithin(root, req.OutputDir)
+	if err != nil {
+		return fmt.Errorf("invalid output directory: %w", err)
+	}
+	if filepath.Clean(output) == filepath.Clean(root) {
+		return errors.New("output directory must not be the project root")
+	}
+	req.OutputDir = output
+	for i, source := range req.Files {
+		resolved, err := authorizeAbsoluteWithin(root, source)
+		if err != nil {
+			return fmt.Errorf("invalid source file: %w", err)
+		}
+		info, err := os.Stat(resolved)
+		if err != nil {
+			return fmt.Errorf("stat source file: %w", err)
+		}
+		if !info.Mode().IsRegular() || !strings.EqualFold(filepath.Ext(resolved), ".java") {
+			return fmt.Errorf("source is not a regular .java file: %s", source)
+		}
+		req.Files[i] = resolved
+	}
+	for i, entry := range req.Classpath {
+		resolved, err := authorizeAbsoluteWithin(root, entry)
+		if err != nil {
+			return fmt.Errorf("invalid classpath entry: %w", err)
+		}
+		req.Classpath[i] = resolved
+	}
+	return nil
+}
+
+func authorizeAbsoluteWithin(root, candidate string) (string, error) {
+	root, err := filepath.Abs(root)
+	if err != nil {
+		return "", err
+	}
+	root, err = filepath.EvalSymlinks(root)
+	if err != nil {
+		return "", err
+	}
+	abs, err := filepath.Abs(candidate)
+	if err != nil {
+		return "", err
+	}
+	abs, err = evalSymlinksNearestBuildPath(abs)
+	if err != nil {
+		return "", err
+	}
+	relative, err := filepath.Rel(root, abs)
+	if err != nil {
+		return "", pathpolicy.ErrOutsideRoot
+	}
+	return pathpolicy.NewDefaultPathPolicy().ResolveWithin(root, filepath.ToSlash(relative))
+}
+
+func evalSymlinksNearestBuildPath(candidate string) (string, error) {
+	current := candidate
+	var suffix []string
+	for {
+		resolved, err := filepath.EvalSymlinks(current)
+		if err == nil {
+			parts := append([]string{resolved}, suffix...)
+			return filepath.Clean(filepath.Join(parts...)), nil
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return "", err
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return "", err
+		}
+		suffix = append([]string{filepath.Base(current)}, suffix...)
+		current = parent
+	}
+}
+
+func collectAuthorizedJavaSources(root, outputDir string) ([]string, error) {
+	excludedDirectories := map[string]struct{}{
+		".git": {}, ".legacyflow": {}, "node_modules": {}, "target": {},
+	}
+	var sources []string
+	err := filepath.WalkDir(root, func(candidate string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			if filepath.Clean(candidate) == filepath.Clean(outputDir) {
+				return filepath.SkipDir
+			}
+			if candidate != root {
+				if _, excluded := excludedDirectories[entry.Name()]; excluded {
+					return filepath.SkipDir
+				}
+			}
+		}
+		if entry.IsDir() || !strings.EqualFold(filepath.Ext(entry.Name()), ".java") {
+			return nil
+		}
+		resolved, err := authorizeAbsoluteWithin(root, candidate)
+		if err != nil {
+			return fmt.Errorf("authorize Java source %q: %w", candidate, err)
+		}
+		info, err := os.Stat(resolved)
+		if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("Java source is not a regular file: %s", candidate)
+		}
+		sources = append(sources, resolved)
+		if len(sources) > maxBuildSourceFiles {
+			return fmt.Errorf("Java source count exceeds %d", maxBuildSourceFiles)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("collect Java sources: %w", err)
+	}
+	sort.Strings(sources)
+	return sources, nil
+}
+
+func normalizeBuildDiagnostics(diagnostics []build.Diagnostic, projectRoot, toolchain string) []build.Diagnostic {
+	canonicalRoot, err := filepath.EvalSymlinks(projectRoot)
+	if err != nil {
+		canonicalRoot = filepath.Clean(projectRoot)
+	}
+	normalized := make([]build.Diagnostic, 0, len(diagnostics))
+	for _, diagnostic := range diagnostics {
+		diagnostic.Message = sanitizeBuildText(diagnostic.Message, projectRoot, toolchain, maxBuildErrorBytes)
+		if diagnostic.File != "" {
+			resolved, err := authorizeAbsoluteWithin(canonicalRoot, diagnostic.File)
+			if err != nil {
+				diagnostic.File = ""
+			} else if relative, err := filepath.Rel(canonicalRoot, resolved); err == nil {
+				diagnostic.File = filepath.ToSlash(relative)
+			} else {
+				diagnostic.File = ""
+			}
+		}
+		normalized = append(normalized, diagnostic)
+	}
+	return normalized
+}
+
+func sanitizeBuildText(value, projectRoot, toolchain string, maxBytes int) string {
+	replacements := []struct {
+		value       string
+		placeholder string
+	}{
+		{value: projectRoot, placeholder: "<workspace>"},
+		{value: toolchain, placeholder: "<jdk>"},
+	}
+	for _, replacement := range replacements {
+		if replacement.value == "" {
+			continue
+		}
+		variants := []string{
+			filepath.Clean(replacement.value),
+			filepath.ToSlash(filepath.Clean(replacement.value)),
+			strings.ReplaceAll(filepath.Clean(replacement.value), "/", `\`),
+		}
+		seen := map[string]struct{}{}
+		for _, variant := range variants {
+			if variant == "" {
+				continue
+			}
+			if _, duplicate := seen[variant]; duplicate {
+				continue
+			}
+			seen[variant] = struct{}{}
+			pattern, err := regexp.Compile(`(?i)` + regexp.QuoteMeta(variant))
+			if err == nil {
+				value = pattern.ReplaceAllString(value, replacement.placeholder)
+			}
+		}
+	}
+	value = buildSecretAssignmentPattern.ReplaceAllStringFunc(value, func(match string) string {
+		if index := strings.Index(match, "="); index >= 0 {
+			return strings.TrimSpace(match[:index]) + "=[REDACTED]"
+		}
+		return "[REDACTED]"
+	})
+	if maxBytes <= 0 || len(value) <= maxBytes {
+		return value
+	}
+	truncated := value[:maxBytes]
+	for !utf8.ValidString(truncated) && len(truncated) > 0 {
+		truncated = truncated[:len(truncated)-1]
+	}
+	return truncated + "\n...[truncated]"
 }

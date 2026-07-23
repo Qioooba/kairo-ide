@@ -58,6 +58,14 @@ export const projectJsonSchema = {
         },
         aliases: { type: 'object', additionalProperties: { type: 'string' } },
         perExtension: { type: 'object', additionalProperties: { type: 'string' } },
+        directoryEncodingOverrides: {
+          type: 'object',
+          additionalProperties: {
+            type: 'string',
+            enum: ['utf-8', 'utf-8-bom', 'utf-16le', 'utf-16be', 'gbk', 'gb18030', 'iso-8859-1', 'us-ascii'],
+          },
+          description: 'Per-directory encoding overrides. Keys are relative directory paths (e.g. "src/"), values are encoding names.',
+        },
       },
     },
     java: {
@@ -166,3 +174,5 @@ export const projectJsonSchema = {
 } as const;
 
 export type ProjectJsonSchema = typeof projectJsonSchema;
+
+export * from './run-configuration';

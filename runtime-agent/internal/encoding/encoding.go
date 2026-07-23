@@ -74,7 +74,17 @@ func Detect(sample []byte, defaultEnc ID, aliases Aliases) (id ID, confidence fl
 		}
 	}
 
-	// 2. Valid UTF-8?
+	// 2. XML declaration encoding attribute (<?xml encoding="..."?>).
+	if enc, ok := detectXMLEncoding(sample); ok {
+		return enc, 0.98, false, detectEOL(sample)
+	}
+
+	// 3. HTML meta charset (<meta charset="..."> or <meta http-equiv="Content-Type"...>).
+	if enc, ok := detectHTMLCharset(sample); ok {
+		return enc, 0.95, false, detectEOL(sample)
+	}
+
+	// 4. Valid UTF-8?
 	if utf8.Valid(sample) {
 		// Distinguish pure ASCII from UTF-8.
 		if isASCII(sample) {
@@ -91,7 +101,7 @@ func Detect(sample []byte, defaultEnc ID, aliases Aliases) (id ID, confidence fl
 		return UTF8, 0.95, false, detectEOL(sample)
 	}
 
-	// 3. Try GB18030 (superset of GBK and GB2312). High chance for
+	// 5. Try GB18030 (superset of GBK and GB2312). High chance for
 	// Chinese legacy content.
 	rest := sample
 	if len(rest) > 8192 {
@@ -101,7 +111,7 @@ func Detect(sample []byte, defaultEnc ID, aliases Aliases) (id ID, confidence fl
 		return GB18030, 0.9, false, detectEOL(sample)
 	}
 
-	// 4. Fall back to defaultEnc ONLY if the sample is actually
+	// 6. Fall back to defaultEnc ONLY if the sample is actually
 	// decodable as that encoding. Without this guard, an
 	// invalid-UTF-8 sample with defaultEnc=utf-8 would lie and
 	// return utf-8 — which is exactly the false-positive the
@@ -110,8 +120,131 @@ func Detect(sample []byte, defaultEnc ID, aliases Aliases) (id ID, confidence fl
 		return defaultEnc, 0.6, false, detectEOL(sample)
 	}
 
-	// 5. iso-8859-1 never errors. Last resort.
+	// 7. iso-8859-1 never errors. Last resort.
 	return ISO88591, 0.5, false, detectEOL(sample)
+}
+
+// detectXMLEncoding looks for <?xml encoding="..."?> in the
+// first 256 bytes of the sample. It returns the canonical encoding
+// ID and true if found, or ("", false) if no XML declaration is
+// present or the encoding attribute is missing.
+func detectXMLEncoding(sample []byte) (ID, bool) {
+	limit := len(sample)
+	if limit > 256 {
+		limit = 256
+	}
+	head := string(sample[:limit])
+	// Look for <?xml ... encoding="..." ...?>
+	idx := strings.Index(head, "<?xml")
+	if idx < 0 {
+		return "", false
+	}
+	closeIdx := strings.Index(head[idx:], "?>")
+	if closeIdx < 0 {
+		closeIdx = limit - idx
+	}
+	decl := head[idx : idx+closeIdx]
+	encIdx := strings.Index(decl, "encoding")
+	if encIdx < 0 {
+		return "", false
+	}
+	// Extract the quoted value: encoding="..." or encoding='...'
+	rest := decl[encIdx+8:]
+	eqIdx := strings.IndexByte(rest, '=')
+	if eqIdx < 0 {
+		return "", false
+	}
+	val := strings.TrimSpace(rest[eqIdx+1:])
+	if len(val) < 2 {
+		return "", false
+	}
+	quote := val[0]
+	if quote != '"' && quote != '\'' {
+		return "", false
+	}
+	end := strings.IndexByte(val[1:], quote)
+	if end < 0 {
+		return "", false
+	}
+	enc := strings.ToLower(strings.TrimSpace(val[1 : 1+end]))
+	return canonicalEncodingName(enc), true
+}
+
+// detectHTMLCharset looks for <meta charset="..."> or
+// <meta http-equiv="Content-Type" content="...; charset=...">
+// or JSP/ASP page directives like <%@ page contentType="...;charset=..."%>
+// in the first 1024 bytes of the sample.
+func detectHTMLCharset(sample []byte) (ID, bool) {
+	limit := len(sample)
+	if limit > 1024 {
+		limit = 1024
+	}
+	head := strings.ToLower(string(sample[:limit]))
+	// <meta charset="..."> or page contentType charset
+	if idx := strings.Index(head, "charset"); idx >= 0 {
+		rest := head[idx+7:]
+		eqIdx := strings.IndexByte(rest, '=')
+		if eqIdx < 0 {
+			return "", false
+		}
+		val := strings.TrimSpace(rest[eqIdx+1:])
+		if len(val) < 2 {
+			return "", false
+		}
+		quote := val[0]
+		if quote != '"' && quote != '\'' {
+			// Try unquoted value: terminate on space, tab, newline,
+			// CR, slash, >, ", ', ;, ) which commonly delimit
+			// attribute or parameter boundaries.
+			end := strings.IndexAny(val, " \t\n\r/>\"';)%")
+			if end < 0 {
+				end = len(val)
+			}
+			return canonicalEncodingName(strings.TrimSpace(val[:end])), true
+		}
+		end := strings.IndexByte(val[1:], quote)
+		if end < 0 {
+			// Quoted value not closed properly; fall back to
+			// treating as unquoted and taking up to the next
+			// reasonable delimiter.
+			end2 := strings.IndexAny(val[1:], " \t\n\r>;%")
+			if end2 < 0 {
+				end2 = len(val) - 1
+			}
+			enc := strings.TrimSpace(val[1 : 1+end2])
+			if enc != "" {
+				return canonicalEncodingName(enc), true
+			}
+			return "", false
+		}
+		enc := strings.TrimSpace(val[1 : 1+end])
+		return canonicalEncodingName(enc), true
+	}
+	return "", false
+}
+
+// canonicalEncodingName maps common encoding names from XML/HTML
+// declarations to our internal encoding IDs.
+func canonicalEncodingName(name string) ID {
+	name = strings.ToLower(strings.TrimSpace(name))
+	switch name {
+	case "utf-8", "utf8":
+		return UTF8
+	case "gbk", "gb2312", "cp936", "ms936":
+		return GBK
+	case "gb18030":
+		return GB18030
+	case "iso-8859-1", "iso8859-1", "latin1", "latin-1":
+		return ISO88591
+	case "us-ascii", "ascii":
+		return USASCII
+	case "utf-16", "utf-16le", "utf16le":
+		return UTF16LE
+	case "utf-16be", "utf16be":
+		return UTF16BE
+	default:
+		return UTF8
+	}
 }
 
 func detectEOL(b []byte) string {

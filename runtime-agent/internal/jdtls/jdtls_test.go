@@ -504,6 +504,642 @@ func TestReadHeaders_ParsesContentLength(t *testing.T) {
 	}
 }
 
+// ---------- Manager lifecycle tests ----------
+
+func TestManager_SetJREPath(t *testing.T) {
+	dir := t.TempDir()
+	m := New(dir, dir, "", false, "", log.New("test"))
+	m.SetJREPath("/custom/jre")
+	if got := m.JREPath(); got != "/custom/jre" {
+		t.Fatalf("JREPath() = %q, want /custom/jre", got)
+	}
+}
+
+func TestManager_SetAutoRestartBudget(t *testing.T) {
+	dir := t.TempDir()
+	m := New(dir, dir, "", false, "", log.New("test"))
+	m.SetAutoRestartBudget(5)
+	// Verify no panic — budget is internal
+	m.SetAutoRestartBudget(0)
+}
+
+func TestManager_LastError(t *testing.T) {
+	dir := t.TempDir()
+	m := New(dir, dir, "", false, "", log.New("test"))
+	if got := m.LastError(); got != "" {
+		t.Fatalf("LastError() = %q, want empty", got)
+	}
+}
+
+func TestManager_DataDir_BundledDir_HomedDir(t *testing.T) {
+	dataDir := t.TempDir()
+	bundled := t.TempDir()
+	m := New(dataDir, bundled, "", false, "", log.New("test"))
+	if got := m.DataDir(); got != dataDir {
+		t.Fatalf("DataDir() = %q, want %q", got, dataDir)
+	}
+	if got := m.BundledDir(); got != bundled {
+		t.Fatalf("BundledDir() = %q, want %q", got, bundled)
+	}
+	wantHome := filepath.Join(bundled, "jdtls")
+	if got := m.HomedDir(); got != wantHome {
+		t.Fatalf("HomedDir() = %q, want %q", got, wantHome)
+	}
+}
+
+func TestManager_LastStart_Nil(t *testing.T) {
+	dir := t.TempDir()
+	m := New(dir, dir, "", false, "", log.New("test"))
+	if got := m.LastStart(); got != nil {
+		t.Fatalf("LastStart() = %v, want nil", got)
+	}
+}
+
+func TestManager_IsPrepared_NoInstall(t *testing.T) {
+	dir := t.TempDir()
+	m := New(dir, dir, "", false, "", log.New("test"))
+	if m.IsPrepared() {
+		t.Fatal("expected IsPrepared() false when no install exists")
+	}
+}
+
+func TestManager_IsPrepared_WithInstall(t *testing.T) {
+	layout := makeLayout(t)
+	archivePath := filepath.Join(t.TempDir(), "jdtls.tar.gz")
+	writeTarGzFromDir(t, archivePath, layout)
+	want, _ := fileSHA256(archivePath)
+
+	t.Setenv("KAIRO_JDTLS_HOME", "")
+	t.Setenv("KAIRO_JDTLS_ARCHIVE", archivePath)
+	pinChecksum(t, want)
+
+	bundled := t.TempDir()
+	dataDir := t.TempDir()
+	m := New(dataDir, bundled, "", false, "", log.New("test"))
+	_, err := m.EnsureInstalled(context.Background())
+	if err != nil {
+		t.Fatalf("EnsureInstalled: %v", err)
+	}
+	if !m.IsPrepared() {
+		t.Fatal("expected IsPrepared() true after install")
+	}
+}
+
+func TestManager_StderrPath(t *testing.T) {
+	dir := t.TempDir()
+	m := New(dir, dir, "", false, "", log.New("test"))
+	if got := m.StderrPath(); got != "" {
+		t.Fatalf("StderrPath() = %q, want empty before start", got)
+	}
+}
+
+func TestManager_BuildLaunchDescriptor_NoJRE(t *testing.T) {
+	dir := t.TempDir()
+	m := New(dir, dir, "", false, "", log.New("test"))
+	t.Setenv("KAIRO_JRE17_HOME", "")
+	_, err := m.BuildLaunchDescriptor(dir)
+	if err == nil {
+		t.Fatal("expected error without JRE")
+	}
+	if !strings.Contains(err.Error(), "JRE 17") {
+		t.Fatalf("error %q should mention JRE 17", err.Error())
+	}
+}
+
+func TestManager_BuildLaunchDescriptor_JRENotFound(t *testing.T) {
+	dir := t.TempDir()
+	m := New(dir, dir, "", false, "", log.New("test"))
+	t.Setenv("KAIRO_JRE17_HOME", "/nonexistent/jre/path")
+	_, err := m.BuildLaunchDescriptor(dir)
+	if err == nil {
+		t.Fatal("expected error for nonexistent JRE")
+	}
+}
+
+func TestManager_BuildLaunchDescriptor_NoInstall(t *testing.T) {
+	dir := t.TempDir()
+	m := New(dir, dir, "", false, "", log.New("test"))
+	// Use a real JDK path so the JRE check passes
+	t.Setenv("KAIRO_JRE17_HOME", dir)
+	// Create a fake java binary
+	binDir := filepath.Join(dir, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(binDir, "java"), []byte("fake"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, err := m.BuildLaunchDescriptor(dir)
+	if err == nil {
+		t.Fatal("expected error without install")
+	}
+	if !strings.Contains(err.Error(), "not installed") {
+		t.Fatalf("error %q should mention not installed", err.Error())
+	}
+}
+
+func TestManager_BuildLaunchDescriptor_WithInstall(t *testing.T) {
+	layout := makeLayout(t)
+	archivePath := filepath.Join(t.TempDir(), "jdtls.tar.gz")
+	writeTarGzFromDir(t, archivePath, layout)
+	want, _ := fileSHA256(archivePath)
+
+	t.Setenv("KAIRO_JDTLS_HOME", "")
+	t.Setenv("KAIRO_JDTLS_ARCHIVE", archivePath)
+	pinChecksum(t, want)
+
+	bundled := t.TempDir()
+	dataDir := t.TempDir()
+	m := New(dataDir, bundled, "", false, "", log.New("test"))
+	_, err := m.EnsureInstalled(context.Background())
+	if err != nil {
+		t.Fatalf("EnsureInstalled: %v", err)
+	}
+
+	// Use the bundled dir as fake JRE root
+	jreDir := filepath.Join(bundled, "fake-jre")
+	binDir := filepath.Join(jreDir, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(binDir, "java"), []byte("fake"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	m.SetJREPath(jreDir)
+	m.SetWorkspace("test-ws")
+	desc, err := m.BuildLaunchDescriptor(dataDir)
+	if err != nil {
+		t.Fatalf("BuildLaunchDescriptor: %v", err)
+	}
+	if desc.Command == "" {
+		t.Fatal("Command empty")
+	}
+	if len(desc.Args) == 0 {
+		t.Fatal("Args empty")
+	}
+	if desc.WorkingDir != dataDir {
+		t.Fatalf("WorkingDir = %q, want %q", desc.WorkingDir, dataDir)
+	}
+	if len(desc.EnvAllowlist) == 0 {
+		t.Fatal("EnvAllowlist empty")
+	}
+}
+
+func TestManager_FinalizeShutdown_Stopped(t *testing.T) {
+	dir := t.TempDir()
+	m := New(dir, dir, "", false, "", log.New("test"))
+	// Should not panic when already stopped
+	m.FinalizeShutdown()
+}
+
+func TestManager_SetWorkspace_Empty(t *testing.T) {
+	dir := t.TempDir()
+	m := New(dir, dir, "", false, "", log.New("test"))
+	m.SetWorkspace("test-ws")
+	if got := m.Workspace(); got == "" {
+		t.Fatal("Workspace() empty after SetWorkspace")
+	}
+	m.SetWorkspace("")
+	if got := m.Workspace(); got != "" {
+		t.Fatalf("Workspace() = %q, want empty after clearing", got)
+	}
+}
+
+func TestManager_Dispatch(t *testing.T) {
+	dir := t.TempDir()
+	m := New(dir, dir, "", false, "", log.New("test"))
+	received := make(chan Event, 1)
+	m.AddListener(func(e Event) {
+		received <- e
+	})
+	m.dispatch(Event{Type: "state", State: "running"})
+	select {
+	case ev := <-received:
+		if ev.Type != "state" || ev.State != "running" {
+			t.Fatalf("unexpected event: %+v", ev)
+		}
+	default:
+		t.Fatal("expected event to be dispatched")
+	}
+}
+
+// ---------- jdtlsMaxHeapMB tests ----------
+
+func TestJdtlsMaxHeapMB_Default(t *testing.T) {
+	t.Setenv("KAIRO_JDTLS_MAX_HEAP_MB", "")
+	if got := jdtlsMaxHeapMB(); got != 768 {
+		t.Fatalf("jdtlsMaxHeapMB() = %d, want 768", got)
+	}
+}
+
+func TestJdtlsMaxHeapMB_Custom(t *testing.T) {
+	t.Setenv("KAIRO_JDTLS_MAX_HEAP_MB", "1024")
+	if got := jdtlsMaxHeapMB(); got != 1024 {
+		t.Fatalf("jdtlsMaxHeapMB() = %d, want 1024", got)
+	}
+}
+
+func TestJdtlsMaxHeapMB_TooLow(t *testing.T) {
+	t.Setenv("KAIRO_JDTLS_MAX_HEAP_MB", "128")
+	if got := jdtlsMaxHeapMB(); got != 768 {
+		t.Fatalf("jdtlsMaxHeapMB() = %d, want 768 (clamped)", got)
+	}
+}
+
+func TestJdtlsMaxHeapMB_TooHigh(t *testing.T) {
+	t.Setenv("KAIRO_JDTLS_MAX_HEAP_MB", "8192")
+	if got := jdtlsMaxHeapMB(); got != 768 {
+		t.Fatalf("jdtlsMaxHeapMB() = %d, want 768 (clamped)", got)
+	}
+}
+
+func TestJdtlsMaxHeapMB_Invalid(t *testing.T) {
+	t.Setenv("KAIRO_JDTLS_MAX_HEAP_MB", "not-a-number")
+	if got := jdtlsMaxHeapMB(); got != 768 {
+		t.Fatalf("jdtlsMaxHeapMB() = %d, want 768 (default)", got)
+	}
+}
+
+// ---------- Distribution helper tests ----------
+
+func TestSafeJoin(t *testing.T) {
+	dir := t.TempDir()
+	tests := []struct {
+		name    string
+		entry   string
+		wantErr bool
+		skipOS  string // skip on this OS
+	}{
+		{"normal file", "plugins/foo.jar", false, ""},
+		{"deep path", "config_linux/config.ini", false, ""},
+		{"empty entry", "", true, ""},
+		{"absolute entry", "/etc/passwd", true, ""},
+		{"parent traversal", "../escape.txt", true, ""},
+		{"deep traversal", "foo/../../escape.txt", true, ""},
+		{"windows absolute", `C:\Windows\System32`, true, "!windows"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.skipOS == "!windows" && runtime.GOOS != "windows" {
+				t.Skip("Windows-specific test")
+			}
+			_, err := safeJoin(dir, tc.entry)
+			if tc.wantErr && err == nil {
+				t.Error("expected error, got nil")
+			}
+			if !tc.wantErr && err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestHasParentTraversal(t *testing.T) {
+	tests := []struct {
+		entry string
+		want  bool
+	}{
+		{"normal/file.txt", false},
+		{"../escape.txt", true},
+		{"foo/../bar", true},
+		{"foo\\..\\bar", true},
+		{"foo/bar/../baz", true},
+		{"foo/bar/baz", false},
+		{"..", true},
+		{"", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.entry, func(t *testing.T) {
+			if got := hasParentTraversal(tc.entry); got != tc.want {
+				t.Errorf("hasParentTraversal(%q) = %v, want %v", tc.entry, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestLauncherVersionFromFilename(t *testing.T) {
+	tests := []struct {
+		filename string
+		want     string
+	}{
+		{"org.eclipse.equinox.launcher_1.6.500.v20230711-1234.jar", "1.6.500.v20230711-1234"},
+		{"org.eclipse.equinox.launcher_1.6.400.jar", "1.6.400"},
+		{"not-a-launcher.jar", ""},
+		{"org.eclipse.equinox.launcher_1.0", ""},
+		{"", ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.filename, func(t *testing.T) {
+			if got := launcherVersionFromFilename(tc.filename); got != tc.want {
+				t.Errorf("launcherVersionFromFilename(%q) = %q, want %q", tc.filename, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCompareVersions(t *testing.T) {
+	tests := []struct {
+		a, b string
+		want int
+	}{
+		{"1.6.500", "1.6.400", 1},
+		{"1.6.400", "1.6.500", -1},
+		{"1.6.500", "1.6.500", 0},
+		{"1.7.0", "1.6.999", 1},
+		{"2.0.0", "1.9.9", 1},
+		{"1.6", "1.6.0", 0},
+		{"1.6.0", "1.6", 0},
+		{"", "1.0.0", -1},
+		{"1.0.0", "", 1},
+	}
+	for _, tc := range tests {
+		t.Run(tc.a+"_vs_"+tc.b, func(t *testing.T) {
+			if got := compareVersions(tc.a, tc.b); got != tc.want {
+				t.Errorf("compareVersions(%q, %q) = %d, want %d", tc.a, tc.b, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestHostConfigDir(t *testing.T) {
+	dir := t.TempDir()
+	got, err := hostConfigDir(dir)
+	if err != nil {
+		t.Fatalf("hostConfigDir: %v", err)
+	}
+	switch runtime.GOOS {
+	case "linux":
+		if !strings.HasSuffix(got, "config_linux") {
+			t.Errorf("expected config_linux, got %q", got)
+		}
+	case "darwin":
+		if !strings.HasSuffix(got, "config_mac") {
+			t.Errorf("expected config_mac, got %q", got)
+		}
+	case "windows":
+		if !strings.HasSuffix(got, "config_win") {
+			t.Errorf("expected config_win, got %q", got)
+		}
+	}
+}
+
+func TestEffectiveArchiveSHA256(t *testing.T) {
+	// Default: production constant
+	if got := effectiveArchiveSHA256(); got != JDTLSExpectedSHA256 {
+		t.Fatalf("effectiveArchiveSHA256() = %q, want %q", got, JDTLSExpectedSHA256)
+	}
+	// With test override
+	jdtlsArchiveSHA256ForTest = "test-override-hash"
+	defer func() { jdtlsArchiveSHA256ForTest = "" }()
+	if got := effectiveArchiveSHA256(); got != "test-override-hash" {
+		t.Fatalf("effectiveArchiveSHA256() = %q, want test-override-hash", got)
+	}
+}
+
+func TestReadInstallReport_Nonexistent(t *testing.T) {
+	rep, err := readInstallReport(t.TempDir())
+	if err != nil {
+		t.Fatalf("readInstallReport: %v", err)
+	}
+	if rep != nil {
+		t.Fatal("expected nil for nonexistent report")
+	}
+}
+
+func TestWriteAndReadInstallReport(t *testing.T) {
+	dir := t.TempDir()
+	rep := &InstallReport{
+		Version:       "1.0.0",
+		Home:          "/tmp/jdtls",
+		LauncherJAR:   "/tmp/jdtls/plugins/launcher.jar",
+		LayoutVersion: 1,
+	}
+	if err := writeInstallReport(dir, rep); err != nil {
+		t.Fatalf("writeInstallReport: %v", err)
+	}
+	got, err := readInstallReport(dir)
+	if err != nil {
+		t.Fatalf("readInstallReport: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected non-nil report")
+	}
+	if got.Version != rep.Version {
+		t.Fatalf("Version = %q, want %q", got.Version, rep.Version)
+	}
+	if got.LauncherJAR != rep.LauncherJAR {
+		t.Fatalf("LauncherJAR = %q, want %q", got.LauncherJAR, rep.LauncherJAR)
+	}
+}
+
+func TestReadHeaders_MissingContentLength(t *testing.T) {
+	raw := "Content-Type: application/json\r\n\r\n"
+	br := bytes.NewReader([]byte(raw))
+	_, err := readHeaders(bufio.NewReader(br))
+	if err == nil {
+		t.Fatal("expected error for missing Content-Length")
+	}
+}
+
+func TestReadHeaders_InvalidContentLength(t *testing.T) {
+	raw := "Content-Length: abc\r\nContent-Type: text/plain\r\n\r\n"
+	br := bytes.NewReader([]byte(raw))
+	_, err := readHeaders(bufio.NewReader(br))
+	if err == nil {
+		t.Fatal("expected error for invalid Content-Length")
+	}
+}
+
+func TestReadHeaders_Empty(t *testing.T) {
+	raw := "\r\n"
+	br := bytes.NewReader([]byte(raw))
+	_, err := readHeaders(bufio.NewReader(br))
+	if err == nil {
+		t.Fatal("expected error for empty input")
+	}
+}
+
+func TestSanitizeID(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"normal", "normal"},
+		{"path/with/slashes", "path_with_slashes"},
+		{"path\\with\\backslashes", "path_with_backslashes"},
+		{"../../etc/passwd", "____etc_passwd"},
+		{"..hidden", "_hidden"},
+		{"", "."},
+	}
+	for _, tc := range tests {
+		t.Run(tc.input, func(t *testing.T) {
+			if got := sanitizeID(tc.input); got != tc.want {
+				t.Errorf("sanitizeID(%q) = %q, want %q", tc.input, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestDistributionStatus(t *testing.T) {
+	ds := DistributionStatus{
+		Installed:   true,
+		Version:     "1.0.0",
+		Home:        "/tmp/jdtls",
+		LauncherJAR: "/tmp/jdtls/plugins/launcher.jar",
+		Source:      "archive",
+	}
+	if !ds.Installed {
+		t.Error("expected Installed true")
+	}
+}
+
+func TestInstallReport(t *testing.T) {
+	rep := InstallReport{
+		Version:       "1.0.0",
+		BuildTag:      "20260113",
+		ArchiveName:   "jdtls.tar.gz",
+		ArchiveSHA256: "abc123",
+		InstalledAt:   "2026-01-13T00:00:00Z",
+		Home:          "/tmp/jdtls",
+		LauncherJAR:   "/tmp/jdtls/plugins/launcher.jar",
+		LayoutVersion: 1,
+	}
+	if rep.LayoutVersion < LayoutMinSupp {
+		t.Error("LayoutVersion below minimum")
+	}
+}
+
+func TestEvent(t *testing.T) {
+	ev := Event{
+		Type:    "state",
+		State:   "running",
+		Message: "started",
+		Line:    "line 1",
+		At:      "2026-01-13T00:00:00Z",
+	}
+	if ev.Type != "state" {
+		t.Errorf("Type = %q, want state", ev.Type)
+	}
+}
+
+func TestStatus(t *testing.T) {
+	st := Status{
+		State:        "running",
+		Pid:          12345,
+		Version:      "1.55.0",
+		StartedAt:    "2026-01-13T00:00:00Z",
+		Jre:          "/usr/lib/jvm/java-17",
+		LauncherJAR:  "/tmp/jdtls/plugins/launcher.jar",
+		Workspace:    "/tmp/workspace",
+		RestartCount: 0,
+	}
+	if st.State != "running" {
+		t.Errorf("State = %q, want running", st.State)
+	}
+}
+
+func TestLaunchDescriptor(t *testing.T) {
+	ld := LaunchDescriptor{
+		Command:      "/usr/bin/java",
+		Args:         []string{"-jar", "launcher.jar"},
+		WorkingDir:   "/tmp/project",
+		EnvAllowlist: []string{"PATH=/usr/bin", "JAVA_HOME=/usr/lib/jvm/java-17"},
+	}
+	if ld.Command == "" {
+		t.Error("Command empty")
+	}
+	if len(ld.Args) != 2 {
+		t.Errorf("expected 2 args, got %d", len(ld.Args))
+	}
+}
+
+func TestProgressReader(t *testing.T) {
+	data := make([]byte, 300)
+	for i := range data {
+		data[i] = byte('a' + (i % 26))
+	}
+	logged := false
+	pr := &progressReader{
+		inner:  bytes.NewReader(data),
+		total:  int64(len(data)),
+		next:   10 * 1024 * 1024, // won't trigger
+		logger: func(msg string, fields map[string]any) {
+			logged = true
+		},
+	}
+	buf := make([]byte, 100)
+	for {
+		_, err := pr.Read(buf)
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if logged {
+		t.Error("should not log for small data")
+	}
+}
+
+func TestProgressReader_LogsAtThreshold(t *testing.T) {
+	logged := false
+	pr := &progressReader{
+		inner:  bytes.NewReader([]byte("hello")),
+		total:  5,
+		next:   0, // immediate
+		logger: func(msg string, fields map[string]any) {
+			logged = true
+		},
+	}
+	buf := make([]byte, 10)
+	_, _ = pr.Read(buf)
+	if !logged {
+		t.Error("expected log at threshold")
+	}
+}
+
+func TestLayout_LayoutVersion(t *testing.T) {
+	l := &layout{}
+	if v := l.layoutVersion(); v != LayoutVersion {
+		t.Errorf("layoutVersion() = %d, want %d", v, LayoutVersion)
+	}
+}
+
+func TestDiscoverLayout_NoPlugins(t *testing.T) {
+	dir := t.TempDir()
+	_, err := discoverLayout(dir)
+	if err == nil {
+		t.Fatal("expected error for missing plugins/")
+	}
+	if !strings.Contains(err.Error(), "plugins") {
+		t.Fatalf("error %q should mention plugins", err.Error())
+	}
+}
+
+func TestDiscoverLayout_NoLauncher(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "plugins"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "config_linux"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "config_mac"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "config_win"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, err := discoverLayout(dir)
+	if err == nil {
+		t.Fatal("expected error for missing launcher JAR")
+	}
+	if !strings.Contains(err.Error(), "launcher") {
+		t.Fatalf("error %q should mention launcher", err.Error())
+	}
+}
+
 // KAIRO-RC-WEB-241: the cached archive lives INSIDE home
 // (home/JDTLSArchiveFile). Before the fix, installFromFile wiped
 // home — deleting the archive itself — so every install failed
@@ -529,5 +1165,70 @@ func TestEnsureInstalled_CachedArchiveInsideHomeSurvivesWipe(t *testing.T) {
 	}
 	if _, err := os.Stat(archivePath); err != nil {
 		t.Fatalf("cached archive must survive the layout wipe: %v", err)
+	}
+}
+
+func TestManager_State(t *testing.T) {
+	dir := t.TempDir()
+	m := New(dir, dir, "", false, "", log.New("test"))
+
+	// Default: stopped
+	if got := m.State(); got != "stopped" {
+		t.Fatalf("State() = %q, want stopped", got)
+	}
+
+	// starting
+	m.state.Store(1)
+	if got := m.State(); got != "starting" {
+		t.Fatalf("State() = %q, want starting", got)
+	}
+
+	// running
+	m.state.Store(2)
+	if got := m.State(); got != "running" {
+		t.Fatalf("State() = %q, want running", got)
+	}
+
+	// stopping
+	m.state.Store(3)
+	if got := m.State(); got != "stopping" {
+		t.Fatalf("State() = %q, want stopping", got)
+	}
+
+	// crashed
+	m.state.Store(4)
+	if got := m.State(); got != "crashed" {
+		t.Fatalf("State() = %q, want crashed", got)
+	}
+}
+
+func TestManager_SetLastErr(t *testing.T) {
+	dir := t.TempDir()
+	m := New(dir, dir, "", false, "", log.New("test"))
+
+	if got := m.LastError(); got != "" {
+		t.Fatalf("LastError() = %q, want empty", got)
+	}
+
+	m.setLastErr("something went wrong")
+	if got := m.LastError(); got != "something went wrong" {
+		t.Fatalf("LastError() = %q, want 'something went wrong'", got)
+	}
+
+	// Overwrite
+	m.setLastErr("another error")
+	if got := m.LastError(); got != "another error" {
+		t.Fatalf("LastError() = %q, want 'another error'", got)
+	}
+}
+
+func TestManager_FinalizeShutdown_AllStates(t *testing.T) {
+	dir := t.TempDir()
+	m := New(dir, dir, "", false, "", log.New("test"))
+
+	// Should not panic in any state
+	for _, s := range []int32{0, 1, 2, 3, 4} {
+		m.state.Store(s)
+		m.FinalizeShutdown()
 	}
 }

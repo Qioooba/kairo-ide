@@ -4,9 +4,23 @@
 // will be added in Phase 1.
 package protocol
 
+import "github.com/Qioooba/kairo-ide/runtime-agent/internal/domain"
+
 // PROTOCOL_VERSION is the wire protocol major version. It lives
 // in the URL prefix (`/api/v1`).
 const PROTOCOL_VERSION = "v1"
+
+const RUN_CONFIGURATION_VERSION = domain.RunConfigurationVersion
+
+type RunConfigurationDocument = domain.RunConfigurationDocument
+type TomcatRunConfiguration = domain.TomcatRunConfiguration
+type RunConfigurationBuild = domain.RunConfigurationBuild
+type RunConfigurationServer = domain.RunConfigurationServer
+type RunConfigurationDeploy = domain.RunConfigurationDeploy
+
+type RunConfigurationLaunchRequest struct {
+	Mode string `json:"mode"`
+}
 
 // KairoErrorCode is the closed enum of stable, machine-readable
 // error codes. Add new codes here AND in the TypeScript mirror.
@@ -32,6 +46,7 @@ const (
 	ErrCompileFailed      KairoErrorCode = "compile_failed"
 	ErrDeployFailed       KairoErrorCode = "deploy_failed"
 	ErrDebugAttachFailed  KairoErrorCode = "debug_attach_failed"
+	ErrCancelled          KairoErrorCode = "cancelled"
 	ErrTimeout            KairoErrorCode = "timeout"
 	ErrPluginCrashed      KairoErrorCode = "plugin_crashed"
 	ErrUnsupported        KairoErrorCode = "unsupported"
@@ -153,6 +168,7 @@ type StartDeploymentRequest struct {
 // StartServerRequest is the POST /api/v1/servers request body.
 type StartServerRequest struct {
 	ProjectID string `json:"projectId"`
+	Debug     bool   `json:"debug,omitempty"`
 }
 
 // BuildResult is the wire format for a build run (mirrors TS BuildResult).
@@ -384,4 +400,68 @@ type WebXMLSummary struct {
 	ServletCount  int               `json:"servletCount"`
 	URLPatterns   []string          `json:"urlPatterns"`
 	ContextParams map[string]string `json:"contextParams"`
+}
+
+// ProjectDetection is the Go mirror of the TS ProjectDetection
+// type. It holds the result of auto-detecting a legacy Java web
+// project structure from a directory.
+type ProjectDetection struct {
+	SourceDirs      []string `json:"sourceDirs"`
+	WebRoot         string   `json:"webRoot"`
+	LibDirs         []string `json:"libDirs"`
+	BuildScript     string   `json:"buildScript"`
+	DefaultEncoding string   `json:"defaultEncoding"`
+	JDKVersion      string   `json:"jdkVersion"`
+	SourceVersion   string   `json:"sourceVersion"`
+	TargetVersion   string   `json:"targetVersion"`
+	OutputDir       string   `json:"outputDir"`
+	BuildSystem     string   `json:"buildSystem"`
+	Confidence      float64  `json:"confidence"`
+	Warnings        []string `json:"warnings"`
+}
+
+// ProjectImportConfirmRequest is the Go mirror of the TS
+// ProjectImportConfirmRequest type.
+type ProjectImportConfirmRequest struct {
+	WorkspaceID     string   `json:"workspaceId"`
+	RootPath        string   `json:"rootPath"`
+	Name            string   `json:"name"`
+	SourceDirs      []string `json:"sourceDirs"`
+	WebRoot         string   `json:"webRoot"`
+	LibDirs         []string `json:"libDirs"`
+	BuildScript     string   `json:"buildScript"`
+	DefaultEncoding string   `json:"defaultEncoding"`
+	JDKVersion      string   `json:"jdkVersion"`
+	SourceVersion   string   `json:"sourceVersion"`
+	TargetVersion   string   `json:"targetVersion"`
+	OutputDir       string   `json:"outputDir"`
+	BuildTool       string   `json:"buildTool"`
+	ContextPath     string   `json:"contextPath"`
+}
+
+// RecentProject is the Go mirror of the TS RecentProject type.
+type RecentProject struct {
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	RootPath     string `json:"rootPath"`
+	LastOpenedAt string `json:"lastOpenedAt"`
+}
+
+// SearchStreamEvent is a streamed search result batch sent over WebSocket.
+type SearchStreamEvent struct {
+	Kind       string `json:"kind"`
+	TaskID     string `json:"taskId"`
+	Batch      []struct {
+		File          string `json:"file"`
+		Line          int    `json:"line"`
+		Column        int    `json:"column"`
+		MatchText     string `json:"matchText"`
+		ContextBefore string `json:"contextBefore"`
+		ContextAfter  string `json:"contextAfter"`
+		Replacement   string `json:"replacement,omitempty"`
+	} `json:"batch"`
+	BatchIndex int    `json:"batchIndex"`
+	Total      int    `json:"total"`
+	Done       bool   `json:"done"`
+	Error      string `json:"error,omitempty"`
 }

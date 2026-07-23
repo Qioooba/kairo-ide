@@ -5,9 +5,12 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -54,11 +57,16 @@ type Compiler struct {
 	javaHome string
 }
 
+const compilerStopTimeout = 5 * time.Second
+
 func New(javaHome string) *Compiler {
 	return &Compiler{javaHome: javaHome}
 }
 
 func (c *Compiler) Compile(ctx context.Context, req Request) (*Result, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if c.javaHome == "" {
 		return nil, errors.New("compiler toolchain not set")
 	}
@@ -87,8 +95,17 @@ func (c *Compiler) Compile(ctx context.Context, req Request) (*Result, error) {
 			args = append(args, "-d", req.OutputDir)
 		}
 		args = append(args, "-Xlint:all")
+		if shouldUseJavacArgFile(args, req.Sources) {
+			argFile, err := writeJavacArgFile(req.ProjectRoot, req.Sources)
+			if err != nil {
+				return nil, fmt.Errorf("write javac argfile: %w", err)
+			}
+			defer os.Remove(argFile)
+			args = append(args, "@"+argFile)
+		} else {
+			args = append(args, req.Sources...)
+		}
 	}
-	args = append(args, req.Sources...)
 
 	bin := filepath.Join(c.javaHome, "bin", "javac")
 	if _, err := exec.LookPath(bin); err != nil {
@@ -124,7 +141,32 @@ func (c *Compiler) Compile(ctx context.Context, req Request) (*Result, error) {
 		return nil, err
 	}
 
-	p.Wait()
+	// ManagedProcess intentionally outlives the context passed to Start
+	// because server processes use the same abstraction. A compiler is
+	// different: cancellation and the build timeout must terminate the
+	// complete javac process tree. Wait through a channel so this call is
+	// bounded even when javac or one of its children hangs.
+	waitDone := make(chan struct{})
+	go func() {
+		p.Wait()
+		close(waitDone)
+	}()
+	select {
+	case <-waitDone:
+	case <-cctx.Done():
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), compilerStopTimeout)
+		stopErr := p.ForceStop(stopCtx, obs.Identity)
+		stopCancel()
+		if stopErr != nil {
+			return nil, fmt.Errorf("javac %w; force-stop process tree: %v", cctx.Err(), stopErr)
+		}
+		select {
+		case <-waitDone:
+		case <-time.After(compilerStopTimeout):
+			return nil, fmt.Errorf("javac %w; process tree did not exit within %s", cctx.Err(), compilerStopTimeout)
+		}
+		return nil, fmt.Errorf("javac %w", cctx.Err())
+	}
 
 	var exitCode int
 	inspectCtx, inspectCancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -160,6 +202,53 @@ func (c *Compiler) Compile(ctx context.Context, req Request) (*Result, error) {
 		res.FilesCompiled = countCompiled(res.Output)
 	}
 	return res, nil
+}
+
+func shouldUseJavacArgFile(args, sources []string) bool {
+	if runtime.GOOS == "windows" && len(sources) > 50 {
+		return true
+	}
+	length := 0
+	for _, arg := range args {
+		length += len(arg) + 1
+	}
+	for _, source := range sources {
+		length += len(source) + 1
+	}
+	return length > 24*1024
+}
+
+func writeJavacArgFile(projectRoot string, sources []string) (string, error) {
+	if projectRoot == "" {
+		return "", errors.New("project root is required for javac argfile")
+	}
+	file, err := os.CreateTemp(projectRoot, ".kairo-javac-*.args")
+	if err != nil {
+		return "", err
+	}
+	name := file.Name()
+	ok := false
+	defer func() {
+		_ = file.Close()
+		if !ok {
+			_ = os.Remove(name)
+		}
+	}()
+	for _, source := range sources {
+		escaped := strings.ReplaceAll(source, `\`, `\\`)
+		escaped = strings.ReplaceAll(escaped, `"`, `\"`)
+		if _, err := fmt.Fprintf(file, "\"%s\"\n", escaped); err != nil {
+			return "", err
+		}
+	}
+	if err := file.Sync(); err != nil {
+		return "", err
+	}
+	if err := file.Close(); err != nil {
+		return "", err
+	}
+	ok = true
+	return name, nil
 }
 
 var (

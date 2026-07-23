@@ -185,6 +185,41 @@ func TestBuildCommand_ClasspathAndEnv(t *testing.T) {
 	}
 }
 
+func TestBuildCommand_JDWPOnlyWhenExplicitlyEnabled(t *testing.T) {
+	home := createFakeCatalinaHome(t)
+	base := t.TempDir()
+	javaHome := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(javaHome, "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	baseConfig := Config{
+		JavaHome: javaHome, CatalinaHome: home, CatalinaBase: base,
+		WebappDir: filepath.Join(base, "webapps", "ROOT"), HTTPPort: 18080, ShutdownPort: 18005,
+	}
+
+	_, runArgs, _, err := BuildCommand(baseConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(strings.Join(runArgs, " "), "jdwp") {
+		t.Fatalf("normal Run unexpectedly contains JDWP args: %v", runArgs)
+	}
+
+	debugConfig := baseConfig
+	debugConfig.DebugPort = 18000
+	debugConfig.DebugSuspend = true
+	_, debugArgs, _, err := BuildCommand(debugConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(debugArgs, " ")
+	for _, want := range []string{"-agentlib:jdwp=", "transport=dt_socket", "server=y", "suspend=y", "address=127.0.0.1:18000"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("debug args missing %q: %v", want, debugArgs)
+		}
+	}
+}
+
 func TestBuildCommand_PathWithSpaces(t *testing.T) {
 	baseParent := t.TempDir()
 	home := createFakeCatalinaHome(t)
@@ -381,6 +416,24 @@ func TestWaitForReady_Success(t *testing.T) {
 	}
 }
 
+func TestWaitForPort_RequiresARealListener(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	port := ln.Addr().(*net.TCPAddr).Port
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := WaitForPort(ctx, port, time.Now().Add(time.Second)); err != nil {
+		t.Fatalf("WaitForPort on bound listener: %v", err)
+	}
+	ln.Close()
+	if err := WaitForPort(ctx, port, time.Now().Add(150*time.Millisecond)); err == nil {
+		t.Fatal("WaitForPort on closed listener unexpectedly succeeded")
+	}
+}
+
 func TestSendShutdown_ConnectionRefused(t *testing.T) {
 	err := SendShutdown(1, 100*time.Millisecond)
 	if err == nil {
@@ -475,4 +528,169 @@ func TestIsPortBound(t *testing.T) {
 		t.Error("expected port to be reported as bound")
 	}
 	ln.Close()
+}
+
+func TestTailLines(t *testing.T) {
+	tests := []struct {
+		name string
+		s    string
+		n    int
+		want []string
+	}{
+		{"n zero", "a\nb\nc", 0, nil},
+		{"n negative", "a\nb\nc", -1, nil},
+		{"n less than total", "a\nb\nc", 2, []string{"b", "c"}},
+		{"n equals total", "a\nb\nc", 3, []string{"a", "b", "c"}},
+		{"n greater than total", "a\nb\nc", 10, []string{"a", "b", "c"}},
+		{"empty string", "", 5, nil},
+		{"single line", "hello", 1, []string{"hello"}},
+		{"trailing newline", "a\nb\n", 2, []string{"a", "b"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := tailLines(tc.s, tc.n)
+			if len(got) != len(tc.want) {
+				t.Fatalf("len = %d, want %d", len(got), len(tc.want))
+			}
+			for i := range got {
+				if got[i] != tc.want[i] {
+					t.Errorf("[%d] = %q, want %q", i, got[i], tc.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestSplitLines(t *testing.T) {
+	tests := []struct {
+		name string
+		s    string
+		want []string
+	}{
+		{"empty", "", nil},
+		{"single", "hello", []string{"hello"}},
+		{"two lines", "a\nb", []string{"a", "b"}},
+		{"trailing newline", "a\nb\n", []string{"a", "b"}},
+		{"three lines", "a\nb\nc", []string{"a", "b", "c"}},
+		{"empty lines", "\n\n", []string{"", ""}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := splitLines(tc.s)
+			if len(got) != len(tc.want) {
+				t.Fatalf("len = %d, want %d", len(got), len(tc.want))
+			}
+			for i := range got {
+				if got[i] != tc.want[i] {
+					t.Errorf("[%d] = %q, want %q", i, got[i], tc.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestFileSHA256(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.txt")
+	if err := os.WriteFile(path, []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	hash, err := fileSHA256(path)
+	if err != nil {
+		t.Fatalf("fileSHA256: %v", err)
+	}
+	if hash == "" {
+		t.Error("hash should not be empty")
+	}
+	if len(hash) != 64 {
+		t.Errorf("hash length = %d, want 64", len(hash))
+	}
+}
+
+func TestFileSHA256_NotFound(t *testing.T) {
+	_, err := fileSHA256("/nonexistent/file")
+	if err == nil {
+		t.Fatal("expected error for nonexistent file")
+	}
+}
+
+func TestBoolYN(t *testing.T) {
+	if got := boolYN(true); got != "y" {
+		t.Errorf("boolYN(true) = %q, want y", got)
+	}
+	if got := boolYN(false); got != "n" {
+		t.Errorf("boolYN(false) = %q, want n", got)
+	}
+}
+
+func TestLogTail(t *testing.T) {
+	lt := newLogTail(3)
+	lt.add("line1")
+	lt.add("line2")
+	lt.add("line3")
+	lt.add("line4")
+	// Should keep last 3
+	s := lt.String()
+	if !strings.Contains(s, "line2") {
+		t.Error("should contain line2")
+	}
+	if !strings.Contains(s, "line4") {
+		t.Error("should contain line4")
+	}
+	if strings.Contains(s, "line1") {
+		t.Error("should not contain line1 (evicted)")
+	}
+}
+
+func TestLogTail_Empty(t *testing.T) {
+	lt := newLogTail(5)
+	if s := lt.String(); s != "" {
+		t.Errorf("String() = %q, want empty", s)
+	}
+}
+
+func TestBootstrapClasspath(t *testing.T) {
+	// Create a fake catalina home with bootstrap.jar
+	dir := t.TempDir()
+	binDir := filepath.Join(dir, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	bootstrapJar := filepath.Join(binDir, "bootstrap.jar")
+	if err := os.WriteFile(bootstrapJar, []byte("fake"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cp := BootstrapClasspath(dir)
+	if len(cp) == 0 {
+		t.Fatal("BootstrapClasspath returned empty")
+	}
+	if cp[0] != bootstrapJar {
+		t.Errorf("cp[0] = %q, want %q", cp[0], bootstrapJar)
+	}
+}
+
+func TestBootstrapClasspath_NoJar(t *testing.T) {
+	dir := t.TempDir()
+	cp := BootstrapClasspath(dir)
+	if len(cp) != 0 {
+		t.Errorf("expected empty classpath, got %v", cp)
+	}
+}
+
+func TestWriteLoggingProperties(t *testing.T) {
+	dir := t.TempDir()
+	if err := writeLoggingProperties(dir); err != nil {
+		t.Fatalf("writeLoggingProperties: %v", err)
+	}
+	path := filepath.Join(dir, "conf", "logging.properties")
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("logging.properties not found: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "java.util.logging") {
+		t.Error("logging.properties should contain logging config")
+	}
 }

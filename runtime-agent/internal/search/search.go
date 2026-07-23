@@ -101,12 +101,125 @@ func Search(root string, opts Options) (*Result, error) {
 	inc := compileGlobs(opts.Include)
 	exc := compileGlobs(opts.Exclude)
 
-	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
+	err = walkAndCollect(root, matcher, inc, exc, opts, res)
+	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, err
+		}
+		return nil, fmt.Errorf("walk search root: %w", err)
+	}
+	if res.TotalMatches >= opts.MaxResults {
+		res.Truncated = true
+	}
+	res.ElapsedMs = time.Since(start).Milliseconds()
+	return res, nil
+}
+
+// SearchStreaming walks root and calls callback for each batch of matches.
+// Each batch contains up to batchSize results. callback receives the batch,
+// the batch index (0-based), and the cumulative total matches so far.
+// Returns an error if the callback fails or the context is cancelled.
+func SearchStreaming(ctx context.Context, root string, opts Options, callback func(batch []Match, batchIndex int, total int) error) error {
+	const batchSize = 50
+	if root == "" {
+		return errors.New("root is empty")
+	}
+	if opts.Query == "" {
+		return nil
+	}
+	if opts.MaxResults == 0 {
+		opts.MaxResults = 100_000
+	}
+	if opts.Cancel == nil {
+		opts.Cancel = ctx
+	}
+	if opts.ProjectEncoding == "" {
+		opts.ProjectEncoding = encoding.UTF8
+	}
+
+	matcher, err := buildMatcher(opts)
+	if err != nil {
+		return err
+	}
+
+	inc := compileGlobs(opts.Include)
+	exc := compileGlobs(opts.Exclude)
+
+	matchCh := make(chan Match, 100)
+	walkErrCh := make(chan error, 1)
+
+	go func() {
+		defer close(matchCh)
+		walkErrCh <- walkAndCollect(root, matcher, inc, exc, opts, &streamCollector{ch: matchCh, ctx: opts.Cancel})
+	}()
+
+	batch := make([]Match, 0, batchSize)
+	batchIndex := 0
+	total := 0
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case match, ok := <-matchCh:
+			if !ok {
+				if len(batch) > 0 {
+					if err := callback(batch, batchIndex, total); err != nil {
+						return err
+					}
+				}
+				select {
+				case walkErr := <-walkErrCh:
+					if walkErr != nil && !errors.Is(walkErr, context.Canceled) && !errors.Is(walkErr, context.DeadlineExceeded) {
+						return walkErr
+					}
+					return nil
+				default:
+					return nil
+				}
+			}
+			batch = append(batch, match)
+			total++
+			if len(batch) >= batchSize {
+				if err := callback(batch, batchIndex, total); err != nil {
+					return err
+				}
+				batch = make([]Match, 0, batchSize)
+				batchIndex++
+			}
+		}
+	}
+}
+
+// streamCollector implements a match collector that sends to a channel.
+type streamCollector struct {
+	ch  chan<- Match
+	ctx context.Context
+}
+
+func (sc *streamCollector) addMatch(m Match) {
+	select {
+	case sc.ch <- m:
+	case <-sc.ctx.Done():
+	}
+}
+
+// matchSink is the interface that both Result and streamCollector implement.
+type matchSink interface {
+	addMatch(m Match)
+}
+
+// walkAndCollect walks the filesystem and collects matches into the sink.
+func walkAndCollect(root string, matcher *compiledMatcher, inc, exc *globSet, opts Options, sink matchSink) error {
+	matchedCount := 0
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
 		if err := opts.Cancel.Err(); err != nil {
 			return err
 		}
 		if walkErr != nil {
-			res.recordError(path, walkErr)
+			if path == root {
+				return walkErr
+			}
 			if d != nil && d.IsDir() {
 				return filepath.SkipDir
 			}
@@ -134,16 +247,20 @@ func Search(root string, opts Options) (*Result, error) {
 		if isLikelyBinary(path) {
 			return nil
 		}
-		if res.TotalMatches >= opts.MaxResults {
-			res.Truncated = true
+		if matchedCount >= opts.MaxResults {
 			return filepath.SkipAll
 		}
-		searchFile(path, rel, root, matcher, opts, res)
+		if err := searchFileToSink(path, rel, root, matcher, opts, sink, &matchedCount); err != nil {
+			return err
+		}
 		return nil
 	})
-	_ = err
-	res.ElapsedMs = time.Since(start).Milliseconds()
-	return res, nil
+	return err
+}
+
+func (r *Result) addMatch(m Match) {
+	r.Matches = append(r.Matches, m)
+	r.TotalMatches++
 }
 
 func (r *Result) recordError(path string, err error) {
@@ -209,106 +326,134 @@ func buildMatcher(opts Options) (*compiledMatcher, error) {
 	}, nil
 }
 
-func searchFile(absPath, rel, root string, m *compiledMatcher, opts Options, res *Result) {
+// searchFileToSink reads a file, detects encoding, and sends matches to the sink.
+func searchFileToSink(absPath, rel, root string, m *compiledMatcher, opts Options, sink matchSink, matchedCount *int) error {
+	if err := opts.Cancel.Err(); err != nil {
+		return err
+	}
 	f, err := os.Open(absPath)
 	if err != nil {
-		res.recordError(rel, err)
-		return
+		return nil
 	}
 	defer f.Close()
 	// Sniff a small sample to detect encoding.
 	head := make([]byte, 4096)
 	n, _ := f.Read(head)
-	detID, _, hasBom, _ := encoding.Detect(head[:n], opts.ProjectEncoding, opts.EncodingAliases)
-	if hasBom {
-		// Already accounted for in detector; we will Decode later
-		// which will strip the BOM.
-		_ = detID
-	}
+	detID, _, _, _ := encoding.Detect(head[:n], opts.ProjectEncoding, opts.EncodingAliases)
 
-	// Re-open and stream line-by-line. The file may be large; we
-	// use bufio.Scanner with a large buffer.
+	// Re-open and stream line-by-line.
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
-		res.recordError(rel, err)
-		return
+		return nil
 	}
 	scanner := bufio.NewScanner(f)
 	const maxLine = 4 * 1024 * 1024
 	scanner.Buffer(make([]byte, 64*1024), maxLine)
 
-	// We need to convert each line from its detected encoding to
-	// UTF-8 for matching. A pre-bound transform saves allocation.
 	_ = encoding.Encoder(detID, opts.EncodingAliases)
-	// We don't actually need a per-line transform: for UTF-8 we
-	// stream; for non-UTF-8 we decode the whole file below.
 
-	// For GBK / GB18030 / ISO-8859-1 etc, we read bytes and
-	// decode the entire file in memory. For UTF-8 we can stream.
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
-		res.recordError(rel, err)
-		return
+		return nil
 	}
 	if detID == encoding.UTF8 || detID == encoding.UTF8BOM {
-		scanUTF8(scanner, rel, m, opts, res)
-	} else {
-		data, err := os.ReadFile(absPath)
-		if err != nil {
-			res.recordError(rel, err)
-			return
+		return scanUTF8ToSink(scanner, rel, m, opts, sink, matchedCount)
+	}
+	if err := opts.Cancel.Err(); err != nil {
+		return err
+	}
+	data, err := readAllContext(opts.Cancel, f)
+	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return err
 		}
-		decoded, err := encoding.Decode(data, detID, opts.EncodingAliases)
-		if err != nil {
-			res.recordError(rel, err)
-			return
+		return nil
+	}
+	if err := opts.Cancel.Err(); err != nil {
+		return err
+	}
+	decoded, err := encoding.Decode(data, detID, opts.EncodingAliases)
+	if err != nil {
+		return nil
+	}
+	if err := opts.Cancel.Err(); err != nil {
+		return err
+	}
+	return scanBytesToSink(decoded, rel, m, opts, sink, matchedCount)
+}
+
+// readAllContext bounds cancellation latency for large/non-UTF files to one
+// filesystem read chunk. It intentionally avoids a helper goroutine, which
+// could leak forever when a network filesystem blocks in Read.
+func readAllContext(ctx context.Context, reader io.Reader) ([]byte, error) {
+	const chunkSize = 64 * 1024
+	var out bytes.Buffer
+	chunk := make([]byte, chunkSize)
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
 		}
-		scanBytes(decoded, rel, m, opts, res)
+		n, err := reader.Read(chunk)
+		if n > 0 {
+			_, _ = out.Write(chunk[:n])
+		}
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return out.Bytes(), nil
+			}
+			return nil, err
+		}
+		if n == 0 {
+			return nil, io.ErrNoProgress
+		}
 	}
 }
 
-func scanUTF8(scanner *bufio.Scanner, rel string, m *compiledMatcher, opts Options, res *Result) {
+func scanUTF8ToSink(scanner *bufio.Scanner, rel string, m *compiledMatcher, opts Options, sink matchSink, matchedCount *int) error {
 	line := 0
-	for scanner.Scan() {
+	for {
+		if err := opts.Cancel.Err(); err != nil {
+			return err
+		}
+		if !scanner.Scan() {
+			break
+		}
 		line++
 		s := scanner.Text()
 		matches := m.re.FindAllStringIndex(s, -1)
+		if err := opts.Cancel.Err(); err != nil {
+			return err
+		}
 		for _, idx := range matches {
-			if res.TotalMatches >= opts.MaxResults {
-				res.Truncated = true
-				return
-			}
-			res.Matches = append(res.Matches, buildMatch(rel, line, idx[0], idx[1], s, m, opts))
-			res.TotalMatches++
+			sink.addMatch(buildMatch(rel, line, idx[0], idx[1], s, m, opts))
+			*matchedCount++
 		}
 	}
-	// bufio.Scanner stops early on lines longer than the buffer
-	// or on I/O errors; surface that instead of silently returning
-	// partial matches.
-	if err := scanner.Err(); err != nil {
-		res.recordError(rel, err)
-	}
+	return nil
 }
 
-func scanBytes(data []byte, rel string, m *compiledMatcher, opts Options, res *Result) {
+func scanBytesToSink(data []byte, rel string, m *compiledMatcher, opts Options, sink matchSink, matchedCount *int) error {
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	const maxLine = 4 * 1024 * 1024
 	scanner.Buffer(make([]byte, 64*1024), maxLine)
 	line := 0
-	for scanner.Scan() {
+	for {
+		if err := opts.Cancel.Err(); err != nil {
+			return err
+		}
+		if !scanner.Scan() {
+			break
+		}
 		line++
 		s := scanner.Text()
 		matches := m.re.FindAllStringIndex(s, -1)
+		if err := opts.Cancel.Err(); err != nil {
+			return err
+		}
 		for _, idx := range matches {
-			if res.TotalMatches >= opts.MaxResults {
-				res.Truncated = true
-				return
-			}
-			res.Matches = append(res.Matches, buildMatch(rel, line, idx[0], idx[1], s, m, opts))
-			res.TotalMatches++
+			sink.addMatch(buildMatch(rel, line, idx[0], idx[1], s, m, opts))
+			*matchedCount++
 		}
 	}
-	if err := scanner.Err(); err != nil {
-		res.recordError(rel, err)
-	}
+	return nil
 }
 
 func buildMatch(rel string, line, start, end int, s string, m *compiledMatcher, opts Options) Match {

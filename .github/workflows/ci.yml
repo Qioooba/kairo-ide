@@ -11,13 +11,30 @@ env:
   GO_VERSION: '1.22'
   NODE_VERSION: '20'
   FIXED_TOMCAT_VERSION: '6.0.53'
-  # TODO: replace with the real sha256 of apache-tomcat-6.0.53.tar.gz
-  FIXED_TOMCAT_CHECKSUM: 'sha256:PLACEHOLDER_UPDATE_BEFORE_RELEASE'
   FIXED_JDTLS_VERSION: '1.43.0'
-  # TODO: replace with the real sha256 of the downloaded jdtls archive
-  FIXED_JDTLS_CHECKSUM: 'sha256:PLACEHOLDER_UPDATE_BEFORE_RELEASE'
+  # These repository variables are deliberately not given fallback values.
+  # Release/integration jobs fail closed until an operator records values
+  # verified out-of-band. Never commit placeholder or guessed digests.
+  KAIRO_TOMCAT6_SHA256: ${{ vars.KAIRO_TOMCAT6_SHA256 }}
+  KAIRO_JDTLS_ARCHIVE_URL: ${{ vars.KAIRO_JDTLS_ARCHIVE_URL }}
+  KAIRO_JDTLS_SHA256: ${{ vars.KAIRO_JDTLS_SHA256 }}
+  KAIRO_TOMCAT6_WINDOWS_ARCHIVE_URL: ${{ vars.KAIRO_TOMCAT6_WINDOWS_ARCHIVE_URL }}
+  KAIRO_TOMCAT6_WINDOWS_SHA256: ${{ vars.KAIRO_TOMCAT6_WINDOWS_SHA256 }}
+  KAIRO_JDTLS_WINDOWS_ARCHIVE_URL: ${{ vars.KAIRO_JDTLS_WINDOWS_ARCHIVE_URL }}
+  KAIRO_JDTLS_WINDOWS_SHA256: ${{ vars.KAIRO_JDTLS_WINDOWS_SHA256 }}
 
 jobs:
+  supply-chain-config:
+    name: Supply-chain Configuration Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate locked dependency configuration
+        run: |
+          node scripts/run-with-timeout.cjs 30 node scripts/fetch-verified-archive.cjs --id tomcat6-linux --check-config
+          node scripts/run-with-timeout.cjs 30 node scripts/fetch-verified-archive.cjs --id jdtls-linux --check-config
+
   # =========================================================================
   # 1. Go unit tests
   # =========================================================================
@@ -45,11 +62,11 @@ jobs:
 
       - name: Vet
         working-directory: runtime-agent
-        run: go vet ./...
+        run: node ../scripts/run-with-timeout.cjs 120 go vet ./...
 
       - name: Unit tests with race detector
         working-directory: runtime-agent
-        run: go test -race -v -count=1 -timeout 420s ./...
+        run: node ../scripts/run-with-timeout.cjs 300 go test -race -v -count=1 -timeout 285s ./...
 
       - name: Upload agent logs on failure
         if: failure()
@@ -109,22 +126,25 @@ jobs:
           version: 9.15.9
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: node scripts/run-with-timeout.cjs 300 pnpm install --frozen-lockfile
 
       - name: Clean build outputs
-        run: pnpm clean
+        run: node scripts/run-with-timeout.cjs 120 pnpm clean
 
       - name: Build all packages
-        run: pnpm build
+        run: node scripts/run-with-timeout.cjs 300 pnpm build
 
       - name: Type-check packages
-        run: pnpm -r --filter "./packages/*" exec tsc --noEmit
+        run: node scripts/run-with-timeout.cjs 180 pnpm -r --filter "./packages/*" exec tsc --noEmit
 
       - name: Lint
-        run: pnpm lint
+        run: node scripts/run-with-timeout.cjs 120 pnpm lint
 
       - name: Unit tests
-        run: pnpm -r --filter './packages/*' test
+        run: node scripts/run-with-timeout.cjs 300 pnpm -r --filter './packages/*' test
+
+      - name: Supply-chain gate tests
+        run: node scripts/run-with-timeout.cjs 30 node --test scripts/supply-chain.test.cjs
 
       - name: Encoding round-trip tests
         run: pnpm --filter @kairo/encoding-extension test
@@ -165,10 +185,10 @@ jobs:
           version: 9.15.9
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: node scripts/run-with-timeout.cjs 300 pnpm install --frozen-lockfile
 
       - name: Build packages
-        run: pnpm build
+        run: node scripts/run-with-timeout.cjs 300 pnpm build
 
       - name: Contract endpoint tests
         run: node --test tests/contract/contract.test.cjs
@@ -218,10 +238,10 @@ jobs:
           version: 9.15.9
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: node scripts/run-with-timeout.cjs 300 pnpm install --frozen-lockfile
 
       - name: Build packages
-        run: pnpm build
+        run: node scripts/run-with-timeout.cjs 300 pnpm build
 
       - name: Start agent
         run: |
@@ -275,7 +295,7 @@ jobs:
     name: Integration Tomcat (Linux)
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: [go-unit-linux]
+    needs: [go-unit-linux, supply-chain-config]
     steps:
       - uses: actions/checkout@v4
 
@@ -290,12 +310,10 @@ jobs:
 
       - name: Download fixed Tomcat
         run: |
-          TOMCAT_URL="https://archive.apache.org/dist/tomcat/tomcat-6/v${FIXED_TOMCAT_VERSION}/bin/apache-tomcat-${FIXED_TOMCAT_VERSION}.tar.gz"
           mkdir -p dist/tomcat
-          curl -fsSL "$TOMCAT_URL" -o dist/tomcat/apache-tomcat.tar.gz
-          echo "${FIXED_TOMCAT_CHECKSUM#sha256:}  dist/tomcat/apache-tomcat.tar.gz" > dist/tomcat/checksum
-          sha256sum -c dist/tomcat/checksum
-          tar -xzf dist/tomcat/apache-tomcat.tar.gz -C dist/tomcat/
+          node scripts/run-with-timeout.cjs 45 node scripts/fetch-verified-archive.cjs \
+            --id tomcat6-linux --output dist/tomcat/apache-tomcat.tar.gz
+          node scripts/run-with-timeout.cjs 60 tar -xzf dist/tomcat/apache-tomcat.tar.gz -C dist/tomcat/
 
       - name: Build agent
         working-directory: runtime-agent
@@ -381,7 +399,7 @@ jobs:
     name: Theia Java E2E
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: [ts-clean-build]
+    needs: [ts-clean-build, supply-chain-config]
     steps:
       - uses: actions/checkout@v4
 
@@ -415,11 +433,9 @@ jobs:
       - name: Download fixed JDT LS
         run: |
           mkdir -p dist/jdtls
-          JDTLS_URL="https://download.eclipse.org/jdtls/milestones/${FIXED_JDTLS_VERSION}/jdt-language-server-${FIXED_JDTLS_VERSION}-20240125.tar.gz"
-          curl -fsSL "$JDTLS_URL" -o dist/jdtls/jdtls.tar.gz
-          echo "${FIXED_JDTLS_CHECKSUM#sha256:}  dist/jdtls/jdtls.tar.gz" > dist/jdtls/checksum
-          sha256sum -c dist/jdtls/checksum
-          tar -xzf dist/jdtls/jdtls.tar.gz -C dist/jdtls/
+          node scripts/run-with-timeout.cjs 45 node scripts/fetch-verified-archive.cjs \
+            --id jdtls-linux --output dist/jdtls/jdtls.tar.gz
+          node scripts/run-with-timeout.cjs 60 tar -xzf dist/jdtls/jdtls.tar.gz -C dist/jdtls/
 
       - name: Start agent
         run: |
@@ -499,10 +515,14 @@ jobs:
           go build -trimpath -o ../dist/kairo-runtime.exe ./cmd/kairo-runtime
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: node scripts/run-with-timeout.cjs 300 pnpm install --frozen-lockfile
 
       - name: Build packages
-        run: pnpm build
+        run: node scripts/run-with-timeout.cjs 300 pnpm build
+
+      - name: Prepare and verify Windows bundled dependencies
+        shell: pwsh
+        run: pwsh -ExecutionPolicy Bypass -File scripts/prepare-bundled.ps1 -Strict -BundledRoot apps/desktop/bundled
 
       - name: Start agent (Windows)
         run: |

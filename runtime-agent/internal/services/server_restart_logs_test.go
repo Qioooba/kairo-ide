@@ -32,7 +32,7 @@ func TestServerLogs_TailsKairoStdoutLog(t *testing.T) {
 		t.Fatal(err)
 	}
 	var sb strings.Builder
-	for i := 1; i <= 600; i++ {
+	for i := 1; i <= 6000; i++ {
 		sb.WriteString("line-" + strconv.Itoa(i) + "\n")
 	}
 	if err := os.WriteFile(filepath.Join(base, "logs", "kairo-stdout.log"), []byte(sb.String()), 0o644); err != nil {
@@ -50,11 +50,19 @@ func TestServerLogs_TailsKairoStdoutLog(t *testing.T) {
 	if len(entries) != 500 {
 		t.Fatalf("default tail returned %d entries, want 500", len(entries))
 	}
-	if entries[0].Line != "line-101" || entries[len(entries)-1].Line != "line-600" {
+	if entries[0].Line != "line-5501" || entries[len(entries)-1].Line != "line-6000" {
 		t.Fatalf("unexpected tail window: first=%q last=%q", entries[0].Line, entries[len(entries)-1].Line)
 	}
 	if entries[0].TS == "" {
 		t.Errorf("entries must carry a timestamp")
+	}
+	if entries[0].Source != "kairo-stdout.log" || entries[0].Ordinal >= entries[len(entries)-1].Ordinal {
+		t.Fatalf("entries need stable source/ordinal identity: first=%#v last=%#v", entries[0], entries[len(entries)-1])
+	}
+	stableTimestamp := entries[0].TS
+	repeated, err := r.Logs("srv_1", 0)
+	if err != nil || repeated[0].TS != stableTimestamp || repeated[0].Ordinal != entries[0].Ordinal {
+		t.Fatalf("unchanged polls must retain identity: first=%#v repeated=%#v err=%v", entries[0], repeated[0], err)
 	}
 
 	// Explicit tail wins.
@@ -62,8 +70,54 @@ func TestServerLogs_TailsKairoStdoutLog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Logs: %v", err)
 	}
-	if len(entries) != 10 || entries[0].Line != "line-591" {
+	if len(entries) != 10 || entries[0].Line != "line-5991" {
 		t.Fatalf("tail=10 returned %d entries, first=%q", len(entries), entries[0].Line)
+	}
+
+	entries, err = r.Logs("srv_1", 999999)
+	if err != nil || len(entries) != maxLogTail || entries[0].Line != "line-1001" {
+		t.Fatalf("hard tail cap returned %d entries, first=%q, err=%v", len(entries), entries[0].Line, err)
+	}
+}
+
+func TestServerLogs_BoundedLargeFileTailAndSkipsSymlinks(t *testing.T) {
+	dataDir := t.TempDir()
+	base := filepath.Join(dataDir, "runtime", "srv_1")
+	logDir := filepath.Join(base, "logs")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	large := strings.Repeat("discarded-prefix-data\n", 150000) + "[stdout] wanted-one\n[stderr] wanted-two\n"
+	if err := os.WriteFile(filepath.Join(logDir, "kairo-stdout.log"), []byte(large), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(dataDir, "outside-secret.log")
+	if err := os.WriteFile(outside, []byte("must-not-leak\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(logDir, "linked.log")); err != nil {
+		t.Skipf("symlink unavailable on this platform: %v", err)
+	}
+	seedServerMeta(t, dataDir, &serverMeta{ID: "srv_1", State: "running", CatalinaBase: base})
+
+	r := newRealServerRunner(dataDir, "", "", nil)
+	entries, err := r.Logs("srv_1", 10)
+	if err != nil {
+		t.Fatalf("Logs: %v", err)
+	}
+	joined := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		joined = append(joined, entry.Line)
+	}
+	output := strings.Join(joined, "\n")
+	if strings.Contains(output, "must-not-leak") {
+		t.Fatal("symlink target escaped the logs directory")
+	}
+	if !strings.Contains(output, "wanted-one\nwanted-two") {
+		t.Fatalf("large-file tail missing final lines: %q", output)
+	}
+	if len(entries) < 2 || entries[len(entries)-2].Stream != "stdout" || entries[len(entries)-1].Stream != "stderr" {
+		t.Fatalf("persisted stream markers were not retained: %#v", entries)
 	}
 }
 

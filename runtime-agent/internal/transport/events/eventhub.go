@@ -22,6 +22,7 @@ const (
 	EventServerError      EventType = "server.error"
 	EventDeployComplete   EventType = "deploy.completed"
 	EventDeployStarted    EventType = "deploy.started"
+	EventHotReloadStatus  EventType = "hotreload.status"
 	EventSnapshotRequired EventType = "snapshot.required"
 	EventGap              EventType = "event.gap"
 )

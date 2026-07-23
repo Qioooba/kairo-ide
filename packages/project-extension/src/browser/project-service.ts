@@ -7,7 +7,7 @@
  */
 
 import { injectable, inject, interfaces } from '@theia/core/shared/inversify';
-import type { Workspace as WorkspaceDTO, ProjectConfig } from '@kairo/protocol';
+import type { Workspace as WorkspaceDTO, ProjectConfig, ProjectImportRequest, ProjectDetection, ProjectImportConfirmRequest, RecentProject, Toolchain } from '@kairo/protocol';
 import { RuntimeConnectionService } from '@kairo/runtime-extension';
 
 @injectable()
@@ -24,8 +24,21 @@ export class KairoProjectService {
     return ws;
   }
 
-  async detectLayout(workspaceId: string): Promise<unknown> {
-    return this.runtime.request('POST /api/v1/workspaces/{workspaceId}/scan', { deep: true }, { pathParams: { workspaceId } });
+  async detectLayout(workspaceId: string, rootPath?: string): Promise<unknown> {
+    return this.runtime.request('POST /api/v1/workspaces/{workspaceId}/scan', { deep: true, rootPath }, { pathParams: { workspaceId }, timeoutMs: 15_000 });
+  }
+
+  async listToolchains(): Promise<Toolchain[]> {
+    return this.runtime.request('GET /api/v1/toolchains', undefined) as Promise<Toolchain[]>;
+  }
+
+  async importProject(workspaceId: string, project: ProjectImportRequest): Promise<ProjectConfig> {
+    const saved = await this.runtime.request(
+      'POST /api/v1/workspaces/{workspaceId}/projects/import', project,
+      { pathParams: { workspaceId }, timeoutMs: 15_000, noRetry: true },
+    ) as ProjectConfig;
+    this.projects.set(saved.id, saved);
+    return saved;
   }
 
   /**
@@ -60,6 +73,26 @@ export class KairoProjectService {
 
   currentWorkspace(): WorkspaceDTO | undefined {
     return this.current;
+  }
+
+  /** Detect project structure from a directory using the new endpoint. */
+  async detectProject(rootPath: string): Promise<ProjectDetection> {
+    return this.runtime.request('POST /api/v1/projects/detect', { rootPath }, { timeoutMs: 15_000 }) as Promise<ProjectDetection>;
+  }
+
+  /** Import a project with confirmed configuration using the new endpoint. */
+  async importProjectNew(params: ProjectImportConfirmRequest): Promise<ProjectConfig> {
+    const saved = await this.runtime.request(
+      'POST /api/v1/projects/import', params,
+      { timeoutMs: 15_000, noRetry: true },
+    ) as ProjectConfig;
+    this.projects.set(saved.id, saved);
+    return saved;
+  }
+
+  /** Get recent projects for the welcome page. */
+  async getRecentProjects(): Promise<RecentProject[]> {
+    return this.runtime.request('GET /api/v1/projects/recent', undefined) as Promise<RecentProject[]>;
   }
 }
 

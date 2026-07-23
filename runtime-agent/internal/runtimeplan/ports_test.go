@@ -79,6 +79,22 @@ func TestDefaultPortAllocator(t *testing.T) {
 	}
 }
 
+func TestDefaultPortAllocator_RunSessionHasNoDebugPort(t *testing.T) {
+	cfg := DefaultPortConfig()
+	pa := NewDefaultPortAllocator(cfg)
+	lease, err := pa.AllocateServer(0, 0, 0, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lease.Release()
+	if lease.HTTPPort == 0 || lease.ShutdownPort == 0 {
+		t.Fatalf("run ports must be allocated: %+v", lease)
+	}
+	if lease.DebugPort != 0 {
+		t.Fatalf("run session DebugPort=%d, want 0", lease.DebugPort)
+	}
+}
+
 func TestDefaultPortAllocatorDistinct(t *testing.T) {
 	cfg := PortConfig{
 		HTTPMin:     28080,

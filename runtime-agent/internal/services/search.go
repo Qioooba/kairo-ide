@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
@@ -24,7 +25,7 @@ type memSearcher struct {
 	workspaces workspaceResolver
 }
 
-func (m *memSearcher) Search(payload json.RawMessage) (json.RawMessage, error) {
+func (m *memSearcher) Search(ctx context.Context, payload json.RawMessage) (json.RawMessage, error) {
 	var req struct {
 		WorkspaceID     string   `json:"workspaceId"`
 		RootPath        string   `json:"rootPath"`
@@ -80,6 +81,7 @@ func (m *memSearcher) Search(payload json.RawMessage) (json.RawMessage, error) {
 		MaxResults:      req.MaxResults,
 		PreviewReplace:  req.PreviewReplace,
 		ProjectEncoding: encoding.ID(req.ProjectEncoding),
+		Cancel:          ctx,
 	})
 	if err != nil {
 		return nil, err

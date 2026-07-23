@@ -8,7 +8,7 @@
     "build": "tsc -p tsconfig.json",
     "prebuild": "pnpm --workspace-root bundled:prepare ; node scripts/build-agent.js && node scripts/copy-browser-artifacts.js && node scripts/copy-bundled.js",
     "build:mac": "tsc -p tsconfig.json && electron-builder --mac",
-    "build:win": "tsc -p tsconfig.json && electron-builder --win",
+    "build:win": "pnpm --filter @kairo/browser build && pwsh -ExecutionPolicy Bypass -File ../../scripts/prepare-bundled.ps1 -Strict -BundledRoot apps/desktop/bundled && node scripts/build-agent.js && node scripts/copy-browser-artifacts.js --strict && tsc -p tsconfig.json && electron-builder --win",
     "build:linux": "tsc -p tsconfig.json && electron-builder --linux",
     "build:all": "tsc -p tsconfig.json && electron-builder --mac --win --linux",
     "prestart": "node scripts/copy-browser-artifacts.js",

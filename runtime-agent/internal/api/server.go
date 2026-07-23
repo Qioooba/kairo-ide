@@ -63,6 +63,11 @@ type Server struct {
 	// spawn a fresh process. See SetRestartConfig.
 	restartConfig RestartConfig
 
+	// recentProjects tracks recently opened projects for the
+	// welcome page. In-memory only; survives agent restarts
+	// via the project catalog.
+	recentProjects []recentProjectEntry
+
 	// injected services
 	Services *Services
 }
@@ -103,6 +108,8 @@ type Services struct {
 	WorkspaceStore WorkspaceStore
 	// ProjectStore reads/writes project configs.
 	ProjectStore ProjectStore
+	// RunConfigurationStore reads/writes .legacyflow/run-configurations.json.
+	RunConfigurationStore RunConfigurationStore
 	// ToolchainRegistry is the toolchain registry.
 	ToolchainRegistry ToolchainRegistry
 	// Searcher runs full-text search.
@@ -131,6 +138,11 @@ type Services struct {
 	// ToolchainRepo resolves a toolchain by its ID.
 	// Used by the JDT LS launch descriptor handler.
 	ToolchainRepo ToolchainRepo
+	// DataDir is the agent's data directory for runtime artifacts
+	// (deployment targets, server instances, etc.).
+	DataDir string
+	// Orchestrator executes before-launch tasks and starts the server.
+	Orchestrator LaunchOrchestrator
 }
 
 // NewServer creates a Server.
@@ -229,8 +241,8 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 			switch r.URL.Path {
 			case "/api/v1/health", "/api/v1/endpoints":
 				// Public, by contract.
-			case "/api/v1/events":
-				// WebSocket auth is handled inside handleEvents.
+			case "/api/v1/events", "/api/v1/search/stream":
+				// WebSocket auth is handled inside handleEvents / handleSearchStream.
 			default:
 				if subtle.ConstantTimeCompare([]byte(r.Header.Get("X-Kairo-Secret")), []byte(s.secret)) != 1 {
 					writeError(w, rid, cid, protocol.KairoError{
@@ -305,9 +317,16 @@ func (s *Server) routes() {
 	// specific path like /api/v1/workspaces/{ws}/java/launch-descriptor
 	// must be registered before the catch-all /api/v1/workspaces/.
 	s.router.HandleFunc("/api/v1/workspaces/{ws}/java/", s.handleWorkspacesJava)
+	// Versioned Tomcat Run/Debug configuration persistence.
+	s.router.HandleFunc("/api/v1/workspaces/{ws}/run-configurations", s.handleRunConfigurations)
+	s.router.HandleFunc("/api/v1/workspaces/{ws}/run-configurations/{configuration}", s.handleRunConfigurationByID)
+	s.router.HandleFunc("/api/v1/workspaces/{ws}/run-configurations/{configuration}/launch", s.handleRunConfigurationLaunch)
 	// Projects
 	s.router.HandleFunc("/api/v1/projects", s.handleProjects)
 	s.router.HandleFunc("/api/v1/projects/", s.handleProjectByID)
+	s.router.HandleFunc("/api/v1/projects/detect", s.handleProjectDetect)
+	s.router.HandleFunc("/api/v1/projects/import", s.handleProjectImportNew)
+	s.router.HandleFunc("/api/v1/projects/recent", s.handleProjectRecent)
 	// Toolchains
 	s.router.HandleFunc("/api/v1/toolchains", s.handleToolchains)
 	s.router.HandleFunc("/api/v1/toolchains/import", s.handleToolchainImport)
@@ -322,6 +341,7 @@ func (s *Server) routes() {
 	s.router.HandleFunc("/api/v1/servers/", s.handleServerSub)
 	// Search
 	s.router.HandleFunc("/api/v1/search", s.handleSearch)
+	s.router.HandleFunc("/api/v1/search/stream", s.handleSearchStream)
 	// Encoding
 	s.router.HandleFunc("/api/v1/encoding/detect", s.handleEncodingDetect)
 	s.router.HandleFunc("/api/v1/encoding/recode", s.handleEncodingRecode)
@@ -337,6 +357,17 @@ func (s *Server) routes() {
 	s.router.HandleFunc("/api/v1/jdtls", s.handleJDTLS)
 	// JDT project model generator for legacy projects.
 	s.router.HandleFunc("/api/v1/jdtls/project", s.handleJDTProject)
+	// Port diagnostics
+	s.router.HandleFunc("/api/v1/diagnostics/port", s.handlePortDiagnostics)
+	// Recovery - list recoverable servers
+	s.router.HandleFunc("/api/v1/servers/recoverable", s.handleRecoverableServers)
+	// Maven endpoints
+	s.router.HandleFunc("/api/v1/maven/detect", s.handleMavenDetect)
+	s.router.HandleFunc("/api/v1/maven/dependencies", s.handleMavenDependencies)
+	s.router.HandleFunc("/api/v1/maven/run", s.handleMavenRun)
+	// SQL — EXPERIMENTAL: Oracle 11g database operations
+	s.router.HandleFunc("/api/v1/sql/execute", s.handleSQLExecute)
+	s.router.HandleFunc("/api/v1/sql/test-connection", s.handleSQLTestConnection)
 }
 
 // doRestart performs the actual restart sequence after

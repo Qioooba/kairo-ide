@@ -1,0 +1,28 @@
+{
+  "name": "@kairo/test-extension",
+  "version": "0.1.0",
+  "description": "Kairo Test extension — JUnit test discovery, execution, and results view.",
+  "main": "lib/index.js",
+  "types": "lib/src/index.d.ts",
+  "files": [
+    "lib",
+    "src"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "clean": "rm -rf lib",
+    "lint": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@kairo/protocol": "workspace:*",
+    "@kairo/runtime-extension": "workspace:*",
+    "@kairo/project-extension": "workspace:*"
+  },
+  "peerDependencies": {
+    "@theia/core": "1.73.1"
+  },
+  "devDependencies": {
+    "@types/react": "18.3.1",
+    "typescript": "5.5.4"
+  }
+}

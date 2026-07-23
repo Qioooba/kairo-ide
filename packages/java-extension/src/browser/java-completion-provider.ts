@@ -12,7 +12,22 @@ import { ILogger } from '@theia/core/lib/common/logger';
 import { Disposable } from '@theia/core/lib/common/disposable';
 import { Emitter, Event } from '@theia/core/lib/common/event';
 import { JavaLanguageClient } from './java-language-client';
-import { LSPCompletionItem, LSPPublishDiagnosticsParams, LSPLocation } from '../common/lsp-protocol';
+import {
+  LSPCompletionItem,
+  LSPPublishDiagnosticsParams,
+  LSPLocation,
+  LSPHover,
+  LSPSignatureHelp,
+  LSPDocumentSymbolResult,
+  LSPWorkspaceSymbolResult,
+  LSPWorkspaceEdit,
+  LSPCodeActionResult,
+  LSPDiagnostic,
+  LSPRange,
+  LSPCodeLens,
+  LSPTextEdit,
+  LSPInlayHint,
+} from '../common/lsp-protocol';
 
 export interface JavaCompletionRequest {
   uri: string;
@@ -112,6 +127,75 @@ export class JavaCompletionProvider {
     } catch (err) {
       this.logger.warn(`[JavaCompletionProvider] definition failed: ${String(err)}`);
       return [];
+    }
+  }
+
+  async provideImplementation(uri: string, line: number, character: number): Promise<LSPLocation[]> {
+    const result = await this.whenReady('implementation', null, () => this.client.implementation({ uri, line, character }));
+    if (!result) return [];
+    return Array.isArray(result) ? result : [result];
+  }
+
+  async provideHover(uri: string, line: number, character: number): Promise<LSPHover | null> {
+    return this.whenReady('hover', null, () => this.client.hover({ uri, line, character }));
+  }
+
+  async provideReferences(uri: string, line: number, character: number, includeDeclaration: boolean): Promise<LSPLocation[]> {
+    return this.whenReady('references', [], () => this.client.references({ uri, line, character, includeDeclaration }));
+  }
+
+  async provideSignatureHelp(p: {
+    uri: string;
+    line: number;
+    character: number;
+    triggerKind?: 1 | 2 | 3;
+    triggerCharacter?: string;
+    isRetrigger?: boolean;
+  }): Promise<LSPSignatureHelp | null> {
+    return this.whenReady('signature help', null, () => this.client.signatureHelp(p));
+  }
+
+  async provideDocumentSymbols(uri: string): Promise<LSPDocumentSymbolResult> {
+    return this.whenReady('document symbols', null, () => this.client.documentSymbols(uri));
+  }
+
+  async provideWorkspaceSymbols(query: string): Promise<LSPWorkspaceSymbolResult> {
+    return this.whenReady('workspace symbols', null, () => this.client.workspaceSymbols(query));
+  }
+
+  async provideCodeActions(uri: string, range: LSPRange, diagnostics: LSPDiagnostic[], only?: string[]): Promise<LSPCodeActionResult> {
+    return this.whenReady('code actions', null, () => this.client.codeActions({ uri, range, diagnostics, only }));
+  }
+
+  async provideRename(uri: string, line: number, character: number, newName: string): Promise<LSPWorkspaceEdit | null> {
+    return this.whenReady('rename', null, () => this.client.rename({ uri, line, character, newName }));
+  }
+
+  async provideCodeLens(uri: string): Promise<LSPCodeLens[]> {
+    return this.whenReady('codeLens', [], () => this.client.codeLens(uri));
+  }
+
+  async provideFormatting(uri: string, options?: { tabSize?: number; insertSpaces?: boolean }): Promise<LSPTextEdit[]> {
+    return this.whenReady('formatting', [], () => this.client.formatting(uri, options));
+  }
+
+  async provideRangeFormatting(uri: string, range: LSPRange, options?: { tabSize?: number; insertSpaces?: boolean }): Promise<LSPTextEdit[]> {
+    return this.whenReady('range formatting', [], () => this.client.rangeFormatting(uri, range, options));
+  }
+
+  async provideInlayHints(uri: string, range?: LSPRange): Promise<LSPInlayHint[]> {
+    return this.whenReady('inlay hints', [], () => this.client.inlayHint(uri, range));
+  }
+
+  protected async whenReady<T>(feature: string, empty: T, request: () => Promise<T>): Promise<T> {
+    if (await this.client.fetchState() !== 'ready') {
+      return empty;
+    }
+    try {
+      return await request();
+    } catch (err) {
+      this.logger.warn(`[JavaCompletionProvider] ${feature} failed: ${String(err)}`);
+      return empty;
     }
   }
 

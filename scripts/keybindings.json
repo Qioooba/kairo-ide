@@ -1,0 +1,453 @@
+[
+  {
+    "command": "actions.find",
+    "keybinding": "ctrlcmd+f",
+    "when": "editorFocus",
+    "label": "Find in Editor"
+  },
+  {
+    "command": "core.redo",
+    "keybinding": "ctrlcmd+shift+z",
+    "when": "editorFocus",
+    "label": "Redo"
+  },
+  {
+    "command": "core.save",
+    "keybinding": "ctrlcmd+s",
+    "when": "editorFocus",
+    "label": "Save"
+  },
+  {
+    "command": "core.saveAll",
+    "keybinding": "ctrlcmd+k s",
+    "when": "",
+    "label": "Save All"
+  },
+  {
+    "command": "core.undo",
+    "keybinding": "ctrlcmd+z",
+    "when": "editorFocus",
+    "label": "Undo"
+  },
+  {
+    "command": "editor.action.blockComment",
+    "keybinding": "ctrlcmd+shift+/",
+    "when": "editorFocus",
+    "label": "Toggle Block Comment"
+  },
+  {
+    "command": "editor.action.clipboardCopyAction",
+    "keybinding": "ctrlcmd+c",
+    "when": "editorFocus",
+    "label": "Copy"
+  },
+  {
+    "command": "editor.action.clipboardCutAction",
+    "keybinding": "ctrlcmd+x",
+    "when": "editorFocus",
+    "label": "Cut"
+  },
+  {
+    "command": "editor.action.clipboardPasteAction",
+    "keybinding": "ctrlcmd+v",
+    "when": "editorFocus",
+    "label": "Paste"
+  },
+  {
+    "command": "editor.action.commentLine",
+    "keybinding": "ctrlcmd+/",
+    "when": "editorFocus",
+    "label": "Toggle Comment"
+  },
+  {
+    "command": "editor.action.copyLinesDownAction",
+    "keybinding": "shift+alt+down",
+    "when": "editorFocus",
+    "label": "Copy Line Down"
+  },
+  {
+    "command": "editor.action.copyLinesUpAction",
+    "keybinding": "shift+alt+up",
+    "when": "editorFocus",
+    "label": "Copy Line Up"
+  },
+  {
+    "command": "editor.action.deleteLines",
+    "keybinding": "ctrlcmd+shift+k",
+    "when": "editorFocus",
+    "label": "Delete Line"
+  },
+  {
+    "command": "editor.action.fontZoomIn",
+    "keybinding": "ctrlcmd+=",
+    "when": "editorFocus",
+    "label": "Zoom In"
+  },
+  {
+    "command": "editor.action.fontZoomOut",
+    "keybinding": "ctrlcmd+-",
+    "when": "editorFocus",
+    "label": "Zoom Out"
+  },
+  {
+    "command": "editor.action.fontZoomReset",
+    "keybinding": "ctrlcmd+0",
+    "when": "editorFocus",
+    "label": "Reset Zoom"
+  },
+  {
+    "command": "editor.action.formatDocument",
+    "keybinding": "shift+alt+f",
+    "when": "editorFocus",
+    "label": "Format Document"
+  },
+  {
+    "command": "editor.action.goToImplementation",
+    "keybinding": "ctrlcmd+f12",
+    "when": "editorFocus",
+    "label": "Go to Implementation"
+  },
+  {
+    "command": "editor.action.goToMatchingBracket",
+    "keybinding": "ctrlcmd+shift+\\",
+    "when": "editorFocus",
+    "label": "Go to Bracket"
+  },
+  {
+    "command": "editor.action.goToTypeDefinition",
+    "keybinding": "ctrlcmd+shift+f12",
+    "when": "editorFocus",
+    "label": "Go to Type Definition"
+  },
+  {
+    "command": "editor.action.indentLines",
+    "keybinding": "ctrlcmd+]",
+    "when": "editorFocus",
+    "label": "Indent"
+  },
+  {
+    "command": "editor.action.insertLineAfter",
+    "keybinding": "ctrlcmd+enter",
+    "when": "editorFocus",
+    "label": "Insert Line Below"
+  },
+  {
+    "command": "editor.action.insertLineBefore",
+    "keybinding": "ctrlcmd+shift+enter",
+    "when": "editorFocus",
+    "label": "Insert Line Above"
+  },
+  {
+    "command": "editor.action.marker.next",
+    "keybinding": "f8",
+    "when": "editorFocus",
+    "label": "Next Problem"
+  },
+  {
+    "command": "editor.action.marker.prev",
+    "keybinding": "shift+f8",
+    "when": "editorFocus",
+    "label": "Previous Problem"
+  },
+  {
+    "command": "editor.action.moveLinesDownAction",
+    "keybinding": "alt+down",
+    "when": "editorFocus",
+    "label": "Move Line Down"
+  },
+  {
+    "command": "editor.action.moveLinesUpAction",
+    "keybinding": "alt+up",
+    "when": "editorFocus",
+    "label": "Move Line Up"
+  },
+  {
+    "command": "editor.action.outdentLines",
+    "keybinding": "ctrlcmd+[",
+    "when": "editorFocus",
+    "label": "Outdent"
+  },
+  {
+    "command": "editor.action.peekDefinition",
+    "keybinding": "alt+f12",
+    "when": "editorFocus",
+    "label": "Peek Definition"
+  },
+  {
+    "command": "editor.action.quickFix",
+    "keybinding": "ctrlcmd+.",
+    "when": "editorFocus",
+    "label": "Quick Fix"
+  },
+  {
+    "command": "editor.action.referenceSearch.trigger",
+    "keybinding": "shift+f12",
+    "when": "editorFocus",
+    "label": "Find References"
+  },
+  {
+    "command": "editor.action.rename",
+    "keybinding": "f2",
+    "when": "editorFocus",
+    "label": "Rename Symbol"
+  },
+  {
+    "command": "editor.action.revealDeclaration",
+    "keybinding": "ctrlcmd+f12",
+    "when": "editorFocus",
+    "label": "Go to Declaration"
+  },
+  {
+    "command": "editor.action.revealDefinition",
+    "keybinding": "f12",
+    "when": "editorFocus",
+    "label": "Go to Definition"
+  },
+  {
+    "command": "editor.action.selectAll",
+    "keybinding": "ctrlcmd+a",
+    "when": "editorFocus",
+    "label": "Select All"
+  },
+  {
+    "command": "editor.action.showHover",
+    "keybinding": "ctrlcmd+k ctrlcmd+i",
+    "when": "editorFocus",
+    "label": "Show Hover"
+  },
+  {
+    "command": "editor.action.startFindReplaceAction",
+    "keybinding": "ctrlcmd+h",
+    "when": "editorFocus",
+    "label": "Find and Replace in Editor"
+  },
+  {
+    "command": "editor.action.toggleWordWrap",
+    "keybinding": "alt+z",
+    "when": "editorFocus",
+    "label": "Toggle Word Wrap"
+  },
+  {
+    "command": "editor.action.triggerParameterHints",
+    "keybinding": "ctrlcmd+shift+space",
+    "when": "editorFocus",
+    "label": "Parameter Hints"
+  },
+  {
+    "command": "editor.action.triggerSuggest",
+    "keybinding": "ctrlcmd+space",
+    "when": "editorFocus",
+    "label": "Trigger Suggest"
+  },
+  {
+    "command": "editor.debug.action.toggleBreakpoint",
+    "keybinding": "f9",
+    "when": "editorFocus",
+    "label": "Toggle Breakpoint"
+  },
+  {
+    "command": "git.commit",
+    "keybinding": "ctrlcmd+enter",
+    "when": "scmInputFocus",
+    "label": "Commit"
+  },
+  {
+    "command": "git.stage",
+    "keybinding": "ctrlcmd+shift+a g",
+    "when": "scmViewletFocus",
+    "label": "Stage"
+  },
+  {
+    "command": "git.stageAll",
+    "keybinding": "ctrlcmd+shift+a a",
+    "when": "scmViewletFocus",
+    "label": "Stage All"
+  },
+  {
+    "command": "java.action.organizeImports",
+    "keybinding": "shift+alt+o",
+    "when": "editorFocus",
+    "label": "Organize Imports"
+  },
+  {
+    "command": "java.action.refactor.extractMethod",
+    "keybinding": "ctrlcmd+shift+alt+m",
+    "when": "editorFocus",
+    "label": "Extract Method"
+  },
+  {
+    "command": "java.action.safeDelete",
+    "keybinding": "alt+delete",
+    "when": "editorFocus",
+    "label": "Safe Delete"
+  },
+  {
+    "command": "kairo.find.symbol",
+    "keybinding": "ctrlcmd+alt+shift+n",
+    "when": "",
+    "file": "packages/search-extension/src/browser/find-symbol-contribution.ts",
+    "label": "kairo.find.symbol"
+  },
+  {
+    "command": "keybindings:open",
+    "keybinding": "ctrlcmd+k ctrlcmd+s",
+    "when": "",
+    "label": "Open Keyboard Shortcuts"
+  },
+  {
+    "command": "references-view.showCallHierarchy",
+    "keybinding": "shift+alt+h",
+    "when": "editorFocus",
+    "label": "Show Call Hierarchy"
+  },
+  {
+    "command": "references-view.showTypeHierarchy",
+    "keybinding": "shift+alt+t",
+    "when": "editorFocus",
+    "label": "Show Type Hierarchy"
+  },
+  {
+    "command": "search.action.openSearch",
+    "keybinding": "ctrlcmd+shift+f",
+    "when": "",
+    "label": "Search in Workspace"
+  },
+  {
+    "command": "search.action.replaceAll",
+    "keybinding": "ctrlcmd+shift+h",
+    "when": "searchViewletFocus",
+    "label": "Replace in Workspace"
+  },
+  {
+    "command": "workbench.action.closeActiveEditor",
+    "keybinding": "ctrlcmd+w",
+    "when": "",
+    "label": "Close Active Editor"
+  },
+  {
+    "command": "workbench.action.closeAllEditors",
+    "keybinding": "ctrlcmd+k ctrlcmd+w",
+    "when": "",
+    "label": "Close All Editors"
+  },
+  {
+    "command": "workbench.action.debug.configure",
+    "keybinding": "ctrlcmd+shift+d",
+    "when": "",
+    "label": "Show Debug View"
+  },
+  {
+    "command": "workbench.action.debug.continue",
+    "keybinding": "f5",
+    "when": "inDebugMode",
+    "label": "Continue"
+  },
+  {
+    "command": "workbench.action.debug.pause",
+    "keybinding": "f6",
+    "when": "inDebugMode",
+    "label": "Pause"
+  },
+  {
+    "command": "workbench.action.debug.restart",
+    "keybinding": "ctrlcmd+shift+f5",
+    "when": "",
+    "label": "Restart Debugging"
+  },
+  {
+    "command": "workbench.action.debug.start",
+    "keybinding": "f5",
+    "when": "",
+    "label": "Start Debugging"
+  },
+  {
+    "command": "workbench.action.debug.stepInto",
+    "keybinding": "f11",
+    "when": "inDebugMode",
+    "label": "Step Into"
+  },
+  {
+    "command": "workbench.action.debug.stepOut",
+    "keybinding": "shift+f11",
+    "when": "inDebugMode",
+    "label": "Step Out"
+  },
+  {
+    "command": "workbench.action.debug.stepOver",
+    "keybinding": "f10",
+    "when": "inDebugMode",
+    "label": "Step Over"
+  },
+  {
+    "command": "workbench.action.debug.stop",
+    "keybinding": "shift+f5",
+    "when": "inDebugMode",
+    "label": "Stop Debugging"
+  },
+  {
+    "command": "workbench.action.navigateBack",
+    "keybinding": "ctrlcmd+alt+-",
+    "when": "",
+    "label": "Navigate Back"
+  },
+  {
+    "command": "workbench.action.navigateForward",
+    "keybinding": "ctrlcmd+shift+-",
+    "when": "",
+    "label": "Navigate Forward"
+  },
+  {
+    "command": "workbench.action.quickOpen",
+    "keybinding": "ctrlcmd+p",
+    "when": "",
+    "label": "Quick Open"
+  },
+  {
+    "command": "workbench.action.reopenClosedEditor",
+    "keybinding": "ctrlcmd+shift+t",
+    "when": "",
+    "label": "Reopen Closed Editor"
+  },
+  {
+    "command": "workbench.action.showCommands",
+    "keybinding": "ctrlcmd+shift+p",
+    "when": "",
+    "label": "Command Palette"
+  },
+  {
+    "command": "workbench.action.terminal.toggleTerminal",
+    "keybinding": "ctrlcmd+`",
+    "when": "",
+    "label": "Toggle Terminal"
+  },
+  {
+    "command": "workbench.action.toggleMaximizedPanel",
+    "keybinding": "ctrlcmd+shift+enter",
+    "when": "",
+    "label": "Toggle Maximized Panel"
+  },
+  {
+    "command": "workbench.action.togglePanel",
+    "keybinding": "ctrlcmd+j",
+    "when": "",
+    "label": "Toggle Panel"
+  },
+  {
+    "command": "workbench.action.toggleSidebar",
+    "keybinding": "ctrlcmd+b",
+    "when": "",
+    "label": "Toggle Sidebar"
+  },
+  {
+    "command": "workspace:open",
+    "keybinding": "ctrlcmd+o",
+    "when": "",
+    "label": "Open Workspace"
+  },
+  {
+    "command": "workspace:openFile",
+    "keybinding": "ctrlcmd+o",
+    "when": "",
+    "label": "Open File"
+  }
+]

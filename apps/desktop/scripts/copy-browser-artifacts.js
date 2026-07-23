@@ -11,6 +11,7 @@
  *
  *   node apps/desktop/scripts/copy-browser-artifacts.js
  *   node apps/desktop/scripts/copy-browser-artifacts.js --dry-run
+ *   node apps/desktop/scripts/copy-browser-artifacts.js --strict
  *
  * Layout after copy:
  *   apps/desktop/lib/frontend/  <- apps/browser/lib/frontend/
@@ -26,6 +27,7 @@ const fs = require('fs');
 const path = require('path');
 
 const DRY_RUN = process.argv.includes('--dry-run');
+const STRICT = process.argv.includes('--strict');
 
 const SCRIPT_DIR = __dirname;
 const DESKTOP_PKG_DIR = path.resolve(SCRIPT_DIR, '..');
@@ -77,6 +79,18 @@ function main() {
   const mode = DRY_RUN ? 'dry-run' : 'copy';
   log(`mode=${mode}`);
   log(`repo root: ${REPO_ROOT}`);
+
+  if (STRICT) {
+    for (const source of [BROWSER_FRONTEND_SRC, BROWSER_BACKEND_SRC]) {
+      if (!fs.existsSync(source) || fs.readdirSync(source).length === 0) {
+        throw new Error(`strict mode requires a non-empty browser build output: ${source}`);
+      }
+    }
+    if (!DRY_RUN) {
+      fs.rmSync(DESKTOP_FRONTEND_DST, { recursive: true, force: true });
+      fs.rmSync(DESKTOP_BACKEND_DST, { recursive: true, force: true });
+    }
+  }
 
   log(`frontend: ${BROWSER_FRONTEND_SRC} -> ${DESKTOP_FRONTEND_DST}`);
   const fe = copyRecursive(BROWSER_FRONTEND_SRC, DESKTOP_FRONTEND_DST);

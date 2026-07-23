@@ -2,12 +2,77 @@ package build
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestCompilerTimeoutTerminatesManagedProcessTree(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell fixture; Windows tree termination is covered by proc_windows tests")
+	}
+	javaHome := t.TempDir()
+	binDir := filepath.Join(javaHome, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	javac := filepath.Join(binDir, "javac")
+	if err := os.WriteFile(javac, []byte("#!/bin/sh\nsleep 30 &\nwait\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	project := t.TempDir()
+	source := filepath.Join(project, "Slow.java")
+	if err := os.WriteFile(source, []byte("class Slow {}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	started := time.Now()
+	_, err := New(javaHome).Compile(context.Background(), Request{
+		ProjectRoot: project,
+		Sources:     []string{source},
+		Timeout:     150 * time.Millisecond,
+	})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Compile error = %v, want deadline exceeded", err)
+	}
+	if elapsed := time.Since(started); elapsed > 3*time.Second {
+		t.Fatalf("timeout took %s; compiler process tree was not stopped promptly", elapsed)
+	}
+}
+
+func TestJavacArgFileThresholdAndEscaping(t *testing.T) {
+	root := t.TempDir()
+	sources := make([]string, 60)
+	for i := range sources {
+		sources[i] = filepath.Join(root, `src folder`, `A"B.java`)
+	}
+	if runtime.GOOS == "windows" && !shouldUseJavacArgFile(nil, sources) {
+		t.Fatal("Windows builds with many sources must use an argfile")
+	}
+	name, err := writeJavacArgFile(root, sources[:1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(name)
+	info, err := os.Stat(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm()&0o077 != 0 {
+		t.Fatalf("argfile permissions = %o, want owner-only", info.Mode().Perm())
+	}
+	data, err := os.ReadFile(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(string(data), `"`) || !strings.Contains(string(data), `\"`) {
+		t.Fatalf("argfile path is not safely quoted: %q", data)
+	}
+}
 
 // TestCompiler_RealJavac uses the system javac to compile a
 // trivial Hello.java. Skipped if no javac on PATH.

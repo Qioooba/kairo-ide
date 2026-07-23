@@ -69,6 +69,7 @@ export type KairoErrorCode =
   | 'compile_failed'
   | 'deploy_failed'
   | 'debug_attach_failed'
+  | 'cancelled'
   | 'timeout'
   | 'plugin_crashed'
   | 'unsupported';
@@ -200,6 +201,87 @@ export interface ProjectConfig {
   };
 }
 
+/** Create-only import payload; paths are relative to rootPath unless stated. */
+export interface ProjectImportRequest {
+  id: string;
+  workspaceId: string;
+  name: string;
+  /** Absolute selected project root; the agent confines it to the workspace. */
+  rootPath: string;
+  sourceRoots: string[];
+  resourceRoots: string[];
+  webappDir: string;
+  outputDir: string;
+  buildFile?: string;
+  buildTargets?: string[];
+  sourceLevel: '1.5' | '1.6' | '1.7' | '1.8';
+  targetLevel: '1.5' | '1.6' | '1.7' | '1.8';
+  encoding: EncodingId;
+  buildTool: 'ant' | 'javac';
+  contextPath: string;
+  toolchainId?: string;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Run configurations                                                 */
+/* ------------------------------------------------------------------ */
+
+export const RUN_CONFIGURATION_VERSION = 1 as const;
+
+export type TomcatLaunchMode = 'run' | 'debug';
+export type BeforeLaunchTask = 'build' | 'deploy';
+
+export type RunConfigurationBuild =
+  | { type: 'ant'; target: string; clean: boolean }
+  | { type: 'javac'; clean: boolean }
+  | { type: 'custom'; command: string; clean: boolean };
+
+export interface RunConfigurationDeploy {
+  mode: 'exploded' | 'war';
+  /** Path relative to the configuration's project root. */
+  artifact: string;
+}
+
+export interface TomcatRunConfiguration {
+  /** Stable identifier used by persistence and toolbar selection. */
+  id: string;
+  name: string;
+  type: 'tomcat6';
+  projectId: string;
+  mode: TomcatLaunchMode;
+  /** Only meaningful for Debug; must be false for Run. */
+  suspend: boolean;
+  jdkRef: string;
+  build: RunConfigurationBuild;
+  server: {
+    /** Stable reference to a saved Tomcat server definition. */
+    id: string;
+    httpPort: number;
+    debugPort: number;
+    contextPath: string;
+  };
+  deploy: RunConfigurationDeploy;
+  /** Plain values or `${env:HOST_NAME}` references; secrets must use references. */
+  env: Record<string, string>;
+  vmOptions: string[];
+  /** Ordered, unique tasks executed before the server starts. */
+  beforeLaunchTasks: BeforeLaunchTask[];
+}
+
+/** Persisted project-level document (`.legacyflow/run-configurations.json`). */
+export interface RunConfigurationDocument {
+  version: typeof RUN_CONFIGURATION_VERSION;
+  configurations: TomcatRunConfiguration[];
+  /** Null only when configurations is empty. */
+  selectedConfigurationId: string | null;
+}
+
+/** Non-sensitive control for launching a persisted configuration. */
+export interface RunConfigurationLaunchRequest {
+  /** Must match the persisted configuration; prevents accidental Run/Debug inversion. */
+  mode: TomcatLaunchMode;
+}
+
 export interface ToolchainRef {
   /** Either 'auto' (let the agent pick) or a known toolchain id. */
   toolchainId: string;
@@ -244,6 +326,14 @@ export interface ServerInstance {
   };
 }
 
+export interface PortDiagnostics {
+  port: number;
+  occupied: boolean;
+  pid?: number;
+  processName?: string;
+  suggestion?: string;
+}
+
 export interface StartBuildRequest {
   projectId: string;
   clean?: boolean;
@@ -255,23 +345,32 @@ export interface StartDeploymentRequest {
   projectId: string;
   buildId: string;
   scope: 'all' | 'classes' | 'webapp' | 'resources';
+  intent?: 'publish-static-changes';
 }
 
 export interface StartServerRequest {
   projectId: string;
+  /** Start Tomcat with a local JDWP listener. */
+  debug?: boolean;
 }
 
 export interface BuildResult {
   id: string;
   state: 'queued' | 'running' | 'success' | 'failure' | 'cancelled';
+  /** Correlates the HTTP request, persisted result and redacted Agent logs. */
+  traceId?: string;
   startedAt: string;
   finishedAt?: string;
   /** Structured diagnostics. */
-  diagnostics: BuildDiagnostic[];
+  diagnostics: BuildDiagnostic[] | null;
   /** Output of stdout, truncated. */
   output: string;
+  error?: string;
+  exitCode?: number;
+  filesCompiled?: number;
+  elapsedMs?: number;
   /** Counts for the UI. */
-  summary: { errors: number; warnings: number; filesCompiled: number };
+  summary?: { errors: number; warnings: number; filesCompiled: number } | null;
 }
 
 export interface BuildDiagnostic {
@@ -338,6 +437,17 @@ export interface SearchResponse {
   elapsedMs: number;
   /** Files that errored during read. */
   erroredFiles: { file: string; reason: string }[];
+}
+
+/** Streamed search result event sent over WebSocket. */
+export interface SearchStreamEvent {
+  kind: 'searchStream';
+  taskId: string;
+  batch: SearchMatch[];
+  batchIndex: number;
+  total: number;
+  done: boolean;
+  error?: string;
 }
 
 export interface EncodingDetectRequest {
@@ -540,8 +650,40 @@ export interface EndpointMap {
   };
   'DELETE /api/v1/workspaces/{workspaceId}': { request: undefined; response: void };
   'POST /api/v1/workspaces/{workspaceId}/scan': {
-    request: { deep?: boolean };
+    request: { deep?: boolean; rootPath?: string };
     response: { detected: DetectedProjectLayout[] };
+  };
+  'POST /api/v1/workspaces/{workspaceId}/projects/import': {
+    request: ProjectImportRequest;
+    response: ProjectConfig;
+  };
+  'GET /api/v1/workspaces/{workspaceId}/run-configurations': {
+    request: undefined;
+    response: RunConfigurationDocument;
+  };
+  'POST /api/v1/workspaces/{workspaceId}/run-configurations': {
+    request: TomcatRunConfiguration;
+    response: RunConfigurationDocument;
+  };
+  'PUT /api/v1/workspaces/{workspaceId}/run-configurations': {
+    request: RunConfigurationDocument;
+    response: RunConfigurationDocument;
+  };
+  'GET /api/v1/workspaces/{workspaceId}/run-configurations/{configurationId}': {
+    request: undefined;
+    response: TomcatRunConfiguration;
+  };
+  'PUT /api/v1/workspaces/{workspaceId}/run-configurations/{configurationId}': {
+    request: TomcatRunConfiguration;
+    response: RunConfigurationDocument;
+  };
+  'DELETE /api/v1/workspaces/{workspaceId}/run-configurations/{configurationId}': {
+    request: undefined;
+    response: RunConfigurationDocument;
+  };
+  'POST /api/v1/workspaces/{workspaceId}/run-configurations/{configurationId}/launch': {
+    request: RunConfigurationLaunchRequest;
+    response: ServerInstance;
   };
   'POST /api/v1/workspaces/{workspaceId}/java/prepare': {
     request: { projectId: string };
@@ -573,8 +715,8 @@ export interface EndpointMap {
   'POST /api/v1/servers/{serverId}/debug': { request: undefined; response: ServerInstance };
   'DELETE /api/v1/servers/{serverId}': { request: { force?: boolean }; response: ServerInstance };
   'GET /api/v1/servers/{serverId}/logs': {
-    request: { follow?: boolean; since?: number };
-    response: { line: string; ts: string }[];
+    request: { follow?: boolean; since?: number; tail?: number };
+    response: { line: string; ts: string; stream?: 'stdout' | 'stderr' | 'structured'; source?: string; ordinal?: number }[];
   };
   // Search
   'POST /api/v1/search': { request: SearchRequest; response: SearchResponse };
@@ -598,6 +740,19 @@ export interface EndpointMap {
   'POST /api/v1/encoding/detect': { request: EncodingDetectRequest; response: EncodingDetectResponse };
   'POST /api/v1/encoding/recode': { request: EncodingRecodeRequest; response: EncodingRecodeResponse };
   'POST /api/v1/encoding/validate': { request: EncodingValidateRequest; response: EncodingValidateResponse };
+  // Project Detection & Import
+  'POST /api/v1/projects/detect': { request: { rootPath: string }; response: ProjectDetection };
+  'POST /api/v1/projects/import': { request: ProjectImportConfirmRequest; response: ProjectConfig };
+  'GET /api/v1/projects/recent': { request: undefined; response: RecentProject[] };
+  // Diagnostics
+  'GET /api/v1/diagnostics/port': { request: { port: number }; response: PortDiagnostics };
+  // Recovery
+  'GET /api/v1/servers/recoverable': { request: undefined; response: ServerInstance[] };
+  'POST /api/v1/servers/{serverId}/recover': { request: undefined; response: ServerInstance };
+  // Maven
+  'POST /api/v1/maven/detect': { request: { rootPath: string }; response: MavenDetectResult };
+  'GET /api/v1/maven/dependencies': { request: { rootPath: string; offline?: boolean }; response: MavenDetectResult };
+  'POST /api/v1/maven/run': { request: { rootPath: string; task: string; offline?: boolean }; response: MavenRunResult };
 }
 
 export interface DetectedProjectLayout {
@@ -621,6 +776,106 @@ export interface DetectedProjectLayout {
   warnings: string[];
 }
 
+/** Result of auto-detecting a legacy Java web project structure. */
+export interface ProjectDetection {
+  sourceDirs: string[];
+  webRoot: string;
+  libDirs: string[];
+  buildScript: string;
+  defaultEncoding: EncodingId;
+  jdkVersion: string;
+  sourceVersion: string;
+  targetVersion: string;
+  outputDir: string;
+  buildSystem: string;
+  confidence: number;
+  warnings: string[];
+}
+
+/** Request to import a project with confirmed configuration. */
+export interface ProjectImportConfirmRequest {
+  workspaceId: string;
+  /** Absolute project root path. */
+  rootPath: string;
+  name: string;
+  sourceDirs: string[];
+  webRoot: string;
+  libDirs: string[];
+  buildScript: string;
+  defaultEncoding: EncodingId;
+  jdkVersion: string;
+  sourceVersion: string;
+  targetVersion: string;
+  outputDir: string;
+  buildTool: 'ant' | 'javac';
+  contextPath: string;
+}
+
+/** Recent project entry for the welcome page. */
+export interface RecentProject {
+  id: string;
+  name: string;
+  rootPath: string;
+  lastOpenedAt: string;
+}
+
+// Maven types
+
+export interface MavenProject {
+  groupId: string;
+  artifactId: string;
+  version: string;
+  packaging: string;
+  name: string;
+  description: string;
+  dependencies: MavenDependency[];
+  buildDir: string;
+  outputDir: string;
+}
+
+export interface MavenDependency {
+  groupId: string;
+  artifactId: string;
+  version: string;
+  scope: string;
+  optional: boolean;
+  type: string;
+}
+
+export interface MavenDependencyTreeNode {
+  groupId: string;
+  artifactId: string;
+  version: string;
+  scope: string;
+  optional: boolean;
+  type: string;
+  children?: MavenDependencyTreeNode[];
+}
+
+export interface MavenLifecycleTask {
+  id: string;
+  label: string;
+  description: string;
+  phase: string;
+}
+
+export interface MavenDetectResult {
+  found: boolean;
+  project?: MavenProject;
+  tasks: MavenLifecycleTask[];
+  dependencies: MavenDependency[];
+  tree?: MavenDependencyTreeNode[];
+  warnings: string[];
+}
+
+export interface MavenRunResult {
+  task: string;
+  success: boolean;
+  exitCode: number;
+  output: string;
+  error?: string;
+}
+
 export type Endpoint = keyof EndpointMap;
 export type RequestFor<E extends Endpoint> = RequestEnvelope<EndpointMap[E]['request']>;
 export type ResponseFor<E extends Endpoint> = EndpointMap[E]['response'];
@@ -630,7 +885,7 @@ export type ResponseFor<E extends Endpoint> = EndpointMap[E]['response'];
 /* ------------------------------------------------------------------ */
 
 export type WsEvent =
-  | { type: 'log'; serverId: string; line: string; ts: string }
+  | { type: 'log'; serverId: string; line: string; ts: string; stream?: 'stdout' | 'stderr' | 'structured'; source?: string; ordinal?: number }
   | { type: 'build.progress'; buildId: string; state: BuildResult['state']; currentFile?: string }
   | {
       type: 'deployment.progress';

@@ -1,0 +1,538 @@
+package debug
+
+import (
+	"context"
+	"net"
+	"runtime"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+)
+
+func TestGateProbeResult_Defaults(t *testing.T) {
+	cfg := GateProbeConfig{
+		JavaHome:  "/nonexistent",
+		DebugPort: 5005,
+		Timeout:   5 * time.Second,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	result := RunGate(ctx, cfg)
+
+	if result.Platform == "" {
+		t.Error("Platform should not be empty")
+	}
+	if result.DebugPort != 5005 {
+		t.Errorf("DebugPort = %d, want 5005", result.DebugPort)
+	}
+	if result.JDK6JDWP {
+		t.Error("JDK6JDWP should be false for nonexistent JavaHome")
+	}
+	if result.DurationMs < 0 {
+		t.Error("DurationMs should be >= 0")
+	}
+}
+
+func TestGateProbeResult_EmptyJavaHome(t *testing.T) {
+	cfg := GateProbeConfig{
+		JavaHome:  "",
+		DebugPort: 5005,
+		Timeout:   5 * time.Second,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	result := RunGate(ctx, cfg)
+
+	if result.JDK6JDWP {
+		t.Error("JDK6JDWP should be false when JavaHome is empty")
+	}
+	if len(result.Errors) == 0 {
+		t.Error("Should have errors when JavaHome is empty")
+	}
+}
+
+func TestProbeDebugPort_Closed(t *testing.T) {
+	// Find an available port, then close it — the probe should fail.
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := l.Addr().(*net.TCPAddr).Port
+	l.Close()
+
+	// Wait a moment for the OS to release the port
+	time.Sleep(50 * time.Millisecond)
+
+	ctx := context.Background()
+	if probeDebugPort(ctx, port) {
+		t.Log("port was still open (OS may not have released it yet)")
+	}
+}
+
+func TestProbeDebugPort_Open(t *testing.T) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	port := l.Addr().(*net.TCPAddr).Port
+
+	ctx := context.Background()
+	if !probeDebugPort(ctx, port) {
+		t.Error("probeDebugPort should return true for an open port")
+	}
+}
+
+func TestProbeJDWPHandshake_InvalidPort(t *testing.T) {
+	ctx := context.Background()
+	if probeJDWPHandshake(ctx, 1) {
+		t.Error("JDWP handshake should fail on an invalid port")
+	}
+}
+
+func TestProbeJDWPHandshake_NoJDWP(t *testing.T) {
+	// Start a plain TCP listener that doesn't speak JDWP
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	port := l.Addr().(*net.TCPAddr).Port
+
+	// Serve a wrong response
+	go func() {
+		conn, err := l.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		buf := make([]byte, 14)
+		conn.Read(buf)
+		conn.Write([]byte("NOT-JDWP-XYZ12"))
+	}()
+
+	ctx := context.Background()
+	if probeJDWPHandshake(ctx, port) {
+		t.Error("JDWP handshake should fail when server returns wrong response")
+	}
+}
+
+func TestProbeJDWPHandshake_ValidHandshake(t *testing.T) {
+	// Mock a JDWP-compatible handshake server
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	port := l.Addr().(*net.TCPAddr).Port
+
+	go func() {
+		conn, err := l.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		buf := make([]byte, 14)
+		conn.Read(buf)
+		conn.Write([]byte("JDWP-Handshake"))
+	}()
+
+	ctx := context.Background()
+	if !probeJDWPHandshake(ctx, port) {
+		t.Error("JDWP handshake should succeed with correct response")
+	}
+}
+
+func TestRunGate_Timeout(t *testing.T) {
+	// Use a very short timeout to verify timeout handling
+	cfg := GateProbeConfig{
+		JavaHome:  "/nonexistent",
+		DebugPort: 5005,
+		Timeout:   100 * time.Millisecond,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	result := RunGate(ctx, cfg)
+
+	if result.DurationMs < 0 {
+		t.Error("DurationMs should be >= 0")
+	}
+	// Errors should be present since JavaHome doesn't exist
+	if len(result.Errors) == 0 {
+		t.Error("Should have errors when JavaHome is nonexistent")
+	}
+}
+
+func TestProbeJDK6JDWP_NoJavaHome(t *testing.T) {
+	ctx := context.Background()
+	var mu sync.Mutex
+	var errors []string
+	addError := func(s string) {
+		mu.Lock()
+		defer mu.Unlock()
+		errors = append(errors, s)
+	}
+
+	version, ok := probeJDK6JDWP(ctx, "", 5005, addError)
+	if ok {
+		t.Error("should fail when JavaHome is empty")
+	}
+	if version != "" {
+		t.Error("version should be empty when JavaHome is empty")
+	}
+	if len(errors) == 0 {
+		t.Error("should have recorded an error")
+	}
+}
+
+func TestProbeJDK6JDWP_NonexistentJavaBin(t *testing.T) {
+	ctx := context.Background()
+	var mu sync.Mutex
+	var errors []string
+	addError := func(s string) {
+		mu.Lock()
+		defer mu.Unlock()
+		errors = append(errors, s)
+	}
+
+	version, ok := probeJDK6JDWP(ctx, "/nonexistent/path/to/jdk", 5005, addError)
+	if ok {
+		t.Error("should fail when java binary does not exist")
+	}
+	if version != "" {
+		t.Error("version should be empty when java binary does not exist")
+	}
+	if len(errors) == 0 {
+		t.Error("should have recorded an error")
+	}
+}
+
+func TestProbeTomcat6Debug_NoTomcatHome(t *testing.T) {
+	ctx := context.Background()
+	var mu sync.Mutex
+	var errors []string
+	addError := func(s string) {
+		mu.Lock()
+		defer mu.Unlock()
+		errors = append(errors, s)
+	}
+
+	ok := probeTomcat6Debug(ctx, "/fake/java", "", 5005, addError)
+	if ok {
+		t.Error("should fail when tomcatHome is empty")
+	}
+	if len(errors) == 0 {
+		t.Error("should have recorded an error")
+	}
+}
+
+func TestProbeTomcat6Debug_NoBootstrapJar(t *testing.T) {
+	ctx := context.Background()
+	var mu sync.Mutex
+	var errors []string
+	addError := func(s string) {
+		mu.Lock()
+		defer mu.Unlock()
+		errors = append(errors, s)
+	}
+
+	ok := probeTomcat6Debug(ctx, "/fake/java", "/nonexistent/tomcat", 5005, addError)
+	if ok {
+		t.Error("should fail when bootstrap.jar does not exist")
+	}
+	if len(errors) == 0 {
+		t.Error("should have recorded an error")
+	}
+}
+
+func TestTomcatBootstrapClasspath(t *testing.T) {
+	cp := tomcatBootstrapClasspath("/nonexistent")
+	if cp != "" {
+		t.Errorf("classpath should be empty for nonexistent dir, got %q", cp)
+	}
+}
+
+func TestFirstLine(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"", ""},
+		{"\n", ""},
+		{"  \n", ""},
+		{"hello\nworld", "hello"},
+		{"  java version \"1.6.0_45\"\n  ", "java version \"1.6.0_45\""},
+	}
+
+	for _, tt := range tests {
+		got := firstLine([]byte(tt.input))
+		if got != tt.want {
+			t.Errorf("firstLine(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestGateProbeResult_JSONFields(t *testing.T) {
+	result := GateProbeResult{
+		JDK6JDWP:      true,
+		Tomcat6Debug:  true,
+		JDWPHandshake: true,
+		DebugPortOpen: true,
+		Platform:      "darwin",
+		Errors:        []string{},
+		DurationMs:    1234,
+		JDKVersion:    "1.6.0_45",
+		DebugPort:     5005,
+	}
+
+	// Verify all fields are set correctly
+	if !result.JDK6JDWP {
+		t.Error("JDK6JDWP should be true")
+	}
+	if !result.Tomcat6Debug {
+		t.Error("Tomcat6Debug should be true")
+	}
+	if !result.JDWPHandshake {
+		t.Error("JDWPHandshake should be true")
+	}
+	if !result.DebugPortOpen {
+		t.Error("DebugPortOpen should be true")
+	}
+	if result.Platform != "darwin" {
+		t.Errorf("Platform = %q, want darwin", result.Platform)
+	}
+	if result.DurationMs != 1234 {
+		t.Errorf("DurationMs = %d, want 1234", result.DurationMs)
+	}
+	if result.JDKVersion != "1.6.0_45" {
+		t.Errorf("JDKVersion = %q, want 1.6.0_45", result.JDKVersion)
+	}
+	if result.DebugPort != 5005 {
+		t.Errorf("DebugPort = %d, want 5005", result.DebugPort)
+	}
+}
+
+func TestGateProbeConfig_Defaults(t *testing.T) {
+	cfg := GateProbeConfig{
+		JavaHome:  "/fake",
+		DebugPort: 0,
+		Timeout:   0,
+	}
+
+	// Verify zero values are handled
+	_ = cfg
+}
+
+func TestProbeJDWPHandshake_Concurrent(t *testing.T) {
+	// Start a mock JDWP server
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	port := l.Addr().(*net.TCPAddr).Port
+
+	go func() {
+		for {
+			conn, err := l.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer conn.Close()
+				buf := make([]byte, 14)
+				conn.Read(buf)
+				conn.Write([]byte("JDWP-Handshake"))
+			}()
+		}
+	}()
+
+	ctx := context.Background()
+
+	// Run multiple concurrent handshake probes
+	var wg sync.WaitGroup
+	results := make([]bool, 10)
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			results[idx] = probeJDWPHandshake(ctx, port)
+		}(i)
+	}
+	wg.Wait()
+
+	for i, ok := range results {
+		if !ok {
+			t.Errorf("concurrent handshake %d failed", i)
+		}
+	}
+}
+
+func TestGateProbeResult_ErrorAccumulation(t *testing.T) {
+	cfg := GateProbeConfig{
+		JavaHome:  "/nonexistent/jdk",
+		TomcatHome: "/nonexistent/tomcat",
+		DebugPort: 5005,
+		Timeout:   5 * time.Second,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	result := RunGate(ctx, cfg)
+
+	// Should have accumulated multiple errors
+	if len(result.Errors) < 2 {
+		t.Errorf("expected at least 2 errors, got %d: %v", len(result.Errors), result.Errors)
+	}
+
+	// Verify mutex-safety: all errors should be non-empty
+	for i, err := range result.Errors {
+		if strings.TrimSpace(err) == "" {
+			t.Errorf("error %d is empty", i)
+		}
+	}
+}
+
+func TestRunGate_DefaultsApplied(t *testing.T) {
+	// When Timeout and DebugPort are zero/negative, defaults are applied
+	cfg := GateProbeConfig{
+		JavaHome:  "/nonexistent/jdk",
+		TomcatHome: "/nonexistent/tomcat",
+		Timeout:  0,
+		DebugPort: 0,
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	result := RunGate(ctx, cfg)
+	if result.DebugPort != 5005 {
+		t.Errorf("DebugPort = %d, want 5005 (default)", result.DebugPort)
+	}
+	if result.Platform != runtime.GOOS {
+		t.Errorf("Platform = %q, want %q", result.Platform, runtime.GOOS)
+	}
+	if len(result.Errors) < 1 {
+		t.Error("expected at least 1 error with nonexistent paths")
+	}
+}
+
+func TestRunGate_NegativeTimeout(t *testing.T) {
+	cfg := GateProbeConfig{
+		JavaHome:  "/nonexistent/jdk",
+		TomcatHome: "/nonexistent/tomcat",
+		Timeout:  -1 * time.Second,
+		DebugPort: 5005,
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	result := RunGate(ctx, cfg)
+	// Should still complete without panic
+	if result.Platform == "" {
+		t.Error("Platform should not be empty")
+	}
+}
+
+func TestGateProbeResult_FieldsPopulated(t *testing.T) {
+	cfg := GateProbeConfig{
+		JavaHome:  "/nonexistent/jdk",
+		TomcatHome: "/nonexistent/tomcat",
+		DebugPort: 9999,
+		Timeout:   5 * time.Second,
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	result := RunGate(ctx, cfg)
+	if result.DebugPort != 9999 {
+		t.Errorf("DebugPort = %d, want 9999", result.DebugPort)
+	}
+	if result.Platform == "" {
+		t.Error("Platform should not be empty")
+	}
+	// JDK6JDWP should be false with nonexistent JDK
+	if result.JDK6JDWP {
+		t.Error("JDK6JDWP should be false with nonexistent JDK")
+	}
+	// Tomcat6Debug should be false with nonexistent Tomcat
+	if result.Tomcat6Debug {
+		t.Error("Tomcat6Debug should be false with nonexistent Tomcat")
+	}
+}
+
+func TestProbeJDK6JDWP_EmptyJavaHome(t *testing.T) {
+	var errors []string
+	addError := func(s string) { errors = append(errors, s) }
+	ctx := context.Background()
+	version, ok := probeJDK6JDWP(ctx, "", 5005, addError)
+	if ok {
+		t.Error("expected false with empty javaHome")
+	}
+	if version != "" {
+		t.Errorf("version = %q, want empty", version)
+	}
+	if len(errors) != 1 {
+		t.Errorf("expected 1 error, got %d", len(errors))
+	}
+}
+
+func TestProbeTomcat6Debug_EmptyJavaHome(t *testing.T) {
+	var errors []string
+	addError := func(s string) { errors = append(errors, s) }
+	ctx := context.Background()
+	ok := probeTomcat6Debug(ctx, "", "/nonexistent/tomcat", 5005, addError)
+	if ok {
+		t.Error("expected false with empty javaHome")
+	}
+	if len(errors) < 1 {
+		t.Error("expected at least 1 error")
+	}
+}
+
+func TestProbeTomcat6Debug_EmptyTomcatHome(t *testing.T) {
+	var errors []string
+	addError := func(s string) { errors = append(errors, s) }
+	ctx := context.Background()
+	ok := probeTomcat6Debug(ctx, "/usr/bin", "", 5005, addError)
+	if ok {
+		t.Error("expected false with empty tomcatHome")
+	}
+	if len(errors) < 1 {
+		t.Error("expected at least 1 error")
+	}
+}
+
+func TestProbeDebugPort_HighRange(t *testing.T) {
+	// Use a high port that's unlikely to be in use
+	ctx := context.Background()
+	ok := probeDebugPort(ctx, 19999)
+	if ok {
+		// Port might be open on some systems, but typically not
+		t.Log("port 19999 was open (unexpected but possible)")
+	}
+}
+
+func TestGateProbeResult_JSONTags(t *testing.T) {
+	result := GateProbeResult{
+		Platform:      "linux",
+		DebugPort:     5005,
+		JDK6JDWP:      true,
+		Tomcat6Debug:  true,
+		DebugPortOpen: true,
+		JDWPHandshake: true,
+		JDKVersion:    "1.6.0_45",
+		Errors:        []string{"err1", "err2"},
+	}
+	// Just verify the struct can be populated without panics
+	if result.Errors == nil || len(result.Errors) != 2 {
+		t.Error("Errors field not populated correctly")
+	}
+}

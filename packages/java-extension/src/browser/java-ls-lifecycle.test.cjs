@@ -55,7 +55,7 @@ const DISPOSABLE = { dispose() {} };
 function makeMocks(descriptor) {
   const calls = [];
   let started = false;
-  const listeners = { project: undefined, context: undefined };
+  const listeners = { project: undefined, context: undefined, state: undefined };
   const logs = { info: [], warn: [], error: [] };
   const mocks = {
     calls,
@@ -94,6 +94,14 @@ function makeMocks(descriptor) {
         started = true;
         return { ok: true };
       },
+      async stop() {
+        calls.push({ kind: 'stop' });
+        started = false;
+      },
+      onState(listener) {
+        listeners.state = listener;
+        return DISPOSABLE;
+      },
     },
     logger: {
       info: m => logs.info.push(String(m)),
@@ -108,6 +116,10 @@ function makeMocks(descriptor) {
       child: () => mocks.logger,
     },
   };
+  mocks.crash = () => {
+    started = false;
+    listeners.state('crashed');
+  };
   return mocks;
 }
 
@@ -121,6 +133,13 @@ function makeLifecycle(mocks) {
   svc.launchDescriptor = undefined;
   svc.lastStartKey = undefined;
   svc.toDispose = [];
+  svc.desiredProject = undefined;
+  svc.activationToken = 0;
+  svc.restartAttempts = 0;
+  svc.restartTimer = undefined;
+  svc.restartInFlight = false;
+  svc.disposed = false;
+  svc.transitionChain = Promise.resolve();
   svc.init();
   return svc;
 }
@@ -179,6 +198,173 @@ test('already running is success: no second start for same project', async () =>
   assert.equal(starts.length, 1);
   assert.deepEqual(mocks.logs.error, []);
   svc.dispose();
+});
+
+test('crash schedules one non-reentrant automatic restart', async () => {
+  const mocks = makeMocks(DESCRIPTOR);
+  const svc = makeLifecycle(mocks);
+  svc.restartDelayMs = () => 0;
+
+  mocks.listeners.project({ workspaceId: 'ws1', projectId: 'p1' });
+  await flush();
+  mocks.crash();
+  mocks.listeners.state('crashed');
+  await new Promise(resolve => setTimeout(resolve, 5));
+  await flush();
+
+  assert.equal(mocks.calls.filter(c => c.kind === 'start').length, 2);
+  assert.match(mocks.logs.warn[0], /automatic restart 1\/3/);
+  mocks.listeners.context({ workspaceId: 'ws1' });
+  await flush();
+  assert.equal(svc.restartAttempts, 1, 'duplicate context events must not reset the crash-loop budget');
+  svc.dispose();
+});
+
+test('automatic restart stops after the configured limit', async () => {
+  const mocks = makeMocks(DESCRIPTOR);
+  const svc = makeLifecycle(mocks);
+  svc.restartDelayMs = () => 0;
+
+  mocks.listeners.project({ workspaceId: 'ws1', projectId: 'p1' });
+  await flush();
+  for (let i = 0; i < 4; i++) {
+    mocks.crash();
+    await new Promise(resolve => setTimeout(resolve, 5));
+    await flush();
+  }
+
+  assert.equal(mocks.calls.filter(c => c.kind === 'start').length, 4, 'initial start plus at most three restarts');
+  assert.ok(mocks.logs.error.some(line => /restart limit reached/.test(line)));
+  svc.dispose();
+});
+
+test('clearing the active project cancels restart and stops the backend', async () => {
+  const mocks = makeMocks(DESCRIPTOR);
+  const svc = makeLifecycle(mocks);
+  svc.restartDelayMs = () => 20;
+
+  mocks.listeners.project({ workspaceId: 'ws1', projectId: 'p1' });
+  await flush();
+  mocks.crash();
+  mocks.listeners.project(undefined);
+  await new Promise(resolve => setTimeout(resolve, 30));
+  await flush();
+
+  assert.equal(mocks.calls.filter(c => c.kind === 'start').length, 1);
+  assert.equal(mocks.calls.filter(c => c.kind === 'stop').length, 1);
+  svc.dispose();
+});
+
+test('workspace close cancels an in-flight prepare before it can start JDT LS', async () => {
+  const mocks = makeMocks(DESCRIPTOR);
+  let releasePrepare;
+  const prepare = new Promise(resolve => { releasePrepare = resolve; });
+  mocks.runtime.request = async (endpoint, body, opts) => {
+    mocks.calls.push({ kind: 'http', endpoint: String(endpoint), body, opts });
+    if (String(endpoint).startsWith('POST')) {
+      await prepare;
+      return {};
+    }
+    return DESCRIPTOR;
+  };
+  const svc = makeLifecycle(mocks);
+
+  mocks.listeners.project({ workspaceId: 'ws1', projectId: 'p1' });
+  mocks.listeners.context(undefined);
+  releasePrepare();
+  await flush();
+
+  assert.equal(mocks.calls.filter(c => c.kind === 'start').length, 0);
+  assert.equal(mocks.calls.filter(c => c.kind === 'stop').length, 1);
+  assert.equal(mocks.calls.filter(c => c.kind === 'http').length, 1, 'descriptor request must be cancelled logically');
+  svc.dispose();
+});
+
+test('switching project stops the old ready process before starting the new root', async () => {
+  const mocks = makeMocks(DESCRIPTOR);
+  mocks.runtime.request = async (endpoint, body, opts) => {
+    mocks.calls.push({ kind: 'http', endpoint: String(endpoint), body, opts });
+    if (String(endpoint).startsWith('POST')) return {};
+    const projectId = opts.query.projectId;
+    return {
+      ...DESCRIPTOR,
+      workingDir: `/repo/${projectId}`,
+      envAllowlist: [`JDTLS_WORKSPACE=/data/${projectId}`],
+    };
+  };
+  const svc = makeLifecycle(mocks);
+
+  mocks.listeners.project({ workspaceId: 'ws1', projectId: 'p1' });
+  await flush();
+  mocks.listeners.project({ workspaceId: 'ws1', projectId: 'p2' });
+  await flush();
+
+  assert.deepEqual(
+    mocks.calls.filter(c => c.kind === 'start' || c.kind === 'stop').map(c => c.kind),
+    ['start', 'stop', 'start'],
+  );
+  assert.equal(mocks.calls.filter(c => c.kind === 'start')[1].opts.rootUri, 'file:///repo/p2');
+  svc.dispose();
+});
+
+test('overlapping project switches serialize stop and only start the latest project', async () => {
+  const mocks = makeMocks(DESCRIPTOR);
+  let state = 'uninitialized';
+  let releaseStop;
+  const stopGate = new Promise(resolve => { releaseStop = resolve; });
+  mocks.runtime.request = async (endpoint, body, opts) => {
+    mocks.calls.push({ kind: 'http', endpoint: String(endpoint), body, opts });
+    if (String(endpoint).startsWith('POST')) return {};
+    const projectId = opts.query.projectId;
+    return {
+      ...DESCRIPTOR,
+      workingDir: `/repo/${projectId}`,
+      envAllowlist: [`JDTLS_WORKSPACE=/data/${projectId}`],
+    };
+  };
+  mocks.javaClient.fetchState = async () => state;
+  mocks.javaClient.start = async opts => {
+    mocks.calls.push({ kind: 'start', opts });
+    state = 'ready';
+    return { ok: true };
+  };
+  mocks.javaClient.stop = async () => {
+    mocks.calls.push({ kind: 'stop' });
+    await stopGate;
+    state = 'stopped';
+  };
+  const svc = makeLifecycle(mocks);
+
+  mocks.listeners.project({ workspaceId: 'ws1', projectId: 'p1' });
+  await flush();
+  mocks.listeners.project({ workspaceId: 'ws1', projectId: 'p2' });
+  await flush();
+  assert.equal(mocks.calls.filter(c => c.kind === 'stop').length, 1, 'p2 transition must be waiting for stop');
+  mocks.listeners.project({ workspaceId: 'ws1', projectId: 'p3' });
+  await flush();
+  releaseStop();
+  await flush();
+
+  const starts = mocks.calls.filter(c => c.kind === 'start');
+  assert.deepEqual(starts.map(call => call.opts.rootUri), ['file:///repo/p1', 'file:///repo/p3']);
+  assert.equal(mocks.calls.filter(c => c.kind === 'stop').length, 1);
+  svc.dispose();
+});
+
+test('dispose cancels recovery and requests bounded backend stop', async () => {
+  const mocks = makeMocks(DESCRIPTOR);
+  const svc = makeLifecycle(mocks);
+  svc.restartDelayMs = () => 20;
+
+  mocks.listeners.project({ workspaceId: 'ws1', projectId: 'p1' });
+  await flush();
+  mocks.crash();
+  svc.dispose();
+  await new Promise(resolve => setTimeout(resolve, 30));
+  await flush();
+
+  assert.equal(mocks.calls.filter(c => c.kind === 'start').length, 1);
+  assert.equal(mocks.calls.filter(c => c.kind === 'stop').length, 1);
 });
 
 test('start failure is logged, not thrown', async () => {

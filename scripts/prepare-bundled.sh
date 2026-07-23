@@ -15,9 +15,9 @@
 #   2. /opt/kairo/tomcat6 (project default for macOS/Linux)
 #   3. /usr/local/share/kairo/tomcat6
 #
-# If neither source exists, the script prints a clear warning
-# and exits 0 — packaging still succeeds, the runtime will
-# attempt first-run download.
+# Release packaging must use --strict. In that mode missing or structurally
+# incomplete dependencies fail closed; offline installers must never silently
+# fall back to a first-run network download.
 #
 # Usage:
 #   bash scripts/prepare-bundled.sh
@@ -87,7 +87,7 @@ TOMCAT_SRC="$(resolve_source_dir "${KAIRO_TOMCAT6_HOME:-}" \
   "/usr/share/tomcat6" \
   || true)"
 TOMCAT_OK=true
-ensure_bundled_dir "tomcat6" "$TOMCAT_SRC" "KAIRO_TOMCAT6_HOME or place it at /opt/kairo/tomcat6" || TOMCAT_OK=false
+ensure_bundled_dir "tomcat6/apache-tomcat-6.0.53" "$TOMCAT_SRC" "KAIRO_TOMCAT6_HOME or place it at /opt/kairo/tomcat6" || TOMCAT_OK=false
 
 JDTLS_SRC="$(resolve_source_dir "${KAIRO_JDTLS_HOME:-}" \
   "/opt/kairo/eclipse-jdt-ls" \
@@ -98,7 +98,7 @@ JDTLS_SRC="$(resolve_source_dir "${KAIRO_JDTLS_HOME:-}" \
   "$HOME/.kairo/eclipse-jdt-ls" \
   || true)"
 JDTLS_OK=true
-ensure_bundled_dir "eclipse-jdt-ls" "$JDTLS_SRC" "KAIRO_JDTLS_HOME or place it at /opt/kairo/eclipse-jdt-ls" || JDTLS_OK=false
+ensure_bundled_dir "jdtls" "$JDTLS_SRC" "KAIRO_JDTLS_HOME or place it at /opt/kairo/eclipse-jdt-ls" || JDTLS_OK=false
 
 if [ "$TOMCAT_OK" != true ] || [ "$JDTLS_OK" != true ]; then
   if [ "$STRICT" = true ]; then
@@ -108,5 +108,10 @@ if [ "$TOMCAT_OK" != true ] || [ "$JDTLS_OK" != true ]; then
   echo "[bundled] Continuing — runtime will attempt first-run download" >&2
 else
   echo "[bundled] All bundled dependencies present"
+fi
+
+if [ "$STRICT" = true ]; then
+  node "$REPO_ROOT/scripts/run-with-timeout.cjs" 30 node \
+    "$REPO_ROOT/scripts/verify-bundled-dependencies.cjs"
 fi
 exit 0

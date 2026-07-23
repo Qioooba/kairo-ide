@@ -209,6 +209,28 @@ importers:
         specifier: 5.5.4
         version: 5.5.4
 
+  packages/git-extension:
+    dependencies:
+      '@kairo/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      '@theia/core':
+        specifier: 1.73.1
+        version: 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@theia/editor':
+        specifier: 1.73.1
+        version: 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@theia/filesystem':
+        specifier: 1.73.1
+        version: 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.5.4)
+      '@theia/navigator':
+        specifier: 1.73.1
+        version: 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.5.4)
+    devDependencies:
+      typescript:
+        specifier: 5.5.4
+        version: 5.5.4
+
   packages/java-extension:
     dependencies:
       '@kairo/project-extension':
@@ -332,6 +354,34 @@ importers:
 
   packages/search-extension:
     dependencies:
+      '@kairo/java-extension':
+        specifier: workspace:*
+        version: link:../java-extension
+      '@kairo/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      '@kairo/runtime-extension':
+        specifier: workspace:*
+        version: link:../runtime-extension
+      '@kairo/ui-kit':
+        specifier: workspace:*
+        version: link:../ui-kit
+      '@theia/core':
+        specifier: 1.73.1
+        version: 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@theia/editor':
+        specifier: 1.73.1
+        version: 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+    devDependencies:
+      typescript:
+        specifier: 5.5.4
+        version: 5.5.4
+
+  packages/test-extension:
+    dependencies:
+      '@kairo/project-extension':
+        specifier: workspace:*
+        version: link:../project-extension
       '@kairo/protocol':
         specifier: workspace:*
         version: link:../protocol
@@ -341,10 +391,10 @@ importers:
       '@theia/core':
         specifier: 1.73.1
         version: 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
-      '@theia/editor':
-        specifier: 1.73.1
-        version: 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
     devDependencies:
+      '@types/react':
+        specifier: 18.3.1
+        version: 18.3.1
       typescript:
         specifier: 5.5.4
         version: 5.5.4
@@ -477,6 +527,9 @@ importers:
       '@axe-core/playwright':
         specifier: ^4.12.1
         version: 4.12.1(playwright-core@1.61.1)
+      '@playwright/test':
+        specifier: ^1.61.1
+        version: 1.61.1
 
 packages:
 
@@ -1564,6 +1617,11 @@ packages:
   '@pkgjs/parseargs@0.11.0':
     resolution: {integrity: sha512-+1VkjdD0QBLPodGrJUeqarH8VAIvQODIbwh9XpP5Syisf7YoQgsJKPNFoqqLQlu+VQ/tVSshMR6loPMn8U+dPg==}
     engines: {node: '>=14'}
+
+  '@playwright/test@1.61.1':
+    resolution: {integrity: sha512-8nKv6+0RJSL9FE4jYOEGXnPeM/Hg12qZpmqzZjRh3qM0Y7c3z1mrOTfFLids72RDQYVh9WpLEfR5WdpNX4fkig==}
+    engines: {node: '>=18'}
+    hasBin: true
 
   '@puppeteer/browsers@1.9.1':
     resolution: {integrity: sha512-PuvK6xZzGhKPvlx3fpfdM2kYY3P/hB1URtK8wA7XUJ6prn6pp22zvJHu48th0SGcHL9SutbPHrFuQgfXTFobWA==}
@@ -7327,6 +7385,10 @@ snapshots:
 
   '@pkgjs/parseargs@0.11.0':
     optional: true
+
+  '@playwright/test@1.61.1':
+    dependencies:
+      playwright: 1.61.1
 
   '@puppeteer/browsers@1.9.1':
     dependencies:

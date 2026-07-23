@@ -24,9 +24,17 @@ import URI from '@theia/core/lib/common/uri';
 
 @injectable()
 export class KairoSaveableService extends SaveableService {
+  /** Pre-save callbacks invoked before each save operation. */
+  static readonly onBeforeSave: Array<(widget: Widget, options?: SaveOptions) => void> = [];
+
   @inject(MessageService) protected readonly messages!: MessageService;
 
   override async save(widget: Widget, options?: SaveOptions): Promise<URI | undefined> {
+    // P2-GIT-03: fire pre-save hooks before writing to disk
+    for (const cb of KairoSaveableService.onBeforeSave) {
+      try { cb(widget, options); } catch { /* prevent hook failures from breaking save */ }
+    }
+
     try {
       return await super.save(widget, options);
     } catch (err) {

@@ -3,11 +3,17 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
 
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/build"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/domain"
+)
+
+var (
+	ErrBuildNotFound      = errors.New("build not found")
+	ErrBuildCancelTimeout = errors.New("build cancellation timed out")
 )
 
 // WorkspaceStore manages workspace metadata.
@@ -35,6 +41,18 @@ type ProjectStore interface {
 	Update(id string, cfg *domain.Project) (domain.Project, error)
 }
 
+// RunConfigurationStore persists project-level Tomcat Run/Debug configurations.
+// Callers identify an already-authorized workspace; no filesystem path crosses
+// the HTTP boundary.
+type RunConfigurationStore interface {
+	Load(ctx context.Context, workspaceID string) (domain.RunConfigurationDocument, error)
+	Replace(ctx context.Context, workspaceID string, document domain.RunConfigurationDocument) (domain.RunConfigurationDocument, error)
+	Get(ctx context.Context, workspaceID, configurationID string) (domain.TomcatRunConfiguration, error)
+	Create(ctx context.Context, workspaceID string, configuration domain.TomcatRunConfiguration) (domain.RunConfigurationDocument, error)
+	Update(ctx context.Context, workspaceID, configurationID string, configuration domain.TomcatRunConfiguration) (domain.RunConfigurationDocument, error)
+	Delete(ctx context.Context, workspaceID, configurationID string) (domain.RunConfigurationDocument, error)
+}
+
 // ToolchainRegistry imports and lists toolchains.
 type ToolchainRegistry interface {
 	List() []json.RawMessage
@@ -43,7 +61,7 @@ type ToolchainRegistry interface {
 
 // Searcher runs full-text search.
 type Searcher interface {
-	Search(payload json.RawMessage) (json.RawMessage, error)
+	Search(ctx context.Context, payload json.RawMessage) (json.RawMessage, error)
 }
 
 // Encoder runs encoding detect/recode/validate.
@@ -55,16 +73,23 @@ type Encoder interface {
 
 // BuildRequest is the typed request to start a build.
 type BuildRequest struct {
-	ProjectID   string   `json:"projectId"`
-	Files       []string `json:"files"`
-	Toolchain   string   `json:"toolchainId"`
-	SourceLevel string   `json:"sourceLevel"`
-	TargetLevel string   `json:"targetLevel"`
-	ProjectRoot string   `json:"projectRoot"`
-	OutputDir   string   `json:"outputDir"`
-	Classpath   []string `json:"classpath"`
-	Encoding    string   `json:"encoding"`
-	Clean       bool     `json:"clean"`
+	ProjectID     string   `json:"projectId"`
+	Clean         bool     `json:"clean"`
+	Intent        string   `json:"intent,omitempty"`
+	SelectedFiles []string `json:"selectedFiles,omitempty"`
+
+	// The remaining fields form the trusted execution plan. The HTTP
+	// decoder must never accept them from a caller; handleBuilds derives
+	// them from the registered project and validates every path first.
+	Files       []string `json:"-"`
+	Toolchain   string   `json:"-"`
+	SourceLevel string   `json:"-"`
+	TargetLevel string   `json:"-"`
+	ProjectRoot string   `json:"-"`
+	OutputDir   string   `json:"-"`
+	Classpath   []string `json:"-"`
+	Encoding    string   `json:"-"`
+	TraceID     string   `json:"-"`
 }
 
 // BuildResult is the typed build result.
@@ -84,6 +109,7 @@ type BuildResult struct {
 	Output        string             `json:"output"`
 	Error         string             `json:"error,omitempty"`
 	ExitCode      int                `json:"exitCode"`
+	TraceID       string             `json:"traceId,omitempty"`
 }
 
 // DeployRequest is the typed request to publish a deployment.
@@ -95,6 +121,7 @@ type DeployRequest struct {
 	Target    string `json:"target"`
 	Trigger   string `json:"trigger"`
 	Mode      string `json:"mode"`
+	Intent    string `json:"intent"`
 }
 
 // DeployResult is the typed deployment result.
@@ -123,6 +150,7 @@ type BuildEngine interface {
 	Start(req BuildRequest) (*BuildResult, error)
 	Get(id string) (*BuildResult, error)
 	List() []*BuildResult
+	Cancel(ctx context.Context, id string) (*BuildResult, error)
 }
 
 // Deployer publishes a deployment.
@@ -135,6 +163,7 @@ type Deployer interface {
 // StartServerRequest is the typed request to start a server.
 type StartServerRequest struct {
 	ProjectID    string   `json:"projectId"`
+	Debug        bool     `json:"debug,omitempty"`
 	JavaHome     string   `json:"javaHome"`
 	WebappDir    string   `json:"webappDir"`
 	ContextPath  string   `json:"contextPath"`
@@ -144,6 +173,9 @@ type StartServerRequest struct {
 	DebugPort    int      `json:"debugPort"`
 	DebugSuspend bool     `json:"debugSuspend"`
 	JVMOptions   []string `json:"jvmOptions"`
+	// Env is trusted launch-plan data. HTTP callers cannot submit resolved
+	// environment values; run-configuration launch resolves references server-side.
+	Env []string `json:"-"`
 }
 
 // ServerResponse is the safe API response shape for server info.
@@ -168,8 +200,11 @@ type ServerPorts struct {
 
 // ServerLogEntry is a single log line with timestamp.
 type ServerLogEntry struct {
-	Line string `json:"line"`
-	TS   string `json:"ts"`
+	Line    string `json:"line"`
+	TS      string `json:"ts"`
+	Stream  string `json:"stream,omitempty"`
+	Source  string `json:"source,omitempty"`
+	Ordinal int64  `json:"ordinal"`
 }
 
 // ServerRunner starts/stops a server runtime.
@@ -189,6 +224,14 @@ type ServerRunner interface {
 	// file yields an empty slice, not an error.
 	Logs(id string, tail int) ([]ServerLogEntry, error)
 	List() []*ServerResponse
+	// Recoverable returns the list of servers that were
+	// running when the agent last exited and can be
+	// re-launched. This is populated at startup by the
+	// recovery check.
+	Recoverable() []*ServerResponse
+	// Recover attempts to re-launch a crashed server by its
+	// ID. The server must be in "crashed" state.
+	Recover(id string) (*ServerResponse, error)
 }
 
 // Authenticator handles login/logout.
@@ -243,4 +286,19 @@ type ProjectRepo interface {
 // Java toolchain before building the descriptor.
 type ToolchainRepo interface {
 	Get(ctx context.Context, id string) (*domain.Toolchain, error)
+}
+
+// LaunchOrchestrator orchestrates before-launch tasks and starts the server.
+type LaunchOrchestrator interface {
+	Execute(ctx context.Context, config LaunchOrchestratorConfig) (*ServerResponse, error)
+}
+
+// LaunchOrchestratorConfig is the configuration for launch orchestration.
+type LaunchOrchestratorConfig struct {
+	Configuration domain.TomcatRunConfiguration
+	WorkspaceRoot string
+	ProjectRoot   string
+	ArtifactPath  string
+	JavaHome      string
+	Env           []string
 }

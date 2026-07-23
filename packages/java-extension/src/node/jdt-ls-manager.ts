@@ -47,6 +47,22 @@ import {
   LSPPublishDiagnosticsParams,
   LSPLocation,
   LSPCompletionList,
+  LSPHover,
+  LSPSignatureHelp,
+  LSPDocumentSymbolResult,
+  LSPWorkspaceSymbolResult,
+  LSPWorkspaceEdit,
+  LSPCodeActionResult,
+  LSPDiagnostic,
+  LSPRange,
+  LSPCodeLens,
+  LSPProgressParams,
+  LSPCallHierarchyItem,
+  LSPCallHierarchyIncomingCall,
+  LSPCallHierarchyOutgoingCall,
+  LSPTypeHierarchyItem,
+  LSPInlayHint,
+  LSPTextEdit,
 } from '../common/lsp-protocol';
 
 /** What the manager knows about the install of JDT LS. */
@@ -74,7 +90,8 @@ export type JdtLsEvent =
   | { kind: 'log'; level: 'stdout' | 'stderr'; line: string }
   | { kind: 'diagnostics'; params: LSPPublishDiagnosticsParams }
   | { kind: 'initialized'; result: LSPInitializeResult }
-  | { kind: 'exit'; code: number | null; signal: NodeJS.Signals | null };
+  | { kind: 'exit'; code: number | null; signal: NodeJS.Signals | null }
+  | { kind: 'progress'; params: LSPProgressParams };
 
 export type JdtLsState =
   | 'uninitialized'
@@ -87,6 +104,18 @@ export type JdtLsState =
   | 'failed';
 
 export type JdtLsEventListener = (event: JdtLsEvent) => void;
+
+export const JDT_LS_INITIALIZE_TIMEOUT_MS = 60_000;
+export const JDT_LS_REQUEST_TIMEOUT_MS = 30_000;
+
+export class JdtLsRequestTimeoutError extends Error {
+  readonly code = 'JDT_LS_REQUEST_TIMEOUT';
+
+  constructor(readonly method: string, readonly timeoutMs: number) {
+    super(`JDT LS request ${method} timed out after ${timeoutMs}ms`);
+    this.name = 'JdtLsRequestTimeoutError';
+  }
+}
 
 /**
  * Manager for a single JDT LS child process. The manager
@@ -110,6 +139,7 @@ export class JdtLsManager implements Disposable {
    *  InitializeResult arrives. */
   protected initializeResolver: ((result: LSPInitializeResult) => void) | undefined;
   protected initializeRejecter: ((err: Error) => void) | undefined;
+  protected stopPromise: Promise<void> | undefined;
 
   constructor(protected readonly logger?: ILogger) {}
 
@@ -228,7 +258,7 @@ export class JdtLsManager implements Disposable {
    * `{ kind, message }` error to the UI.
    */
   async start(opts: { rootUri: string; workspaceDataDir: string; sourceLevel?: string; home?: string }): Promise<void> {
-    if (this.state === 'starting' || this.state === 'initializing' || this.state === 'ready') {
+    if (this.state === 'starting' || this.state === 'initializing' || this.state === 'ready' || this.state === 'stopping' || this.stopPromise) {
       throw new Error(`JDT LS already in state ${this.state}`);
     }
     // opts.home (derived from the Go agent's launch descriptor)
@@ -289,32 +319,38 @@ export class JdtLsManager implements Disposable {
     };
 
     this.logger?.info(`[JDT LS] spawning: ${dist.jre} ${args.slice(0, 6).join(' ')} … (${args.length} args total)`);
-    this.process = spawn(dist.jre, args, spawnOpts);
+    const child = spawn(dist.jre, args, spawnOpts);
+    this.process = child;
 
     // Wire up stdout/stderr line buffering. JDT LS writes
     // its log output to stderr; the LSP frames go to
     // stdout. We must NOT collapse stderr to a single
     // data event because the line order matters.
-    this.attachStreamLogging(this.process.stdout, 'stdout');
-    this.attachStreamLogging(this.process.stderr, 'stderr');
+    this.attachStreamLogging(child.stdout, 'stdout');
+    this.attachStreamLogging(child.stderr, 'stderr');
 
-    this.process.on('error', (err: Error) => {
+    child.on('error', (err: Error) => {
       this.logger?.error(`[JDT LS] process error: ${err.message}`);
       this.fire({ kind: 'log', level: 'stderr', line: `[spawn-error] ${err.message}` });
-      this.cleanup('crashed');
+      if (this.process === child) this.cleanup('crashed');
     });
-    this.process.on('exit', (code, signal) => {
+    child.on('exit', (code, signal) => {
       this.logger?.info(`[JDT LS] exit code=${code} signal=${signal ?? ''}`);
       this.fire({ kind: 'log', level: 'stdout', line: `[exit] code=${code} signal=${signal ?? ''}` });
       this.fire({ kind: 'exit', code, signal });
-      this.cleanup(this.state === 'stopping' ? 'stopped' : 'crashed');
+      // An old child may exit after a bounded stop has already
+      // allowed a replacement to start. Never let that stale exit
+      // dispose the replacement connection or mark it crashed.
+      if (this.process === child) {
+        this.cleanup(this.state === 'stopping' ? 'stopped' : 'crashed');
+      }
     });
 
     // Build the vscode-jsonrpc MessageConnection. We give it
     // the child stdout reader and stdin writer directly so
     // the framing is fully handled by the library.
-    const reader = new StreamMessageReader(this.process.stdout as Readable);
-    const writer = new StreamMessageWriter(this.process.stdin as Writable);
+    const reader = new StreamMessageReader(child.stdout as Readable);
+    const writer = new StreamMessageWriter(child.stdin as Writable);
     this.connection = createMessageConnection(reader, writer, this.makeLogger());
 
     // Surface publishDiagnostics to the event bus so the
@@ -326,6 +362,9 @@ export class JdtLsManager implements Disposable {
     this.connection.onRequest('window/workDoneProgress/create', () => null);
     this.connection.onRequest('client/registerCapability', () => null);
     this.connection.onRequest('client/unregisterCapability', () => null);
+    this.connection.onNotification('$/progress', (params: LSPProgressParams) => {
+      this.fire({ kind: 'progress', params });
+    });
 
     this.connection.listen();
 
@@ -364,6 +403,7 @@ export class JdtLsManager implements Disposable {
             definition: { dynamicRegistration: true, linkSupport: true },
             references: { dynamicRegistration: true },
             documentSymbol: { dynamicRegistration: true, symbolKind: { valueSet: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26] } },
+            rename: { dynamicRegistration: true, prepareSupport: false },
             publishDiagnostics: { relatedInformation: true, versionSupport: false, codeDescriptionSupport: true },
           },
           window: { showMessage: { dynamicRegistration: true } },
@@ -392,14 +432,17 @@ export class JdtLsManager implements Disposable {
                 checkProjectSettingsExclusions: false,
                 updateBuildConfiguration: 'interactive',
               },
-              trace: { server: 'verbose' },
+              // KAIRO-PERF: trace disabled in production to reduce excessive
+              // JDT LS logging. Set KAIRO_JDT_TRACE=verbose to re-enable
+              // for debugging language server issues.
+              trace: { server: process.env.KAIRO_JDT_TRACE === 'verbose' ? 'verbose' : 'off' },
             },
           },
         },
-        trace: 'verbose',
+        trace: process.env.KAIRO_JDT_TRACE === 'verbose' ? 'verbose' : 'off',
       };
 
-      const result = await this.connection.sendRequest<LSPInitializeResult>('initialize', initParams);
+      const result = await this.initializeConnection(initParams, child);
       // Acknowledge — the LSP spec requires a `initialized`
       // notification before any other request.
       this.connection.sendNotification('initialized', {});
@@ -408,7 +451,13 @@ export class JdtLsManager implements Disposable {
       this.logger?.info(`[JDT LS] ready: ${result.serverInfo?.name ?? 'unknown'} ${result.serverInfo?.version ?? ''}`);
     } catch (err) {
       this.logger?.error(`[JDT LS] initialize failed: ${String(err)}`);
-      this.cleanup('failed');
+      // An explicit stop may interrupt initialize. Preserve stopped /
+      // stopping so the lifecycle does not misclassify user shutdown
+      // as a crash and schedule recovery.
+      const currentState = this.state$();
+      if (currentState !== 'stopping' && currentState !== 'stopped') {
+        this.cleanup('failed');
+      }
       throw err;
     }
   }
@@ -456,7 +505,7 @@ export class JdtLsManager implements Disposable {
     if (!this.connection || this.state !== 'ready') {
       throw new Error(`JDT LS not ready (state=${this.state})`);
     }
-    const list = await this.connection.sendRequest<LSPCompletionList>('textDocument/completion', {
+    const list = await this.sendRequestWithTimeout<LSPCompletionList>('textDocument/completion', {
       textDocument: { uri: params.uri },
       position: { line: params.line, character: params.character },
       context: { triggerKind: params.triggerKind ?? 1, triggerCharacter: params.triggerCharacter },
@@ -470,7 +519,7 @@ export class JdtLsManager implements Disposable {
     if (!this.connection || this.state !== 'ready') {
       throw new Error(`JDT LS not ready (state=${this.state})`);
     }
-    const result = await this.connection.sendRequest<LSPLocation | LSPLocation[] | null>(
+    const result = await this.sendRequestWithTimeout<LSPLocation | LSPLocation[] | null>(
       'textDocument/definition',
       {
         textDocument: { uri: params.uri },
@@ -479,6 +528,145 @@ export class JdtLsManager implements Disposable {
     );
     this.logger?.info(`[JDT LS] definition result=${JSON.stringify(result)?.slice(0, 200) ?? 'null'} uri=${params.uri} pos=${params.line}:${params.character}`);
     return result;
+  }
+
+  async implementation(params: { uri: string; line: number; character: number }): Promise<LSPLocation | LSPLocation[] | null> {
+    return this.sendTextDocumentPositionRequest<LSPLocation | LSPLocation[] | null>(
+      'textDocument/implementation', params,
+    );
+  }
+
+  async hover(params: { uri: string; line: number; character: number }): Promise<LSPHover | null> {
+    return this.sendTextDocumentPositionRequest<LSPHover | null>('textDocument/hover', params);
+  }
+
+  async references(params: { uri: string; line: number; character: number; includeDeclaration: boolean }): Promise<LSPLocation[]> {
+    const result = await this.sendTextDocumentPositionRequest<LSPLocation[]>('textDocument/references', params, {
+      context: { includeDeclaration: params.includeDeclaration },
+    });
+    return result ?? [];
+  }
+
+  async signatureHelp(params: {
+    uri: string;
+    line: number;
+    character: number;
+    triggerKind?: 1 | 2 | 3;
+    triggerCharacter?: string;
+    isRetrigger?: boolean;
+  }): Promise<LSPSignatureHelp | null> {
+    return this.sendTextDocumentPositionRequest<LSPSignatureHelp | null>('textDocument/signatureHelp', params, {
+      context: {
+        triggerKind: params.triggerKind ?? 1,
+        triggerCharacter: params.triggerCharacter,
+        isRetrigger: params.isRetrigger ?? false,
+      },
+    });
+  }
+
+  async documentSymbols(uri: string): Promise<LSPDocumentSymbolResult> {
+    if (!this.connection || this.state !== 'ready') {
+      throw new Error(`JDT LS not ready (state=${this.state})`);
+    }
+    return this.sendRequestWithTimeout<LSPDocumentSymbolResult>('textDocument/documentSymbol', {
+      textDocument: { uri },
+    });
+  }
+
+  async workspaceSymbols(query: string): Promise<LSPWorkspaceSymbolResult> {
+    if (!this.connection || this.state !== 'ready') {
+      throw new Error(`JDT LS not ready (state=${this.state})`);
+    }
+    return this.sendRequestWithTimeout<LSPWorkspaceSymbolResult>('workspace/symbol', { query });
+  }
+
+  async codeActions(params: {
+    uri: string;
+    range: LSPRange;
+    diagnostics: LSPDiagnostic[];
+    only?: string[];
+  }): Promise<LSPCodeActionResult> {
+    if (!this.connection || this.state !== 'ready') {
+      throw new Error(`JDT LS not ready (state=${this.state})`);
+    }
+    return this.sendRequestWithTimeout<LSPCodeActionResult>('textDocument/codeAction', {
+      textDocument: { uri: params.uri },
+      range: params.range,
+      context: { diagnostics: params.diagnostics, only: params.only },
+    });
+  }
+
+  async rename(params: { uri: string; line: number; character: number; newName: string }): Promise<LSPWorkspaceEdit | null> {
+    return this.sendTextDocumentPositionRequest<LSPWorkspaceEdit | null>('textDocument/rename', params, {
+      newName: params.newName,
+    });
+  }
+
+  async codeLens(uri: string): Promise<LSPCodeLens[]> {
+    if (!this.connection || this.state !== 'ready') {
+      throw new Error(`JDT LS not ready (state=${this.state})`);
+    }
+    const result = await this.sendRequestWithTimeout<LSPCodeLens[]>('textDocument/codeLens', {
+      textDocument: { uri },
+    });
+    return result ?? [];
+  }
+
+  async formatting(uri: string, options?: { tabSize?: number; insertSpaces?: boolean }): Promise<LSPTextEdit[]> {
+    if (!this.connection || this.state !== 'ready') {
+      throw new Error(`JDT LS not ready (state=${this.state})`);
+    }
+    const result = await this.sendRequestWithTimeout<LSPTextEdit[]>('textDocument/formatting', {
+      textDocument: { uri },
+      options: { tabSize: options?.tabSize ?? 4, insertSpaces: options?.insertSpaces ?? true },
+    });
+    return result ?? [];
+  }
+
+  async rangeFormatting(uri: string, range: LSPRange, options?: { tabSize?: number; insertSpaces?: boolean }): Promise<LSPTextEdit[]> {
+    if (!this.connection || this.state !== 'ready') {
+      throw new Error(`JDT LS not ready (state=${this.state})`);
+    }
+    const result = await this.sendRequestWithTimeout<LSPTextEdit[]>('textDocument/rangeFormatting', {
+      textDocument: { uri },
+      range,
+      options: { tabSize: options?.tabSize ?? 4, insertSpaces: options?.insertSpaces ?? true },
+    });
+    return result ?? [];
+  }
+
+  async inlayHint(uri: string, range?: LSPRange): Promise<LSPInlayHint[]> {
+    if (!this.connection || this.state !== 'ready') {
+      throw new Error(`JDT LS not ready (state=${this.state})`);
+    }
+    const result = await this.sendRequestWithTimeout<LSPInlayHint[]>('textDocument/inlayHint', {
+      textDocument: { uri },
+      range,
+    });
+    return result ?? [];
+  }
+
+  /** Force workspace reindex (clear cache and rebuild). */
+  async buildWorkspace(): Promise<void> {
+    if (!this.connection || this.state !== 'ready') {
+      throw new Error(`JDT LS not ready (state=${this.state})`);
+    }
+    await this.sendRequestWithTimeout<unknown>('java/buildWorkspace', true);
+  }
+
+  protected async sendTextDocumentPositionRequest<T>(
+    method: string,
+    params: { uri: string; line: number; character: number },
+    extra: Record<string, unknown> = {},
+  ): Promise<T> {
+    if (!this.connection || this.state !== 'ready') {
+      throw new Error(`JDT LS not ready (state=${this.state})`);
+    }
+    return this.sendRequestWithTimeout<T>(method, {
+      textDocument: { uri: params.uri },
+      position: { line: params.line, character: params.character },
+      ...extra,
+    });
   }
 
   /**
@@ -492,41 +680,187 @@ export class JdtLsManager implements Disposable {
     if (!this.connection || this.state !== 'ready') {
       throw new Error(`JDT LS not ready (state=${this.state})`);
     }
-    const result = await this.connection.sendRequest<string>('java/classFileContents', { uri });
+    const result = await this.sendRequestWithTimeout<string>('java/classFileContents', { uri });
     return typeof result === 'string' ? result : '';
+  }
+
+  /** Call Hierarchy */
+
+  async prepareCallHierarchy(params: { uri: string; line: number; character: number }): Promise<LSPCallHierarchyItem[]> {
+    const result = await this.sendTextDocumentPositionRequest<LSPCallHierarchyItem[]>('textDocument/prepareCallHierarchy', params);
+    return result ?? [];
+  }
+
+  async incomingCalls(item: LSPCallHierarchyItem): Promise<LSPCallHierarchyIncomingCall[]> {
+    if (!this.connection || this.state !== 'ready') {
+      throw new Error(`JDT LS not ready (state=${this.state})`);
+    }
+    const result = await this.sendRequestWithTimeout<LSPCallHierarchyIncomingCall[]>('callHierarchy/incomingCalls', { item });
+    return result ?? [];
+  }
+
+  async outgoingCalls(item: LSPCallHierarchyItem): Promise<LSPCallHierarchyOutgoingCall[]> {
+    if (!this.connection || this.state !== 'ready') {
+      throw new Error(`JDT LS not ready (state=${this.state})`);
+    }
+    const result = await this.sendRequestWithTimeout<LSPCallHierarchyOutgoingCall[]>('callHierarchy/outgoingCalls', { item });
+    return result ?? [];
+  }
+
+  /** Type Hierarchy */
+
+  async prepareTypeHierarchy(params: { uri: string; line: number; character: number }): Promise<LSPTypeHierarchyItem[]> {
+    const result = await this.sendTextDocumentPositionRequest<LSPTypeHierarchyItem[]>('textDocument/prepareTypeHierarchy', params);
+    return result ?? [];
+  }
+
+  async supertypes(item: LSPTypeHierarchyItem): Promise<LSPTypeHierarchyItem[]> {
+    if (!this.connection || this.state !== 'ready') {
+      throw new Error(`JDT LS not ready (state=${this.state})`);
+    }
+    const result = await this.sendRequestWithTimeout<LSPTypeHierarchyItem[]>('typeHierarchy/supertypes', { item });
+    return result ?? [];
+  }
+
+  async subtypes(item: LSPTypeHierarchyItem): Promise<LSPTypeHierarchyItem[]> {
+    if (!this.connection || this.state !== 'ready') {
+      throw new Error(`JDT LS not ready (state=${this.state})`);
+    }
+    const result = await this.sendRequestWithTimeout<LSPTypeHierarchyItem[]>('typeHierarchy/subtypes', { item });
+    return result ?? [];
   }
 
   /** Stop the process; the `stopped` state fires when the child
    *  actually exits. */
-  async stop(): Promise<void> {    if (this.state === 'stopped' || this.state === 'uninitialized') {
+  stop(): Promise<void> {
+    if (this.stopPromise) return this.stopPromise;
+    if (this.state === 'stopped' || this.state === 'uninitialized') {
+      return Promise.resolve();
+    }
+    const pending = this.doStop();
+    const shared = pending.finally(() => {
+      if (this.stopPromise === shared) this.stopPromise = undefined;
+    });
+    this.stopPromise = shared;
+    return shared;
+  }
+
+  protected async doStop(): Promise<void> {
+    if (!this.process) {
+      this.connection?.dispose();
+      this.connection = undefined;
+      this.setState('stopped');
       return;
     }
     this.setState('stopping');
-    if (this.process && !this.process.killed) {
-      this.process.kill('SIGTERM');
+    const child = this.process;
+    if (!child.killed) {
+      child.kill('SIGTERM');
     }
     // give it 3s to die, then SIGKILL
     await new Promise<void>(resolve => {
+      let killWait: ReturnType<typeof setTimeout> | undefined;
       const t = setTimeout(() => {
-        if (this.process && !this.process.killed) {
-          this.process.kill('SIGKILL');
+        // ChildProcess.killed only means a signal was sent, not
+        // that the child exited. Always escalate if this exact
+        // process is still owned after the grace period.
+        if (this.process === child) {
+          child.kill('SIGKILL');
         }
-        resolve();
-      }, 3_000);
-      this.process?.on('exit', () => {
+        killWait = setTimeout(() => {
+          // SIGKILL should exit promptly, but the lifecycle must
+          // remain bounded even for a broken ChildProcess shim.
+          // Stale child events are identity-guarded in start().
+          if (this.process === child) this.cleanup('stopped');
+          resolve();
+        }, this.stopKillWaitMs());
+      }, this.stopGracePeriodMs());
+      child.once('exit', () => {
         clearTimeout(t);
+        if (killWait) clearTimeout(killWait);
         resolve();
       });
+    });
+  }
+
+  protected stopGracePeriodMs(): number {
+    return 3_000;
+  }
+
+  protected stopKillWaitMs(): number {
+    return 1_000;
+  }
+
+  protected initializeTimeoutMs(): number {
+    return JDT_LS_INITIALIZE_TIMEOUT_MS;
+  }
+
+  protected requestTimeoutMs(): number {
+    return JDT_LS_REQUEST_TIMEOUT_MS;
+  }
+
+  protected initializeConnection(params: LSPInitializeParams, child: ChildProcess): Promise<LSPInitializeResult> {
+    return this.sendRequestWithTimeout<LSPInitializeResult>('initialize', params, {
+      timeoutMs: this.initializeTimeoutMs(),
+      timeoutState: 'failed',
+      onTimeout: () => child.kill('SIGKILL'),
+    });
+  }
+
+  protected sendRequestWithTimeout<T>(
+    method: string,
+    params: unknown,
+    options: { timeoutMs?: number; timeoutState?: JdtLsState; onTimeout?: () => void } = {},
+  ): Promise<T> {
+    const connection = this.connection;
+    if (!connection) return Promise.reject(new Error(`JDT LS connection unavailable for ${method}`));
+    const child = this.process;
+    const timeoutMs = options.timeoutMs ?? this.requestTimeoutMs();
+    const request = connection.sendRequest<T>(method, params);
+    return new Promise<T>((resolve, reject) => {
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        const error = new JdtLsRequestTimeoutError(method, timeoutMs);
+        this.appendLog('stderr', `[timeout] ${error.message}`);
+        try {
+          if (options.onTimeout) options.onTimeout();
+          else if (child && this.process === child) child.kill('SIGKILL');
+        } catch (err) {
+          this.appendLog('stderr', `[timeout-cleanup] ${String(err)}`);
+        }
+        if (this.connection === connection) this.cleanup(options.timeoutState ?? 'crashed');
+        reject(error);
+      }, timeoutMs);
+      request.then(
+        value => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          resolve(value);
+        },
+        err => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          reject(err);
+        },
+      );
     });
   }
 
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
-    this.stop().catch(() => undefined);
-    this.connection?.dispose();
-    this.connection = undefined;
-    this.process = undefined;
+    // Keep the child identity until the bounded stop completes;
+    // clearing it immediately would suppress SIGKILL escalation
+    // and could leak a process that ignores SIGTERM.
+    void this.stop().catch(() => undefined).finally(() => {
+      this.connection?.dispose();
+      this.connection = undefined;
+      this.process = undefined;
+    });
     this.listeners.clear();
   }
 

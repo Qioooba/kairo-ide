@@ -47,6 +47,13 @@ func NewDefaultPortAllocator(cfg PortConfig) *DefaultPortAllocator {
 }
 
 func (a *DefaultPortAllocator) Allocate(preferredHTTP, preferredShutdown, preferredDebug int) (*domain.PortLease, error) {
+	return a.AllocateServer(preferredHTTP, preferredShutdown, preferredDebug, true)
+}
+
+// AllocateServer allocates the ports required by one Tomcat launch. Normal
+// Run sessions deliberately receive no debug port; reserving and publishing
+// one would falsely imply that JDWP is enabled.
+func (a *DefaultPortAllocator) AllocateServer(preferredHTTP, preferredShutdown, preferredDebug int, withDebug bool) (*domain.PortLease, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -61,11 +68,14 @@ func (a *DefaultPortAllocator) Allocate(preferredHTTP, preferredShutdown, prefer
 		return nil, fmt.Errorf("shutdown port: %w", err)
 	}
 
-	debugPort, err := a.allocateOne(preferredDebug, a.config.DebugMin, a.config.DebugMax, httpPort, shutdownPort)
-	if err != nil {
-		a.releaseOne(httpPort)
-		a.releaseOne(shutdownPort)
-		return nil, fmt.Errorf("debug port: %w", err)
+	debugPort := 0
+	if withDebug {
+		debugPort, err = a.allocateOne(preferredDebug, a.config.DebugMin, a.config.DebugMax, httpPort, shutdownPort)
+		if err != nil {
+			a.releaseOne(httpPort)
+			a.releaseOne(shutdownPort)
+			return nil, fmt.Errorf("debug port: %w", err)
+		}
 	}
 
 	release := func() {
@@ -73,7 +83,9 @@ func (a *DefaultPortAllocator) Allocate(preferredHTTP, preferredShutdown, prefer
 		defer a.mu.Unlock()
 		a.releaseOne(httpPort)
 		a.releaseOne(shutdownPort)
-		a.releaseOne(debugPort)
+		if debugPort > 0 {
+			a.releaseOne(debugPort)
+		}
 	}
 
 	return domain.NewPortLease(httpPort, shutdownPort, debugPort, release), nil

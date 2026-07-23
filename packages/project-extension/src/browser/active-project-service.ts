@@ -15,6 +15,9 @@ export interface ProjectInfo {
      * folder-level override so files under the project root open
      * with the right encoding (KAIRO-RC-WEB-206). */
     encoding?: string;
+    /** Per-directory encoding overrides. Keys are relative directory
+     * paths (e.g. "src/"), values are encoding names (e.g. "GBK"). */
+    directoryEncodingOverrides?: Record<string, string>;
 }
 
 const LAST_PROJECT_KEY = 'kairo.lastSelectedProjectId';
@@ -66,23 +69,33 @@ export class ActiveProjectService {
                 if (projects.length === 1) {
                     // Auto-select the only project
                     const p = projects[0];
+                    const raw = p as unknown as {
+                        encoding?: string;
+                        directoryEncodingOverrides?: Record<string, string>;
+                    };
                     const projectInfo: ProjectInfo = {
                         workspaceId: ctx.workspaceId,
                         projectId: p.id,
                         name: p.name,
                         root: p.rootPath,
-                        encoding: (p as unknown as { encoding?: string }).encoding,
+                        encoding: raw.encoding,
+                        directoryEncodingOverrides: raw.directoryEncodingOverrides,
                     };
                     this.currentProject = projectInfo;
                     this.onDidChangeProjectEmitter.fire(projectInfo);
                 } else if (lastProject) {
                     // Restore last selected project
+                    const raw = lastProject as unknown as {
+                        encoding?: string;
+                        directoryEncodingOverrides?: Record<string, string>;
+                    };
                     const projectInfo: ProjectInfo = {
                         workspaceId: ctx.workspaceId,
                         projectId: lastProject.id,
                         name: lastProject.name,
                         root: lastProject.rootPath,
-                        encoding: (lastProject as unknown as { encoding?: string }).encoding,
+                        encoding: raw.encoding,
+                        directoryEncodingOverrides: raw.directoryEncodingOverrides,
                     };
                     this.currentProject = projectInfo;
                     this.onDidChangeProjectEmitter.fire(projectInfo);

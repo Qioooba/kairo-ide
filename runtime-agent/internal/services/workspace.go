@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -190,8 +191,36 @@ func (s *diskProjectStore) load() {
 }
 
 func (s *diskProjectStore) save() {
+	_ = s.saveChecked()
+}
+
+func (s *diskProjectStore) saveChecked() error {
 	data, _ := json.MarshalIndent(s.data, "", "  ")
-	_ = atomicfile.WriteFile(filepath.Join(s.dir, "projects.json"), data, 0o600)
+	return atomicfile.WriteFile(filepath.Join(s.dir, "projects.json"), data, 0o600)
+}
+
+// Create is the create-only import boundary. It never overwrites an existing
+// ID or canonical project root and rolls back the in-memory entry on I/O error.
+func (s *diskProjectStore) Create(id string, cfg *domain.Project) (domain.Project, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if cfg == nil || id == "" || string(cfg.ID) != id {
+		return domain.Project{}, errors.New("project id mismatch")
+	}
+	if _, exists := s.data[id]; exists {
+		return domain.Project{}, fmt.Errorf("project already exists: %s", id)
+	}
+	for _, existing := range s.data {
+		if existing.RootPath == cfg.RootPath {
+			return domain.Project{}, fmt.Errorf("project root already imported")
+		}
+	}
+	s.data[id] = *cfg
+	if err := s.saveChecked(); err != nil {
+		delete(s.data, id)
+		return domain.Project{}, err
+	}
+	return *cfg, nil
 }
 
 func (s *diskProjectStore) List() []domain.Project {

@@ -22,6 +22,8 @@ import { EncodingService } from '@theia/core/lib/common/encoding-service';
 // (Lumino DOM) which would crash the Node backend. The safe
 // service itself only touches @theia/core common code.
 import { KairoSafeEncodingService } from '@kairo/encoding-extension/lib/browser/safe-encoding-service';
+import { DebugAdapterContribution } from '@theia/debug/lib/common/debug-model';
+import { KairoJavaDebugAdapterContribution } from './kairo-java-debug-adapter-contribution';
 
 export default new ContainerModule((bind, unbind, isBound, rebind) => {
   if (isBound(EncodingService)) {
@@ -29,4 +31,6 @@ export default new ContainerModule((bind, unbind, isBound, rebind) => {
   } else {
     bind(EncodingService).to(KairoSafeEncodingService).inSingletonScope();
   }
+  bind(KairoJavaDebugAdapterContribution).toSelf().inSingletonScope();
+  bind(DebugAdapterContribution).toService(KairoJavaDebugAdapterContribution);
 });

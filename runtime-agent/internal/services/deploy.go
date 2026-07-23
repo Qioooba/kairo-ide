@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -101,7 +102,14 @@ func (d *diskDeployer) Publish(req api.DeployRequest) (*api.DeployResult, error)
 	d.save()
 	d.mu.Unlock()
 
-	filesAdded, filesModified, filesDeleted, bytes, err := syncDir(req.Source, req.Target, req.Mode == "mirror")
+	var filesAdded, filesModified, filesDeleted int
+	var bytes int64
+	var err error
+	if req.What == "static" {
+		filesAdded, filesModified, bytes, err = syncStaticWebFiles(req.Source, req.Target)
+	} else {
+		filesAdded, filesModified, filesDeleted, bytes, err = syncDir(req.Source, req.Target, req.Mode == "mirror")
+	}
 	rec.FinishedAt = time.Now()
 	if err != nil {
 		rec.State = "failed"
@@ -118,6 +126,24 @@ func (d *diskDeployer) Publish(req api.DeployRequest) (*api.DeployResult, error)
 	d.save()
 	d.mu.Unlock()
 	return rec, nil
+}
+
+var hotReloadExtensions = map[string]bool{".jsp": true, ".jspx": true, ".css": true, ".js": true, ".html": true, ".htm": true, ".json": true, ".xml": true, ".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".svg": true, ".webp": true, ".woff": true, ".woff2": true}
+
+func syncStaticWebFiles(srcRoot, dstRoot string) (added, modified int, bytes int64, err error) {
+	srcRoot, err = filepath.Abs(srcRoot); if err != nil { return }
+	dstRoot, err = filepath.Abs(dstRoot); if err != nil { return }
+	err = filepath.WalkDir(srcRoot, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil { return walkErr }
+		if entry.Type()&os.ModeSymlink != 0 { return fmt.Errorf("symlink rejected: %s", path) }
+		if entry.IsDir() { return nil }
+		if !hotReloadExtensions[strings.ToLower(filepath.Ext(entry.Name()))] { return nil }
+		rel, relErr := filepath.Rel(srcRoot, path); if relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) { return errors.New("source escaped project webapp") }
+		target := filepath.Join(dstRoot, rel)
+		targetRel, relErr := filepath.Rel(dstRoot, target); if relErr != nil || targetRel == ".." || strings.HasPrefix(targetRel, ".."+string(filepath.Separator)) { return errors.New("target escaped deployment root") }
+		a, m, n, copyErr := copyOneFile(path, target); added += a; modified += m; bytes += n; return copyErr
+	})
+	return
 }
 
 func (d *diskDeployer) Get(id string) (*api.DeployResult, error) {

@@ -36,6 +36,8 @@ type Config struct {
 	JavaHome     string
 	HTTPPort     int
 	ShutdownPort int
+	DebugPort    int
+	DebugSuspend bool
 	ContextPath  string
 	WebappDir    string
 	JVMOptions   []string
@@ -101,6 +103,16 @@ func BuildCommand(cfg Config) (executable string, args []string, env []string, e
 		"-Dcatalina.home=" + cfg.CatalinaHome,
 		"-Dcatalina.base=" + cfg.CatalinaBase,
 		"-Djava.util.logging.config.file=" + filepath.Join(cfg.CatalinaBase, "conf", "logging.properties"),
+	}
+	if cfg.DebugPort > 0 {
+		suspend := "n"
+		if cfg.DebugSuspend {
+			suspend = "y"
+		}
+		args = append(args, fmt.Sprintf(
+			"-agentlib:jdwp=transport=dt_socket,server=y,suspend=%s,address=127.0.0.1:%d",
+			suspend, cfg.DebugPort,
+		))
 	}
 	args = append(args, cfg.JVMOptions...)
 	args = append(args, "org.apache.catalina.startup.Bootstrap", "start")
@@ -412,6 +424,35 @@ func WaitForReady(ctx context.Context, httpPort int, deadline time.Time) error {
 	}
 }
 
+// WaitForPort proves that a local listener is actually bound. It is used for
+// JDWP so the API never reports a merely allocated port as "debug ready".
+func WaitForPort(ctx context.Context, port int, deadline time.Time) error {
+	if port <= 0 {
+		return errors.New("port is required")
+	}
+	addr := "127.0.0.1:" + strconv.Itoa(port)
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("port readiness timeout: %s", addr)
+		}
+		conn, err := net.DialTimeout("tcp", addr, 500*time.Millisecond)
+		if err == nil {
+			_ = conn.Close()
+			return nil
+		}
+		timer := time.NewTimer(100 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
 func SendShutdown(shutdownPort int, timeout time.Duration) error {
 	addr := "127.0.0.1:" + strconv.Itoa(shutdownPort)
 	conn, err := net.DialTimeout("tcp", addr, timeout)
@@ -512,6 +553,8 @@ func Start(ctx context.Context, spec Spec) (*Instance, error) {
 		JavaHome:     spec.JavaHome,
 		HTTPPort:     spec.HTTPPort,
 		ShutdownPort: spec.ShutdownPort,
+		DebugPort:    spec.DebugPort,
+		DebugSuspend: spec.DebugSuspend,
 		ContextPath:  spec.ContextPath,
 		WebappDir:    spec.WebappDir,
 		JVMOptions:   spec.JVMOptions,
@@ -601,7 +644,16 @@ func Start(ctx context.Context, spec Spec) (*Instance, error) {
 		timeout = DefaultStartTimeout
 	}
 	deadline := time.Now().Add(timeout)
-	if err := WaitForReady(ctx, spec.HTTPPort, deadline); err != nil {
+	var readinessErr error
+	if spec.DebugPort > 0 {
+		readinessErr = WaitForPort(ctx, spec.DebugPort, deadline)
+	}
+	// With suspend=y the JVM deliberately pauses before Tomcat can bind HTTP;
+	// JDWP readiness is the correct launch boundary in that mode.
+	if readinessErr == nil && !spec.DebugSuspend {
+		readinessErr = WaitForReady(ctx, spec.HTTPPort, deadline)
+	}
+	if readinessErr != nil {
 		// Clean up on failure
 		process.ForceStop(context.Background(), obs.Identity)
 		logMu.Lock()
@@ -609,9 +661,9 @@ func Start(ctx context.Context, spec Spec) (*Instance, error) {
 		logFile.Close()
 		logMu.Unlock()
 		if tailText != "" {
-			return nil, fmt.Errorf("readiness: %w; last server output:\n%s", err, tailText)
+			return nil, fmt.Errorf("readiness: %w; last server output:\n%s", readinessErr, tailText)
 		}
-		return nil, fmt.Errorf("readiness: %w (server produced no output; see %s)", err, logPath)
+		return nil, fmt.Errorf("readiness: %w (server produced no output; see %s)", readinessErr, logPath)
 	}
 
 	// 6. Monitor process exit in background

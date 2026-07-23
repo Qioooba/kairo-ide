@@ -44,11 +44,20 @@ export class KairoProjectEncodingContribution implements FrontendApplicationCont
   }
 
   protected apply(p: ProjectInfo | undefined): void {
-    if (p?.encoding && p.root) {
+    if (!p?.root) return;
+    const rootUri = toProjectRootUri(p.root);
+    if (p.encoding) {
       try {
-        this.encodingSvc.applyProjectEncoding(toProjectRootUri(p.root), p.encoding);
+        this.encodingSvc.applyProjectEncoding(rootUri, p.encoding);
       } catch (err) {
         console.warn('[kairo] failed to apply project encoding', err);
+      }
+    }
+    if (p.directoryEncodingOverrides && Object.keys(p.directoryEncodingOverrides).length > 0) {
+      try {
+        this.encodingSvc.applyDirectoryEncodingOverrides(rootUri, p.directoryEncodingOverrides);
+      } catch (err) {
+        console.warn('[kairo] failed to apply directory encoding overrides', err);
       }
     }
   }

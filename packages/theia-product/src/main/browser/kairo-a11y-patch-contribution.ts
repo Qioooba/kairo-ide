@@ -49,6 +49,17 @@ export class KairoA11yPatchContribution implements FrontendApplicationContributi
       notificationCenter.setAttribute('role', 'button');
     }
 
+    // Kairo notification bell: Theia StatusBar renders a plain <div>
+    // with aria-label but no role — axe-core flags aria-prohibited-attr.
+    // Add role="button" so the aria-label is permitted.
+    const kairoNotifications = document.getElementById('status-bar-kairo.notifications');
+    if (kairoNotifications && !kairoNotifications.hasAttribute('role')) {
+      kairoNotifications.setAttribute('role', 'button');
+    }
+
+    // Patch status bar elements for screen reader announcements (D4.2)
+    this.patchStatusBar();
+
     for (const tab of Array.from(document.querySelectorAll<HTMLElement>('li.lm-TabBar-tab'))) {
       if (tab.getAttribute('role') !== 'tab') {
         tab.setAttribute('role', 'tab');
@@ -68,6 +79,19 @@ export class KairoA11yPatchContribution implements FrontendApplicationContributi
         || tab.id.replace(/^shell-tab-/, '').replace(/-/g, ' ');
       if (name && tab.getAttribute('aria-label') !== name) {
         tab.setAttribute('aria-label', name);
+      }
+    }
+  }
+
+  /** Add aria-live regions to status bar entries for dynamic content (D4.2). */
+  protected patchStatusBar(): void {
+    const statusBar = document.getElementById('theia-statusBar');
+    if (!statusBar) return;
+    // Mark status bar elements with text content that changes as live regions
+    const elements = statusBar.querySelectorAll<HTMLElement>('.element');
+    for (const el of elements) {
+      if (!el.hasAttribute('aria-live')) {
+        el.setAttribute('aria-live', 'polite');
       }
     }
   }

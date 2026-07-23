@@ -1,38 +1,128 @@
 {
   "url": "http://127.0.0.1:3000",
-  "testedAt": "2026-07-22T14:01:07.973Z",
+  "testedAt": "2026-07-23T12:51:52.096Z",
   "viewport": "1440x900",
   "engine": "axe-core via @axe-core/playwright (wcag2a, wcag2aa, wcag21aa)",
   "scans": [
     {
       "name": "01-shell",
-      "violations": []
+      "violations": [
+        {
+          "id": "aria-prohibited-attr",
+          "impact": "serious",
+          "help": "Elements must only use permitted ARIA attributes",
+          "nodes": 1,
+          "targets": [
+            {
+              "target": [
+                "#status-bar-kairo\\.notifications"
+              ],
+              "html": "<div id=\"status-bar-kairo.notifications\" class=\"element hasCommand\" aria-label=\"$(bell), No notifications. Click to open.\"><span class=\"codicon codicon-bell\"></span></div>"
+            }
+          ]
+        }
+      ]
     },
     {
       "name": "02-import-wizard",
-      "violations": []
+      "violations": [
+        {
+          "id": "aria-prohibited-attr",
+          "impact": "serious",
+          "help": "Elements must only use permitted ARIA attributes",
+          "nodes": 1,
+          "targets": [
+            {
+              "target": [
+                "#status-bar-kairo\\.notifications"
+              ],
+              "html": "<div id=\"status-bar-kairo.notifications\" class=\"element hasCommand\" aria-label=\"$(bell), No notifications. Click to open.\"><span class=\"codicon codicon-bell\"></span></div>"
+            }
+          ]
+        }
+      ]
     },
     {
       "name": "03-project-selector",
-      "violations": []
+      "violations": [
+        {
+          "id": "aria-prohibited-attr",
+          "impact": "serious",
+          "help": "Elements must only use permitted ARIA attributes",
+          "nodes": 1,
+          "targets": [
+            {
+              "target": [
+                "#status-bar-kairo\\.notifications"
+              ],
+              "html": "<div id=\"status-bar-kairo.notifications\" class=\"element hasCommand\" aria-label=\"$(bell), No notifications. Click to open.\"><span class=\"codicon codicon-bell\"></span></div>"
+            }
+          ]
+        }
+      ]
     },
     {
       "name": "04-build-view",
-      "violations": []
+      "violations": [
+        {
+          "id": "aria-prohibited-attr",
+          "impact": "serious",
+          "help": "Elements must only use permitted ARIA attributes",
+          "nodes": 1,
+          "targets": [
+            {
+              "target": [
+                "#status-bar-kairo\\.notifications"
+              ],
+              "html": "<div id=\"status-bar-kairo.notifications\" class=\"element hasCommand\" aria-label=\"$(bell), No notifications. Click to open.\"><span class=\"codicon codicon-bell\"></span></div>"
+            }
+          ]
+        }
+      ]
     },
     {
       "name": "05-server-view",
-      "violations": []
+      "violations": [
+        {
+          "id": "aria-prohibited-attr",
+          "impact": "serious",
+          "help": "Elements must only use permitted ARIA attributes",
+          "nodes": 1,
+          "targets": [
+            {
+              "target": [
+                "#status-bar-kairo\\.notifications"
+              ],
+              "html": "<div id=\"status-bar-kairo.notifications\" class=\"element hasCommand\" aria-label=\"$(bell), No notifications. Click to open.\"><span class=\"codicon codicon-bell\"></span></div>"
+            }
+          ]
+        }
+      ]
     },
     {
       "name": "06-deployments-view",
-      "violations": []
+      "violations": [
+        {
+          "id": "aria-prohibited-attr",
+          "impact": "serious",
+          "help": "Elements must only use permitted ARIA attributes",
+          "nodes": 1,
+          "targets": [
+            {
+              "target": [
+                "#status-bar-kairo\\.notifications"
+              ],
+              "html": "<div id=\"status-bar-kairo.notifications\" class=\"element hasCommand\" aria-label=\"$(bell), No notifications. Click to open.\"><span class=\"codicon codicon-bell\"></span></div>"
+            }
+          ]
+        }
+      ]
     }
   ],
   "summary": {
-    "violations": 0,
+    "violations": 6,
     "critical": 0,
-    "serious": 0,
+    "serious": 6,
     "moderate": 0,
     "minor": 0
   },

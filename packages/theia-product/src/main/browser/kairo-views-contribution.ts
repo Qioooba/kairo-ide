@@ -26,6 +26,8 @@ import {
   ApplicationShell,
 } from '@theia/core/lib/browser';
 import { Command, CommandRegistry, CommandService, MenuContribution, MenuModelRegistry, MessageService } from '@theia/core/lib/common';
+import { KeybindingContribution, KeybindingRegistry } from '@theia/core/lib/browser/keybinding';
+import { isOSX } from '@theia/core/lib/common/os';
 import { CommonMenus } from '@theia/core/lib/browser/common-menus';
 import { RuntimeConnectionService, KairoError } from '@kairo/runtime-extension';
 import {
@@ -39,16 +41,28 @@ import { BuildViewWidget } from '@kairo/build-extension';
 import { BuildStore, mapBuildResult } from '@kairo/build-extension';
 import { ServerViewWidget, LogViewerWidget } from '@kairo/tomcat-extension';
 import { ImportWizardWidget, ProjectSelectorWidget } from '@kairo/project-extension';
+import { MavenViewWidget } from './maven-view-widget';
+import { KairoTodoWidget } from './kairo-todo-widget';
+import { KairoRemoteWidget } from './kairo-remote-widget';
 import { KAIRO_WELCOME_FACTORY_ID } from './kairo-welcome-widget';
 import {
   KAIRO_IMPORT_WIZARD_FACTORY_ID,
   KAIRO_PROJECT_SELECTOR_FACTORY_ID,
+  KAIRO_RUN_CONFIGURATIONS_FACTORY_ID,
+  KAIRO_KEYMAP_FACTORY_ID,
+  KAIRO_MAVEN_FACTORY_ID as _KAIRO_MAVEN_FACTORY_ID,
+  KAIRO_TODO_FACTORY_ID,
+  KAIRO_TESTS_FACTORY_ID,
+  KAIRO_REMOTE_FACTORY_ID,
+  KAIRO_SQL_CONSOLE_FACTORY_ID,
+  KAIRO_PERF_FACTORY_ID,
 } from './kairo-factory-ids';
 import type {
   ServerInstance,
   BuildResult,
   DeploymentResult,
 } from '@kairo/protocol';
+import { KairoJavaDebugService } from './kairo-java-debug-service';
 
 /* ------------------------------------------------------------------ */
 /*  Commands                                                            */
@@ -63,6 +77,9 @@ export namespace KairoCommands {
   export const BUILD_AND_DEPLOY: Command = { id: 'kairo.buildAndDeploy', label: 'Kairo: Build and Deploy' };
   export const START_SERVER: Command = { id: 'kairo.server.start', label: 'Kairo: Start Server' };
   export const DEBUG_SERVER: Command = { id: 'kairo.server.debug', label: 'Kairo: Start Server (Debug)' };
+  export const CHECK_DEBUG_ADAPTER: Command = { id: 'kairo.debug.checkAdapter', label: 'Kairo: Check Java Debug Adapter' };
+  export const OPEN_DEBUG_VIEW: Command = { id: 'kairo.debug.openView', label: 'Kairo: Open Debug View' };
+  export const OPEN_DEBUG_CONSOLE: Command = { id: 'kairo.debug.openConsole', label: 'Kairo: Open Debug Console' };
   export const STOP_SERVER: Command = { id: 'kairo.server.stop', label: 'Kairo: Stop Server' };
   export const RESTART_SERVER: Command = { id: 'kairo.server.restart', label: 'Kairo: Restart Server' };
   export const OPEN_APPLICATION: Command = { id: 'kairo.app.open', label: 'Kairo: Open Application' };
@@ -70,6 +87,17 @@ export namespace KairoCommands {
   export const REVEAL_KAIRO_BUILDS: Command = { id: 'kairo.view.builds', label: 'Kairo: Show Builds' };
   export const REVEAL_KAIRO_DEPLOYMENTS: Command = { id: 'kairo.view.deployments', label: 'Kairo: Show Deployments' };
   export const REVEAL_KAIRO_LOGS: Command = { id: 'kairo.view.logs', label: 'Kairo: Show Tomcat Logs' };
+  export const REVEAL_KAIRO_MAVEN: Command = { id: 'kairo.view.maven', label: 'Kairo: Show Maven' };
+  export const REVEAL_KAIRO_TODO: Command = { id: 'kairo.view.todo', label: 'Kairo: Show TODO/FIXME' };
+  export const REVEAL_KAIRO_SQL_CONSOLE: Command = { id: 'kairo.view.sqlConsole', label: 'Kairo: Show SQL Console' };
+  export const REVEAL_KAIRO_TESTS: Command = { id: 'kairo.view.tests', label: 'Kairo: Show Test Results' };
+  export const MANAGE_RUN_CONFIGURATIONS: Command = { id: 'kairo.runConfigurations.manage', label: 'Kairo: Manage Run Configurations' };
+  export const SWITCH_JDK: Command = { id: 'kairo.jdk.switch', label: 'Kairo: Switch JDK' };
+  export const RECONNECT_AGENT: Command = { id: 'kairo.agent.reconnect', label: 'Kairo: Reconnect Agent' };
+  export const OPEN_KEYMAP: Command = { id: 'kairo.keymap.open', label: 'Kairo: Open Keyboard Shortcuts' };
+  export const TOGGLE_TERMINAL: Command = { id: 'kairo.terminal.toggle', label: 'Kairo: Toggle Terminal' };
+  export const REVEAL_KAIRO_REMOTE: Command = { id: 'kairo.view.remote', label: 'Kairo: Show Remote Development', iconClass: 'codicon codicon-remote' };
+  export const REVEAL_KAIRO_PERF: Command = { id: 'kairo.view.perf', label: 'Kairo: Show Performance' };
 }
 
 /* ------------------------------------------------------------------ */
@@ -95,7 +123,7 @@ export class KairoDeploymentsWidget extends Widget {
   setDeployments(deployments: DeploymentResult[]): void {
     this.deployments = deployments;
     if (deployments.length === 0) {
-      this.node.innerHTML = `<div class="kairo-widget-body">
+      this.node.innerHTML = `<div class="kairo-widget-body" role="status">
         <p>No deployments yet.</p>
       </div>`;
       return;
@@ -110,7 +138,7 @@ export class KairoDeploymentsWidget extends Widget {
       </tr>
     `).join('');
     this.node.innerHTML = `<div class="kairo-widget-body">
-      <table class="kairo-deployments-table">
+      <table class="kairo-deployments-table" aria-label="Deployments list">
         <thead><tr><th>ID</th><th>State</th><th>Files</th><th>Trigger</th><th>Reload</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
@@ -123,7 +151,7 @@ export class KairoDeploymentsWidget extends Widget {
 /* ------------------------------------------------------------------ */
 
 @injectable()
-export class KairoViewsContribution implements FrontendApplicationContribution, MenuContribution {
+export class KairoViewsContribution implements FrontendApplicationContribution, MenuContribution, KeybindingContribution {
   @inject(ApplicationShell) protected shell!: ApplicationShell;
   @inject(WidgetManager) protected widgetManager!: WidgetManager;
   @inject(CommandService) protected commands!: CommandService;
@@ -133,6 +161,7 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
   @inject(ActiveProjectService) protected activeProject!: ActiveProjectService;
   @inject(MessageService) protected messages!: MessageService;
   @inject(BuildStore) protected buildStore!: BuildStore;
+  @inject(KairoJavaDebugService) protected javaDebug!: KairoJavaDebugService;
 
   protected eventsUnsub: (() => void) | undefined;
   protected statusUnsub: (() => void) | undefined;
@@ -140,6 +169,8 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
   protected buildsView: BuildViewWidget | undefined;
   protected deploymentsView: KairoDeploymentsWidget | undefined;
   protected logsView: LogViewerWidget | undefined;
+  protected mavenView: MavenViewWidget | undefined;
+  protected todoView: KairoTodoWidget | undefined;
 
   @postConstruct()
   init(): void {
@@ -170,6 +201,8 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
     // KAIRO-RC-WEB-018: cold start with no active project shows
     // the Welcome tab so the first task is discoverable; the tab
     // closes itself once a project is selected.
+    // P2-UX-02: on first launch (no recent projects), auto-open the
+    // import wizard to guide the user through onboarding.
     void this.maybeOpenWelcome();
     this.activeProject.onDidChangeProject(p => {
       if (p) void this.closeWelcome();
@@ -182,6 +215,22 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
     }
     try {
       await this.revealOrCreateMain(KAIRO_WELCOME_FACTORY_ID, () => undefined, () => { /* singleton via WidgetManager */ });
+      // P2-UX-02: detect first launch — if no recent projects exist,
+      // auto-open the import wizard to guide the user.
+      try {
+        const recent = await this.projectSvc.getRecentProjects();
+        if (recent.length === 0) {
+          // First launch: show a brief welcome tip before opening the import wizard
+          this.messages.info('Welcome to Kairo IDE! Let\'s import your first project.', { timeout: 5000 });
+          // Auto-open the import wizard after a short delay
+          setTimeout(() => {
+            void this.commands.executeCommand('kairo.project.import');
+          }, 500);
+        }
+      } catch {
+        // If getRecentProjects fails (e.g., agent not connected),
+        // still show the welcome page but skip auto-import.
+      }
     } catch (err) {
       console.warn('[kairo] welcome tab failed to open', err);
     }
@@ -311,20 +360,59 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
 
     registry.registerCommand(KairoCommands.DEBUG_SERVER, {
       execute: async () => {
+        let serverId: string | undefined;
         try {
           const p = await this.activeProject.requireProject();
+          const capability = await this.javaDebug.probeAvailability();
+          if (capability.state !== 'available') {
+            throw new Error(capability.message ?? 'Java Debug Adapter is unavailable');
+          }
           const srv = await this.serverSvc.start(p.projectId, true);
-          this.messages.info(`Server ${srv.id} (debug) ${srv.state}.`);
+          serverId = srv.id;
+          const port = srv.ports.debug;
+          if (!port) throw new Error('Tomcat started without a verified JDWP port');
+          const status = await this.javaDebug.attach({
+            serverId: srv.id,
+            projectId: p.projectId,
+            projectName: p.name,
+            projectRoot: p.root,
+            port,
+          });
+          this.messages.info(`Java Debug Adapter connected to JDWP 127.0.0.1:${port} (session ${status.sessionId}).`);
         } catch (err) {
+          if (serverId) {
+            try { await this.serverSvc.stop(serverId, false); } catch { /* preserve the attach error */ }
+          }
           this.messages.error(kairoErrorMessage(err, 'Server debug start failed'));
         }
         return undefined;
       },
     });
 
+    registry.registerCommand(KairoCommands.CHECK_DEBUG_ADAPTER, {
+      execute: async () => {
+        const status = await this.javaDebug.probeAvailability();
+        if (status.state === 'available') this.messages.info('Java Debug Adapter is available.');
+        else this.messages.warn(status.message ?? `Java Debug Adapter state: ${status.state}`);
+        return status;
+      },
+    });
+
+    registry.registerCommand(KairoCommands.OPEN_DEBUG_VIEW, {
+      execute: () => this.commands.executeCommand('debug:toggle'),
+    });
+    registry.registerCommand(KairoCommands.OPEN_DEBUG_CONSOLE, {
+      execute: () => this.commands.executeCommand('debug:console:toggle'),
+    });
+
     registry.registerCommand(KairoCommands.STOP_SERVER, {
       execute: async () => {
         try {
+          // A broken adapter must not prevent the owned Tomcat process from
+          // being stopped. Preserve the debug error for the user, but continue
+          // with server teardown as the authoritative cleanup boundary.
+          let debugStopError: unknown;
+          try { await this.javaDebug.stop(); } catch (error) { debugStopError = error; }
           const list = (await this.runtime.request('GET /api/v1/servers', undefined)) as ServerInstance[];
           // Only stop servers that are actually up — the agent
           // persists server metadata across sessions, so the list
@@ -346,6 +434,9 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
           }
           if (failures.length > 0) {
             this.messages.error(`Failed to stop: ${failures.join('; ')}`);
+          }
+          if (debugStopError) {
+            this.messages.warn(`Debug Adapter termination reported an error; Tomcat stop was still attempted: ${kairoErrorMessage(debugStopError, 'unknown error')}`);
           }
         } catch (err) {
           this.messages.error(kairoErrorMessage(err, 'Server stop failed'));
@@ -404,6 +495,64 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
     registry.registerCommand(KairoCommands.REVEAL_KAIRO_LOGS, {
       execute: () => { void this.revealOrCreate(LogViewerWidget.ID, () => this.logsView, w => { this.logsView = w; }); },
     });
+    registry.registerCommand(KairoCommands.REVEAL_KAIRO_MAVEN, {
+      execute: () => { void this.revealOrCreate(MavenViewWidget.ID, () => this.mavenView, w => { this.mavenView = w; }); },
+    });
+    registry.registerCommand(KairoCommands.REVEAL_KAIRO_TODO, {
+      execute: () => { void this.revealOrCreate(KairoTodoWidget.ID, () => this.todoView, w => { this.todoView = w; }); },
+    });
+    registry.registerCommand(KairoCommands.REVEAL_KAIRO_TESTS, {
+      execute: () => { void this.revealOrCreate(KAIRO_TESTS_FACTORY_ID, () => undefined, () => undefined); },
+    });
+    registry.registerCommand(KairoCommands.REVEAL_KAIRO_PERF, {
+      execute: () => { void this.revealOrCreate(KAIRO_PERF_FACTORY_ID, () => undefined, () => undefined); },
+    });
+    registry.registerCommand(KairoCommands.REVEAL_KAIRO_SQL_CONSOLE, {
+      execute: () => { void this.revealOrCreateMain(KAIRO_SQL_CONSOLE_FACTORY_ID, () => undefined, () => undefined); },
+    });
+    registry.registerCommand(KairoCommands.REVEAL_KAIRO_REMOTE, {
+      execute: () => { void this.revealOrCreateMain(KAIRO_REMOTE_FACTORY_ID, () => undefined, () => undefined); },
+    });
+    registry.registerCommand(KairoCommands.MANAGE_RUN_CONFIGURATIONS, {
+      execute: () => { void this.revealOrCreateMain(KAIRO_RUN_CONFIGURATIONS_FACTORY_ID, () => undefined, () => undefined); },
+    });
+    // P1-INT-01: JDK switch — opens the project selector so the user
+    // can switch to a different project / JDK configuration.
+    registry.registerCommand(KairoCommands.SWITCH_JDK, {
+      execute: async () => {
+        try {
+          await this.revealOrCreateMain<ProjectSelectorWidget>(
+            KAIRO_PROJECT_SELECTOR_FACTORY_ID,
+            () => undefined,
+            _w => { /* singleton via WidgetManager */ },
+          );
+        } catch (err) {
+          this.messages.error(kairoErrorMessage(err, '打开项目选择器失败'));
+        }
+        return undefined;
+      },
+    });
+    // P1-INT-01: Agent reconnect — forces the EventStream to
+    // disconnect and reconnect to the Runtime Agent.
+    registry.registerCommand(KairoCommands.RECONNECT_AGENT, {
+      execute: () => {
+        this.runtime.disconnectEvents();
+        this.runtime.openEvents();
+        return undefined;
+      },
+    });
+
+    // G1: P2-UX-01 — Open the Keyboard Shortcuts (Keymap) widget.
+    registry.registerCommand(KairoCommands.OPEN_KEYMAP, {
+      execute: () => {
+        void this.revealOrCreateMain(KAIRO_KEYMAP_FACTORY_ID, () => undefined, () => undefined);
+      },
+    });
+
+    // Terminal toggle — delegates to @theia/terminal's built-in command.
+    registry.registerCommand(KairoCommands.TOGGLE_TERMINAL, {
+      execute: () => this.commands.executeCommand('terminal:new'),
+    });
   }
 
   async registerViewContainers(): Promise<void> {
@@ -422,9 +571,21 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
       order: 'a1',
     });
     menus.registerMenuAction(CommonMenus.FILE_OPEN, {
+      commandId: KairoCommands.MANAGE_RUN_CONFIGURATIONS.id,
+      label: 'Run Configurations...',
+      order: 'a3',
+    });
+    menus.registerMenuAction(CommonMenus.FILE_OPEN, {
       commandId: KairoCommands.SELECT_PROJECT.id,
       label: 'Select Kairo Project...',
       order: 'a2',
+    });
+  }
+
+  registerKeybindings(keybindings: KeybindingRegistry): void {
+    keybindings.registerKeybinding({
+      command: KairoCommands.TOGGLE_TERMINAL.id,
+      keybinding: 'alt+f12',
     });
   }
 
@@ -441,6 +602,8 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
     }
     this.shell.activateWidget(w.id);
     w.update();
+    // Focus the first focusable element in the target panel (D4.1)
+    this.focusFirstFocusable(w.node);
   }
 
   protected async revealOrCreate<T extends Widget>(
@@ -474,6 +637,8 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
     // class="kairo-widget">` shell with scrollbar placeholders and
     // no `data-testid`).
     w.update();
+    // Focus the first focusable element in the target panel (D4.1)
+    this.focusFirstFocusable(w.node);
   }
 
   protected async refreshBuilds(): Promise<void> {
@@ -516,6 +681,17 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
         return;
       default:
         return;
+    }
+  }
+
+  /** Focus the first focusable element inside a container node (D4.1). */
+  protected focusFirstFocusable(container: HTMLElement): void {
+    const selector = 'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+    const el = container.querySelector<HTMLElement>(selector);
+    if (el) {
+      // Use requestAnimationFrame to allow React/monaco to finish
+      // rendering before attempting focus.
+      requestAnimationFrame(() => el.focus());
     }
   }
 }

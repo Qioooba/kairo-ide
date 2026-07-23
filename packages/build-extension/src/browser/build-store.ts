@@ -42,7 +42,7 @@ export function mapBuildResult(b: BuildResult, workspaceId: string): BuildRun {
         state: b.state === 'success' ? 'succeeded' : b.state === 'failure' ? 'failed' : b.state === 'queued' ? 'pending' : b.state,
         startTime: b.startedAt,
         endTime: b.finishedAt,
-        summary: summary ? `${summary.errors ?? 0} errors, ${summary.warnings ?? 0} warnings` : '',
+        summary: summary ? `${summary.errors ?? 0} errors, ${summary.warnings ?? 0} warnings` : b.error ?? '',
         diagnostics: diagnostics.map(d => ({
             file: d.file,
             line: d.line,
@@ -70,6 +70,7 @@ export class BuildStore {
     private readonly onConnectionStateChangeEmitter = new Emitter<ConnectionState>();
     readonly onConnectionStateChange: Event<ConnectionState> = this.onConnectionStateChangeEmitter.event;
     private connectionState: ConnectionState = 'loading';
+    private readonly cancellationRequests = new Map<string, Promise<BuildRun>>();
 
     /** Read the current connection state. UI components can seed their
      * initial render with this and then subscribe to `onConnectionStateChange`
@@ -161,7 +162,7 @@ export class BuildStore {
                         : state;
                     this.updateBuild(event.buildId, {
                         state: mappedState as BuildRun['state'],
-                        endTime: (state === 'success' || state === 'failure') ? new Date().toISOString() : undefined,
+                        endTime: (state === 'success' || state === 'failure' || state === 'cancelled') ? new Date().toISOString() : undefined,
                     });
                 }
             });
@@ -194,6 +195,37 @@ export class BuildStore {
     clearHistory(): void {
         this.builds = [];
         this.onDidChangeEmitter.fire([]);
+    }
+
+    cancelBuild(buildId: string): Promise<BuildRun> {
+        const existing = this.cancellationRequests.get(buildId);
+        if (existing) return existing;
+        const request = this.cancelBuildOnce(buildId);
+        this.cancellationRequests.set(buildId, request);
+        void request.then(
+            () => this.cancellationRequests.delete(buildId),
+            () => this.cancellationRequests.delete(buildId),
+        );
+        return request;
+    }
+
+    private async cancelBuildOnce(buildId: string): Promise<BuildRun> {
+        const ctx = this.workspaceContext.context;
+        if (!ctx) {
+            throw new Error('No active workspace');
+        }
+        const result = await this.runtime.request(
+            'DELETE /api/v1/builds/{buildId}',
+            undefined,
+            { pathParams: { buildId }, timeoutMs: 15_000, noRetry: true },
+        ) as BuildResult;
+        const mapped = mapBuildResult(result, ctx.workspaceId);
+        const exists = this.builds.some(build => build.id === buildId);
+        this.builds = exists
+            ? this.builds.map(build => build.id === buildId ? mapped : build)
+            : [...this.builds, mapped].slice(-200);
+        this.onDidChangeEmitter.fire(this.getBuilds());
+        return mapped;
     }
 
     dispose(): void {

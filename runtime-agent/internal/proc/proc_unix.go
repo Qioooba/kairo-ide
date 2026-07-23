@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/user"
 	"path/filepath"
 	"strconv"
@@ -277,3 +278,37 @@ func sameExecutable(a, b string) bool {
 
 // ensure user package is referenced when we add per-user checks later.
 var _ = user.Current
+
+// findChildProcesses returns the PIDs of all direct child processes of pid.
+// On Linux it reads /proc/{pid}/task/{pid}/children; on macOS it uses pgrep.
+func findChildProcesses(pid int) []int {
+	if pid <= 0 {
+		return nil
+	}
+	// Try Linux /proc interface first
+	childrenPath := fmt.Sprintf("/proc/%d/task/%d/children", pid, pid)
+	data, err := os.ReadFile(childrenPath)
+	if err == nil {
+		fields := strings.Fields(string(data))
+		result := make([]int, 0, len(fields))
+		for _, f := range fields {
+			if cp, err := strconv.Atoi(f); err == nil && cp > 0 {
+				result = append(result, cp)
+			}
+		}
+		return result
+	}
+	// macOS fallback: pgrep -P <pid>
+	out, err := exec.Command("pgrep", "-P", strconv.Itoa(pid)).Output()
+	if err != nil {
+		return nil
+	}
+	fields := strings.Fields(string(out))
+	result := make([]int, 0, len(fields))
+	for _, f := range fields {
+		if cp, err := strconv.Atoi(f); err == nil && cp > 0 {
+			result = append(result, cp)
+		}
+	}
+	return result
+}

@@ -195,3 +195,209 @@ func TestIsUnder(t *testing.T) {
 		}
 	}
 }
+
+func TestAuthorizeReadAbs(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("hi"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	w, err := NewWorkspaceRoots(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	absPath := filepath.Join(dir, "a.txt")
+	got, err := w.AuthorizeReadAbs(absPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// On macOS /var is a symlink to /private/var, so resolveRoot
+	// may return the path with /private prefix. Compare to the
+	// canonicalized expected path.
+	want, err := resolveRoot(absPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestAuthorizeReadAbs_Outside(t *testing.T) {
+	dir := t.TempDir()
+	w, err := NewWorkspaceRoots(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = w.AuthorizeReadAbs("/etc/passwd")
+	if err == nil {
+		t.Error("expected error for outside path")
+	}
+}
+
+func TestAuthorizeWriteAbs(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("hi"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	w, err := NewWorkspaceRoots(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	absPath := filepath.Join(dir, "a.txt")
+	got, err := w.AuthorizeWriteAbs(absPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// On macOS /var is a symlink to /private/var, so resolveRoot
+	// may return the path with /private prefix. Compare to the
+	// canonicalized expected path.
+	want, err := resolveRoot(absPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestAuthorizeWriteAbs_ReadOnly(t *testing.T) {
+	dir := t.TempDir()
+	bundled := filepath.Join(dir, "bundled")
+	if err := os.Mkdir(bundled, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bundled, "x"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	w, err := NewWorkspaceRoots(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.WithReadOnly(bundled)
+
+	_, err = w.AuthorizeWriteAbs(filepath.Join(bundled, "x"))
+	if err == nil {
+		t.Error("expected error for read-only path")
+	}
+}
+
+func TestFindRoot(t *testing.T) {
+	dir := t.TempDir()
+	sub := filepath.Join(dir, "sub")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	w, err := NewWorkspaceRoots(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	idx := w.FindRoot(sub)
+	if idx != 0 {
+		t.Errorf("expected root index 0, got %d", idx)
+	}
+
+	idx = w.FindRoot("/etc")
+	if idx != -1 {
+		t.Errorf("expected -1 for outside path, got %d", idx)
+	}
+}
+
+func TestRoots(t *testing.T) {
+	dir := t.TempDir()
+	w, err := NewWorkspaceRoots(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	roots := w.Roots()
+	if len(roots) != 1 {
+		t.Errorf("expected 1 root, got %d", len(roots))
+	}
+}
+
+func TestAddRoot(t *testing.T) {
+	dir1 := t.TempDir()
+	dir2 := t.TempDir()
+
+	w, err := NewWorkspaceRoots(dir1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := w.AddRoot(dir2); err != nil {
+		t.Fatalf("AddRoot failed: %v", err)
+	}
+
+	roots := w.Roots()
+	if len(roots) != 2 {
+		t.Errorf("expected 2 roots, got %d", len(roots))
+	}
+
+	// Adding same root again should be a no-op
+	if err := w.AddRoot(dir2); err != nil {
+		t.Fatalf("AddRoot duplicate failed: %v", err)
+	}
+	if len(w.Roots()) != 2 {
+		t.Error("duplicate AddRoot should not increase count")
+	}
+}
+
+func TestCanonical(t *testing.T) {
+	dir := t.TempDir()
+	got, err := canonical(dir)
+	if err != nil {
+		t.Fatalf("canonical failed: %v", err)
+	}
+	if got != dir {
+		t.Errorf("got %q, want %q", got, dir)
+	}
+
+	_, err = canonical("")
+	if err == nil {
+		t.Error("expected error for empty path")
+	}
+}
+
+func TestAuthorizeRead_EmptyPath(t *testing.T) {
+	dir := t.TempDir()
+	w, err := NewWorkspaceRoots(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = w.AuthorizeRead(0, "")
+	if err == nil {
+		t.Error("expected error for empty path")
+	}
+}
+
+func TestAuthorizeRead_NullByte(t *testing.T) {
+	dir := t.TempDir()
+	w, err := NewWorkspaceRoots(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = w.AuthorizeRead(0, "file\x00name")
+	if err == nil {
+		t.Error("expected error for null byte")
+	}
+}
+
+func TestAuthorizeRead_InvalidRootIndex(t *testing.T) {
+	dir := t.TempDir()
+	w, err := NewWorkspaceRoots(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = w.AuthorizeRead(-1, "file")
+	if err == nil {
+		t.Error("expected error for negative index")
+	}
+	_, err = w.AuthorizeRead(99, "file")
+	if err == nil {
+		t.Error("expected error for out-of-range index")
+	}
+}

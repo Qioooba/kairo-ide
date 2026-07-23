@@ -24,7 +24,19 @@ import {
   FrontendApplicationContribution,
   WidgetFactory,
 } from '@theia/core/lib/browser';
+// Activate Theia Git, SCM, and Terminal modules (auto-register on import).
+// Git/SCM are optional — wrapped in try/catch for environments where
+// @theia/git and @theia/scm are not installed (P1-GIT-01: needs real
+// environment verification per checklist).
+try {
+  require('@theia/git/lib/browser/git-frontend-module');
+} catch { /* @theia/git not available — Git features disabled */ }
+try {
+  require('@theia/scm/lib/browser/scm-frontend-module');
+} catch { /* @theia/scm not available — SCM features disabled */ }
+import '@theia/terminal/lib/browser/terminal-frontend-module';
 import { CommandContribution, MenuContribution } from '@theia/core/lib/common';
+import { KeybindingContribution } from '@theia/core/lib/browser/keybinding';
 import { PreferenceContribution } from '@theia/core/lib/common/preferences';
 import {
   KairoDeploymentsWidget,
@@ -32,9 +44,10 @@ import {
 } from './kairo-views-contribution';
 import { KairoStatusBarContribution } from './kairo-status-bar-contribution';
 import { KairoFileCommandsContribution } from './kairo-file-commands';
-import { KairoEncodingCommandsContribution, KairoEncodingRegistry, KairoFileService, KairoSafeEncodingService } from '@kairo/encoding-extension';
+import { KairoEncodingCommandsContribution, KairoEncodingRegistry, KairoFileService, KairoSafeEncodingService, KairoEncodingTabDecorator } from '@kairo/encoding-extension';
 import { EncodingService } from '@theia/core/lib/common/encoding-service';
 import { EncodingRegistry } from '@theia/core/lib/browser/encoding-registry';
+import { TabBarDecorator } from '@theia/core/lib/browser/shell/tab-bar-decorator';
 import { FileService } from '@theia/filesystem/lib/browser/file-service';
 import { BuildViewWidget } from '@kairo/build-extension';
 import { ServerViewWidget, LogViewerWidget } from '@kairo/tomcat-extension';
@@ -54,6 +67,35 @@ import { KairoSaveableService } from './kairo-saveable-service';
 import { SaveableService } from '@theia/core/lib/browser/saveable-service';
 import { KairoLargeFileContribution } from './kairo-large-file-contribution';
 import { KairoLargeFilePreferenceContribution } from './kairo-large-file-preferences';
+import { KairoEditorPreferenceContribution, KairoEditorAutoSaveSync } from './kairo-editor-preferences';
+import { KairoSettingsPreferenceContribution } from './kairo-settings-preferences';
+import { KairoSettingsService } from './kairo-settings-service';
+import { KairoKeymapWidget, KAIRO_KEYMAP_FACTORY_ID } from './kairo-keymap-widget';
+import { MavenViewWidget } from './maven-view-widget';
+import { KairoTodoWidget, KAIRO_TODO_FACTORY_ID } from './kairo-todo-widget';
+import { KairoEditorContribution } from './kairo-editor-contribution';
+import { KairoDebugSessionManager, KairoJavaDebugService } from './kairo-java-debug-service';
+import { JavaHierarchyWidget } from '@kairo/java-extension';
+import { KairoRunConfigurationService } from './kairo-run-configuration-service';
+import { KairoRunConfigurationsWidget } from './kairo-run-configurations-widget';
+import { KairoToolbarWidget } from './kairo-toolbar-widget';
+import { DebugSessionManager } from '@theia/debug/lib/browser/debug-session-manager';
+import { KairoProblemsWidget } from './kairo-problems-widget';
+import { KairoSqlService } from './kairo-sql-service';
+import { KairoSqlConsoleWidget } from './kairo-sql-console-widget';
+import { KairoTestResultsWidget } from './kairo-test-results-widget';
+import {
+  KairoNotificationServiceImpl,
+  KairoNotificationService,
+  KairoNotificationCenterWidget,
+  KairoNotificationCenterContribution,
+  KAIRO_NOTIFICATION_CENTER_FACTORY_ID,
+} from './kairo-notification-center';
+import {
+  LocalHistoryService,
+  LocalHistoryWidget,
+  LocalHistoryContribution,
+} from './kairo-local-history';
 import {
   KAIRO_SERVERS_FACTORY_ID,
   KAIRO_BUILDS_FACTORY_ID,
@@ -61,7 +103,27 @@ import {
   KAIRO_LOGS_FACTORY_ID,
   KAIRO_IMPORT_WIZARD_FACTORY_ID,
   KAIRO_PROJECT_SELECTOR_FACTORY_ID,
+  KAIRO_RUN_CONFIGURATIONS_FACTORY_ID,
+  KAIRO_TOOLBAR_FACTORY_ID,
+  KAIRO_PROBLEMS_FACTORY_ID,
+  KAIRO_LOCAL_HISTORY_FACTORY_ID as _KAIRO_LOCAL_HISTORY_FACTORY_ID,
+  KAIRO_TESTS_FACTORY_ID,
+  KAIRO_MAVEN_FACTORY_ID,
+  KAIRO_REMOTE_FACTORY_ID,
+  KAIRO_PERF_FACTORY_ID,
+  KAIRO_SQL_CONSOLE_FACTORY_ID,
 } from './kairo-factory-ids';
+import { KairoRemoteAgentService } from './kairo-remote-agent-service';
+import { KairoRemoteFileSystemProvider } from './kairo-remote-fs-provider';
+import { KairoRemoteWidget } from './kairo-remote-widget';
+import { KairoColdStartTimer, KairoCompletionTimer } from './kairo-cold-start-timer';
+import { KairoSearchTimer } from './kairo-search-timer';
+import { KairoMemoryTracker } from './kairo-memory-tracker';
+import { KairoPerfDashboardWidget } from './kairo-perf-dashboard-widget';
+import { KairoNavigationContribution } from './kairo-navigation-contribution';
+import { KairoScreenReaderService } from './kairo-screen-reader';
+import { KairoFocusManagement } from './kairo-focus-management';
+import { KairoShortcutsWidget, KAIRO_SHORTCUTS_FACTORY_ID } from './kairo-shortcuts-widget';
 
 // Re-export so existing consumers can keep importing the IDs from
 // this module; the definitions live in kairo-factory-ids.ts.
@@ -72,6 +134,13 @@ export {
   KAIRO_LOGS_FACTORY_ID,
   KAIRO_IMPORT_WIZARD_FACTORY_ID,
   KAIRO_PROJECT_SELECTOR_FACTORY_ID,
+  KAIRO_RUN_CONFIGURATIONS_FACTORY_ID,
+  KAIRO_TOOLBAR_FACTORY_ID,
+  KAIRO_PROBLEMS_FACTORY_ID,
+  KAIRO_KEYMAP_FACTORY_ID,
+  KAIRO_TODO_FACTORY_ID,
+  KAIRO_TESTS_FACTORY_ID,
+  KAIRO_PERF_FACTORY_ID,
 } from './kairo-factory-ids';
 
 export function bindKairoFrontend(bind: interfaces.Bind, unbind?: interfaces.Unbind, isBound?: interfaces.IsBound, rebind?: interfaces.Rebind): void {
@@ -118,7 +187,12 @@ export function bindKairoFrontend(bind: interfaces.Bind, unbind?: interfaces.Unb
   // it as a CommandContribution so Theia's command registry
   // picks up the methods.
   bind(CommandContribution).toService(KairoViewsContribution);
+  bind(KeybindingContribution).toService(KairoViewsContribution);
   bind(MenuContribution).toService(KairoViewsContribution);
+  bind(KairoJavaDebugService).toSelf().inSingletonScope();
+  bind(KairoDebugSessionManager).toService(DebugSessionManager);
+  bind(KairoRunConfigurationService).toSelf().inSingletonScope();
+  bind(KairoSqlService).toSelf().inSingletonScope();
   bind(CommandContribution).toService(KairoEncodingCommandsContribution);
 
   // KAIRO-RC-WEB-229: replace Theia's lossy encoder (iconv silently
@@ -157,7 +231,58 @@ export function bindKairoFrontend(bind: interfaces.Bind, unbind?: interfaces.Unb
   bind(CommandContribution).toService(KairoLargeFileContribution);
   bind(PreferenceContribution).toConstantValue(KairoLargeFilePreferenceContribution);
 
+  // KairoEditorPreferenceContribution: registers editor.autoSave and
+  // editor.autoSaveDelay preferences (B3.1 auto-save strategy).
+  bind(PreferenceContribution).toConstantValue(KairoEditorPreferenceContribution);
+  bind(KairoEditorAutoSaveSync).toSelf().inSingletonScope();
+  bind(FrontendApplicationContribution).toService(KairoEditorAutoSaveSync);
+
+  // KairoSettingsPreferenceContribution: registers Kairo-specific
+  // preference categories (general, appearance, build, server, etc.)
+  // for the Theia Preferences widget (G1: P2-UX-01).
+  bind(PreferenceContribution).toConstantValue(KairoSettingsPreferenceContribution);
+
+  // KairoSettingsService: project-level settings persistence
+  // to .kairo/settings.json (G1: P2-UX-01).
+  bind(KairoSettingsService).toSelf().inSingletonScope();
+
+  // KairoEditorContribution: external modification conflict handling,
+  // breadcrumbs enablement, and read-only file handling (B3.2–B3.4).
+  bind(KairoEditorContribution).toSelf().inSingletonScope();
+  bind(FrontendApplicationContribution).toService(KairoEditorContribution);
+  bind(CommandContribution).toService(KairoEditorContribution);
+  bind(KeybindingContribution).toService(KairoEditorContribution);
+  bind(MenuContribution).toService(KairoEditorContribution);
+
+  // P2-UX-03: Notification Center — aggregated notifications,
+  // bell icon in status bar with unread count badge, expandable
+  // history, last 50 items, clearable.
+  bind(KairoNotificationServiceImpl).toSelf().inSingletonScope();
+  bind(KairoNotificationService).toService(KairoNotificationServiceImpl);
+  bind(KairoNotificationCenterContribution).toSelf().inSingletonScope();
+  bind(FrontendApplicationContribution).toService(KairoNotificationCenterContribution);
+  bind(CommandContribution).toService(KairoNotificationCenterContribution);
+  bind(KairoNotificationCenterWidget).toSelf();
+  bind(WidgetFactory).toDynamicValue(ctx => ({
+    id: KAIRO_NOTIFICATION_CENTER_FACTORY_ID,
+    createWidget: () => ctx.container.get(KairoNotificationCenterWidget),
+  })).inSingletonScope();
+
+  // P2-GIT-03: Local History — snapshot timeline, diff, and restore
+  bind(LocalHistoryService).toSelf().inSingletonScope();
+  bind(LocalHistoryWidget).toSelf();
+  bind(LocalHistoryContribution).toSelf().inSingletonScope();
+  bind(FrontendApplicationContribution).toService(LocalHistoryContribution);
+  bind(CommandContribution).toService(LocalHistoryContribution);
+
   bind(KairoDeploymentsWidget).toSelf();
+  bind(KairoRunConfigurationsWidget).toSelf();
+  bind(KairoToolbarWidget).toSelf();
+  bind(KairoProblemsWidget).toSelf();
+  bind(KairoSqlConsoleWidget).toSelf();
+  bind(KairoTestResultsWidget).toSelf();
+  bind(MavenViewWidget).toSelf();
+  bind(KairoTodoWidget).toSelf();
 
   // Register widget factories so the WidgetManager can lazily
   // construct each view the first time the user opens it.
@@ -176,6 +301,42 @@ export function bindKairoFrontend(bind: interfaces.Bind, unbind?: interfaces.Unb
   bind(WidgetFactory).toDynamicValue(ctx => ({
     id: KAIRO_LOGS_FACTORY_ID,
     createWidget: () => ctx.container.get(LogViewerWidget),
+  })).inSingletonScope();
+  bind(WidgetFactory).toDynamicValue(ctx => ({
+    id: KAIRO_RUN_CONFIGURATIONS_FACTORY_ID,
+    createWidget: () => ctx.container.get(KairoRunConfigurationsWidget),
+  })).inSingletonScope();
+  bind(WidgetFactory).toDynamicValue(ctx => ({
+    id: KAIRO_TOOLBAR_FACTORY_ID,
+    createWidget: () => ctx.container.get(KairoToolbarWidget),
+  })).inSingletonScope();
+  bind(WidgetFactory).toDynamicValue(ctx => ({
+    id: KAIRO_PROBLEMS_FACTORY_ID,
+    createWidget: () => ctx.container.get(KairoProblemsWidget),
+  })).inSingletonScope();
+  bind(WidgetFactory).toDynamicValue(ctx => ({
+    id: KAIRO_KEYMAP_FACTORY_ID,
+    createWidget: () => ctx.container.get(KairoKeymapWidget),
+  })).inSingletonScope();
+  bind(WidgetFactory).toDynamicValue(ctx => ({
+    id: KAIRO_MAVEN_FACTORY_ID,
+    createWidget: () => ctx.container.get(MavenViewWidget),
+  })).inSingletonScope();
+  bind(WidgetFactory).toDynamicValue(ctx => ({
+    id: KAIRO_TODO_FACTORY_ID,
+    createWidget: () => ctx.container.get(KairoTodoWidget),
+  })).inSingletonScope();
+  bind(WidgetFactory).toDynamicValue(ctx => ({
+    id: KAIRO_TESTS_FACTORY_ID,
+    createWidget: () => ctx.container.get(KairoTestResultsWidget),
+  })).inSingletonScope();
+  bind(WidgetFactory).toDynamicValue(ctx => ({
+    id: KAIRO_SQL_CONSOLE_FACTORY_ID,
+    createWidget: () => ctx.container.get(KairoSqlConsoleWidget),
+  })).inSingletonScope();
+  bind(WidgetFactory).toDynamicValue(ctx => ({
+    id: 'kairo-java-hierarchy',
+    createWidget: () => ctx.container.get(JavaHierarchyWidget),
   })).inSingletonScope();
 
   // Import Wizard and Project Selector are the primary entry
@@ -222,6 +383,51 @@ export function bindKairoFrontend(bind: interfaces.Bind, unbind?: interfaces.Unb
   } else {
     bind(SaveableService).to(KairoSaveableService).inSingletonScope();
   }
+
+  // Encoding tab decorator — shows encoding suffix on editor tabs.
+  bind(KairoEncodingTabDecorator).toSelf().inSingletonScope();
+  bind(TabBarDecorator).toService(KairoEncodingTabDecorator);
+
+  // ── Performance instrumentation ─────────────────────────────
+  bind(KairoColdStartTimer).toSelf().inSingletonScope();
+  bind(FrontendApplicationContribution).toService(KairoColdStartTimer);
+  bind(KairoCompletionTimer).toSelf().inSingletonScope();
+  bind(KairoSearchTimer).toSelf().inSingletonScope();
+  bind(KairoMemoryTracker).toSelf().inSingletonScope();
+  bind(FrontendApplicationContribution).toService(KairoMemoryTracker);
+  bind(KairoPerfDashboardWidget).toSelf();
+  bind(WidgetFactory).toDynamicValue(ctx => ({
+    id: KAIRO_PERF_FACTORY_ID,
+    createWidget: () => ctx.container.get(KairoPerfDashboardWidget),
+  })).inSingletonScope();
+
+  // ── Kairo Remote Development ────────────────────────────────
+  bind(KairoRemoteAgentService).toSelf().inSingletonScope();
+  bind(KairoRemoteFileSystemProvider).toSelf().inSingletonScope();
+  bind(KairoRemoteWidget).toSelf();
+  bind(WidgetFactory).toDynamicValue(ctx => ({
+    id: KAIRO_REMOTE_FACTORY_ID,
+    createWidget: () => ctx.container.get(KairoRemoteWidget),
+  })).inSingletonScope();
+
+  // ── Kairo Navigation Enhancement ──────────────────────────────
+  bind(KairoNavigationContribution).toSelf().inSingletonScope();
+  bind(CommandContribution).toService(KairoNavigationContribution);
+  bind(KeybindingContribution).toService(KairoNavigationContribution);
+
+  // ── Kairo Accessibility ───────────────────────────────────────
+  bind(KairoScreenReaderService).toSelf().inSingletonScope();
+  bind(KairoFocusManagement).toSelf().inSingletonScope();
+  bind(FrontendApplicationContribution).toService(KairoFocusManagement);
+  bind(CommandContribution).toService(KairoFocusManagement);
+  bind(KeybindingContribution).toService(KairoFocusManagement);
+
+  // ── Kairo Keyboard Shortcuts Widget ──────────────────────────
+  bind(KairoShortcutsWidget).toSelf();
+  bind(WidgetFactory).toDynamicValue(ctx => ({
+    id: KAIRO_SHORTCUTS_FACTORY_ID,
+    createWidget: () => ctx.container.get(KairoShortcutsWidget),
+  })).inSingletonScope();
 }
 
 export default new ContainerModule((bind, unbind, isBound, rebind) => {

@@ -15,6 +15,17 @@
     --kairo-info: #3B82F6;
 }
 
+/* D4.3: Respect user's motion preferences */
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+}
+
 /* Kairo component styles - only for Kairo-specific widgets, not Theia core */
 .kairo-import-wizard {
     padding: 24px;
@@ -48,7 +59,7 @@
 
 .kairo-wizard-step .step-number {
     width: 28px;
-    height: 28px;
+    min-height: 28px;
     border-radius: 50%;
     background: var(--kairo-border);
     display: flex;
@@ -89,6 +100,46 @@
     font-size: 14px;
 }
 
+/* P2-UX-02: welcome tips in the import wizard */
+.kairo-wizard-tips {
+    padding: 12px 16px;
+    margin-bottom: 16px;
+    background: color-mix(in srgb, var(--kairo-primary) 10%, transparent);
+    border: 1px solid color-mix(in srgb, var(--kairo-primary) 25%, transparent);
+    border-radius: 8px;
+}
+
+.kairo-wizard-tips h3 {
+    font-size: 15px;
+    font-weight: 600;
+    margin: 0 0 6px 0;
+    color: var(--kairo-primary-light);
+}
+
+.kairo-wizard-tips p {
+    font-size: 13px;
+    margin: 0 0 8px 0;
+    color: var(--kairo-text-secondary);
+}
+
+.kairo-wizard-tips ul {
+    margin: 0;
+    padding-left: 18px;
+    font-size: 12px;
+    color: var(--kairo-text-secondary);
+}
+
+.kairo-wizard-tips li {
+    margin-bottom: 3px;
+}
+
+.kairo-wizard-tips code {
+    font-size: 11px;
+    padding: 1px 4px;
+    border-radius: 3px;
+    background: var(--kairo-bg-secondary);
+}
+
 .kairo-selected-path {
     margin-top: 12px;
     padding: 8px 12px;
@@ -127,7 +178,7 @@
 
 .kairo-error {
     color: var(--kairo-error);
-    background: rgba(239, 68, 68, 0.1);
+    background: color-mix(in srgb, var(--kairo-error) 10%, transparent);
     padding: 8px 12px;
     border-radius: 4px;
     font-size: 13px;
@@ -209,17 +260,17 @@
 }
 
 .kairo-server-status.running {
-    background: rgba(16, 185, 129, 0.1);
+    background: color-mix(in srgb, var(--kairo-success) 10%, transparent);
     color: var(--kairo-success);
 }
 
 .kairo-server-status.stopped {
-    background: rgba(160, 160, 160, 0.1);
+    background: color-mix(in srgb, var(--kairo-text-secondary) 10%, transparent);
     color: var(--kairo-text-secondary);
 }
 
 .kairo-server-status.error {
-    background: rgba(239, 68, 68, 0.1);
+    background: color-mix(in srgb, var(--kairo-error) 10%, transparent);
     color: var(--kairo-error);
 }
 
@@ -569,7 +620,48 @@
     background: var(--kairo-bg-secondary);
     border-bottom: 1px solid var(--kairo-border);
     flex-shrink: 0;
+    flex-wrap: wrap;
 }
+
+.kairo-log-viewer-toolbar .theia-input {
+    min-width: 140px;
+    flex: 1 1 180px;
+}
+
+.kairo-log-checkbox {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--kairo-text-secondary);
+    white-space: nowrap;
+}
+
+.kairo-log-status {
+    padding: 3px 12px;
+    color: var(--kairo-text-secondary);
+    background: var(--kairo-bg-secondary);
+    border-bottom: 1px solid var(--kairo-border);
+    font-size: 11px;
+}
+
+.kairo-log-error {
+    color: var(--kairo-error);
+}
+
+.kairo-log-stream,
+.kairo-log-line time {
+    color: var(--kairo-text-secondary);
+}
+
+.kairo-log-line.stream-stderr .kairo-log-stream {
+    color: var(--kairo-error);
+}
+
+.kairo-hot-reload-status { padding: 4px 0; color: var(--kairo-text-secondary); }
+.kairo-hot-reload-status.success { color: var(--kairo-success); }
+.kairo-hot-reload-status.error { color: var(--kairo-error); }
+.kairo-hot-reload-status.publishing { color: var(--kairo-warning); }
+.kairo-help-text { color: var(--kairo-text-secondary); font-size: 11px; line-height: 1.4; }
 
 .kairo-log-viewer-title {
     font-size: 12px;
@@ -670,7 +762,7 @@
     /* Lighter tint of --kairo-primary for large text on dark
      * backgrounds: #7C3AED on #1e1f22 is only ~2.3:1 (fails WCAG
      * AA), #a78bfa reaches ~4.7:1 (KAIRO-RC-WEB-021). */
-    color: #a78bfa;
+    color: var(--kairo-accent-purple, #a78bfa);
     margin: 0;
 }
 
@@ -693,6 +785,328 @@
     color: var(--kairo-text-secondary);
 }
 
+/* Recent projects on the welcome page */
+.kairo-welcome-recent {
+    margin-top: 24px;
+    width: 100%;
+    max-width: 480px;
+    text-align: left;
+}
+
+.kairo-welcome-recent-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--kairo-text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 8px;
+    padding-left: 4px;
+}
+
+.kairo-welcome-recent-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.kairo-welcome-recent-item button {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    width: 100%;
+    text-align: left;
+    padding: 8px 12px;
+    gap: 2px;
+}
+
+.recent-project-name {
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.recent-project-path {
+    font-size: 11px;
+    color: var(--kairo-text-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
+}
+
+/* Quick start guide on the welcome page */
+.kairo-welcome-quickstart {
+    margin-top: 24px;
+    width: 100%;
+    max-width: 560px;
+    text-align: left;
+}
+
+.kairo-welcome-section-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--kairo-text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 8px;
+    padding-left: 4px;
+}
+
+.kairo-quickstart-steps {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    counter-reset: quickstart;
+}
+
+.kairo-quickstart-step {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--theia-panel-border);
+    border-radius: 6px;
+    background: var(--theia-editor-background);
+}
+
+.kairo-quickstart-icon {
+    font-size: 24px;
+    flex-shrink: 0;
+    line-height: 1;
+    margin-top: 2px;
+}
+
+.kairo-quickstart-content {
+    flex: 1;
+    min-width: 0;
+}
+
+.kairo-quickstart-content strong {
+    display: block;
+    font-size: 13px;
+    margin-bottom: 2px;
+}
+
+.kairo-quickstart-content p {
+    font-size: 12px;
+    color: var(--kairo-text-secondary);
+    margin: 0;
+}
+
+.kairo-quickstart-action {
+    flex-shrink: 0;
+    align-self: center;
+}
+
+/* P2-UX-02: Run Configuration form editor */
+.kairo-runconfig-form {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 12px;
+    overflow: auto;
+    height: 100%;
+}
+
+.kairo-runconfig-title {
+    font-size: 15px;
+    font-weight: 600;
+    margin: 0 0 4px 0;
+    color: var(--kairo-primary-light);
+}
+
+.kairo-runconfig-fieldset {
+    border: 1px solid var(--theia-panel-border);
+    border-radius: 6px;
+    padding: 10px 12px;
+    margin: 0;
+}
+
+.kairo-runconfig-legend {
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--kairo-text-secondary);
+    padding: 0 4px;
+}
+
+.kairo-runconfig-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 10px;
+}
+
+.kairo-runconfig-advanced {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 10px;
+}
+
+.kairo-runconfig-field {
+    display: grid;
+    gap: 4px;
+    /* KAIRO-RC-WEB-009: prevent long labels from pushing the
+     * grid column wider than its minmax() allocation. */
+    min-width: 0;
+}
+
+.kairo-runconfig-field-label {
+    font-size: 12px;
+    color: var(--kairo-text-secondary);
+    font-weight: 500;
+}
+
+.kairo-runconfig-input,
+.kairo-runconfig-select {
+    padding: 5px 8px;
+    font-size: 13px;
+    border-radius: 4px;
+    border: 1px solid var(--theia-dropdown-border);
+    background: var(--theia-input-background);
+    color: var(--theia-input-foreground);
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.kairo-runconfig-input:focus,
+.kairo-runconfig-select:focus {
+    border-color: var(--theia-focusBorder);
+    outline: none;
+}
+
+.kairo-runconfig-textarea {
+    padding: 5px 8px;
+    font-size: 13px;
+    border-radius: 4px;
+    resize: vertical;
+    font-family: monospace;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.kairo-runconfig-checkbox {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.kairo-runconfig-checkbox-group {
+    display: flex;
+    gap: 16px;
+}
+
+.kairo-runconfig-hint {
+    font-size: 11px;
+    color: var(--kairo-text-secondary);
+    margin-top: 2px;
+    line-height: 1.4;
+}
+
+.kairo-runconfig-error {
+    color: var(--kairo-error);
+    background: color-mix(in srgb, var(--kairo-error) 10%, transparent);
+    padding: 8px 12px;
+    border-radius: 4px;
+    font-size: 13px;
+}
+
+.kairo-runconfig-actions {
+    display: flex;
+    gap: 8px;
+    padding-top: 4px;
+}
+
+/* Run config summary card */
+.kairo-runconfig-summary {
+    padding: 8px 12px;
+    margin: 0 8px;
+    border: 1px solid var(--theia-panel-border);
+    border-radius: 6px;
+    background: var(--theia-editor-background);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 16px;
+}
+
+.kairo-runconfig-summary-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+}
+
+.kairo-runconfig-summary-label {
+    color: var(--kairo-text-secondary);
+    font-weight: 500;
+    min-width: 40px;
+}
+
+.kairo-runconfig-badge {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.kairo-runconfig-badge-run {
+    background: color-mix(in srgb, var(--kairo-success, #2ecc71) 20%, transparent);
+    color: var(--kairo-success, #2ecc71);
+}
+
+.kairo-runconfig-badge-debug {
+    background: color-mix(in srgb, var(--kairo-warning, #f39c12) 20%, transparent);
+    color: var(--kairo-warning, #f39c12);
+}
+
+.kairo-runconfig-badge-default {
+    background: color-mix(in srgb, var(--kairo-primary) 20%, transparent);
+    color: var(--kairo-primary-light);
+}
+
+/* Run config list */
+.kairo-runconfig-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    overflow: auto;
+}
+
+.kairo-runconfig-list-item {
+    border-bottom: 1px solid var(--theia-panel-border);
+    padding: 8px 12px;
+}
+
+.kairo-runconfig-list-item:last-child {
+    border-bottom: none;
+}
+
+.kairo-runconfig-list-item-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 2px;
+}
+
+.kairo-runconfig-list-item-header strong {
+    font-size: 13px;
+}
+
+.kairo-runconfig-list-item-info {
+    font-size: 11px;
+    color: var(--kairo-text-secondary);
+    margin-bottom: 6px;
+}
+
 /* KAIRO-RC-WEB-101: at narrow widths / 200% zoom the status bar
  * clipped right-side items (Runtime, notification bell, panel
  * toggle) off-screen with no way to reach them. Let each area
@@ -706,4 +1120,218 @@
 
 #theia-statusBar .area::-webkit-scrollbar {
     display: none;
+}
+
+/* ── Kairo toolbar (P1-INT-03) ─────────────────────────────── */
+.kairo-toolbar-widget {
+    flex-shrink: 0;
+    height: auto;
+}
+
+.kairo-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 6px 12px;
+    background: var(--kairo-bg-secondary);
+    border-bottom: 1px solid var(--kairo-border);
+    flex-shrink: 0;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+
+.kairo-toolbar::-webkit-scrollbar {
+    display: none;
+}
+
+.kairo-toolbar-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+.kairo-toolbar-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--kairo-text-secondary);
+    white-space: nowrap;
+}
+
+.kairo-toolbar-select {
+    background: var(--kairo-bg);
+    color: var(--kairo-text);
+    border: 1px solid var(--kairo-border);
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 12px;
+    min-width: 140px;
+    max-width: 200px;
+}
+
+.kairo-toolbar-select:disabled {
+    opacity: 0.5;
+}
+
+.kairo-toolbar-actions {
+    margin-left: auto;
+    gap: 4px;
+}
+
+.kairo-toolbar-actions .theia-button {
+    flex-shrink: 0;
+    white-space: nowrap;
+}
+
+/* ── Kairo Problems panel (P1-INT-02) ──────────────────────── */
+.kairo-problems-widget {
+    min-height: 0;
+}
+
+.kairo-problems-toolbar {
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.kairo-problems-filter-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    color: var(--kairo-text-secondary);
+    white-space: nowrap;
+}
+
+.kairo-problems-select {
+    background: var(--kairo-bg);
+    color: var(--kairo-text);
+    border: 1px solid var(--kairo-border);
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 12px;
+}
+
+.kairo-problems-counts {
+    margin-left: auto;
+    font-size: 11px;
+    color: var(--kairo-text-secondary);
+    white-space: nowrap;
+}
+
+.kairo-problems-count-error {
+    color: var(--kairo-error);
+}
+
+.kairo-problems-count-warning {
+    color: var(--kairo-warning);
+}
+
+.kairo-problems-count-info {
+    color: var(--kairo-info);
+}
+
+.kairo-problems-body {
+    padding: 0;
+    overflow: auto;
+}
+
+.kairo-problems-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+    table-layout: fixed;
+}
+
+.kairo-problems-table th,
+.kairo-problems-table td {
+    text-align: left;
+    padding: 4px 8px;
+    border-bottom: 1px solid var(--kairo-border);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.kairo-problems-table th {
+    color: var(--kairo-text-secondary);
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 11px;
+    letter-spacing: 0.5px;
+    position: sticky;
+    top: 0;
+    background: var(--kairo-bg-secondary);
+    z-index: 1;
+}
+
+.kairo-problems-row {
+    cursor: pointer;
+}
+
+.kairo-problems-row:hover {
+    background: var(--kairo-bg-secondary);
+}
+
+.kairo-problems-col-severity {
+    width: 64px;
+}
+
+.kairo-problems-col-file {
+    width: 140px;
+}
+
+.kairo-problems-col-line {
+    width: 48px;
+}
+
+.kairo-problems-col-message {
+    white-space: normal !important;
+    word-break: break-word;
+}
+
+.kairo-problems-col-source {
+    width: 64px;
+}
+
+.kairo-problem-severity-error {
+    color: var(--kairo-error);
+    font-weight: 600;
+}
+
+.kairo-problem-severity-warning {
+    color: var(--kairo-warning);
+    font-weight: 600;
+}
+
+.kairo-problem-severity-info {
+    color: var(--kairo-info);
+    font-weight: 600;
+}
+
+.kairo-problem-severity-hint {
+    color: var(--kairo-text-secondary);
+}
+
+.kairo-problems-source-badge {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.kairo-problems-source-build {
+    background: var(--kairo-primary);
+    color: #fff;
+}
+
+.kairo-problems-source-java {
+    background: var(--kairo-surface);
+    color: var(--kairo-info);
 }

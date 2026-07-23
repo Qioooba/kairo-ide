@@ -1,13 +1,17 @@
 package services
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -44,6 +48,7 @@ type serverMeta struct {
 	WebappDir    string         `json:"webappDir"`
 	CatalinaBase string         `json:"catalinaBase"`
 	LastError    string         `json:"lastError,omitempty"`
+	WasRunning   bool           `json:"wasRunning,omitempty"`
 }
 
 // toResponse maps the persisted serverMeta to the safe API
@@ -99,8 +104,22 @@ func (r *realServerRunner) load() {
 	if err := json.Unmarshal(data, &items); err != nil {
 		return
 	}
+	recoveryCount := 0
 	for _, m := range items {
+		// On agent restart, every server that was previously
+		// persisted as "running" has been orphaned (the agent
+		// process died or was forcefully terminated). Mark
+		// them as "crashed" so the UI can offer recovery.
+		if m.State == "running" || m.State == "starting" {
+			m.State = "crashed"
+			m.LastError = "Agent was restarted or crashed while server was running"
+			m.WasRunning = true
+			recoveryCount++
+		}
 		r.meta[m.ID] = m
+	}
+	if recoveryCount > 0 {
+		r.save()
 	}
 }
 
@@ -133,18 +152,23 @@ func (r *realServerRunner) Start(req api.StartServerRequest) (*api.ServerRespons
 		return nil, fmt.Errorf("webappDir not found: %w", err)
 	}
 
-	// KAIRO-RC-WEB-246: auto-allocate ports when the caller does not
-	// pin them — the UI sends only {projectId}, and failing with
-	// "http port is required" is useless to a user who never heard
-	// of ports.
-	if req.HTTPPort == 0 {
-		lease, err := r.ports.Allocate(0, req.ShutdownPort, req.DebugPort)
-		if err != nil {
-			return nil, fmt.Errorf("allocate ports: %w", err)
-		}
-		req.HTTPPort = lease.HTTPPort
-		req.ShutdownPort = lease.ShutdownPort
-		req.DebugPort = lease.DebugPort
+	// A debug port is meaningful only when JDWP is explicitly requested.
+	// Accepting an explicit debugPort/suspend flag also opts in for backwards
+	// compatibility with advanced callers.
+	debugEnabled := req.Debug || req.DebugPort > 0 || req.DebugSuspend
+	lease, err := r.ports.AllocateServer(req.HTTPPort, req.ShutdownPort, req.DebugPort, debugEnabled)
+	if err != nil {
+		return nil, fmt.Errorf("allocate ports: %w", err)
+	}
+	// Keep reservations through the blocking startup probe, then release the
+	// allocator bookkeeping. Bound listeners provide the authoritative guard
+	// afterwards; retaining leases forever would exhaust the finite ranges.
+	defer lease.Release()
+	req.HTTPPort = lease.HTTPPort
+	req.ShutdownPort = lease.ShutdownPort
+	req.DebugPort = lease.DebugPort
+	if !debugEnabled {
+		req.DebugSuspend = false
 	}
 
 	id := "srv_" + shortID()
@@ -165,6 +189,7 @@ func (r *realServerRunner) Start(req api.StartServerRequest) (*api.ServerRespons
 		ContextPath:  req.ContextPath,
 		WebappDir:    req.WebappDir,
 		JVMOptions:   req.JVMOptions,
+		Env:          req.Env,
 		Logger:       r.logger,
 	})
 	if err != nil {
@@ -220,6 +245,19 @@ func (r *realServerRunner) List() []*api.ServerResponse {
 		items = append(items, m.toResponse())
 	}
 	return items
+}
+
+func (r *realServerRunner) DeploymentTarget(projectID string) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, m := range r.meta {
+		if m.ProjectID == projectID && m.State == "running" {
+			name := strings.TrimPrefix(m.ContextPath, "/")
+			if name == "" { name = "ROOT" }
+			return filepath.Join(m.CatalinaBase, "webapps", name), nil
+		}
+	}
+	return "", fmt.Errorf("no running server for project %s", projectID)
 }
 
 func (r *realServerRunner) Stop(id string, force bool) (*api.ServerResponse, error) {
@@ -303,10 +341,11 @@ func (r *realServerRunner) Restart(id string) (*api.ServerResponse, error) {
 		debugPort = m.Ports.Debug
 	}
 	if httpPort == 0 || tomcat6.IsPortBound(httpPort) || tomcat6.IsPortBound(shutdownPort) {
-		lease, err := r.ports.Allocate(0, 0, 0)
+		lease, err := r.ports.AllocateServer(0, 0, debugPort, debugPort > 0)
 		if err != nil {
 			return nil, fmt.Errorf("allocate ports: %w", err)
 		}
+		defer lease.Release()
 		httpPort = lease.HTTPPort
 		shutdownPort = lease.ShutdownPort
 		debugPort = lease.DebugPort
@@ -401,9 +440,102 @@ func (r *realServerRunner) Debug(id string) (*api.ServerResponse, error) {
 	return m.toResponse(), nil
 }
 
+// Recoverable returns servers that were running when the agent
+// last exited (crashed or was forcefully terminated). These are
+// candidates for the recovery flow.
+func (r *realServerRunner) Recoverable() []*api.ServerResponse {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var result []*api.ServerResponse
+	for _, m := range r.meta {
+		if m.State == "crashed" && m.WasRunning {
+			result = append(result, m.toResponse())
+		}
+	}
+	return result
+}
+
+// Recover attempts to re-launch a crashed server by its ID.
+// It uses the stored metadata (JavaHome, CatalinaBase, WebappDir,
+// ContextPath, etc.) to re-start the server. If the previous ports
+// are still bound, fresh ports are allocated.
+func (r *realServerRunner) Recover(id string) (*api.ServerResponse, error) {
+	r.mu.Lock()
+	m, ok := r.meta[id]
+	r.mu.Unlock()
+	if !ok {
+		return nil, fmt.Errorf("server not found: %s", id)
+	}
+	if m.State != "crashed" {
+		return nil, fmt.Errorf("server %s is not in crashed state (current: %s)", id, m.State)
+	}
+	if m.JavaHome == "" || m.CatalinaBase == "" {
+		return nil, errors.New("server is missing recovery metadata")
+	}
+	if m.Ports == nil {
+		return nil, errors.New("server metadata missing ports; cannot recover")
+	}
+
+	var httpPort, shutdownPort, debugPort int
+	httpPort = m.Ports.HTTP
+	shutdownPort = m.Ports.Shutdown
+	debugPort = m.Ports.Debug
+
+	// If the old ports are still bound, allocate fresh ones
+	if httpPort == 0 || tomcat6.IsPortBound(httpPort) || tomcat6.IsPortBound(shutdownPort) {
+		lease, err := r.ports.AllocateServer(0, 0, debugPort, debugPort > 0)
+		if err != nil {
+			return nil, fmt.Errorf("allocate ports for recovery: %w", err)
+		}
+		defer lease.Release()
+		httpPort = lease.HTTPPort
+		shutdownPort = lease.ShutdownPort
+		debugPort = lease.DebugPort
+	}
+
+	m.WasRunning = false
+	inst, err := tomcat6.Start(context.Background(), tomcat6.Spec{
+		ID:           id,
+		JavaHome:     m.JavaHome,
+		CatalinaHome: r.tomcat6Home,
+		CatalinaBase: m.CatalinaBase,
+		HTTPPort:     httpPort,
+		ShutdownPort: shutdownPort,
+		DebugPort:    debugPort,
+		ContextPath:  m.ContextPath,
+		WebappDir:    m.WebappDir,
+		Logger:       r.logger,
+	})
+	if err != nil {
+		m.State = "error"
+		m.LastError = fmt.Sprintf("recovery failed: %v", err)
+		r.mu.Lock()
+		r.save()
+		r.mu.Unlock()
+		return nil, err
+	}
+	ports := inst.Ports()
+	m.PID = inst.PID()
+	m.Ports = &ports
+	m.State = inst.State()
+	m.StartedAt = inst.StartedAt()
+	m.LastError = ""
+	r.mu.Lock()
+	r.instances[id] = inst
+	r.save()
+	r.mu.Unlock()
+	return m.toResponse(), nil
+}
+
 // defaultLogTail is the number of lines returned by Logs when the
 // caller does not pass an explicit ?tail=N.
-const defaultLogTail = 500
+const (
+	defaultLogTail     = 500
+	maxLogTail         = 5000
+	maxLogFiles        = 32
+	maxLogBytesPerFile = 2 * 1024 * 1024
+	maxLogBytesTotal   = 8 * 1024 * 1024
+)
 
 // Logs returns the combined tail of regular files in <catalinaBase>/logs.
 // Reading the persisted files works for running and stopped servers alike;
@@ -411,6 +543,9 @@ const defaultLogTail = 500
 func (r *realServerRunner) Logs(id string, tail int) ([]api.ServerLogEntry, error) {
 	if tail <= 0 {
 		tail = defaultLogTail
+	}
+	if tail > maxLogTail {
+		tail = maxLogTail
 	}
 	r.mu.Lock()
 	m, ok := r.meta[id]
@@ -423,29 +558,129 @@ func (r *realServerRunner) Logs(id string, tail int) ([]api.ServerLogEntry, erro
 	if err != nil {
 		return []api.ServerLogEntry{}, nil
 	}
-	// Tomcat records actual HTTP traffic in localhost_access_log.* rather
-	// than stdout. Combine regular log files so the live viewer contains both
-	// startup output and requests made after the server is ready.
-	var all []string
+	// Tomcat records actual HTTP traffic in localhost_access_log.* rather than
+	// stdout. Read only bounded tails of regular, non-symlink files so a long
+	// running server cannot force a full multi-gigabyte read or escape logs/.
+	type logFile struct {
+		name    string
+		modTime time.Time
+	}
+	files := make([]logFile, 0, len(entries))
 	for _, entry := range entries {
-		if entry.IsDir() {
+		if entry.IsDir() || entry.Type()&os.ModeSymlink != 0 {
 			continue
 		}
-		data, readErr := os.ReadFile(filepath.Join(logDir, entry.Name()))
-		if readErr == nil {
-			all = append(all, splitLines(string(data), 0)...)
+		info, infoErr := entry.Info()
+		if infoErr != nil || !info.Mode().IsRegular() {
+			continue
+		}
+		files = append(files, logFile{name: entry.Name(), modTime: info.ModTime()})
+	}
+	sort.Slice(files, func(i, j int) bool {
+		if files[i].modTime.Equal(files[j].modTime) {
+			return files[i].name < files[j].name
+		}
+		return files[i].modTime.Before(files[j].modTime)
+	})
+	if len(files) > maxLogFiles {
+		files = files[len(files)-maxLogFiles:]
+	}
+	type logChunk struct {
+		name       string
+		timestamp  string
+		data       []byte
+		baseOffset int64
+	}
+	var chunks []logChunk
+	remainingBytes := int64(maxLogBytesTotal)
+	for i := len(files) - 1; i >= 0; i-- {
+		if remainingBytes <= 0 {
+			break
+		}
+		file := files[i]
+		limit := int64(maxLogBytesPerFile)
+		if limit > remainingBytes {
+			limit = remainingBytes
+		}
+		data, baseOffset, readErr := readRegularFileTail(filepath.Join(logDir, file.name), limit)
+		if readErr != nil {
+			continue
+		}
+		remainingBytes -= int64(len(data))
+		chunks = append(chunks, logChunk{name: file.name, timestamp: file.modTime.UTC().Format(time.RFC3339Nano), data: data, baseOffset: baseOffset})
+	}
+	var all []api.ServerLogEntry
+	for i := len(chunks) - 1; i >= 0; i-- {
+		chunk := chunks[i]
+		for _, persisted := range splitLinesWithOrdinals(chunk.data, chunk.baseOffset) {
+			line, stream := normalizePersistedLogLine(persisted.line)
+			all = append(all, api.ServerLogEntry{Line: line, TS: chunk.timestamp, Stream: stream, Source: chunk.name, Ordinal: persisted.ordinal})
 		}
 	}
 	if len(all) > tail {
 		all = all[len(all)-tail:]
 	}
-	lines := all
-	out := make([]api.ServerLogEntry, 0, len(lines))
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	for _, l := range lines {
-		out = append(out, api.ServerLogEntry{Line: l, TS: now})
+	return all, nil
+}
+
+func normalizePersistedLogLine(line string) (string, string) {
+	if strings.HasPrefix(line, "[stderr] ") {
+		return strings.TrimPrefix(line, "[stderr] "), "stderr"
 	}
-	return out, nil
+	if strings.HasPrefix(line, "[stdout] ") {
+		return strings.TrimPrefix(line, "[stdout] "), "stdout"
+	}
+	return line, "stdout"
+}
+
+func readRegularFileTail(path string, maxBytes int64) ([]byte, int64, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		return nil, 0, fmt.Errorf("not a regular log file")
+	}
+	start := info.Size() - maxBytes
+	if start <= 0 {
+		data, readErr := io.ReadAll(io.LimitReader(f, maxBytes))
+		return data, 0, readErr
+	}
+	// Include one preceding byte and discard through the next newline so the
+	// returned tail never begins with a partial line.
+	if _, err := f.Seek(start-1, io.SeekStart); err != nil {
+		return nil, 0, err
+	}
+	data, err := io.ReadAll(io.LimitReader(f, maxBytes+1))
+	if err != nil {
+		return nil, 0, err
+	}
+	if newline := bytes.IndexByte(data, '\n'); newline >= 0 {
+		return data[newline+1:], start + int64(newline), nil
+	}
+	return nil, info.Size(), nil
+}
+
+type persistedLogLine struct {
+	line    string
+	ordinal int64
+}
+
+func splitLinesWithOrdinals(data []byte, baseOffset int64) []persistedLogLine {
+	var out []persistedLogLine
+	start := 0
+	for i, b := range data {
+		if b == '\n' {
+			out = append(out, persistedLogLine{line: string(data[start:i]), ordinal: baseOffset + int64(start)})
+			start = i + 1
+		}
+	}
+	if start < len(data) {
+		out = append(out, persistedLogLine{line: string(data[start:]), ordinal: baseOffset + int64(start)})
+	}
+	return out
 }
 
 func splitLines(s string, max int) []string {

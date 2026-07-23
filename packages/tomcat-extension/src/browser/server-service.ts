@@ -9,6 +9,9 @@ import { RuntimeConnectionService } from '@kairo/runtime-extension';
 import { ServerStore } from './server-store';
 import { ServerViewWidget } from './server-view-widget';
 import { LogViewerWidget } from './log-viewer-widget';
+import { toStoreServer } from './server-model';
+
+export { toStoreServer } from './server-model';
 
 @injectable()
 export class KairoServerService {
@@ -17,26 +20,21 @@ export class KairoServerService {
 
   protected cache = new Map<string, ServerInstance>();
 
+  /** Adopt a ServerInstance created by another trusted typed endpoint. */
+  adopt(instance: ServerInstance): ServerInstance {
+    this.cache.set(instance.id, instance);
+    this.store.upsertServer(toStoreServer(instance), { force: true });
+    return instance;
+  }
+
   async start(projectId: string, debug = false): Promise<ServerInstance> {
     const s = await this.runtime.request('POST /api/v1/servers', { projectId, debug });
-    this.cache.set(s.id, s);
-    this.store.upsertServer(this.toStoreServer(s), { force: true });
-    return s;
+    return this.adopt(s);
   }
 
   async stop(id: string, force = false): Promise<ServerInstance> {
     const s = await this.runtime.request('DELETE /api/v1/servers/{serverId}', { force }, { pathParams: { serverId: id } });
-    this.cache.set(id, s);
-    this.store.upsertServer(this.toStoreServer(s), { force: true });
-    return s;
-  }
-
-  private toStoreServer(s: ServerInstance) {
-    return {
-      id: s.id, workspaceId: '', projectId: s.projectId, state: s.state,
-      httpPort: s.ports.http || 0, pid: s.pid || 0, startTime: s.startedAt || '',
-      url: s.ports.http ? `http://127.0.0.1:${s.ports.http}` : undefined,
-    } as import('./server-store').ServerInstance;
+    return this.adopt(s);
   }
 }
 

@@ -18,7 +18,7 @@
     "build": "tsc -b --force",
     "clean": "rm -rf lib tsconfig.tsbuildinfo",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "test": "node --test src/main/browser/kairo-commands.test.cjs src/main/browser/kairo-file-commands.test.cjs src/main/browser/large-file-policy.test.cjs && node --import ./test/register-hooks.mjs --test src/main/browser/kairo-composition.test.cjs",
+    "test": "node --test src/main/browser/kairo-commands.test.cjs src/main/browser/kairo-file-commands.test.cjs src/main/browser/large-file-policy.test.cjs src/main/browser/kairo-java-debug-service.test.cjs src/main/browser/kairo-debug-native-wiring.test.cjs src/main/browser/kairo-run-configuration-service.test.cjs src/main/node/kairo-java-debug-adapter.test.cjs && node --import ./test/register-hooks.mjs --test src/main/browser/kairo-composition.test.cjs",
     "start:browser": "theia start /tmp/kairo-workspace --hostname=127.0.0.1 --port=3000",
     "start:server": "theia start /var/lib/kairo/workspaces --hostname=127.0.0.1 --port=8443"
   },
@@ -37,6 +37,8 @@
     "@theia/debug": "1.73.1",
     "@theia/editor": "1.73.1",
     "@theia/filesystem": "1.73.1",
+    "@theia/git": "1.73.1",
+    "@theia/scm": "1.73.1",
     "@theia/markers": "1.73.1",
     "@theia/messages": "1.73.1",
     "@theia/monaco": "1.73.1",
@@ -54,4 +56,3 @@
     "typescript": "5.5.4"
   }
 }
-

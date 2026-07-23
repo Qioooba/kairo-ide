@@ -12,6 +12,7 @@
   "exclude": ["node_modules", "lib", "**/*.test.ts"],
   "references": [
     { "path": "../protocol" },
+    { "path": "../config-schema" },
     { "path": "../ui-kit" },
     { "path": "../runtime-extension" },
     { "path": "../project-extension" },
@@ -19,6 +20,7 @@
     { "path": "../jsp-extension" },
     { "path": "../tomcat-extension" },
     { "path": "../build-extension" },
+    { "path": "../test-extension" },
     { "path": "../java-extension" },
     { "path": "../encoding-extension" }
   ]

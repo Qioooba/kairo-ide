@@ -83,6 +83,117 @@ export interface LSPDefinitionParams {
   position: LSPPosition;
 }
 
+export interface LSPTextDocumentPositionParams {
+  textDocument: LSPTextDocumentIdentifier;
+  position: LSPPosition;
+}
+
+export interface LSPMarkupContent {
+  kind: 'markdown' | 'plaintext';
+  value: string;
+}
+
+export type LSPMarkedString = string | { language: string; value: string };
+
+export interface LSPHover {
+  contents: LSPMarkupContent | LSPMarkedString | LSPMarkedString[];
+  range?: LSPRange;
+}
+
+export interface LSPReferenceParams extends LSPTextDocumentPositionParams {
+  context: { includeDeclaration: boolean };
+}
+
+export interface LSPSignatureHelpParams extends LSPTextDocumentPositionParams {
+  context?: {
+    triggerKind: 1 | 2 | 3;
+    triggerCharacter?: string;
+    isRetrigger: boolean;
+  };
+}
+
+export interface LSPParameterInformation {
+  label: string | [number, number];
+  documentation?: string | LSPMarkupContent;
+}
+
+export interface LSPSignatureInformation {
+  label: string;
+  documentation?: string | LSPMarkupContent;
+  parameters?: LSPParameterInformation[];
+  activeParameter?: number;
+}
+
+export interface LSPSignatureHelp {
+  signatures: LSPSignatureInformation[];
+  activeSignature?: number;
+  activeParameter?: number;
+}
+
+export interface LSPDocumentSymbol {
+  name: string;
+  detail?: string;
+  kind: number;
+  tags?: number[];
+  deprecated?: boolean;
+  range: LSPRange;
+  selectionRange: LSPRange;
+  children?: LSPDocumentSymbol[];
+}
+
+export interface LSPSymbolInformation {
+  name: string;
+  kind: number;
+  tags?: number[];
+  deprecated?: boolean;
+  location: LSPLocation;
+  containerName?: string;
+}
+
+export type LSPDocumentSymbolResult = (LSPDocumentSymbol | LSPSymbolInformation)[] | null;
+export type LSPWorkspaceSymbolResult = LSPSymbolInformation[] | null;
+
+export interface LSPTextEdit {
+  range: LSPRange;
+  newText: string;
+}
+
+export interface LSPTextDocumentEdit {
+  textDocument: LSPVersionedTextDocumentIdentifier & { version: number | null };
+  edits: LSPTextEdit[];
+}
+
+export interface LSPResourceOperation {
+  kind: 'create' | 'rename' | 'delete';
+  uri?: string;
+  oldUri?: string;
+  newUri?: string;
+}
+
+export interface LSPWorkspaceEdit {
+  changes?: Record<string, LSPTextEdit[]>;
+  documentChanges?: (LSPTextDocumentEdit | LSPResourceOperation)[];
+}
+
+export interface LSPCommand {
+  title: string;
+  command: string;
+  arguments?: unknown[];
+}
+
+export interface LSPCodeAction {
+  title: string;
+  kind?: string;
+  diagnostics?: LSPDiagnostic[];
+  isPreferred?: boolean;
+  disabled?: { reason: string };
+  edit?: LSPWorkspaceEdit;
+  command?: LSPCommand;
+  data?: unknown;
+}
+
+export type LSPCodeActionResult = (LSPCommand | LSPCodeAction)[] | null;
+
 export interface LSPDiagnosticRelatedInformation {
   location: {
     uri: string;
@@ -170,6 +281,113 @@ export interface LSPInitializeResult {
 export interface LSPLocation {
   uri: string;
   range: LSPRange;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Call Hierarchy (LSP 3.16+)                                         */
+/* ------------------------------------------------------------------ */
+
+export interface LSPCallHierarchyItem {
+  name: string;
+  kind: number;
+  tags?: number[];
+  detail?: string;
+  uri: string;
+  range: LSPRange;
+  selectionRange: LSPRange;
+  data?: unknown;
+}
+
+export interface LSPCallHierarchyIncomingCall {
+  from: LSPCallHierarchyItem;
+  fromRanges: LSPRange[];
+}
+
+export interface LSPCallHierarchyOutgoingCall {
+  to: LSPCallHierarchyItem;
+  fromRanges: LSPRange[];
+}
+
+export interface LSPCallHierarchyPrepareParams {
+  textDocument: LSPTextDocumentIdentifier;
+  position: LSPPosition;
+}
+
+export interface LSPCallHierarchyIncomingCallsParams {
+  item: LSPCallHierarchyItem;
+}
+
+export interface LSPCallHierarchyOutgoingCallsParams {
+  item: LSPCallHierarchyItem;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Type Hierarchy (LSP 3.16+)                                         */
+/* ------------------------------------------------------------------ */
+
+export interface LSPTypeHierarchyItem {
+  name: string;
+  kind: number;
+  tags?: number[];
+  detail?: string;
+  uri: string;
+  range: LSPRange;
+  selectionRange: LSPRange;
+  data?: unknown;
+}
+
+export interface LSPTypeHierarchyPrepareParams {
+  textDocument: LSPTextDocumentIdentifier;
+  position: LSPPosition;
+}
+
+export interface LSPTypeHierarchySupertypesParams {
+  item: LSPTypeHierarchyItem;
+}
+
+export interface LSPTypeHierarchySubtypesParams {
+  item: LSPTypeHierarchyItem;
+}
+
+export interface LSPCodeLens {
+  range: LSPRange;
+  command?: LSPCommand;
+  data?: unknown;
+}
+
+export interface LSPInlayHint {
+  position: LSPPosition;
+  label: string | { value: string }[];
+  kind?: 1 | 2; // 1=Type, 2=Parameter
+  paddingLeft?: boolean;
+  paddingRight?: boolean;
+  tooltip?: string | LSPMarkupContent;
+}
+
+/** LSP 3.17 $/progress notification params */
+export interface LSPWorkDoneProgressBegin {
+  kind: 'begin';
+  title: string;
+  cancellable?: boolean;
+  message?: string;
+  percentage?: number;
+}
+
+export interface LSPWorkDoneProgressReport {
+  kind: 'report';
+  cancellable?: boolean;
+  message?: string;
+  percentage?: number;
+}
+
+export interface LSPWorkDoneProgressEnd {
+  kind: 'end';
+  message?: string;
+}
+
+export interface LSPProgressParams {
+  token: string | number;
+  value: LSPWorkDoneProgressBegin | LSPWorkDoneProgressReport | LSPWorkDoneProgressEnd;
 }
 
 /* ------------------------------------------------------------------ */

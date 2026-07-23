@@ -8,9 +8,12 @@
     "test:ui": "node ui-full-chain.cjs",
     "test:smoke": "node theia-smoke.cjs",
     "test:visual": "node visual-regression.cjs",
-    "test:a11y": "node a11y-scan.cjs"
+    "test:a11y": "node a11y-scan.cjs",
+    "test:playwright": "npx playwright test --config playwright.config.ts",
+    "test:core": "npx playwright test --config playwright.config.ts --grep 'E2E-0[12459]'"
   },
   "dependencies": {
-    "@axe-core/playwright": "^4.12.1"
+    "@axe-core/playwright": "^4.12.1",
+    "@playwright/test": "^1.61.1"
   }
 }

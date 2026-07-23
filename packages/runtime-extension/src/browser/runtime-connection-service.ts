@@ -29,6 +29,7 @@ import {
   ResponseFor,
   WsEvent,
   HealthResponse,
+  PortDiagnostics,
 } from '@kairo/protocol';
 import {
   KairoError,
@@ -340,6 +341,21 @@ export class RuntimeConnectionService {
    */
   invalidateEndpoints(): void {
     this.cachedEndpoints = undefined;
+  }
+
+  /**
+   * Query the agent for port diagnostics — check whether a
+   * port is occupied and by which process.
+   */
+  async diagnosePort(port: number): Promise<PortDiagnostics> {
+    const url = this.url('GET /api/v1/diagnostics/port', { query: { port: String(port) } });
+    const headers: Record<string, string> = { Accept: 'application/json' };
+    const secret = this.agentSecret();
+    if (secret) headers['X-Kairo-Secret'] = secret;
+    const res = await fetch(url, { method: 'GET', headers, credentials: 'omit' });
+    const body = await res.json().catch(() => undefined);
+    const out = unwrapResponse(res, body);
+    return out as PortDiagnostics;
   }
 
   async request<E extends Endpoint>(

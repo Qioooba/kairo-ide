@@ -27,6 +27,7 @@ import {
 } from '@kairo/java-extension';
 import { KairoEncodingServiceImpl, bindEncodingCommands } from '@kairo/encoding-extension';
 import { bindBuildExtension } from '@kairo/build-extension';
+import { bindTestExtension } from '@kairo/test-extension';
 
 /**
  * Single-shot binder used by `KairoProduct` (theia-product
@@ -74,6 +75,7 @@ export function bindKairoProduct(
   bindJspExtension(bind);
   bindTomcatExtension(bind);
   bindBuildExtension(bind);
+  bindTestExtension(bind);
   bindJavaExtension(bind);
   bindJavaLanguageClientContribution(bind);
   bindJdtLsService(bind);

@@ -20,6 +20,7 @@
 
 import { injectable, inject, interfaces } from '@theia/core/shared/inversify';
 import { QuickInputService, ApplicationShell, FrontendApplicationContribution } from '@theia/core/lib/browser';
+import { ConfirmDialog } from '@theia/core/lib/browser/dialogs';
 import { KairoProjectEncodingContribution } from './project-encoding-contribution';
 import {
   Command,
@@ -50,6 +51,11 @@ export namespace KairoEncodingCommands {
   export const SHOW_ENCODING: Command = {
     id: 'kairo.encoding.show',
     label: 'Show File Encoding',
+    category: 'Kairo',
+  };
+  export const CONVERT_ENCODING: Command = {
+    id: 'kairo.encoding.convert',
+    label: 'Convert Encoding…',
     category: 'Kairo',
   };
 }
@@ -152,6 +158,87 @@ export class KairoEncodingCommandsContribution implements CommandContribution {
           this.messages.info(`Saved ${target.displayName} as ${picked}.`);
         } catch (err) {
           this.messages.error(`Save with ${picked} failed: ${(err as Error).message}`);
+        }
+      },
+    });
+
+    registry.registerCommand(KairoEncodingCommands.CONVERT_ENCODING, {
+      execute: async (uri?: URI | string) => {
+        const target = this.normalizeUri(uri) ?? this.currentEditorUri();
+        if (!target) {
+          this.messages.warn('Open a file first.');
+          return;
+        }
+        const widget = await this.editorManager.getByUri(target);
+        if (!widget) {
+          this.messages.warn(`No open editor for ${target.displayName}.`);
+          return;
+        }
+        const document = widget.editor.document;
+        const current = this.service.getEncodingFor(target);
+        const picked = await this.pickEncoding(current);
+        if (!picked) return;
+        if (picked === current) {
+          this.messages.info(`Already using ${current}, nothing to convert.`);
+          return;
+        }
+        // Show confirmation dialog with details
+        const dialog = new ConfirmDialog({
+          title: 'Convert Encoding',
+          msg: [
+            `You are about to convert the encoding of this file:`,
+            ``,
+            `  File: ${target.displayName}`,
+            `  Current encoding: ${current}`,
+            `  Target encoding: ${picked}`,
+            ``,
+            `⚠️ Warning: This operation is NOT reversible.`,
+            `The file bytes on disk will be permanently changed.`,
+            `Make sure you have a backup or version control.`,
+            ``,
+            `Do you want to proceed?`,
+          ].join('\n'),
+          ok: 'Convert',
+          cancel: 'Cancel',
+        });
+        const confirmed = await dialog.open();
+        if (!confirmed) return;
+        const text = document.getText();
+        // Validate the text can be represented in the target encoding
+        const validation = await this.service.validateEncoding(text, picked);
+        if (!validation.valid) {
+          this.messages.error(
+            `Cannot convert to ${picked}: the document contains characters ` +
+              `${picked} cannot represent. ${validation.error || ''} ` +
+              `Conversion refused.`,
+          );
+          return;
+        }
+        try {
+          // Use the Go agent's recode endpoint to convert the file on disk
+          await this.service.recode({
+            workspaceId: '', // not needed for sandbox-less calls
+            file: target.path.toString(),
+            from: current,
+            to: picked,
+          });
+          // Update the encoding metadata
+          this.service.setEncodingFor(target, picked);
+          // Reload the editor to show the recoded content
+          const reloaded = await this.editorManager.getByUri(target);
+          if (reloaded) {
+            await reloadEditorWithEncoding(
+              reloaded, target, toTheiaEncodingId(picked),
+              this.editorManager, this.messages,
+            );
+          }
+          this.messages.info(
+            `Converted ${target.displayName} from ${current} to ${picked}.`,
+          );
+        } catch (err) {
+          this.messages.error(
+            `Conversion from ${current} to ${picked} failed: ${(err as Error).message}`,
+          );
         }
       },
     });

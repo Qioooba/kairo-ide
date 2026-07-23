@@ -7,15 +7,11 @@ cd "$(dirname "$0")/.."
 DEST="bundled/tomcat6"
 mkdir -p "$DEST"
 
-# Mirror selection. Apache's archive redirects to a CDN; the
-# exact host is recorded in the file we ship.
-MIRROR="${KAIRO_TOMCAT_MIRROR:-https://archive.apache.org/dist/tomcat/tomcat-6/v6.0.53/bin}"
 TARBALL="apache-tomcat-6.0.53.tar.gz"
-URL="$MIRROR/$TARBALL"
 TARGET="$DEST/$TARBALL"
 
 # SHA-256 of the official archive. Apache publishes the hash
-# alongside the binary at $URL.sha256 for modern releases; for
+# alongside the binary for modern releases; for
 # 6.0.53 (2017) only .md5/.asc were published, so we can't rely
 # on a downloadable .sha256. Instead the operator must supply
 # the verified value via KAIRO_TOMCAT6_SHA256 (verified against
@@ -43,19 +39,15 @@ if ! echo "$EXPECTED_SHA256" | grep -qE '^[0-9a-fA-F]{64}$'; then
   exit 1
 fi
 
+export KAIRO_TOMCAT6_SHA256="$EXPECTED_SHA256"
 if [ ! -f "$TARGET" ]; then
-  echo "Downloading $URL"
-  curl -fL --retry 3 -o "$TARGET" "$URL"
-fi
-
-ACTUAL=$(shasum -a 256 "$TARGET" | awk '{print $1}')
-if [ "$ACTUAL" != "$EXPECTED_SHA256" ]; then
-  echo "ERROR: SHA-256 mismatch."
-  echo "  expected: $EXPECTED_SHA256"
-  echo "  actual:   $ACTUAL"
-  echo "Refusing to use a tampered archive. Re-verify the expected"
-  echo "value against the Apache KEYS file."
-  exit 1
+  # The shared fetcher enforces HTTPS, a 10s connection timeout,
+  # a 30s total network timeout and atomic publication after hash match.
+  node scripts/run-with-timeout.cjs 45 node scripts/fetch-verified-archive.cjs \
+    --id tomcat6-linux --output "$TARGET"
+else
+  node scripts/run-with-timeout.cjs 30 node scripts/fetch-verified-archive.cjs \
+    --id tomcat6-linux --archive "$TARGET"
 fi
 
 EXTRACTED="$DEST/apache-tomcat-6.0.53"

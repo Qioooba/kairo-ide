@@ -2,7 +2,8 @@ import * as React from 'react';
 import { injectable, inject } from '@theia/core/shared/inversify';
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import { CommandService } from '@theia/core/lib/common';
-import { ServerStore, ServerInstance, ConnectionState } from './server-store';
+import { RuntimeConnectionService } from '@kairo/runtime-extension';
+import { ServerStore, ServerInstance, ConnectionState, HotReloadStatus } from './server-store';
 
 function stateIcon(state: ServerInstance['state']): string {
     switch (state) {
@@ -26,14 +27,35 @@ function stateLabel(state: ServerInstance['state']): string {
     }
 }
 
+function hotReloadStatusColor(status: HotReloadStatus): string {
+    switch (status) {
+        case 'synced': return '#22c55e'; // green
+        case 'compiling': return '#eab308'; // yellow
+        case 'restart_required': return '#ef4444'; // red
+    }
+}
+
+function hotReloadStatusLabel(status: HotReloadStatus): string {
+    switch (status) {
+        case 'synced': return '已同步';
+        case 'compiling': return '编译中';
+        case 'restart_required': return '需要重启';
+    }
+}
+
 interface ServerViewProps {
     store: ServerStore;
     commandService: CommandService;
+    runtime: RuntimeConnectionService;
 }
 
-const ServerViewComponent: React.FC<ServerViewProps> = ({ store, commandService }) => {
+const ServerViewComponent: React.FC<ServerViewProps> = ({ store, commandService, runtime }) => {
     const [servers, setServers] = React.useState<ServerInstance[]>(store.getServers());
     const [connectionState, setConnectionState] = React.useState<ConnectionState>(store.getConnectionState());
+    const [reloadPaused, setReloadPaused] = React.useState(false);
+    const [publishState, setPublishState] = React.useState<'idle' | 'publishing' | 'success' | 'error'>('idle');
+    const [publishMessage, setPublishMessage] = React.useState('Manual mode — no file watcher is active.');
+    const [hotReloadStatus, setHotReloadStatus] = React.useState<HotReloadStatus>(store.getHotReloadStatus());
 
     React.useEffect(() => {
         const sub = store.onDidChange(s => setServers([...s]));
@@ -42,6 +64,11 @@ const ServerViewComponent: React.FC<ServerViewProps> = ({ store, commandService 
 
     React.useEffect(() => {
         const sub = store.onConnectionStateChange(s => setConnectionState(s));
+        return () => sub.dispose();
+    }, [store]);
+
+    React.useEffect(() => {
+        const sub = store.onHotReloadStatusChange(s => setHotReloadStatus(s));
         return () => sub.dispose();
     }, [store]);
 
@@ -56,18 +83,45 @@ const ServerViewComponent: React.FC<ServerViewProps> = ({ store, commandService 
     const isEmpty = servers.length === 0 && connectionState !== 'loading';
 
     const handleStart = () => commandService.executeCommand('kairo.server.start');
+    const handleDebug = () => commandService.executeCommand('kairo.server.debug');
     const handleStop = () => commandService.executeCommand('kairo.server.stop');
     const handleRestart = () => commandService.executeCommand('kairo.server.restart');
     const handleOpenApp = () => commandService.executeCommand('kairo.app.open');
+    const publishStatic = async () => {
+        if (!activeServer || reloadPaused) return;
+        setPublishState('publishing'); setPublishMessage('Publishing JSP/CSS/JS and static resources…');
+        try {
+            const result = await runtime.request('POST /api/v1/deployments', { projectId: activeServer.projectId, buildId: '', scope: 'webapp', intent: 'publish-static-changes' });
+            setPublishState('success'); setPublishMessage(`${result.filesTouched} file(s), ${result.bytes} bytes published without context reload.`);
+        } catch (error) {
+            setPublishState('error'); setPublishMessage(error instanceof Error ? error.message : 'Publish failed. Retry when ready.');
+        }
+    };
 
     if (connectionState === 'loading') {
         return (
+            <>
             <div className="kairo-widget" data-testid="server-view">
                 <div className="kairo-widget-header" data-testid="server-view-header">
                     <span className="kairo-widget-title">Server</span>
                 </div>
                 <p className="kairo-empty" data-testid="server-loading">Loading...</p>
             </div>
+
+            <div className="kairo-widget-section" data-testid="hot-reload-section">
+                <div className="kairo-section-title">Static Hot Reload (manual)</div>
+                <div className="kairo-hot-reload-indicator" data-testid="hot-reload-indicator" title={hotReloadStatusLabel(hotReloadStatus)}>
+                    <span className="kairo-hot-reload-dot" style={{ display: 'inline-block', width: 10, height: 10, borderRadius: '50%', backgroundColor: hotReloadStatusColor(hotReloadStatus), marginRight: 6, verticalAlign: 'middle' }} />
+                    <span className="kairo-hot-reload-label">{hotReloadStatusLabel(hotReloadStatus)}</span>
+                </div>
+                <div className="kairo-widget-toolbar">
+                    <button className="theia-button" onClick={() => void publishStatic()} disabled={!activeServer || activeServer.state !== 'running' || reloadPaused || publishState === 'publishing'}>Publish Changed Files</button>
+                    <button className="theia-button secondary" onClick={() => setReloadPaused(value => !value)} aria-pressed={reloadPaused}>{reloadPaused ? 'Resume' : 'Pause'}</button>
+                </div>
+                <div className={`kairo-hot-reload-status ${publishState}`} role="status">{publishMessage}</div>
+                <p className="kairo-help-text">JSP/CSS/JS and static bytes are merge-copied. Deletes are not propagated. Java/class changes require Build + Publish and may require restart; HotSwap is not claimed.</p>
+            </div>
+            </>
         );
     }
 
@@ -96,11 +150,12 @@ const ServerViewComponent: React.FC<ServerViewProps> = ({ store, commandService 
                         className="kairo-server-state"
                         data-testid="server-state"
                         data-state={activeServer.state}
+                        aria-live="polite"
                     >
                         {stateIcon(activeServer.state)} {stateLabel(activeServer.state)}
                     </span>
                 ) : (
-                    <span className="kairo-server-state" data-testid="server-state" data-state="stopped">
+                    <span className="kairo-server-state" data-testid="server-state" data-state="stopped" aria-live="polite">
                         {stateIcon('stopped')} Stopped
                     </span>
                 )}
@@ -115,6 +170,16 @@ const ServerViewComponent: React.FC<ServerViewProps> = ({ store, commandService 
                     aria-label="Start server"
                 >
                     Start
+                </button>
+                <button
+                    className="theia-button"
+                    data-testid="server-debug-button"
+                    onClick={handleDebug}
+                    disabled={activeServer?.state === 'running' || activeServer?.state === 'starting' || isDisconnected}
+                    aria-label="Start server with JDWP enabled"
+                    title="Start Tomcat with a local JDWP port. Debug Adapter connection is shown separately."
+                >
+                    Debug Server
                 </button>
                 <button
                     className="theia-button"
@@ -152,6 +217,7 @@ const ServerViewComponent: React.FC<ServerViewProps> = ({ store, commandService 
                         href={activeServer.url}
                         target="_blank"
                         rel="noopener noreferrer"
+                        aria-label={`Open ${activeServer.url} in browser`}
                         data-testid="server-url-link"
                     >
                         {activeServer.url}
@@ -167,6 +233,14 @@ const ServerViewComponent: React.FC<ServerViewProps> = ({ store, commandService 
                         <dd data-testid="server-info-id">{activeServer.id}</dd>
                         <dt>Port</dt>
                         <dd data-testid="server-info-port">{activeServer.httpPort}</dd>
+                        {Boolean(activeServer.debugPort) && (
+                            <>
+                                <dt>JDWP</dt>
+                                <dd data-testid="server-info-debug-port">
+                                    127.0.0.1:{activeServer.debugPort} (ready)
+                                </dd>
+                            </>
+                        )}
                         <dt>PID</dt>
                         <dd data-testid="server-info-pid">{activeServer.pid}</dd>
                         <dt>Started</dt>
@@ -174,6 +248,20 @@ const ServerViewComponent: React.FC<ServerViewProps> = ({ store, commandService 
                     </dl>
                 </div>
             )}
+
+            <div className="kairo-widget-section" data-testid="hot-reload-section">
+                <div className="kairo-section-title">Static Hot Reload (manual)</div>
+                <div className="kairo-hot-reload-indicator" data-testid="hot-reload-indicator" title={hotReloadStatusLabel(hotReloadStatus)}>
+                    <span className="kairo-hot-reload-dot" style={{ display: 'inline-block', width: 10, height: 10, borderRadius: '50%', backgroundColor: hotReloadStatusColor(hotReloadStatus), marginRight: 6, verticalAlign: 'middle' }} />
+                    <span className="kairo-hot-reload-label">{hotReloadStatusLabel(hotReloadStatus)}</span>
+                </div>
+                <div className="kairo-widget-toolbar">
+                    <button className="theia-button" onClick={() => void publishStatic()} disabled={!activeServer || activeServer.state !== 'running' || reloadPaused || publishState === 'publishing'}>Publish Changed Files</button>
+                    <button className="theia-button secondary" onClick={() => setReloadPaused(value => !value)} aria-pressed={reloadPaused}>{reloadPaused ? 'Resume' : 'Pause'}</button>
+                </div>
+                <div className={`kairo-hot-reload-status ${publishState}`} role="status">{publishMessage}</div>
+                <p className="kairo-help-text">JSP/CSS/JS and static bytes are merge-copied. Deletes are not propagated. Java/class changes require Build + Publish and may require restart; HotSwap is not claimed.</p>
+            </div>
 
             <div className="kairo-widget-section" data-testid="server-list-section">
                 <div className="kairo-section-title">All Servers</div>
@@ -192,6 +280,11 @@ const ServerViewComponent: React.FC<ServerViewProps> = ({ store, commandService 
                                 <span className="kairo-server-state-icon">{stateIcon(s.state)}</span>
                                 <span className="kairo-server-id">{s.id}</span>
                                 <span className="kairo-server-port">:{s.httpPort}</span>
+                                {Boolean(s.debugPort) && (
+                                    <span className="kairo-server-debug-port" title="JDWP debug-ready port">
+                                        {' '}JDWP:{s.debugPort}
+                                    </span>
+                                )}
                                 <span className="kairo-server-status">{stateLabel(s.state)}</span>
                             </li>
                         ))}
@@ -208,6 +301,7 @@ export class ServerViewWidget extends ReactWidget {
 
     @inject(ServerStore) protected readonly serverStore!: ServerStore;
     @inject(CommandService) protected readonly commandService!: CommandService;
+    @inject(RuntimeConnectionService) protected readonly runtime!: RuntimeConnectionService;
 
     constructor() {
         super();
@@ -221,6 +315,7 @@ export class ServerViewWidget extends ReactWidget {
         return React.createElement(ServerViewComponent, {
             store: this.serverStore,
             commandService: this.commandService,
+            runtime: this.runtime,
         });
     }
 }

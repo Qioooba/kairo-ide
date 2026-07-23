@@ -7,12 +7,18 @@ import type { ServerInstance as ProtocolServerInstance } from '@kairo/protocol';
 
 export type ConnectionState = 'loading' | 'connected' | 'disconnected' | 'empty';
 
+/** Hot reload status mirroring the Go backend HotReloadStatus enum. */
+export type HotReloadStatus = 'synced' | 'compiling' | 'restart_required';
+
 export interface ServerInstance {
     id: string;
     workspaceId: string;
     projectId: string;
     state: 'stopped' | 'starting' | 'running' | 'stopping' | 'error' | 'crashed';
     httpPort: number;
+    /** JDWP listen port. A non-zero value means the server was started in
+     * debug-ready mode; it does not imply that a DAP client is attached. */
+    debugPort?: number;
     pid: number;
     startTime: string;
     url?: string;
@@ -81,12 +87,20 @@ export class ServerStore {
     private readonly onConnectionStateChangeEmitter = new Emitter<ConnectionState>();
     readonly onConnectionStateChange: Event<ConnectionState> = this.onConnectionStateChangeEmitter.event;
     private connectionState: ConnectionState = 'loading';
+    private hotReloadStatus: HotReloadStatus = 'synced';
+    private readonly onHotReloadStatusChangeEmitter = new Emitter<HotReloadStatus>();
+    readonly onHotReloadStatusChange: Event<HotReloadStatus> = this.onHotReloadStatusChangeEmitter.event;
 
     /** Read the current connection state. UI components can seed their
      * initial render with this and then subscribe to `onConnectionStateChange`
      * for updates. */
     getConnectionState(): ConnectionState {
         return this.connectionState;
+    }
+
+    /** Read the current hot reload status. */
+    getHotReloadStatus(): HotReloadStatus {
+        return this.hotReloadStatus;
     }
 
     /** Direct setter for the connection state. Used by tests and by
@@ -153,6 +167,7 @@ export class ServerStore {
                         projectId: s.projectId,
                         state: s.state,
                         httpPort: s.ports.http || 0,
+                        debugPort: s.ports.debug || 0,
                         pid: s.pid || 0,
                         startTime: s.startedAt || '',
                         url: s.ports.http ? `http://127.0.0.1:${s.ports.http}` : undefined,
@@ -185,10 +200,18 @@ export class ServerStore {
                         projectId: existing?.projectId || '',
                         state: nextState,
                         httpPort: event.ports?.http || existing?.httpPort || 0,
+                        debugPort: event.ports?.debug || existing?.debugPort || 0,
                         pid: event.pid || existing?.pid || 0,
                         startTime: existing?.startTime || new Date().toISOString(),
                         url: event.ports?.http ? `http://127.0.0.1:${event.ports.http}` : existing?.url,
                     });
+                }
+                if (event.type === 'hotreload.status') {
+                    const nextStatus = (event.data?.status || event.message) as HotReloadStatus;
+                    if (this.hotReloadStatus !== nextStatus) {
+                        this.hotReloadStatus = nextStatus;
+                        this.onHotReloadStatusChangeEmitter.fire(nextStatus);
+                    }
                 }
             });
         }
@@ -238,5 +261,6 @@ export class ServerStore {
         this.contextUnsubscribe?.dispose();
         this.onDidChangeEmitter.dispose();
         this.onConnectionStateChangeEmitter.dispose();
+        this.onHotReloadStatusChangeEmitter.dispose();
     }
 }

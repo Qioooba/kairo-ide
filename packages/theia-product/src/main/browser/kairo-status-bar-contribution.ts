@@ -1,16 +1,14 @@
 /**
- * Kairo status bar — the bottom-of-window strip that always
- * shows the current state of the IDE in one glance.
+ * Kairo status bar — unified bottom-of-window strip that
+ * always shows the current state of the IDE in one glance.
  *
- * We use the Theia `StatusBar` API to add a few left-aligned
- * entries and one right-aligned "runtime agent" indicator:
+ * Six left-aligned items (P1-INT-01):
  *
- *   [Project: legacy-sample]  [Encoding: GBK]  [JDT LS: running]
- *   [Server: running  :61100]  [Runtime: connected]
+ *   [JDK: 1.8]  [Encoding: GBK]  [Build: succeeded]
+ *   [Server: running  :61100]  [Debug: connected]  [Agent: connected]
  *
- * Clickable entries carry a real command; purely informational
- * entries (JDT LS, Runtime) stay inert on purpose
- * (KAIRO-RC-WEB-006).
+ * Clickable entries carry a real command; the Agent item
+ * supports reconnect on click.
  */
 
 import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
@@ -27,7 +25,9 @@ import { KairoJavaService, JavaServiceState } from '@kairo/java-extension';
 import { KairoEncodingServiceImpl } from '@kairo/encoding-extension';
 import { ActiveProjectService } from '@kairo/project-extension';
 import { EditorManager } from '@theia/editor/lib/browser/editor-manager';
+import { BuildStore } from '@kairo/build-extension';
 import type { ServerInstance } from '@kairo/protocol';
+import { debugStatusBarPresentation, KairoJavaDebugService, type KairoJavaDebugStatus } from './kairo-java-debug-service';
 
 @injectable()
 export class KairoStatusBarContribution implements FrontendApplicationContribution {
@@ -38,6 +38,8 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
   @inject(EditorManager) protected editorManager!: EditorManager;
   @inject(ServerStore) protected serverStore!: ServerStore;
   @inject(ActiveProjectService) protected activeProject!: ActiveProjectService;
+  @inject(KairoJavaDebugService) protected javaDebug!: KairoJavaDebugService;
+  @inject(BuildStore) protected buildStore!: BuildStore;
 
   protected unsubscribeStatus: (() => void) | undefined;
   protected unsubscribeServerEvents: (() => void) | undefined;
@@ -46,48 +48,68 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
   protected unsubscribeEncoding: Disposable | undefined;
   protected unsubscribeServerStore: Disposable | undefined;
   protected unsubscribeProject: Disposable | undefined;
+  protected unsubscribeDebug: Disposable | undefined;
+  protected unsubscribeBuild: Disposable | undefined;
   private runtimeStatus: 'connecting' | 'open' | 'disconnected' | 'closed' = 'disconnected';
 
   @postConstruct()
   init(): void {
+    // ── Project: current project (kept for project selection) ──
     this.statusBar.setElement('kairo.project', {
       text: '$(file-directory) Project: (no workspace)',
-      tooltip: 'Open a legacy Java Web project to get started. Click to select a project.',
+      tooltip: '打开一个 Java Web 项目以开始使用。点击选择项目。',
       alignment: StatusBarAlignment.LEFT,
-      priority: 100,
+      priority: 101,
       command: 'kairo.project.select',
     });
-    this.statusBar.setElement('kairo.jdtls', {
-      text: '$(coffee) JDT LS: idle',
-      tooltip: 'Eclipse JDT Language Server (skeleton — no LSP bridge yet)',
+    // ── JDK: current project JDK version ──────────────────────
+    this.statusBar.setElement('kairo.jdk', {
+      text: '$(code) JDK: -',
+      tooltip: '当前项目 JDK 版本。点击切换 JDK。',
       alignment: StatusBarAlignment.LEFT,
-      priority: 96,
+      priority: 100,
+      command: 'kairo.jdk.switch',
     });
+    // ── Encoding: current file encoding ───────────────────────
     this.statusBar.setElement('kairo.encoding', {
       text: '$(text) Encoding: -',
-      tooltip: 'Encoding of the active editor (UTF-8 default). Click to reopen with a different encoding.',
+      tooltip: '当前文件编码（默认 UTF-8）。点击以其他编码重新打开。',
       alignment: StatusBarAlignment.LEFT,
-      priority: 98,
+      priority: 99,
       command: 'kairo.encoding.reopen',
     });
+    // ── Build: last build result ──────────────────────────────
+    this.statusBar.setElement('kairo.build', {
+      text: '$(gear) Build: -',
+      tooltip: '最近一次构建结果。点击打开构建面板。',
+      alignment: StatusBarAlignment.LEFT,
+      priority: 98,
+      command: 'kairo.view.builds',
+    });
+    // ── Server: Tomcat running status ─────────────────────────
     this.statusBar.setElement('kairo.server', {
       text: '$(server-process) Server: stopped',
-      tooltip: 'Tomcat server status',
+      tooltip: 'Tomcat 服务器状态。点击打开服务器视图。',
       alignment: StatusBarAlignment.LEFT,
       priority: 97,
+      command: 'kairo.view.servers',
     });
-    this.statusBar.setElement('kairo.runtime', {
-      text: '$(pulse) Runtime: connecting…',
-      tooltip: 'Connection to the Go Runtime Agent',
-      alignment: StatusBarAlignment.RIGHT,
-      priority: 100,
+    // ── Debug: Debug session status ───────────────────────────
+    this.renderDebugStatus(this.javaDebug.currentStatus);
+    // ── Agent: Runtime Agent connection status ────────────────
+    this.statusBar.setElement('kairo.agent', {
+      text: '$(pulse) Agent: 连接中…',
+      tooltip: 'Runtime Agent 连接状态。点击重连。',
+      alignment: StatusBarAlignment.LEFT,
+      priority: 95,
+      command: 'kairo.agent.reconnect',
     });
   }
 
   async onStart(_app: FrontendApplication): Promise<void> {
     this.unsubscribeStatus = this.runtime.onStatusChange(s => {
       this.runtimeStatus = s;
-      this.setRuntimeStatus(s);
+      this.setAgentStatus(s);
       // Re-render server status to show disconnected state if applicable
       this.renderServerStatus();
     });
@@ -96,29 +118,23 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
         void this.refreshServerStatus();
       }
     });
-    this.unsubscribeJdtState = this.javaSvc.onState((s, st) => this.setJdtStatus(s, st));
+    this.unsubscribeJdtState = this.javaSvc.onState((s, st) => this.setJdkStatus(s, st));
     this.unsubscribeEditor = this.editorManager.onCurrentEditorChanged(() =>
       this.refreshEncodingStatus(),
     );
-    // "Reopen/Save with Encoding" keeps the same editor alive, so
-    // onCurrentEditorChanged never fires — refresh explicitly when
-    // the encoding service reports a change (stale 'utf8' shown
-    // after a GBK reopen otherwise).
     this.unsubscribeEncoding = this.encodingSvc.onDidChangeEncoding(() =>
       this.refreshEncodingStatus(),
     );
-    // Pull the current JDT LS state once on start so the
-    // status bar shows truth after a reconnect / window reload.
-    void this.refreshJdtStatus();
+    void this.refreshJdkStatus();
     void this.refreshEncodingStatus();
-    // Subscribe to ServerStore for server status updates.
     this.unsubscribeServerStore = this.serverStore.onDidChange(() => this.renderServerStatus());
-    // Load initial server status from store.
     this.renderServerStatus();
-    // Subscribe to ActiveProjectService so the Project status
-    // bar entry reflects the currently selected Kairo project.
     this.unsubscribeProject = this.activeProject.onDidChangeProject(p => this.renderProjectStatus(p));
     this.renderProjectStatus(this.activeProject.project);
+    this.unsubscribeDebug = this.javaDebug.onDidChangeStatus(status => this.renderDebugStatus(status));
+    // Subscribe to BuildStore for build status updates
+    this.unsubscribeBuild = this.buildStore.onDidChange(() => this.renderBuildStatus());
+    this.renderBuildStatus();
   }
 
   onStop(): void {
@@ -129,6 +145,18 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
     this.unsubscribeEncoding?.dispose();
     this.unsubscribeServerStore?.dispose();
     this.unsubscribeProject?.dispose();
+    this.unsubscribeDebug?.dispose();
+    this.unsubscribeBuild?.dispose();
+  }
+
+  protected renderDebugStatus(status: Readonly<KairoJavaDebugStatus>): void {
+    const presentation = debugStatusBarPresentation(status);
+    this.statusBar.setElement('kairo.debug', {
+      ...presentation,
+      alignment: StatusBarAlignment.LEFT,
+      priority: 96,
+      command: 'kairo.debug.openView',
+    });
   }
 
   /**
@@ -143,42 +171,40 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
     if (!p) {
       this.statusBar.setElement('kairo.project', {
         text: '$(file-directory) Project: (no workspace)',
-        tooltip: 'Open a legacy Java Web project to get started. Click to select a project.',
+        tooltip: '打开一个 Java Web 项目以开始使用。点击选择项目。',
         alignment: StatusBarAlignment.LEFT,
-        priority: 100,
+        priority: 101,
         command: 'kairo.project.select',
       });
       return;
     }
     this.statusBar.setElement('kairo.project', {
       text: `$(file-directory) Project: ${p.name}`,
-      tooltip: `${p.name}\n${p.root}\nWorkspace: ${p.workspaceId}\nProject: ${p.projectId}\nClick to select a different project.`,
+      tooltip: `${p.name}\n${p.root}\nWorkspace: ${p.workspaceId}\nProject: ${p.projectId}\n点击选择其他项目。`,
       alignment: StatusBarAlignment.LEFT,
-      priority: 100,
+      priority: 101,
       command: 'kairo.project.select',
     });
   }
 
   /**
-   * Map the JDT LS state machine to a status-bar entry.
-   * The state field on the service is the local view
-   * (uninitialized / starting / ready / crashed); the agent
-   * status is the wire truth (stopped / starting / running /
-   * stopping / crashed). Both are useful; we surface the
-   * wire truth when we have it.
+   * Render the JDK status entry based on the JDT LS state.
+   * Shows the current project JDK version from the JDT status.
    */
-  protected setJdtStatus(
+  protected setJdkStatus(
     s: JavaServiceState,
     st?: { state: string; jre?: string; pid?: number; lastError?: string; version?: string },
   ): void {
+    const jre = st?.jre;
+    const jdkVersion = jre ? extractJdkVersion(jre) : undefined;
     const local = s;
     const wire = st?.state;
     const effective: string = wire ?? local;
-    const icon = (iconFor: string): string => {
+    const _icon = (iconFor: string): string => {
       switch (iconFor) {
         case 'ready':
         case 'running':
-          return '$(coffee)';
+          return '$(check)';
         case 'starting':
           return '$(sync~spin)';
         case 'stopping':
@@ -191,28 +217,24 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
           return '$(circle-outline)';
       }
     };
-    const tooltipParts: string[] = [
-      `Local: ${local}`,
-      wire ? `Agent: ${wire}` : 'Agent: (no status yet)',
-    ];
-    if (st?.version) tooltipParts.push(`Version: ${st.version}`);
-    if (st?.jre) tooltipParts.push(`JRE: ${st.jre}`);
-    if (st?.pid) tooltipParts.push(`PID: ${st.pid}`);
-    if (st?.lastError) tooltipParts.push(`Last error: ${st.lastError}`);
-    tooltipParts.push(
-      'Skeleton: HTTP state + status bar only. LSP frame bridge to Monaco is the next round (v0.3-jdt-ls-bridge).',
-    );
-    this.statusBar.setElement('kairo.jdtls', {
-      text: `${icon(effective)} JDT LS: ${effective}`,
+    const tooltipParts: string[] = [];
+    if (jdkVersion) tooltipParts.push(`JDK: ${jdkVersion}`);
+    if (jre) tooltipParts.push(`JRE 路径: ${jre}`);
+    tooltipParts.push(`JDT LS 状态: ${effective}`);
+    if (st?.version) tooltipParts.push(`JDT LS 版本: ${st.version}`);
+    tooltipParts.push('点击切换 JDK。');
+    this.statusBar.setElement('kairo.jdk', {
+      text: jdkVersion ? `$(code) JDK: ${jdkVersion}` : `$(code) JDK: ${effective}`,
       tooltip: tooltipParts.join('\n'),
       alignment: StatusBarAlignment.LEFT,
-      priority: 96,
+      priority: 100,
+      command: 'kairo.jdk.switch',
     });
   }
 
-  protected async refreshJdtStatus(): Promise<void> {
+  protected async refreshJdkStatus(): Promise<void> {
     const st = await this.javaSvc.refreshStatus();
-    this.setJdtStatus(this.javaSvc.state$(), st);
+    this.setJdkStatus(this.javaSvc.state$(), st);
   }
 
   /**
@@ -226,9 +248,9 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
     if (!uri) {
       this.statusBar.setElement('kairo.encoding', {
         text: '$(text) Encoding: -',
-        tooltip: 'No active editor',
+        tooltip: '没有活动编辑器',
         alignment: StatusBarAlignment.LEFT,
-        priority: 98,
+        priority: 99,
         command: 'kairo.encoding.reopen',
       });
       return;
@@ -239,56 +261,104 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
       text: `$(text) Encoding: ${enc}${isOverride ? ' *' : ''}`,
       tooltip:
         `${uri.toString()}\n` +
-        `Encoding: ${enc}${isOverride ? ' (override)' : ' (default)'}\n` +
-        'Kairo: Reopen with Encoding / Save with Encoding to change. Click to reopen with encoding.',
+        `编码: ${enc}${isOverride ? ' (覆盖)' : ' (默认)'}\n` +
+        '点击以其他编码重新打开。',
       alignment: StatusBarAlignment.LEFT,
-      priority: 98,
+      priority: 99,
       command: 'kairo.encoding.reopen',
     });
   }
 
-  protected setRuntimeStatus(s: 'connecting' | 'open' | 'disconnected' | 'closed'): void {
+  protected setAgentStatus(s: 'connecting' | 'open' | 'disconnected' | 'closed'): void {
     switch (s) {
       case 'open':
-        this.statusBar.setElement('kairo.runtime', {
-          text: '$(pulse) Runtime: connected',
-          tooltip: 'Go Runtime Agent is reachable',
-          alignment: StatusBarAlignment.RIGHT,
-          priority: 100,
+        this.statusBar.setElement('kairo.agent', {
+          text: '$(pulse) Agent: 已连接',
+          tooltip: 'Runtime Agent 连接正常。点击重连。',
+          alignment: StatusBarAlignment.LEFT,
+          priority: 95,
+          command: 'kairo.agent.reconnect',
         });
         break;
       case 'connecting':
-        this.statusBar.setElement('kairo.runtime', {
-          text: '$(sync~spin) Runtime: connecting…',
-          tooltip: 'Connecting to the Go Runtime Agent',
-          alignment: StatusBarAlignment.RIGHT,
-          priority: 100,
+        this.statusBar.setElement('kairo.agent', {
+          text: '$(sync~spin) Agent: 连接中…',
+          tooltip: '正在连接 Runtime Agent…',
+          alignment: StatusBarAlignment.LEFT,
+          priority: 95,
+          command: 'kairo.agent.reconnect',
         });
         break;
       case 'disconnected':
-        this.statusBar.setElement('kairo.runtime', {
-          text: '$(error) Runtime: disconnected',
-          tooltip: 'Cannot reach the Go Runtime Agent. Build/Run/Deploy will fail until it returns.',
-          alignment: StatusBarAlignment.RIGHT,
-          priority: 100,
+        this.statusBar.setElement('kairo.agent', {
+          text: '$(error) Agent: 已断开',
+          tooltip: '无法连接到 Runtime Agent。构建/运行/部署将不可用。点击重连。',
+          alignment: StatusBarAlignment.LEFT,
+          priority: 95,
+          command: 'kairo.agent.reconnect',
         });
         break;
       case 'closed':
-        this.statusBar.setElement('kairo.runtime', {
-          text: '$(circle-slash) Runtime: closed',
-          tooltip: 'The WebSocket to the Go Runtime Agent was closed by the client.',
-          alignment: StatusBarAlignment.RIGHT,
-          priority: 100,
+        this.statusBar.setElement('kairo.agent', {
+          text: '$(circle-slash) Agent: 已关闭',
+          tooltip: 'Runtime Agent WebSocket 已被客户端关闭。点击重连。',
+          alignment: StatusBarAlignment.LEFT,
+          priority: 95,
+          command: 'kairo.agent.reconnect',
         });
         break;
     }
   }
 
+  /**
+   * Render the build status entry based on the latest build
+   * from the BuildStore. Shows the result of the most recent
+   * build with status icon and summary.
+   */
+  protected renderBuildStatus(): void {
+    const latest = this.buildStore.getLatestBuild();
+    if (!latest) {
+      this.statusBar.setElement('kairo.build', {
+        text: '$(gear) Build: 无记录',
+        tooltip: '暂无构建记录。点击打开构建面板。',
+        alignment: StatusBarAlignment.LEFT,
+        priority: 98,
+        command: 'kairo.view.builds',
+      });
+      return;
+    }
+    const icon = (() => {
+      switch (latest.state) {
+        case 'succeeded': return '$(check)';
+        case 'running':
+        case 'pending': return '$(sync~spin)';
+        case 'failed': return '$(error)';
+        case 'cancelled': return '$(circle-slash)';
+        default: return '$(gear)';
+      }
+    })();
+    const summary = latest.summary ? ` · ${latest.summary}` : '';
+    this.statusBar.setElement('kairo.build', {
+      text: `${icon} Build: ${latest.state}${summary}`,
+      tooltip: [
+        `构建 ID: ${latest.id}`,
+        `状态: ${latest.state}`,
+        latest.summary ? `结果: ${latest.summary}` : undefined,
+        latest.startTime ? `开始: ${latest.startTime}` : undefined,
+        latest.endTime ? `结束: ${latest.endTime}` : undefined,
+        '点击打开构建面板。',
+      ].filter(Boolean).join('\n'),
+      alignment: StatusBarAlignment.LEFT,
+      priority: 98,
+      command: 'kairo.view.builds',
+    });
+  }
+
   protected renderServerStatus(): void {
     if (this.runtimeStatus === 'disconnected' || this.runtimeStatus === 'closed') {
       this.statusBar.setElement('kairo.server', {
-        text: '$(error) Server: Disconnected',
-        tooltip: 'Cannot reach the runtime agent. Server commands are unavailable. Click to open the Servers view.',
+        text: '$(error) Server: 已断开',
+        tooltip: '无法连接到 Runtime Agent。服务器命令不可用。点击打开服务器视图。',
         alignment: StatusBarAlignment.LEFT,
         priority: 97,
         command: 'kairo.view.servers',
@@ -297,8 +367,8 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
     }
     if (this.runtimeStatus === 'connecting') {
       this.statusBar.setElement('kairo.server', {
-        text: '$(sync~spin) Server: connecting…',
-        tooltip: 'Connecting to runtime agent... Click to open the Servers view.',
+        text: '$(sync~spin) Server: 连接中…',
+        tooltip: '正在连接 Runtime Agent…点击打开服务器视图。',
         alignment: StatusBarAlignment.LEFT,
         priority: 97,
         command: 'kairo.view.servers',
@@ -309,8 +379,8 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
     const srv = servers[0];
     if (!srv) {
       this.statusBar.setElement('kairo.server', {
-        text: '$(server-process) Server: stopped',
-        tooltip: 'No running Tomcat server Click to open the Servers view.',
+        text: '$(server-process) Server: 已停止',
+        tooltip: '没有运行中的 Tomcat 服务器。点击打开服务器视图。',
         alignment: StatusBarAlignment.LEFT,
         priority: 97,
         command: 'kairo.view.servers',
@@ -318,10 +388,13 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
       return;
     }
     const port = srv.httpPort ? `:${srv.httpPort}` : '';
+    const debugPort = srv.debugPort ? ` · JDWP:${srv.debugPort}` : '';
     const icon = srv.state === 'running' ? '$(server-process~spin)' : '$(server-process)';
     this.statusBar.setElement('kairo.server', {
-      text: `${icon} Server: ${srv.state} ${port}`.trim(),
-      tooltip: `Tomcat ${srv.state} (id=${srv.id}). Click to open the Servers view.`,
+      text: `${icon} Server: ${srv.state} ${port}${debugPort}`.trim(),
+      tooltip: srv.debugPort
+        ? `Tomcat ${srv.state} (id=${srv.id}); JDWP 监听 ${srv.debugPort}。点击打开服务器视图。`
+        : `Tomcat ${srv.state} (id=${srv.id})。点击打开服务器视图。`,
       alignment: StatusBarAlignment.LEFT,
       priority: 97,
       command: 'kairo.view.servers',
@@ -339,6 +412,7 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
           projectId: srv.projectId,
           state: srv.state,
           httpPort: srv.ports.http || 0,
+          debugPort: srv.ports.debug || 0,
           pid: srv.pid || 0,
           startTime: srv.startedAt || '',
           url: srv.ports.http ? `http://127.0.0.1:${srv.ports.http}` : undefined,
@@ -349,12 +423,40 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
       // Network blip or agent unreachable — keep previous status from store,
       // but update the runtime status bar entry to reflect the error.
       const msg = err instanceof Error ? err.message : String(err);
-      this.statusBar.setElement('kairo.runtime', {
-        text: '$(error) Runtime: disconnected',
-        tooltip: `Cannot reach the Go Runtime Agent. ${msg}`,
-        alignment: StatusBarAlignment.RIGHT,
-        priority: 100,
+      this.statusBar.setElement('kairo.agent', {
+        text: '$(error) Agent: 已断开',
+        tooltip: `无法连接到 Runtime Agent。${msg}`,
+        alignment: StatusBarAlignment.LEFT,
+        priority: 95,
+        command: 'kairo.agent.reconnect',
       });
     }
   }
+}
+
+/**
+ * Extract a human-readable JDK version from a JRE path string.
+ * E.g., "/usr/lib/jvm/java-8-openjdk" → "1.8"
+ *       "/usr/lib/jvm/jdk-11.0.20" → "11"
+ */
+function extractJdkVersion(jrePath: string): string | undefined {
+  // Try to match common patterns: java-8, jdk-11.0.20, jdk1.8.0_202, etc.
+  const patterns = [
+    /java-(\d+)/i,
+    /jdk-?(\d+[.\d]*)/i,
+    /jdk(\d+[.\d]*)/i,
+    /jre-?(\d+[.\d]*)/i,
+    /jre(\d+[.\d]*)/i,
+  ];
+  for (const p of patterns) {
+    const m = p.exec(jrePath);
+    if (m) {
+      const v = m[1];
+      // Normalize: "1.8" → "8", "11.0.20" → "11"
+      if (v.startsWith('1.')) return v;
+      const major = v.split('.')[0];
+      return major;
+    }
+  }
+  return undefined;
 }

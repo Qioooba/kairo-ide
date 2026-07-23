@@ -56,20 +56,26 @@ func NewMemoryServices(cfg Config, sandbox *security.WorkspaceRoots) *api.Servic
 	// launch-descriptor lookup (instance B) — "project not found"
 	// and JDT LS never started (flow-03 live evidence).
 	projectStore := newDiskProjectStore(cfg.DataDir)
+	buildEngine := newAsyncBuildEngine(cfg.DataDir, registry, cfg.Logger)
+	deployer := newDiskDeployer(cfg.DataDir, cfg.Logger)
+	serverRunner := newRealServerRunner(cfg.DataDir, cfg.BundledDir, tomcat6Home, cfg.Logger)
 	return &api.Services{
-		WorkspaceStore:      wsStore,
-		ProjectStore:        projectStore,
-		ToolchainRegistry:   &memToolchainRegistry{reg: registry},
-		ProjectRepo:         &domainProjectRepo{store: projectStore},
-		ToolchainRepo:       &domainToolchainRepo{reg: registry},
-		Searcher:            &memSearcher{sandbox: sandbox, workspaces: wsStore},
-		Encoder:             &memEncoder{sandbox: sandbox},
-		BuildEngine:         newAsyncBuildEngine(cfg.DataDir, registry, cfg.Logger),
-		Deployer:            newDiskDeployer(cfg.DataDir, cfg.Logger),
-		ServerRunner:        newRealServerRunner(cfg.DataDir, cfg.BundledDir, tomcat6Home, cfg.Logger),
-		Auth:                newDiskAuthenticator(cfg.DataDir, cfg.Logger),
-		JDTLS:               newJDTLSService(cfg.DataDir, cfg.BundledDir, cfg.Logger, cfg.SkipSHAVerify, cfg.JDTLSURL),
-		JDTProjectGenerator: newJDTProjectService(cfg.DataDir, cfg.BundledDir, cfg.Logger),
+		WorkspaceStore:        wsStore,
+		ProjectStore:          projectStore,
+		RunConfigurationStore: newDiskRunConfigurationStore(wsStore),
+		ToolchainRegistry:     &memToolchainRegistry{reg: registry},
+		ProjectRepo:           &domainProjectRepo{store: projectStore},
+		ToolchainRepo:         &domainToolchainRepo{reg: registry},
+		Searcher:              &memSearcher{sandbox: sandbox, workspaces: wsStore},
+		Encoder:               &memEncoder{sandbox: sandbox},
+		BuildEngine:           buildEngine,
+		Deployer:              deployer,
+		ServerRunner:          serverRunner,
+		Auth:                  newDiskAuthenticator(cfg.DataDir, cfg.Logger),
+		JDTLS:                 newJDTLSService(cfg.DataDir, cfg.BundledDir, cfg.Logger, cfg.SkipSHAVerify, cfg.JDTLSURL),
+		JDTProjectGenerator:   newJDTProjectService(cfg.DataDir, cfg.BundledDir, cfg.Logger),
+		DataDir:               cfg.DataDir,
+		Orchestrator:          NewLaunchOrchestrator(buildEngine, deployer, serverRunner, cfg.DataDir, nil),
 		// EventBus is wired in cmd/kairo-runtime/main.go after
 		// bootstrap returns (we need the EventHub reference).
 		// Leaving it nil here is safe — handleEvents will return

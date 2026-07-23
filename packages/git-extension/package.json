@@ -1,0 +1,22 @@
+{
+  "name": "@kairo/git-extension",
+  "version": "0.1.0",
+  "description": "Kairo Git integration — file status, history, blame via child_process git CLI",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "files": ["lib", "src"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "clean": "rm -rf lib",
+    "lint": "tsc -p tsconfig.json --noEmit"
+  },
+  "peerDependencies": {
+    "@theia/core": "1.73.1",
+    "@theia/editor": "1.73.1",
+    "@theia/filesystem": "1.73.1",
+    "@theia/navigator": "1.73.1"
+  },
+  "devDependencies": {
+    "typescript": "5.5.4"
+  }
+}

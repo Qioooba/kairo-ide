@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "dependencies": {
+    "tomcat6-linux": {
+      "name": "Apache Tomcat",
+      "version": "6.0.53",
+      "archiveUrl": "https://archive.apache.org/dist/tomcat/tomcat-6/v6.0.53/bin/apache-tomcat-6.0.53.tar.gz",
+      "sha256Env": "KAIRO_TOMCAT6_SHA256",
+      "license": "Apache-2.0",
+      "licenseFiles": ["LICENSE", "NOTICE"]
+    },
+    "tomcat6-macos": {
+      "name": "Apache Tomcat",
+      "version": "6.0.53",
+      "archiveUrl": "https://archive.apache.org/dist/tomcat/tomcat-6/v6.0.53/bin/apache-tomcat-6.0.53.tar.gz",
+      "sha256Env": "KAIRO_TOMCAT6_SHA256",
+      "license": "Apache-2.0",
+      "licenseFiles": ["LICENSE", "NOTICE"]
+    },
+    "tomcat6-windows": {
+      "name": "Apache Tomcat",
+      "version": "6.0.53",
+      "archiveUrlEnv": "KAIRO_TOMCAT6_WINDOWS_ARCHIVE_URL",
+      "sha256Env": "KAIRO_TOMCAT6_WINDOWS_SHA256",
+      "license": "Apache-2.0",
+      "licenseFiles": ["LICENSE", "NOTICE"]
+    },
+    "jdtls-linux": {
+      "name": "Eclipse JDT Language Server",
+      "version": "1.21.0",
+      "_comment": "版本锁定为 1.21.0，详见 ADR-0017（JDT LS 版本兼容性矩阵）",
+      "archiveUrlEnv": "KAIRO_JDTLS_ARCHIVE_URL",
+      "sha256Env": "KAIRO_JDTLS_SHA256",
+      "license": "EPL-2.0",
+      "licenseFiles": ["LICENSE"]
+    },
+    "jdtls-macos": {
+      "name": "Eclipse JDT Language Server",
+      "version": "1.21.0",
+      "_comment": "版本锁定为 1.21.0，详见 ADR-0017（JDT LS 版本兼容性矩阵）",
+      "archiveUrlEnv": "KAIRO_JDTLS_ARCHIVE_URL",
+      "sha256Env": "KAIRO_JDTLS_SHA256",
+      "license": "EPL-2.0",
+      "licenseFiles": ["LICENSE"]
+    },
+    "jdtls-windows": {
+      "name": "Eclipse JDT Language Server",
+      "version": "1.21.0",
+      "_comment": "版本锁定为 1.21.0，详见 ADR-0017（JDT LS 版本兼容性矩阵）",
+      "archiveUrlEnv": "KAIRO_JDTLS_WINDOWS_ARCHIVE_URL",
+      "sha256Env": "KAIRO_JDTLS_WINDOWS_SHA256",
+      "license": "EPL-2.0",
+      "licenseFiles": ["LICENSE"]
+    }
+  }
+}

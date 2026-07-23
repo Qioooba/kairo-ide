@@ -6,6 +6,9 @@
     "declaration": true,
     "composite": true
   },
+  "references": [
+    { "path": "../protocol" }
+  ],
   "include": ["src/**/*.ts"],
   "exclude": ["node_modules", "lib", "**/*.test.ts"]
 }

@@ -5,3 +5,4 @@ export { KairoProjectEncodingContribution } from './project-encoding-contributio
 export { KairoSafeEncodingService, UnrepresentableEncodingError } from './safe-encoding-service';
 export { KairoEncodingRegistry } from './kairo-encoding-registry';
 export { KairoFileService, isEncodingRefusal } from './kairo-file-service';
+export { KairoEncodingTabDecorator } from './encoding-tab-decorator';

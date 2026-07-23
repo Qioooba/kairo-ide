@@ -11,7 +11,27 @@
 // shapes.
 
 import type { JdtLsState } from '../node/jdt-ls-manager';
-import type { LSPPublishDiagnosticsParams, LSPCompletionList, LSPLocation } from './lsp-protocol';
+import type {
+  LSPPublishDiagnosticsParams,
+  LSPCompletionList,
+  LSPLocation,
+  LSPHover,
+  LSPSignatureHelp,
+  LSPDocumentSymbolResult,
+  LSPWorkspaceSymbolResult,
+  LSPWorkspaceEdit,
+  LSPCodeActionResult,
+  LSPDiagnostic,
+  LSPRange,
+  LSPCodeLens,
+  LSPProgressParams,
+  LSPCallHierarchyItem,
+  LSPCallHierarchyIncomingCall,
+  LSPCallHierarchyOutgoingCall,
+  LSPTypeHierarchyItem,
+  LSPTextEdit,
+  LSPInlayHint,
+} from './lsp-protocol';
 
 export const JdtLsBackendPath = '/services/jdt-ls-backend';
 
@@ -28,8 +48,27 @@ export interface JdtLsBackendService {
   $didClose(uri: string): Promise<void>;
   $completion(p: { uri: string; line: number; character: number; triggerKind?: 1 | 2 | 3; triggerCharacter?: string }): Promise<LSPCompletionList>;
   $definition(p: { uri: string; line: number; character: number }): Promise<LSPLocation | LSPLocation[] | null>;
+  $implementation(p: { uri: string; line: number; character: number }): Promise<LSPLocation | LSPLocation[] | null>;
+  $hover(p: { uri: string; line: number; character: number }): Promise<LSPHover | null>;
+  $references(p: { uri: string; line: number; character: number; includeDeclaration: boolean }): Promise<LSPLocation[]>;
+  $signatureHelp(p: { uri: string; line: number; character: number; triggerKind?: 1 | 2 | 3; triggerCharacter?: string; isRetrigger?: boolean }): Promise<LSPSignatureHelp | null>;
+  $documentSymbols(uri: string): Promise<LSPDocumentSymbolResult>;
+  $workspaceSymbols(query: string): Promise<LSPWorkspaceSymbolResult>;
+  $codeActions(p: { uri: string; range: LSPRange; diagnostics: LSPDiagnostic[]; only?: string[] }): Promise<LSPCodeActionResult>;
+  $rename(p: { uri: string; line: number; character: number; newName: string }): Promise<LSPWorkspaceEdit | null>;
   $classFileContents(uri: string): Promise<string>;
   $recentLogs(): Promise<{ level: 'stdout' | 'stderr'; line: string; ts: number }[]>;
+  $prepareCallHierarchy(p: { uri: string; line: number; character: number }): Promise<LSPCallHierarchyItem[]>;
+  $incomingCalls(item: LSPCallHierarchyItem): Promise<LSPCallHierarchyIncomingCall[]>;
+  $outgoingCalls(item: LSPCallHierarchyItem): Promise<LSPCallHierarchyOutgoingCall[]>;
+  $prepareTypeHierarchy(p: { uri: string; line: number; character: number }): Promise<LSPTypeHierarchyItem[]>;
+  $supertypes(item: LSPTypeHierarchyItem): Promise<LSPTypeHierarchyItem[]>;
+  $subtypes(item: LSPTypeHierarchyItem): Promise<LSPTypeHierarchyItem[]>;
+  $codeLens(uri: string): Promise<LSPCodeLens[]>;
+  $buildWorkspace(force: boolean): Promise<void>;
+  $formatting(uri: string, options?: { tabSize?: number; insertSpaces?: boolean }): Promise<LSPTextEdit[]>;
+  $rangeFormatting(uri: string, range: LSPRange, options?: { tabSize?: number; insertSpaces?: boolean }): Promise<LSPTextEdit[]>;
+  $inlayHint(uri: string, range?: LSPRange): Promise<LSPInlayHint[]>;
 }
 
 /** Backend → browser: state, log, diagnostics, messages.
@@ -40,4 +79,5 @@ export interface JdtLsFrontendClient {
   onLogEvent(level: 'stdout' | 'stderr', line: string): void;
   onDiagnosticsEvent(params: LSPPublishDiagnosticsParams): void;
   onMessageEvent(message: string): void;
+  onProgressEvent(params: LSPProgressParams): void;
 }

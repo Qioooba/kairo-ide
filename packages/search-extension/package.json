@@ -6,14 +6,16 @@
   "types": "lib/src/index.d.ts",
   "files": ["lib", "src"],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node -e \"require('node:fs').copyFileSync('src/browser/search-center.css','lib/browser/search-center.css')\"",
     "clean": "rm -rf lib",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "test": "node --require source-map-support/register --test src/browser/search-service.test.cjs"
+    "test": "node --require source-map-support/register --test src/browser/search-service.test.cjs src/browser/search-session-model.test.cjs src/browser/search-center-widget.test.cjs src/browser/search-everywhere-model.test.cjs src/browser/search-replace-service.test.cjs"
   },
   "dependencies": {
     "@kairo/protocol": "workspace:*",
-    "@kairo/runtime-extension": "workspace:*"
+    "@kairo/java-extension": "workspace:*",
+    "@kairo/runtime-extension": "workspace:*",
+    "@kairo/ui-kit": "workspace:*"
   },
   "peerDependencies": {
     "@theia/core": "1.73.1",
@@ -23,4 +25,3 @@
     "typescript": "5.5.4"
   }
 }
-

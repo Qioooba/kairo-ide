@@ -37,6 +37,7 @@ type ProcessObservation struct {
 	Running          bool
 	ExitCode         *int
 	IdentityMismatch bool
+	Children         []int
 }
 
 type LogListener func(line domain.LogLine)
@@ -50,6 +51,7 @@ type ManagedProcess interface {
 	GracefulStop(ctx context.Context, identity domain.ProcessIdentity) error
 	ForceStop(ctx context.Context, identity domain.ProcessIdentity) error
 	Inspect(ctx context.Context, identity domain.ProcessIdentity) (ProcessObservation, error)
+	ChildProcesses(ctx context.Context, identity domain.ProcessIdentity) ([]int, error)
 	SubscribeLogs(listener LogListener) Disposable
 	Wait()
 }
@@ -349,13 +351,36 @@ func (p *realOSProcess) Inspect(ctx context.Context, identity domain.ProcessIden
 		}
 	}
 
+	children := findChildProcesses(pid)
+
 	return ProcessObservation{
 		PID:              pid,
 		Identity:         currentIdentity,
 		Running:          running,
 		ExitCode:         exitCode,
 		IdentityMismatch: mismatch,
+		Children:         children,
 	}, nil
+}
+
+func (p *realOSProcess) ChildProcesses(ctx context.Context, identity domain.ProcessIdentity) ([]int, error) {
+	p.mu.Lock()
+	if p.cmd == nil || p.cmd.Process == nil {
+		p.mu.Unlock()
+		return nil, nil
+	}
+	pid := p.cmd.Process.Pid
+	currentIdentity := p.identity
+	p.mu.Unlock()
+
+	if !identityMatches(currentIdentity, identity) {
+		return nil, domain.ErrProcessIdentityMismatch
+	}
+	if !verifyProcessIdentity(pid, currentIdentity) {
+		return nil, domain.ErrProcessIdentityMismatch
+	}
+
+	return findChildProcesses(pid), nil
 }
 
 func (p *realOSProcess) SubscribeLogs(listener LogListener) Disposable {

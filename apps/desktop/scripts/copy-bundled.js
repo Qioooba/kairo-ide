@@ -10,6 +10,7 @@
 // first.
 //
 // Behaviour:
+//   * Only the supply-chain-approved runtime directory names are copied.
 //   * If `bundled/` at the project root is empty or missing,
 //     we log a warning and exit 0 — packaging still succeeds
 //     and the runtime falls back to first-run download.
@@ -26,14 +27,17 @@ const path = require('node:path');
 const repoRoot = path.resolve(__dirname, '..', '..', '..');
 const src = path.join(repoRoot, 'bundled');
 const dst = path.join(__dirname, '..', 'bundled');
+const approvedDirectories = ['tomcat6', 'jdtls'];
 
 if (!fs.existsSync(src)) {
   console.log(`[copy-bundled] WARN: ${src} does not exist — runtime will fall back to first-run download`);
   process.exit(0);
 }
 
-const entries = fs.readdirSync(src, { withFileTypes: true });
-const realDirs = entries.filter((e) => e.isDirectory());
+const entries = new Map(fs.readdirSync(src, { withFileTypes: true }).map(entry => [entry.name, entry]));
+const realDirs = approvedDirectories
+  .map(name => entries.get(name))
+  .filter(entry => entry?.isDirectory());
 if (realDirs.length === 0) {
   console.log(`[copy-bundled] WARN: ${src} is empty — runtime will fall back to first-run download`);
   process.exit(0);

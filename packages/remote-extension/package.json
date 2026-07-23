@@ -1,0 +1,26 @@
+{
+  "name": "@kairo/remote-extension",
+  "version": "0.1.0",
+  "description": "Kairo Remote Extension — P3-REMOTE: TLS 1.3 + WebSocket remote agent connection with auth, reconnection, and sandbox enforcement",
+  "main": "lib/index.js",
+  "types": "lib/src/index.d.ts",
+  "files": [
+    "lib",
+    "src"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "clean": "rm -rf lib",
+    "lint": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@kairo/protocol": "workspace:*",
+    "@kairo/runtime-extension": "workspace:*"
+  },
+  "peerDependencies": {
+    "@theia/core": "1.73.1"
+  },
+  "devDependencies": {
+    "typescript": "5.5.4"
+  }
+}

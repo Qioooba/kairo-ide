@@ -55,15 +55,19 @@ var (
 	procAssignProcessToJobObject   = modkernel32.NewProc("AssignProcessToJobObject")
 )
 
-// jobObjectBasicLimitInformation is the JOBOBJECT_BASIC_LIMIT_INFORMATION
-// struct. The Go layout omits the trailing LimitFlags field; we write to
-// it via unsafe pointer arithmetic in setJobLimitFlags to keep the struct
-// definition simple and portable.
+// jobObjectBasicLimitInformation mirrors JOBOBJECT_BASIC_LIMIT_INFORMATION.
+// Field order is part of the Win32 ABI: LimitFlags is at offset 16 on both
+// supported Windows 64-bit architectures. Keep the fields explicit so a
+// future edit cannot silently write limits into the wrong native field.
 type jobObjectBasicLimitInformation struct {
 	PerProcessUserTimeLimit int64
 	PerJobUserTimeLimit     int64
-	PerProcessMemoryLimit   uintptr
-	PerJobMemoryLimit       uintptr
+	LimitFlags              uint32
+	MinimumWorkingSetSize   uintptr
+	MaximumWorkingSetSize   uintptr
+	ActiveProcessLimit      uint32
+	Affinity                uintptr
+	PriorityClass           uint32
 	SchedulingClass         uint32
 }
 
@@ -109,49 +113,25 @@ func initAgentJob() {
 			return
 		}
 		info := jobObjectExtendedLimitInformationStruct{}
-		info.BasicLimitInformation.SchedulingClass = 0
-		// Set JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE so that all processes
-		// in the job are terminated when the last handle to the job is
-		// closed (i.e. when the Agent process exits).
-		// We encode the flag directly in the LimitFlags field of
-		// BasicLimitInformation, which is the first uint32-sized field
-		// after SchedulingClass in the layout above. Since Go does not
-		// expose LimitFlags directly here, we rely on the field layout
-		// being: PerProcessUserTimeLimit (int64), PerJobUserTimeLimit
-		// (int64), PerProcessMemoryLimit (uintptr), PerJobMemoryLimit
-		// (uintptr), SchedulingClass (uint32), LimitFlags (uint32).
-		// To keep this code portable across architectures we re-derive
-		// the LimitFlags address via unsafe.Pointer arithmetic on the
-		// BasicLimitInformation struct.
-		setJobLimitFlags(&info.BasicLimitInformation, jobObjectLimitKillOnJobClose)
+		// Terminate every managed process when the Agent's last Job Object
+		// handle is closed (including an abnormal Agent exit).
+		info.BasicLimitInformation.LimitFlags = jobObjectLimitKillOnJobClose
 
-		_, _, err = procSetInformationJobObject.Call(
+		r1, _, err := procSetInformationJobObject.Call(
 			h,
 			uintptr(jobObjectExtendedLimitInformationClass),
 			uintptr(unsafe.Pointer(&info)),
 			unsafe.Sizeof(info),
 		)
-		if err != nil && err != syscall.Errno(0) {
+		// SetInformationJobObject returns nonzero on success. GetLastError is
+		// undefined in that case and may contain a stale nonzero value.
+		if r1 == 0 {
 			procCloseHandle.Call(h)
 			agentJobErr = fmt.Errorf("SetInformationJobObject failed: %w", err)
 			return
 		}
 		agentJob = syscall.Handle(h)
 	})
-}
-
-// setJobLimitFlags writes the LimitFlags value into the
-// JOBOBJECT_BASIC_LIMIT_INFORMATION struct referenced by info. The struct
-// layout is fixed by the Windows ABI; LimitFlags sits immediately after
-// SchedulingClass.
-func setJobLimitFlags(info *jobObjectBasicLimitInformation, flags uint32) {
-	// Layout (x64): int64, int64, uintptr, uintptr, uint32 (SchedulingClass),
-	// uint32 (LimitFlags). We compute the address of LimitFlags via
-	// unsafe arithmetic and store flags there.
-	base := uintptr(unsafe.Pointer(info))
-	schedulingClassOffset := unsafe.Offsetof(info.SchedulingClass)
-	limitFlagsAddr := (*uint32)(unsafe.Pointer(base + schedulingClassOffset + 4))
-	*limitFlagsAddr = flags
 }
 
 // assignToAgentJob adds the process referenced by pid to the agent-wide
@@ -376,4 +356,33 @@ func verifyProcessStartTime(h uintptr, expected time.Time) bool {
 		diff = -diff
 	}
 	return diff <= 2*time.Second
+}
+
+// findChildProcesses returns the PIDs of all direct child processes of pid.
+// On Windows it uses wmic to query the process tree.
+func findChildProcesses(pid int) []int {
+	if pid <= 0 {
+		return nil
+	}
+	cmd := exec.Command("wmic", "process", "where", fmt.Sprintf("(ParentProcessId=%d)", pid), "get", "ProcessId", "/format:csv")
+	out, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+	lines := strings.Split(string(out), "\n")
+	var result []int
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "Node,") {
+			continue
+		}
+		// CSV format: Node,ProcessId
+		parts := strings.SplitN(line, ",", 3)
+		if len(parts) >= 2 {
+			if cp, err := strconv.Atoi(strings.TrimSpace(parts[1])); err == nil && cp > 0 {
+				result = append(result, cp)
+			}
+		}
+	}
+	return result
 }

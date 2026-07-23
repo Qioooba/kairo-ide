@@ -24,6 +24,8 @@
     "test:e2e:api": "pnpm --filter @kairo/e2e test:api",
     "test:e2e:web": "pnpm --filter @kairo/e2e test:ui",
     "test:e2e:smoke": "pnpm --filter @kairo/e2e test:smoke",
+    "test:e2e:playwright": "pnpm --filter @kairo/e2e test:playwright",
+    "test:e2e:core": "pnpm --filter @kairo/e2e test:core",
     "test:visual:web": "pnpm --filter @kairo/e2e test:visual",
     "test:a11y:web": "pnpm --filter @kairo/e2e test:a11y",
     "lint": "eslint 'packages/*/src/**/*.{ts,tsx}' --max-warnings 0",
@@ -34,8 +36,18 @@
     "agent:build": "cd runtime-agent && CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o bin/kairo-runtime ./cmd/kairo-runtime",
     "bundled:prepare": "if command -v pwsh >/dev/null 2>&1; then pwsh -ExecutionPolicy Bypass -File scripts/prepare-bundled.ps1; else bash scripts/prepare-bundled.sh; fi",
     "bundled:check": "if command -v pwsh >/dev/null 2>&1; then pwsh -ExecutionPolicy Bypass -File scripts/prepare-bundled.ps1 -Strict; else bash scripts/prepare-bundled.sh --strict; fi",
+    "bundled:verify": "node scripts/verify-bundled-dependencies.cjs",
+    "supply-chain:test": "node --test scripts/supply-chain.test.cjs",
+    "supply-chain:sbom": "node scripts/generate-sbom.cjs",
+    "supply-chain:sign": "node scripts/sign-release.cjs",
+    "supply-chain:verify-reproducible": "node scripts/verify-reproducible.cjs",
+    "supply-chain:release": "node scripts/generate-sbom.cjs && node scripts/sign-release.cjs",
+    "baseline:release": "node scripts/run-release-baseline.cjs",
     "qa:start": "bash scripts/start-qa-stack.sh",
-    "qa:stop": "bash scripts/stop-qa-stack.sh"
+    "qa:stop": "bash scripts/stop-qa-stack.sh",
+    "build:win": "bash scripts/build-windows.sh",
+    "package:win": "bash scripts/package-windows.sh",
+    "dist:win": "bash scripts/build-windows.sh && bash scripts/package-windows.sh"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.12.1",

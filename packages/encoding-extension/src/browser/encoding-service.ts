@@ -241,6 +241,30 @@ export class KairoEncodingServiceImpl {
   }
 
   /**
+   * Apply per-directory encoding overrides from project config.
+   * Each override maps a directory path (relative to project root)
+   * to an encoding. Registered as folder-level overrides so files
+   * under each directory open with the correct encoding.
+   */
+  applyDirectoryEncodingOverrides(
+    rootUri: URI,
+    overrides: Record<string, string>,
+  ): void {
+    const theiaRoot = this.asTheiaUri(rootUri);
+    for (const [dirPath, encoding] of Object.entries(overrides)) {
+      if (!KAIRO_ENCODING_OPTIONS.includes(encoding) && !encoding.match(/^[a-z0-9-]+$/i)) {
+        continue;
+      }
+      const normalized = toTheiaEncodingId(normalizeEncodingLabel(encoding.toLowerCase()));
+      const dirUri = theiaRoot.resolve(dirPath.endsWith('/') ? dirPath : dirPath + '/');
+      this.encodingRegistry.registerOverride({
+        parent: dirUri,
+        encoding: normalized,
+      });
+    }
+  }
+
+  /**
    * Read the file with the chosen encoding. The override
    * must have been registered first (see setEncodingFor) so
    * the next FileService.read also picks it up. This

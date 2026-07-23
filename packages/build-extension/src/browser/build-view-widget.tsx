@@ -31,6 +31,8 @@ interface BuildViewProps {
 const BuildViewComponent: React.FC<BuildViewProps> = ({ store, commandService }) => {
     const [builds, setBuilds] = React.useState<BuildRun[]>(store.getBuilds());
     const [connectionState, setConnectionState] = React.useState<ConnectionState>(store.getConnectionState());
+    const [cancelError, setCancelError] = React.useState('');
+    const [cancelling, setCancelling] = React.useState(false);
 
     React.useEffect(() => {
         const sub = store.onDidChange(b => setBuilds([...b]));
@@ -49,6 +51,18 @@ const BuildViewComponent: React.FC<BuildViewProps> = ({ store, commandService })
 
     const handleBuild = () => commandService.executeCommand('kairo.build');
     const handleCleanBuild = () => commandService.executeCommand('kairo.cleanBuild');
+    const handleCancel = async () => {
+        if (!latest || cancelling) return;
+        setCancelError('');
+        setCancelling(true);
+        try {
+            await store.cancelBuild(latest.id);
+        } catch (error) {
+            setCancelError(error instanceof Error ? error.message : String(error));
+        } finally {
+            setCancelling(false);
+        }
+    };
 
     if (connectionState === 'loading') {
         return (
@@ -86,12 +100,13 @@ const BuildViewComponent: React.FC<BuildViewProps> = ({ store, commandService })
                         className="kairo-build-state"
                         data-testid="build-state"
                         data-state={latest.state}
+                        aria-live="polite"
                     >
                         {stateIcon(latest.state)} {latest.state}
                     </span>
                 )}
                 {!latest && (
-                    <span className="kairo-build-state" data-testid="build-state" data-state="idle">
+                    <span className="kairo-build-state" data-testid="build-state" data-state="idle" aria-live="polite">
                         {stateIcon('idle')} idle
                     </span>
                 )}
@@ -116,7 +131,18 @@ const BuildViewComponent: React.FC<BuildViewProps> = ({ store, commandService })
                 >
                     Clean Build
                 </button>
+                <button
+                    className="theia-button secondary"
+                    data-testid="cancel-build-button"
+                    onClick={handleCancel}
+                    disabled={!isBusy || isDisconnected || cancelling}
+                    aria-label="Cancel current build"
+                >
+                    {cancelling ? 'Cancelling…' : 'Cancel'}
+                </button>
             </div>
+
+            {cancelError && <div className="theia-error" role="alert" data-testid="cancel-build-error">{cancelError}</div>}
 
             {latest && latest.summary && (
                 <div className="kairo-build-summary" data-testid="build-summary">

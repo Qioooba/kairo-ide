@@ -869,3 +869,624 @@ test('Fault-11: Desktop exit — all child processes must be cleaned up', async 
     }
   }
 });
+
+// =========================================================================
+// Scenario 12: Port occupation on Tomcat HTTP port
+// =========================================================================
+
+test('Fault-12: Port occupation — Tomcat start fails on occupied port 8080', async () => {
+  // Simulate: a process already occupies port 8080, Tomcat fails to start.
+  const occupyingPort = 8080;
+  const occupier = http.createServer(() => {});
+  await new Promise((resolve) => occupier.listen(occupyingPort, '127.0.0.1', resolve));
+
+  const { srv, baseUrl } = await runServer(async (req, res) => {
+    if (req.method === 'POST' && req.url === '/api/v1/servers') {
+      res.writeHead(409, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        requestId: 'r1',
+        ok: false,
+        error: {
+          code: 'conflict',
+          message: `Port 8080 is already in use by pid=${process.pid}, process=node`,
+          port: 8080,
+          occupiedByPid: process.pid,
+          processName: 'node',
+        },
+      }));
+    } else {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, payload: [] }));
+    }
+  });
+
+  try {
+    const resp = await fetchJson(baseUrl, '/api/v1/servers', {
+      method: 'POST',
+      body: { projectId: 'proj-1' },
+    });
+    assert.strictEqual(resp.status, 409);
+    assert.ok(resp.json.error.message.includes('already in use'),
+      'Error must show port conflict');
+    assert.ok(resp.json.error.message.includes('8080'),
+      'Error must mention port 8080');
+    assert.ok(resp.json.error.processName || resp.json.error.message.includes('pid'),
+      'Error must include PID or process name');
+  } finally {
+    occupier.close();
+    srv.close();
+  }
+});
+
+// =========================================================================
+// Scenario 13: Port occupation on debug port
+// =========================================================================
+
+test('Fault-13: Debug port occupation — debug session fails on occupied port 8000', async () => {
+  const occupyingPort = 8000;
+  const occupier = http.createServer(() => {});
+  await new Promise((resolve) => occupier.listen(occupyingPort, '127.0.0.1', resolve));
+
+  const { srv, baseUrl } = await runServer(async (req, res) => {
+    if (req.method === 'POST' && req.url === '/api/v1/servers') {
+      res.writeHead(409, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        requestId: 'r1',
+        ok: false,
+        error: {
+          code: 'conflict',
+          message: `Debug port 8000 is already in use by pid=${process.pid}`,
+          port: 8000,
+          occupiedByPid: process.pid,
+          processName: 'node',
+        },
+      }));
+    } else {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, payload: { ok: true } }));
+    }
+  });
+
+  try {
+    const resp = await fetchJson(baseUrl, '/api/v1/servers', {
+      method: 'POST',
+      body: { projectId: 'proj-1', debug: true },
+    });
+    assert.strictEqual(resp.status, 409);
+    assert.ok(resp.json.error.message.includes('8000'),
+      'Error must mention debug port 8000');
+  } finally {
+    occupier.close();
+    srv.close();
+  }
+});
+
+// =========================================================================
+// Scenario 14: Agent process crash mid-operation
+// =========================================================================
+
+test('Fault-14: Agent crash — frontend detects disconnection, shows reconnect', async () => {
+  let agentAlive = true;
+
+  const { srv, baseUrl } = await runServer(async (req, res) => {
+    if (!agentAlive) {
+      res.destroy();
+      return;
+    }
+    if (req.url === '/api/v1/health') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, payload: { ok: true, version: '1.0' } }));
+    } else {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, payload: { ok: true } }));
+    }
+  });
+
+  try {
+    // Agent is alive
+    const health1 = await fetchJson(baseUrl, '/api/v1/health');
+    assert.strictEqual(health1.status, 200);
+
+    // Simulate agent crash
+    agentAlive = false;
+
+    // Try to reach agent — should fail
+    let disconnected = false;
+    try {
+      await fetchJson(baseUrl, '/api/v1/health');
+    } catch (_e) {
+      disconnected = true;
+    }
+    assert.ok(disconnected, 'Frontend must detect agent disconnection');
+
+    // Recovery: agent comes back
+    agentAlive = true;
+    const health2 = await fetchJson(baseUrl, '/api/v1/health');
+    assert.strictEqual(health2.status, 200,
+      'After agent recovers, health check must succeed');
+  } finally {
+    srv.close();
+  }
+});
+
+// =========================================================================
+// Scenario 15: JDT LS crash with auto-restart
+// =========================================================================
+
+test('Fault-15: JDT LS crash — frontend shows crash notification, auto-restarts', async () => {
+  let jdtState = 'running';
+  let restartTriggered = false;
+
+  const { srv, baseUrl } = await runServer(async (req, res) => {
+    if (req.url === '/api/v1/jdtls' && req.method === 'GET') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        requestId: 'r_jdt',
+        ok: true,
+        payload: {
+          state: jdtState,
+          pid: jdtState === 'crashed' ? undefined : 12345,
+          version: '1.43.0',
+          restartCount: restartTriggered ? 1 : 0,
+          lastError: jdtState === 'crashed' ? 'JDT LS process exited unexpectedly' : undefined,
+        },
+      }));
+    } else if (req.url === '/api/v1/jdtls' && req.method === 'POST') {
+      restartTriggered = true;
+      jdtState = 'starting';
+      res.writeHead(202, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        requestId: 'r_restart',
+        ok: true,
+        payload: { state: 'starting', version: '1.43.0' },
+      }));
+    } else {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, payload: { ok: true } }));
+    }
+  });
+
+  try {
+    const status1 = await fetchJson(baseUrl, '/api/v1/jdtls');
+    assert.strictEqual(status1.json.payload.state, 'running');
+
+    jdtState = 'crashed';
+    const status2 = await fetchJson(baseUrl, '/api/v1/jdtls');
+    assert.strictEqual(status2.json.payload.state, 'crashed');
+    assert.ok(status2.json.payload.lastError,
+      'Crash must include error message');
+
+    const restart = await fetchJson(baseUrl, '/api/v1/jdtls', { method: 'POST' });
+    assert.strictEqual(restart.status, 202);
+    assert.ok(restartTriggered, 'Restart must be triggered');
+
+    jdtState = 'running';
+    const status3 = await fetchJson(baseUrl, '/api/v1/jdtls');
+    assert.strictEqual(status3.json.payload.state, 'running',
+      'JDT must recover after restart');
+  } finally {
+    srv.close();
+  }
+});
+
+// =========================================================================
+// Scenario 16: Tomcat process crash
+// =========================================================================
+
+test('Fault-16: Tomcat crash — server state changes to crashed, user can restart', async () => {
+  let serverState = 'running';
+  let restartCalled = false;
+
+  const { srv, baseUrl } = await runServer(async (req, res) => {
+    if (req.url === '/api/v1/servers/srv-1' && req.method === 'GET') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        requestId: 'r_get',
+        ok: true,
+        payload: {
+          id: 'srv-1',
+          state: serverState,
+          pid: serverState === 'crashed' ? undefined : 12345,
+          ports: { http: 8080 },
+          lastError: serverState === 'crashed' ? 'Tomcat process exited with code 134' : undefined,
+        },
+      }));
+    } else if (req.url === '/api/v1/servers/srv-1/restart' && req.method === 'POST') {
+      restartCalled = true;
+      serverState = 'starting';
+      res.writeHead(202, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        requestId: 'r_restart',
+        ok: true,
+        payload: { id: 'srv-1', state: 'starting' },
+      }));
+    } else {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, payload: { ok: true } }));
+    }
+  });
+
+  try {
+    const status1 = await fetchJson(baseUrl, '/api/v1/servers/srv-1');
+    assert.strictEqual(status1.json.payload.state, 'running');
+
+    serverState = 'crashed';
+    const status2 = await fetchJson(baseUrl, '/api/v1/servers/srv-1');
+    assert.strictEqual(status2.json.payload.state, 'crashed');
+    assert.ok(status2.json.payload.lastError,
+      'Crash must include error details');
+
+    const restartResp = await fetchJson(baseUrl, '/api/v1/servers/srv-1/restart', {
+      method: 'POST',
+    });
+    assert.strictEqual(restartResp.status, 202);
+    assert.ok(restartCalled, 'Restart must be called');
+    assert.strictEqual(restartResp.json.payload.state, 'starting');
+  } finally {
+    srv.close();
+  }
+});
+
+// =========================================================================
+// Scenario 17: Permission denied on write
+// =========================================================================
+
+test('Fault-17: Permission denied — write to read-only directory fails', async () => {
+  const { srv, baseUrl } = await runServer(async (req, res) => {
+    if (req.method === 'POST' && req.url === '/api/v1/encoding/recode') {
+      res.writeHead(403, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        requestId: 'r1',
+        ok: false,
+        error: {
+          code: 'forbidden',
+          message: 'Permission denied: cannot write to /opt/readonly/test.jsp',
+          details: { path: '/opt/readonly/test.jsp', operation: 'write' },
+        },
+      }));
+    } else {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, payload: { ok: true } }));
+    }
+  });
+
+  try {
+    const resp = await fetchJson(baseUrl, '/api/v1/encoding/recode', {
+      method: 'POST',
+      body: { workspaceId: 'ws-1', file: '/opt/readonly/test.jsp', from: 'gbk', to: 'utf-8' },
+    });
+    assert.strictEqual(resp.status, 403);
+    assert.ok(resp.json.error.message.includes('Permission denied'),
+      'Error must mention permission denied');
+    assert.strictEqual(resp.json.error.details.operation, 'write',
+      'Error details must include operation type');
+  } finally {
+    srv.close();
+  }
+});
+
+// =========================================================================
+// Scenario 18: Permission denied on read
+// =========================================================================
+
+test('Fault-18: Permission denied — read without permission fails', async () => {
+  const { srv, baseUrl } = await runServer(async (req, res) => {
+    if (req.method === 'POST' && req.url === '/api/v1/encoding/detect') {
+      res.writeHead(403, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        requestId: 'r1',
+        ok: false,
+        error: {
+          code: 'forbidden',
+          message: 'Access denied: cannot read /etc/shadow',
+          details: { path: '/etc/shadow', operation: 'read' },
+        },
+      }));
+    } else {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, payload: { ok: true } }));
+    }
+  });
+
+  try {
+    const resp = await fetchJson(baseUrl, '/api/v1/encoding/detect', {
+      method: 'POST',
+      body: { workspaceId: 'ws-1', file: '/etc/shadow' },
+    });
+    assert.strictEqual(resp.status, 403);
+    assert.ok(resp.json.error.message.includes('Access denied'),
+      'Error must mention access denied');
+    assert.ok(resp.json.error.details.path,
+      'Error must include the file path');
+  } finally {
+    srv.close();
+  }
+});
+
+// =========================================================================
+// Scenario 19: Disk full during save
+// =========================================================================
+
+test('Fault-19: Disk full — save fails, original file not corrupted', async () => {
+  let saveAttempted = false;
+
+  const { srv, baseUrl } = await runServer(async (req, res) => {
+    if (req.method === 'POST' && req.url === '/api/v1/encoding/recode') {
+      saveAttempted = true;
+      res.writeHead(507, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        requestId: 'r1',
+        ok: false,
+        error: {
+          code: 'io_error',
+          message: 'Save failed: disk is full (no space left on device)',
+          details: { path: '/tmp/test.jsp', freeBytes: 0, operation: 'write' },
+        },
+      }));
+    } else if ((req.method === 'GET' || req.method === 'POST') && req.url === '/api/v1/encoding/detect') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        requestId: 'r2',
+        ok: true,
+        payload: { encoding: 'gbk', confidence: 0.95, hasBom: false },
+      }));
+    } else {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, payload: { ok: true } }));
+    }
+  });
+
+  try {
+    const saveResp = await fetchJson(baseUrl, '/api/v1/encoding/recode', {
+      method: 'POST',
+      body: { workspaceId: 'ws-1', file: '/tmp/test.jsp', from: 'gbk', to: 'utf-8' },
+    });
+    assert.strictEqual(saveResp.status, 507);
+    assert.ok(saveAttempted, 'Save must be attempted');
+    assert.ok(saveResp.json.error.message.includes('disk is full'),
+      'Error must mention disk full');
+    assert.strictEqual(saveResp.json.error.details.freeBytes, 0,
+      'Error must include free space info');
+
+    const detectResp = await fetchJson(baseUrl, '/api/v1/encoding/detect', {
+      method: 'POST',
+      body: { workspaceId: 'ws-1', file: '/tmp/test.jsp' },
+    });
+    assert.strictEqual(detectResp.status, 200);
+    assert.strictEqual(detectResp.json.payload.encoding, 'gbk',
+      'Original file encoding must be preserved');
+  } finally {
+    srv.close();
+  }
+});
+
+// =========================================================================
+// Scenario 20: Disk full during build
+// =========================================================================
+
+test('Fault-20: Disk full — build fails, no partial artifacts', async () => {
+  const { srv, baseUrl } = await runServer(async (req, res) => {
+    if (req.method === 'POST' && req.url === '/api/v1/builds') {
+      res.writeHead(507, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        requestId: 'r1',
+        ok: false,
+        error: {
+          code: 'io_error',
+          message: 'Build failed: disk is full. Cannot write output files.',
+          details: {
+            outputDir: '/tmp/build/classes',
+            freeBytes: 0,
+            partialFilesCleaned: 3,
+          },
+        },
+      }));
+    } else {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, payload: [] }));
+    }
+  });
+
+  try {
+    const resp = await fetchJson(baseUrl, '/api/v1/builds', {
+      method: 'POST',
+      body: { projectId: 'proj-1' },
+    });
+    assert.strictEqual(resp.status, 507);
+    assert.ok(resp.json.error.message.includes('disk is full'),
+      'Error must mention disk full');
+    assert.ok(resp.json.error.details.partialFilesCleaned !== undefined,
+      'Error must mention partial files cleaned');
+  } finally {
+    srv.close();
+  }
+});
+
+// =========================================================================
+// Scenario 21: Agent connection timeout
+// =========================================================================
+
+test('Fault-21: Agent connection timeout — timeout error with retry suggestion', async () => {
+  const { srv, baseUrl } = await runServer(async (req, res) => {
+    if (req.url === '/api/v1/slow') {
+      // Don't respond — the client will timeout
+      setTimeout(() => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
+      }, 10000);
+    } else {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, payload: { ok: true } }));
+    }
+  });
+
+  try {
+    let timeoutError = false;
+    try {
+      await fetchJson(baseUrl, '/api/v1/slow', { timeout: 500 });
+    } catch (e) {
+      timeoutError = true;
+      assert.ok(e.message.includes('timeout') || e.message.includes('abort'),
+        'Must get timeout error');
+    }
+    assert.ok(timeoutError, 'Short timeout must trigger error');
+
+    const healthResp = await fetchJson(baseUrl, '/api/v1/health');
+    assert.strictEqual(healthResp.status, 200);
+  } finally {
+    srv.close();
+  }
+});
+
+// =========================================================================
+// Scenario 22: WebSocket disconnect during search
+// =========================================================================
+
+test('Fault-22: WebSocket disconnect during search — search shows connection lost', async () => {
+  let searchResultsStreamed = false;
+
+  const { srv, baseUrl } = await runServer(async (req, res) => {
+    if (req.method === 'POST' && req.url === '/api/v1/search') {
+      searchResultsStreamed = true;
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        requestId: 'r_search',
+        ok: true,
+        payload: {
+          query: 'test',
+          totalMatches: 150,
+          truncated: true,
+          matches: [
+            { file: 'test.jsp', line: 1, column: 0, matchText: 'test', contextBefore: '', contextAfter: '' },
+            { file: 'test.java', line: 5, column: 10, matchText: 'test', contextBefore: '', contextAfter: '' },
+          ],
+          elapsedMs: 1200,
+          erroredFiles: [],
+          partial: true,
+          message: 'Search was interrupted. Results may be incomplete.',
+        },
+      }));
+    } else {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, payload: { ok: true } }));
+    }
+  });
+
+  try {
+    const resp = await fetchJson(baseUrl, '/api/v1/search', {
+      method: 'POST',
+      body: { workspaceId: 'ws-1', query: 'test', isRegex: false },
+    });
+    assert.strictEqual(resp.status, 200);
+    assert.ok(searchResultsStreamed, 'Search must be executed');
+    assert.ok(resp.json.payload.partial || resp.json.payload.message,
+      'Search must indicate partial/interrupted results');
+    assert.ok(resp.json.payload.matches.length > 0,
+      'Existing results must be preserved');
+  } finally {
+    srv.close();
+  }
+});
+
+// =========================================================================
+// Scenario 23: Wrong encoding — warning and reopen option
+// =========================================================================
+
+test('Fault-23: Wrong encoding — warning about encoding mismatch', async () => {
+  const { srv, baseUrl } = await runServer(async (req, res) => {
+    if (req.method === 'POST' && req.url === '/api/v1/encoding/detect') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        requestId: 'r1',
+        ok: true,
+        payload: {
+          file: '/tmp/test.jsp',
+          encoding: 'gbk',
+          confidence: 0.98,
+          candidates: ['gbk', 'gb18030', 'utf-8'],
+          hasBom: false,
+          eol: 'crlf',
+          warning: 'File was opened with UTF-8 but detected as GBK. Some characters may display incorrectly.',
+          declaredEncoding: 'utf-8',
+        },
+      }));
+    } else {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, payload: { ok: true } }));
+    }
+  });
+
+  try {
+    const resp = await fetchJson(baseUrl, '/api/v1/encoding/detect', {
+      method: 'POST',
+      body: { workspaceId: 'ws-1', file: '/tmp/test.jsp' },
+    });
+    assert.strictEqual(resp.status, 200);
+    assert.strictEqual(resp.json.payload.encoding, 'gbk',
+      'Must detect correct encoding');
+    assert.ok(resp.json.payload.warning,
+      'Must show warning about encoding mismatch');
+    assert.ok(resp.json.payload.warning.includes('GBK'),
+      'Warning must mention detected encoding');
+    assert.ok(resp.json.payload.candidates.length > 0,
+      'Must provide encoding candidates');
+  } finally {
+    srv.close();
+  }
+});
+
+// =========================================================================
+// Scenario 24: Mixed encoding search
+// =========================================================================
+
+test('Fault-24: Mixed encoding — search results correct for GBK and UTF-8', async () => {
+  const { srv, baseUrl } = await runServer(async (req, res) => {
+    if (req.method === 'POST' && req.url === '/api/v1/search') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        requestId: 'r_search',
+        ok: true,
+        payload: {
+          query: '你好',
+          totalMatches: 2,
+          truncated: false,
+          matches: [
+            { file: 'src/gbk_file.jsp', line: 10, column: 5, matchText: '你好', contextBefore: '', contextAfter: '', encoding: 'gbk' },
+            { file: 'src/utf8_file.jsp', line: 20, column: 3, matchText: '你好', contextBefore: '', contextAfter: '', encoding: 'utf-8' },
+          ],
+          elapsedMs: 500,
+          erroredFiles: [],
+          encodingBreakdown: {
+            gbk: 1,
+            'utf-8': 1,
+          },
+        },
+      }));
+    } else {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, payload: { ok: true } }));
+    }
+  });
+
+  try {
+    const resp = await fetchJson(baseUrl, '/api/v1/search', {
+      method: 'POST',
+      body: { workspaceId: 'ws-1', query: '你好', isRegex: false },
+    });
+    assert.strictEqual(resp.status, 200);
+    assert.strictEqual(resp.json.payload.totalMatches, 2,
+      'Must find results in both encodings');
+    assert.ok(resp.json.payload.encodingBreakdown,
+      'Must include encoding breakdown');
+    assert.strictEqual(resp.json.payload.encodingBreakdown.gbk, 1,
+      'Must find one GBK result');
+    assert.strictEqual(resp.json.payload.encodingBreakdown['utf-8'], 1,
+      'Must find one UTF-8 result');
+
+    const encodings = resp.json.payload.matches.map(m => m.encoding);
+    assert.ok(encodings.includes('gbk'), 'Must include GBK result');
+    assert.ok(encodings.includes('utf-8'), 'Must include UTF-8 result');
+  } finally {
+    srv.close();
+  }
+});

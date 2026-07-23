@@ -12,12 +12,20 @@
 
 'use strict';
 
-// Use Theia's jsdom helper to set up a proper DOM environment
-// before any Lumino/Theia browser code is loaded.
+const { register } = require('node:module');
+const { pathToFileURL } = require('node:url');
+register('data:text/javascript,' + encodeURIComponent(`
+export function resolve(specifier, context, nextResolve) {
+  if (/\.(css|svg|ttf|woff|woff2|png|jpg|gif)$/.test(specifier)) {
+    return { url: 'data:text/javascript,export default {};', format: 'module', shortCircuit: true };
+  }
+  return nextResolve(specifier, context);
+}
+`), pathToFileURL(__filename));
+
 const { enableJSDOM } = require('@theia/core/lib/browser/test/jsdom');
 const disableJSDOM = enableJSDOM();
 
-// jsdom doesn't include DragEvent — patch it so Lumino's dragdrop loads
 if (!global.DragEvent) {
   global.DragEvent = class DragEvent extends global.MouseEvent {
     constructor(type, init) {
@@ -27,7 +35,14 @@ if (!global.DragEvent) {
   };
 }
 
-// Theia browser modules require CSS files — stub them out
+if (!global.ResizeObserver) {
+  global.ResizeObserver = class ResizeObserver {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+}
+
 const Module = require('module');
 Module._extensions['.css'] = function (module, filename) {
   module._compile('module.exports = {};', filename);
@@ -58,6 +73,7 @@ const { RuntimeConnectionService } = require('@kairo/runtime-extension/lib/brows
 const { KairoServerService } = require('@kairo/tomcat-extension/lib/browser');
 const { KairoProjectService, ActiveProjectService } = require('@kairo/project-extension/lib/browser');
 const { BuildStore } = require('@kairo/build-extension/lib/browser');
+const { KairoJavaDebugService } = require('../../../lib/browser/kairo-java-debug-service');
 
 // The production module under test
 const { KairoViewsContribution, KairoCommands } = require('../../../lib/browser/kairo-views-contribution');
@@ -80,8 +96,10 @@ function createMockWidgetManager() {
 }
 
 function createMockCommandService() {
+  const calls = [];
   return {
-    executeCommand: () => Promise.resolve(),
+    callLog: calls,
+    executeCommand: (id, ...args) => { calls.push({ id, args }); return Promise.resolve(); },
     executeCommandByHandler: () => Promise.resolve(),
   };
 }
@@ -106,7 +124,7 @@ function createMockKairoServerService() {
     callLog: calls,
     start: (projectId, debug) => {
       calls.push({ method: 'start', projectId, debug });
-      return Promise.resolve({ id: 'mock-srv', state: 'running', pid: 12345 });
+      return Promise.resolve({ id: 'mock-srv', state: 'running', pid: 12345, ports: { http: 18080, debug: 18000 } });
     },
     stop: (serverId, force) => {
       calls.push({ method: 'stop', serverId, force });
@@ -125,7 +143,7 @@ function createMockKairoProjectService() {
 
 function createMockActiveProjectService() {
   return {
-    requireProject: () => Promise.resolve({ projectId: 'mock-proj' }),
+    requireProject: () => Promise.resolve({ projectId: 'mock-proj', name: 'Mock Project', root: '/mock/project' }),
     getProject: () => Promise.resolve({}),
   };
 }
@@ -149,6 +167,19 @@ function createMockBuildStore() {
   };
 }
 
+function createMockJavaDebugService() {
+  const calls = [];
+  return {
+    callLog: calls,
+    probeAvailability: async () => ({ state: 'available' }),
+    attach: async target => {
+      calls.push({ method: 'attach', target });
+      return { state: 'connected', sessionId: 'debug-1', serverId: target.serverId };
+    },
+    stop: async () => { calls.push({ method: 'stop' }); },
+  };
+}
+
 // --------------- helper: build container ---------------
 
 function buildContainer() {
@@ -163,6 +194,7 @@ function buildContainer() {
   container.bind(ActiveProjectService).toConstantValue(createMockActiveProjectService());
   container.bind(MessageService).toConstantValue(createMockMessageService());
   container.bind(BuildStore).toConstantValue(createMockBuildStore());
+  container.bind(KairoJavaDebugService).toConstantValue(createMockJavaDebugService());
 
   container.bind(KairoViewsContribution).toSelf().inSingletonScope();
 
@@ -181,6 +213,9 @@ test('KairoCommands namespace declares the expected command ids with non-empty l
     'kairo.buildAndDeploy',
     'kairo.server.start',
     'kairo.server.debug',
+    'kairo.debug.checkAdapter',
+    'kairo.debug.openView',
+    'kairo.debug.openConsole',
     'kairo.server.stop',
     'kairo.server.restart',
     'kairo.app.open',
@@ -188,6 +223,11 @@ test('KairoCommands namespace declares the expected command ids with non-empty l
     'kairo.view.builds',
     'kairo.view.deployments',
     'kairo.view.logs',
+    'kairo.view.maven',
+    'kairo.runConfigurations.manage',
+    'kairo.jdk.switch',
+    'kairo.agent.reconnect',
+    'kairo.keymap.open',
   ];
 
   const commandEntries = Object.values(KairoCommands);
@@ -218,6 +258,9 @@ test('KairoViewsContribution.registerCommands registers every command in a real 
     'kairo.buildAndDeploy',
     'kairo.server.start',
     'kairo.server.debug',
+    'kairo.debug.checkAdapter',
+    'kairo.debug.openView',
+    'kairo.debug.openConsole',
     'kairo.server.stop',
     'kairo.server.restart',
     'kairo.app.open',
@@ -225,6 +268,17 @@ test('KairoViewsContribution.registerCommands registers every command in a real 
     'kairo.view.builds',
     'kairo.view.deployments',
     'kairo.view.logs',
+    'kairo.view.maven',
+    'kairo.view.todo',
+    'kairo.view.tests',
+    'kairo.view.perf',
+    'kairo.view.sqlConsole',
+    'kairo.view.remote',
+    'kairo.runConfigurations.manage',
+    'kairo.jdk.switch',
+    'kairo.agent.reconnect',
+    'kairo.keymap.open',
+    'kairo.terminal.toggle',
   ];
 
   const registeredIds = registry.commandIds;
@@ -235,14 +289,14 @@ test('KairoViewsContribution.registerCommands registers every command in a real 
   }
 });
 
-test('KairoViewsContribution.registerCommands registers exactly 15 commands', () => {
+test('KairoViewsContribution.registerCommands registers exactly 29 commands', () => {
   const container = buildContainer();
   const contribution = container.get(KairoViewsContribution);
   const registry = new CommandRegistry();
   contribution.registerCommands(registry);
 
-  assert.strictEqual(registry.commandIds.length, 15,
-    `Expected 15 commands, got ${registry.commandIds.length}: ${registry.commandIds.join(', ')}`);
+  assert.strictEqual(registry.commandIds.length, 29,
+    `Expected 29 commands, got ${registry.commandIds.length}: ${registry.commandIds.join(', ')}`);
 });
 
 // --------------- execution verification ---------------
@@ -324,6 +378,9 @@ test('execution: kairo.server.debug calls serverSvc.start with debug=true', asyn
   const startCalls = serverSvc.callLog.filter(c => c.method === 'start');
   assert.ok(startCalls.length >= 1, `Expected serverSvc.start call, got ${startCalls.length}`);
   assert.strictEqual(startCalls[0].debug, true, 'debug command must pass debug=true');
+  const javaDebug = container.get(KairoJavaDebugService);
+  assert.equal(javaDebug.callLog.filter(c => c.method === 'attach').length, 1,
+    'debug command must attach Theia DAP after JDWP is ready');
 });
 
 test('execution: kairo.server.stop calls serverSvc.stop for each running server', async () => {
@@ -348,6 +405,24 @@ test('execution: kairo.server.stop calls serverSvc.stop for each running server'
   const stopCalls = serverSvc.callLog.filter(c => c.method === 'stop');
   assert.ok(stopCalls.length >= 1, `Expected serverSvc.stop call, got ${stopCalls.length}`);
   assert.strictEqual(stopCalls[0].serverId, 'srv-1');
+});
+
+test('execution: adapter stop failure cannot block Tomcat stop', async () => {
+  const container = buildContainer();
+  const contribution = container.get(KairoViewsContribution);
+  const runtime = container.get(RuntimeConnectionService);
+  const serverSvc = container.get(KairoServerService);
+  const javaDebug = container.get(KairoJavaDebugService);
+  javaDebug.stop = async () => { throw new Error('adapter hung'); };
+  runtime.request = endpoint => endpoint === 'GET /api/v1/servers'
+    ? Promise.resolve([{ id: 'srv-1', state: 'running', ports: { debug: 18000 } }])
+    : Promise.resolve({});
+  const registry = new CommandRegistry();
+  contribution.registerCommands(registry);
+
+  await registry.executeCommand('kairo.server.stop');
+
+  assert.equal(serverSvc.callLog.filter(c => c.method === 'stop').length, 1);
 });
 
 test('execution: kairo.server.restart calls POST /api/v1/servers/{id}/restart', async () => {
@@ -414,7 +489,19 @@ test('execution: kairo.app.open calls GET /api/v1/servers then opens URL', async
   assert.ok(serverCalls.length >= 1, 'app.open must call GET /api/v1/servers');
 });
 
-test('execution: all 14 commands have executable handlers', async () => {
+test('execution: debug navigation delegates to native Theia views', async () => {
+  const container = buildContainer();
+  const contribution = container.get(KairoViewsContribution);
+  const commands = container.get(CommandService);
+  const registry = new CommandRegistry();
+  contribution.registerCommands(registry);
+
+  await registry.executeCommand('kairo.debug.openView');
+  await registry.executeCommand('kairo.debug.openConsole');
+  assert.deepEqual(commands.callLog.map(call => call.id), ['debug:toggle', 'debug:console:toggle']);
+});
+
+test('execution: all 23 commands have executable handlers', async () => {
   const container = buildContainer();
   const contribution = container.get(KairoViewsContribution);
   const registry = new CommandRegistry();
@@ -429,6 +516,9 @@ test('execution: all 14 commands have executable handlers', async () => {
     'kairo.buildAndDeploy',
     'kairo.server.start',
     'kairo.server.debug',
+    'kairo.debug.checkAdapter',
+    'kairo.debug.openView',
+    'kairo.debug.openConsole',
     'kairo.server.stop',
     'kairo.server.restart',
     'kairo.app.open',
@@ -436,6 +526,11 @@ test('execution: all 14 commands have executable handlers', async () => {
     'kairo.view.builds',
     'kairo.view.deployments',
     'kairo.view.logs',
+    'kairo.view.maven',
+    'kairo.runConfigurations.manage',
+    'kairo.jdk.switch',
+    'kairo.agent.reconnect',
+    'kairo.keymap.open',
   ];
 
   for (const id of cmdIds) {

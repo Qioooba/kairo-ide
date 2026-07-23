@@ -13,7 +13,8 @@ import (
 // ----------------- Encoder -----------------
 
 type memEncoder struct {
-	sandbox *security.WorkspaceRoots
+	sandbox       *security.WorkspaceRoots
+	fileEncoding  map[string]string // path -> encoding ID, tracks detected encoding per file
 }
 
 func (m *memEncoder) Detect(payload json.RawMessage) (json.RawMessage, error) {
@@ -43,6 +44,11 @@ func (m *memEncoder) Detect(payload json.RawMessage) (json.RawMessage, error) {
 	buf := make([]byte, req.SampleBytes)
 	n, _ := f.Read(buf)
 	id, conf, hasBom, eol := encoding.Detect(buf[:n], encoding.UTF8, encoding.Aliases{})
+	// Cache the detected encoding for this file
+	if m.fileEncoding == nil {
+		m.fileEncoding = make(map[string]string)
+	}
+	m.fileEncoding[req.File] = id
 	return json.Marshal(map[string]any{
 		"file":       req.File,
 		"encoding":   id,
@@ -91,6 +97,11 @@ func (m *memEncoder) Recode(payload json.RawMessage) (json.RawMessage, error) {
 	if err := atomicfile.WriteFile(path, encoded, info.Mode()); err != nil {
 		return nil, err
 	}
+	// Update the cached encoding for this file
+	if m.fileEncoding == nil {
+		m.fileEncoding = make(map[string]string)
+	}
+	m.fileEncoding[req.File] = req.To
 	return json.Marshal(map[string]any{"ok": true, "bytes": len(encoded)})
 }
 
@@ -117,6 +128,15 @@ func (m *memEncoder) Validate(payload json.RawMessage) (json.RawMessage, error) 
 		})
 	}
 	return json.Marshal(map[string]any{"valid": true})
+}
+
+// GetEncoding returns the cached encoding for a file, or ""
+// if the file has not been detected yet.
+func (m *memEncoder) GetEncoding(file string) string {
+	if m.fileEncoding == nil {
+		return ""
+	}
+	return m.fileEncoding[file]
 }
 
 // resolveRead authorizes a caller-supplied read path. If a sandbox

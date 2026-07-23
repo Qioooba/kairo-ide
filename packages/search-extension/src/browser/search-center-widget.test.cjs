@@ -1,0 +1,217 @@
+'use strict';
+
+const { register } = require('node:module');
+const { pathToFileURL } = require('node:url');
+register('data:text/javascript,' + encodeURIComponent(`
+export function resolve(specifier, context, nextResolve) {
+  if (/\.(css|svg|ttf|woff|woff2|png|jpg|gif)$/.test(specifier)) {
+    return { url: 'data:text/javascript,export default {};', format: 'module', shortCircuit: true };
+  }
+  return nextResolve(specifier, context);
+}
+`), pathToFileURL(__filename));
+
+const { enableJSDOM } = require('@theia/core/lib/browser/test/jsdom');
+enableJSDOM();
+global.IS_REACT_ACT_ENVIRONMENT = true;
+
+if (!global.DragEvent) {
+  global.DragEvent = class DragEvent extends global.MouseEvent {};
+}
+
+if (!global.ResizeObserver) {
+  global.ResizeObserver = class ResizeObserver {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+}
+
+const Module = require('module');
+Module._extensions['.css'] = function (module, filename) {
+  module._compile('module.exports = {};', filename);
+};
+
+const { FrontendApplicationConfigProvider } =
+  require('@theia/core/lib/browser/frontend-application-config-provider');
+FrontendApplicationConfigProvider.set({
+  defaultTheme: 'dark',
+  defaultIconTheme: 'theia-file-icons',
+  applicationName: 'Kairo',
+  validatePreferencesSchema: true,
+});
+
+const { test } = require('node:test');
+const assert = require('node:assert');
+const React = require('react');
+const { createRoot } = require('react-dom/client');
+const { SearchCenterComponent, groupMatchesByFile, parseGlobInput } =
+  require('../../lib/browser/search-center-widget');
+const { resolveWorkspaceMatchUri } = require('../../lib/browser/search-path');
+
+const act = React.act;
+
+function state(status, overrides = {}) {
+  return {
+    status,
+    requestId: 1,
+    matches: [],
+    totalMatches: 0,
+    truncated: false,
+    erroredFiles: [],
+    ...overrides,
+  };
+}
+
+function mount(initialState, callbacks = {}) {
+  const container = document.createElement('div');
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  const props = {
+    state: initialState,
+    onSearch: callbacks.onSearch || (() => undefined),
+    onCancel: callbacks.onCancel || (() => undefined),
+    onOpen: callbacks.onOpen || (() => undefined),
+  };
+  act(() => root.render(React.createElement(SearchCenterComponent, props)));
+  return {
+    container,
+    rerender(nextState) {
+      props.state = nextState;
+      act(() => root.render(React.createElement(SearchCenterComponent, props)));
+    },
+    unmount() {
+      act(() => root.unmount());
+      container.remove();
+    },
+  };
+}
+
+function setInput(input, value) {
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+  act(() => {
+    setter.call(input, value);
+    input.dispatchEvent(new window.Event('input', { bubbles: true }));
+  });
+}
+
+test('groupMatchesByFile preserves file and match order', () => {
+  const matches = [
+    { file: 'A.java', line: 1 },
+    { file: 'B.java', line: 2 },
+    { file: 'A.java', line: 3 },
+  ];
+  const groups = groupMatchesByFile(matches);
+  assert.deepStrictEqual(groups.map(group => group.file), ['A.java', 'B.java']);
+  assert.deepStrictEqual(groups[0].matches.map(match => match.line), [1, 3]);
+});
+
+test('parseGlobInput trims, removes blanks and deduplicates filters', () => {
+  assert.deepStrictEqual(parseGlobInput(' **/*.java, ,src/**,**/*.java '), ['**/*.java', 'src/**']);
+  assert.strictEqual(parseGlobInput(' , '), undefined);
+});
+
+test('resolveWorkspaceMatchUri accepts relative paths and rejects workspace escapes', () => {
+  assert.match(resolveWorkspaceMatchUri('/workspace/project', 'src\\A.java').toString(), /workspace\/project\/src\/A\.java$/);
+  for (const unsafe of ['../secret.txt', 'src/../../secret.txt', '/etc/passwd', 'C:\\secret.txt', 'file:///etc/passwd', 'https://example.test/x', '%2e%2e/secret.txt']) {
+    assert.throws(() => resolveWorkspaceMatchUri('/workspace/project', unsafe), /Unsafe|escapes/);
+  }
+});
+
+test('renders loading, empty, error and cancelled states with working cancel', () => {
+  let cancellations = 0;
+  const view = mount(state('loading'), { onCancel: () => cancellations++ });
+  try {
+    assert.ok(view.container.querySelector('[data-testid="search-loading"]'));
+    act(() => view.container.querySelector('[data-testid="search-cancel"]').click());
+    assert.strictEqual(cancellations, 1);
+
+    view.rerender(state('empty'));
+    assert.match(view.container.querySelector('[data-testid="search-empty"]').textContent, /No matches/);
+
+    view.rerender(state('error', { error: new Error('agent unavailable') }));
+    assert.match(view.container.querySelector('[data-testid="search-error"]').textContent, /agent unavailable/);
+
+    view.rerender(state('cancelled'));
+    assert.ok(view.container.querySelector('[data-testid="search-cancelled"]'));
+  } finally {
+    view.unmount();
+  }
+});
+
+test('groups results, reports total count and opens selected match with keyboard', () => {
+  const matches = [
+    { file: 'src/A.java', line: 4, column: 2, matchText: 'needle', contextBefore: 'a ', contextAfter: ' b' },
+    { file: 'src/A.java', line: 8, column: 1, matchText: 'needle', contextBefore: '', contextAfter: '' },
+    { file: 'web/B.jsp', line: 3, column: 5, matchText: 'needle', contextBefore: '', contextAfter: '' },
+  ];
+  const opened = [];
+  const view = mount(state('results', { matches, totalMatches: 3 }), { onOpen: match => opened.push(match) });
+  try {
+    assert.strictEqual(view.container.querySelectorAll('[data-testid="search-group"]').length, 2);
+    assert.strictEqual(view.container.querySelectorAll('[data-testid="search-result"]').length, 3);
+    assert.strictEqual(view.container.querySelector('[data-testid="search-count"]').textContent.trim(), '3 results');
+
+    const results = view.container.querySelector('[data-testid="search-results"]');
+    act(() => results.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })));
+    act(() => results.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+    assert.strictEqual(opened.length, 1);
+    assert.strictEqual(opened[0].line, 8);
+  } finally {
+    view.unmount();
+  }
+});
+
+test('submits query and all filter conditions', async () => {
+  const submitted = [];
+  const view = mount(state('idle'), { onSearch: query => submitted.push(query) });
+  try {
+    setInput(view.container.querySelector('[data-testid="search-query"]'), '  TODO  ');
+    setInput(view.container.querySelector('[data-testid="filter-include"]'), ' **/*.java, src/** ');
+    setInput(view.container.querySelector('[data-testid="filter-exclude"]'), ' target/** ');
+    act(() => view.container.querySelector('[data-testid="filter-case"]').click());
+    act(() => view.container.querySelector('[data-testid="filter-word"]').click());
+    act(() => view.container.querySelector('[data-testid="filter-regex"]').click());
+    await act(async () => {
+      view.container.querySelector('[data-testid="search-form"]').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+    });
+
+    assert.deepStrictEqual(submitted, [{
+      query: 'TODO',
+      isRegex: true,
+      caseSensitive: true,
+      wholeWord: true,
+      include: ['**/*.java', 'src/**'],
+      exclude: ['target/**'],
+    }]);
+  } finally {
+    view.unmount();
+  }
+});
+
+test('allows a new query while loading so the session model can cancel the stale request', async () => {
+  const submitted = [];
+  const view = mount(state('loading'), { onSearch: query => submitted.push(query) });
+  try {
+    setInput(view.container.querySelector('[data-testid="search-query"]'), 'new query');
+    assert.strictEqual(view.container.querySelector('[data-testid="search-submit"]').disabled, false);
+    await act(async () => {
+      view.container.querySelector('[data-testid="search-form"]').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+    });
+    assert.strictEqual(submitted.length, 1);
+    assert.strictEqual(submitted[0].query, 'new query');
+  } finally {
+    view.unmount();
+  }
+});
+
+test('open failures are caught and rendered instead of becoming unhandled rejections', async () => {
+  const match = { file: '../escape.java', line: 1, column: 1, matchText: 'x', contextBefore: '', contextAfter: '' };
+  const view = mount(state('results', { matches: [match], totalMatches: 1 }), { onOpen: async () => { throw new Error('Unsafe search result path'); } });
+  try {
+    await act(async () => view.container.querySelector('[data-testid="search-result"]').click());
+    assert.match(view.container.querySelector('[data-testid="search-error"]').textContent, /Unsafe search result path/);
+  } finally {
+    view.unmount();
+  }
+});

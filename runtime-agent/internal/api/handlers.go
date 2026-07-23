@@ -1,21 +1,28 @@
 package api
 
 import (
+	"bytes"
+	"context"
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/api/protocol"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/domain"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/encoding"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/log"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/maven"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/pathpolicy"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/repository"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/search"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/security"
@@ -114,8 +121,12 @@ func (s *Server) handleWorkspacesSub(w http.ResponseWriter, r *http.Request) {
 		}
 		writeOK(w, env, map[string]bool{"ok": true})
 	case sub == "scan" && r.Method == http.MethodPost:
-		env, _, _ := readEnvelopeAndBody(r)
+		env, body, readErr := readEnvelopeAndBody(r)
 		env.WorkspaceID = id
+		if readErr != nil {
+			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: readErr.Error()})
+			return
+		}
 		if s.Services.WorkspaceStore == nil {
 			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInternal, Message: "WorkspaceStore not configured"})
 			return
@@ -125,12 +136,24 @@ func (s *Server) handleWorkspacesSub(w http.ResponseWriter, r *http.Request) {
 			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrNotFound, Message: err.Error()})
 			return
 		}
-		detected, err := scanWorkspace(ws.RootPath)
+		request, err := decodeStrictProjectScan(extractPayload(body))
+		if err != nil {
+			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: err.Error()})
+			return
+		}
+		scanRoot, err := resolveProjectImportRoot(ws.RootPath, request.RootPath)
+		if err != nil {
+			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrPathForbidden, Message: "scan root is outside workspace or crosses a symlink"})
+			return
+		}
+		detected, err := scanWorkspace(scanRoot)
 		if err != nil {
 			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrIOError, Message: err.Error()})
 			return
 		}
 		writeOK(w, env, map[string]any{"detected": detected})
+	case sub == "projects/import":
+		s.handleProjectImport(w, r, id)
 	default:
 		writeError(w, "", "", protocol.KairoError{Code: protocol.ErrNotFound, Message: "unknown subpath"})
 	}
@@ -206,6 +229,289 @@ func (s *Server) handleProjectByID(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// handleProjectDetect detects a Java web project structure from a
+// directory and returns a ProjectDetection with all inferred info.
+//
+// POST /api/v1/projects/detect
+func (s *Server) handleProjectDetect(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, "", "", protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: "POST only"})
+		return
+	}
+	env, body, _ := readEnvelopeAndBody(r)
+	var p struct {
+		RootPath string `json:"rootPath"`
+	}
+	if err := json.Unmarshal(extractPayload(body), &p); err != nil {
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: err.Error()})
+		return
+	}
+	if p.RootPath == "" {
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: "rootPath required"})
+		return
+	}
+	abs, err := filepath.Abs(p.RootPath)
+	if err != nil {
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: err.Error()})
+		return
+	}
+	detected, err := scanWorkspace(abs)
+	if err != nil {
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrIOError, Message: err.Error()})
+		return
+	}
+	// Convert to ProjectDetection
+	if len(detected) == 0 {
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrNotFound, Message: "no project structure detected"})
+		return
+	}
+	d := convertToProjectDetection(detected[0])
+	writeOK(w, env, d)
+}
+
+func convertToProjectDetection(raw map[string]any) protocol.ProjectDetection {
+	pd := protocol.ProjectDetection{
+		Confidence: 0.5,
+		Warnings:   []string{},
+	}
+	if rootPath, ok := raw["rootPath"].(string); ok && rootPath != "" {
+		// Layout is already populated by scanWorkspace
+	}
+	if layout, ok := raw["layout"].(map[string]any); ok {
+		if src, ok := layout["src"].([]interface{}); ok {
+			for _, s := range src {
+				if ss, ok := s.(string); ok {
+					pd.SourceDirs = append(pd.SourceDirs, ss)
+				}
+			}
+		}
+		if wr, ok := layout["webRoot"].(string); ok {
+			pd.WebRoot = wr
+		}
+		if lib, ok := layout["lib"].(string); ok {
+			pd.LibDirs = append(pd.LibDirs, lib)
+		}
+		if bs, ok := layout["buildXml"].(string); ok {
+			pd.BuildScript = bs
+		}
+	}
+	if bs, ok := raw["buildSystem"].(string); ok {
+		pd.BuildSystem = bs
+	}
+	if enc, ok := raw["encodingByExtension"].(map[string]interface{}); ok {
+		if javaEnc, ok := enc[".java"].(string); ok {
+			pd.DefaultEncoding = javaEnc
+		}
+	}
+	if pd.DefaultEncoding == "" {
+		pd.DefaultEncoding = "gbk"
+	}
+	if jdk, ok := raw["detectedJdk"].(map[string]any); ok {
+		if v, ok := jdk["version"].(string); ok {
+			pd.JDKVersion = v
+		}
+	}
+	if pd.BuildScript == "build.xml" {
+		pd.SourceVersion = "1.6"
+		pd.TargetVersion = "1.6"
+		pd.OutputDir = "build/classes"
+	} else {
+		pd.SourceVersion = "1.6"
+		pd.TargetVersion = "1.6"
+		pd.OutputDir = "bin"
+	}
+	if conf, ok := raw["confidence"].(float64); ok {
+		pd.Confidence = conf
+	}
+	if warns, ok := raw["warnings"].([]interface{}); ok {
+		for _, w := range warns {
+			if ws, ok := w.(string); ok {
+				pd.Warnings = append(pd.Warnings, ws)
+			}
+		}
+	}
+	return pd
+}
+
+// handleProjectImportNew imports a project with the simplified
+// confirmation format.
+//
+// POST /api/v1/projects/import
+func (s *Server) handleProjectImportNew(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, "", "", protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: "POST only"})
+		return
+	}
+	env, body, err := readEnvelopeAndBody(r)
+	if err != nil {
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: err.Error()})
+		return
+	}
+
+	var req protocol.ProjectImportConfirmRequest
+	if err := json.Unmarshal(extractPayload(body), &req); err != nil {
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: err.Error()})
+		return
+	}
+
+	if req.WorkspaceID == "" {
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: "workspaceId required"})
+		return
+	}
+	if req.Name == "" {
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: "name required"})
+		return
+	}
+	if req.RootPath == "" {
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: "rootPath required"})
+		return
+	}
+
+	// Validate workspace exists
+	if s.Services.WorkspaceStore == nil {
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInternal, Message: "WorkspaceStore not configured"})
+		return
+	}
+	ws, err := s.Services.WorkspaceStore.Get(req.WorkspaceID)
+	if err != nil {
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrNotFound, Message: "workspace not found"})
+		return
+	}
+
+	// Resolve project root
+	projectRoot, err := resolveProjectImportRoot(ws.RootPath, req.RootPath)
+	if err != nil {
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrPathForbidden, Message: "project root is outside workspace"})
+		return
+	}
+
+	// Build a domain.Project from the simplified request
+	buildTool := domain.BuildToolID(req.BuildTool)
+	if buildTool == "" {
+		buildTool = domain.BuildToolAnt
+	}
+
+	project := &domain.Project{
+		ID:            domain.ProjectID(sanitizeProjectID(req.Name)),
+		WorkspaceID:   domain.WorkspaceID(req.WorkspaceID),
+		Name:          req.Name,
+		RootPath:      projectRoot,
+		Root:          projectRoot,
+		SourceRoots:   req.SourceDirs,
+		WebappDir:     req.WebRoot,
+		OutputDir:     req.OutputDir,
+		SourceLevel:   req.SourceVersion,
+		TargetLevel:   req.TargetVersion,
+		Encoding:      req.DefaultEncoding,
+		BuildTool:     buildTool,
+		BuildFile:     req.BuildScript,
+		ContextPath:   req.ContextPath,
+		LibraryDirs:   req.LibDirs,
+		ResourceRoots: []string{},
+		CreatedAt:     domain.UTCNow(),
+		UpdatedAt:     domain.UTCNow(),
+	}
+
+	if project.ContextPath == "" {
+		project.ContextPath = "/"
+	}
+
+	// Persist to .kairo/project.json
+	if err := SaveProjectJSON(projectRoot, project); err != nil {
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrIOError, Message: "save project.json: " + err.Error()})
+		return
+	}
+
+	// Also persist to .kairo/project.yaml for compatibility
+	if err := repository.SaveProjectConfig(projectRoot, repository.ProjectToConfig(project)); err != nil {
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrIOError, Message: "save project.yaml: " + err.Error()})
+		return
+	}
+
+	// Add to project catalog
+	creator, ok := s.Services.ProjectStore.(projectCreator)
+	if !ok {
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInternal, Message: "project store does not support create"})
+		return
+	}
+	saved, err := creator.Create(string(project.ID), project)
+	if err != nil {
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrConflict, Message: "project already exists: " + err.Error()})
+		return
+	}
+
+	// Mark as recent
+	s.addRecentProject(string(project.ID), project.Name, projectRoot)
+
+	writeOK(w, env, saved)
+}
+
+// handleProjectRecent returns the list of recently opened projects.
+//
+// GET /api/v1/projects/recent
+func (s *Server) handleProjectRecent(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, "", "", protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: "GET only"})
+		return
+	}
+	env, _, _ := readEnvelopeAndBody(r)
+	recent := s.getRecentProjects()
+	writeOK(w, env, recent)
+}
+
+func sanitizeProjectID(name string) string {
+	// Generate a stable ID from the project name
+	id := strings.ToLower(name)
+	id = regexp.MustCompile(`[^a-z0-9_.-]+`).ReplaceAllString(id, "-")
+	id = strings.Trim(id, "-.")
+	if id == "" {
+		id = "project"
+	}
+	return "project-" + id
+}
+
+// ----- Recent Projects -----
+
+type recentProjectEntry struct {
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	RootPath     string `json:"rootPath"`
+	LastOpenedAt string `json:"lastOpenedAt"`
+}
+
+func (s *Server) addRecentProject(id, name, rootPath string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now().UTC().Format(time.RFC3339)
+	entry := recentProjectEntry{
+		ID:           id,
+		Name:         name,
+		RootPath:     rootPath,
+		LastOpenedAt: now,
+	}
+	// Check if already exists
+	for i, e := range s.recentProjects {
+		if e.ID == id {
+			// Move to front
+			s.recentProjects = append(s.recentProjects[:i], s.recentProjects[i+1:]...)
+			break
+		}
+	}
+	s.recentProjects = append([]recentProjectEntry{entry}, s.recentProjects...)
+	// Keep at most 10
+	if len(s.recentProjects) > 10 {
+		s.recentProjects = s.recentProjects[:10]
+	}
+}
+
+func (s *Server) getRecentProjects() []recentProjectEntry {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]recentProjectEntry, len(s.recentProjects))
+	copy(out, s.recentProjects)
+	return out
+}
+
 // ----- Toolchains -----
 
 func (s *Server) handleToolchains(w http.ResponseWriter, r *http.Request) {
@@ -259,9 +565,13 @@ func (s *Server) handleBuilds(w http.ResponseWriter, r *http.Request) {
 		}
 		writeOK(w, env, s.Services.BuildEngine.List())
 	case http.MethodPost:
-		env, body, _ := readEnvelopeAndBody(r)
+		env, body, readErr := readEnvelopeAndBody(r)
+		if readErr != nil {
+			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: readErr.Error()})
+			return
+		}
 		var req BuildRequest
-		if err := json.Unmarshal(extractPayload(body), &req); err != nil {
+		if err := decodeStrictBuildRequest(extractPayload(body), &req); err != nil {
 			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: err.Error()})
 			return
 		}
@@ -280,16 +590,33 @@ func (s *Server) handleBuilds(w http.ResponseWriter, r *http.Request) {
 		// without the project's root/levels/encoding/outputDir the
 		// engine compiled 0 files into agent-data with defaults
 		// (the "sham build").
-		if s.Services.ProjectStore != nil {
-			p, err := s.Services.ProjectStore.Get(req.ProjectID)
-			if err != nil {
-				writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{
-					Code:    protocol.ErrNotFound,
-					Message: fmt.Sprintf("project not found: %s", req.ProjectID),
-				})
-				return
-			}
-			hydrateBuildRequest(&req, p)
+		if s.Services.ProjectStore == nil {
+			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInternal, Message: "ProjectStore not configured"})
+			return
+		}
+		p, err := s.Services.ProjectStore.Get(req.ProjectID)
+		if err != nil {
+			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{
+				Code:    protocol.ErrNotFound,
+				Message: fmt.Sprintf("project not found: %s", req.ProjectID),
+			})
+			return
+		}
+		if err := hydrateBuildRequest(&req, p); err != nil {
+			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: err.Error()})
+			return
+		}
+		req.TraceID = env.CorrelationID
+		if req.TraceID == "" {
+			_, correlationID, _, _ := log.FromContext(r.Context())
+			req.TraceID = correlationID
+		}
+		if req.TraceID == "" {
+			req.TraceID = env.RequestID
+		}
+		if req.TraceID == "" {
+			requestID, _, _, _ := log.FromContext(r.Context())
+			req.TraceID = requestID
 		}
 		if s.Services.BuildEngine == nil {
 			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInternal, Message: "BuildEngine not configured"})
@@ -306,6 +633,21 @@ func (s *Server) handleBuilds(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func decodeStrictBuildRequest(raw []byte, dst *BuildRequest) error {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(dst); err != nil {
+		return err
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		if err == nil {
+			return errors.New("multiple JSON values are not allowed")
+		}
+		return err
+	}
+	return nil
+}
+
 func (s *Server) handleBuildByID(w http.ResponseWriter, r *http.Request) {
 	rest := strings.TrimPrefix(r.URL.Path, "/api/v1/builds/")
 	env, _, _ := readEnvelopeAndBody(r)
@@ -313,9 +655,28 @@ func (s *Server) handleBuildByID(w http.ResponseWriter, r *http.Request) {
 		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInternal, Message: "BuildEngine not configured"})
 		return
 	}
-	res, err := s.Services.BuildEngine.Get(rest)
+	var res *BuildResult
+	var err error
+	switch r.Method {
+	case http.MethodGet:
+		res, err = s.Services.BuildEngine.Get(rest)
+	case http.MethodDelete:
+		res, err = s.Services.BuildEngine.Cancel(r.Context(), rest)
+	default:
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: "GET or DELETE only"})
+		return
+	}
 	if err != nil {
-		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrNotFound, Message: err.Error()})
+		code := protocol.ErrInternal
+		switch {
+		case errors.Is(err, ErrBuildNotFound):
+			code = protocol.ErrNotFound
+		case errors.Is(err, ErrBuildCancelTimeout), errors.Is(err, context.DeadlineExceeded):
+			code = protocol.ErrTimeout
+		case errors.Is(err, context.Canceled):
+			code = protocol.ErrCancelled
+		}
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: code, Message: err.Error()})
 		return
 	}
 	writeOK(w, env, res)
@@ -354,6 +715,13 @@ func (s *Server) handleDeployments(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			req.Source = filepath.Join(p.RootPath, p.WebappDir)
+			if req.Intent == "publish-static-changes" {
+				req.What, req.Mode, req.Trigger = "static", "merge", "manual"
+				if resolver, ok := s.Services.ServerRunner.(interface{ DeploymentTarget(string) (string, error) }); ok {
+					req.Target, err = resolver.DeploymentTarget(req.ProjectID)
+					if err != nil { writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrConflict, Message: err.Error()}); return }
+				}
+			}
 			if req.Target == "" && s.Services.ServerRunner != nil && s.Services.ServerRunner.CatalinaHome() != "" {
 				ctx := strings.TrimPrefix(p.ContextPath, "/")
 				if ctx == "" {
@@ -390,40 +758,116 @@ func (s *Server) handleDeploymentByID(w http.ResponseWriter, r *http.Request) {
 
 // hydrateBuildRequest fills build-request fields the UI does not
 // send from the stored project (KAIRO-RC-WEB-238).
-func hydrateBuildRequest(req *BuildRequest, p domain.Project) {
-	if req.ProjectRoot == "" {
-		req.ProjectRoot = p.RootPath
+func hydrateBuildRequest(req *BuildRequest, p domain.Project) error {
+	root := p.RootPath
+	if root == "" {
+		root = p.Root
 	}
-	if req.SourceLevel == "" && p.SourceLevel != "" {
-		req.SourceLevel = p.SourceLevel
+	if root == "" {
+		return fmt.Errorf("project root is required")
 	}
-	if req.TargetLevel == "" && p.TargetLevel != "" {
-		req.TargetLevel = p.TargetLevel
+	root, err := filepath.Abs(root)
+	if err != nil {
+		return fmt.Errorf("resolve project root: %w", err)
 	}
-	if req.Encoding == "" && p.Encoding != "" {
-		req.Encoding = p.Encoding
+	root, err = filepath.EvalSymlinks(root)
+	if err != nil {
+		return fmt.Errorf("canonicalize project root: %w", err)
 	}
-	if req.OutputDir == "" && p.OutputDir != "" {
-		req.OutputDir = filepath.Join(p.RootPath, p.OutputDir)
+	if info, err := os.Stat(root); err != nil || !info.IsDir() {
+		if err != nil {
+			return fmt.Errorf("stat project root: %w", err)
+		}
+		return fmt.Errorf("project root is not a directory")
 	}
-	if len(req.Classpath) == 0 {
-		// Legacy layout convention: jars under <root>/lib and
-		// <webapp>/WEB-INF/lib form the compile classpath.
-		for _, dir := range []string{
-			filepath.Join(p.RootPath, "lib"),
-			filepath.Join(p.RootPath, p.WebappDir, "WEB-INF", "lib"),
-		} {
-			entries, err := os.ReadDir(dir)
+
+	policy := pathpolicy.NewDefaultPathPolicy()
+	if p.OutputDir == "" {
+		return fmt.Errorf("project outputDir is required")
+	}
+	outputDir, err := policy.ResolveWithin(root, filepath.ToSlash(p.OutputDir))
+	if err != nil {
+		return fmt.Errorf("invalid project outputDir: %w", err)
+	}
+	if filepath.Clean(outputDir) == filepath.Clean(root) {
+		return fmt.Errorf("project outputDir must not be the project root")
+	}
+
+	intent := req.Intent
+	if intent == "" {
+		intent = "full"
+	}
+	if intent != "full" && intent != "selected-files" {
+		return fmt.Errorf("intent must be full or selected-files")
+	}
+	var files []string
+	if intent == "selected-files" {
+		if len(req.SelectedFiles) == 0 {
+			return fmt.Errorf("selectedFiles is required for selected-files intent")
+		}
+		if len(req.SelectedFiles) > 10000 {
+			return fmt.Errorf("selectedFiles exceeds 10000 entries")
+		}
+		seen := make(map[string]struct{}, len(req.SelectedFiles))
+		for _, selected := range req.SelectedFiles {
+			resolved, err := policy.ResolveWithin(root, selected)
 			if err != nil {
+				return fmt.Errorf("invalid selected file %q: %w", selected, err)
+			}
+			info, err := os.Stat(resolved)
+			if err != nil {
+				return fmt.Errorf("stat selected file %q: %w", selected, err)
+			}
+			if !info.Mode().IsRegular() || !strings.EqualFold(filepath.Ext(resolved), ".java") {
+				return fmt.Errorf("selected file %q is not a regular .java file", selected)
+			}
+			if _, duplicate := seen[resolved]; duplicate {
 				continue
 			}
-			for _, e := range entries {
-				if !e.IsDir() && strings.HasSuffix(strings.ToLower(e.Name()), ".jar") {
-					req.Classpath = append(req.Classpath, filepath.Join(dir, e.Name()))
-				}
-			}
+			seen[resolved] = struct{}{}
+			files = append(files, resolved)
 		}
 	}
+
+	var classpath []string
+	classpathDirs := []string{"lib"}
+	if p.WebappDir != "" {
+		classpathDirs = append(classpathDirs, filepath.ToSlash(filepath.Join(p.WebappDir, "WEB-INF", "lib")))
+	}
+	for _, relativeDir := range classpathDirs {
+		dir, err := policy.ResolveWithin(root, relativeDir)
+		if err != nil {
+			return fmt.Errorf("invalid classpath directory %q: %w", relativeDir, err)
+		}
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return fmt.Errorf("read classpath directory %q: %w", relativeDir, err)
+		}
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.EqualFold(filepath.Ext(entry.Name()), ".jar") {
+				continue
+			}
+			jar, err := policy.ResolveWithin(root, filepath.ToSlash(filepath.Join(relativeDir, entry.Name())))
+			if err != nil {
+				return fmt.Errorf("invalid classpath entry %q: %w", entry.Name(), err)
+			}
+			classpath = append(classpath, jar)
+		}
+	}
+
+	req.Intent = intent
+	req.ProjectRoot = root
+	req.OutputDir = outputDir
+	req.Files = files
+	req.Toolchain = p.ToolchainID
+	req.SourceLevel = p.SourceLevel
+	req.TargetLevel = p.TargetLevel
+	req.Encoding = p.Encoding
+	req.Classpath = classpath
+	return nil
 }
 
 // sanitizeContextName turns a project name into a Tomcat webapps
@@ -567,6 +1011,17 @@ func (s *Server) handleServerSub(w http.ResponseWriter, r *http.Request) {
 		writeOK(w, env, srv)
 	case "logs":
 		s.handleServerLogs(w, r, id, env)
+	case "recover":
+		if r.Method != http.MethodPost {
+			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: "POST only"})
+			return
+		}
+		srv, err := s.Services.ServerRunner.Recover(id)
+		if err != nil {
+			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrProcessSpawnFailed, Message: err.Error()})
+			return
+		}
+		writeOK(w, env, srv)
 	default:
 		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrNotFound, Message: "unknown subpath"})
 	}
@@ -577,7 +1032,7 @@ func (s *Server) handleServerLogs(w http.ResponseWriter, r *http.Request, id str
 		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInternal, Message: "ServerRunner not configured"})
 		return
 	}
-	// The payload stays [{line, ts}] per the endpoint contract; the
+	// The payload stays [{line, ts, stream?}] per the endpoint contract; the
 	// server's state/pid ride along as headers so the Logs view can
 	// show liveness without a second request.
 	if srv, err := s.Services.ServerRunner.Get(id); err == nil && srv != nil {
@@ -607,6 +1062,21 @@ func (s *Server) handleServerLogs(w http.ResponseWriter, r *http.Request, id str
 	writeOK(w, env, lines)
 }
 
+// ----- Recovery -----
+
+func (s *Server) handleRecoverableServers(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, "", "", protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: "GET only"})
+		return
+	}
+	if s.Services.ServerRunner == nil {
+		writeError(w, "", "", protocol.KairoError{Code: protocol.ErrInternal, Message: "ServerRunner not configured"})
+		return
+	}
+	servers := s.Services.ServerRunner.Recoverable()
+	writeOK(w, protocol.RequestEnvelope{}, servers)
+}
+
 // ----- Search -----
 
 func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
@@ -626,9 +1096,17 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInternal, Message: "Searcher not configured"})
 		return
 	}
-	res, err := s.Services.Searcher.Search(extractPayload(body))
+	res, err := s.Services.Searcher.Search(r.Context(), extractPayload(body))
 	if err != nil {
-		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrIOError, Message: err.Error()})
+		code := protocol.ErrIOError
+		retryable := false
+		if errors.Is(err, context.Canceled) {
+			code = protocol.ErrCancelled
+		} else if errors.Is(err, context.DeadlineExceeded) {
+			code = protocol.ErrTimeout
+			retryable = true
+		}
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: code, Message: err.Error(), Retryable: retryable})
 		return
 	}
 	writeOK(w, env, res)
@@ -1183,6 +1661,105 @@ func extractPayload(body []byte) json.RawMessage {
 		return env.Payload
 	}
 	return body
+}
+
+// ----- Maven -----
+
+// handleMavenDetect detects a Maven project from pom.xml.
+//
+// POST /api/v1/maven/detect
+func (s *Server) handleMavenDetect(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, "", "", protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: "POST only"})
+		return
+	}
+	env, body, _ := readEnvelopeAndBody(r)
+	var p struct {
+		RootPath string `json:"rootPath"`
+	}
+	if err := json.Unmarshal(extractPayload(body), &p); err != nil {
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: err.Error()})
+		return
+	}
+	if p.RootPath == "" {
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: "rootPath required"})
+		return
+	}
+	abs, err := filepath.Abs(p.RootPath)
+	if err != nil {
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: err.Error()})
+		return
+	}
+	result, err := maven.Detect(abs)
+	if err != nil {
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrIOError, Message: err.Error()})
+		return
+	}
+	writeOK(w, env, result)
+}
+
+// handleMavenDependencies returns the dependency tree for a Maven project.
+//
+// GET /api/v1/maven/dependencies?rootPath=...&offline=true
+func (s *Server) handleMavenDependencies(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, "", "", protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: "GET only"})
+		return
+	}
+	env, _, _ := readEnvelopeAndBody(r)
+	rootPath := r.URL.Query().Get("rootPath")
+	if rootPath == "" {
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: "rootPath query parameter required"})
+		return
+	}
+	abs, err := filepath.Abs(rootPath)
+	if err != nil {
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: err.Error()})
+		return
+	}
+	offline := r.URL.Query().Get("offline") == "true"
+	result, err := maven.GetDependencies(abs, offline)
+	if err != nil {
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrIOError, Message: err.Error()})
+		return
+	}
+	writeOK(w, env, result)
+}
+
+// handleMavenRun runs a Maven lifecycle task.
+//
+// POST /api/v1/maven/run
+func (s *Server) handleMavenRun(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, "", "", protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: "POST only"})
+		return
+	}
+	env, body, _ := readEnvelopeAndBody(r)
+	var req maven.RunRequest
+	if err := json.Unmarshal(extractPayload(body), &req); err != nil {
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: err.Error()})
+		return
+	}
+	if req.RootPath == "" {
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: "rootPath required"})
+		return
+	}
+	if req.Task == "" {
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: "task required"})
+		return
+	}
+	abs, err := filepath.Abs(req.RootPath)
+	if err != nil {
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: err.Error()})
+		return
+	}
+	req.RootPath = abs
+	result, err := maven.RunTask(req)
+	if err != nil {
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrProcessSpawnFailed, Message: err.Error()})
+		return
+	}
+	writeOK(w, env, result)
 }
 
 // keep helpers used.

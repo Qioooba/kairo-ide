@@ -1,0 +1,69 @@
+{
+  "generatedAt": "2026-07-23T05:46:45.684Z",
+  "script": "audit-ui-visual.cjs",
+  "summary": {
+    "total": 7,
+    "passed": 7,
+    "failed": 0,
+    "elapsedMs": 66
+  },
+  "checks": {
+    "wcagContrast": {
+      "label": "WCAG AA 正文对比度",
+      "passed": true,
+      "totalIssues": 0,
+      "issues": []
+    },
+    "tokenUsage": {
+      "label": "ui-kit token 使用",
+      "passed": true,
+      "totalIssues": 0,
+      "issues": []
+    },
+    "fontSize": {
+      "label": "字号规范",
+      "passed": true,
+      "totalIssues": 0,
+      "issues": []
+    },
+    "shadowsAnimations": {
+      "label": "阴影/模糊/动画",
+      "passed": true,
+      "totalIssues": 0,
+      "issues": []
+    },
+    "reducedMotion": {
+      "label": "prefers-reduced-motion",
+      "passed": true,
+      "totalIssues": 0,
+      "issues": []
+    },
+    "iconReuse": {
+      "label": "图标复用",
+      "passed": true,
+      "totalIssues": 0,
+      "issues": []
+    },
+    "focusScrollLayout": {
+      "label": "焦点/滚动/布局",
+      "passed": true,
+      "totalIssues": 2,
+      "issues": [
+        {
+          "file": "packages/search-extension/src/browser/search-center.css",
+          "type": "fixed-height",
+          "value": "12px",
+          "severity": "low",
+          "detail": "Fixed height (12px) may cause layout shift with content overflow"
+        },
+        {
+          "file": "packages/ui-kit/src/browser/kairo-theme.css",
+          "type": "fixed-height",
+          "value": "28px",
+          "severity": "low",
+          "detail": "Fixed height (28px) may cause layout shift with content overflow"
+        }
+      ]
+    }
+  }
+}

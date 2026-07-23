@@ -342,13 +342,36 @@ func (f *FakeProcess) Inspect(ctx context.Context, identity domain.ProcessIdenti
 	if running && pid > 0 && identity.PID != 0 && identity.PID != pid {
 		mismatch = true
 	}
+	children := make([]int, f.behavior.ChildProcesses)
+	for i := 0; i < f.behavior.ChildProcesses; i++ {
+		children[i] = pid + 1000 + i
+	}
 	return ProcessObservation{
 		PID:              pid,
 		Identity:         ic,
 		Running:          running,
 		ExitCode:         ec,
 		IdentityMismatch: mismatch,
+		Children:         children,
 	}, nil
+}
+
+func (f *FakeProcess) ChildProcesses(ctx context.Context, identity domain.ProcessIdentity) ([]int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	running := f.running
+	pid := f.identity.PID
+	if !running || pid <= 0 {
+		return nil, nil
+	}
+	if identity.PID != 0 && identity.PID != pid {
+		return nil, domain.ErrProcessIdentityMismatch
+	}
+	children := make([]int, f.behavior.ChildProcesses)
+	for i := 0; i < f.behavior.ChildProcesses; i++ {
+		children[i] = pid + 1000 + i
+	}
+	return children, nil
 }
 
 func (f *FakeProcess) SubscribeLogs(listener LogListener) Disposable {

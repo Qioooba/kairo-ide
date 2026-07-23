@@ -603,7 +603,7 @@ type fakeServerRunner struct {
 
 func (f *fakeServerRunner) Start(req StartServerRequest) (*ServerResponse, error) {
 	f.lastReq = req
-	return &ServerResponse{ID: "srv_1", ProjectID: req.ProjectID, State: "starting"}, nil
+	return &ServerResponse{ID: "srv_1", ProjectID: req.ProjectID, State: "starting", ContextPath: req.ContextPath, Ports: &ServerPorts{HTTP: req.HTTPPort, Debug: req.DebugPort}}, nil
 }
 func (f *fakeServerRunner) CatalinaHome() string                   { return "/tmp/catalina" }
 func (f *fakeServerRunner) Get(id string) (*ServerResponse, error) { return nil, nil }
@@ -622,6 +622,10 @@ func (f *fakeServerRunner) Debug(id string) (*ServerResponse, error) { return ni
 func (f *fakeServerRunner) Logs(id string, tail int) ([]ServerLogEntry, error) {
 	f.lastTail = tail
 	return f.logs, f.logsErr
+}
+func (f *fakeServerRunner) Recoverable() []*ServerResponse { return nil }
+func (f *fakeServerRunner) Recover(id string) (*ServerResponse, error) {
+	return &ServerResponse{ID: id, State: "running"}, nil
 }
 
 // KAIRO-RC-WEB-240: POST /api/v1/servers with only {projectId} must
@@ -651,6 +655,30 @@ func TestServerStart_ResolvesWebappDirFromProject(t *testing.T) {
 	}
 	if runner.lastReq.WebappDir != "/tmp/legacy-sample/WebRoot" {
 		t.Fatalf("WebappDir = %q, want /tmp/legacy-sample/WebRoot", runner.lastReq.WebappDir)
+	}
+}
+
+func TestServerStart_PropagatesExplicitDebugMode(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(filepath.Join(t.TempDir(), "audit.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	store := &fakeProjectStore{saved: domain.Project{
+		ID: "proj-1", RootPath: "/tmp/legacy-sample", WebappDir: "WebRoot",
+	}}
+	runner := &fakeServerRunner{}
+	srv := NewServer(&Services{ProjectStore: store, ServerRunner: runner}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/servers", strings.NewReader(`{"projectId":"proj-1","debug":true}`))
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if !runner.lastReq.Debug {
+		t.Fatal("debug=true was not propagated to ServerRunner")
 	}
 }
 
@@ -695,7 +723,7 @@ func TestServerRestart_RoutesToRunner(t *testing.T) {
 	}
 }
 
-// GET /api/v1/servers/{id}/logs must return the [{line, ts}]
+// GET /api/v1/servers/{id}/logs must return the [{line, ts, stream?}]
 // contract shape and pass ?tail=N through to the runner.
 func TestServerLogs_ReturnsEntriesAndTail(t *testing.T) {
 	logger := log.New("test").WithLevel(log.LevelWarn)
@@ -794,10 +822,11 @@ func TestDeployment_ResolvesSourceAndTargetFromProject(t *testing.T) {
 // KAIRO-RC-WEB-238: POST /api/v1/builds {projectId} must hydrate
 // root/levels/encoding/outputDir/classpath from the project.
 func TestBuildStart_HydratesFromProject(t *testing.T) {
+	root := t.TempDir()
 	proj := domain.Project{
 		ID:          "proj-1",
 		Name:        "legacy",
-		RootPath:    "/tmp/legacy-sample",
+		RootPath:    root,
 		WebappDir:   "WebRoot",
 		OutputDir:   "build/classes",
 		SourceLevel: "1.8",
@@ -805,8 +834,14 @@ func TestBuildStart_HydratesFromProject(t *testing.T) {
 		Encoding:    "gbk",
 	}
 	req := BuildRequest{ProjectID: "proj-1"}
-	hydrateBuildRequest(&req, proj)
-	if req.ProjectRoot != "/tmp/legacy-sample" {
+	if err := hydrateBuildRequest(&req, proj); err != nil {
+		t.Fatal(err)
+	}
+	realRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.ProjectRoot != realRoot {
 		t.Fatalf("ProjectRoot = %q", req.ProjectRoot)
 	}
 	if req.SourceLevel != "1.8" || req.TargetLevel != "1.8" {
@@ -815,7 +850,133 @@ func TestBuildStart_HydratesFromProject(t *testing.T) {
 	if req.Encoding != "gbk" {
 		t.Fatalf("Encoding = %q", req.Encoding)
 	}
-	if req.OutputDir != "/tmp/legacy-sample/build/classes" {
+	if req.OutputDir != filepath.Join(realRoot, "build", "classes") {
 		t.Fatalf("OutputDir = %q", req.OutputDir)
+	}
+}
+
+type cancelBuildEngineStub struct {
+	cancelCalls int
+	result      *BuildResult
+}
+
+func (s *cancelBuildEngineStub) Start(BuildRequest) (*BuildResult, error) { return s.result, nil }
+func (s *cancelBuildEngineStub) Get(string) (*BuildResult, error)         { return s.result, nil }
+func (s *cancelBuildEngineStub) List() []*BuildResult                     { return []*BuildResult{s.result} }
+func (s *cancelBuildEngineStub) Cancel(ctx context.Context, _ string) (*BuildResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	s.cancelCalls++
+	return s.result, nil
+}
+
+func TestBuildDeleteInvokesCancellation(t *testing.T) {
+	engine := &cancelBuildEngineStub{result: &BuildResult{ID: "build-1", State: "cancelled"}}
+	srv := newTestServer(t, nil)
+	srv.Services.BuildEngine = engine
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/builds/build-1", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	if engine.cancelCalls != 1 {
+		t.Fatalf("Cancel calls = %d, want 1", engine.cancelCalls)
+	}
+}
+
+func TestBuildRequestRejectsCallerSuppliedExecutionPaths(t *testing.T) {
+	var req BuildRequest
+	malicious := `{"projectId":"proj-1","projectRoot":"/outside","outputDir":"/outside/out","files":["/outside/Evil.java"],"classpath":["/outside/evil.jar"],"toolchainId":"attacker"}`
+	if err := decodeStrictBuildRequest([]byte(malicious), &req); err == nil {
+		t.Fatal("trusted execution fields must be rejected as unknown")
+	}
+}
+
+func TestBuildPostRejectsCallerSuppliedExecutionPaths(t *testing.T) {
+	srv := newTestServer(t, nil)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/builds", strings.NewReader(`{"projectId":"proj-1","projectRoot":"/outside"}`))
+	req.Header.Set("Content-Type", "application/json")
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "unknown field") {
+		t.Fatalf("response does not explain strict rejection: %s", rr.Body.String())
+	}
+}
+
+func TestBuildSelectedFileTraversalIsRejected(t *testing.T) {
+	root := t.TempDir()
+	req := BuildRequest{ProjectID: "proj-1", Intent: "selected-files", SelectedFiles: []string{"../Escape.java"}}
+	project := domain.Project{ID: "proj-1", RootPath: root, OutputDir: "build/classes"}
+	if err := hydrateBuildRequest(&req, project); err == nil {
+		t.Fatal("selected file traversal must be rejected")
+	}
+}
+
+type contextSearchStub struct {
+	seen error
+}
+
+func (s *contextSearchStub) Search(ctx context.Context, _ json.RawMessage) (json.RawMessage, error) {
+	s.seen = ctx.Err()
+	return nil, ctx.Err()
+}
+
+func TestSearchHandler_MapsCancellationAndDeadline(t *testing.T) {
+	tests := []struct {
+		name string
+		ctx  func() (context.Context, context.CancelFunc)
+		code protocol.KairoErrorCode
+	}{
+		{
+			name: "cancelled",
+			ctx: func() (context.Context, context.CancelFunc) {
+				ctx, cancel := context.WithCancel(context.Background())
+				cancel()
+				return ctx, func() {}
+			},
+			code: protocol.ErrCancelled,
+		},
+		{
+			name: "deadline",
+			ctx: func() (context.Context, context.CancelFunc) {
+				return context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+			},
+			code: protocol.ErrTimeout,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stub := &contextSearchStub{}
+			logger := log.New("test").WithLevel(log.LevelWarn)
+			auditLog, err := audit.New(filepath.Join(t.TempDir(), "audit.log"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer auditLog.Close()
+			srv := NewServer(&Services{Searcher: stub}, logger, auditLog, "test-0.1.0", "")
+
+			ctx, cancel := tt.ctx()
+			defer cancel()
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/search", strings.NewReader(`{"query":"hello"}`)).WithContext(ctx)
+			rr := httptest.NewRecorder()
+			srv.Handler().ServeHTTP(rr, req)
+
+			if !errors.Is(stub.seen, ctx.Err()) {
+				t.Fatalf("search context error=%v, request context error=%v", stub.seen, ctx.Err())
+			}
+			var response protocol.ErrorResponse
+			if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
+				t.Fatalf("decode response: %v body=%s", err, rr.Body.String())
+			}
+			if response.Error.Code != tt.code {
+				t.Fatalf("error code=%q, want %q; body=%s", response.Error.Code, tt.code, rr.Body.String())
+			}
+		})
 	}
 }

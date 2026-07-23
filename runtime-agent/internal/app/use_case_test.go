@@ -771,3 +771,28 @@ func (f *fakeServerHistoryRepo) Delete(ctx context.Context, wsID domain.Workspac
 	delete(f.records, key)
 	return nil
 }
+
+func TestResolveAbsPaths(t *testing.T) {
+	root := "/tmp/project"
+	rels := []string{"src", "lib", "web/WEB-INF"}
+	got := resolveAbsPaths(root, rels)
+	if len(got) != 3 {
+		t.Fatalf("len = %d, want 3", len(got))
+	}
+	if got[0] != filepath.Join(root, "src") {
+		t.Errorf("got[0] = %q", got[0])
+	}
+	if got[1] != filepath.Join(root, "lib") {
+		t.Errorf("got[1] = %q", got[1])
+	}
+	if got[2] != filepath.Join(root, "web", "WEB-INF") {
+		t.Errorf("got[2] = %q", got[2])
+	}
+}
+
+func TestResolveAbsPaths_Empty(t *testing.T) {
+	got := resolveAbsPaths("/root", nil)
+	if len(got) != 0 {
+		t.Errorf("len = %d, want 0", len(got))
+	}
+}

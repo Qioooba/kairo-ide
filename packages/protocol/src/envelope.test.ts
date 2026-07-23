@@ -13,6 +13,7 @@ import assert from 'node:assert';
 import {
   PROTOCOL_VERSION,
   PROTOCOL_VERSION_PATH,
+  RUN_CONFIGURATION_VERSION,
   ok,
   err,
   mapBuildState,
@@ -26,6 +27,10 @@ test('PROTOCOL_VERSION is v1 and PROTOCOL_VERSION_PATH is /api/v1', () => {
   // The two must agree — a drift here is a wire-breaking change.
   assert.ok(PROTOCOL_VERSION_PATH.endsWith(PROTOCOL_VERSION),
     `path ${PROTOCOL_VERSION_PATH} should end with version ${PROTOCOL_VERSION}`);
+});
+
+test('RUN_CONFIGURATION_VERSION is independently versioned at 1', () => {
+  assert.strictEqual(RUN_CONFIGURATION_VERSION, 1);
 });
 
 test('ok() produces a success envelope with payload + echoed requestId', () => {
@@ -129,11 +134,11 @@ test('KairoErrorCode is the documented set (lock the wire)', () => {
     'invalid_request', 'path_forbidden', 'toolchain_missing', 'runtime_missing',
     'unsupported_jdk_target',
     'internal', 'io_error', 'process_spawn_failed', 'compile_failed',
-    'deploy_failed', 'debug_attach_failed', 'timeout', 'plugin_crashed', 'unsupported',
+    'deploy_failed', 'debug_attach_failed', 'cancelled', 'timeout', 'plugin_crashed', 'unsupported',
   ];
   // The cast is the point: if the union shrinks, this still
   // compiles; the assertion is that the runtime representation
   // matches the documented list.
   const observed: readonly string[] = expected as readonly string[];
-  assert.strictEqual(observed.length, 19);
+  assert.strictEqual(observed.length, 20);
 });

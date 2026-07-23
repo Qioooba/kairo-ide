@@ -12,7 +12,7 @@ const assert = require('node:assert');
 const path = require('node:path');
 const os = require('node:os');
 const fs = require('node:fs');
-const { JdtLsManager } = require('../../lib/node/jdt-ls-manager');
+const { JdtLsManager, JdtLsRequestTimeoutError } = require('../../lib/node/jdt-ls-manager');
 
 test('resolveDistribution: returns a friendly error when KAIRO_JDT_LS_HOME is missing', () => {
   const saved = process.env.KAIRO_JDT_LS_HOME;
@@ -196,5 +196,116 @@ test('JdtLsManager: state events fire on transition, not on duplicate', () => {
   m.setState('ready');
   m.setState('ready'); // duplicate
   assert.deepEqual(events, ['starting', 'ready']);
+  m.dispose();
+});
+
+test('JdtLsManager: stop from crashed state with no child is immediate', async () => {
+  const m = new JdtLsManager();
+  m.setState('crashed');
+  const startedAt = Date.now();
+  await m.stop();
+  assert.equal(m.state$(), 'stopped');
+  assert.ok(Date.now() - startedAt < 100, 'must not wait for the 3s process grace period');
+  m.dispose();
+});
+
+test('JdtLsManager: stop escalates to SIGKILL when SIGTERM was sent but process has not exited', async () => {
+  const m = new JdtLsManager();
+  const signals = [];
+  const child = {
+    killed: false,
+    kill(signal) {
+      signals.push(signal);
+      this.killed = true;
+      return true;
+    },
+    once() {
+      return this;
+    },
+  };
+  m.process = child;
+  m.setState('ready');
+  m.stopGracePeriodMs = () => 0;
+  m.stopKillWaitMs = () => 0;
+
+  await m.stop();
+  assert.deepEqual(signals, ['SIGTERM', 'SIGKILL']);
+  m.process = undefined;
+  m.dispose();
+});
+
+test('JdtLsManager: concurrent stop callers share one bounded operation', async () => {
+  const m = new JdtLsManager();
+  const signals = [];
+  const child = {
+    killed: false,
+    kill(signal) { signals.push(signal); this.killed = true; return true; },
+    once() { return this; },
+  };
+  m.process = child;
+  m.setState('ready');
+  m.stopGracePeriodMs = () => 0;
+  m.stopKillWaitMs = () => 0;
+
+  const first = m.stop();
+  const second = m.stop();
+  assert.equal(first, second);
+  await first;
+  assert.deepEqual(signals, ['SIGTERM', 'SIGKILL']);
+  assert.equal(m.state$(), 'stopped');
+  m.dispose();
+});
+
+test('JdtLsManager: start is forbidden while a stop is in progress', async () => {
+  const m = new JdtLsManager();
+  m.setState('stopping');
+  await assert.rejects(
+    m.start({ rootUri: 'file:///repo', workspaceDataDir: '/tmp/ws' }),
+    /already in state stopping/,
+  );
+  m.setState('stopped');
+  m.dispose();
+});
+
+test('JdtLsManager: hung initialize is timed out, killed, and enters recoverable failed state', async () => {
+  const m = new JdtLsManager();
+  const signals = [];
+  const child = { kill(signal) { signals.push(signal); return true; } };
+  m.process = child;
+  m.connection = {
+    sendRequest: () => new Promise(() => {}),
+    dispose() {},
+  };
+  m.setState('initializing');
+  m.initializeTimeoutMs = () => 0;
+
+  await assert.rejects(
+    m.initializeConnection({ rootUri: 'file:///repo', processId: 1, capabilities: {} }, child),
+    err => err instanceof JdtLsRequestTimeoutError && err.method === 'initialize',
+  );
+  assert.deepEqual(signals, ['SIGKILL']);
+  assert.equal(m.state$(), 'failed');
+  m.dispose();
+});
+
+test('JdtLsManager: hung semantic request has a hard timeout and crashes the unresponsive child', async () => {
+  const m = new JdtLsManager();
+  const signals = [];
+  const child = { kill(signal) { signals.push(signal); return true; } };
+  m.process = child;
+  m.connection = {
+    sendRequest: () => new Promise(() => {}),
+    dispose() {},
+  };
+  m.setState('ready');
+  m.requestTimeoutMs = () => 0;
+
+  await assert.rejects(
+    m.hover({ uri: 'file:///repo/A.java', line: 0, character: 0 }),
+    err => err instanceof JdtLsRequestTimeoutError && err.method === 'textDocument/hover',
+  );
+  assert.deepEqual(signals, ['SIGKILL']);
+  assert.equal(m.state$(), 'crashed');
+  assert.ok(m.recentLogs().some(entry => entry.line.includes('[timeout]')));
   m.dispose();
 });

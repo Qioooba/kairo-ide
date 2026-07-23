@@ -1,0 +1,437 @@
+.kairo-search-center-widget {
+  min-height: 180px;
+}
+
+.kairo-search-center {
+  height: 100%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  color: var(--theia-foreground);
+  background: var(--theia-editor-background);
+}
+
+.kairo-search-form {
+  padding: 10px 12px 8px;
+  border-bottom: 1px solid var(--theia-panel-border);
+  background: var(--theia-sideBar-background);
+}
+
+.kairo-search-query-row,
+.kairo-search-filters {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.kairo-search-query {
+  flex: 1 1 420px;
+  min-width: 180px;
+}
+
+.kairo-search-filters {
+  margin-top: 7px;
+  flex-wrap: wrap;
+  color: var(--theia-descriptionForeground);
+  font-size: 12px;
+}
+
+.kairo-search-filters label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.kairo-search-filters .theia-input {
+  width: 190px;
+}
+
+.kairo-search-count {
+  min-width: 76px;
+  color: var(--theia-descriptionForeground);
+  text-align: right;
+}
+
+.kairo-search-state {
+  margin: auto;
+  padding: 20px;
+  color: var(--theia-descriptionForeground);
+}
+
+.kairo-search-state.is-loading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.kairo-search-state.is-error {
+  color: var(--theia-errorForeground);
+}
+
+.kairo-search-spinner {
+  width: 12px;
+  min-height: 12px;
+  border: 2px solid var(--theia-progressBar-background);
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: kairo-search-spin .8s linear infinite;
+}
+
+@keyframes kairo-search-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kairo-search-spinner {
+    animation: none;
+  }
+}
+
+.kairo-search-results {
+  min-height: 0;
+  overflow: auto;
+  outline: none;
+  padding-bottom: 10px;
+}
+
+.kairo-search-results:focus-visible {
+  outline: 2px solid var(--theia-focusBorder, #4d90fe);
+  outline-offset: 2px;
+}
+
+.kairo-search-group-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 27px;
+  padding: 0 12px;
+  background: var(--theia-sideBarSectionHeader-background);
+  font-weight: 600;
+}
+
+.kairo-search-file {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kairo-search-file-count {
+  margin-left: auto;
+  color: var(--theia-descriptionForeground);
+  font-weight: normal;
+}
+
+.kairo-search-result {
+  width: 100%;
+  border: 0;
+  border-left: 2px solid transparent;
+  display: flex;
+  gap: 12px;
+  padding: 4px 12px 4px 24px;
+  color: var(--theia-foreground);
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.kairo-search-result:hover,
+.kairo-search-result.is-selected {
+  background: var(--theia-list-hoverBackground);
+}
+
+.kairo-search-result.is-selected {
+  border-left-color: var(--theia-focusBorder);
+  background: var(--theia-list-activeSelectionBackground);
+  color: var(--theia-list-activeSelectionForeground);
+}
+
+.kairo-search-location {
+  flex: 0 0 58px;
+  color: var(--theia-descriptionForeground);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.kairo-search-preview {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: pre;
+  font-family: var(--theia-code-font-family);
+}
+
+.kairo-search-preview mark {
+  color: inherit;
+  background: var(--theia-editor-findMatchHighlightBackground);
+}
+.kairo-search-truncated {
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--theia-descriptionForeground);
+}
+
+.kairo-search-load-more {
+  padding: 8px 12px;
+  display: flex;
+  justify-content: center;
+}
+
+.kairo-search-load-more .theia-button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.kairo-search-load-more .kairo-search-spinner {
+  width: 14px;
+  height: 14px;
+  border-width: 2px;
+}
+
+.kairo-search-everywhere-widget { max-width: 860px; min-height: 360px; margin: 36px auto; box-shadow: 0 8px 28px var(--theia-widget-shadow); }
+.kairo-everywhere { display: flex; flex-direction: column; height: 100%; padding: 12px; background: var(--theia-quickInput-background); }
+.kairo-everywhere-input { font-size: 13px; padding: 8px; }
+.kairo-everywhere-tabs { display: flex; gap: 4px; padding: 8px 0; }
+.kairo-everywhere-tabs button { border: 0; padding: 4px 10px; color: var(--theia-foreground); background: transparent; }
+.kairo-everywhere-tabs button.is-active { border-bottom: 2px solid var(--theia-focusBorder); }
+.kairo-everywhere-body { min-height: 0; overflow: auto; }
+.kairo-everywhere-item { width: 100%; display: grid; grid-template-columns: 70px minmax(120px, 1fr) 2fr; gap: 8px; border: 0; padding: 7px 9px; color: var(--theia-foreground); background: transparent; text-align: left; }
+.kairo-everywhere-item.is-selected { background: var(--theia-list-activeSelectionBackground); color: var(--theia-list-activeSelectionForeground); }
+.kairo-everywhere-kind { color: var(--theia-descriptionForeground); text-transform: uppercase; font-size: 10px; }
+.kairo-everywhere-item small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kairo-replace-preview { border-top: 1px solid var(--theia-panel-border); padding: 8px 12px; max-height: 42%; overflow: auto; }
+.kairo-replace-toolbar { display: flex; gap: 8px; margin-bottom: 8px; }
+.kairo-replace-toolbar .theia-input { flex: 1; }
+.kairo-replace-edit { display: grid; grid-template-columns: 20px 55px 1fr 1fr; gap: 8px; padding: 3px 18px; }
+.kairo-replace-edit del { color: var(--theia-errorForeground); }
+.kairo-replace-edit ins { color: var(--theia-testing-iconPassed); text-decoration: none; }
+.kairo-replace-result.is-failed { color: var(--theia-errorForeground); }
+
+/* --- Find Popup Modal Styles --- */
+
+.kairo-find-file-widget,
+.kairo-find-class-widget,
+.kairo-find-symbol-widget,
+.kairo-find-action-widget {
+  background: transparent;
+  overflow: hidden;
+}
+
+.kairo-find-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: var(--kairo-overlay-background, rgba(0, 0, 0, 0.35));
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 80px;
+  z-index: 1000;
+}
+
+.kairo-find-modal {
+  width: 640px;
+  max-height: 60vh;
+  background: var(--theia-editor-background);
+  border: 1px solid var(--theia-panel-border);
+  border-radius: 6px;
+  box-shadow: 0 12px 40px var(--theia-widget-shadow);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.kairo-find-header {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--theia-panel-border);
+  background: var(--theia-sideBar-background);
+}
+
+.kairo-find-input {
+  width: 100%;
+  font-size: 15px;
+  padding: 8px 10px;
+}
+
+.kairo-find-status {
+  padding: 12px 16px;
+  color: var(--theia-descriptionForeground);
+  font-size: 13px;
+}
+
+.kairo-find-status.is-error {
+  color: var(--theia-errorForeground);
+}
+
+.kairo-find-results {
+  min-height: 0;
+  overflow: auto;
+  outline: none;
+  padding-bottom: 4px;
+}
+
+.kairo-find-results:focus-visible {
+  outline: 2px solid var(--theia-focusBorder, #4d90fe);
+  outline-offset: 2px;
+}
+
+.kairo-find-item {
+  width: 100%;
+  border: 0;
+  border-left: 2px solid transparent;
+  color: var(--theia-foreground);
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.kairo-find-item:hover,
+.kairo-find-item.is-selected {
+  background: var(--theia-list-hoverBackground);
+}
+
+.kairo-find-item.is-selected {
+  border-left-color: var(--theia-focusBorder);
+  background: var(--theia-list-activeSelectionBackground);
+  color: var(--theia-list-activeSelectionForeground);
+}
+
+.kairo-find-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.kairo-find-detail {
+  flex: 0 1 40%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--theia-descriptionForeground);
+  font-size: 12px;
+  text-align: right;
+}
+
+.kairo-find-kind {
+  flex: 0 0 24px;
+  text-align: center;
+  font-size: 14px;
+}
+
+.kairo-find-shortcut {
+  flex: 0 0 auto;
+  color: var(--theia-descriptionForeground);
+  font-size: 11px;
+  background: var(--theia-badge-background);
+  color: var(--theia-badge-foreground);
+  padding: 1px 6px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+
+/* --- Search Center Scope / History / Filter Styles --- */
+
+.kairo-search-scope {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-top: 6px;
+  flex-wrap: wrap;
+  color: var(--theia-descriptionForeground);
+  font-size: 12px;
+}
+
+.kairo-search-scope select {
+  background: var(--theia-dropdown-background);
+  color: var(--theia-dropdown-foreground);
+  border: 1px solid var(--theia-dropdown-border);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 12px;
+  height: 24px;
+}
+
+.kairo-search-scope .theia-input {
+  width: 160px;
+  height: 24px;
+  font-size: 12px;
+}
+
+.kairo-search-scope label {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  white-space: nowrap;
+}
+
+.kairo-search-history {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: var(--theia-editor-background);
+  border: 1px solid var(--theia-panel-border);
+  border-top: 0;
+  box-shadow: 0 4px 12px var(--theia-widget-shadow);
+  max-height: 200px;
+  overflow: auto;
+  z-index: 10;
+}
+
+.kairo-search-history-item {
+  display: flex;
+  align-items: center;
+  padding: 0 4px;
+  border-bottom: 1px solid var(--theia-panel-border);
+}
+
+.kairo-search-history-item:last-child {
+  border-bottom: 0;
+}
+
+.kairo-search-history-query {
+  flex: 1;
+  border: 0;
+  background: transparent;
+  color: var(--theia-foreground);
+  padding: 6px 8px;
+  text-align: left;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kairo-search-history-query:hover {
+  background: var(--theia-list-hoverBackground);
+}
+
+.kairo-search-history-pin {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  padding: 4px 6px;
+  font-size: 12px;
+  opacity: 0.5;
+}
+
+.kairo-search-history-pin:hover,
+.kairo-search-history-pin.is-pinned {
+  opacity: 1;
+}
+
+.kairo-search-query-row {
+  position: relative;
+}

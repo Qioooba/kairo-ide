@@ -11,15 +11,36 @@ import { ILogger } from '@theia/core/lib/common/logger';
 import { Disposable } from '@theia/core/lib/common/disposable';
 import { Emitter, Event } from '@theia/core/lib/common/event';
 import { JdtLsManager, JdtLsEvent, JdtLsState, JdtLsDistribution } from './jdt-ls-manager';
-import { LSPPublishDiagnosticsParams, LSPCompletionList, LSPLocation } from '../common/lsp-protocol';
+import {
+  LSPPublishDiagnosticsParams,
+  LSPCompletionList,
+  LSPLocation,
+  LSPHover,
+  LSPSignatureHelp,
+  LSPDocumentSymbolResult,
+  LSPWorkspaceSymbolResult,
+  LSPWorkspaceEdit,
+  LSPCodeActionResult,
+  LSPDiagnostic,
+  LSPRange,
+  LSPCallHierarchyItem,
+  LSPCallHierarchyIncomingCall,
+  LSPCallHierarchyOutgoingCall,
+  LSPTypeHierarchyItem,
+  LSPCodeLens,
+  LSPProgressParams,
+  LSPTextEdit,
+  LSPInlayHint,
+} from '../common/lsp-protocol';
 import { JdtLsBackendService, JdtLsFrontendClient } from '../common/java-ls-protocol';
 
 export interface JdtLsServiceEvent {
-  kind: 'state' | 'log' | 'diagnostics' | 'initialized' | 'exit' | 'message';
+  kind: 'state' | 'log' | 'diagnostics' | 'initialized' | 'exit' | 'message' | 'progress';
   state?: JdtLsState;
   log?: { level: 'stdout' | 'stderr'; line: string };
   diagnostics?: LSPPublishDiagnosticsParams;
   message?: string;
+  progress?: LSPProgressParams;
 }
 
 @injectable()
@@ -107,6 +128,101 @@ export class JdtLsService implements JdtLsBackendService {
     return this.manager.definition(p);
   }
 
+  async implementation(p: { uri: string; line: number; character: number }): Promise<LSPLocation | LSPLocation[] | null> {
+    if (!this.manager) return null;
+    return this.manager.implementation(p);
+  }
+
+  async hover(p: { uri: string; line: number; character: number }): Promise<LSPHover | null> {
+    if (!this.manager) return null;
+    return this.manager.hover(p);
+  }
+
+  async references(p: { uri: string; line: number; character: number; includeDeclaration: boolean }): Promise<LSPLocation[]> {
+    if (!this.manager) return [];
+    return this.manager.references(p);
+  }
+
+  async signatureHelp(p: { uri: string; line: number; character: number; triggerKind?: 1 | 2 | 3; triggerCharacter?: string; isRetrigger?: boolean }): Promise<LSPSignatureHelp | null> {
+    if (!this.manager) return null;
+    return this.manager.signatureHelp(p);
+  }
+
+  async documentSymbols(uri: string): Promise<LSPDocumentSymbolResult> {
+    if (!this.manager) return null;
+    return this.manager.documentSymbols(uri);
+  }
+
+  async workspaceSymbols(query: string): Promise<LSPWorkspaceSymbolResult> {
+    if (!this.manager) return null;
+    return this.manager.workspaceSymbols(query);
+  }
+
+  async codeActions(p: { uri: string; range: LSPRange; diagnostics: LSPDiagnostic[]; only?: string[] }): Promise<LSPCodeActionResult> {
+    if (!this.manager) return null;
+    return this.manager.codeActions(p);
+  }
+
+  async rename(p: { uri: string; line: number; character: number; newName: string }): Promise<LSPWorkspaceEdit | null> {
+    if (!this.manager) return null;
+    return this.manager.rename(p);
+  }
+
+  async prepareCallHierarchy(p: { uri: string; line: number; character: number }): Promise<LSPCallHierarchyItem[]> {
+    if (!this.manager) return [];
+    return this.manager.prepareCallHierarchy(p);
+  }
+
+  async incomingCalls(item: LSPCallHierarchyItem): Promise<LSPCallHierarchyIncomingCall[]> {
+    if (!this.manager) return [];
+    return this.manager.incomingCalls(item);
+  }
+
+  async outgoingCalls(item: LSPCallHierarchyItem): Promise<LSPCallHierarchyOutgoingCall[]> {
+    if (!this.manager) return [];
+    return this.manager.outgoingCalls(item);
+  }
+
+  async prepareTypeHierarchy(p: { uri: string; line: number; character: number }): Promise<LSPTypeHierarchyItem[]> {
+    if (!this.manager) return [];
+    return this.manager.prepareTypeHierarchy(p);
+  }
+
+  async supertypes(item: LSPTypeHierarchyItem): Promise<LSPTypeHierarchyItem[]> {
+    if (!this.manager) return [];
+    return this.manager.supertypes(item);
+  }
+
+  async subtypes(item: LSPTypeHierarchyItem): Promise<LSPTypeHierarchyItem[]> {
+    if (!this.manager) return [];
+    return this.manager.subtypes(item);
+  }
+
+  async codeLens(uri: string): Promise<LSPCodeLens[]> {
+    if (!this.manager) return [];
+    return this.manager.codeLens(uri);
+  }
+
+  async formatting(uri: string, options?: { tabSize?: number; insertSpaces?: boolean }): Promise<LSPTextEdit[]> {
+    if (!this.manager) return [];
+    return this.manager.formatting(uri, options);
+  }
+
+  async rangeFormatting(uri: string, range: LSPRange, options?: { tabSize?: number; insertSpaces?: boolean }): Promise<LSPTextEdit[]> {
+    if (!this.manager) return [];
+    return this.manager.rangeFormatting(uri, range, options);
+  }
+
+  async inlayHint(uri: string, range?: LSPRange): Promise<LSPInlayHint[]> {
+    if (!this.manager) return [];
+    return this.manager.inlayHint(uri, range);
+  }
+
+  async buildWorkspace(): Promise<void> {
+    if (!this.manager) return;
+    await this.manager.buildWorkspace();
+  }
+
   recentLogs() {
     return this.manager?.recentLogs() ?? [];
   }
@@ -137,6 +253,10 @@ export class JdtLsService implements JdtLsBackendService {
       case 'exit':
         this.onEventEmitter.fire({ kind: 'message', message: `JDT LS exited code=${e.code} signal=${e.signal ?? ''}` });
         this.client?.onMessageEvent(`JDT LS exited code=${e.code} signal=${e.signal ?? ''}`);
+        break;
+      case 'progress':
+        this.onEventEmitter.fire({ kind: 'progress', progress: e.params });
+        this.client?.onProgressEvent(e.params);
         break;
     }
   }
@@ -192,6 +312,38 @@ export class JdtLsService implements JdtLsBackendService {
     return this.definition(p);
   }
 
+  async $implementation(p: { uri: string; line: number; character: number }): Promise<LSPLocation | LSPLocation[] | null> {
+    return this.implementation(p);
+  }
+
+  async $hover(p: { uri: string; line: number; character: number }): Promise<LSPHover | null> {
+    return this.hover(p);
+  }
+
+  async $references(p: { uri: string; line: number; character: number; includeDeclaration: boolean }): Promise<LSPLocation[]> {
+    return this.references(p);
+  }
+
+  async $signatureHelp(p: { uri: string; line: number; character: number; triggerKind?: 1 | 2 | 3; triggerCharacter?: string; isRetrigger?: boolean }): Promise<LSPSignatureHelp | null> {
+    return this.signatureHelp(p);
+  }
+
+  async $documentSymbols(uri: string): Promise<LSPDocumentSymbolResult> {
+    return this.documentSymbols(uri);
+  }
+
+  async $workspaceSymbols(query: string): Promise<LSPWorkspaceSymbolResult> {
+    return this.workspaceSymbols(query);
+  }
+
+  async $codeActions(p: { uri: string; range: LSPRange; diagnostics: LSPDiagnostic[]; only?: string[] }): Promise<LSPCodeActionResult> {
+    return this.codeActions(p);
+  }
+
+  async $rename(p: { uri: string; line: number; character: number; newName: string }): Promise<LSPWorkspaceEdit | null> {
+    return this.rename(p);
+  }
+
   async $classFileContents(uri: string): Promise<string> {
     if (!this.manager) return '';
     return this.manager.classFileContents(uri);
@@ -199,6 +351,50 @@ export class JdtLsService implements JdtLsBackendService {
 
   async $recentLogs(): Promise<{ level: 'stdout' | 'stderr'; line: string; ts: number }[]> {
     return this.recentLogs();
+  }
+
+  async $prepareCallHierarchy(p: { uri: string; line: number; character: number }): Promise<LSPCallHierarchyItem[]> {
+    return this.prepareCallHierarchy(p);
+  }
+
+  async $incomingCalls(item: LSPCallHierarchyItem): Promise<LSPCallHierarchyIncomingCall[]> {
+    return this.incomingCalls(item);
+  }
+
+  async $outgoingCalls(item: LSPCallHierarchyItem): Promise<LSPCallHierarchyOutgoingCall[]> {
+    return this.outgoingCalls(item);
+  }
+
+  async $prepareTypeHierarchy(p: { uri: string; line: number; character: number }): Promise<LSPTypeHierarchyItem[]> {
+    return this.prepareTypeHierarchy(p);
+  }
+
+  async $supertypes(item: LSPTypeHierarchyItem): Promise<LSPTypeHierarchyItem[]> {
+    return this.supertypes(item);
+  }
+
+  async $subtypes(item: LSPTypeHierarchyItem): Promise<LSPTypeHierarchyItem[]> {
+    return this.subtypes(item);
+  }
+
+  async $codeLens(uri: string): Promise<LSPCodeLens[]> {
+    return this.codeLens(uri);
+  }
+
+  async $formatting(uri: string, options?: { tabSize?: number; insertSpaces?: boolean }): Promise<LSPTextEdit[]> {
+    return this.formatting(uri, options);
+  }
+
+  async $rangeFormatting(uri: string, range: LSPRange, options?: { tabSize?: number; insertSpaces?: boolean }): Promise<LSPTextEdit[]> {
+    return this.rangeFormatting(uri, range, options);
+  }
+
+  async $inlayHint(uri: string, range?: LSPRange): Promise<LSPInlayHint[]> {
+    return this.inlayHint(uri, range);
+  }
+
+  async $buildWorkspace(_force: boolean): Promise<void> {
+    await this.buildWorkspace();
   }
 
   dispose(): void {
