@@ -2,8 +2,10 @@
  * TLD tag library completion for JSP files.
  *
  * Scans the workspace for *.tld files, parses them, and provides
- * code completion for custom tag prefixes (e.g. <k: → suggests
- * all tags defined in the TLD whose short-name matches "k").
+ * code completion for:
+ *  - <%@ taglib %> directive (uri and prefix attributes)
+ *  - Custom tag prefixes (e.g. <k: → suggests all tags)
+ *  - Attribute completion for known tags (e.g. <k:message → suggests key=, bundle=)
  */
 
 import * as monaco from '@theia/monaco-editor-core';
@@ -64,6 +66,39 @@ function buildTagCompletionItem(tag: TldTag, prefix: string): monaco.languages.C
 }
 
 /**
+ * Build a completion item for a TLD tag attribute.
+ */
+function buildAttributeCompletionItem(
+  attr: { name: string; required: boolean; rtexprvalue: boolean; type?: string; description?: string },
+): monaco.languages.CompletionItem {
+  const type = attr.type ?? 'String';
+  const req = attr.required ? ' [required]' : '';
+  const el = attr.rtexprvalue ? ' [EL]' : '';
+  const detail = `${type}${req}${el}`;
+  const docParts: string[] = [];
+  if (attr.description) {
+    docParts.push(attr.description);
+  }
+  docParts.push(`**Type**: \`${type}\``);
+  if (attr.required) {
+    docParts.push('**Required**: yes');
+  }
+  if (attr.rtexprvalue) {
+    docParts.push('**Supports EL**: yes');
+  }
+
+  return ci({
+    label: attr.name,
+    kind: monaco.languages.CompletionItemKind.Property,
+    detail,
+    documentation: docParts.join('\n'),
+    insertText: `${attr.name}="\${1}"`,
+    insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+    sortText: attr.required ? '0' + attr.name : '1' + attr.name,
+  });
+}
+
+/**
  * Manages TLD parsing and caching. Scans the workspace for *.tld
  * files and exposes tag completions per prefix.
  */
@@ -113,12 +148,35 @@ export class TldCompletionProvider {
   }
 
   /**
+   * Return a specific tag by prefix:tagName.
+   */
+  getTag(prefix: string, tagName: string): TldTag | undefined {
+    for (const tld of this.tldCache.values()) {
+      if (tld.shortName === prefix) {
+        return tld.tags.find(t => t.name === tagName);
+      }
+    }
+    return undefined;
+  }
+
+  /**
    * Return all known TLD short-names (prefixes). Useful for
    * suggesting prefixes when the user types `<` followed by
    * a partial match.
    */
   getPrefixes(): string[] {
     return [...new Set([...this.tldCache.values()].map(t => t.shortName))];
+  }
+
+  /**
+   * Return all TLD URIs for taglib directive completion.
+   */
+  getTldUris(): { uri: string; shortName: string }[] {
+    const results: { uri: string; shortName: string }[] = [];
+    for (const tld of this.tldCache.values()) {
+      results.push({ uri: tld.uri, shortName: tld.shortName });
+    }
+    return results;
   }
 
   /**
@@ -162,11 +220,60 @@ export class TldCompletionProvider {
   }
 }
 
+/** Regex to detect if cursor is inside a <%@ taglib %> directive. */
+const TAGLIB_DIRECTIVE_RE = /<%@\s+taglib\b/gi;
+
+/** Regex to extract the prefix attribute value from a taglib directive. */
+const TAGLIB_PREFIX_RE = /<%@\s+taglib\b[^%]*\bprefix\s*=\s*"([^"]*)"/i;
+
+/** Regex to detect a known tag with attributes: <prefix:tagname */
+const TAG_WITH_ATTRS_RE = /<([a-zA-Z_][\w-]*):([a-zA-Z_][\w-]*)\s+([^>]*)$/;
+
 /**
- * Monaco completion provider that suggests TLD tags inside JSP files.
+ * Check if the cursor is inside a <%@ taglib %> directive.
+ */
+function isInsideTaglibDirective(
+  model: monaco.editor.ITextModel,
+  position: monaco.Position,
+): boolean {
+  const text = model.getValue();
+  const offset = model.getOffsetAt(position);
+  const before = text.substring(0, offset);
+
+  TAGLIB_DIRECTIVE_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = TAGLIB_DIRECTIVE_RE.exec(before)) !== null) {
+    const afterOpen = text.substring(m.index);
+    const closeIdx = afterOpen.indexOf('%>');
+    if (closeIdx === -1) continue;
+    const directiveEnd = m.index + closeIdx + 2;
+    if (offset >= m.index && offset <= directiveEnd) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Check if the cursor is inside a tag that has a known prefix
+ * (e.g. <k:message), for attribute completion.
+ */
+function parseTagForAttributeCompletion(
+  lineContent: string,
+  column: number,
+): { prefix: string; tagName: string } | null {
+  const lineBeforeCursor = lineContent.substring(0, column);
+  const match = TAG_WITH_ATTRS_RE.exec(lineBeforeCursor);
+  if (!match) return null;
+  return { prefix: match[1], tagName: match[2] };
+}
+
+/**
+ * Monaco completion provider that suggests TLD tags inside JSP files
+ * and provides taglib directive completion.
  */
 class JspTldCompletionProvider implements monaco.languages.CompletionItemProvider {
-  triggerCharacters = ['<', ':'];
+  triggerCharacters = ['<', ':', ' ', '"', '='];
 
   constructor(private readonly tldProvider: TldCompletionProvider) { }
 
@@ -183,6 +290,18 @@ class JspTldCompletionProvider implements monaco.languages.CompletionItemProvide
     const lineContent = model.getLineContent(position.lineNumber);
     const lineBeforeCursor = lineContent.substring(0, position.column - 1);
 
+    // ── Phase 1: <%@ taglib %> directive completion ──────────
+    if (isInsideTaglibDirective(model, position)) {
+      return this.suggestTaglibDirective(model, position);
+    }
+
+    // ── Phase 2: Attribute completion for known tags ──────────
+    const tagInfo = parseTagForAttributeCompletion(lineContent, position.column - 1);
+    if (tagInfo) {
+      return this.suggestTagAttributes(tagInfo.prefix, tagInfo.tagName);
+    }
+
+    // ── Phase 3: Tag name completion (<prefix:tag) ────────────
     // Find the last `<` on the line before the cursor
     const lastOpen = lineBeforeCursor.lastIndexOf('<');
     if (lastOpen === -1) return { suggestions: [] };
@@ -229,6 +348,124 @@ class JspTldCompletionProvider implements monaco.languages.CompletionItemProvide
         }));
       }
     }
+    return { suggestions };
+  }
+
+  /**
+   * Provide completion for <%@ taglib %> directive attributes.
+   */
+  private suggestTaglibDirective(
+    model: monaco.editor.ITextModel,
+    position: monaco.Position,
+  ): monaco.languages.CompletionList {
+    const lineContent = model.getLineContent(position.lineNumber);
+    const lineBeforeCursor = lineContent.substring(0, position.column - 1);
+
+    const suggestions: monaco.languages.CompletionItem[] = [];
+
+    // Check if we're inside a quoted attribute value
+    const lastQuote = Math.max(
+      lineBeforeCursor.lastIndexOf('"'),
+      lineBeforeCursor.lastIndexOf("'"),
+    );
+    const lastEquals = lineBeforeCursor.lastIndexOf('=');
+
+    if (lastQuote > lastEquals && lastQuote >= 0) {
+      // We're inside a quoted value — suggest based on which attribute
+      const beforeQuote = lineBeforeCursor.substring(0, lastQuote);
+      if (beforeQuote.match(/uri\s*=\s*$/i)) {
+        // Suggest known TLD URIs
+        const tldUris = this.tldProvider.getTldUris();
+        for (const { uri, shortName } of tldUris) {
+          suggestions.push(ci({
+            label: uri,
+            kind: monaco.languages.CompletionItemKind.Value,
+            detail: `${shortName} tag library`,
+            insertText: uri,
+            documentation: `URI for the \`${shortName}\` tag library.`,
+          }));
+        }
+        // Also suggest common JSTL URIs
+        const jstlUris = [
+          { uri: 'http://java.sun.com/jsp/jstl/core', name: 'JSTL Core' },
+          { uri: 'http://java.sun.com/jsp/jstl/fmt', name: 'JSTL Format' },
+          { uri: 'http://java.sun.com/jsp/jstl/sql', name: 'JSTL SQL' },
+          { uri: 'http://java.sun.com/jsp/jstl/xml', name: 'JSTL XML' },
+          { uri: 'http://java.sun.com/jsp/jstl/functions', name: 'JSTL Functions' },
+        ];
+        for (const jstl of jstlUris) {
+          if (!tldUris.some(t => t.uri === jstl.uri)) {
+            suggestions.push(ci({
+              label: jstl.uri,
+              kind: monaco.languages.CompletionItemKind.Value,
+              detail: jstl.name,
+              insertText: jstl.uri,
+            }));
+          }
+        }
+        return { suggestions };
+      }
+      if (beforeQuote.match(/prefix\s*=\s*$/i)) {
+        // Suggest known prefixes
+        const prefixes = this.tldProvider.getPrefixes();
+        for (const pfx of prefixes) {
+          suggestions.push(ci({
+            label: pfx,
+            kind: monaco.languages.CompletionItemKind.Value,
+            detail: `${pfx} tag library prefix`,
+            insertText: pfx,
+          }));
+        }
+        return { suggestions };
+      }
+      return { suggestions: [] };
+    }
+
+    // Not inside a quoted value — suggest attribute names
+    const hasUri = /uri\s*=/i.test(lineBeforeCursor);
+    const hasPrefix = /prefix\s*=/i.test(lineBeforeCursor);
+
+    if (!hasUri) {
+      suggestions.push(ci({
+        label: 'uri',
+        kind: monaco.languages.CompletionItemKind.Property,
+        detail: 'Tag library URI',
+        insertText: 'uri="${1}"',
+        insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+        documentation: 'The URI of the tag library descriptor.',
+        sortText: '0',
+      }));
+    }
+    if (!hasPrefix) {
+      suggestions.push(ci({
+        label: 'prefix',
+        kind: monaco.languages.CompletionItemKind.Property,
+        detail: 'Tag library prefix',
+        insertText: 'prefix="${1}"',
+        insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+        documentation: 'The prefix used to invoke tags from this library.',
+        sortText: '1',
+      }));
+    }
+
+    return { suggestions };
+  }
+
+  /**
+   * Provide attribute completion for a known tag (e.g. <k:message).
+   */
+  private suggestTagAttributes(
+    prefix: string,
+    tagName: string,
+  ): monaco.languages.CompletionList {
+    const tag = this.tldProvider.getTag(prefix, tagName);
+    if (!tag) return { suggestions: [] };
+
+    const suggestions: monaco.languages.CompletionItem[] = [];
+    for (const attr of tag.attributes) {
+      suggestions.push(buildAttributeCompletionItem(attr));
+    }
+
     return { suggestions };
   }
 }

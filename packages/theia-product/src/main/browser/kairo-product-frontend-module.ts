@@ -75,6 +75,7 @@ import { MavenViewWidget } from './maven-view-widget';
 import { KairoTodoWidget, KAIRO_TODO_FACTORY_ID } from './kairo-todo-widget';
 import { KairoEditorContribution } from './kairo-editor-contribution';
 import { KairoDebugSessionManager, KairoJavaDebugService } from './kairo-java-debug-service';
+import { KairoDebugSessionService } from './kairo-debug-session-service';
 import { JavaHierarchyWidget } from '@kairo/java-extension';
 import { KairoRunConfigurationService } from './kairo-run-configuration-service';
 import { KairoRunConfigurationsWidget } from './kairo-run-configurations-widget';
@@ -112,6 +113,15 @@ import {
   KAIRO_REMOTE_FACTORY_ID,
   KAIRO_PERF_FACTORY_ID,
   KAIRO_SQL_CONSOLE_FACTORY_ID,
+  KAIRO_DEBUG_VARIABLES_FACTORY_ID,
+  KAIRO_DEBUG_CALLSTACK_FACTORY_ID,
+  KAIRO_DEBUG_BREAKPOINTS_FACTORY_ID,
+  KAIRO_DEBUG_TOOLBAR_FACTORY_ID,
+  KAIRO_DEBUG_CONSOLE_FACTORY_ID,
+  KAIRO_DEBUG_WATCH_FACTORY_ID,
+  KAIRO_DEBUG_MODULE_SELECTOR_FACTORY_ID,
+  KAIRO_DEBUG_CONDITION_EDITOR_FACTORY_ID,
+  KAIRO_DEBUG_HOTSWAP_STATUS_FACTORY_ID,
 } from './kairo-factory-ids';
 import { KairoRemoteAgentService } from './kairo-remote-agent-service';
 import { KairoRemoteFileSystemProvider } from './kairo-remote-fs-provider';
@@ -124,6 +134,16 @@ import { KairoNavigationContribution } from './kairo-navigation-contribution';
 import { KairoScreenReaderService } from './kairo-screen-reader';
 import { KairoFocusManagement } from './kairo-focus-management';
 import { KairoShortcutsWidget, KAIRO_SHORTCUTS_FACTORY_ID } from './kairo-shortcuts-widget';
+import { KairoDebugVariablesWidget } from './debug-variables-widget';
+import { KairoDebugCallStackWidget } from './debug-callstack-widget';
+import { KairoDebugBreakpointsWidget } from './debug-breakpoints-widget';
+import { KairoDebugToolbarWidget } from './debug-toolbar-widget';
+import { KairoDebugConsoleWidget } from './debug-console-widget';
+import { KairoDebugWatchWidget } from './debug-watch-widget';
+import { KairoDebugConfigService } from './debug-config-service';
+import { KairoDebugModuleSelectorWidget } from './debug-module-selector-widget';
+import { KairoDebugConditionEditorWidget } from './debug-condition-editor-widget';
+import { KairoDebugHotSwapStatusWidget } from './debug-hotswap-status-widget';
 
 // Re-export so existing consumers can keep importing the IDs from
 // this module; the definitions live in kairo-factory-ids.ts.
@@ -141,6 +161,15 @@ export {
   KAIRO_TODO_FACTORY_ID,
   KAIRO_TESTS_FACTORY_ID,
   KAIRO_PERF_FACTORY_ID,
+  KAIRO_DEBUG_VARIABLES_FACTORY_ID,
+  KAIRO_DEBUG_CALLSTACK_FACTORY_ID,
+  KAIRO_DEBUG_BREAKPOINTS_FACTORY_ID,
+  KAIRO_DEBUG_TOOLBAR_FACTORY_ID,
+  KAIRO_DEBUG_CONSOLE_FACTORY_ID,
+  KAIRO_DEBUG_WATCH_FACTORY_ID,
+  KAIRO_DEBUG_MODULE_SELECTOR_FACTORY_ID,
+  KAIRO_DEBUG_CONDITION_EDITOR_FACTORY_ID,
+  KAIRO_DEBUG_HOTSWAP_STATUS_FACTORY_ID,
 } from './kairo-factory-ids';
 
 export function bindKairoFrontend(bind: interfaces.Bind, unbind?: interfaces.Unbind, isBound?: interfaces.IsBound, rebind?: interfaces.Rebind): void {
@@ -176,6 +205,9 @@ export function bindKairoFrontend(bind: interfaces.Bind, unbind?: interfaces.Unb
   } else {
     bind(WorkspaceContextService).toSelf().inSingletonScope();
   }
+  // N-026: ensure WorkspaceContextService is created early so it
+  // can re-sync when the runtime (re)connects.
+  bind(FrontendApplicationContribution).toService(WorkspaceContextService);
 
   // ── Kairo contributions ──────────────────────────────────────
   bind(KairoStatusBarContribution).toSelf().inSingletonScope();
@@ -427,6 +459,55 @@ export function bindKairoFrontend(bind: interfaces.Bind, unbind?: interfaces.Unb
   bind(WidgetFactory).toDynamicValue(ctx => ({
     id: KAIRO_SHORTCUTS_FACTORY_ID,
     createWidget: () => ctx.container.get(KairoShortcutsWidget),
+  })).inSingletonScope();
+
+  // ── Kairo Debug Widgets ──────────────────────────────────────
+  bind(KairoDebugSessionService).toSelf().inSingletonScope();
+  bind(KairoDebugConfigService).toSelf().inSingletonScope();
+  bind(KairoDebugVariablesWidget).toSelf();
+  bind(WidgetFactory).toDynamicValue(ctx => ({
+    id: KAIRO_DEBUG_VARIABLES_FACTORY_ID,
+    createWidget: () => ctx.container.get(KairoDebugVariablesWidget),
+  })).inSingletonScope();
+  bind(KairoDebugCallStackWidget).toSelf();
+  bind(WidgetFactory).toDynamicValue(ctx => ({
+    id: KAIRO_DEBUG_CALLSTACK_FACTORY_ID,
+    createWidget: () => ctx.container.get(KairoDebugCallStackWidget),
+  })).inSingletonScope();
+  bind(KairoDebugBreakpointsWidget).toSelf();
+  bind(WidgetFactory).toDynamicValue(ctx => ({
+    id: KAIRO_DEBUG_BREAKPOINTS_FACTORY_ID,
+    createWidget: () => ctx.container.get(KairoDebugBreakpointsWidget),
+  })).inSingletonScope();
+  bind(KairoDebugToolbarWidget).toSelf();
+  bind(WidgetFactory).toDynamicValue(ctx => ({
+    id: KAIRO_DEBUG_TOOLBAR_FACTORY_ID,
+    createWidget: () => ctx.container.get(KairoDebugToolbarWidget),
+  })).inSingletonScope();
+  bind(KairoDebugConsoleWidget).toSelf();
+  bind(WidgetFactory).toDynamicValue(ctx => ({
+    id: KAIRO_DEBUG_CONSOLE_FACTORY_ID,
+    createWidget: () => ctx.container.get(KairoDebugConsoleWidget),
+  })).inSingletonScope();
+  bind(KairoDebugWatchWidget).toSelf();
+  bind(WidgetFactory).toDynamicValue(ctx => ({
+    id: KAIRO_DEBUG_WATCH_FACTORY_ID,
+    createWidget: () => ctx.container.get(KairoDebugWatchWidget),
+  })).inSingletonScope();
+  bind(KairoDebugModuleSelectorWidget).toSelf();
+  bind(WidgetFactory).toDynamicValue(ctx => ({
+    id: KAIRO_DEBUG_MODULE_SELECTOR_FACTORY_ID,
+    createWidget: () => ctx.container.get(KairoDebugModuleSelectorWidget),
+  })).inSingletonScope();
+  bind(KairoDebugConditionEditorWidget).toSelf();
+  bind(WidgetFactory).toDynamicValue(ctx => ({
+    id: KAIRO_DEBUG_CONDITION_EDITOR_FACTORY_ID,
+    createWidget: () => ctx.container.get(KairoDebugConditionEditorWidget),
+  })).inSingletonScope();
+  bind(KairoDebugHotSwapStatusWidget).toSelf();
+  bind(WidgetFactory).toDynamicValue(ctx => ({
+    id: KAIRO_DEBUG_HOTSWAP_STATUS_FACTORY_ID,
+    createWidget: () => ctx.container.get(KairoDebugHotSwapStatusWidget),
   })).inSingletonScope();
 }
 

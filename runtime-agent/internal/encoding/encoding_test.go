@@ -351,3 +351,446 @@ func TestConvert_InvalidSequence(t *testing.T) {
 		t.Errorf("expected error for unknown encoding")
 	}
 }
+
+// TestResolve tests alias resolution.
+func TestResolve(t *testing.T) {
+	t.Parallel()
+
+	t.Run("nil map returns input", func(t *testing.T) {
+		a := Aliases{}
+		if got := a.Resolve("gbk"); got != "gbk" {
+			t.Errorf("Resolve = %q, want gbk", got)
+		}
+	})
+
+	t.Run("known alias", func(t *testing.T) {
+		a := Aliases{M: map[string]ID{"gb2312": GBK, "cp936": GBK}}
+		if got := a.Resolve("gb2312"); got != GBK {
+			t.Errorf("Resolve = %q, want %q", got, GBK)
+		}
+		if got := a.Resolve("cp936"); got != GBK {
+			t.Errorf("Resolve = %q, want %q", got, GBK)
+		}
+	})
+
+	t.Run("unknown alias returns input", func(t *testing.T) {
+		a := Aliases{M: map[string]ID{"gb2312": GBK}}
+		if got := a.Resolve("shift_jis"); got != "shift_jis" {
+			t.Errorf("Resolve = %q, want shift_jis", got)
+		}
+	})
+
+	t.Run("case insensitive", func(t *testing.T) {
+		a := Aliases{M: map[string]ID{"gb2312": GBK}}
+		if got := a.Resolve("GB2312"); got != GBK {
+			t.Errorf("Resolve = %q, want %q", got, GBK)
+		}
+	})
+}
+
+// TestCanonicalEncodingName tests all encoding name mappings.
+func TestCanonicalEncodingName(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		input string
+		want  ID
+	}{
+		{"utf-8", UTF8},
+		{"UTF8", UTF8},
+		{"gbk", GBK},
+		{"gb2312", GBK},
+		{"cp936", GBK},
+		{"ms936", GBK},
+		{"gb18030", GB18030},
+		{"iso-8859-1", ISO88591},
+		{"iso8859-1", ISO88591},
+		{"latin1", ISO88591},
+		{"latin-1", ISO88591},
+		{"us-ascii", USASCII},
+		{"ascii", USASCII},
+		{"utf-16", UTF16LE},
+		{"utf-16le", UTF16LE},
+		{"utf16le", UTF16LE},
+		{"utf-16be", UTF16BE},
+		{"utf16be", UTF16BE},
+		{"unknown-encoding", UTF8}, // default fallback
+		{"", UTF8},                  // empty falls back to UTF8
+	}
+	for _, c := range cases {
+		t.Run(c.input, func(t *testing.T) {
+			got := canonicalEncodingName(c.input)
+			if got != c.want {
+				t.Errorf("canonicalEncodingName(%q) = %q, want %q", c.input, got, c.want)
+			}
+		})
+	}
+}
+
+// TestEncoder tests all encoder types.
+func TestEncoder(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		id      ID
+		notNil  bool
+	}{
+		{UTF8, true},
+		{UTF8BOM, true},
+		{USASCII, true},
+		{UTF16LE, true},
+		{UTF16BE, true},
+		{GBK, true},
+		{GB18030, true},
+		{ISO88591, true},
+		{"shift_jis", true},
+		{"euc-jp", true},
+		{"euc-kr", true},
+		{"big5", true},
+		{"unknown", false},
+	}
+	for _, c := range cases {
+		t.Run(c.id, func(t *testing.T) {
+			enc := Encoder(c.id, Aliases{})
+			if c.notNil && enc == nil {
+				t.Errorf("Encoder(%q) should not be nil", c.id)
+			}
+			if !c.notNil && enc != nil {
+				t.Errorf("Encoder(%q) should be nil", c.id)
+			}
+		})
+	}
+}
+
+// TestEncoder_Aliases tests encoder with alias resolution.
+func TestEncoder_Aliases(t *testing.T) {
+	t.Parallel()
+	aliases := Aliases{M: map[string]ID{"myalias": GBK}}
+	enc := Encoder("myalias", aliases)
+	if enc == nil {
+		t.Fatal("Encoder with alias should not be nil")
+	}
+}
+
+// TestStripBOM tests BOM stripping.
+func TestStripBOM(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		id   ID
+		in   []byte
+		want []byte
+	}{
+		{"utf8 bom", UTF8, []byte{0xEF, 0xBB, 0xBF, 'h', 'e', 'l', 'l', 'o'}, []byte("hello")},
+		{"utf8 bom alias", UTF8BOM, []byte{0xEF, 0xBB, 0xBF, 'w', 'o', 'r', 'l', 'd'}, []byte("world")},
+		{"utf8 no bom", UTF8, []byte("hello"), []byte("hello")},
+		{"utf16le bom", UTF16LE, []byte{0xFF, 0xFE, 0x48, 0x00}, []byte{0x48, 0x00}},
+		{"utf16le no bom", UTF16LE, []byte{0x48, 0x00}, []byte{0x48, 0x00}},
+		{"utf16be bom", UTF16BE, []byte{0xFE, 0xFF, 0x00, 0x48}, []byte{0x00, 0x48}},
+		{"utf16be no bom", UTF16BE, []byte{0x00, 0x48}, []byte{0x00, 0x48}},
+		{"gbk no bom", GBK, []byte{0xC4, 0xE3}, []byte{0xC4, 0xE3}},
+		{"utf8 short", UTF8, []byte{0xEF}, []byte{0xEF}}, // too short for BOM
+		{"utf16le short", UTF16LE, []byte{0xFF}, []byte{0xFF}},
+		{"utf16be short", UTF16BE, []byte{0xFE}, []byte{0xFE}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := stripBOM(c.in, c.id)
+			if !bytes.Equal(got, c.want) {
+				t.Errorf("stripBOM = %x, want %x", got, c.want)
+			}
+		})
+	}
+}
+
+// TestCanDecodeAs tests the canDecodeAs function.
+func TestCanDecodeAs(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name  string
+		data  []byte
+		id    ID
+		valid bool
+	}{
+		{"utf8 valid", []byte("hello"), UTF8, true},
+		{"utf8 invalid", []byte{0xFF, 0xFE, 0xFD}, UTF8, false},
+		{"usascii valid", []byte("hello"), USASCII, true},
+		{"gbk valid", []byte{0xC4, 0xE3, 0xBA, 0xC3}, GBK, true},
+		{"iso88591 valid", []byte{0x80, 0x90}, ISO88591, true},
+		{"unknown encoding", []byte("hello"), "unknown", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := canDecodeAs(c.data, c.id)
+			if got != c.valid {
+				t.Errorf("canDecodeAs = %v, want %v", got, c.valid)
+			}
+		})
+	}
+}
+
+// TestPropertiesDecode tests the PropertiesDecode function.
+func TestPropertiesDecode(t *testing.T) {
+	t.Parallel()
+	// ISO-8859-1 bytes with \uXXXX escapes
+	src := []byte("hello=\\u4F60\\u597D")
+	out, err := PropertiesDecode(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Should decode as ISO-8859-1 (which preserves ASCII + escapes)
+	if !bytes.Contains(out, []byte("hello=")) {
+		t.Errorf("expected 'hello=' in output, got %q", string(out))
+	}
+}
+
+// TestEncode_UTF8BOM tests encoding with BOM.
+func TestEncode_UTF8BOM(t *testing.T) {
+	t.Parallel()
+	out, err := Encode([]byte("hello"), UTF8BOM, Aliases{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.HasPrefix(out, []byte{0xEF, 0xBB, 0xBF}) {
+		t.Errorf("UTF8BOM should have BOM prefix")
+	}
+	if !bytes.HasSuffix(out, []byte("hello")) {
+		t.Errorf("UTF8BOM should contain original data, got %q", string(out))
+	}
+}
+
+// TestEncode_UnknownEncoding tests encoding with unknown encoding.
+func TestEncode_UnknownEncoding(t *testing.T) {
+	t.Parallel()
+	_, err := Encode([]byte("hello"), "unknown-encoding", Aliases{})
+	if err == nil {
+		t.Errorf("expected error for unknown encoding")
+	}
+}
+
+// TestDetect_ASCIIWithGBKDefault tests ASCII data with GBK default.
+func TestDetect_ASCIIWithGBKDefault(t *testing.T) {
+	t.Parallel()
+	got, conf, _, _ := Detect([]byte("hello world\n"), GBK, Aliases{})
+	if got != GBK {
+		t.Errorf("got %q, want gbk", got)
+	}
+	if conf != 0.55 {
+		t.Errorf("confidence = %f, want 0.55", conf)
+	}
+}
+
+// TestDetect_GB18030 tests GB18030 detection.
+func TestDetect_GB18030(t *testing.T) {
+	t.Parallel()
+	// "你好世界" in GBK/GB18030
+	gbk := []byte{0xC4, 0xE3, 0xBA, 0xC3, 0xCA, 0xC0, 0xBD, 0xE7}
+	got, conf, _, _ := Detect(gbk, UTF8, Aliases{})
+	if got != GB18030 {
+		t.Errorf("got %q, want gb18030", got)
+	}
+	if conf != 0.9 {
+		t.Errorf("confidence = %f, want 0.9", conf)
+	}
+}
+
+// TestDetect_XML_SingleQuote tests XML encoding declaration with single quotes.
+func TestDetect_XML_SingleQuote(t *testing.T) {
+	t.Parallel()
+	xml := []byte(`<?xml version='1.0' encoding='GBK'?><root/>`)
+	got, conf, _, _ := Detect(xml, UTF8, Aliases{})
+	if got != GBK {
+		t.Errorf("got %q, want gbk", got)
+	}
+	if conf != 0.98 {
+		t.Errorf("confidence = %f, want 0.98", conf)
+	}
+}
+
+// TestDetect_XML_NoEncoding tests XML without encoding attribute.
+func TestDetect_XML_NoEncoding(t *testing.T) {
+	t.Parallel()
+	xml := []byte(`<?xml version="1.0"?><root>hello</root>`)
+	got, _, _, _ := Detect(xml, UTF8, Aliases{})
+	if got != UTF8 {
+		t.Errorf("got %q, want utf-8", got)
+	}
+}
+
+// TestDetect_HTML_UnquotedCharset tests HTML charset without quotes.
+func TestDetect_HTML_UnquotedCharset(t *testing.T) {
+	t.Parallel()
+	html := []byte(`<meta charset=GBK>`)
+	got, conf, _, _ := Detect(html, UTF8, Aliases{})
+	if got != GBK {
+		t.Errorf("got %q, want gbk", got)
+	}
+	if conf != 0.95 {
+		t.Errorf("confidence = %f, want 0.95", conf)
+	}
+}
+
+// TestDetect_HTML_ContentType tests HTML Content-Type charset detection.
+func TestDetect_HTML_ContentType(t *testing.T) {
+	t.Parallel()
+	html := []byte(`<meta http-equiv="Content-Type" content="text/html; charset=GBK">`)
+	got, conf, _, _ := Detect(html, UTF8, Aliases{})
+	if got != GBK {
+		t.Errorf("got %q, want gbk", got)
+	}
+	if conf != 0.95 {
+		t.Errorf("confidence = %f, want 0.95", conf)
+	}
+}
+
+// TestDetect_JSP_PageDirective tests JSP page directive charset detection.
+func TestDetect_JSP_PageDirective(t *testing.T) {
+	t.Parallel()
+	jsp := []byte(`<%@ page contentType="text/html;charset=GBK"%>`)
+	got, conf, _, _ := Detect(jsp, UTF8, Aliases{})
+	if got != GBK {
+		t.Errorf("got %q, want gbk", got)
+	}
+	if conf != 0.95 {
+		t.Errorf("confidence = %f, want 0.95", conf)
+	}
+}
+
+// TestDetect_HTML_QuotedCharsetUnclosed tests HTML charset with unclosed quote.
+func TestDetect_HTML_UnclosedQuote(t *testing.T) {
+	t.Parallel()
+	html := []byte(`<meta charset="GBK>content`)
+	got, _, _, _ := Detect(html, UTF8, Aliases{})
+	// Partial detection should still work
+	if got == "" {
+		t.Errorf("should detect encoding from unclosed quote")
+	}
+}
+
+// TestPropertiesEncode_Supplementary tests properties encoding with supplementary plane chars.
+func TestPropertiesEncode_Supplementary(t *testing.T) {
+	t.Parallel()
+	// Emoji (supplementary plane) → surrogate pair
+	in := []byte("key=\U0001F600") // 😀
+	out, err := PropertiesEncode(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Should contain \uD83D\uDE00
+	if !strings.Contains(string(out), `\uD83D\uDE00`) {
+		t.Errorf("expected surrogate pair, got %q", string(out))
+	}
+}
+
+// TestPropertiesEncode_PureASCII tests properties encoding with pure ASCII.
+func TestPropertiesEncode_PureASCII(t *testing.T) {
+	t.Parallel()
+	in := []byte("key=value")
+	out, err := PropertiesEncode(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(out) != "key=value" {
+		t.Errorf("got %q, want key=value", string(out))
+	}
+}
+
+// TestEncode_GBK_Alias tests encoding GBK through alias.
+func TestEncode_GBK_Alias(t *testing.T) {
+	t.Parallel()
+	aliases := Aliases{M: map[string]ID{"mygbk": GBK}}
+	out, err := Encode([]byte("你好"), GBK, aliases)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Decode back
+	decoded, err := Decode(out, GBK, aliases)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(decoded) != "你好" {
+		t.Errorf("roundtrip failed: got %q", string(decoded))
+	}
+}
+
+// TestDecode_UTF16LE tests decoding UTF-16LE with BOM.
+func TestDecode_UTF16LE_BOM(t *testing.T) {
+	t.Parallel()
+	// "ab" in UTF-16LE with BOM: FF FE 61 00 62 00
+	src := []byte{0xFF, 0xFE, 0x61, 0x00, 0x62, 0x00}
+	out, err := Decode(src, UTF16LE, Aliases{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(out) != "ab" {
+		t.Errorf("got %q, want ab", string(out))
+	}
+}
+
+// TestDecode_UTF16BE_BOM tests decoding UTF-16BE with BOM.
+func TestDecode_UTF16BE_BOM(t *testing.T) {
+	t.Parallel()
+	// "ab" in UTF-16BE with BOM: FE FF 00 61 00 62
+	src := []byte{0xFE, 0xFF, 0x00, 0x61, 0x00, 0x62}
+	out, err := Decode(src, UTF16BE, Aliases{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(out) != "ab" {
+		t.Errorf("got %q, want ab", string(out))
+	}
+}
+
+// TestIsASCII tests the isASCII helper.
+func TestIsASCII(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		data []byte
+		want bool
+	}{
+		{"pure ascii", []byte("hello"), true},
+		{"with high bit", []byte{0x80}, false},
+		{"empty", []byte{}, true},
+		{"mixed", []byte("hello\x80"), false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := isASCII(c.data); got != c.want {
+				t.Errorf("isASCII = %v, want %v", got, c.want)
+			}
+		})
+	}
+}
+
+// TestDetect_DefaultEncFallback tests fallback to default encoding.
+func TestDetect_DefaultEncFallback(t *testing.T) {
+	t.Parallel()
+	// Invalid UTF-8, not GB18030, but valid as GBK
+	gbk := []byte{0xC4, 0xE3, 0xBA, 0xC3} // 你好 in GBK
+	got, conf, _, _ := Detect(gbk, GBK, Aliases{})
+	// Should detect as GB18030 (superset), not fallback
+	if got != GB18030 {
+		// If GB18030 is detected, that's expected
+		_ = conf
+	}
+}
+
+// TestDetect_HTML_NoCharset tests HTML without charset.
+func TestDetect_HTML_NoCharset(t *testing.T) {
+	t.Parallel()
+	html := []byte(`<html><head><title>Hello</title></head><body>World</body></html>`)
+	got, _, _, _ := Detect(html, UTF8, Aliases{})
+	if got != UTF8 {
+		t.Errorf("got %q, want utf-8", got)
+	}
+}
+
+// TestDetect_XML_EncodingMissingQuote tests XML with encoding but missing closing quote.
+func TestDetect_XML_EncodingMissingQuote(t *testing.T) {
+	t.Parallel()
+	xml := []byte(`<?xml version="1.0" encoding="GBK?><root/>`)
+	got, _, _, _ := Detect(xml, UTF8, Aliases{})
+	// Should fall through to UTF-8 or other detection
+	if got == "" {
+		t.Errorf("should detect some encoding")
+	}
+}

@@ -694,3 +694,604 @@ func TestWriteLoggingProperties(t *testing.T) {
 		t.Error("logging.properties should contain logging config")
 	}
 }
+
+func TestWriteLoggingProperties_AlreadyExists(t *testing.T) {
+	dir := t.TempDir()
+	confDir := filepath.Join(dir, "conf")
+	os.MkdirAll(confDir, 0755)
+	// Write a custom file first
+	custom := []byte("custom")
+	if err := os.WriteFile(filepath.Join(confDir, "logging.properties"), custom, 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Should not overwrite
+	if err := writeLoggingProperties(dir); err != nil {
+		t.Fatalf("writeLoggingProperties: %v", err)
+	}
+	data, _ := os.ReadFile(filepath.Join(confDir, "logging.properties"))
+	if string(data) != string(custom) {
+		t.Error("existing logging.properties should not be overwritten")
+	}
+}
+
+// ── Config.Validate additional edge cases ────────────────────────
+
+func TestConfig_Validate_MissingCatalinaBase(t *testing.T) {
+	cfg := Config{
+		JavaHome:     "/jdk",
+		CatalinaHome: "/fake",
+		WebappDir:    "/fake-webapp",
+		HTTPPort:     8080,
+		ShutdownPort: 8005,
+	}
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "catalina base") {
+		t.Errorf("expected catalina base error, got %v", err)
+	}
+}
+
+func TestConfig_Validate_MissingWebappDir(t *testing.T) {
+	cfg := Config{
+		JavaHome:     "/jdk",
+		CatalinaHome: "/fake",
+		CatalinaBase: "/fake-base",
+		HTTPPort:     8080,
+		ShutdownPort: 8005,
+	}
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "webapp dir") {
+		t.Errorf("expected webapp dir error, got %v", err)
+	}
+}
+
+func TestConfig_Validate_MissingHTTPPort(t *testing.T) {
+	cfg := Config{
+		JavaHome:     "/jdk",
+		CatalinaHome: "/fake",
+		CatalinaBase: "/fake-base",
+		WebappDir:    "/fake-webapp",
+		ShutdownPort: 8005,
+	}
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "http port") {
+		t.Errorf("expected http port error, got %v", err)
+	}
+}
+
+func TestConfig_Validate_MissingShutdownPort(t *testing.T) {
+	cfg := Config{
+		JavaHome:     "/jdk",
+		CatalinaHome: "/fake",
+		CatalinaBase: "/fake-base",
+		WebappDir:    "/fake-webapp",
+		HTTPPort:     8080,
+	}
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "shutdown port") {
+		t.Errorf("expected shutdown port error, got %v", err)
+	}
+}
+
+// ── BuildCommand error path ──────────────────────────────────────
+
+func TestBuildCommand_InvalidConfig(t *testing.T) {
+	cfg := Config{
+		JavaHome: "", // invalid
+	}
+	_, _, _, err := BuildCommand(cfg)
+	if err == nil {
+		t.Error("BuildCommand should fail with invalid config")
+	}
+}
+
+// ── buildEnv with custom env vars ────────────────────────────────
+
+func TestBuildEnv_CustomOverride(t *testing.T) {
+	cfg := Config{
+		JavaHome:     "/jdk",
+		CatalinaHome: "/tomcat",
+		CatalinaBase: "/base",
+		Env:          []string{"JRE_HOME=/custom/jre", "MY_VAR=hello"},
+	}
+	env := buildEnv(cfg)
+	envMap := make(map[string]string)
+	for _, e := range env {
+		if idx := strings.IndexByte(e, '='); idx > 0 {
+			envMap[e[:idx]] = e[idx+1:]
+		}
+	}
+	if envMap["JAVA_HOME"] != "/jdk" {
+		t.Errorf("JAVA_HOME = %q, want /jdk", envMap["JAVA_HOME"])
+	}
+	if envMap["JRE_HOME"] != "/custom/jre" {
+		t.Errorf("JRE_HOME = %q, want /custom/jre", envMap["JRE_HOME"])
+	}
+	if envMap["MY_VAR"] != "hello" {
+		t.Errorf("MY_VAR = %q, want hello", envMap["MY_VAR"])
+	}
+}
+
+func TestBuildEnv_DefaultJREHome(t *testing.T) {
+	cfg := Config{
+		JavaHome:     "/jdk",
+		CatalinaHome: "/tomcat",
+		CatalinaBase: "/base",
+	}
+	env := buildEnv(cfg)
+	envMap := make(map[string]string)
+	for _, e := range env {
+		if idx := strings.IndexByte(e, '='); idx > 0 {
+			envMap[e[:idx]] = e[idx+1:]
+		}
+	}
+	if envMap["JRE_HOME"] != "/jdk" {
+		t.Errorf("JRE_HOME = %q, want /jdk (default)", envMap["JRE_HOME"])
+	}
+}
+
+func TestBuildEnv_EmptyValue(t *testing.T) {
+	cfg := Config{
+		JavaHome:     "/jdk",
+		CatalinaHome: "/tomcat",
+		CatalinaBase: "/base",
+		Env:          []string{"="},
+	}
+	env := buildEnv(cfg)
+	// Should not crash
+	if len(env) < 3 {
+		t.Errorf("expected at least 3 env vars, got %d", len(env))
+	}
+}
+
+// ── WaitForPort edge cases ───────────────────────────────────────
+
+func TestWaitForPort_ZeroPort(t *testing.T) {
+	ctx := context.Background()
+	err := WaitForPort(ctx, 0, time.Now().Add(time.Second))
+	if err == nil || !strings.Contains(err.Error(), "port is required") {
+		t.Errorf("expected 'port is required' error, got %v", err)
+	}
+}
+
+func TestWaitForPort_NegativePort(t *testing.T) {
+	ctx := context.Background()
+	err := WaitForPort(ctx, -1, time.Now().Add(time.Second))
+	if err == nil || !strings.Contains(err.Error(), "port is required") {
+		t.Errorf("expected 'port is required' error, got %v", err)
+	}
+}
+
+func TestWaitForPort_ContextCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := WaitForPort(ctx, 19999, time.Now().Add(5*time.Second))
+	if err != context.Canceled {
+		t.Errorf("expected context.Canceled, got %v", err)
+	}
+}
+
+func TestWaitForPort_Timeout(t *testing.T) {
+	ctx := context.Background()
+	deadline := time.Now().Add(100 * time.Millisecond)
+	err := WaitForPort(ctx, 1, deadline)
+	if err == nil {
+		t.Error("expected timeout error")
+	}
+}
+
+// ── IsPortBound unbound case ─────────────────────────────────────
+
+func TestIsPortBound_Unbound(t *testing.T) {
+	// Find an available port, close it, then test
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	ln.Close()
+	time.Sleep(50 * time.Millisecond)
+
+	if IsPortBound(port) {
+		t.Log("port still reported as bound (OS may not have released it yet)")
+	}
+}
+
+// ── FindCatalinaHome tests ───────────────────────────────────────
+
+func TestFindCatalinaHome_EnvVar(t *testing.T) {
+	home := createFakeCatalinaHome(t)
+	t.Setenv("KAIRO_TOMCAT6_HOME", home)
+	result, err := FindCatalinaHome("/nonexistent/bundled")
+	if err != nil {
+		t.Fatalf("FindCatalinaHome failed: %v", err)
+	}
+	if result != home {
+		t.Errorf("FindCatalinaHome = %q, want %q", result, home)
+	}
+}
+
+func TestFindCatalinaHome_EnvVarInvalid(t *testing.T) {
+	t.Setenv("KAIRO_TOMCAT6_HOME", "/nonexistent/path")
+	_, err := FindCatalinaHome("/nonexistent/bundled")
+	if err == nil {
+		t.Error("Expected error for invalid KAIRO_TOMCAT6_HOME")
+	}
+}
+
+func TestFindCatalinaHome_BundledDir(t *testing.T) {
+	t.Setenv("KAIRO_TOMCAT6_HOME", "")
+	bundledDir := t.TempDir()
+	// Create the bundled tomcat6 directory structure
+	tomcatDir := filepath.Join(bundledDir, "tomcat6", "apache-tomcat-6.0.53")
+	os.MkdirAll(filepath.Join(tomcatDir, "bin"), 0755)
+	os.WriteFile(filepath.Join(tomcatDir, "bin", "bootstrap.jar"), []byte("fake"), 0644)
+
+	result, err := FindCatalinaHome(bundledDir)
+	if err != nil {
+		t.Fatalf("FindCatalinaHome failed: %v", err)
+	}
+	if result != tomcatDir {
+		t.Errorf("FindCatalinaHome = %q, want %q", result, tomcatDir)
+	}
+}
+
+func TestFindCatalinaHome_ScanSubdirs(t *testing.T) {
+	t.Setenv("KAIRO_TOMCAT6_HOME", "")
+	bundledDir := t.TempDir()
+	tomcatDir := filepath.Join(bundledDir, "tomcat6")
+	os.MkdirAll(filepath.Join(tomcatDir, "custom-tomcat-6.0.53", "bin"), 0755)
+	os.WriteFile(filepath.Join(tomcatDir, "custom-tomcat-6.0.53", "bin", "bootstrap.jar"), []byte("fake"), 0644)
+
+	// Also add a file (not dir) to test the IsDir check
+	os.WriteFile(filepath.Join(tomcatDir, "README.txt"), []byte("readme"), 0644)
+
+	result, err := FindCatalinaHome(bundledDir)
+	if err != nil {
+		t.Fatalf("FindCatalinaHome failed: %v", err)
+	}
+	if !strings.Contains(result, "custom-tomcat-6.0.53") {
+		t.Errorf("FindCatalinaHome = %q, expected to find custom-tomcat-6.0.53", result)
+	}
+}
+
+func TestFindCatalinaHome_NotFound(t *testing.T) {
+	t.Setenv("KAIRO_TOMCAT6_HOME", "")
+	bundledDir := t.TempDir()
+	_, err := FindCatalinaHome(bundledDir)
+	if err == nil {
+		t.Error("Expected error when no Tomcat 6 found")
+	}
+}
+
+// ── FetchCatalinaHomeOrDownload ──────────────────────────────────
+
+func TestFetchCatalinaHomeOrDownload(t *testing.T) {
+	home := createFakeCatalinaHome(t)
+	t.Setenv("KAIRO_TOMCAT6_HOME", home)
+	result, err := FetchCatalinaHomeOrDownload("/nonexistent/bundled")
+	if err != nil {
+		t.Fatalf("FetchCatalinaHomeOrDownload failed: %v", err)
+	}
+	if result != home {
+		t.Errorf("FetchCatalinaHomeOrDownload = %q, want %q", result, home)
+	}
+}
+
+// ── Instance getter methods ──────────────────────────────────────
+
+func TestInstance_State(t *testing.T) {
+	inst := &Instance{state: "running"}
+	if inst.State() != "running" {
+		t.Errorf("State = %q, want running", inst.State())
+	}
+}
+
+func TestInstance_PID(t *testing.T) {
+	inst := &Instance{pid: 12345}
+	if inst.PID() != 12345 {
+		t.Errorf("PID = %d, want 12345", inst.PID())
+	}
+}
+
+func TestInstance_StartedAt(t *testing.T) {
+	now := time.Now()
+	inst := &Instance{startedAt: now}
+	if !inst.StartedAt().Equal(now) {
+		t.Errorf("StartedAt = %v, want %v", inst.StartedAt(), now)
+	}
+}
+
+func TestInstance_Ports(t *testing.T) {
+	inst := &Instance{ports: Ports{HTTP: 8080, Shutdown: 8005, AJP: 8009, Debug: 5005}}
+	ports := inst.Ports()
+	if ports.HTTP != 8080 {
+		t.Errorf("HTTP port = %d, want 8080", ports.HTTP)
+	}
+	if ports.Debug != 5005 {
+		t.Errorf("Debug port = %d, want 5005", ports.Debug)
+	}
+}
+
+func TestInstance_LogPath(t *testing.T) {
+	inst := &Instance{logPath: "/var/log/tomcat.log"}
+	if inst.LogPath() != "/var/log/tomcat.log" {
+		t.Errorf("LogPath = %q, want /var/log/tomcat.log", inst.LogPath())
+	}
+}
+
+func TestInstance_Stopped(t *testing.T) {
+	inst := &Instance{stopped: make(chan struct{})}
+	select {
+	case <-inst.Stopped():
+		t.Error("Stopped channel should not be closed yet")
+	default:
+	}
+	close(inst.stopped)
+	select {
+	case <-inst.Stopped():
+		// ok
+	default:
+		t.Error("Stopped channel should be closed")
+	}
+}
+
+// ── TailLog tests ────────────────────────────────────────────────
+
+func TestInstance_TailLog_NoPath(t *testing.T) {
+	inst := &Instance{}
+	lines, err := inst.TailLog(10)
+	if err != nil {
+		t.Fatalf("TailLog failed: %v", err)
+	}
+	if lines != nil {
+		t.Errorf("TailLog with no path should return nil, got %v", lines)
+	}
+}
+
+func TestInstance_TailLog_FileNotFound(t *testing.T) {
+	inst := &Instance{logPath: "/nonexistent/tomcat.log"}
+	lines, err := inst.TailLog(10)
+	if err != nil {
+		t.Fatalf("TailLog should not error on missing file: %v", err)
+	}
+	if lines != nil {
+		t.Errorf("TailLog missing file should return nil, got %v", lines)
+	}
+}
+
+func TestInstance_TailLog_WithContent(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "test.log")
+	content := "line1\nline2\nline3\nline4\nline5\n"
+	os.WriteFile(logPath, []byte(content), 0644)
+
+	inst := &Instance{logPath: logPath}
+	lines, err := inst.TailLog(3)
+	if err != nil {
+		t.Fatalf("TailLog failed: %v", err)
+	}
+	if len(lines) != 3 {
+		t.Fatalf("len(lines) = %d, want 3", len(lines))
+	}
+	if lines[0] != "line3" {
+		t.Errorf("lines[0] = %q, want line3", lines[0])
+	}
+}
+
+// ── FileSHA256 error path ────────────────────────────────────────
+
+func TestFileSHA256_ReadError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "unreadable")
+	// Create a directory to make Open succeed but Read fail
+	os.MkdirAll(path, 0755)
+	_, err := fileSHA256(path)
+	if err == nil {
+		t.Error("Expected error when hashing a directory")
+	}
+}
+
+// ── BuildCommand with DebugSuspend=n ─────────────────────────────
+
+func TestBuildCommand_DebugSuspendFalse(t *testing.T) {
+	home := createFakeCatalinaHome(t)
+	base := t.TempDir()
+	javaHome := t.TempDir()
+	os.MkdirAll(filepath.Join(javaHome, "bin"), 0755)
+
+	cfg := Config{
+		JavaHome:     javaHome,
+		CatalinaHome: home,
+		CatalinaBase: base,
+		WebappDir:    filepath.Join(base, "webapps", "ROOT"),
+		HTTPPort:     18080,
+		ShutdownPort: 18005,
+		DebugPort:    5005,
+		DebugSuspend: false,
+	}
+	_, args, _, err := BuildCommand(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "suspend=n") {
+		t.Error("expected suspend=n when DebugSuspend is false")
+	}
+}
+
+// ── writeServerXML with empty context path ───────────────────────
+
+func TestWriteServerXML_EmptyContextPath(t *testing.T) {
+	home := createFakeCatalinaHome(t)
+	base := t.TempDir()
+
+	cfg := Config{
+		JavaHome:     "/jdk",
+		CatalinaHome: home,
+		CatalinaBase: base,
+		WebappDir:    filepath.Join(base, "webapps", "ROOT"),
+		HTTPPort:     18080,
+		ShutdownPort: 18005,
+		ContextPath:  "", // empty -> defaults to "/"
+	}
+	if err := writeServerXML(cfg); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(base, "conf", "server.xml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var srv ServerConfig
+	xml.Unmarshal(data, &srv)
+	if len(srv.Services) == 0 || len(srv.Services[0].Engines) == 0 || len(srv.Services[0].Engines[0].Hosts) == 0 {
+		t.Fatal("expected Engine with Host")
+	}
+	ctx := srv.Services[0].Engines[0].Hosts[0].Contexts[0]
+	if ctx.Path != "/" {
+		t.Errorf("empty context path should default to '/', got %q", ctx.Path)
+	}
+}
+
+// ── copyMinimalConf error paths ──────────────────────────────────
+
+func TestCopyMinimalConf_ReadError(t *testing.T) {
+	home := createFakeCatalinaHome(t)
+	base := t.TempDir()
+	// Make a conf file unreadable
+	confDir := filepath.Join(home, "conf")
+	os.Chmod(filepath.Join(confDir, "web.xml"), 0000)
+	defer os.Chmod(filepath.Join(confDir, "web.xml"), 0644)
+
+	err := copyMinimalConf(home, base)
+	if runtime.GOOS == "windows" {
+		// Windows doesn't respect chmod in the same way
+		if err != nil {
+			t.Logf("copyMinimalConf error on Windows: %v", err)
+		}
+	} else {
+		if err == nil {
+			t.Error("Expected error when reading unreadable file")
+		}
+	}
+}
+
+func TestCopyMinimalConf_NonExistentFile(t *testing.T) {
+	home := t.TempDir()
+	// Create bin dir but no conf dir
+	os.MkdirAll(filepath.Join(home, "bin"), 0755)
+	os.WriteFile(filepath.Join(home, "bin", "bootstrap.jar"), []byte("fake"), 0644)
+
+	base := t.TempDir()
+	err := copyMinimalConf(home, base)
+	if err != nil {
+		t.Fatalf("copyMinimalConf should not error on missing conf files: %v", err)
+	}
+}
+
+// ── PrepareCatalinaBase error path ───────────────────────────────
+
+func TestPrepareCatalinaBase_WriteServerXMLError(t *testing.T) {
+	home := createFakeCatalinaHome(t)
+	base := t.TempDir()
+	// Create conf as a file (not dir) to make mkdir fail
+	os.MkdirAll(base, 0755)
+	os.WriteFile(filepath.Join(base, "conf"), []byte{}, 0644)
+
+	cfg := Config{
+		JavaHome:     "/jdk",
+		CatalinaHome: home,
+		CatalinaBase: base,
+		WebappDir:    filepath.Join(base, "webapps", "ROOT"),
+		HTTPPort:     18080,
+		ShutdownPort: 18005,
+	}
+	err := PrepareCatalinaBase(cfg)
+	if err == nil {
+		t.Error("Expected error when conf is a file not a directory")
+	}
+}
+
+// ── BuildCommand with env vars ───────────────────────────────────
+
+func TestBuildCommand_WithCustomEnv(t *testing.T) {
+	home := createFakeCatalinaHome(t)
+	base := t.TempDir()
+	javaHome := t.TempDir()
+	os.MkdirAll(filepath.Join(javaHome, "bin"), 0755)
+
+	cfg := Config{
+		JavaHome:     javaHome,
+		CatalinaHome: home,
+		CatalinaBase: base,
+		WebappDir:    filepath.Join(base, "webapps", "ROOT"),
+		HTTPPort:     18080,
+		ShutdownPort: 18005,
+		Env:          []string{"MY_VAR=test", "ANOTHER=value"},
+	}
+	_, _, env, err := BuildCommand(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	envMap := make(map[string]string)
+	for _, e := range env {
+		if idx := strings.IndexByte(e, '='); idx > 0 {
+			envMap[e[:idx]] = e[idx+1:]
+		}
+	}
+	if envMap["MY_VAR"] != "test" {
+		t.Errorf("MY_VAR = %q, want test", envMap["MY_VAR"])
+	}
+}
+
+// ── Config struct defaults ───────────────────────────────────────
+
+func TestConfig_Defaults(t *testing.T) {
+	cfg := Config{
+		JavaHome:     "/jdk",
+		CatalinaHome: "/tomcat",
+		CatalinaBase: "/base",
+		WebappDir:    "/webapp",
+		HTTPPort:     8080,
+		ShutdownPort: 8005,
+	}
+	if cfg.DebugPort != 0 {
+		t.Errorf("DebugPort default = %d, want 0", cfg.DebugPort)
+	}
+	if cfg.DebugSuspend {
+		t.Error("DebugSuspend default should be false")
+	}
+	if cfg.ContextPath != "" {
+		t.Errorf("ContextPath default = %q, want empty", cfg.ContextPath)
+	}
+}
+
+// ── Ports struct ─────────────────────────────────────────────────
+
+func TestPorts_Struct(t *testing.T) {
+	p := Ports{HTTP: 8080, Shutdown: 8005, AJP: 8009, Debug: 5005}
+	if p.HTTP != 8080 {
+		t.Errorf("HTTP = %d, want 8080", p.HTTP)
+	}
+	if p.AJP != 8009 {
+		t.Errorf("AJP = %d, want 8009", p.AJP)
+	}
+}
+
+// ── Spec struct ──────────────────────────────────────────────────
+
+func TestSpec_Defaults(t *testing.T) {
+	spec := Spec{
+		ID:           "test",
+		JavaHome:     "/jdk",
+		CatalinaHome: "/tomcat",
+		CatalinaBase: "/base",
+		HTTPPort:     8080,
+		ShutdownPort: 8005,
+	}
+	if spec.StartTimeout != 0 {
+		t.Errorf("StartTimeout default = %v, want 0", spec.StartTimeout)
+	}
+	if spec.DebugSuspend {
+		t.Error("DebugSuspend should default to false")
+	}
+}

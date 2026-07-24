@@ -56,11 +56,18 @@ import {
   KAIRO_REMOTE_FACTORY_ID,
   KAIRO_SQL_CONSOLE_FACTORY_ID,
   KAIRO_PERF_FACTORY_ID,
+  KAIRO_DEBUG_VARIABLES_FACTORY_ID,
+  KAIRO_DEBUG_CALLSTACK_FACTORY_ID,
+  KAIRO_DEBUG_BREAKPOINTS_FACTORY_ID,
+  KAIRO_DEBUG_TOOLBAR_FACTORY_ID,
+  KAIRO_DEBUG_CONSOLE_FACTORY_ID,
+  KAIRO_DEBUG_WATCH_FACTORY_ID,
 } from './kairo-factory-ids';
 import type {
   ServerInstance,
   BuildResult,
   DeploymentResult,
+  WsEvent,
 } from '@kairo/protocol';
 import { KairoJavaDebugService } from './kairo-java-debug-service';
 
@@ -98,6 +105,12 @@ export namespace KairoCommands {
   export const TOGGLE_TERMINAL: Command = { id: 'kairo.terminal.toggle', label: 'Kairo: Toggle Terminal' };
   export const REVEAL_KAIRO_REMOTE: Command = { id: 'kairo.view.remote', label: 'Kairo: Show Remote Development', iconClass: 'codicon codicon-remote' };
   export const REVEAL_KAIRO_PERF: Command = { id: 'kairo.view.perf', label: 'Kairo: Show Performance' };
+  export const REVEAL_KAIRO_DEBUG_VARIABLES: Command = { id: 'kairo.debug.view.variables', label: 'Kairo: Show Debug Variables' };
+  export const REVEAL_KAIRO_DEBUG_CALLSTACK: Command = { id: 'kairo.debug.view.callstack', label: 'Kairo: Show Debug Call Stack' };
+  export const REVEAL_KAIRO_DEBUG_BREAKPOINTS: Command = { id: 'kairo.debug.view.breakpoints', label: 'Kairo: Show Debug Breakpoints' };
+  export const REVEAL_KAIRO_DEBUG_TOOLBAR: Command = { id: 'kairo.debug.view.toolbar', label: 'Kairo: Show Debug Toolbar' };
+  export const REVEAL_KAIRO_DEBUG_CONSOLE: Command = { id: 'kairo.debug.view.console', label: 'Kairo: Show Debug Console' };
+  export const REVEAL_KAIRO_DEBUG_WATCH: Command = { id: 'kairo.debug.view.watch', label: 'Kairo: Show Debug Watch' };
 }
 
 /* ------------------------------------------------------------------ */
@@ -196,7 +209,15 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
       }
       lastStatus = s;
     });
-    this.eventsUnsub = this.runtime.subscribeEvents(this.runtime.workspace(), (e: any) => this.handleEvent(e));
+    this.eventsUnsub = this.runtime.subscribeEvents(this.runtime.workspace(), (e: WsEvent) => this.handleEvent(e));
+
+    // N-029: clear the WidgetManager cache so the new React Build/Server
+    // views replace any stale cached factories from earlier module loads.
+    const wm = this.widgetManager as unknown as { _cachedFactories?: unknown; factories?: Map<string, unknown> };
+    if (wm._cachedFactories) {
+      wm._cachedFactories = undefined;
+      void wm.factories?.size;
+    }
 
     // KAIRO-RC-WEB-018: cold start with no active project shows
     // the Welcome tab so the first task is discoverable; the tab
@@ -513,6 +534,25 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
     registry.registerCommand(KairoCommands.REVEAL_KAIRO_REMOTE, {
       execute: () => { void this.revealOrCreateMain(KAIRO_REMOTE_FACTORY_ID, () => undefined, () => undefined); },
     });
+    // ── Debug View Commands ──────────────────────────────────────
+    registry.registerCommand(KairoCommands.REVEAL_KAIRO_DEBUG_VARIABLES, {
+      execute: () => { void this.revealOrCreate(KAIRO_DEBUG_VARIABLES_FACTORY_ID, () => undefined, () => undefined); },
+    });
+    registry.registerCommand(KairoCommands.REVEAL_KAIRO_DEBUG_CALLSTACK, {
+      execute: () => { void this.revealOrCreate(KAIRO_DEBUG_CALLSTACK_FACTORY_ID, () => undefined, () => undefined); },
+    });
+    registry.registerCommand(KairoCommands.REVEAL_KAIRO_DEBUG_BREAKPOINTS, {
+      execute: () => { void this.revealOrCreate(KAIRO_DEBUG_BREAKPOINTS_FACTORY_ID, () => undefined, () => undefined); },
+    });
+    registry.registerCommand(KairoCommands.REVEAL_KAIRO_DEBUG_TOOLBAR, {
+      execute: () => { void this.revealOrCreate(KAIRO_DEBUG_TOOLBAR_FACTORY_ID, () => undefined, () => undefined); },
+    });
+    registry.registerCommand(KairoCommands.REVEAL_KAIRO_DEBUG_CONSOLE, {
+      execute: () => { void this.revealOrCreate(KAIRO_DEBUG_CONSOLE_FACTORY_ID, () => undefined, () => undefined); },
+    });
+    registry.registerCommand(KairoCommands.REVEAL_KAIRO_DEBUG_WATCH, {
+      execute: () => { void this.revealOrCreate(KAIRO_DEBUG_WATCH_FACTORY_ID, () => undefined, () => undefined); },
+    });
     registry.registerCommand(KairoCommands.MANAGE_RUN_CONFIGURATIONS, {
       execute: () => { void this.revealOrCreateMain(KAIRO_RUN_CONFIGURATIONS_FACTORY_ID, () => undefined, () => undefined); },
     });
@@ -667,7 +707,7 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
     }
   }
 
-  protected handleEvent(e: any): void {
+  protected handleEvent(e: WsEvent): void {
     switch (e.type) {
       case 'build.progress':
         void this.refreshBuilds();
@@ -678,6 +718,11 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
       case 'server.state':
         void this.refreshBuilds();
         void this.refreshDeployments();
+        return;
+      // N-033: log events are handled by the LogViewerWidget's own
+      // subscription; we forward them here to ensure the event stream
+      // is known to carry log data.
+      case 'log':
         return;
       default:
         return;

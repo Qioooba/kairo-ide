@@ -194,7 +194,7 @@ async function pollApiPost(path, payload) {
       hasJdtls: /JDT LS:/.test(text),
       hasEncoding: /Encoding:/.test(text),
       hasServer: /Server:/.test(text),
-      hasRuntime: /Runtime:/.test(text),
+      hasRuntime: /Agent:/.test(text),
     };
   });
   if (!sbState) {

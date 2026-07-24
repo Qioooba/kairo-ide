@@ -1,5 +1,8 @@
 export { KairoJavaService, bindJavaExtension } from './java-service';
 export type { JavaServiceState } from './java-service';
+export { KairoMavenService } from './maven-service';
+export type { MavenDetectResult, MavenDependency, MavenDependencyConflict, MavenDependencyTreeNode, MavenLifecycleTask, MavenRunResult, MavenBuildProgress, MavenViewTab } from './maven-service';
+export { MavenViewWidget } from './maven-view-widget';
 export { KairoJavaLanguageClientContribution } from './java-language-client-contribution';
 export {
   JavaLanguageServerLifecycle,
@@ -13,6 +16,13 @@ export {
 export type { JdtLsLaunchDescriptor } from './java-ls-lifecycle';
 export { JavaLanguageClient } from './java-language-client';
 export { JavaCompletionProvider } from './java-completion-provider';
+export { JavaIntelliSenseProvider } from './java-intellisense-provider';
+export type {
+  JavaIntelliSenseCompletionItem,
+  JavaIntelliSenseCompletionResult,
+  JavaIntelliSenseDefinition,
+  JavaIntelliSenseDiagnostic,
+} from './java-intellisense-provider';
 export { JavaMonacoRegistrationContribution } from './java-monaco-registration';
 export { JdtClassFileFsProvider } from './jdt-fs-provider';
 export { JavaDocumentSyncContribution } from './java-document-sync';
@@ -87,6 +97,7 @@ import { KairoJavaLanguageClientContribution } from './java-language-client-cont
 import { JavaLanguageServerLifecycle } from './java-ls-lifecycle';
 import { JavaLanguageClient } from './java-language-client';
 import { JavaCompletionProvider } from './java-completion-provider';
+import { JavaIntelliSenseProvider } from './java-intellisense-provider';
 import { JavaMonacoRegistrationContribution } from './java-monaco-registration';
 import { JdtClassFileFsProvider } from './jdt-fs-provider';
 import { JavaDocumentSyncContribution } from './java-document-sync';
@@ -112,6 +123,8 @@ import { JavaHotSwapService } from './java-hotswap-service';
 import { JavaJUnitRunner } from './java-junit-runner';
 import { JavaSaveActionsService } from './java-save-actions';
 import { JavaPreferenceContribution } from './java-preference-schema';
+import { KairoMavenService } from './maven-service';
+import { MavenViewWidget } from './maven-view-widget';
 
 export function bindJavaLanguageClientContribution(bind: interfaces.Bind): void {
     bind(KairoJavaLanguageClientContribution).toSelf().inSingletonScope();
@@ -125,6 +138,7 @@ export function bindJavaLanguageClientContribution(bind: interfaces.Bind): void 
     bind(FrontendApplicationContribution).toService(JavaLanguageServerLifecycle);
     bind(JavaLanguageClient).toSelf().inSingletonScope();
     bind(JavaCompletionProvider).toSelf().inSingletonScope();
+    bind(JavaIntelliSenseProvider).toSelf().inSingletonScope();
     bind(JavaMonacoRegistrationContribution).toSelf().inSingletonScope();
     bind(JdtClassFileFsProvider).toSelf().inSingletonScope();
     // Registers the Java completion + definition providers with
@@ -195,4 +209,8 @@ export function bindJavaLanguageClientContribution(bind: interfaces.Bind): void 
 
     // ── Java Preferences ─────────────────────────────────────────────
     bind(PreferenceContribution).toConstantValue(JavaPreferenceContribution);
+
+    // ── Maven View ───────────────────────────────────────────────────
+    bind(KairoMavenService).toSelf().inSingletonScope();
+    bind(MavenViewWidget).toSelf();
 }

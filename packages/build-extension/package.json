@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "Kairo Build extension — build store, build view widget, and build lifecycle management.",
   "main": "lib/index.js",
-  "types": "lib/src/index.d.ts",
+  "types": "lib/index.d.ts",
   "files": [
     "lib",
     "src"
@@ -12,7 +12,7 @@
     "build": "tsc -p tsconfig.json",
     "clean": "rm -rf lib",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "test": "node --import ./test/register-hooks.mjs --test src/browser/build-store-map.test.cjs"
+    "test": "node --test src/browser/maven-view-widget.test.cjs src/browser/build-view-widget.test.cjs && node --import ./test/register-hooks.mjs --test src/browser/build-store-map.test.cjs src/browser/build-exports-extended.test.cjs src/browser/build-store-logic.test.cjs src/browser/build-store-context.test.cjs src/browser/build-store-map-extended.test.cjs"
   },
   "dependencies": {
     "@kairo/protocol": "workspace:*",

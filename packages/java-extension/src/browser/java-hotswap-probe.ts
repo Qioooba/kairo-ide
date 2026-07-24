@@ -19,6 +19,7 @@ import { MessageService } from '@theia/core/lib/common/message-service';
 import { StatusBar, StatusBarAlignment } from '@theia/core/lib/browser';
 import { StorageService } from '@theia/core/lib/browser';
 import { RuntimeConnectionService } from '@kairo/runtime-extension';
+import { Endpoint } from '@kairo/protocol';
 
 /** HotSwap capability status. */
 export type HotSwapStatus = 'unknown' | 'ready' | 'not-available' | 'requires-restart';
@@ -238,7 +239,7 @@ export class ClassHotSwapProbe {
   }> {
     try {
       const result = await this.runtime.request(
-        'POST /api/v1/jvm/capabilities' as any,
+        'POST /api/v1/jvm/capabilities' as Endpoint,
         undefined,
         { noRetry: true },
       ) as unknown as {
@@ -276,7 +277,7 @@ export class ClassHotSwapProbe {
   }> {
     try {
       const result = await this.runtime.request(
-        'POST /api/v1/jvm/compile' as any,
+        'POST /api/v1/jvm/compile' as Endpoint,
         { file: filePath },
         { noRetry: true },
       ) as unknown as {
@@ -310,7 +311,7 @@ export class ClassHotSwapProbe {
   ): Promise<void> {
     try {
       const result = await this.runtime.request(
-        'POST /api/v1/jvm/redefine' as any,
+        'POST /api/v1/jvm/redefine' as Endpoint,
         { sourcePath, classPath },
         { noRetry: true },
       ) as unknown as {

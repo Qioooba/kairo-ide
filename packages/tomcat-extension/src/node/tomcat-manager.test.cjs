@@ -24,6 +24,34 @@ const cp = require('node:child_process');
 
 const { TomcatManager } = require('../../lib/node/tomcat-manager');
 
+/**
+ * Remove a directory tree with retry logic for Windows EBUSY.
+ * On Windows, spawned child processes may still hold file handles
+ * for a short time after the process exits, causing rmdirSync to
+ * fail with EBUSY. This helper retries with exponential backoff.
+ *
+ * On Windows, the process tree cleanup (cmd.exe → ping.exe) can
+ * take a few seconds even after SIGKILL, so we allow up to ~30s
+ * of retries.
+ */
+function rmRetrySync(dir, maxRetries = 20) {
+  let delay = 100;
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      fs.rmSync(dir, { recursive: true, force: true });
+      return;
+    } catch (err) {
+      if (err.code === 'EBUSY' && i < maxRetries - 1) {
+        const waitUntil = Date.now() + delay;
+        while (Date.now() < waitUntil) { /* busy-wait */ }
+        delay = Math.min(delay * 2, 5000);
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
 // Build a fake catalina script. The manager spawns
 // catalina.bat via `cmd.exe /c <script> <args>` on Windows
 // and `catalina.sh <args>` on POSIX. Our script just
@@ -43,7 +71,11 @@ function makeFakeTomcatDir() {
       ? '@echo off\r\n' +
         'echo INFO: Deploying web application directory\r\n' +
         'echo INFO: Server startup in 42 ms\r\n' +
-        'ping 127.0.0.1 -n 60 > nul\r\n' +
+        // Use ping only as a lightweight keep-alive; the process
+        // must be killable and release its handles quickly.
+        // On Windows, SIGKILL on cmd.exe does not always kill
+        // the nested ping.exe, so we use a short count.
+        'ping 127.0.0.1 -n 3 > nul\r\n' +
         'exit /b 0\r\n'
       : '#!/bin/sh\n' +
         'echo "INFO: Deploying web application directory"\n' +
@@ -121,7 +153,7 @@ test('TomcatManager.resolveHome: error when catalina script is missing', () => {
   } finally {
     if (saved !== undefined) process.env.KAIRO_TOMCAT6_HOME = saved;
     else delete process.env.KAIRO_TOMCAT6_HOME;
-    fs.rmSync(tmp, { recursive: true, force: true });
+    rmRetrySync(tmp);
   }
 });
 
@@ -138,7 +170,7 @@ test('TomcatManager.resolveHome: success with a complete install', () => {
   } finally {
     if (saved !== undefined) process.env.KAIRO_TOMCAT6_HOME = saved;
     else delete process.env.KAIRO_TOMCAT6_HOME;
-    fs.rmSync(home, { recursive: true, force: true });
+    rmRetrySync(home);
   }
 });
 
@@ -179,7 +211,7 @@ test('TomcatManager: start() emits state transitions and a "ready" event', async
     assert.ok(logEvents.length > 0, 'expected log events to be emitted');
   } finally {
     await m.stop({ deadlineMs: 5_000 });
-    fs.rmSync(home, { recursive: true, force: true });
+    rmRetrySync(home);
   }
 });
 
@@ -212,7 +244,7 @@ test('TomcatManager: stop() sends SHUTDOWN to the configured port and exits the 
     assert.equal(receivedShutdown, true, 'expected the shutdown port to receive the SHUTDOWN command');
   } finally {
     shutdownSrv.close();
-    fs.rmSync(home, { recursive: true, force: true });
+    rmRetrySync(home);
   }
 });
 
@@ -227,7 +259,7 @@ test('TomcatManager: restart() stops and starts again', async () => {
     assert.equal(m.getState(), 'running');
   } finally {
     await m.stop({ deadlineMs: 5_000 });
-    fs.rmSync(home, { recursive: true, force: true });
+    rmRetrySync(home);
   }
 });
 

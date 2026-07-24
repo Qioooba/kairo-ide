@@ -131,7 +131,7 @@ export function parseFailureLocation(stackTrace: string[]): { file: string; line
 }
 
 function attrValue(attrs: string, name: string): string | undefined {
-    const re = new RegExp(`${name}\\s*=\\s*"([^"]*)"`);
+    const re = new RegExp(`\\b${name}\\s*=\\s*"([^"]*)"`);
     const match = attrs.match(re);
     return match ? match[1] : undefined;
 }
@@ -169,7 +169,7 @@ export class TestRunner {
         args.push('-target', sourceLevel);
         args.push('-d', outputDir);
         if (classpath.length > 0) {
-            args.push('-cp', classpath.join(':'));
+            args.push('-cp', classpath.join(process.platform === 'win32' ? ';' : ':'));
         }
         args.push(...sourceFiles);
         return args;
@@ -203,7 +203,7 @@ export class TestRunner {
         }
 
         const args: string[] = ['java'];
-        args.push('-cp', fullCp.join(':'));
+        args.push('-cp', fullCp.join(process.platform === 'win32' ? ';' : ':'));
         if (framework === 'junit4') {
             args.push('org.junit.runner.JUnitCore');
         } else {

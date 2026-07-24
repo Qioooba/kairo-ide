@@ -234,12 +234,22 @@ func writeJavacArgFile(projectRoot string, sources []string) (string, error) {
 			_ = os.Remove(name)
 		}
 	}()
+	bw := bufio.NewWriter(file)
 	for _, source := range sources {
 		escaped := strings.ReplaceAll(source, `\`, `\\`)
 		escaped = strings.ReplaceAll(escaped, `"`, `\"`)
-		if _, err := fmt.Fprintf(file, "\"%s\"\n", escaped); err != nil {
+		if _, err := bw.WriteString("\""); err != nil {
 			return "", err
 		}
+		if _, err := bw.WriteString(escaped); err != nil {
+			return "", err
+		}
+		if _, err := bw.WriteString("\"\n"); err != nil {
+			return "", err
+		}
+	}
+	if err := bw.Flush(); err != nil {
+		return "", err
 	}
 	if err := file.Sync(); err != nil {
 		return "", err
@@ -329,4 +339,187 @@ func countCompiled(output string) int {
 		return n
 	}
 	return 0
+}
+
+// defaultExcludeDirs contains directories commonly excluded from builds.
+var defaultExcludeDirs = []string{".git", ".svn", "node_modules", "target", "build", ".kairo"}
+
+// defaultExcludeSet is a pre-built lookup set for defaultExcludeDirs.
+var defaultExcludeSet = func() map[string]struct{} {
+	m := make(map[string]struct{}, len(defaultExcludeDirs))
+	for _, d := range defaultExcludeDirs {
+		m[d] = struct{}{}
+	}
+	return m
+}()
+
+// CollectSources walks source roots and collects all .java files.
+// It skips directories commonly excluded from builds.
+func CollectSources(sourceRoots []string, excludeDirs []string) ([]string, error) {
+	excludeSet := defaultExcludeSet
+	if len(excludeDirs) > 0 {
+		excludeSet = make(map[string]struct{}, len(excludeDirs))
+		for _, d := range excludeDirs {
+			excludeSet[d] = struct{}{}
+		}
+	}
+
+	var sources []string
+	for _, root := range sourceRoots {
+		root = filepath.Clean(root)
+		err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+			if d.IsDir() {
+				if _, excluded := excludeSet[d.Name()]; excluded {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if strings.EqualFold(filepath.Ext(d.Name()), ".java") {
+				sources = append(sources, path)
+			}
+			return nil
+		})
+		if err != nil {
+			return nil, fmt.Errorf("walk source root %s: %w", root, err)
+		}
+	}
+	return sources, nil
+}
+
+// ResolveClasspath resolves classpath entries from a list of library directories
+// and individual jar files. It walks library directories recursively to find .jar files.
+func ResolveClasspath(libDirs []string, extraJars []string) ([]string, error) {
+	var classpath []string
+
+	for _, dir := range libDirs {
+		dir = filepath.Clean(dir)
+		info, err := os.Stat(dir)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return nil, fmt.Errorf("stat lib dir %s: %w", dir, err)
+		}
+		if !info.IsDir() {
+			classpath = append(classpath, dir)
+			continue
+		}
+		err = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+			if d.IsDir() {
+				return nil
+			}
+			if strings.EqualFold(filepath.Ext(d.Name()), ".jar") {
+				classpath = append(classpath, path)
+			}
+			return nil
+		})
+		if err != nil {
+			return nil, fmt.Errorf("walk lib dir %s: %w", dir, err)
+		}
+	}
+
+	for _, jar := range extraJars {
+		classpath = append(classpath, jar)
+	}
+
+	return classpath, nil
+}
+
+// IncrementalSources filters the given sources to only those that are newer
+// than their corresponding .class files in the output directory. If the output
+// directory doesn't exist or the .class file is missing, the source is included.
+func IncrementalSources(sources []string, outputDir string) []string {
+	incremental := make([]string, 0, len(sources))
+	for _, src := range sources {
+		classFile := sourceToClassFile(src, outputDir)
+		if classFile == "" {
+			incremental = append(incremental, src)
+			continue
+		}
+		srcInfo, srcErr := os.Stat(src)
+		if srcErr != nil {
+			incremental = append(incremental, src)
+			continue
+		}
+		classInfo, classErr := os.Stat(classFile)
+		if classErr != nil {
+			incremental = append(incremental, src)
+			continue
+		}
+		if srcInfo.ModTime().After(classInfo.ModTime()) {
+			incremental = append(incremental, src)
+		}
+	}
+	return incremental
+}
+
+// sourceToClassFile converts a .java source path to its corresponding .class
+// file path in the output directory. It preserves the package directory structure.
+func sourceToClassFile(sourcePath, outputDir string) string {
+	base := filepath.Base(sourcePath)
+	if !strings.HasSuffix(strings.ToLower(base), ".java") {
+		return ""
+	}
+	className := base[:len(base)-5] + ".class"
+	// Try to find the package structure from the source file
+	// The simplest approach: look for the package declaration and use the parent dir
+	dir := filepath.Dir(sourcePath)
+	// For a simple flat structure, just use the output dir
+	if filepath.Dir(dir) == filepath.Dir(outputDir) || dir == filepath.Dir(outputDir) {
+		return filepath.Join(outputDir, className)
+	}
+
+	// Try to read the package declaration from the source file
+	pkg := readPackageDeclaration(sourcePath)
+	if pkg != "" {
+		pkgPath := filepath.Join(strings.Split(pkg, ".")...)
+		return filepath.Join(outputDir, pkgPath, className)
+	}
+
+	// Fallback: use the directory structure relative to a common ancestor
+	return filepath.Join(outputDir, className)
+}
+
+// readPackageDeclaration reads the package declaration from a Java source file.
+func readPackageDeclaration(sourcePath string) string {
+	f, err := os.Open(sourcePath)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if strings.HasPrefix(line, "package ") {
+			pkg := strings.TrimPrefix(line, "package ")
+			pkg = strings.TrimSuffix(pkg, ";")
+			pkg = strings.TrimSpace(pkg)
+			return pkg
+		}
+		// Stop at the first non-comment, non-empty line that isn't a package declaration
+		if line != "" && !strings.HasPrefix(line, "//") && !strings.HasPrefix(line, "/*") && !strings.HasPrefix(line, "*") {
+			break
+		}
+	}
+	return ""
+}
+
+// DetermineEncoding resolves the encoding to use for compilation.
+// It checks the request encoding first, then falls back to the default.
+func DetermineEncoding(reqEncoding string) string {
+	if reqEncoding != "" {
+		return reqEncoding
+	}
+	return "UTF-8"
+}
+
+// BuildClasspathString joins classpath entries using the platform path separator.
+func BuildClasspathString(entries []string) string {
+	return strings.Join(entries, string(filepath.ListSeparator))
 }

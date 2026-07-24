@@ -626,7 +626,11 @@ func TestManager_BuildLaunchDescriptor_NoInstall(t *testing.T) {
 	if err := os.MkdirAll(binDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(binDir, "java"), []byte("fake"), 0o755); err != nil {
+	javaName := "java"
+	if runtime.GOOS == "windows" {
+		javaName = "java.exe"
+	}
+	if err := os.WriteFile(filepath.Join(binDir, javaName), []byte("fake"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	_, err := m.BuildLaunchDescriptor(dir)
@@ -662,7 +666,11 @@ func TestManager_BuildLaunchDescriptor_WithInstall(t *testing.T) {
 	if err := os.MkdirAll(binDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(binDir, "java"), []byte("fake"), 0o755); err != nil {
+	javaName := "java"
+	if runtime.GOOS == "windows" {
+		javaName = "java.exe"
+	}
+	if err := os.WriteFile(filepath.Join(binDir, javaName), []byte("fake"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	m.SetJREPath(jreDir)

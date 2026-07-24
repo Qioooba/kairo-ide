@@ -34,7 +34,7 @@ export interface SqlConnectionConfig {
 
 export interface SqlQueryResult {
   columns: string[];
-  rows: any[][];
+  rows: unknown[][];
   rowCount: number;
   executionTime: number;
   error?: string;
@@ -146,8 +146,8 @@ export class KairoSqlService {
         }
 
         // Sanitize rows: convert null values to 'NULL' string
-        const rows = (data.rows ?? []).map((row: any[]) =>
-          (row ?? []).map((cell: any) => (cell === null || cell === undefined ? 'NULL' : cell)),
+        const rows = (data.rows ?? []).map((row: unknown[]) =>
+          (row ?? []).map((cell: unknown) => (cell === null || cell === undefined ? 'NULL' : cell)),
         );
 
         return {

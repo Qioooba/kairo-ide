@@ -2,6 +2,7 @@ import { injectable, inject, postConstruct } from '@theia/core/shared/inversify'
 import { Emitter, Event } from '@theia/core/lib/common/event';
 import { RuntimeConnectionService } from '@kairo/runtime-extension';
 import { WorkspaceContextService } from '@kairo/runtime-extension';
+import type { Endpoint } from '@kairo/protocol';
 
 /** A test item in the hierarchical tree: package → class → method. */
 export interface TestItem {
@@ -122,8 +123,8 @@ export class TestStore {
         if (!ctx) return;
 
         try {
-            const result = await (this.runtimeConnection as any).request(
-                'GET /api/v1/tests',
+            const result = await this.runtimeConnection.request(
+                'GET /api/v1/tests' as Endpoint,
                 undefined,
             ) as TestItem[];
             if (Array.isArray(result)) {
@@ -199,8 +200,8 @@ export class TestStore {
         if (!ctx) return undefined;
 
         try {
-            const result = await (this.runtimeConnection as any).request(
-                'POST /api/v1/tests/run',
+            const result = await this.runtimeConnection.request(
+                'POST /api/v1/tests/run' as Endpoint,
                 { scope, target },
             ) as TestRun;
             this.addRun(result);
@@ -215,8 +216,8 @@ export class TestStore {
         const ctx = this.workspaceContext.context;
         if (!ctx) return;
         try {
-            await (this.runtimeConnection as any).request(
-                'DELETE /api/v1/tests/runs/{runId}',
+            await this.runtimeConnection.request(
+                'DELETE /api/v1/tests/runs/{runId}' as Endpoint,
                 undefined,
                 { pathParams: { runId } },
             );

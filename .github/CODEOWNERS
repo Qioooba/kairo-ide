@@ -1,0 +1,52 @@
+# Kairo IDE — Code Owners
+#
+# Automatically requests reviews from the specified owners when
+# a pull request modifies files matching the patterns.
+#
+# See: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Global owners — fallback for all files
+* @kairo-team
+
+# ─── Go Runtime Agent ──────────────────────────────────────────────
+/runtime-agent/            @kairo-team
+/runtime-agent/**/*.go     @kairo-team
+
+# ─── TypeScript Packages ──────────────────────────────────────────
+/packages/                 @kairo-team
+/packages/**/*.ts          @kairo-team
+/packages/**/*.tsx         @kairo-team
+
+# ─── Applications ──────────────────────────────────────────────────
+/apps/                     @kairo-team
+/apps/desktop/             @kairo-team
+/apps/browser/             @kairo-team
+
+# ─── CI/CD & Workflows ─────────────────────────────────────────────
+/.github/                  @kairo-team
+/.github/workflows/        @kairo-team
+/.github/dependabot.yml    @kairo-team
+/.github/codecov.yml       @kairo-team
+
+# ─── Scripts & Build Infrastructure ────────────────────────────────
+/scripts/                  @kairo-team
+/scripts/ci/               @kairo-team
+
+# ─── Configuration Files ───────────────────────────────────────────
+/package.json              @kairo-team
+/pnpm-lock.yaml            @kairo-team
+/pnpm-workspace.yaml       @kairo-team
+/tsconfig.json             @kairo-team
+/.eslintrc*                @kairo-team
+/.prettierrc*              @kairo-team
+
+# ─── Security & Compliance ─────────────────────────────────────────
+/supply-chain*             @kairo-team
+/scripts/supply-chain*     @kairo-team
+/scripts/sign-release*     @kairo-team
+/scripts/generate-sbom*    @kairo-team
+
+# ─── Documentation ─────────────────────────────────────────────────
+/docs/                     @kairo-team
+/README.md                 @kairo-team
+/LICENSE                   @kairo-team

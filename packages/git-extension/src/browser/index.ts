@@ -18,6 +18,11 @@ import { GitBlameDecorator } from './git-blame-decorator';
 import { GitPreCommitChecker } from './git-precommit-check';
 import { GitCommitTemplateService } from './git-commit-template';
 import { GitCommitSearch } from './git-commit-search';
+import { GitStashService } from './git-stash-service';
+import { GitStashWidget } from './git-stash-widget';
+import { GitStashContribution } from './git-stash-contribution';
+import { GitCherryPickService } from './git-cherrypick-service';
+import { GitCherryPickContribution } from './git-cherrypick-contribution';
 
 export { GitService } from './git-service';
 export type { GitFileStatus, GitStatusResult, GitCommit, GitBlameLine, GitDiffResult, GitCommitResult } from './git-service';
@@ -38,6 +43,13 @@ export { GitCommitTemplateService } from './git-commit-template';
 export type { CommitType, CommitTemplate, CommitSuggestion } from './git-commit-template';
 export { GitCommitSearch } from './git-commit-search';
 export type { CommitSearchCriteria, CommitSearchResult, SearchHighlight, CommitSearchStatus, CommitSearchSummary } from './git-commit-search';
+export { GitStashService } from './git-stash-service';
+export type { GitStashEntry, GitStashShowResult } from './git-stash-service';
+export { GitStashWidget } from './git-stash-widget';
+export { GitStashContribution, GIT_STASH_TOGGLE_COMMAND } from './git-stash-contribution';
+export { GitCherryPickService } from './git-cherrypick-service';
+export type { CherryPickState, CherryPickStatus } from './git-cherrypick-service';
+export { GitCherryPickContribution, GIT_CHERRY_PICK_COMMAND, GIT_CHERRY_PICK_CONTINUE_COMMAND, GIT_CHERRY_PICK_ABORT_COMMAND } from './git-cherrypick-contribution';
 
 export function bindGitExtension(bind: interfaces.Bind): void {
   // Core services
@@ -46,6 +58,8 @@ export function bindGitExtension(bind: interfaces.Bind): void {
   bind(GitPreCommitChecker).toSelf().inSingletonScope();
   bind(GitCommitTemplateService).toSelf().inSingletonScope();
   bind(GitCommitSearch).toSelf().inSingletonScope();
+  bind(GitStashService).toSelf().inSingletonScope();
+  bind(GitCherryPickService).toSelf().inSingletonScope();
 
   // Changes, diff, commit widgets
   bind(GitChangesWidget).toSelf();
@@ -86,4 +100,15 @@ export function bindGitExtension(bind: interfaces.Bind): void {
 
   // Blame decorator
   bind(GitBlameDecorator).toSelf().inSingletonScope();
+
+  // Stash widget
+  bind(GitStashWidget).toSelf();
+  bind(WidgetFactory).toDynamicValue(context => ({
+    id: GitStashWidget.ID,
+    createWidget: () => context.container.get(GitStashWidget),
+  })).inSingletonScope();
+  bindViewContribution(bind, GitStashContribution);
+
+  // Cherry-pick contribution
+  bind(GitCherryPickContribution).toSelf().inSingletonScope();
 }

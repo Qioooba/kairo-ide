@@ -32,6 +32,9 @@ let theiaPort: number = 0;
 let mainWindow: BrowserWindow | null = null;
 let isQuitting = false;
 
+// Track child process exit codes for diagnostics.
+const childExitCodes: Map<string, { code: number | null; signal: string | null }> = new Map();
+
 // File-based logger. Electron on Windows detaches from the parent's
 // stdout when launched as a GUI app, which makes `pnpm start | tee`
 // unreliable for debugging. This mirrors every console.log/warn/error
@@ -73,6 +76,54 @@ function initFileLogger(): void {
   console.info = wrap(console.info);
 }
 
+// ─── Startup Validation ──────────────────────────────────────
+
+/**
+ * Validates the runtime environment before launching child processes.
+ * Returns an array of warning messages (non-fatal) or throws on fatal errors.
+ */
+function validateStartup(): string[] {
+  const warnings: string[] = [];
+
+  // 1. Node.js version check — Electron 39 ships Node 22, we require >= 20.10
+  const nodeMajor = parseInt(process.versions.node.split('.')[0], 10);
+  if (isNaN(nodeMajor) || nodeMajor < 20) {
+    throw new Error(
+      `Unsupported Node.js version: ${process.versions.node}. ` +
+      `Kairo IDE requires Node.js >= 20.10.0.`
+    );
+  }
+
+  // 2. Platform check
+  if (!['win32', 'darwin', 'linux'].includes(process.platform)) {
+    throw new Error(`Unsupported platform: ${process.platform}.`);
+  }
+
+  // 3. Architecture check (warn on 32-bit)
+  if (process.arch === 'ia32') {
+    warnings.push('32-bit architecture detected; Kairo IDE is optimized for 64-bit.');
+  }
+
+  // 4. Validate agent path if explicitly set
+  if (process.env.KAIRO_AGENT_PATH) {
+    if (!fs.existsSync(process.env.KAIRO_AGENT_PATH)) {
+      throw new Error(
+        `KAIRO_AGENT_PATH is set but the binary does not exist: ${process.env.KAIRO_AGENT_PATH}`
+      );
+    }
+  }
+
+  // 5. Validate data directory writability
+  const userDataPath = app.getPath('userData');
+  try {
+    fs.accessSync(userDataPath, fs.constants.W_OK);
+  } catch {
+    warnings.push(`User data directory is not writable: ${userDataPath}`);
+  }
+
+  return warnings;
+}
+
 // ─── Secret Generation ────────────────────────────────────────
 
 function generateSecret(): string {
@@ -111,7 +162,7 @@ function resolveAgentPath(): string {
   throw new Error(
     `Cannot locate kairo-runtime binary in dev mode. Searched in: ${devDir} ` +
     `(candidates: ${candidates.join(', ')}). Either run the desktop prebuild ` +
-    `(pnpm --filter @kairo/desktop build) or set KAIRO_AGENT_PATH to the binary location.`
+    `(pnpm --filter @kairo/desktop prebuild) or set KAIRO_AGENT_PATH to the binary location.`
   );
 }
 
@@ -203,8 +254,11 @@ async function startAgent(dataDir: string): Promise<{ port: number; secret: stri
   });
 
   agentProcess.on('exit', (code: number | null, signal: string | null) => {
+    childExitCodes.set('agent', { code, signal });
     if (!isQuitting) {
       console.error(`[kairo] Agent exited unexpectedly with code ${code}, signal ${signal}`);
+    } else {
+      console.log(`[kairo] Agent exited with code ${code}, signal ${signal}`);
     }
     agentProcess = null;
   });
@@ -372,8 +426,11 @@ async function startTheiaBackend(): Promise<number> {
   });
 
   theiaProcess.on('exit', (code: number | null, signal: string | null) => {
+    childExitCodes.set('theia', { code, signal });
     if (!isQuitting) {
       console.error(`[kairo] Theia backend exited unexpectedly with code ${code}, signal ${signal}`);
+    } else {
+      console.log(`[kairo] Theia backend exited with code ${code}, signal ${signal}`);
     }
     theiaProcess = null;
   });
@@ -561,6 +618,15 @@ if (!gotLock) {
   });
 
   app.on('ready', async () => {
+    // Set the app version so the preload script can expose it.
+    process.env.KAIRO_APP_VERSION = app.getVersion();
+
+    // Run startup validation before launching child processes.
+    const warnings = validateStartup();
+    for (const w of warnings) {
+      console.warn(`[kairo] startup warning: ${w}`);
+    }
+
     // Set CSP before creating any windows.
     app.on('session-created', (session) => {
       session.webRequest.onHeadersReceived((details, callback) => {
@@ -616,6 +682,21 @@ if (!gotLock) {
 
   app.on('before-quit', (event) => {
     isQuitting = true;
+
+    // Log child process exit codes for diagnostics.
+    flog(`[kairo] shutdown initiated; child exit codes: ${JSON.stringify([...childExitCodes.entries()])}`);
+
+    // Detect zombie processes: if a child process is still alive after
+    // a previous stop attempt, force-kill it.
+    if (agentProcess && !agentProcess.killed) {
+      flog('[kairo] zombie agent detected; force-killing before quit');
+      killProcessTree(agentProcess, 'SIGKILL');
+    }
+    if (theiaProcess && !theiaProcess.killed) {
+      flog('[kairo] zombie theia detected; force-killing before quit');
+      killProcessTree(theiaProcess, 'SIGKILL');
+    }
+
     // Wait for child processes to exit cleanly before quitting.
     // Electron will wait for this event handler to complete.
     stopTheiaBackend();
@@ -649,7 +730,8 @@ if (!gotLock) {
 }
 
 // Best-effort cleanup on process exit
-process.on('exit', () => {
+process.on('exit', (code) => {
+  flog(`[kairo] main process exiting with code ${code}; child exit codes: ${JSON.stringify([...childExitCodes.entries()])}`);
   if (agentProcess && !agentProcess.killed) {
     try { agentProcess.kill('SIGKILL'); } catch { /* already gone */ }
   }

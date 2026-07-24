@@ -14,6 +14,13 @@ import { ILogger } from '@theia/core/lib/common/logger';
 import { MessageService } from '@theia/core/lib/common/message-service';
 import { StatusBar, StatusBarAlignment } from '@theia/core/lib/browser';
 
+/** Chrome's non-standard performance.memory API. */
+interface PerformanceMemory {
+  usedJSHeapSize: number;
+  totalJSHeapSize: number;
+  jsHeapSizeLimit: number;
+}
+
 /** A single performance sample. */
 export interface PerfSample {
   timestamp: number;
@@ -218,8 +225,8 @@ export class KairoPerfSampler {
 
   protected measureHeapMemory(): number {
     // Use performance.memory if available (Chrome only)
-    if (typeof performance !== 'undefined' && (performance as any).memory) {
-      const mem = (performance as any).memory;
+    if (typeof performance !== 'undefined' && (performance as unknown as { memory?: PerformanceMemory }).memory) {
+      const mem = (performance as unknown as { memory: PerformanceMemory }).memory;
       return mem.usedJSHeapSize / (1024 * 1024);
     }
     return 0;
@@ -227,8 +234,8 @@ export class KairoPerfSampler {
 
   protected measureRSSMemory(): number {
     // Estimate RSS from performance.memory.totalJSHeapSize
-    if (typeof performance !== 'undefined' && (performance as any).memory) {
-      const mem = (performance as any).memory;
+    if (typeof performance !== 'undefined' && (performance as unknown as { memory?: PerformanceMemory }).memory) {
+      const mem = (performance as unknown as { memory: PerformanceMemory }).memory;
       return mem.totalJSHeapSize / (1024 * 1024);
     }
     return 0;

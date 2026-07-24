@@ -11,6 +11,14 @@
 // we can call the backend service directly. In a real
 // remote scenario, the Theia messaging layer provides a
 // JsonRpcProxy that bridges the two.
+//
+// Connection lifecycle:
+//   - The client monitors the backend state and emits events
+//     for disconnection/reconnection.
+//   - When the backend disconnects unexpectedly, the client
+//     enters a "reconnecting" state and notifies listeners.
+//   - The JavaLanguageServerLifecycle handles the actual
+//     restart logic based on these events.
 
 import { injectable, inject, optional, postConstruct } from '@theia/core/shared/inversify';
 import { ILogger } from '@theia/core/lib/common/logger';
@@ -42,6 +50,19 @@ import {
   LSPInlayHint,
 } from '../common/lsp-protocol';
 
+/** Connection status for the language client. */
+export type ClientConnectionStatus = 'connected' | 'disconnected' | 'reconnecting';
+
+/** Backend event forwarded from JDT LS. */
+interface BackendEvent {
+  kind: 'state' | 'log' | 'diagnostics' | 'message' | 'progress' | 'initialized' | 'exit';
+  state?: JdtLsState;
+  log?: { level: 'stdout' | 'stderr'; line: string };
+  diagnostics?: LSPPublishDiagnosticsParams;
+  message?: string;
+  progress?: LSPProgressParams;
+}
+
 @injectable()
 export class JavaLanguageClient implements JdtLsFrontendClient, Disposable {
   @inject(ILogger)
@@ -62,7 +83,11 @@ export class JavaLanguageClient implements JdtLsFrontendClient, Disposable {
   readonly onLog: Event<{ level: 'stdout' | 'stderr'; line: string }> = this.onLogEmitter.event;
   protected readonly onProgressEmitter = new Emitter<LSPProgressParams>();
   readonly onProgress: Event<LSPProgressParams> = this.onProgressEmitter.event;
+  protected readonly onConnectionStatusEmitter = new Emitter<ClientConnectionStatus>();
+  /** Emitted when the client's connection status changes. */
+  readonly onConnectionStatus: Event<ClientConnectionStatus> = this.onConnectionStatusEmitter.event;
   protected subs: Disposable[] = [];
+
   /**
    * JSON-RPC proxy to the backend-hosted JdtLsService. Created
    * lazily; undefined in single-process mode (unit tests). If a
@@ -72,12 +97,21 @@ export class JavaLanguageClient implements JdtLsFrontendClient, Disposable {
   protected rpcProxy: JdtLsBackendService | undefined;
   protected rpcFailed = false;
 
+  /** Connection status tracking. */
+  protected connectionStatus: ClientConnectionStatus = 'disconnected';
+  private lastKnownState: JdtLsState = 'uninitialized';
+
   @postConstruct()
   protected init(): void {
     this.logger.info('[JavaLanguageClient] initialised');
     this.subs.push(
       this.backend.onEvent(e => this.forwardBackendEvent(e)),
     );
+  }
+
+  /** Returns the current connection status. */
+  getConnectionStatus(): ClientConnectionStatus {
+    return this.connectionStatus;
   }
 
   /** Static helper for the messaging layer. */
@@ -396,9 +430,11 @@ export class JavaLanguageClient implements JdtLsFrontendClient, Disposable {
     this.onProgressEmitter.fire(params);
   }
 
-  protected forwardBackendEvent(e: any): void {
+  protected forwardBackendEvent(e: BackendEvent): void {
     if (e.kind === 'state' && e.state) {
-      this.onStateEmitter.fire(e.state as JdtLsState);
+      const state = e.state as JdtLsState;
+      this.updateConnectionStatus(state);
+      this.onStateEmitter.fire(state);
     } else if (e.kind === 'log' && e.log) {
       this.onLogEmitter.fire(e.log);
     } else if (e.kind === 'diagnostics' && e.diagnostics) {
@@ -407,6 +443,38 @@ export class JavaLanguageClient implements JdtLsFrontendClient, Disposable {
       this.logger.info(`[JavaLanguageClient] backend: ${e.message}`);
     } else if (e.kind === 'progress' && e.progress) {
       this.onProgressEmitter.fire(e.progress);
+    }
+  }
+
+  /** Update connection status based on backend state changes. */
+  private updateConnectionStatus(newState: JdtLsState): void {
+    const prev = this.connectionStatus;
+    this.lastKnownState = newState;
+
+    switch (newState) {
+      case 'ready':
+        this.connectionStatus = 'connected';
+        break;
+      case 'crashed':
+      case 'failed':
+        this.connectionStatus = 'disconnected';
+        break;
+      case 'starting':
+      case 'initializing':
+        if (this.connectionStatus === 'disconnected') {
+          this.connectionStatus = 'reconnecting';
+        }
+        break;
+      case 'uninitialized':
+      case 'stopping':
+      case 'stopped':
+        this.connectionStatus = 'disconnected';
+        break;
+    }
+
+    if (this.connectionStatus !== prev) {
+      this.logger.info(`[JavaLanguageClient] connection status: ${prev} → ${this.connectionStatus}`);
+      this.onConnectionStatusEmitter.fire(this.connectionStatus);
     }
   }
 

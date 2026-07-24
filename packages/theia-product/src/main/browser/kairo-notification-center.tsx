@@ -298,14 +298,19 @@ export class KairoNotificationCenterContribution
   protected renderStatusBarEntry(): void {
     const unread = this.service.getUnreadCount();
     const badge = unread > 0 ? ` ${unread}` : '';
+    const label = unread > 0
+      ? `${unread} unread notification${unread > 1 ? 's' : ''}. Click to open.`
+      : 'No notifications. Click to open.';
     this.statusBar.setElement('kairo.notifications', {
       text: `$(bell)${badge}`,
-      tooltip: unread > 0
-        ? `${unread} unread notification${unread > 1 ? 's' : ''}. Click to open.`
-        : 'No notifications. Click to open.',
+      tooltip: label,
       alignment: StatusBarAlignment.RIGHT,
       priority: 50,
       command: KairoNotificationCommands.TOGGLE.id,
+      accessibilityInformation: {
+        label: `Notifications. ${label}`,
+        role: 'button',
+      },
     });
   }
 

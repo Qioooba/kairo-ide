@@ -14,6 +14,7 @@ import {
 } from '@theia/core/lib/common';
 import { FileDialogService } from '@theia/filesystem/lib/browser';
 import { RuntimeConnectionService } from '@kairo/runtime-extension';
+import type { Endpoint } from '@kairo/protocol';
 
 export namespace KairoDiagnosticCommands {
   export const GENERATE_DIAGNOSTIC = {
@@ -53,7 +54,7 @@ export class KairoDiagnosticCommandContribution implements CommandContribution {
 
       // Request the runtime agent to generate the bundle
       const result = await this.runtime.request(
-        'POST /api/v1/diagnostics/bundle' as any,
+        'POST /api/v1/diagnostics/bundle' as Endpoint,
         undefined,
         { noRetry: true },
       ) as unknown as {
@@ -96,7 +97,7 @@ export class KairoDiagnosticCommandContribution implements CommandContribution {
 
       // Download the bundle from the agent
       await this.runtime.request(
-        'POST /api/v1/diagnostics/download' as any,
+        'POST /api/v1/diagnostics/download' as Endpoint,
         { bundlePath, savePath: saveUri.path.toString() },
         { noRetry: true },
       );

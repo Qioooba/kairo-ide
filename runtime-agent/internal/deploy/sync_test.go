@@ -166,7 +166,7 @@ func TestPreflight_AbsoluteTarget(t *testing.T) {
 		OwnerToken:     validOwnerToken(),
 		Mode:           domain.DeployModeMerge,
 		Entries: []domain.DeployEntry{
-			{Source: filepath.Join(srcRoot, "evil.txt"), Target: outsideRoot + "/evil.txt", Action: domain.DeployActionAdd},
+			{Source: filepath.Join(srcRoot, "evil.txt"), Target: filepath.ToSlash(outsideRoot) + "/evil.txt", Action: domain.DeployActionAdd},
 		},
 	}
 
@@ -174,8 +174,8 @@ func TestPreflight_AbsoluteTarget(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for absolute target, got nil")
 	}
-	if !errors.Is(err, pathpolicy.ErrAbsolutePath) {
-		t.Errorf("expected ErrAbsolutePath, got: %v", err)
+	if !errors.Is(err, pathpolicy.ErrAbsolutePath) && !errors.Is(err, pathpolicy.ErrVolumeName) && !errors.Is(err, pathpolicy.ErrBackslash) {
+		t.Errorf("expected path policy error, got: %v", err)
 	}
 }
 
@@ -936,4 +936,464 @@ func TestPreflight_SourceOutsideAllowedDirs(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(deployRoot, "leaked.txt")); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("file must not be deployed when source is outside allowed dirs")
 	}
+}
+
+func TestNewDeployEngineWithBuilder(t *testing.T) {
+	builder := NewPlanBuilder().WithProtectedPaths([]string{".kairo", ".custom"})
+	engine := NewDeployEngineWithBuilder(builder)
+	if engine == nil {
+		t.Fatal("NewDeployEngineWithBuilder returned nil")
+	}
+}
+
+func TestWithProtectedPaths(t *testing.T) {
+	builder := NewPlanBuilder()
+	builder.WithProtectedPaths([]string{".kairo", ".custom"})
+	// Verify the builder is still usable
+	_, deployRoot, outsideRoot := setupTestEnv(t)
+	defer verifySentinel(t, outsideRoot)
+
+	srcRoot := filepath.Join(t.TempDir(), "src")
+	os.MkdirAll(srcRoot, 0755)
+	writeTestFile(t, srcRoot, "a.txt", "content")
+
+	engine := NewDeployEngineWithBuilder(builder)
+	plan := domain.DeployPlan{
+		DeploymentRoot: deployRoot,
+		OwnerToken:     validOwnerToken(),
+		Mode:           domain.DeployModeMerge,
+		Entries: []domain.DeployEntry{
+			{Source: filepath.Join(srcRoot, "a.txt"), Target: "a.txt", Action: domain.DeployActionAdd},
+		},
+	}
+
+	result, err := executePlan(t, engine, plan, []string{srcRoot})
+	if err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+	if result.Failed != 0 {
+		t.Errorf("expected 0 failures, got %d", result.Failed)
+	}
+}
+
+func TestPreflight_EmptyDeploymentRoot(t *testing.T) {
+	srcRoot, _, _ := setupTestEnv(t)
+
+	engine := NewDeployEngine()
+	plan := domain.DeployPlan{
+		DeploymentRoot: "",
+		OwnerToken:     validOwnerToken(),
+		Mode:           domain.DeployModeMerge,
+		Entries: []domain.DeployEntry{
+			{Source: filepath.Join(srcRoot, "a.txt"), Target: "a.txt", Action: domain.DeployActionAdd},
+		},
+	}
+
+	_, err := executePlan(t, engine, plan, []string{srcRoot})
+	if err == nil {
+		t.Fatal("expected error for empty deployment root")
+	}
+}
+
+func TestPreflight_RootIsFile(t *testing.T) {
+	srcRoot, _, outsideRoot := setupTestEnv(t)
+	defer verifySentinel(t, outsideRoot)
+
+	base := t.TempDir()
+	fileAsRoot := filepath.Join(base, "notadir")
+	os.WriteFile(fileAsRoot, []byte("data"), 0644)
+
+	writeTestFile(t, srcRoot, "a.txt", "content")
+
+	engine := NewDeployEngine()
+	plan := domain.DeployPlan{
+		DeploymentRoot: fileAsRoot,
+		OwnerToken:     validOwnerToken(),
+		Mode:           domain.DeployModeMerge,
+		Entries: []domain.DeployEntry{
+			{Source: filepath.Join(srcRoot, "a.txt"), Target: "a.txt", Action: domain.DeployActionAdd},
+		},
+	}
+
+	_, err := executePlan(t, engine, plan, []string{srcRoot})
+	if err == nil {
+		t.Fatal("expected error when root is a file, not a directory")
+	}
+}
+
+func TestPreflight_DeployRootAlreadyExists_NotDir(t *testing.T) {
+	srcRoot, _, outsideRoot := setupTestEnv(t)
+	defer verifySentinel(t, outsideRoot)
+
+	base := t.TempDir()
+	fileAsRoot := filepath.Join(base, "notadir")
+	os.WriteFile(fileAsRoot, []byte("data"), 0644)
+
+	writeTestFile(t, srcRoot, "a.txt", "content")
+
+	engine := NewDeployEngine()
+	plan := domain.DeployPlan{
+		DeploymentRoot: fileAsRoot,
+		OwnerToken:     validOwnerToken(),
+		Mode:           domain.DeployModeMerge,
+		Entries: []domain.DeployEntry{
+			{Source: filepath.Join(srcRoot, "a.txt"), Target: "a.txt", Action: domain.DeployActionAdd},
+		},
+	}
+
+	_, err := executePlan(t, engine, plan, []string{srcRoot})
+	if err == nil {
+		t.Fatal("expected error for file as deployment root")
+	}
+}
+
+func TestPreflight_MirrorModeNotKairoOwned(t *testing.T) {
+	srcRoot, _, outsideRoot := setupTestEnv(t)
+	defer verifySentinel(t, outsideRoot)
+
+	base := t.TempDir()
+	nonKairoRoot := filepath.Join(base, "not-kairo-owned")
+	os.MkdirAll(nonKairoRoot, 0755)
+
+	writeTestFile(t, srcRoot, "a.txt", "content")
+
+	engine := NewDeployEngine()
+	plan := domain.DeployPlan{
+		DeploymentRoot: nonKairoRoot,
+		OwnerToken:     validOwnerToken(),
+		Mode:           domain.DeployModeMirror,
+		Entries: []domain.DeployEntry{
+			{Source: filepath.Join(srcRoot, "a.txt"), Target: "a.txt", Action: domain.DeployActionAdd},
+		},
+	}
+
+	_, err := executePlan(t, engine, plan, []string{srcRoot})
+	if err == nil {
+		t.Fatal("expected error for mirror mode on non-Kairo-owned root")
+	}
+}
+
+func TestExecute_DeleteNonExistent(t *testing.T) {
+	_, deployRoot, outsideRoot := setupTestEnv(t)
+	defer verifySentinel(t, outsideRoot)
+
+	engine := NewDeployEngine()
+	plan := domain.DeployPlan{
+		DeploymentRoot: deployRoot,
+		OwnerToken:     validOwnerToken(),
+		Mode:           domain.DeployModeMerge,
+		Entries: []domain.DeployEntry{
+			{Source: "", Target: "nonexistent.txt", Action: domain.DeployActionDelete},
+		},
+	}
+
+	result, err := executePlan(t, engine, plan, nil)
+	if err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+	if result.Failed != 0 {
+		t.Errorf("expected 0 failures for deleting nonexistent file, got %d", result.Failed)
+	}
+}
+
+func TestExecute_DeleteNonEmptyDirectory(t *testing.T) {
+	_, deployRoot, outsideRoot := setupTestEnv(t)
+	defer verifySentinel(t, outsideRoot)
+
+	nonEmptyDir := filepath.Join(deployRoot, "nonempty")
+	os.MkdirAll(nonEmptyDir, 0755)
+	os.WriteFile(filepath.Join(nonEmptyDir, "child.txt"), []byte("child"), 0644)
+
+	engine := NewDeployEngine()
+	plan := domain.DeployPlan{
+		DeploymentRoot: deployRoot,
+		OwnerToken:     validOwnerToken(),
+		Mode:           domain.DeployModeMerge,
+		Entries: []domain.DeployEntry{
+			{Source: "", Target: "nonempty", Action: domain.DeployActionDelete},
+		},
+	}
+
+	result, err := executePlan(t, engine, plan, nil)
+	if err == nil {
+		t.Fatal("expected error for non-empty dir delete")
+	}
+	if result.Failed < 1 {
+		t.Errorf("expected at least 1 failure for non-empty dir delete, got %d", result.Failed)
+	}
+}
+
+func TestExecute_DeleteSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink tests require admin on Windows")
+	}
+	_, deployRoot, outsideRoot := setupTestEnv(t)
+	defer verifySentinel(t, outsideRoot)
+
+	symlinkPath := filepath.Join(deployRoot, "symlink")
+	os.Symlink(outsideRoot, symlinkPath)
+
+	engine := NewDeployEngine()
+	plan := domain.DeployPlan{
+		DeploymentRoot: deployRoot,
+		OwnerToken:     validOwnerToken(),
+		Mode:           domain.DeployModeMerge,
+		Entries: []domain.DeployEntry{
+			{Source: "", Target: "symlink", Action: domain.DeployActionDelete},
+		},
+	}
+
+	result, err := executePlan(t, engine, plan, nil)
+	if err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+	if result.Failed != 0 {
+		t.Errorf("expected 0 failures for symlink delete, got %d", result.Failed)
+	}
+}
+
+func TestExecute_DeleteWithOutsideRootEscape(t *testing.T) {
+	_, deployRoot, outsideRoot := setupTestEnv(t)
+	defer verifySentinel(t, outsideRoot)
+
+	engine := NewDeployEngine()
+	plan := domain.DeployPlan{
+		DeploymentRoot: deployRoot,
+		OwnerToken:     validOwnerToken(),
+		Mode:           domain.DeployModeMerge,
+		Entries: []domain.DeployEntry{
+			{Source: "", Target: filepath.ToSlash(outsideRoot) + "/evil.txt", Action: domain.DeployActionDelete},
+		},
+	}
+
+	_, err := executePlan(t, engine, plan, nil)
+	if err == nil {
+		t.Fatal("expected error for delete target outside root")
+	}
+}
+
+func TestExecute_ReplaceExistingFile(t *testing.T) {
+	srcRoot, deployRoot, outsideRoot := setupTestEnv(t)
+	defer verifySentinel(t, outsideRoot)
+
+	writeTestFile(t, deployRoot, "existing.txt", "old-content")
+	writeTestFile(t, srcRoot, "new.txt", "new-content")
+
+	engine := NewDeployEngine()
+	plan := domain.DeployPlan{
+		DeploymentRoot: deployRoot,
+		OwnerToken:     validOwnerToken(),
+		Mode:           domain.DeployModeMerge,
+		Entries: []domain.DeployEntry{
+			{Source: filepath.Join(srcRoot, "new.txt"), Target: "existing.txt", Action: domain.DeployActionAdd},
+		},
+	}
+
+	result, err := executePlan(t, engine, plan, []string{srcRoot})
+	if err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+	if result.Failed != 0 {
+		t.Errorf("expected 0 failures, got %d", result.Failed)
+	}
+
+	data, err := os.ReadFile(filepath.Join(deployRoot, "existing.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "new-content" {
+		t.Errorf("expected new-content, got %q", string(data))
+	}
+}
+
+func TestExecute_CustomFileMode(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("os.Chmod does not preserve Unix-style permission bits on Windows")
+	}
+	srcRoot, deployRoot, outsideRoot := setupTestEnv(t)
+	defer verifySentinel(t, outsideRoot)
+
+	writeTestFile(t, srcRoot, "exec.txt", "#!/bin/sh\necho hello")
+
+	engine := NewDeployEngine()
+	plan := domain.DeployPlan{
+		DeploymentRoot: deployRoot,
+		OwnerToken:     validOwnerToken(),
+		Mode:           domain.DeployModeMerge,
+		Entries: []domain.DeployEntry{
+			{Source: filepath.Join(srcRoot, "exec.txt"), Target: "exec.txt", Mode: 0755, Action: domain.DeployActionAdd},
+		},
+	}
+
+	result, err := executePlan(t, engine, plan, []string{srcRoot})
+	if err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+	if result.Failed != 0 {
+		t.Errorf("expected 0 failures, got %d", result.Failed)
+	}
+
+	info, err := os.Stat(filepath.Join(deployRoot, "exec.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0755 {
+		t.Errorf("expected 0755 permissions, got %o", info.Mode().Perm())
+	}
+}
+
+func TestExecute_EmptySourceAllowedDirs(t *testing.T) {
+	srcRoot, deployRoot, outsideRoot := setupTestEnv(t)
+	defer verifySentinel(t, outsideRoot)
+
+	writeTestFile(t, srcRoot, "a.txt", "content")
+
+	engine := NewDeployEngine()
+	plan := domain.DeployPlan{
+		DeploymentRoot: deployRoot,
+		OwnerToken:     validOwnerToken(),
+		Mode:           domain.DeployModeMerge,
+		Entries: []domain.DeployEntry{
+			{Source: filepath.Join(srcRoot, "a.txt"), Target: "a.txt", Action: domain.DeployActionAdd},
+		},
+	}
+
+	// source not in allowed dirs (empty)
+	_, err := executePlan(t, engine, plan, []string{})
+	if err == nil {
+		t.Fatal("expected error when source not in allowed dirs")
+	}
+}
+
+func TestExecute_EmptySource(t *testing.T) {
+	_, deployRoot, outsideRoot := setupTestEnv(t)
+	defer verifySentinel(t, outsideRoot)
+
+	engine := NewDeployEngine()
+	plan := domain.DeployPlan{
+		DeploymentRoot: deployRoot,
+		OwnerToken:     validOwnerToken(),
+		Mode:           domain.DeployModeMerge,
+		Entries: []domain.DeployEntry{
+			{Source: "", Target: "a.txt", Action: domain.DeployActionAdd},
+		},
+	}
+
+	_, err := executePlan(t, engine, plan, []string{deployRoot})
+	if err == nil {
+		t.Fatal("expected error for empty source")
+	}
+}
+
+func TestExecute_DirectoryAsSource(t *testing.T) {
+	srcRoot, deployRoot, outsideRoot := setupTestEnv(t)
+	defer verifySentinel(t, outsideRoot)
+
+	subDir := filepath.Join(srcRoot, "subdir")
+	os.MkdirAll(subDir, 0755)
+
+	engine := NewDeployEngine()
+	plan := domain.DeployPlan{
+		DeploymentRoot: deployRoot,
+		OwnerToken:     validOwnerToken(),
+		Mode:           domain.DeployModeMerge,
+		Entries: []domain.DeployEntry{
+			{Source: subDir, Target: "subdir", Action: domain.DeployActionAdd},
+		},
+	}
+
+	_, err := executePlan(t, engine, plan, []string{srcRoot})
+	if err == nil {
+		t.Fatal("expected error for directory as source")
+	}
+}
+
+func TestExecute_SourceSymlinkInsideAllowed(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink tests require admin on Windows")
+	}
+	srcRoot, deployRoot, outsideRoot := setupTestEnv(t)
+	defer verifySentinel(t, outsideRoot)
+
+	targetFile := filepath.Join(srcRoot, "target.txt")
+	os.WriteFile(targetFile, []byte("target"), 0644)
+	symlinkSource := filepath.Join(srcRoot, "link.txt")
+	os.Symlink(targetFile, symlinkSource)
+
+	engine := NewDeployEngine()
+	plan := domain.DeployPlan{
+		DeploymentRoot: deployRoot,
+		OwnerToken:     validOwnerToken(),
+		Mode:           domain.DeployModeMerge,
+		Entries: []domain.DeployEntry{
+			{Source: symlinkSource, Target: "deployed.txt", Action: domain.DeployActionAdd},
+		},
+	}
+
+	_, err := executePlan(t, engine, plan, []string{srcRoot})
+	if err == nil {
+		t.Fatal("expected error for source symlink")
+	}
+}
+
+func TestDeployPlan_SortEntries(t *testing.T) {
+	srcRoot, deployRoot, outsideRoot := setupTestEnv(t)
+	defer verifySentinel(t, outsideRoot)
+
+	writeTestFile(t, srcRoot, "c.txt", "c")
+	writeTestFile(t, srcRoot, "a.txt", "a")
+	writeTestFile(t, srcRoot, "b.txt", "b")
+
+	engine := NewDeployEngine()
+	plan := domain.DeployPlan{
+		DeploymentRoot: deployRoot,
+		OwnerToken:     validOwnerToken(),
+		Mode:           domain.DeployModeMerge,
+		Entries: []domain.DeployEntry{
+			{Source: filepath.Join(srcRoot, "c.txt"), Target: "c.txt", Action: domain.DeployActionAdd},
+			{Source: filepath.Join(srcRoot, "a.txt"), Target: "a.txt", Action: domain.DeployActionAdd},
+			{Source: filepath.Join(srcRoot, "b.txt"), Target: "b.txt", Action: domain.DeployActionAdd},
+		},
+	}
+
+	result, err := executePlan(t, engine, plan, []string{srcRoot})
+	if err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+	if result.Failed != 0 {
+		t.Errorf("expected 0 failures, got %d", result.Failed)
+	}
+	if result.Succeeded != 3 {
+		t.Errorf("expected 3 succeeded, got %d", result.Succeeded)
+	}
+}
+
+func TestDeploy_DeleteSymlinkTarget(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink tests require admin on Windows")
+	}
+	_, deployRoot, outsideRoot := setupTestEnv(t)
+	defer verifySentinel(t, outsideRoot)
+
+	outsideTarget := filepath.Join(outsideRoot, "target.txt")
+	os.WriteFile(outsideTarget, []byte("outside"), 0644)
+	symlinkPath := filepath.Join(deployRoot, "link-to-outside")
+	os.Symlink(outsideTarget, symlinkPath)
+
+	engine := NewDeployEngine()
+	plan := domain.DeployPlan{
+		DeploymentRoot: deployRoot,
+		OwnerToken:     validOwnerToken(),
+		Mode:           domain.DeployModeMerge,
+		Entries: []domain.DeployEntry{
+			{Source: "", Target: "link-to-outside", Action: domain.DeployActionDelete},
+		},
+	}
+
+	_, err := executePlan(t, engine, plan, nil)
+	if err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	verifySentinel(t, outsideRoot)
 }

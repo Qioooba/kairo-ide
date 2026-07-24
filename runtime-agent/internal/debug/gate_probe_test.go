@@ -536,3 +536,371 @@ func TestGateProbeResult_JSONTags(t *testing.T) {
 		t.Error("Errors field not populated correctly")
 	}
 }
+
+// ── JDWP Version Probe Tests ────────────────────────────────────
+
+func TestProbeJDWPVersion_NoJDWPServer(t *testing.T) {
+	ctx := context.Background()
+	var mu sync.Mutex
+	var errors []string
+	addError := func(s string) {
+		mu.Lock()
+		defer mu.Unlock()
+		errors = append(errors, s)
+	}
+
+	version := probeJDWPVersion(ctx, 1, addError)
+	if version != nil {
+		t.Error("Version should be nil when no JDWP server is running")
+	}
+	if len(errors) == 0 {
+		t.Error("Should have recorded an error")
+	}
+}
+
+func TestProbeJDWPVersion_Mock(t *testing.T) {
+	// Start a mock JDWP server that responds to the handshake and version command
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	port := l.Addr().(*net.TCPAddr).Port
+
+	go func() {
+		conn, err := l.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+
+		// Read handshake
+		buf := make([]byte, 14)
+		conn.Read(buf)
+		// Write handshake response
+		conn.Write([]byte("JDWP-Handshake"))
+
+		// Read the version command packet
+		header := make([]byte, 11)
+		conn.Read(header)
+		// Reply with version data
+		// Build a reply packet: errorCode=0, then version data
+		w := NewJDWPDataWriter()
+		w.WriteString("Java Debug Wire Protocol (Reference Implementation) version 1.6")
+		w.WriteInt(1)  // jdwpMajor
+		w.WriteInt(6)  // jdwpMinor
+		w.WriteString("1.6.0_45")
+		w.WriteString("Java HotSpot(TM) Client VM")
+		replyData := w.Bytes()
+
+		// Build reply packet header
+		reply := make([]byte, 11+len(replyData))
+		// Length
+		reply[0] = byte((11 + len(replyData)) >> 24)
+		reply[1] = byte((11 + len(replyData)) >> 16)
+		reply[2] = byte((11 + len(replyData)) >> 8)
+		reply[3] = byte(11 + len(replyData))
+		// ID
+		reply[4] = 0
+		reply[5] = 0
+		reply[6] = 0
+		reply[7] = 1
+		// Flags (reply)
+		reply[8] = 0x80
+		// Error code
+		reply[9] = 0
+		reply[10] = 0
+		copy(reply[11:], replyData)
+		conn.Write(reply)
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+
+	ctx := context.Background()
+	var errors []string
+	addError := func(s string) { errors = append(errors, s) }
+
+	version := probeJDWPVersion(ctx, port, addError)
+	if version == nil {
+		t.Fatal("Version should not be nil for mock JDWP server")
+	}
+	if version.JDWPMajor != 1 {
+		t.Errorf("JDWPMajor = %d, want 1", version.JDWPMajor)
+	}
+	if version.JDWPMinor != 6 {
+		t.Errorf("JDWPMinor = %d, want 6", version.JDWPMinor)
+	}
+	if version.VMVersion != "1.6.0_45" {
+		t.Errorf("VMVersion = %q, want 1.6.0_45", version.VMVersion)
+	}
+	if version.VMName != "Java HotSpot(TM) Client VM" {
+		t.Errorf("VMName = %q", version.VMName)
+	}
+}
+
+// ── Debug Capabilities Probe Tests ──────────────────────────────
+
+func TestParseCapabilities(t *testing.T) {
+	w := NewJDWPDataWriter()
+	// 15 booleans for the standard capabilities
+	w.WriteByte(1) // canWatchFieldModification
+	w.WriteByte(1) // canWatchFieldAccess
+	w.WriteByte(0) // canGetBytecodes
+	w.WriteByte(0) // canGetSyntheticAttribute
+	w.WriteByte(1) // canGetOwnedMonitorInfo
+	w.WriteByte(1) // canGetCurrentContendedMonitor
+	w.WriteByte(0) // canGetMonitorInfo
+	w.WriteByte(1) // canRedefineClasses
+	w.WriteByte(0) // canAddMethod
+	w.WriteByte(0) // canUnrestrictedlyRedefineClasses
+	w.WriteByte(1) // canPopFrames
+	w.WriteByte(1) // canUseInstanceFilters
+	w.WriteByte(0) // canGetSourceDebugExtension
+	w.WriteByte(1) // canRequestVMDeathEvent
+	w.WriteByte(0) // canSetDefaultStratum
+	// JDWP 1.6+ extras
+	w.WriteByte(0) // canGetInstanceInfo
+	w.WriteByte(0) // canRequestMonitorEvents
+	w.WriteByte(0) // canGetMonitorFrameInfo
+	w.WriteByte(0) // canUseSourceNameFilters
+	w.WriteByte(1) // canGetConstantPool
+	w.WriteByte(1) // canForceEarlyReturn
+
+	data := w.Bytes()
+	caps, err := parseCapabilities(data)
+	if err != nil {
+		t.Fatalf("parseCapabilities failed: %v", err)
+	}
+
+	if !caps.CanWatchFieldModification {
+		t.Error("CanWatchFieldModification should be true")
+	}
+	if !caps.CanWatchFieldAccess {
+		t.Error("CanWatchFieldAccess should be true")
+	}
+	if caps.CanGetBytecodes {
+		t.Error("CanGetBytecodes should be false")
+	}
+	if !caps.CanRedefineClasses {
+		t.Error("CanRedefineClasses should be true")
+	}
+	if !caps.CanPopFrames {
+		t.Error("CanPopFrames should be true")
+	}
+	if !caps.CanGetConstantPool {
+		t.Error("CanGetConstantPool should be true")
+	}
+	if !caps.CanForceEarlyReturn {
+		t.Error("CanForceEarlyReturn should be true")
+	}
+}
+
+func TestParseCapabilities_Minimal(t *testing.T) {
+	// Only 15 booleans (JDWP 1.4 style)
+	w := NewJDWPDataWriter()
+	for i := 0; i < 15; i++ {
+		w.WriteByte(0)
+	}
+	data := w.Bytes()
+
+	caps, err := parseCapabilities(data)
+	if err != nil {
+		t.Fatalf("parseCapabilities minimal failed: %v", err)
+	}
+	if caps.CanWatchFieldAccess {
+		t.Error("CanWatchFieldAccess should be false")
+	}
+	if caps.CanGetConstantPool {
+		t.Error("CanGetConstantPool should be false when not present")
+	}
+	if caps.CanForceEarlyReturn {
+		t.Error("CanForceEarlyReturn should be false when not present")
+	}
+}
+
+func TestParseCapabilities_Truncated(t *testing.T) {
+	_, err := parseCapabilities([]byte{0x00, 0x00})
+	if err == nil {
+		t.Error("Expected error for truncated capabilities data")
+	}
+}
+
+func TestProbeDebugCapabilities_NoJDWPServer(t *testing.T) {
+	ctx := context.Background()
+	var mu sync.Mutex
+	var errors []string
+	addError := func(s string) {
+		mu.Lock()
+		defer mu.Unlock()
+		errors = append(errors, s)
+	}
+
+	caps := probeDebugCapabilities(ctx, 1, addError)
+	if caps != nil {
+		t.Error("Capabilities should be nil when no JDWP server is running")
+	}
+	if len(errors) == 0 {
+		t.Error("Should have recorded an error")
+	}
+}
+
+// ── GateProbeResult with Version and Capabilities ───────────────
+
+func TestGateProbeResult_WithVersion(t *testing.T) {
+	result := GateProbeResult{
+		Platform: "linux",
+		JDWPVersion: &JDWPVersion{
+			Description: "test",
+			JDWPMajor:   1,
+			JDWPMinor:   6,
+			VMVersion:   "1.6.0_45",
+			VMName:      "Test VM",
+		},
+	}
+
+	if result.JDWPVersion == nil {
+		t.Fatal("JDWPVersion should not be nil")
+	}
+	if result.JDWPVersion.JDWPMajor != 1 {
+		t.Errorf("JDWPMajor = %d, want 1", result.JDWPVersion.JDWPMajor)
+	}
+}
+
+func TestGateProbeResult_WithCapabilities(t *testing.T) {
+	result := GateProbeResult{
+		Platform: "linux",
+		Capabilities: &DebugCapabilities{
+			CanWatchFieldAccess: true,
+			CanPopFrames:        true,
+			CanRedefineClasses:  true,
+		},
+	}
+
+	if result.Capabilities == nil {
+		t.Fatal("Capabilities should not be nil")
+	}
+	if !result.Capabilities.CanWatchFieldAccess {
+		t.Error("CanWatchFieldAccess should be true")
+	}
+	if !result.Capabilities.CanPopFrames {
+		t.Error("CanPopFrames should be true")
+	}
+	if !result.Capabilities.CanRedefineClasses {
+		t.Error("CanRedefineClasses should be true")
+	}
+}
+
+func TestRunGate_WithVersionProbe(t *testing.T) {
+	cfg := GateProbeConfig{
+		JavaHome:    "/nonexistent/jdk",
+		TomcatHome:  "/nonexistent/tomcat",
+		DebugPort:   5005,
+		Timeout:     5 * time.Second,
+		ProbeVersion: true,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	result := RunGate(ctx, cfg)
+
+	// Version probe should not panic even when no JDWP server
+	if result.Platform == "" {
+		t.Error("Platform should not be empty")
+	}
+	// JDWPVersion should be nil since no server is running
+	if result.JDWPVersion != nil {
+		t.Error("JDWPVersion should be nil when no JDWP server")
+	}
+}
+
+func TestRunGate_WithCapabilitiesProbe(t *testing.T) {
+	cfg := GateProbeConfig{
+		JavaHome:          "/nonexistent/jdk",
+		TomcatHome:        "/nonexistent/tomcat",
+		DebugPort:         5005,
+		Timeout:           5 * time.Second,
+		ProbeCapabilities: true,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	result := RunGate(ctx, cfg)
+
+	// Capabilities probe should not panic even when no JDWP server
+	if result.Platform == "" {
+		t.Error("Platform should not be empty")
+	}
+	if result.Capabilities != nil {
+		t.Error("Capabilities should be nil when no JDWP server")
+	}
+}
+
+func TestRunGate_BothVersionAndCapabilities(t *testing.T) {
+	cfg := GateProbeConfig{
+		JavaHome:          "/nonexistent/jdk",
+		TomcatHome:        "/nonexistent/tomcat",
+		DebugPort:         5005,
+		Timeout:           5 * time.Second,
+		ProbeVersion:      true,
+		ProbeCapabilities: true,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	result := RunGate(ctx, cfg)
+
+	// Both probes should not panic
+	if result.Platform == "" {
+		t.Error("Platform should not be empty")
+	}
+	if result.JDWPVersion != nil {
+		t.Error("JDWPVersion should be nil when no JDWP server")
+	}
+	if result.Capabilities != nil {
+		t.Error("Capabilities should be nil when no JDWP server")
+	}
+}
+
+func TestDebugCapabilities_AllFields(t *testing.T) {
+	caps := &DebugCapabilities{
+		CanWatchFieldAccess:                true,
+		CanWatchFieldModification:          true,
+		CanGetBytecodes:                    false,
+		CanGetSyntheticAttribute:           false,
+		CanGetOwnedMonitorInfo:             true,
+		CanGetCurrentContendedMonitor:      true,
+		CanGetMonitorInfo:                  false,
+		CanRedefineClasses:                 true,
+		CanAddMethod:                       false,
+		CanUnrestrictedlyRedefineClasses:   false,
+		CanPopFrames:                       true,
+		CanUseInstanceFilters:              true,
+		CanGetSourceDebugExtension:         false,
+		CanRequestVMDeathEvent:             true,
+		CanSetDefaultStratum:               false,
+		CanGetConstantPool:                 true,
+		CanForceEarlyReturn:                true,
+	}
+
+	// Verify all fields are accessible
+	_ = caps.CanWatchFieldAccess
+	_ = caps.CanWatchFieldModification
+	_ = caps.CanGetBytecodes
+	_ = caps.CanGetSyntheticAttribute
+	_ = caps.CanGetOwnedMonitorInfo
+	_ = caps.CanGetCurrentContendedMonitor
+	_ = caps.CanGetMonitorInfo
+	_ = caps.CanRedefineClasses
+	_ = caps.CanAddMethod
+	_ = caps.CanUnrestrictedlyRedefineClasses
+	_ = caps.CanPopFrames
+	_ = caps.CanUseInstanceFilters
+	_ = caps.CanGetSourceDebugExtension
+	_ = caps.CanRequestVMDeathEvent
+	_ = caps.CanSetDefaultStratum
+	_ = caps.CanGetConstantPool
+	_ = caps.CanForceEarlyReturn
+}

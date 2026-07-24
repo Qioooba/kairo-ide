@@ -10,6 +10,7 @@
 import { injectable, inject, postConstruct as _postConstruct } from '@theia/core/shared/inversify';
 import { Emitter, Event } from '@theia/core/lib/common/event';
 import { RuntimeConnectionService } from '@kairo/runtime-extension';
+import type { Endpoint } from '@kairo/protocol';
 
 /** A discovered JVM process that can be attached to via JDWP. */
 export interface JvmProcess {
@@ -82,7 +83,7 @@ export class JavaJvmProcessLister {
   protected async discoverJvmProcesses(): Promise<JvmProcess[]> {
     try {
       const result = await this.runtime.request(
-        'POST /api/v1/jvm/list' as any,
+        'POST /api/v1/jvm/list' as Endpoint,
         undefined,
         { noRetry: true },
       ) as unknown as { processes: JvmProcess[] } | undefined;

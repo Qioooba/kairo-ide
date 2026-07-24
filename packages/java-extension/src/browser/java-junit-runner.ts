@@ -13,9 +13,12 @@
 import { injectable, inject } from '@theia/core/shared/inversify';
 import { Emitter, Event } from '@theia/core/lib/common/event';
 import { ILogger } from '@theia/core/lib/common/logger';
+import { Endpoint } from '@kairo/protocol';
 import { RuntimeConnectionService } from '@kairo/runtime-extension';
 import { JavaLanguageClient } from './java-language-client';
 import type { LSPSymbolInformation } from '../common/lsp-protocol';
+import { FileService } from '@theia/filesystem/lib/browser/file-service';
+import { URI } from '@theia/core/lib/common/uri';
 
 /** A single test item (class or method). */
 export interface JUnitTestItem {
@@ -95,6 +98,7 @@ export class JavaJUnitRunner {
   @inject(ILogger) protected readonly logger!: ILogger;
   @inject(JavaLanguageClient) protected readonly client!: JavaLanguageClient;
   @inject(RuntimeConnectionService) protected readonly runtime!: RuntimeConnectionService;
+  @inject(FileService) protected readonly fileService!: FileService;
 
   protected readonly onDidDiscoverTestsEmitter = new Emitter<JUnitTestItem[]>();
   readonly onDidDiscoverTests: Event<JUnitTestItem[]> = this.onDidDiscoverTestsEmitter.event;
@@ -171,6 +175,131 @@ export class JavaJUnitRunner {
   }
 
   /**
+   * Discover JUnit tests by parsing source files directly.
+   * Fallback for when JDT LS is not available.
+   *
+   * Scans Java files in the workspace for @Test annotations
+   * using regex-based parsing.
+   */
+  async discoverTestsFromFiles(rootPath: string): Promise<JUnitTestItem[]> {
+    const items: JUnitTestItem[] = [];
+    const seenIds = new Set<string>();
+
+    try {
+      const rootUri = URI.fromFilePath(rootPath);
+      const javaFiles = await this.findJavaFiles(rootUri);
+
+      for (const fileUri of javaFiles) {
+        try {
+          const content = await this.fileService.readFile(fileUri);
+          const text = content.value.toString();
+          const filePath = fileUri.path.toString();
+
+          // Extract class name from file path
+          const className = this.extractClassNameFromPath(filePath);
+          if (!className) continue;
+
+          // Find @Test annotated methods
+          const testMethodRegex = /@Test\s*(?:\([^)]*\))?\s*\n\s*(?:public|protected|private)?\s+\w+\s+(\w+)\s*\(/g;
+          let match: RegExpExecArray | null;
+          let hasTests = false;
+
+          while ((match = testMethodRegex.exec(text)) !== null) {
+            hasTests = true;
+            const methodName = match[1];
+            const id = `method:${className}#${methodName}`;
+            if (seenIds.has(id)) continue;
+            seenIds.add(id);
+
+            // Calculate line number
+            const line = text.substring(0, match.index).split('\n').length - 1;
+
+            items.push({
+              id,
+              kind: 'method',
+              className,
+              methodName,
+              label: `${className}.${methodName}`,
+              filePath: fileUri.toString(),
+              line,
+            });
+          }
+
+          if (hasTests && !seenIds.has(`class:${className}`)) {
+            seenIds.add(`class:${className}`);
+            items.push({
+              id: `class:${className}`,
+              kind: 'class',
+              className,
+              label: className,
+              filePath: fileUri.toString(),
+            });
+          }
+        } catch {
+          // Skip files that can't be read
+        }
+      }
+    } catch (error) {
+      this.logger.error(`[JUnit] File-based discovery failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+
+    if (items.length === 0) {
+      this.logger.info('[JUnit] No test classes discovered from file scanning');
+    }
+
+    this.onDidDiscoverTestsEmitter.fire(items);
+    return items;
+  }
+
+  /**
+   * Recursively find all .java files under a root URI.
+   */
+  protected async findJavaFiles(rootUri: URI): Promise<URI[]> {
+    const javaFiles: URI[] = [];
+    const stack = [rootUri];
+
+    while (stack.length > 0) {
+      const currentUri = stack.pop()!;
+      try {
+        const stat = await this.fileService.resolve(currentUri);
+        if (stat.isDirectory) {
+          for (const child of stat.children || []) {
+            stack.push(child.resource);
+          }
+        } else if (stat.isFile && currentUri.path.toString().endsWith('.java')) {
+          javaFiles.push(currentUri);
+        }
+      } catch {
+        // Skip inaccessible directories
+      }
+    }
+
+    return javaFiles;
+  }
+
+  /**
+   * Extract a fully qualified class name from a file path.
+   */
+  protected extractClassNameFromPath(filePath: string): string | undefined {
+    // Match path like .../src/main/java/com/example/MyTest.java
+    const javaMatch = filePath.match(/src\/main\/java\/(.+)\.java$/);
+    if (javaMatch) {
+      return javaMatch[1].replace(/\//g, '.');
+    }
+    // Match path like .../src/test/java/com/example/MyTest.java
+    const testMatch = filePath.match(/src\/test\/java\/(.+)\.java$/);
+    if (testMatch) {
+      return testMatch[1].replace(/\//g, '.');
+    }
+    // Fallback: just use the file name without extension
+    const fileNameMatch = filePath.match(/\/([^/]+)\.java$/);
+    if (fileNameMatch) {
+      return fileNameMatch[1];
+    }
+    return undefined;
+  }
+
+  /**
    * Run a specific test class or method.
    *
    * @param className Fully qualified class name to run
@@ -206,7 +335,7 @@ export class JavaJUnitRunner {
 
       // Execute the test via the Go Agent
       const result = await this.runtime.request(
-        'POST /api/v1/run' as any,
+        'POST /api/v1/run' as Endpoint,
         {
           command: 'java',
           args: [

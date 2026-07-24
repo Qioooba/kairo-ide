@@ -16,7 +16,14 @@ import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
   testDir: '.',
-  testMatch: 'core-e2e.spec.ts',
+  testMatch: [
+    'core-e2e.spec.ts',
+    'desktop-e2e.spec.ts',
+    'frontend-e2e.spec.ts',
+    'boundary-e2e.spec.ts',
+    'windows-e2e.spec.ts',
+    'standalone-smoke.spec.ts',
+  ],
 
   // Timeout for each test: 5 minutes (300s)
   timeout: 300_000,
@@ -61,6 +68,9 @@ export default defineConfig({
   },
 
   // Projects: only Chromium for now
+  // On Windows, when headless shell is not available, fall back to
+  // full Chrome binary. Set PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH to
+  // override.
   projects: [
     {
       name: 'chromium',
@@ -68,6 +78,8 @@ export default defineConfig({
         browserName: 'chromium',
         launchOptions: {
           headless: true,
+          executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
+          args: ['--headless=new'],
         },
       },
     },

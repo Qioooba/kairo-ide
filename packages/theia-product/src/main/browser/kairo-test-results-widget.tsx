@@ -4,6 +4,9 @@ import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import { KAIRO_TESTS_FACTORY_ID } from './kairo-factory-ids';
 import { JavaJUnitRunner, type JUnitTestResult, type JUnitTestRun } from '@kairo/java-extension';
 
+/** Filter type for test results. */
+type TestStatusFilter = 'all' | 'passed' | 'failed' | 'skipped' | 'error';
+
 /** Group test results by class name for tree display. */
 interface TestClassGroup {
   className: string;
@@ -38,6 +41,11 @@ function statusIcon(status: JUnitTestResult['status']): string {
 
 function statusClass(status: JUnitTestResult['status']): string {
   return `kairo-test-status-${status}`;
+}
+
+/** Count number of failed tests (including errors) in a run. */
+function countFailedAndErrors(run: JUnitTestRun): number {
+  return run.failedCount + run.errorCount;
 }
 
 /** Single test method result row. */
@@ -126,17 +134,53 @@ const TestResultsView: React.FC<TestResultsViewProps> = ({ runner }) => {
   const [latestRun, setLatestRun] = React.useState<JUnitTestRun | null>(null);
   const [pastRuns, setPastRuns] = React.useState<JUnitTestRun[]>([]);
   const [selectedRunId, setSelectedRunId] = React.useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = React.useState<TestStatusFilter>('all');
+  const [rerunningFailed, setRerunningFailed] = React.useState(false);
 
   React.useEffect(() => {
     const sub = runner.onDidCompleteRun((run: JUnitTestRun) => {
       setPastRuns(prev => [run, ...prev].slice(0, 20));
       setLatestRun(run);
       setSelectedRunId(run.id);
+      setRerunningFailed(false);
     });
     return () => sub.dispose();
   }, [runner]);
 
   const selectedRun = pastRuns.find(r => r.id === selectedRunId) || latestRun;
+
+  /** Filter results by status, then group by class. */
+  const getFilteredResults = (): JUnitTestResult[] => {
+    if (!selectedRun) return [];
+    if (statusFilter === 'all') return selectedRun.results;
+    return selectedRun.results.filter(r => r.status === statusFilter);
+  };
+
+  /** Rerun all failed tests from the selected run. */
+  const handleRerunFailed = async () => {
+    if (!selectedRun) return;
+    const failedResults = selectedRun.results.filter(r => r.status === 'failed' || r.status === 'error');
+    if (failedResults.length === 0) return;
+
+    setRerunningFailed(true);
+    // Collect unique class names and run them
+    const uniqueClasses = [...new Set(failedResults.map(r => r.className))];
+    for (const className of uniqueClasses) {
+      const failedMethods = failedResults
+        .filter(r => r.className === className)
+        .map(r => r.methodName)
+        .filter((m): m is string => !!m);
+      if (failedMethods.length > 0) {
+        // Run each failed method individually
+        for (const method of failedMethods) {
+          await runner.runTest(className, method);
+        }
+      } else {
+        await runner.runTest(className);
+      }
+    }
+    setRerunningFailed(false);
+  };
 
   if (!selectedRun) {
     return (
@@ -149,7 +193,8 @@ const TestResultsView: React.FC<TestResultsViewProps> = ({ runner }) => {
     );
   }
 
-  const groups = groupByClass(selectedRun.results);
+  const filteredResults = getFilteredResults();
+  const groups = groupByClass(filteredResults);
 
   return (
     <div className="kairo-widget">
@@ -205,6 +250,35 @@ const TestResultsView: React.FC<TestResultsViewProps> = ({ runner }) => {
         </div>
       </div>
 
+      {/* Filter toolbar */}
+      <div className="kairo-widget-toolbar" style={{ gap: '8px', flexWrap: 'wrap' }}>
+        <label className="kairo-sql-field" style={{ flexDirection: 'row', alignItems: 'center', gap: '4px' }}>
+          <span className="kairo-sql-field-label">Filter:</span>
+          <select
+            className="theia-select"
+            value={statusFilter}
+            onChange={e => setStatusFilter(e.target.value as TestStatusFilter)}
+            aria-label="Filter test results by status"
+          >
+            <option value="all">All ({selectedRun.totalCount})</option>
+            <option value="passed">Passed ({selectedRun.passedCount})</option>
+            <option value="failed">Failed ({selectedRun.failedCount})</option>
+            <option value="skipped">Skipped ({selectedRun.skippedCount})</option>
+            <option value="error">Errors ({selectedRun.errorCount})</option>
+          </select>
+        </label>
+        {countFailedAndErrors(selectedRun) > 0 && (
+          <button
+            className="theia-button secondary"
+            onClick={handleRerunFailed}
+            disabled={rerunningFailed}
+            title="Rerun all failed and error tests"
+          >
+            {rerunningFailed ? '\u25D0 Rerunning...' : `\u21BA Rerun Failed (${countFailedAndErrors(selectedRun)})`}
+          </button>
+        )}
+      </div>
+
       {/* Test tree */}
       <div className="kairo-test-tree">
         {groups.length > 0 ? (
@@ -212,7 +286,7 @@ const TestResultsView: React.FC<TestResultsViewProps> = ({ runner }) => {
             <TestClassGroup key={group.className} group={group} />
           ))
         ) : (
-          <p className="kairo-empty">No test results in this run.</p>
+          <p className="kairo-empty">No test results match the current filter.</p>
         )}
       </div>
 

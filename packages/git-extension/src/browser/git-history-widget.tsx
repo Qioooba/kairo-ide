@@ -3,6 +3,7 @@ import { injectable, inject, postConstruct } from '@theia/core/shared/inversify'
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import { GitService, GitCommit } from './git-service';
 import { GitCommitSearch, CommitSearchCriteria, CommitSearchResult, CommitSearchSummary } from './git-commit-search';
+import { GitCherryPickService } from './git-cherrypick-service';
 
 @injectable()
 export class GitHistoryWidget extends ReactWidget {
@@ -11,6 +12,7 @@ export class GitHistoryWidget extends ReactWidget {
 
   @inject(GitService) protected gitService!: GitService;
   @inject(GitCommitSearch) protected commitSearch!: GitCommitSearch;
+  @inject(GitCherryPickService) protected cherryPickService!: GitCherryPickService;
 
   protected commits: GitCommit[] = [];
   protected selectedCommit: GitCommit | undefined;
@@ -46,6 +48,15 @@ export class GitHistoryWidget extends ReactWidget {
   protected selectCommit = async (commit: GitCommit): Promise<void> => {
     this.selectedCommit = commit;
     this.update();
+  };
+
+  protected handleCherryPick = async (commit: GitCommit, event: React.MouseEvent): Promise<void> => {
+    event.stopPropagation();
+    try {
+      await this.cherryPickService.cherryPickSingle(commit.hash);
+    } catch {
+      // Cherry-pick conflict or error handled by the service
+    }
   };
 
   protected handleSearch = async (query: string): Promise<void> => {
@@ -273,6 +284,17 @@ export class GitHistoryWidget extends ReactWidget {
             : commit.author}
           {' · '}
           {dateStr}
+        </div>
+        <div style={{ marginTop: 4, display: 'flex', gap: 4 }} onClick={e => e.stopPropagation()}>
+          <button
+            className="theia-button secondary"
+            onClick={(e) => this.handleCherryPick(commit, e)}
+            style={{ fontSize: 'var(--theia-ui-font-size0)', padding: '2px 8px' }}
+            aria-label={`Cherry-pick ${commit.hash.substring(0, 7)}`}
+            title="Cherry-pick this commit"
+          >
+            Cherry-Pick
+          </button>
         </div>
       </div>
     );

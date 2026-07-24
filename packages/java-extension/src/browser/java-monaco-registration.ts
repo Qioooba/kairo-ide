@@ -72,6 +72,19 @@ export class JavaMonacoRegistrationContribution implements FrontendApplicationCo
     // jdt://…/HttpServletResponse.class, nothing opened).
     this.subs.push(this.fileService.registerProvider('jdt', this.jdtFs));
 
+    // Cache source text for fallback IntelliSense when LS is unavailable.
+    this.subs.push(monaco.editor.onDidCreateModel(model => {
+      this.provider.cacheSource(model.uri.toString(), model.getValue());
+      this.subs.push(model.onDidChangeContent(() => {
+        this.provider.cacheSource(model.uri.toString(), model.getValue());
+      }));
+    }));
+    this.subs.push(
+      monaco.editor.onWillDisposeModel(model => {
+        this.provider.clearSource(model.uri.toString());
+      }),
+    );
+
     this.subs.push(registerJavaLiveTemplates(JAVA_LANGUAGE_ID));
     this.subs.push(
       monaco.languages.registerCompletionItemProvider(JAVA_LANGUAGE_ID, {

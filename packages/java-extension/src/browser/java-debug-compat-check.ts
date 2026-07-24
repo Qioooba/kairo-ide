@@ -16,6 +16,7 @@ import { Emitter, Event } from '@theia/core/lib/common/event';
 import { ILogger } from '@theia/core/lib/common/logger';
 import { MessageService } from '@theia/core/lib/common/message-service';
 import { RuntimeConnectionService } from '@kairo/runtime-extension';
+import { Endpoint } from '@kairo/protocol';
 
 // ===========================================================================
 // Types
@@ -333,7 +334,7 @@ export class JavaDebugCompatCheck {
 
     try {
       // Request the agent to check port availability
-      const response = await this.runtime.request('POST /api/v1/port/check' as any, {
+      const response = await this.runtime.request('POST /api/v1/port/check' as Endpoint, {
         port: debugPort,
         host: '127.0.0.1',
       });
@@ -380,7 +381,7 @@ export class JavaDebugCompatCheck {
 
     try {
       // Check if the debug adapter command is configured
-      const response = await this.runtime.request('GET /api/v1/debug/adapter-status' as any, undefined);
+      const response = await this.runtime.request('GET /api/v1/debug/adapter-status' as Endpoint, undefined);
       const body = response as { available?: boolean; command?: string; version?: string };
 
       if (body?.available) {
@@ -432,7 +433,7 @@ export class JavaDebugCompatCheck {
 
     try {
       // Request the agent to check source/class mismatch
-      const response = await this.runtime.request('POST /api/v1/project/check-mismatch' as any, {
+      const response = await this.runtime.request('POST /api/v1/project/check-mismatch' as Endpoint, {
         projectRoot,
       });
       const body = response as { mismatchCount?: number; totalScanned?: number };

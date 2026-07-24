@@ -111,7 +111,7 @@ const GitCommitComponent: React.FC<GitCommitProps> = ({ store, preCommitChecker,
         const template = templates[idx];
         if (template && !message.trim()) {
             const generated = await templateService.generateMessage(
-                template.name as any,
+                template.name,
                 '',
                 '',
             );

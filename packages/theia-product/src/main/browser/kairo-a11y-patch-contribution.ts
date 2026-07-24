@@ -29,7 +29,17 @@ export class KairoA11yPatchContribution implements FrontendApplicationContributi
   protected observer: MutationObserver | undefined;
 
   onStart(): void {
-    this.patchAll();
+    // Poll for elements that may not exist yet when onStart fires.
+    // Theia contributions create status bar entries asynchronously.
+    let attempts = 0;
+    const maxAttempts = 20;
+    const interval = setInterval(() => {
+      this.patchAll();
+      attempts++;
+      if (attempts >= maxAttempts) {
+        clearInterval(interval);
+      }
+    }, 250);
     this.observer = new MutationObserver(() => this.patchAll());
     this.observer.observe(document.body, {
       childList: true,
@@ -52,9 +62,17 @@ export class KairoA11yPatchContribution implements FrontendApplicationContributi
     // Kairo notification bell: Theia StatusBar renders a plain <div>
     // with aria-label but no role — axe-core flags aria-prohibited-attr.
     // Add role="button" so the aria-label is permitted.
+    // Also strip unresolved Codicon variables like $(bell) from aria-label.
     const kairoNotifications = document.getElementById('status-bar-kairo.notifications');
-    if (kairoNotifications && !kairoNotifications.hasAttribute('role')) {
-      kairoNotifications.setAttribute('role', 'button');
+    if (kairoNotifications) {
+      if (!kairoNotifications.hasAttribute('role')) {
+        kairoNotifications.setAttribute('role', 'button');
+      }
+      // Fix aria-label: strip unresolved Codicon variables like $(bell)
+      const label = kairoNotifications.getAttribute('aria-label');
+      if (label && /\$\([^)]+\)/.test(label)) {
+        kairoNotifications.setAttribute('aria-label', label.replace(/\$\([^)]+\)\s*/g, ''));
+      }
     }
 
     // Patch status bar elements for screen reader announcements (D4.2)

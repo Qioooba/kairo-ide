@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE web-app PUBLIC "-//Sun Microsystems, Inc.//DTD Web Application 2.4//EN"
+                         "http://java.sun.com/dtd/web-app_2_4.dtd">
+<web-app version="2.4">
+
+    <display-name>Legacy Web Application</display-name>
+    <description>Tomcat 6 遗留项目 - Servlet 2.4 规范</description>
+
+    <!-- 上下文参数 -->
+    <context-param>
+        <param-name>encoding</param-name>
+        <param-value>GBK</param-value>
+    </context-param>
+    <context-param>
+        <param-name>dbUrl</param-name>
+        <param-value>jdbc:mysql://localhost:3306/legacy_db?useUnicode=true&amp;characterEncoding=GBK</param-value>
+    </context-param>
+
+    <!-- HelloServlet -->
+    <servlet>
+        <servlet-name>hello</servlet-name>
+        <servlet-class>com.example.HelloServlet</servlet-class>
+        <init-param>
+            <param-name>appName</param-name>
+            <param-value>遗留信息管理系统</param-value>
+        </init-param>
+        <init-param>
+            <param-name>dbUrl</param-name>
+            <param-value>jdbc:mysql://localhost:3306/legacy_db?useUnicode=true&amp;characterEncoding=GBK</param-value>
+        </init-param>
+        <load-on-startup>1</load-on-startup>
+    </servlet>
+
+    <servlet-mapping>
+        <servlet-name>hello</servlet-name>
+        <url-pattern>/hello</url-pattern>
+    </servlet-mapping>
+
+    <!-- 欢迎文件列表 -->
+    <welcome-file-list>
+        <welcome-file>index.jsp</welcome-file>
+        <welcome-file>hello.jsp</welcome-file>
+        <welcome-file>index.html</welcome-file>
+    </welcome-file-list>
+
+    <!-- 会话配置 -->
+    <session-config>
+        <session-timeout>30</session-timeout>
+    </session-config>
+
+    <!-- MIME类型映射 -->
+    <mime-mapping>
+        <extension>html</extension>
+        <mime-type>text/html; charset=GBK</mime-type>
+    </mime-mapping>
+    <mime-mapping>
+        <extension>jsp</extension>
+        <mime-type>text/html; charset=GBK</mime-type>
+    </mime-mapping>
+
+    <!-- 错误页面 -->
+    <error-page>
+        <error-code>404</error-code>
+        <location>/error.jsp</location>
+    </error-page>
+    <error-page>
+        <error-code>500</error-code>
+        <location>/error.jsp</location>
+    </error-page>
+
+    <!-- 标签库引用 -->
+    <taglib>
+        <taglib-uri>http://java.sun.com/jsp/jstl/core</taglib-uri>
+        <taglib-location>/WEB-INF/c.tld</taglib-location>
+    </taglib>
+    <taglib>
+        <taglib-uri>http://java.sun.com/jsp/jstl/fmt</taglib-uri>
+        <taglib-location>/WEB-INF/fmt.tld</taglib-location>
+    </taglib>
+    <taglib>
+        <taglib-uri>/WEB-INF/custom.tld</taglib-uri>
+        <taglib-location>/WEB-INF/custom.tld</taglib-location>
+    </taglib>
+
+</web-app>

@@ -1,0 +1,91 @@
+# Kairo IDE — Codecov Configuration
+#
+# See: https://docs.codecov.com/docs/codecovyml-reference
+
+codecov:
+  require_ci_to_pass: false
+  notify:
+    wait_for_ci: true
+
+coverage:
+  precision: 2
+  round: down
+  range: "50...80"
+
+  status:
+    # Project status checks overall coverage
+    project:
+      go:
+        flags:
+          - go
+        target: 60%
+        threshold: 5%
+        paths:
+          - "runtime-agent/"
+      typescript:
+        flags:
+          - typescript
+        target: 50%
+        threshold: 10%
+        paths:
+          - "packages/"
+          - "apps/"
+
+    # Patch status checks coverage on changed lines
+    patch:
+      go:
+        flags:
+          - go
+        target: 70%
+        paths:
+          - "runtime-agent/"
+      typescript:
+        flags:
+          - typescript
+        target: 60%
+        paths:
+          - "packages/"
+          - "apps/"
+
+    # Changes status checks if coverage changed unexpectedly
+    changes:
+      default:
+        threshold: 10%
+
+flags:
+  go:
+    paths:
+      - "runtime-agent/"
+    carryforward: false
+  typescript:
+    paths:
+      - "packages/"
+      - "apps/"
+      - "tests/"
+    carryforward: false
+
+comment:
+  layout: "reach, diff, flags, files"
+  behavior: default
+  require_changes: false
+  require_head: true
+  require_base: false
+
+ignore:
+  - "**/*.test.ts"
+  - "**/*.test.tsx"
+  - "**/*.spec.ts"
+  - "**/*.spec.tsx"
+  - "**/*.test.js"
+  - "**/*.test.cjs"
+  - "**/test_helpers_test.go"
+  - "**/fakes.go"
+  - "**/testhelpers_*.go"
+  - "tests/"
+  - "scripts/"
+  - "docs/"
+  - "legacy-sample/"
+  - "**/node_modules/"
+  - "**/dist/"
+  - "**/lib/"
+  - "**/out/"

@@ -36,8 +36,41 @@ runtime-agent/kairo-runtime
 runtime-agent/bin/
 runtime-agent/dist/
 runtime-agent/coverage.out
+runtime-agent/coverage/
+runtime-agent/coverage*/
+runtime-agent/*.out
+runtime-agent/cover*.out
+runtime-agent/*_cov
+runtime-agent/api.out
+runtime-agent/api_cov
+runtime-agent/app.out
+runtime-agent/build/
+runtime-agent/build_cov
+runtime-agent/cmd/kairo-runtime/main_test.go
+runtime-agent/cov_*
+runtime-agent/deploy/
+runtime-agent/deploy.out
+runtime-agent/kairo_cov
+runtime-agent/pathpolicy/
+runtime-agent/pathpolicy.out
+runtime-agent/repo.out
+runtime-agent/repository/
+runtime-agent/repository.out
+runtime-agent/services.out
+runtime-agent/test-data-e2e/
+runtime-agent/tests/
+runtime-agent/af_cov
 *.test
 *.prof
+
+# Benchmark scratch files
+bench_*.txt
+*_api.txt
+*_deploy.txt
+*_events.txt
+*_pathpolicy.txt
+*_results.txt
+*_tomcat6.txt
 
 # Build artifacts
 build/

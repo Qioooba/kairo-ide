@@ -852,3 +852,304 @@ func TestMemToolchainRegistry_List(t *testing.T) {
 		t.Error("List should not return nil")
 	}
 }
+
+// =========================================================================
+// Encoding Validate Edge Cases
+// =========================================================================
+
+func TestMemEncoder_Validate_UTF8UpperCase(t *testing.T) {
+	m := &memEncoder{}
+	payload, _ := json.Marshal(map[string]string{
+		"text":     "hello",
+		"encoding": "UTF-8",
+	})
+	resp, err := m.Validate(payload)
+	if err != nil {
+		t.Fatalf("Validate UTF-8 uppercase: %v", err)
+	}
+	var result map[string]any
+	json.Unmarshal(resp, &result)
+	if result["valid"] != true {
+		t.Error("UTF-8 uppercase should be valid")
+	}
+}
+
+func TestMemEncoder_Validate_InvalidJSON(t *testing.T) {
+	m := &memEncoder{}
+	_, err := m.Validate([]byte("not json"))
+	if err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+}
+
+func TestMemEncoder_ResolveRead_NilEncoder(t *testing.T) {
+	var m *memEncoder
+	path, err := m.resolveRead("/some/path")
+	if err != nil {
+		t.Fatalf("resolveRead with nil encoder: %v", err)
+	}
+	if path != "/some/path" {
+		t.Errorf("path = %q, want /some/path", path)
+	}
+}
+
+func TestMemEncoder_ResolveWrite_NilEncoder(t *testing.T) {
+	var m *memEncoder
+	path, err := m.resolveWrite("/some/path")
+	if err != nil {
+		t.Fatalf("resolveWrite with nil encoder: %v", err)
+	}
+	if path != "/some/path" {
+		t.Errorf("path = %q, want /some/path", path)
+	}
+}
+
+// =========================================================================
+// DiskAuthenticator Login with user auth but no password hash
+// =========================================================================
+
+func TestDiskAuthenticator_Login_UserAuthNoPasswordHash(t *testing.T) {
+	a := newDiskAuthenticator(t.TempDir(), log.New("test"))
+	os.Unsetenv("KAIRO_SECRET")
+	os.Setenv("KAIRO_AUTH_USER", "admin")
+	os.Unsetenv("KAIRO_AUTH_PASSWORD")
+	defer os.Unsetenv("KAIRO_AUTH_USER")
+
+	payload, _ := json.Marshal(map[string]string{
+		"username": "admin",
+		"password": "any-password",
+	})
+	resp, err := a.Login(payload, nil)
+	if err != nil {
+		t.Fatalf("Login with user auth but no password hash: %v", err)
+	}
+	var result map[string]any
+	json.Unmarshal(resp, &result)
+	if result["sessionToken"] == nil {
+		t.Error("sessionToken should be generated")
+	}
+}
+
+// =========================================================================
+// Test domainToolchainRepo.Get
+// =========================================================================
+
+func TestDomainToolchainRepo_Get_NotFound(t *testing.T) {
+	cfg := Config{
+		DataDir:    t.TempDir(),
+		BundledDir: t.TempDir(),
+		Logger:     log.New("test"),
+	}
+	svc := NewMemoryServices(cfg, nil)
+	_, err := svc.ToolchainRepo.Get(nil, "nonexistent-toolchain")
+	if err == nil {
+		t.Fatal("expected error for nonexistent toolchain")
+	}
+}
+
+// =========================================================================
+// Test diskProjectStore.Update
+// =========================================================================
+
+func TestDiskProjectStore_Update(t *testing.T) {
+	dir := t.TempDir()
+	store := newDiskProjectStore(dir)
+	proj, err := store.Create("proj-1", &domain.Project{
+		ID:          "proj-1",
+		WorkspaceID: "ws-1",
+		Name:        "original",
+		RootPath:    dir,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	proj.Name = "updated"
+	updated, err := store.Update("proj-1", &proj)
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if updated.Name != "updated" {
+		t.Errorf("Name = %q, want updated", updated.Name)
+	}
+	got, err := store.Get("proj-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Name != "updated" {
+		t.Errorf("Get after Update: Name = %q, want updated", got.Name)
+	}
+}
+
+// =========================================================================
+// Test serverMeta.toResponse edge cases
+// =========================================================================
+
+func TestServerMeta_toResponse_NoPorts(t *testing.T) {
+	meta := &serverMeta{
+		ID:          "srv_1",
+		ProjectID:   "prj_1",
+		Type:        "tomcat6",
+		State:       "running",
+		PID:         1234,
+		ContextPath: "/app",
+	}
+	resp := meta.toResponse()
+	if resp.URL != "" {
+		t.Errorf("URL = %q, want empty when no ports", resp.URL)
+	}
+}
+
+// =========================================================================
+// Test realServerRunner.CatalinaHome
+// =========================================================================
+
+func TestRealServerRunner_CatalinaHome(t *testing.T) {
+	r := newRealServerRunner(t.TempDir(), "", "/path/to/tomcat6", nil)
+	home := r.CatalinaHome()
+	if home != "/path/to/tomcat6" {
+		t.Errorf("CatalinaHome = %q, want /path/to/tomcat6", home)
+	}
+}
+
+// =========================================================================
+// Test realServerRunner.Get/List/DeploymentTarget/Recoverable/Recover edge cases
+// =========================================================================
+
+func TestRealServerRunner_GetNotFound(t *testing.T) {
+	r := newRealServerRunner(t.TempDir(), "", "", nil)
+	_, err := r.Get("nonexistent")
+	if err == nil {
+		t.Fatal("expected error for nonexistent server")
+	}
+}
+
+func TestRealServerRunner_ListEmpty(t *testing.T) {
+	r := newRealServerRunner(t.TempDir(), "", "", nil)
+	items := r.List()
+	if len(items) != 0 {
+		t.Errorf("List() = %d, want 0", len(items))
+	}
+}
+
+func TestRealServerRunner_DeploymentTargetNotFound(t *testing.T) {
+	r := newRealServerRunner(t.TempDir(), "", "", nil)
+	_, err := r.DeploymentTarget("nonexistent-project")
+	if err == nil {
+		t.Fatal("expected error for nonexistent project")
+	}
+}
+
+func TestRealServerRunner_StopNotFound(t *testing.T) {
+	r := newRealServerRunner(t.TempDir(), "", "", nil)
+	_, err := r.Stop("nonexistent", false)
+	if err == nil {
+		t.Fatal("expected error for nonexistent server")
+	}
+}
+
+func TestRealServerRunner_RecoverableEmpty(t *testing.T) {
+	r := newRealServerRunner(t.TempDir(), "", "", nil)
+	items := r.Recoverable()
+	if len(items) != 0 {
+		t.Errorf("Recoverable() = %d, want 0", len(items))
+	}
+}
+
+func TestRealServerRunner_RecoverNotFound(t *testing.T) {
+	r := newRealServerRunner(t.TempDir(), "", "", nil)
+	_, err := r.Recover("nonexistent")
+	if err == nil {
+		t.Fatal("expected error for nonexistent server recovery")
+	}
+}
+
+func TestRealServerRunner_RecoverNotCrashed(t *testing.T) {
+	dataDir := t.TempDir()
+	seedServerMeta(t, dataDir, &serverMeta{
+		ID:    "srv_1",
+		State: "stopped",
+	})
+	r := newRealServerRunner(dataDir, "", "", nil)
+	_, err := r.Recover("srv_1")
+	if err == nil {
+		t.Fatal("expected error for non-crashed server recovery")
+	}
+}
+
+func TestRealServerRunner_DebugNotFound(t *testing.T) {
+	r := newRealServerRunner(t.TempDir(), "", "", nil)
+	_, err := r.Debug("nonexistent")
+	if err == nil {
+		t.Fatal("expected error for nonexistent server debug")
+	}
+}
+
+func TestRealServerRunner_DebugMissingMetadata(t *testing.T) {
+	dataDir := t.TempDir()
+	seedServerMeta(t, dataDir, &serverMeta{
+		ID:    "srv_1",
+		State: "stopped",
+	})
+	r := newRealServerRunner(dataDir, "", "", nil)
+	_, err := r.Debug("srv_1")
+	if err == nil {
+		t.Fatal("expected error for missing debug metadata")
+	}
+}
+
+func TestRealServerRunner_DebugMissingPorts(t *testing.T) {
+	dataDir := t.TempDir()
+	seedServerMeta(t, dataDir, &serverMeta{
+		ID:           "srv_1",
+		State:        "stopped",
+		JavaHome:     "/jdk",
+		CatalinaBase: "/base",
+	})
+	r := newRealServerRunner(dataDir, "", "", nil)
+	_, err := r.Debug("srv_1")
+	if err == nil {
+		t.Fatal("expected error for missing ports metadata")
+	}
+}
+
+func TestRealServerRunner_RecoverMissingPorts(t *testing.T) {
+	dataDir := t.TempDir()
+	seedServerMeta(t, dataDir, &serverMeta{
+		ID:           "srv_1",
+		State:        "crashed",
+		WasRunning:   true,
+		JavaHome:     "/jdk",
+		CatalinaBase: "/base",
+	})
+	r := newRealServerRunner(dataDir, "", "", nil)
+	_, err := r.Recover("srv_1")
+	if err == nil {
+		t.Fatal("expected error for missing ports during recovery")
+	}
+}
+
+func TestRealServerRunner_RecoverMissingMetadata(t *testing.T) {
+	dataDir := t.TempDir()
+	seedServerMeta(t, dataDir, &serverMeta{
+		ID:    "srv_1",
+		State: "crashed",
+	})
+	r := newRealServerRunner(dataDir, "", "", nil)
+	_, err := r.Recover("srv_1")
+	if err == nil {
+		t.Fatal("expected error for missing recovery metadata")
+	}
+}
+
+func TestRealServerRunner_RestartMissingMetadata(t *testing.T) {
+	dataDir := t.TempDir()
+	seedServerMeta(t, dataDir, &serverMeta{
+		ID:    "srv_1",
+		State: "stopped",
+	})
+	r := newRealServerRunner(dataDir, "", "", nil)
+	_, err := r.Restart("srv_1")
+	if err == nil {
+		t.Fatal("expected error for missing restart metadata")
+	}
+}

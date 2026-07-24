@@ -454,7 +454,7 @@ export class LocalHistoryWidget extends Widget {
 
     const dialog = new (class extends AbstractDialog<boolean> {
       constructor() {
-        const props: ConfirmDialogProps = { title: `Diff: ${snapshotId}`, msg: '', ok: 'Close', cancel: undefined as any };
+        const props: ConfirmDialogProps = { title: `Diff: ${snapshotId}`, msg: '', ok: 'Close', cancel: undefined as unknown as string };
         super(props);
         this.contentNode.appendChild(container);
         this.acceptButton?.addEventListener('click', () => this.close());

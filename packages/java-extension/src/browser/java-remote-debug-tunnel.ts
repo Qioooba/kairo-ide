@@ -15,6 +15,7 @@ import { Emitter, Event } from '@theia/core/lib/common/event';
 import { ILogger } from '@theia/core/lib/common/logger';
 import { MessageService } from '@theia/core/lib/common/message-service';
 import { RuntimeConnectionService } from '@kairo/runtime-extension';
+import type { Endpoint } from '@kairo/protocol';
 
 /** Authentication types for remote JDWP. */
 export type RemoteDebugAuthType = 'none' | 'ssh-key' | 'token';
@@ -177,7 +178,7 @@ export class RemoteDebugTunnel {
   protected async establishTunnel(config: RemoteDebugConfig): Promise<number> {
     try {
       const result = await this.runtime.request(
-        'POST /api/v1/debug/tunnel/connect' as any,
+        'POST /api/v1/debug/tunnel/connect' as Endpoint,
         {
           host: config.host,
           port: config.port,
@@ -211,7 +212,7 @@ export class RemoteDebugTunnel {
   protected async teardownTunnel(): Promise<void> {
     try {
       await this.runtime.request(
-        'POST /api/v1/debug/tunnel/disconnect' as any,
+        'POST /api/v1/debug/tunnel/disconnect' as Endpoint,
         undefined,
         { noRetry: true },
       );

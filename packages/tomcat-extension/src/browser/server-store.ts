@@ -3,7 +3,7 @@ import { Emitter, Event } from '@theia/core/lib/common/event';
 import { ILogger } from '@theia/core/lib/common/logger';
 import { RuntimeConnectionService } from '@kairo/runtime-extension';
 import { WorkspaceContextService } from '@kairo/runtime-extension';
-import type { ServerInstance as ProtocolServerInstance } from '@kairo/protocol';
+import type { ServerInstance as ProtocolServerInstance, WsEvent } from '@kairo/protocol';
 
 export type ConnectionState = 'loading' | 'connected' | 'disconnected' | 'empty';
 
@@ -69,9 +69,6 @@ export function isValidTransition(from: ServerInstance['state'], to: ServerInsta
 
 @injectable()
 export class ServerStore {
-    @inject(RuntimeConnectionService)
-    private readonly runtimeConnection!: RuntimeConnectionService;
-
     @inject(RuntimeConnectionService)
     private readonly runtime!: RuntimeConnectionService;
 
@@ -151,7 +148,10 @@ export class ServerStore {
                 void this.bootstrap();
             }
         });
-        void this.bootstrap();
+        // Fire bootstrap immediately if context is already set (N-032).
+        if (this.workspaceContext.context) {
+            void this.bootstrap();
+        }
     }
 
     protected async bootstrap(): Promise<void> {
@@ -183,7 +183,7 @@ export class ServerStore {
 
         // Subscribe to events
         if (ctx) {
-            this.eventsUnsubscribe = this.runtimeConnection.subscribeEvents(ctx.workspaceId, (event: any) => {
+            this.eventsUnsubscribe = this.runtime.subscribeEvents(ctx.workspaceId, (event: WsEvent) => {
                 if (event.type === 'server.state') {
                     const existing = this.servers.find(s => s.id === event.serverId);
                     const nextState = event.state as ServerInstance['state'];

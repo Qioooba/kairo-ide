@@ -570,7 +570,7 @@ func TestProjectPut_WritesKairoProjectYAML(t *testing.T) {
 	store := &fakeProjectStore{}
 	srv := NewServer(&Services{ProjectStore: store}, logger, auditLog, "test-0.1.0", "")
 
-	body := `{"id":"proj-1","workspaceId":"ws-1","name":"Legacy 中文项目","rootPath":"` + root + `","sourceRoots":["src"],"webappDir":"WebRoot","outputDir":"build/classes","sourceLevel":"1.8","targetLevel":"1.8","encoding":"gbk","buildTool":"ant"}`
+	body := `{"id":"proj-1","workspaceId":"ws-1","name":"Legacy 中文项目","rootPath":"` + filepath.ToSlash(root) + `","sourceRoots":["src"],"webappDir":"WebRoot","outputDir":"build/classes","sourceLevel":"1.8","targetLevel":"1.8","encoding":"gbk","buildTool":"ant"}`
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPut, "/api/v1/projects/proj-1", strings.NewReader(body))
 	srv.Handler().ServeHTTP(rr, req)
@@ -653,7 +653,7 @@ func TestServerStart_ResolvesWebappDirFromProject(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200, body=%s", rr.Code, rr.Body.String())
 	}
-	if runner.lastReq.WebappDir != "/tmp/legacy-sample/WebRoot" {
+	if filepath.ToSlash(runner.lastReq.WebappDir) != "/tmp/legacy-sample/WebRoot" {
 		t.Fatalf("WebappDir = %q, want /tmp/legacy-sample/WebRoot", runner.lastReq.WebappDir)
 	}
 }
@@ -811,10 +811,10 @@ func TestDeployment_ResolvesSourceAndTargetFromProject(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200, body=%s", rr.Code, rr.Body.String())
 	}
-	if deployer.lastReq.Source != "/tmp/legacy-sample/WebRoot" {
+	if filepath.ToSlash(deployer.lastReq.Source) != "/tmp/legacy-sample/WebRoot" {
 		t.Fatalf("Source = %q, want /tmp/legacy-sample/WebRoot", deployer.lastReq.Source)
 	}
-	if deployer.lastReq.Target != "/tmp/catalina/webapps/legacy-sample" {
+	if filepath.ToSlash(deployer.lastReq.Target) != "/tmp/catalina/webapps/legacy-sample" {
 		t.Fatalf("Target = %q, want /tmp/catalina/webapps/legacy-sample", deployer.lastReq.Target)
 	}
 }
@@ -926,6 +926,1130 @@ func (s *contextSearchStub) Search(ctx context.Context, _ json.RawMessage) (json
 	return nil, ctx.Err()
 }
 
+// fakeWorkspaceStore is a minimal in-memory WorkspaceStore for handler tests.
+type fakeWorkspaceStore struct {
+	workspaces []WorkspaceRecord
+}
+
+func (f *fakeWorkspaceStore) List() []WorkspaceRecord                { return f.workspaces }
+func (f *fakeWorkspaceStore) Get(id string) (WorkspaceRecord, error) {
+	for _, ws := range f.workspaces {
+		if ws.ID == id {
+			return ws, nil
+		}
+	}
+	return WorkspaceRecord{}, fmt.Errorf("workspace not found: %s", id)
+}
+func (f *fakeWorkspaceStore) Open(rootPath, name string) (WorkspaceRecord, error) {
+	ws := WorkspaceRecord{
+		ID:       "ws_" + name,
+		Name:     name,
+		RootPath: rootPath,
+	}
+	f.workspaces = append(f.workspaces, ws)
+	return ws, nil
+}
+func (f *fakeWorkspaceStore) Close(id string) error {
+	for i, ws := range f.workspaces {
+		if ws.ID == id {
+			f.workspaces = append(f.workspaces[:i], f.workspaces[i+1:]...)
+			return nil
+		}
+	}
+	return fmt.Errorf("workspace not found: %s", id)
+}
+
+// fakeToolchainRegistry is a minimal in-memory ToolchainRegistry for handler tests.
+type fakeToolchainRegistry struct {
+	toolchains []json.RawMessage
+}
+
+func (f *fakeToolchainRegistry) List() []json.RawMessage { return f.toolchains }
+func (f *fakeToolchainRegistry) Import(path, label string) (json.RawMessage, error) {
+	raw, _ := json.Marshal(map[string]string{"id": "tc_test", "name": label, "path": path})
+	return raw, nil
+}
+
+// fakeEncoder is a minimal Encoder for handler tests.
+type fakeEncoder struct{}
+
+func (f *fakeEncoder) Detect(payload json.RawMessage) (json.RawMessage, error) {
+	return json.Marshal(map[string]any{"encoding": "utf-8", "confidence": 0.95})
+}
+func (f *fakeEncoder) Recode(payload json.RawMessage) (json.RawMessage, error) {
+	return json.Marshal(map[string]any{"encoding": "utf-8", "content": "re-encoded"})
+}
+func (f *fakeEncoder) Validate(payload json.RawMessage) (json.RawMessage, error) {
+	return json.Marshal(map[string]bool{"valid": true})
+}
+
+// fakeAuth is a minimal Authenticator for handler tests.
+type fakeAuth struct {
+	loginErr error
+}
+
+func (f *fakeAuth) Login(payload json.RawMessage, w http.ResponseWriter) (json.RawMessage, error) {
+	if f.loginErr != nil {
+		return nil, f.loginErr
+	}
+	return json.Marshal(map[string]any{"token": "test-token", "user": "admin"})
+}
+func (f *fakeAuth) Logout(r *http.Request, w http.ResponseWriter) error { return nil }
+
+// TestHealth_RejectsNonGET tests that the health endpoint rejects non-GET methods.
+func TestHealth_RejectsNonGET(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	srv := NewServer(&Services{}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/health", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestHealth_OK tests the health endpoint returns correct data.
+func TestHealth_OK(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	srv := NewServer(&Services{}, logger, auditLog, "test-0.1.0", "")
+	srv.bindAddr = "127.0.0.1"
+	srv.port = 8080
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/health", nil)
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rr.Code, rr.Body.String())
+	}
+	_, p := decodeOK(t, rr.Body.Bytes())
+	if got, _ := p["version"].(string); got != "test-0.1.0" {
+		t.Errorf("version = %q, want test-0.1.0", got)
+	}
+	if _, ok := p["platform"]; !ok {
+		t.Error("health response missing platform field")
+	}
+}
+
+// TestProjects_List tests GET /api/v1/projects.
+func TestProjects_List(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	store := &fakeProjectStore{saved: domain.Project{ID: "proj-1", Name: "test"}}
+	srv := NewServer(&Services{ProjectStore: store}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/projects", nil)
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestProjects_RejectsNonGET tests that the projects endpoint rejects non-GET methods.
+func TestProjects_RejectsNonGET(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	srv := NewServer(&Services{}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/projects", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestProjects_NoStore tests that the projects endpoint returns an error when ProjectStore is nil.
+func TestProjects_NoStore(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	srv := NewServer(&Services{}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/projects", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestProjectByID_Get tests GET /api/v1/projects/{id}.
+func TestProjectByID_Get(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	store := &fakeProjectStore{saved: domain.Project{ID: "proj-1", Name: "test"}}
+	srv := NewServer(&Services{ProjectStore: store}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/projects/proj-1", nil)
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestProjectByID_GetNotFound tests GET /api/v1/projects/{id} with a missing ID.
+func TestProjectByID_GetNotFound(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	store := &fakeProjectStore{}
+	srv := NewServer(&Services{ProjectStore: store}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/projects/nonexistent", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestProjectByID_EmptyID tests GET /api/v1/projects/ with no ID.
+func TestProjectByID_EmptyID(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	srv := NewServer(&Services{}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/projects/", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestToolchains_List tests GET /api/v1/toolchains.
+func TestToolchains_List(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	reg := &fakeToolchainRegistry{toolchains: []json.RawMessage{json.RawMessage(`{"id":"tc1","name":"JDK 8"}`)}}
+	srv := NewServer(&Services{ToolchainRegistry: reg}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/toolchains", nil)
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestToolchains_RejectsNonGET tests that the toolchains endpoint rejects non-GET methods.
+func TestToolchains_RejectsNonGET(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	srv := NewServer(&Services{}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/toolchains", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestToolchains_NoRegistry tests that the toolchains endpoint returns an error when ToolchainRegistry is nil.
+func TestToolchains_NoRegistry(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	srv := NewServer(&Services{}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/toolchains", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestToolchainImport tests POST /api/v1/toolchains/import.
+func TestToolchainImport(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	reg := &fakeToolchainRegistry{}
+	srv := NewServer(&Services{ToolchainRegistry: reg}, logger, auditLog, "test-0.1.0", "")
+
+	body := mustEnvelope(t, map[string]any{"path": "/opt/jdk", "label": "JDK 17"})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/toolchains/import", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestToolchainImport_RejectsNonPOST tests that the toolchain import endpoint rejects non-POST methods.
+func TestToolchainImport_RejectsNonPOST(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	srv := NewServer(&Services{}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/toolchains/import", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestAudit_List tests GET /api/v1/audit.
+func TestAudit_List(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	srv := NewServer(&Services{}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/audit", nil)
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestAudit_RejectsNonGET tests that the audit endpoint rejects non-GET methods.
+func TestAudit_RejectsNonGET(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	srv := NewServer(&Services{}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/audit", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestAudit_NilAuditLog tests that the audit endpoint returns empty list when audit log is nil.
+func TestAudit_NilAuditLog(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	srv := NewServer(&Services{}, logger, nil, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/audit", nil)
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestLogin_Success tests POST /api/v1/auth/login.
+func TestLogin_Success(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	auth := &fakeAuth{}
+	srv := NewServer(&Services{Auth: auth}, logger, auditLog, "test-0.1.0", "")
+
+	body := mustEnvelope(t, map[string]any{"username": "admin", "password": "secret"})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestLogin_RejectsNonPOST tests that the login endpoint rejects non-POST methods.
+func TestLogin_RejectsNonPOST(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	srv := NewServer(&Services{}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/login", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestLogin_NoAuth tests that the login endpoint returns error when Auth is nil.
+func TestLogin_NoAuth(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	srv := NewServer(&Services{}, logger, auditLog, "test-0.1.0", "")
+
+	body := mustEnvelope(t, map[string]any{"username": "admin"})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestLogout_Success tests POST /api/v1/auth/logout.
+func TestLogout_Success(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	auth := &fakeAuth{}
+	srv := NewServer(&Services{Auth: auth}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/logout", nil)
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestLogout_RejectsNonPOST tests that the logout endpoint rejects non-POST methods.
+func TestLogout_RejectsNonPOST(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	srv := NewServer(&Services{}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/logout", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestEncodingDetect tests POST /api/v1/encoding/detect.
+func TestEncodingDetect(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	enc := &fakeEncoder{}
+	srv := NewServer(&Services{Encoder: enc}, logger, auditLog, "test-0.1.0", "")
+
+	body := mustEnvelope(t, map[string]any{"sample": "hello"})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/encoding/detect", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestEncodingRecode tests POST /api/v1/encoding/recode.
+func TestEncodingRecode(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	enc := &fakeEncoder{}
+	srv := NewServer(&Services{Encoder: enc}, logger, auditLog, "test-0.1.0", "")
+
+	body := mustEnvelope(t, map[string]any{"content": "test", "from": "gbk", "to": "utf-8"})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/encoding/recode", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestEncodingValidate tests POST /api/v1/encoding/validate.
+func TestEncodingValidate(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	enc := &fakeEncoder{}
+	srv := NewServer(&Services{Encoder: enc}, logger, auditLog, "test-0.1.0", "")
+
+	body := mustEnvelope(t, map[string]any{"content": "test", "encoding": "utf-8"})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/encoding/validate", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestEncodingDetect_NoEncoder tests that the encoding detect endpoint returns error when Encoder is nil.
+func TestEncodingDetect_NoEncoder(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	srv := NewServer(&Services{}, logger, auditLog, "test-0.1.0", "")
+
+	body := mustEnvelope(t, map[string]any{"sample": "hello"})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/encoding/detect", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestRecoverableServers tests GET /api/v1/servers/recoverable.
+func TestRecoverableServers(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	runner := &fakeServerRunner{}
+	srv := NewServer(&Services{ServerRunner: runner}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/servers/recoverable", nil)
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestRecoverableServers_RejectsNonGET tests that the recoverable servers endpoint rejects non-GET methods.
+func TestRecoverableServers_RejectsNonGET(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	srv := NewServer(&Services{}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/servers/recoverable", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestRecoverableServers_NoRunner tests that the recoverable servers endpoint returns error when ServerRunner is nil.
+func TestRecoverableServers_NoRunner(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	srv := NewServer(&Services{}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/servers/recoverable", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestProjectRecent tests GET /api/v1/projects/recent.
+func TestProjectRecent(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	srv := NewServer(&Services{}, logger, auditLog, "test-0.1.0", "")
+	srv.addRecentProject("proj-1", "Test Project", "/tmp/test")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/projects/recent", nil)
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestProjectRecent_RejectsNonGET tests that the project recent endpoint rejects non-GET methods.
+func TestProjectRecent_RejectsNonGET(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	srv := NewServer(&Services{}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/projects/recent", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestDeploymentByID tests GET /api/v1/deployments/{id}.
+func TestDeploymentByID(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	deployer := &fakeDeployer{}
+	srv := NewServer(&Services{Deployer: deployer}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/deployments/dep-1", nil)
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestDeploymentByID_NoDeployer tests that the deployment by ID endpoint returns error when Deployer is nil.
+func TestDeploymentByID_NoDeployer(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	srv := NewServer(&Services{}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/deployments/dep-1", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestWorkspaces_List tests GET /api/v1/workspaces.
+func TestWorkspaces_List(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	ws := &fakeWorkspaceStore{workspaces: []WorkspaceRecord{{ID: "ws_1", Name: "test", RootPath: "/tmp/test"}}}
+	srv := NewServer(&Services{WorkspaceStore: ws}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workspaces", nil)
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestWorkspaces_NoStore tests that the workspaces endpoint returns error when WorkspaceStore is nil.
+func TestWorkspaces_NoStore(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	srv := NewServer(&Services{}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workspaces", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestWorkspacesSub_Get tests GET /api/v1/workspaces/{id}.
+func TestWorkspacesSub_Get(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	ws := &fakeWorkspaceStore{workspaces: []WorkspaceRecord{{ID: "ws_1", Name: "test", RootPath: "/tmp/test"}}}
+	srv := NewServer(&Services{WorkspaceStore: ws}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workspaces/ws_1", nil)
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestWorkspacesSub_GetNotFound tests GET /api/v1/workspaces/{id} with a missing ID.
+func TestWorkspacesSub_GetNotFound(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	ws := &fakeWorkspaceStore{}
+	srv := NewServer(&Services{WorkspaceStore: ws}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workspaces/nonexistent", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestWorkspacesSub_Delete tests DELETE /api/v1/workspaces/{id}.
+func TestWorkspacesSub_Delete(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	ws := &fakeWorkspaceStore{workspaces: []WorkspaceRecord{{ID: "ws_1", Name: "test", RootPath: "/tmp/test"}}}
+	srv := NewServer(&Services{WorkspaceStore: ws}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/workspaces/ws_1", nil)
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestWorkspacesSub_EmptyID tests that the workspaces sub endpoint returns error for empty ID.
+func TestWorkspacesSub_EmptyID(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	srv := NewServer(&Services{}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workspaces/", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestWorkspacesSub_UnknownSubpath tests that workspace sub endpoint returns error for unknown subpath.
+func TestWorkspacesSub_UnknownSubpath(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	srv := NewServer(&Services{}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workspaces/ws_1/unknown", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestHandleBuilds_NoStore tests that the builds endpoint returns error when ProjectStore is nil.
+func TestHandleBuilds_NoStore(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	srv := NewServer(&Services{}, logger, auditLog, "test-0.1.0", "")
+
+	body := mustEnvelope(t, map[string]any{"projectId": "proj-1"})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/builds", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestHandleBuilds_RejectsWrongMethod tests that the builds endpoint rejects non-GET/POST methods.
+func TestHandleBuilds_RejectsWrongMethod(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	srv := NewServer(&Services{}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/builds", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestHandleServers_NoRunner tests that the servers endpoint returns error when ServerRunner is nil.
+func TestHandleServers_NoRunner(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	srv := NewServer(&Services{}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/servers", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestHandleServers_RejectsWrongMethod tests that the servers endpoint rejects non-GET/POST methods.
+func TestHandleServers_RejectsWrongMethod(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	srv := NewServer(&Services{}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/servers", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestHandleDeployments_NoDeployer tests that POST /api/v1/deployments returns error when Deployer is nil.
+func TestHandleDeployments_NoDeployer(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	srv := NewServer(&Services{}, logger, auditLog, "test-0.1.0", "")
+
+	body := mustEnvelope(t, map[string]any{"projectId": "proj-1", "buildId": "b1"})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/deployments", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestHandleDeployments_RejectsWrongMethod tests that the deployments endpoint rejects non-GET/POST methods.
+func TestHandleDeployments_RejectsWrongMethod(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	srv := NewServer(&Services{}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/deployments", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestHandleWorkspaces_RejectsWrongMethod tests that the workspaces endpoint rejects non-GET/POST methods.
+func TestHandleWorkspaces_RejectsWrongMethod(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	srv := NewServer(&Services{}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/workspaces", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestHandleProjectByID_RejectsWrongMethod tests that the project by ID endpoint rejects non-GET/PUT methods.
+func TestHandleProjectByID_RejectsWrongMethod(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	srv := NewServer(&Services{}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/projects/proj-1", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestHandleServerSub_NoRunner tests that the server sub endpoint returns error when ServerRunner is nil.
+func TestHandleServerSub_NoRunner(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	srv := NewServer(&Services{}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/servers/srv_1", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestHandleServerSub_EmptyID tests that the server sub endpoint returns error for empty ID.
+func TestHandleServerSub_EmptyID(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	srv := NewServer(&Services{}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/servers/", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestCORS_OptionsRequest tests that CORS preflight OPTIONS requests return 204.
+func TestCORS_OptionsRequest(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	srv := NewServer(&Services{}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodOptions, "/api/v1/health", nil)
+	req.Header.Set("Origin", "http://localhost:3000")
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204, body=%s", rr.Code, rr.Body.String())
+	}
+	if rr.Header().Get("Access-Control-Allow-Origin") != "http://localhost:3000" {
+		t.Error("CORS origin header not set")
+	}
+}
+
+// TestCORS_NoOrigin tests that CORS headers are not set when no Origin header is present.
+func TestCORS_NoOrigin(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	srv := NewServer(&Services{}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodOptions, "/api/v1/health", nil)
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Header().Get("Access-Control-Allow-Origin") != "" {
+		t.Error("CORS origin header should not be set without Origin")
+	}
+}
+
+// TestParseSubprotocols_EdgeCases tests edge cases of parseSubprotocols.
+func TestParseSubprotocols_EdgeCases(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  string
+		expect []string
+	}{
+		{"empty", "", nil},
+		{"single", "sub1", []string{"sub1"}},
+		{"multiple", "sub1, sub2", []string{"sub1", "sub2"}},
+		{"with spaces", " sub1 , sub2 ", []string{"sub1", "sub2"}},
+		{"combined form", "kairo-secret-v1=secret123", []string{"kairo-secret-v1=secret123"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseSubprotocols(tt.input)
+			if len(got) != len(tt.expect) {
+				t.Fatalf("len = %d, want %d; got=%v", len(got), len(tt.expect), got)
+			}
+			for i, v := range tt.expect {
+				if got[i] != v {
+					t.Errorf("got[%d] = %q, want %q", i, got[i], v)
+				}
+			}
+		})
+	}
+}
+
+// TestSetRateLimit tests the SetRateLimit method.
+func TestSetRateLimit(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	srv := NewServer(&Services{}, logger, auditLog, "test-0.1.0", "")
+
+	// Disable rate limiting
+	srv.SetRateLimit(0)
+	if srv.rateLimiter != nil {
+		t.Error("rateLimiter should be nil after SetRateLimit(0)")
+	}
+
+	// Enable rate limiting
+	srv.SetRateLimit(60)
+	if srv.rateLimiter == nil {
+		t.Error("rateLimiter should not be nil after SetRateLimit(60)")
+	}
+
+	// Change rate limit
+	srv.SetRateLimit(120)
+	if srv.rateLimiter == nil {
+		t.Error("rateLimiter should not be nil after SetRateLimit(120)")
+	}
+}
+
+// TestSetRateLimit_Negative tests that negative rate limit disables it.
+func TestSetRateLimit_Negative(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	srv := NewServer(&Services{}, logger, auditLog, "test-0.1.0", "")
+
+	srv.SetRateLimit(-1)
+	if srv.rateLimiter != nil {
+		t.Error("rateLimiter should be nil after SetRateLimit(-1)")
+	}
+}
+
 func TestSearchHandler_MapsCancellationAndDeadline(t *testing.T) {
 	tests := []struct {
 		name string
@@ -978,5 +2102,1490 @@ func TestSearchHandler_MapsCancellationAndDeadline(t *testing.T) {
 				t.Fatalf("error code=%q, want %q; body=%s", response.Error.Code, tt.code, rr.Body.String())
 			}
 		})
+	}
+}
+
+func TestMavenDetect_NonPost(t *testing.T) {
+	srv := newTestServer(t, &fakeJDTLS{state: "stopped"})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/maven/detect", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rr.Code)
+	}
+}
+
+func TestMavenDetect_NoRootPath(t *testing.T) {
+	srv := newTestServer(t, &fakeJDTLS{state: "stopped"})
+	body := mustEnvelope(t, map[string]any{})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/maven/detect", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestMavenDetect_ValidPom(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "pom.xml"), []byte(`<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <groupId>com.example</groupId>
+  <artifactId>test</artifactId>
+  <version>1.0</version>
+</project>`), 0o644)
+
+	srv := newTestServer(t, &fakeJDTLS{state: "stopped"})
+	body := mustEnvelope(t, map[string]any{"rootPath": dir})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/maven/detect", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestMavenDependencies_NonGet(t *testing.T) {
+	srv := newTestServer(t, &fakeJDTLS{state: "stopped"})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/maven/dependencies", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rr.Code)
+	}
+}
+
+func TestMavenDependencies_NoRootPath(t *testing.T) {
+	srv := newTestServer(t, &fakeJDTLS{state: "stopped"})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/maven/dependencies", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestMavenDependencies_Valid(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "pom.xml"), []byte(`<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <groupId>com.example</groupId>
+  <artifactId>test</artifactId>
+  <version>1.0</version>
+</project>`), 0o644)
+
+	srv := newTestServer(t, &fakeJDTLS{state: "stopped"})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/maven/dependencies?rootPath="+dir, nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestMavenRun_NonPost(t *testing.T) {
+	srv := newTestServer(t, &fakeJDTLS{state: "stopped"})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/maven/run", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rr.Code)
+	}
+}
+
+func TestMavenRun_NoRootPath(t *testing.T) {
+	srv := newTestServer(t, &fakeJDTLS{state: "stopped"})
+	body := mustEnvelope(t, map[string]any{"task": "compile"})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/maven/run", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestMavenRun_NoTask(t *testing.T) {
+	srv := newTestServer(t, &fakeJDTLS{state: "stopped"})
+	dir := t.TempDir()
+	body := mustEnvelope(t, map[string]any{"rootPath": dir})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/maven/run", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestProjectDetect_NonPost(t *testing.T) {
+	srv := newTestServer(t, &fakeJDTLS{state: "stopped"})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/projects/detect", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rr.Code)
+	}
+}
+
+func TestProjectDetect_NoRootPath(t *testing.T) {
+	srv := newTestServer(t, &fakeJDTLS{state: "stopped"})
+	body := mustEnvelope(t, map[string]any{})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/projects/detect", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestProjectDetect_ValidDir(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "src"), 0o755)
+
+	srv := newTestServer(t, &fakeJDTLS{state: "stopped"})
+	body := mustEnvelope(t, map[string]any{"rootPath": dir})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/projects/detect", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestProjectImportNew_NonPost(t *testing.T) {
+	srv := newTestServer(t, &fakeJDTLS{state: "stopped"})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/projects/import", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rr.Code)
+	}
+}
+
+func TestProjectImportNew_NoWorkspace(t *testing.T) {
+	srv := newTestServer(t, &fakeJDTLS{state: "stopped"})
+	body := mustEnvelope(t, map[string]any{})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/projects/import", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestProjectImportNew_NoName(t *testing.T) {
+	srv := newTestServer(t, &fakeJDTLS{state: "stopped"})
+	body := mustEnvelope(t, map[string]any{"workspaceId": "ws-1"})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/projects/import", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestProjectImportNew_NoRootPath(t *testing.T) {
+	srv := newTestServer(t, &fakeJDTLS{state: "stopped"})
+	body := mustEnvelope(t, map[string]any{"workspaceId": "ws-1", "name": "Test"})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/projects/import", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestWorkspacesJava_UnknownSubpath(t *testing.T) {
+	srv := newTestServer(t, &fakeJDTLS{state: "stopped"})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workspaces/ws-1/java/unknown", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestJDTProject_NotConfigured(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	srv := NewServer(&Services{}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/jdtls/project", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestJDTLSLaunchDescriptor_NotConfigured(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	srv := NewServer(&Services{}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workspaces/ws-1/java/launch-descriptor?projectId=proj-1", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestJDTLSLaunchDescriptor_NonGet(t *testing.T) {
+	srv := newTestServer(t, &fakeJDTLS{state: "stopped"})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workspaces/ws-1/java/launch-descriptor", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestJDTLSPrepare_NotConfigured(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	srv := NewServer(&Services{}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workspaces/ws-1/java/prepare", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestJDTLSPrepare_NonPost(t *testing.T) {
+	srv := newTestServer(t, &fakeJDTLS{state: "stopped"})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workspaces/ws-1/java/prepare", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestSQLExecute_NonPost(t *testing.T) {
+	srv := newTestServer(t, &fakeJDTLS{state: "stopped"})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/sql/execute", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestSQLExecute_NoConnectionID(t *testing.T) {
+	srv := newTestServer(t, &fakeJDTLS{state: "stopped"})
+	body := mustEnvelope(t, map[string]any{"sql": "SELECT 1 FROM DUAL"})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sql/execute", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestSQLExecute_NoSQL(t *testing.T) {
+	srv := newTestServer(t, &fakeJDTLS{state: "stopped"})
+	body := mustEnvelope(t, map[string]any{"connectionId": "conn-1"})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sql/execute", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestSQLExecute_MaxRowsExceeded(t *testing.T) {
+	srv := newTestServer(t, &fakeJDTLS{state: "stopped"})
+	body := mustEnvelope(t, map[string]any{"connectionId": "conn-1", "sql": "SELECT 1 FROM DUAL", "maxRows": 200000})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sql/execute", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestSQLTestConnection_NonPost(t *testing.T) {
+	srv := newTestServer(t, &fakeJDTLS{state: "stopped"})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/sql/test-connection", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestSQLTestConnection_NoConnectionParams(t *testing.T) {
+	srv := newTestServer(t, &fakeJDTLS{state: "stopped"})
+	body := mustEnvelope(t, map[string]any{})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sql/test-connection", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestSQLTestConnection_InvalidJSON(t *testing.T) {
+	srv := newTestServer(t, &fakeJDTLS{state: "stopped"})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sql/test-connection", bytes.NewReader([]byte(`not json`)))
+	req.Header.Set("Content-Type", "application/json")
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestSQLExecute_InvalidJSON(t *testing.T) {
+	srv := newTestServer(t, &fakeJDTLS{state: "stopped"})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sql/execute", bytes.NewReader([]byte(`not json`)))
+	req.Header.Set("Content-Type", "application/json")
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestMavenRun_InvalidJSON(t *testing.T) {
+	srv := newTestServer(t, &fakeJDTLS{state: "stopped"})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/maven/run", bytes.NewReader([]byte(`not json`)))
+	req.Header.Set("Content-Type", "application/json")
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestMavenDetect_InvalidJSON(t *testing.T) {
+	srv := newTestServer(t, &fakeJDTLS{state: "stopped"})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/maven/detect", bytes.NewReader([]byte(`not json`)))
+	req.Header.Set("Content-Type", "application/json")
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestEncodingRecode_NoEncoder(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	srv := NewServer(&Services{}, logger, auditLog, "test-0.1.0", "")
+
+	body := mustEnvelope(t, map[string]any{"content": "test"})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/encoding/recode", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestEncodingValidate_NoEncoder(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	srv := NewServer(&Services{}, logger, auditLog, "test-0.1.0", "")
+
+	body := mustEnvelope(t, map[string]any{"content": "test", "encoding": "utf-8"})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/encoding/validate", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestEncodingDetect_NonPost(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	srv := NewServer(&Services{}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/encoding/detect", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestEncodingRecode_NonPost(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	srv := NewServer(&Services{}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/encoding/recode", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestEncodingValidate_NonPost(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	srv := NewServer(&Services{}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/encoding/validate", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleJDTProject_NoGenerator(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	srv := NewServer(&Services{}, logger, auditLog, "test-0.1.0", "")
+
+	body := mustEnvelope(t, map[string]any{"projectId": "proj-1"})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/jdtls/project", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleJDTProject_NonPost(t *testing.T) {
+	srv := newTestServer(t, &fakeJDTLS{state: "stopped"})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/jdtls/project", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	// Returns 500 because JDTProjectGenerator is not configured on the test server
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleJDTProject_NoProjectId(t *testing.T) {
+	srv := newTestServer(t, &fakeJDTLS{state: "stopped"})
+	body := mustEnvelope(t, map[string]any{})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/jdtls/project", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	srv.Handler().ServeHTTP(rr, req)
+	// Returns 500 because JDTProjectGenerator is not configured on the test server
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleJDTLSPrepare_NoProjectId(t *testing.T) {
+	srv := newTestServer(t, &fakeJDTLS{state: "stopped"})
+	body := mustEnvelope(t, map[string]any{})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workspaces/ws-1/java/prepare", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	srv.Handler().ServeHTTP(rr, req)
+	// Prepare succeeds even without projectId - it installs the distribution
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleJDTLSLaunchDescriptor_NoProjectId(t *testing.T) {
+	srv := newTestServer(t, &fakeJDTLS{state: "stopped"})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workspaces/ws-1/java/launch-descriptor", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleBuilds_Get(t *testing.T) {
+	engine := &cancelBuildEngineStub{result: &BuildResult{ID: "build-1", State: "succeeded"}}
+	srv := newTestServer(t, nil)
+	srv.Services.BuildEngine = engine
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/builds", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleBuildByID_Get(t *testing.T) {
+	engine := &cancelBuildEngineStub{result: &BuildResult{ID: "build-1", State: "succeeded"}}
+	srv := newTestServer(t, nil)
+	srv.Services.BuildEngine = engine
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/builds/build-1", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleBuildByID_NoEngine(t *testing.T) {
+	srv := newTestServer(t, nil)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/builds/build-1", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleBuilds_GetNoEngine(t *testing.T) {
+	srv := newTestServer(t, nil)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/builds", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleDeployments_Get(t *testing.T) {
+	deployer := &fakeDeployer{}
+	srv := newTestServer(t, nil)
+	srv.Services.Deployer = deployer
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/deployments", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleDeployments_GetNoDeployer(t *testing.T) {
+	srv := newTestServer(t, nil)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/deployments", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleWorkspaces_Post(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	ws := &fakeWorkspaceStore{}
+	srv := NewServer(&Services{WorkspaceStore: ws}, logger, auditLog, "test-0.1.0", "")
+
+	dir := t.TempDir()
+	body := mustEnvelope(t, map[string]any{"rootPath": dir, "name": "TestWS"})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workspaces", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleWorkspaces_PostNoRootPath(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	ws := &fakeWorkspaceStore{}
+	srv := NewServer(&Services{WorkspaceStore: ws}, logger, auditLog, "test-0.1.0", "")
+
+	body := mustEnvelope(t, map[string]any{"name": "TestWS"})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workspaces", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleWorkspaces_PostPathTraversal(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	ws := &fakeWorkspaceStore{}
+	srv := NewServer(&Services{WorkspaceStore: ws}, logger, auditLog, "test-0.1.0", "")
+
+	body := mustEnvelope(t, map[string]any{"rootPath": "/tmp/../etc", "name": "TestWS"})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workspaces", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleWorkspaces_PostInvalidJSON(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	srv := NewServer(&Services{}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workspaces", bytes.NewReader([]byte(`not json`)))
+	req.Header.Set("Content-Type", "application/json")
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleProjectByID_PutInvalidJSON(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	srv := NewServer(&Services{}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/projects/proj-1", bytes.NewReader([]byte(`not json`)))
+	req.Header.Set("Content-Type", "application/json")
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleProjectByID_Delete(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	srv := NewServer(&Services{}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/projects/proj-1", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleSearch_RejectsNonPost(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	srv := NewServer(&Services{}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/search", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleSearch_NoSearcher(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	srv := NewServer(&Services{}, logger, auditLog, "test-0.1.0", "")
+
+	body := mustEnvelope(t, map[string]any{"query": "hello"})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/search", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleSearch_NoQuery(t *testing.T) {
+	stub := &contextSearchStub{}
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	srv := NewServer(&Services{Searcher: stub}, logger, auditLog, "test-0.1.0", "")
+
+	body := mustEnvelope(t, map[string]any{})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/search", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleLogin_InvalidJSON(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	auth := &fakeAuth{}
+	srv := NewServer(&Services{Auth: auth}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewReader([]byte(`not json`)))
+	req.Header.Set("Content-Type", "application/json")
+	srv.Handler().ServeHTTP(rr, req)
+	// fakeAuth succeeds with any input, the handler returns 200
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleLogout_NoAuth(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	srv := NewServer(&Services{}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/logout", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	// Logout succeeds even without Auth configured
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleLogin_LoginError(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	auth := &fakeAuth{loginErr: errors.New("invalid credentials")}
+	srv := NewServer(&Services{Auth: auth}, logger, auditLog, "test-0.1.0", "")
+
+	body := mustEnvelope(t, map[string]any{"username": "admin", "password": "wrong"})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleToolchainImport_NoRegistry(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	srv := NewServer(&Services{}, logger, auditLog, "test-0.1.0", "")
+
+	body := mustEnvelope(t, map[string]any{"path": "/opt/jdk"})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/toolchains/import", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleToolchainImport_InvalidJSON(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	reg := &fakeToolchainRegistry{}
+	srv := NewServer(&Services{ToolchainRegistry: reg}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/toolchains/import", bytes.NewReader([]byte(`not json`)))
+	req.Header.Set("Content-Type", "application/json")
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleProjectDetect_InvalidJSON(t *testing.T) {
+	srv := newTestServer(t, &fakeJDTLS{state: "stopped"})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/projects/detect", bytes.NewReader([]byte(`not json`)))
+	req.Header.Set("Content-Type", "application/json")
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleProjectImportNew_InvalidJSON(t *testing.T) {
+	srv := newTestServer(t, &fakeJDTLS{state: "stopped"})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/projects/import", bytes.NewReader([]byte(`not json`)))
+	req.Header.Set("Content-Type", "application/json")
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleProjectImportNew_NoProjectStore(t *testing.T) {
+	srv := newTestServer(t, &fakeJDTLS{state: "stopped"})
+	body := mustEnvelope(t, map[string]any{"workspaceId": "ws-1", "name": "Test", "rootPath": "/tmp/test"})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/projects/import", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleProjectImportNew_NoWorkspaceStore(t *testing.T) {
+	srv := newTestServer(t, &fakeJDTLS{state: "stopped"})
+	srv.Services.ProjectStore = &fakeProjectStore{}
+	body := mustEnvelope(t, map[string]any{"workspaceId": "ws-1", "name": "Test", "rootPath": "/tmp/test"})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/projects/import", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleWorkspacesJava_LaunchDescriptor(t *testing.T) {
+	srv := newTestServer(t, &fakeJDTLS{state: "stopped"})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workspaces/ws-1/java/launch-descriptor?projectId=p1", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500 (no ProjectRepo), body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleWorkspacesJava_Prepare(t *testing.T) {
+	srv := newTestServer(t, &fakeJDTLS{state: "stopped"})
+	body := mustEnvelope(t, map[string]any{"projectId": "p1"})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workspaces/ws-1/java/prepare", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleWorkspacesJava_UnknownSubpath(t *testing.T) {
+	srv := newTestServer(t, &fakeJDTLS{state: "stopped"})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workspaces/ws-1/java/unknown", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleWorkspacesSub_Scan(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	ws := &fakeWorkspaceStore{workspaces: []WorkspaceRecord{{ID: "ws_1", Name: "test", RootPath: t.TempDir()}}}
+	srv := NewServer(&Services{WorkspaceStore: ws}, logger, auditLog, "test-0.1.0", "")
+
+	body := mustEnvelope(t, map[string]any{"rootPath": t.TempDir()})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workspaces/ws_1/scan", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	srv.Handler().ServeHTTP(rr, req)
+	// Scan root may be outside workspace, returns 403
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleServerSub_Recover(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	runner := &fakeServerRunner{}
+	srv := NewServer(&Services{ServerRunner: runner}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/servers/srv_1/recover", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleServerSub_Debug(t *testing.T) {
+	runner := &fakeServerRunner{}
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	srv := NewServer(&Services{ServerRunner: runner}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/servers/srv_1/debug", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleServerSub_Stop(t *testing.T) {
+	runner := &fakeServerRunner{}
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	srv := NewServer(&Services{ServerRunner: runner}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/servers/srv_1/stop", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	// /api/v1/servers/srv_1/stop routes to handleServerSub which returns "unknown subpath"
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleServerSub_UnknownSubpath(t *testing.T) {
+	runner := &fakeServerRunner{}
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	srv := NewServer(&Services{ServerRunner: runner}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/servers/srv_1/unknown", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleMavenDependencies_NoDependencies(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "pom.xml"), []byte(`<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <groupId>com.example</groupId>
+  <artifactId>test</artifactId>
+  <version>1.0</version>
+</project>`), 0o644)
+
+	srv := newTestServer(t, &fakeJDTLS{state: "stopped"})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/maven/dependencies?rootPath="+dir, nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleMavenDependencies_InvalidPOM(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "pom.xml"), []byte(`not xml`), 0o644)
+
+	srv := newTestServer(t, &fakeJDTLS{state: "stopped"})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/maven/dependencies?rootPath="+dir, nil)
+	srv.Handler().ServeHTTP(rr, req)
+	// Invalid POM returns 500 (EOF/parse error)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleMavenDetect_NoPom(t *testing.T) {
+	dir := t.TempDir()
+	srv := newTestServer(t, &fakeJDTLS{state: "stopped"})
+	body := mustEnvelope(t, map[string]any{"rootPath": dir})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/maven/detect", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleMavenRun_WithArgs(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "pom.xml"), []byte(`<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <groupId>com.example</groupId>
+  <artifactId>test</artifactId>
+  <version>1.0</version>
+</project>`), 0o644)
+
+	srv := newTestServer(t, &fakeJDTLS{state: "stopped"})
+	body := mustEnvelope(t, map[string]any{"rootPath": dir, "task": "compile", "args": "-DskipTests"})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/maven/run", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleMavenRun_NoPom(t *testing.T) {
+	dir := t.TempDir()
+	srv := newTestServer(t, &fakeJDTLS{state: "stopped"})
+	body := mustEnvelope(t, map[string]any{"rootPath": dir, "task": "compile"})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/maven/run", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+type fakeProjectRepo struct {
+	proj *domain.Project
+	err  error
+}
+
+func (f *fakeProjectRepo) Get(ctx context.Context, workspaceID domain.WorkspaceID, projectID domain.ProjectID) (*domain.Project, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.proj, nil
+}
+
+type fakeToolchainRepo struct {
+	tc  *domain.Toolchain
+	err error
+}
+
+func (f *fakeToolchainRepo) Get(ctx context.Context, id string) (*domain.Toolchain, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.tc, nil
+}
+
+func TestHandleJDTLSLaunchDescriptor_WithProjectRepo(t *testing.T) {
+	srv := newTestServer(t, &fakeJDTLS{state: "stopped"})
+	proj := &domain.Project{ID: "p1", RootPath: "/tmp/proj", SourceLevel: "1.8", TargetLevel: "1.8", Encoding: "utf-8"}
+	srv.Services.ProjectRepo = &fakeProjectRepo{proj: proj}
+	srv.Services.ToolchainRepo = &fakeToolchainRepo{tc: &domain.Toolchain{ID: "tc1", JavaHome: "/opt/jdk"}}
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workspaces/ws-1/java/launch-descriptor?projectId=p1", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleJDTLSLaunchDescriptor_ProjectNotFound(t *testing.T) {
+	srv := newTestServer(t, &fakeJDTLS{state: "stopped"})
+	srv.Services.ProjectRepo = &fakeProjectRepo{err: errors.New("not found")}
+	srv.Services.ToolchainRepo = &fakeToolchainRepo{tc: &domain.Toolchain{ID: "tc1", JavaHome: "/opt/jdk"}}
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workspaces/ws-1/java/launch-descriptor?projectId=nonexistent", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleJDTLSLaunchDescriptor_NoToolchainRepo(t *testing.T) {
+	srv := newTestServer(t, &fakeJDTLS{state: "stopped"})
+	proj := &domain.Project{ID: "p1", RootPath: "/tmp/proj", SourceLevel: "1.8", TargetLevel: "1.8", Encoding: "utf-8"}
+	srv.Services.ProjectRepo = &fakeProjectRepo{proj: proj}
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workspaces/ws-1/java/launch-descriptor?projectId=p1", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	// Project has no ToolchainID, so ToolchainRepo is not needed — returns 200
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleJDTLS_Delete(t *testing.T) {
+	j := &fakeJDTLS{state: "running", jre: "C:/jre17", version: "1.43.0", pid: 99}
+	srv := newTestServer(t, j)
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/jdtls", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	// DELETE is not supported on /api/v1/jdtls
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleEncodingDetect_InvalidJSON(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	enc := &fakeEncoder{}
+	srv := NewServer(&Services{Encoder: enc}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/encoding/detect", bytes.NewReader([]byte(`not json`)))
+	req.Header.Set("Content-Type", "application/json")
+	srv.Handler().ServeHTTP(rr, req)
+	// fakeEncoder always succeeds, handler returns 200
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleEncodingRecode_InvalidJSON(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	enc := &fakeEncoder{}
+	srv := NewServer(&Services{Encoder: enc}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/encoding/recode", bytes.NewReader([]byte(`not json`)))
+	req.Header.Set("Content-Type", "application/json")
+	srv.Handler().ServeHTTP(rr, req)
+	// fakeEncoder always succeeds, handler returns 200
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleEncodingValidate_InvalidJSON(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	enc := &fakeEncoder{}
+	srv := NewServer(&Services{Encoder: enc}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/encoding/validate", bytes.NewReader([]byte(`not json`)))
+	req.Header.Set("Content-Type", "application/json")
+	srv.Handler().ServeHTTP(rr, req)
+	// fakeEncoder always succeeds, handler returns 200
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleServers_Get(t *testing.T) {
+	runner := &fakeServerRunner{}
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	srv := NewServer(&Services{ServerRunner: runner}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/servers", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleDeploymentByID_NonGet(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	deployer := &fakeDeployer{}
+	srv := NewServer(&Services{Deployer: deployer}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/deployments/dep-1", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	// Handler doesn't reject non-GET methods for this route
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleDeploymentByID_NotFound(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	srv := NewServer(&Services{}, logger, auditLog, "test-0.1.0", "")
+	// No Deployer configured → internal error
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/deployments/dep-1", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleAudit_NilBody(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	srv := NewServer(&Services{}, logger, nil, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/audit", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleProjectDetect_NonExistentPath(t *testing.T) {
+	srv := newTestServer(t, &fakeJDTLS{state: "stopped"})
+	body := mustEnvelope(t, map[string]any{"rootPath": "/nonexistent/path"})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/projects/detect", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	srv.Handler().ServeHTTP(rr, req)
+	// Non-existent path returns 500 (IO error)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleProjectRecent_NoProjects(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	srv := NewServer(&Services{}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/projects/recent", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (empty list), body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleJDTLS_Get(t *testing.T) {
+	j := &fakeJDTLS{state: "running", jre: "C:/jre17", version: "1.43.0", pid: 99}
+	srv := newTestServer(t, j)
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/jdtls", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rr.Code, rr.Body.String())
+	}
+	_, p := decodeOK(t, rr.Body.Bytes())
+	if p["state"] != "running" {
+		t.Errorf("state = %v, want running", p["state"])
+	}
+	if p["version"] != "1.43.0" {
+		t.Errorf("version = %v, want 1.43.0", p["version"])
+	}
+}
+
+func TestHandleJDTLS_Get_Crashed(t *testing.T) {
+	j := &fakeJDTLS{state: "crashed", jre: "C:/jre17", version: "1.43.0", lastErr: "OOM"}
+	srv := newTestServer(t, j)
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/jdtls", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rr.Code, rr.Body.String())
+	}
+	_, p := decodeOK(t, rr.Body.Bytes())
+	if p["state"] != "crashed" {
+		t.Errorf("state = %v, want crashed", p["state"])
+	}
+	if p["lastError"] != "OOM" {
+		t.Errorf("lastError = %v, want OOM", p["lastError"])
+	}
+}
+
+func TestHandleJDTLS_Post_Start(t *testing.T) {
+	j := &fakeJDTLS{state: "stopped", jre: "C:/jre17", version: "1.43.0"}
+	srv := newTestServer(t, j)
+
+	body := mustEnvelope(t, map[string]any{"projectId": "proj-1"})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/jdtls", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleJDTLS_Post_InvalidJSON(t *testing.T) {
+	j := &fakeJDTLS{state: "stopped", jre: "C:/jre17", version: "1.43.0"}
+	srv := newTestServer(t, j)
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/jdtls", bytes.NewReader([]byte(`not json`)))
+	req.Header.Set("Content-Type", "application/json")
+	srv.Handler().ServeHTTP(rr, req)
+	// POST handler doesn't parse JSON, it calls Prepare directly — returns 200
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleJDTLS_NotConfigured_Get(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	srv := NewServer(&Services{}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/jdtls", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleJDTLS_NotConfigured_Post(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	srv := NewServer(&Services{}, logger, auditLog, "test-0.1.0", "")
+
+	body := mustEnvelope(t, map[string]any{"projectId": "proj-1"})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/jdtls", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleJDTLS_NotConfigured_Delete(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+	srv := NewServer(&Services{}, logger, auditLog, "test-0.1.0", "")
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/jdtls", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500, body=%s", rr.Code, rr.Body.String())
 	}
 }

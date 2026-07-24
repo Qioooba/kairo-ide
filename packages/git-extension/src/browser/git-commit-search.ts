@@ -117,9 +117,10 @@ export class GitCommitSearch {
                 query,
                 totalCount: results.length,
             };
-        } catch (err: any) {
+        } catch (err: unknown) {
+            const execErr = err as { killed?: boolean; code?: string; message?: string };
             if (signal.aborted) return this.getSummary();
-            if (err.killed || err.code === 'ETIMEDOUT') {
+            if (execErr.killed || execErr.code === 'ETIMEDOUT') {
                 this.summary = {
                     status: 'timed_out',
                     results: this.summary.results,

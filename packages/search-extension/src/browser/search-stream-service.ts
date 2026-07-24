@@ -63,7 +63,7 @@ export class SearchStreamService {
     const baseUrl = this.runtime.baseUrl().replace(/\/$/, '');
     const wsUrl = baseUrl.replace(/^http/, 'ws') + PROTOCOL_VERSION_PATH + '/search/stream';
 
-    const secret = (this.runtime as any).config?.agentSecret ?? (this.runtime as any).config?.bearerToken;
+    const secret = this.runtime.getAgentSecret();
     const protocols = secret ? [KAIRO_WS_SUBPROTOCOL, secret] : [];
 
     let ws: WebSocket;

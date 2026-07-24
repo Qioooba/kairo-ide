@@ -202,11 +202,12 @@ func (o *launchOrchestrator) executeExplodedDeploy(ctx context.Context, config a
 	policy := pathpolicy.NewDefaultPathPolicy()
 
 	// Validate artifact is within project root.
-	if _, err := policy.ResolveWithin(config.ProjectRoot, filepath.ToSlash(artifact)); err != nil {
+	resolved, err := policy.ResolveWithin(config.ProjectRoot, filepath.ToSlash(artifact))
+	if err != nil {
 		return fmt.Errorf("artifact path safety check failed: %w", err)
 	}
 
-	info, err := os.Stat(artifact)
+	info, err := os.Stat(resolved)
 	if err != nil {
 		return fmt.Errorf("artifact not found: %w", err)
 	}
@@ -236,7 +237,7 @@ func (o *launchOrchestrator) executeExplodedDeploy(ctx context.Context, config a
 	_, err = o.deployer.Publish(api.DeployRequest{
 		ProjectID: cfg.ProjectID,
 		What:      "all",
-		Source:    artifact,
+		Source:    resolved,
 		Target:    target,
 		Mode:      "mirror",
 		Trigger:   "manual",
@@ -254,11 +255,12 @@ func (o *launchOrchestrator) executeWARDeploy(ctx context.Context, config api.La
 	policy := pathpolicy.NewDefaultPathPolicy()
 
 	// Validate artifact is within project root.
-	if _, err := policy.ResolveWithin(config.ProjectRoot, filepath.ToSlash(artifact)); err != nil {
+	resolved, err := policy.ResolveWithin(config.ProjectRoot, filepath.ToSlash(artifact))
+	if err != nil {
 		return fmt.Errorf("artifact path safety check failed: %w", err)
 	}
 
-	info, err := os.Stat(artifact)
+	info, err := os.Stat(resolved)
 	if err != nil {
 		return fmt.Errorf("WAR file not found: %w", err)
 	}
@@ -286,7 +288,7 @@ func (o *launchOrchestrator) executeWARDeploy(ctx context.Context, config api.La
 	_ = os.Remove(targetFile)
 
 	// Copy WAR file.
-	if err := copyFile(artifact, targetFile); err != nil {
+	if err := copyFile(resolved, targetFile); err != nil {
 		return fmt.Errorf("copy WAR file: %w", err)
 	}
 

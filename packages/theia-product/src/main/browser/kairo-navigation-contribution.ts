@@ -27,6 +27,46 @@ import { MessageService } from '@theia/core/lib/common/message-service';
 import { isOSX } from '@theia/core/lib/common/os';
 import URI from '@theia/core/lib/common/uri';
 
+/** Minimal Monaco editor API surface used by the navigation contribution. */
+interface MonacoNamespace {
+  CancellationTokenSource: { new(): { token: unknown } };
+  languages: {
+    /** Internal document symbol providers (not part of the public API). */
+    _documentSymbolProviders: MonacoDocumentSymbolProvider[];
+    /** Internal workspace symbol providers (not part of the public API). */
+    _workspaceSymbolProviders: MonacoWorkspaceSymbolProvider[];
+  };
+  Selection: { new(line: number, col: number, line2: number, col2: number): unknown };
+  Range: { new(line: number, col: number, line2: number, col2: number): unknown };
+  editor: {
+    getModel(uri: unknown): MonacoTextModel | undefined;
+  };
+}
+
+interface MonacoTextModel {
+  getLineCount(): number;
+  getLineMaxColumn(line: number): number;
+}
+
+interface MonacoDocumentSymbolProvider {
+  provideDocumentSymbols: (model: unknown, token: unknown) => Promise<MonacoSymbol[] | undefined>;
+}
+
+interface MonacoWorkspaceSymbolProvider {
+  provideWorkspaceSymbols: (query: { query: string }, token: unknown) => Promise<MonacoSymbol[] | undefined>;
+}
+
+interface MonacoSymbol {
+  name: string;
+  kind: number;
+  detail?: string;
+  containerName?: string;
+  range?: { startLineNumber: number; startColumn: number };
+  selectionRange?: { startLineNumber: number; startColumn: number };
+  location?: { uri: { toString(): string }; range: { startLineNumber: number; startColumn: number } };
+  children?: MonacoSymbol[];
+}
+
 export namespace KairoNavigationCommands {
   export const GO_TO_LINE: Command = {
     id: 'kairo.navigation.goToLine',
@@ -175,7 +215,7 @@ export class KairoNavigationContribution implements CommandContribution, Keybind
       validateInput: async (val: string) => {
         const num = parseInt(val, 10);
         if (isNaN(num) || num < 1 || num > totalLines) {
-          return { content: `Enter a number between 1 and ${totalLines}`, severity: 1 as any };
+          return { content: `Enter a number between 1 and ${totalLines}`, severity: 1 };
         }
         return undefined;
       },
@@ -215,7 +255,7 @@ export class KairoNavigationContribution implements CommandContribution, Keybind
         return;
       }
 
-      const providers = (monaco.languages as any)._documentSymbolProviders;
+      const providers = monaco.languages._documentSymbolProviders;
       if (!providers) {
         this.messages.info('No symbol provider registered for this file type.');
         return;
@@ -245,16 +285,16 @@ export class KairoNavigationContribution implements CommandContribution, Keybind
   }
 
   /** Dynamically import Monaco editor core. */
-  private async getMonaco(): Promise<any> {
+  private async getMonaco(): Promise<MonacoNamespace | undefined> {
     try {
-      return await import('@theia/monaco-editor-core');
+      return await import('@theia/monaco-editor-core') as unknown as MonacoNamespace;
     } catch {
       return undefined;
     }
   }
 
   /** Get flat symbol list from the editor model. */
-  private async getModelSymbols(model: any, monaco: any): Promise<SymbolQuickPickItem[]> {
+  private async getModelSymbols(model: unknown, monaco: MonacoNamespace): Promise<SymbolQuickPickItem[]> {
     const result: SymbolQuickPickItem[] = [];
     try {
       // Access internal document symbol providers
@@ -282,7 +322,7 @@ export class KairoNavigationContribution implements CommandContribution, Keybind
 
   /** Recursively collect flat symbols. */
   private collectFlatSymbols(
-    symbols: any[],
+    symbols: MonacoSymbol[],
     prefix: string,
     result: SymbolQuickPickItem[],
   ): void {
@@ -502,14 +542,14 @@ export class KairoNavigationContribution implements CommandContribution, Keybind
       }
 
       // Access internal workspace symbol providers
-      const providers = (monaco.languages as any)._workspaceSymbolProviders;
+      const providers = monaco.languages._workspaceSymbolProviders;
       if (!providers || providers.length === 0) {
         this.messages.warn('No workspace symbol provider available.');
         return;
       }
 
       const token = new monaco.CancellationTokenSource().token;
-      const allResults: any[] = [];
+      const allResults: MonacoSymbol[] = [];
       for (const provider of providers) {
         if (!provider.provideWorkspaceSymbols) continue;
         try {

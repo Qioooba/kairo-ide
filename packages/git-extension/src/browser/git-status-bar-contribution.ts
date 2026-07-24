@@ -2,21 +2,63 @@ import { injectable, inject, postConstruct } from '@theia/core/shared/inversify'
 import { FrontendApplicationContribution } from '@theia/core/lib/browser';
 import { StatusBar, StatusBarAlignment, StatusBarEntry } from '@theia/core/lib/browser/status-bar/status-bar-types';
 import { GitService } from './git-service';
+import { GitCherryPickService } from './git-cherrypick-service';
 
 @injectable()
 export class GitStatusBarContribution implements FrontendApplicationContribution {
   @inject(StatusBar) protected statusBar!: StatusBar;
   @inject(GitService) protected gitService!: GitService;
+  @inject(GitCherryPickService) protected cherryPickService!: GitCherryPickService;
 
   protected static readonly ID = 'kairo-git-status';
+  protected static readonly CHERRY_PICK_ID = 'kairo-git-cherrypick-status';
 
   @postConstruct()
   protected init(): void {
     this.gitService.onDidChangeStatus(() => this.updateStatusBar());
+    this.cherryPickService.onDidChangeState(() => this.updateCherryPickStatus());
   }
 
   onStart(): void {
     this.updateStatusBar();
+    this.updateCherryPickStatus();
+  }
+
+  protected async updateCherryPickStatus(): Promise<void> {
+    const state = this.cherryPickService.getState();
+    if (state.status === 'idle') {
+      await this.statusBar.removeElement(GitStatusBarContribution.CHERRY_PICK_ID);
+      return;
+    }
+
+    let text = '';
+    if (state.status === 'in-progress') {
+      text = '$(git-merge) Cherry-picking...';
+      if (state.currentHash) {
+        const shortHash = state.currentHash.substring(0, 7);
+        text += ` ${shortHash}`;
+      }
+      if (state.remainingHashes.length > 0) {
+        text += ` (${state.remainingHashes.length} remaining)`;
+      }
+    } else if (state.status === 'conflict') {
+      text = '$(warning) Cherry-pick conflict!';
+      if (state.currentHash) {
+        text += ` ${state.currentHash.substring(0, 7)}`;
+      }
+    }
+
+    const entry: StatusBarEntry = {
+      text,
+      alignment: StatusBarAlignment.LEFT,
+      command: state.status === 'conflict' ? 'kairo-git-cherrypick:abort' : undefined,
+      tooltip: state.status === 'conflict'
+        ? 'Cherry-pick conflict. Click to abort, or resolve conflicts and continue.'
+        : 'Cherry-pick in progress...',
+      priority: 90,
+    };
+
+    await this.statusBar.setElement(GitStatusBarContribution.CHERRY_PICK_ID, entry);
   }
 
   protected async updateStatusBar(): Promise<void> {
@@ -26,7 +68,7 @@ export class GitStatusBarContribution implements FrontendApplicationContribution
       return;
     }
 
-    const status = this.gitService['cachedStatus'];
+    const status = this.gitService.getCachedStatus();
     if (!status) {
       await this.statusBar.removeElement(GitStatusBarContribution.ID);
       return;

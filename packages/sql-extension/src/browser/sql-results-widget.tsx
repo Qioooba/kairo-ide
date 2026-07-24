@@ -93,6 +93,12 @@ export class SqlResultsWidget extends ReactWidget {
           >
             Export CSV
           </button>
+          <button
+            className="theia-button"
+            onClick={() => this.handleExportJson()}
+          >
+            Export JSON
+          </button>
           {result.truncated && (
             <span className="sql-results-warning">Results truncated. Refine your query to see more rows.</span>
           )}
@@ -222,6 +228,18 @@ export class SqlResultsWidget extends ReactWidget {
     const a = document.createElement('a');
     a.href = url;
     a.download = `sql-results-${new Date().toISOString().replace(/[:.]/g, '-')}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  private handleExportJson(): void {
+    if (!this.state.result) return;
+    const json = this.executionService.exportToJson(this.state.result);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `sql-results-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
     a.click();
     URL.revokeObjectURL(url);
   }

@@ -61,6 +61,11 @@ export class GitService {
 
   protected repoRoot: string | undefined;
   protected cachedStatus: GitStatusResult | undefined;
+
+  /** Public read-only access to the cached status. */
+  getCachedStatus(): GitStatusResult | undefined {
+    return this.cachedStatus;
+  }
   protected pollingTimer: ReturnType<typeof setInterval> | undefined;
 
   @postConstruct()

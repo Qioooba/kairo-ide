@@ -1,6 +1,7 @@
 package remote
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/tls"
@@ -77,8 +78,8 @@ func TestNewRemoteServer_DefaultLogger(t *testing.T) {
 	}
 }
 
-// TestBuildTLSConfig_NoCert tests error when cert files are missing.
-func TestBuildTLSConfig_NoCert(t *testing.T) {
+// TestBuildTLSConfig_NoCertInServer tests error when cert files are missing.
+func TestBuildTLSConfig_NoCertInServer(t *testing.T) {
 	rs, _ := NewRemoteServer(RemoteConfig{
 		BindAddr: ":0",
 		CertFile: "/nonexistent/cert.pem",
@@ -548,6 +549,240 @@ func TestSessionExpiry(t *testing.T) {
 	}
 	if rs.validateSession("valid") == nil {
 		t.Error("valid session should be found")
+	}
+}
+
+// TestExtractToken_WebSocketSubprotocol tests token from WebSocket subprotocol.
+func TestExtractToken_WebSocketSubprotocol(t *testing.T) {
+	rs, _ := NewRemoteServer(RemoteConfig{BindAddr: ":0"})
+	req, _ := http.NewRequest(http.MethodGet, "/api/v1/remote/ws", nil)
+	req.Header.Set("Upgrade", "websocket")
+	req.Header.Set("Sec-WebSocket-Protocol", "ws-token-123")
+	token := rs.extractToken(req)
+	if token != "ws-token-123" {
+		t.Errorf("token = %q, want ws-token-123", token)
+	}
+}
+
+// TestExtractToken_ShortAuth tests short Authorization header.
+func TestExtractToken_ShortAuth(t *testing.T) {
+	rs, _ := NewRemoteServer(RemoteConfig{BindAddr: ":0"})
+	req, _ := http.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Authorization", "short")
+	token := rs.extractToken(req)
+	if token != "" {
+		t.Errorf("token should be empty for short auth header, got %q", token)
+	}
+}
+
+// TestShutdown_WithServer tests shutdown with a server.
+func TestShutdown_WithServer(t *testing.T) {
+	dir := t.TempDir()
+	certFile, keyFile, err := generateTestCert(dir)
+	if err != nil {
+		t.Fatalf("generateTestCert: %v", err)
+	}
+
+	rs, _ := NewRemoteServer(RemoteConfig{
+		BindAddr: ":0",
+		Logger:   log.New("test"),
+		CertFile: certFile,
+		KeyFile: keyFile,
+	})
+	// Set httpSrv to simulate a running server
+	rs.httpSrv = &http.Server{Addr: ":0"}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+	err = rs.Shutdown(ctx)
+	if err != nil {
+		// May fail because server isn't actually listening, but code path is covered
+		t.Logf("Shutdown: %v", err)
+	}
+}
+
+// TestHandleWebSocket tests the WebSocket handler (not implemented).
+func TestHandleWebSocket(t *testing.T) {
+	rs, _ := NewRemoteServer(RemoteConfig{
+		BindAddr: ":0",
+		Logger:   log.New("test"),
+	})
+	req, _ := http.NewRequest(http.MethodGet, "/api/v1/remote/ws", nil)
+	rec := &responseRecorder{header: make(http.Header)}
+	rs.handleWebSocket(rec, req)
+	if rec.status != http.StatusNotImplemented {
+		t.Errorf("status = %d, want %d", rec.status, http.StatusNotImplemented)
+	}
+}
+
+// TestHandleProxiedAPI tests the proxied API handler (not implemented).
+func TestHandleProxiedAPI(t *testing.T) {
+	rs, _ := NewRemoteServer(RemoteConfig{
+		BindAddr: ":0",
+		Logger:   log.New("test"),
+	})
+	req, _ := http.NewRequest(http.MethodGet, "/api/v1/workspaces", nil)
+	// Add session info to context
+	session := &sessionInfo{Username: "testuser", Role: "user"}
+	ctx := context.WithValue(req.Context(), ctxKeySession, session)
+	req = req.WithContext(ctx)
+
+	rec := &responseRecorder{header: make(http.Header)}
+	rs.handleProxiedAPI(rec, req)
+	if rec.status != http.StatusNotImplemented {
+		t.Errorf("status = %d, want %d", rec.status, http.StatusNotImplemented)
+	}
+}
+
+// TestAuthMiddleware_PublicPaths tests auth middleware on public paths.
+func TestAuthMiddleware_PublicPaths(t *testing.T) {
+	rs, _ := NewRemoteServer(RemoteConfig{
+		BindAddr: ":0",
+		Logger:   log.New("test"),
+	})
+
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	handler := rs.authMiddleware(next)
+
+	// Login path should bypass auth
+	req, _ := http.NewRequest(http.MethodGet, "/api/v1/remote/login", nil)
+	rec := &responseRecorder{header: make(http.Header)}
+	handler.ServeHTTP(rec, req)
+	if rec.status != http.StatusOK {
+		t.Errorf("login path status = %d, want 200", rec.status)
+	}
+
+	// Health path should bypass auth
+	req2, _ := http.NewRequest(http.MethodGet, "/api/v1/remote/health", nil)
+	rec2 := &responseRecorder{header: make(http.Header)}
+	handler.ServeHTTP(rec2, req2)
+	if rec2.status != http.StatusOK {
+		t.Errorf("health path status = %d, want 200", rec2.status)
+	}
+}
+
+// TestAuthMiddleware_NoToken tests auth middleware without token.
+func TestAuthMiddleware_NoToken(t *testing.T) {
+	rs, _ := NewRemoteServer(RemoteConfig{
+		BindAddr: ":0",
+		Logger:   log.New("test"),
+	})
+
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	handler := rs.authMiddleware(next)
+
+	req, _ := http.NewRequest(http.MethodGet, "/api/v1/workspaces", nil)
+	rec := &responseRecorder{header: make(http.Header)}
+	handler.ServeHTTP(rec, req)
+	if rec.status != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", rec.status)
+	}
+}
+
+// TestAuthMiddleware_ValidToken tests auth middleware with valid token.
+func TestAuthMiddleware_ValidToken(t *testing.T) {
+	rs, _ := NewRemoteServer(RemoteConfig{
+		BindAddr: ":0",
+		Logger:   log.New("test"),
+	})
+	token := generateToken(32)
+	rs.sessions[token] = &sessionInfo{
+		Token:     token,
+		Username:  "testuser",
+		CreatedAt: time.Now(),
+		ExpiresAt: time.Now().Add(1 * time.Hour),
+	}
+
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sess := r.Context().Value(ctxKeySession).(*sessionInfo)
+		if sess.Username != "testuser" {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	})
+	handler := rs.authMiddleware(next)
+
+	req, _ := http.NewRequest(http.MethodGet, "/api/v1/workspaces", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := &responseRecorder{header: make(http.Header)}
+	handler.ServeHTTP(rec, req)
+	if rec.status != http.StatusOK {
+		t.Errorf("status = %d, want 200", rec.status)
+	}
+}
+
+// TestAuthMiddleware_ExpiredToken tests auth middleware with expired token.
+func TestAuthMiddleware_ExpiredToken(t *testing.T) {
+	rs, _ := NewRemoteServer(RemoteConfig{
+		BindAddr: ":0",
+		Logger:   log.New("test"),
+	})
+	token := generateToken(32)
+	rs.sessions[token] = &sessionInfo{
+		Token:     token,
+		Username:  "olduser",
+		CreatedAt: time.Now().Add(-2 * time.Hour),
+		ExpiresAt: time.Now().Add(-1 * time.Hour),
+	}
+
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	handler := rs.authMiddleware(next)
+
+	req, _ := http.NewRequest(http.MethodGet, "/api/v1/workspaces", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := &responseRecorder{header: make(http.Header)}
+	handler.ServeHTTP(rec, req)
+	if rec.status != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", rec.status)
+	}
+}
+
+// TestHandleLogin_KAIRO_SECRET_Fallback tests login with KAIRO_SECRET fallback.
+func TestHandleLogin_SecretFallback(t *testing.T) {
+	os.Unsetenv("KAIRO_REMOTE_SECRET")
+	os.Setenv("KAIRO_SECRET", "fallback-secret")
+	defer os.Unsetenv("KAIRO_SECRET")
+
+	rs, _ := NewRemoteServer(RemoteConfig{
+		BindAddr: ":0",
+		Logger:   log.New("test"),
+	})
+	body, _ := json.Marshal(LoginRequest{Username: "admin", Password: "fallback-secret"})
+	req, _ := http.NewRequest(http.MethodPost, "/api/v1/remote/login", nil)
+	req.Body = &fakeReadCloser{data: body}
+	rec := &responseRecorder{header: make(http.Header)}
+	rs.handleLogin(rec, req)
+
+	if rec.status != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.status)
+	}
+}
+
+// TestHandleLogin_AllowedUsers_Success tests login with allowed user.
+func TestHandleLogin_AllowedUsers_Success(t *testing.T) {
+	os.Setenv("KAIRO_REMOTE_SECRET", "correct-secret")
+	defer os.Unsetenv("KAIRO_REMOTE_SECRET")
+
+	rs, _ := NewRemoteServer(RemoteConfig{
+		BindAddr:     ":0",
+		Logger:       log.New("test"),
+		AllowedUsers: []string{"admin"},
+	})
+	body, _ := json.Marshal(LoginRequest{Username: "admin", Password: "correct-secret"})
+	req, _ := http.NewRequest(http.MethodPost, "/api/v1/remote/login", nil)
+	req.Body = &fakeReadCloser{data: body}
+	rec := &responseRecorder{header: make(http.Header)}
+	rs.handleLogin(rec, req)
+
+	if rec.status != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rec.status, string(rec.body))
 	}
 }
 

@@ -21,6 +21,7 @@ import { Disposable, DisposableCollection } from '@theia/core/lib/common/disposa
 import { FrontendApplicationContribution } from '@theia/core/lib/browser';
 import { EditorManager } from '@theia/editor/lib/browser/editor-manager';
 import { ILogger } from '@theia/core/lib/common/logger';
+import { MonacoEditor } from '@theia/monaco/lib/browser/monaco-editor';
 import { JavaLanguageClient } from './java-language-client';
 import type { LSPLocation as _LSPLocation } from '../common/lsp-protocol';
 
@@ -404,7 +405,7 @@ export class JavaOverrideGutter implements FrontendApplicationContribution, Disp
   protected getCurrentMonacoEditor(): monaco.editor.IStandaloneCodeEditor | undefined {
     const editorWidget = this.editorManager.currentEditor;
     if (!editorWidget) return undefined;
-    return (editorWidget.editor as any).getControl?.() as monaco.editor.IStandaloneCodeEditor | undefined;
+    return (editorWidget.editor as MonacoEditor).getControl?.() as monaco.editor.IStandaloneCodeEditor | undefined;
   }
 
   protected clearAllTimers(): void {

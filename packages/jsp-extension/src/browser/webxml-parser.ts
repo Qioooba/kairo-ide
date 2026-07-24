@@ -8,6 +8,8 @@
 export interface ServletDef {
   servletName: string;
   servletClass: string;
+  /** JSP file path if this servlet is backed by a JSP (instead of a class). */
+  jspFile?: string;
 }
 
 export interface ServletMapping {
@@ -22,6 +24,10 @@ export interface WebXml {
   mappings: ServletMapping[];
   /** servlet-class → servlet-name reverse lookup. */
   classToServlet: Record<string, string>;
+  /** JSP file path → servlet-name reverse lookup. */
+  jspToServlet: Record<string, string>;
+  /** url-pattern → servlet-name reverse lookup. */
+  urlToServlet: Record<string, string>;
 }
 
 /**
@@ -43,14 +49,23 @@ export function parseWebXml(xml: string): WebXml | undefined {
 
   const servlets: Record<string, ServletDef> = {};
   const classToServlet: Record<string, string> = {};
+  const jspToServlet: Record<string, string> = {};
+  const urlToServlet: Record<string, string> = {};
   const mappings: ServletMapping[] = [];
 
   for (const servletEl of allByTag(root, 'servlet')) {
     const name = byTag(servletEl, 'servlet-name')?.textContent?.trim() ?? '';
     const clazz = byTag(servletEl, 'servlet-class')?.textContent?.trim() ?? '';
-    if (name && clazz) {
-      servlets[name] = { servletName: name, servletClass: clazz };
-      classToServlet[clazz] = name;
+    const jspFile = byTag(servletEl, 'jsp-file')?.textContent?.trim() ?? undefined;
+    if (name) {
+      const def: ServletDef = { servletName: name, servletClass: clazz, jspFile };
+      servlets[name] = def;
+      if (clazz) {
+        classToServlet[clazz] = name;
+      }
+      if (jspFile) {
+        jspToServlet[jspFile] = name;
+      }
     }
   }
 
@@ -59,10 +74,11 @@ export function parseWebXml(xml: string): WebXml | undefined {
     const pattern = byTag(mappingEl, 'url-pattern')?.textContent?.trim() ?? '';
     if (name && pattern) {
       mappings.push({ servletName: name, urlPattern: pattern });
+      urlToServlet[pattern] = name;
     }
   }
 
-  return { servlets, mappings, classToServlet };
+  return { servlets, mappings, classToServlet, jspToServlet, urlToServlet };
 }
 
 /**

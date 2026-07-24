@@ -278,7 +278,7 @@ func convertToProjectDetection(raw map[string]any) protocol.ProjectDetection {
 		// Layout is already populated by scanWorkspace
 	}
 	if layout, ok := raw["layout"].(map[string]any); ok {
-		if src, ok := layout["src"].([]interface{}); ok {
+		if src, ok := layout["src"].([]any); ok {
 			for _, s := range src {
 				if ss, ok := s.(string); ok {
 					pd.SourceDirs = append(pd.SourceDirs, ss)
@@ -298,7 +298,7 @@ func convertToProjectDetection(raw map[string]any) protocol.ProjectDetection {
 	if bs, ok := raw["buildSystem"].(string); ok {
 		pd.BuildSystem = bs
 	}
-	if enc, ok := raw["encodingByExtension"].(map[string]interface{}); ok {
+	if enc, ok := raw["encodingByExtension"].(map[string]any); ok {
 		if javaEnc, ok := enc[".java"].(string); ok {
 			pd.DefaultEncoding = javaEnc
 		}
@@ -323,7 +323,7 @@ func convertToProjectDetection(raw map[string]any) protocol.ProjectDetection {
 	if conf, ok := raw["confidence"].(float64); ok {
 		pd.Confidence = conf
 	}
-	if warns, ok := raw["warnings"].([]interface{}); ok {
+	if warns, ok := raw["warnings"].([]any); ok {
 		for _, w := range warns {
 			if ws, ok := w.(string); ok {
 				pd.Warnings = append(pd.Warnings, ws)

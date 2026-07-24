@@ -18,6 +18,33 @@
 
 'use strict';
 
+// CSS extension hook must be set up BEFORE any @theia/core module is loaded.
+const Module = require('module');
+Module._extensions['.css'] = function (module, filename) {
+  module._compile('module.exports = {};', filename);
+};
+
+// Set up JSDOM so @lumino/domutils has access to `navigator`.
+const { enableJSDOM } = require('@theia/core/lib/browser/test/jsdom');
+enableJSDOM();
+
+// JSDOM does not expose DragEvent as a global; @lumino/dragdrop needs it.
+if (!global.DragEvent) {
+  global.DragEvent = class DragEvent extends global.MouseEvent {};
+}
+
+// Theia requires FrontendApplicationConfigProvider to be set before
+// any browser module is loaded.
+const { FrontendApplicationConfigProvider } = require('@theia/core/lib/browser/frontend-application-config-provider');
+FrontendApplicationConfigProvider.set({
+  defaultTheme: 'dark',
+  defaultIconTheme: 'theia-file-icons',
+  applicationName: 'Kairo',
+  validatePreferencesSchema: true,
+});
+
+require('reflect-metadata');
+
 const { test } = require('node:test');
 const assert = require('node:assert');
 const http = require('node:http');

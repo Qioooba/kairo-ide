@@ -1,0 +1,3 @@
+# Mock servlet-api.jar - 这是占位文件，模拟遗留项目中的servlet-api.jar
+# 实际运行时，IDE会使用bundled/tomcat6/中的真实jar
+# 此文件仅用于测试项目结构验证

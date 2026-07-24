@@ -396,7 +396,7 @@ export function registerJspBreakpointCommand(): monaco.IDisposable {
     id: 'kairo.jsp.toggleBreakpoint',
     label: 'JSP: Toggle Breakpoint',
     contextMenuGroupId: 'debug',
-    run: async (editor: monaco.editor.ICodeEditor, ...args: any[]): Promise<void> => {
+    run: async (editor: monaco.editor.ICodeEditor, ...args: unknown[]): Promise<void> => {
       const jspUri = args[0] as string;
       const jspLine = args[1] as number;
 

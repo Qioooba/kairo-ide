@@ -400,7 +400,7 @@ export class KairoComplianceSuite {
       language: typeof navigator !== 'undefined' ? navigator.language : 'unknown',
       timestamp: new Date().toISOString(),
       memoryUsage: typeof performance !== 'undefined'
-        ? (performance as any).memory || 'unknown'
+        ? (performance as unknown as { memory?: string | { usedJSHeapSize: number } }).memory || 'unknown'
         : 'unknown',
     };
   }

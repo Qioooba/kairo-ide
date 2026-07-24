@@ -3,8 +3,10 @@ import { Emitter, Event } from '@theia/core/lib/common/event';
 import { Disposable } from '@theia/core/lib/common/disposable';
 import { FileStat } from '@theia/filesystem/lib/common/files';
 import { WorkspaceService } from '@theia/workspace/lib/browser/workspace-service';
+import { FrontendApplicationContribution, FrontendApplication } from '@theia/core/lib/browser';
 import { RuntimeConnectionService } from './runtime-connection-service';
 import { KairoError } from './runtime-errors';
+import type { Workspace } from '@kairo/protocol';
 
 export interface WorkspaceContext {
     workspaceId: string;
@@ -12,11 +14,14 @@ export interface WorkspaceContext {
 }
 
 @injectable()
-export class WorkspaceContextService {
+export class WorkspaceContextService implements FrontendApplicationContribution {
     private currentContext: WorkspaceContext | undefined;
     private readonly onDidChangeContextEmitter = new Emitter<WorkspaceContext | undefined>();
     readonly onDidChangeContext: Event<WorkspaceContext | undefined> = this.onDidChangeContextEmitter.event;
     private toDispose: Disposable | undefined;
+    private statusUnsubscribe: (() => void) | undefined;
+    /** Track the last known roots so we can re-sync when the runtime connects. */
+    private lastRoots: FileStat[] | undefined;
 
     @inject(WorkspaceService)
     protected readonly workspaceService!: WorkspaceService;
@@ -26,36 +31,35 @@ export class WorkspaceContextService {
 
     @postConstruct()
     protected init(): void {
-        // The postConstruct must remain synchronous: every
-        // Kairo FrontendApplicationContribution / CommandContribution
-        // transitively injects this service (via BuildStore,
-        // KairoServerService, KairoProjectService, ActiveProjectService,
-        // LogViewerWidget, …). An async @postConstruct makes the
-        // entire binding chain async, and the synchronous
-        // `getAll(FrontendApplicationContribution)` /
-        // `getAll(CommandContribution)` calls in the Theia
-        // ApplicationShell / CommandRegistry onStart paths
-        // throw `LazyInSync` for the contribution symbol.
-        //
-        // The previous version of this method was `async` and
-        // `await`ed `workspaceService.roots` here. We now fire the
-        // initial-check as a microtask after construction so the
-        // postConstruct returns void. The behavior is unchanged:
-        // the listener below also fires for any subsequent
-        // workspace changes, so the first `roots` event covers the
-        // initial state regardless of which path populates it.
         this.toDispose = this.workspaceService.onWorkspaceChanged((roots) => {
+            this.lastRoots = roots;
             void this.syncFromRoots(roots);
         });
 
         // Trigger the initial sync as a fire-and-forget microtask.
-        // `workspaceService.roots` is a Promise<Stat[]>, so we
-        // chain off it instead of awaiting inside init().
         void this.workspaceService.roots.then(roots => {
+            this.lastRoots = roots;
             if (roots.length > 0) {
                 void this.syncFromRoots(roots);
             }
         });
+
+        // Re-sync when the runtime (re)connects, in case the initial
+        // sync failed because the agent was not reachable (N-026).
+        this.statusUnsubscribe = this.runtime.onStatusChange(s => {
+            if (s === 'open' && this.lastRoots && this.lastRoots.length > 0) {
+                void this.syncFromRoots(this.lastRoots);
+            }
+        });
+    }
+
+    onStart(_app: FrontendApplication): void {
+        // WorkspaceContextService is initialized via @postConstruct;
+        // onStart is a no-op but required by FrontendApplicationContribution.
+    }
+
+    onStop(): void {
+        this.statusUnsubscribe?.();
     }
 
     /**
@@ -77,14 +81,14 @@ export class WorkspaceContextService {
 
         try {
             // Call backend to get/create workspace
-            const workspaces = await this.runtime.request('GET /api/v1/workspaces', undefined) as any[];
-            const existing = workspaces.find((w: any) => w.rootPath === rootPath);
+            const workspaces = await this.runtime.request('GET /api/v1/workspaces', undefined) as Workspace[];
+            const existing = workspaces.find((w: Workspace) => w.rootPath === rootPath);
 
             if (existing) {
                 this.setWorkspace(existing.id, existing.rootPath);
             } else {
                 const name = rootPath.split(/[/\\]/).filter(Boolean).pop() || 'workspace';
-                const created = await this.runtime.request('POST /api/v1/workspaces', { rootPath, name }) as any;
+                const created = await this.runtime.request('POST /api/v1/workspaces', { rootPath, name }) as Workspace;
                 this.setWorkspace(created.id, created.rootPath);
             }
         } catch (_err) {
@@ -96,6 +100,7 @@ export class WorkspaceContextService {
 
     dispose(): void {
         this.toDispose?.dispose();
+        this.statusUnsubscribe?.();
         this.onDidChangeContextEmitter.dispose();
     }
 

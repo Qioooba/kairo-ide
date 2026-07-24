@@ -16,6 +16,7 @@ export * from './webxml-completion';
 export * from './jsp-servlet-nav';
 export * from './jsp-debug-breakpoint';
 export * from './jsp-scriptlet-provider';
+export * from './jsp-scriptlet-java-completion';
 export * from './jsp-scriptlet-diagnostics';
 export * from './xml-monarch';
 export * from './xml-language';

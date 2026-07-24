@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -164,11 +165,12 @@ func (uc *DeployUseCase) Deploy(ctx context.Context, cmd StartDeployCommand) (*D
 		// Failed deployment must NOT leave "success" record
 		result.State = "failed"
 		result.Error = err.Error()
+		failData, _ := json.Marshal(result)
 		uc.eventHub.Publish(events.Event{
 			Type:        events.EventDeployComplete,
 			WorkspaceID: string(cmd.WorkspaceID),
 			Message:     fmt.Sprintf("Deployment %s failed: %v", deployID, err),
-			Data:        result,
+			Data:        failData,
 		})
 		return result, err
 	}
@@ -191,11 +193,12 @@ func (uc *DeployUseCase) Deploy(ctx context.Context, cmd StartDeployCommand) (*D
 	result.Bytes = totalBytes
 	result.FilesTouched = len(domainPlan.Entries)
 
+	completeData, _ := json.Marshal(result)
 	uc.eventHub.Publish(events.Event{
 		Type:        events.EventDeployComplete,
 		WorkspaceID: string(cmd.WorkspaceID),
 		Message:     fmt.Sprintf("Deployment %s completed (%d files, %d bytes)", deployID, result.FilesTouched, result.Bytes),
-		Data:        result,
+		Data:        completeData,
 	})
 
 	return result, nil

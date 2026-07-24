@@ -616,6 +616,394 @@ jobs:
           if-no-files-found: ignore
 
   # =========================================================================
+  # 10. Windows Test Matrix
+  # =========================================================================
+  windows-test:
+    name: Windows Test Matrix
+    runs-on: windows-latest
+    timeout-minutes: 25
+    strategy:
+      matrix:
+        component: [go, frontend, perf]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        if: matrix.component == 'go' || matrix.component == 'perf'
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - uses: actions/setup-node@v4
+        if: matrix.component == 'frontend' || matrix.component == 'perf'
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - uses: pnpm/action-setup@v4
+        if: matrix.component == 'frontend' || matrix.component == 'perf'
+        with:
+          version: 9.15.9
+
+      - name: Run Windows test script
+        shell: pwsh
+        run: pwsh -ExecutionPolicy Bypass -File scripts/ci/windows-test.ps1 -Component ${{ matrix.component }}
+
+      - name: Upload test logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-test-${{ matrix.component }}-logs
+          path: |
+            ${{ env:TEMP }}/kairo-*.log
+            /tmp/kairo-*.log
+          if-no-files-found: ignore
+
+  # =========================================================================
+  # 11. Coverage Report
+  # =========================================================================
+  coverage-report:
+    name: Coverage Report
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [go-unit-linux, ts-clean-build]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+
+      - name: Install dependencies
+        run: node scripts/run-with-timeout.cjs 300 pnpm install --frozen-lockfile
+
+      - name: Run Go coverage
+        working-directory: runtime-agent
+        run: |
+          mkdir -p ../coverage/go
+          go test -coverprofile=../coverage/go/coverage.out -covermode=count ./...
+          go tool cover -func=../coverage/go/coverage.out > ../coverage/go/coverage.txt
+          go tool cover -html=../coverage/go/coverage.out -o ../coverage/go/coverage.html
+
+      - name: Run TypeScript coverage
+        run: node scripts/run-coverage.cjs
+
+      - name: Coverage threshold check
+        run: node scripts/ci/coverage-check.cjs --go-coverage coverage/go/coverage.txt --go-threshold 60 --ts-threshold 50
+
+      - name: Upload Go coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: coverage/go/coverage.out
+          flags: go
+          name: kairo-go-coverage
+          fail_ci_if_error: false
+
+      - name: Upload TypeScript coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          directory: coverage/typescript
+          flags: typescript
+          name: kairo-ts-coverage
+          fail_ci_if_error: false
+
+      - name: Upload coverage artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-reports
+          path: coverage/
+          if-no-files-found: ignore
+
+  # =========================================================================
+  # 12. Security Scan
+  # =========================================================================
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: Run govulncheck
+        working-directory: runtime-agent
+        run: govulncheck ./...
+
+      - name: Install dependencies
+        run: node scripts/run-with-timeout.cjs 300 pnpm install --frozen-lockfile
+
+      - name: Run npm audit
+        run: node scripts/ci/security-audit.cjs
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: go,javascript-typescript
+
+      - name: Autobuild CodeQL
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:go,javascript-typescript"
+
+      - name: Upload security scan results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-scan-results
+          path: |
+            security-audit.json
+            npm-audit-report.json
+          if-no-files-found: ignore
+
+  # =========================================================================
+  # 13. Performance Gate
+  # =========================================================================
+  performance-gate:
+    name: Performance Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [go-cross-build, ts-clean-build]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+
+      - name: Install dependencies
+        run: node scripts/run-with-timeout.cjs 300 pnpm install --frozen-lockfile
+
+      - name: Build packages
+        run: node scripts/run-with-timeout.cjs 300 pnpm build
+
+      - name: Build agent
+        working-directory: runtime-agent
+        run: go build -trimpath -o ../dist/kairo-runtime ./cmd/kairo-runtime
+
+      - name: Start agent for perf measurements
+        run: |
+          ./dist/kairo-runtime --bind 127.0.0.1 --port 18080 &
+          echo "AGENT_PID=$!" >> $GITHUB_ENV
+          sleep 3
+
+      - name: Fetch baseline from main branch
+        run: |
+          if git show origin/main:perf-baseline.json > /tmp/perf-baseline.json 2>/dev/null; then
+            echo "BASELINE_FILE=/tmp/perf-baseline.json" >> $GITHUB_ENV
+          else
+            echo "BASELINE_FILE=" >> $GITHUB_ENV
+          fi
+
+      - name: Run performance gate
+        run: |
+          if [ -n "$BASELINE_FILE" ]; then
+            node scripts/run-perf-gate.cjs --output perf-gate.json --compare "$BASELINE_FILE"
+          else
+            node scripts/run-perf-gate.cjs --output perf-gate.json
+          fi
+
+      - name: Run performance regression detection
+        run: node scripts/ci/perf-regression.cjs --current perf-gate.json --baseline "$BASELINE_FILE"
+
+      - name: Stop agent
+        if: always()
+        run: |
+          if [ -n "$AGENT_PID" ]; then
+            kill $AGENT_PID 2>/dev/null || true
+          fi
+
+      - name: Upload performance report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: performance-report
+          path: |
+            perf-gate.json
+            perf-regression-report.md
+          if-no-files-found: ignore
+
+  # =========================================================================
+  # 14. E2E Test
+  # =========================================================================
+  e2e-test:
+    name: E2E Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [ts-clean-build, go-unit-linux]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+
+      - name: Build agent
+        working-directory: runtime-agent
+        run: go build -trimpath -o ../dist/kairo-runtime ./cmd/kairo-runtime
+
+      - name: Install dependencies
+        run: node scripts/run-with-timeout.cjs 300 pnpm install --frozen-lockfile
+
+      - name: Build packages
+        run: node scripts/run-with-timeout.cjs 300 pnpm build
+
+      - name: Start agent
+        run: |
+          ./dist/kairo-runtime --bind 127.0.0.1 --port 18080 &
+          echo "AGENT_PID=$!" >> $GITHUB_ENV
+          sleep 3
+
+      - name: Start Theia
+        env:
+          KAIRO_RUNTIME_URL: http://127.0.0.1:18080
+        run: |
+          cd packages/theia-product
+          npx theia start --hostname=127.0.0.1 --port=3000 &
+          echo "THEIA_PID=$!" >> $GITHUB_ENV
+          sleep 10
+
+      - name: Install Playwright
+        run: pnpm exec playwright install chromium
+
+      - name: Run Playwright E2E
+        run: pnpm test:e2e:playwright
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-screenshots
+          path: docs/screenshots/
+          if-no-files-found: ignore
+
+      - name: Upload E2E test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-test-results
+          path: tests/e2e/test-results/
+          if-no-files-found: ignore
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-logs
+          path: |
+            /tmp/kairo-agent*.log
+            packages/theia-product/logs/
+          if-no-files-found: ignore
+
+      - name: Stop processes
+        if: always()
+        run: |
+          if [ -n "$THEIA_PID" ]; then kill $THEIA_PID 2>/dev/null || true; fi
+          if [ -n "$AGENT_PID" ]; then kill $AGENT_PID 2>/dev/null || true; fi
+
+  # =========================================================================
+  # 15. Build Artifacts
+  # =========================================================================
+  build-artifacts:
+    name: Build Artifacts
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    needs: [go-cross-build, ts-clean-build]
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+
+      - name: Build agent (Linux)
+        working-directory: runtime-agent
+        run: go build -trimpath -ldflags='-s -w' -o ../dist/kairo-runtime ./cmd/kairo-runtime
+
+      - name: Install dependencies
+        run: node scripts/run-with-timeout.cjs 300 pnpm install --frozen-lockfile
+
+      - name: Build packages
+        run: node scripts/run-with-timeout.cjs 300 pnpm build
+
+      - name: Package desktop application (Linux)
+        run: |
+          pnpm --filter @kairo/desktop build:linux 2>&1 || echo "Desktop packaging skipped (may require electron-builder)"
+
+      - name: Upload desktop artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-app-linux
+          path: apps/desktop/dist/*.{AppImage,deb,rpm,zip,tar.gz}
+          if-no-files-found: ignore
+
+      - name: Upload agent binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: kairo-runtime-linux
+          path: dist/kairo-runtime
+
+      - name: Generate SBOM
+        run: node scripts/generate-sbom.cjs
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom.json
+          if-no-files-found: ignore
+
+  # =========================================================================
   # Release gate — all required jobs must pass
   # =========================================================================
   release-gate:
@@ -627,6 +1015,11 @@ jobs:
       - ts-clean-build
       - contract
       - integration-core
+      - windows-test
+      - coverage-report
+      - security-scan
+      - performance-gate
+      - e2e-test
     if: always()
     steps:
       - name: Check all required jobs
@@ -649,6 +1042,11 @@ jobs:
           check_job "${{ needs.ts-clean-build.result }}" "ts-clean-build"
           check_job "${{ needs.contract.result }}" "contract"
           check_job "${{ needs.integration-core.result }}" "integration-core"
+          check_job "${{ needs.windows-test.result }}" "windows-test"
+          check_job "${{ needs.coverage-report.result }}" "coverage-report"
+          check_job "${{ needs.security-scan.result }}" "security-scan"
+          check_job "${{ needs.performance-gate.result }}" "performance-gate"
+          check_job "${{ needs.e2e-test.result }}" "e2e-test"
 
           if [ "$FAILED" -eq 1 ]; then
             echo "Release gate FAILED"

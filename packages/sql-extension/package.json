@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "Kairo SQL extension — lightweight Oracle 11g SQL tool for legacy database operations",
   "main": "lib/common/index.js",
-  "types": "lib/src/index.d.ts",
+  "types": "lib/index.d.ts",
   "files": [
     "lib",
     "src"
@@ -12,7 +12,7 @@
     "build": "tsc -p tsconfig.json",
     "clean": "rm -rf lib",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "test": "node --test src/**/*.test.cjs"
+    "test": "node --test src/browser/sql-exports.test.cjs src/browser/sql-execution-extended.test.cjs src/browser/sql-connection-widget.test.cjs"
   },
   "dependencies": {
     "@theia/core": "^1.58.0",

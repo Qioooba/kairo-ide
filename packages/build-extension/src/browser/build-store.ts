@@ -2,7 +2,7 @@ import { injectable, inject, postConstruct } from '@theia/core/shared/inversify'
 import { Emitter, Event } from '@theia/core/lib/common/event';
 import { RuntimeConnectionService } from '@kairo/runtime-extension';
 import { WorkspaceContextService } from '@kairo/runtime-extension';
-import type { BuildResult } from '@kairo/protocol';
+import type { BuildResult, WsEvent } from '@kairo/protocol';
 
 export interface BuildRun {
     id: string;
@@ -55,9 +55,6 @@ export function mapBuildResult(b: BuildResult, workspaceId: string): BuildRun {
 
 @injectable()
 export class BuildStore {
-    @inject(RuntimeConnectionService)
-    private readonly runtimeConnection!: RuntimeConnectionService;
-
     @inject(RuntimeConnectionService)
     private readonly runtime!: RuntimeConnectionService;
 
@@ -131,7 +128,10 @@ export class BuildStore {
                 void this.bootstrap();
             }
         });
-        void this.bootstrap();
+        // Fire bootstrap immediately if context is already set (N-032).
+        if (this.workspaceContext.context) {
+            void this.bootstrap();
+        }
     }
 
     protected async bootstrap(): Promise<void> {
@@ -153,7 +153,7 @@ export class BuildStore {
 
         // Subscribe to events
         if (ctx) {
-            this.eventsUnsubscribe = this.runtimeConnection.subscribeEvents(ctx.workspaceId, (event: any) => {
+            this.eventsUnsubscribe = this.runtime.subscribeEvents(ctx.workspaceId, (event: WsEvent) => {
                 if (event.type === 'build.progress') {
                     const state = event.state as string;
                     const mappedState = state === 'success' ? 'succeeded' as const

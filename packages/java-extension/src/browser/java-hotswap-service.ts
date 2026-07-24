@@ -21,6 +21,7 @@ import { ILogger } from '@theia/core/lib/common/logger';
 import { MessageService } from '@theia/core/lib/common/message-service';
 import { DebugSessionManager } from '@theia/debug/lib/browser/debug-session-manager';
 import { RuntimeConnectionService } from '@kairo/runtime-extension';
+import type { Endpoint } from '@kairo/protocol';
 import { WorkspaceService } from '@theia/workspace/lib/browser/workspace-service';
 import { MonacoWorkspace } from '@theia/monaco/lib/browser/monaco-workspace';
 import type { MonacoEditorModel } from '@theia/monaco/lib/browser/monaco-editor-model';
@@ -260,7 +261,7 @@ export class JavaHotSwapService implements FrontendApplicationContribution {
   }> {
     try {
       const result = await this.runtime.request(
-        'POST /api/v1/jvm/compile' as any,
+        'POST /api/v1/jvm/compile' as Endpoint,
         { file: filePath },
         { noRetry: true },
       ) as unknown as {
@@ -286,7 +287,7 @@ export class JavaHotSwapService implements FrontendApplicationContribution {
   protected async redefineClass(sourcePath: string): Promise<void> {
     try {
       const result = await this.runtime.request(
-        'POST /api/v1/jvm/redefine' as any,
+        'POST /api/v1/jvm/redefine' as Endpoint,
         { sourcePath },
         { noRetry: true },
       ) as unknown as {

@@ -354,6 +354,71 @@ export class SqlExecutionService {
     return lines.join('\n');
   }
 
+  /** Export results to JSON string. */
+  exportToJson(result: SqlQueryResult): string {
+    return JSON.stringify({
+      columns: result.columns.map(c => ({ name: c.name, type: c.type })),
+      rows: result.rows,
+      rowCount: result.rowCount,
+      totalRows: result.totalRows,
+      executionTimeMs: result.executionTimeMs,
+      truncated: result.truncated,
+    }, null, 2);
+  }
+
+  /** Format SQL with basic indentation and keyword casing. */
+  formatSql(sql: string): string {
+    if (!sql || typeof sql !== 'string') return '';
+
+    const upperKeywords = [
+      'SELECT', 'FROM', 'WHERE', 'INSERT', 'INTO', 'VALUES', 'UPDATE', 'SET',
+      'DELETE', 'CREATE', 'TABLE', 'ALTER', 'DROP', 'INDEX', 'JOIN', 'LEFT',
+      'RIGHT', 'INNER', 'OUTER', 'ON', 'AND', 'OR', 'NOT', 'NULL', 'IS', 'IN',
+      'LIKE', 'BETWEEN', 'ORDER', 'BY', 'GROUP', 'HAVING', 'LIMIT', 'OFFSET',
+      'AS', 'DISTINCT', 'COUNT', 'SUM', 'AVG', 'MAX', 'MIN', 'UNION', 'ALL',
+      'CASE', 'WHEN', 'THEN', 'ELSE', 'END', 'EXISTS', 'ANY', 'SOME', 'TRUNCATE',
+      'COMMIT', 'ROLLBACK', 'GRANT', 'REVOKE', 'BEGIN', 'DECLARE', 'EXCEPTION',
+      'RAISE', 'PRAGMA', 'EXPLAIN', 'UNIQUE', 'PRIMARY', 'KEY', 'FOREIGN',
+      'REFERENCES', 'CASCADE', 'DEFAULT', 'CHECK', 'CONSTRAINT', 'ADD', 'COLUMN',
+      'RENAME', 'TO', 'IF', 'UNION ALL', 'CROSS', 'NATURAL', 'FULL', 'WITH',
+      'RECURSIVE', 'RETURNING', 'OVER', 'PARTITION', 'ROWS', 'RANGE', 'UNBOUNDED',
+      'PRECEDING', 'FOLLOWING', 'CURRENT', 'ROW', 'ASC', 'DESC', 'NULLS', 'FIRST', 'LAST',
+    ];
+
+    // Normalize whitespace
+    let formatted = sql.replace(/\s+/g, ' ').trim();
+
+    // Uppercase SQL keywords
+    const keywordPattern = new RegExp('\\b(' + upperKeywords.join('|') + ')\\b', 'gi');
+    formatted = formatted.replace(keywordPattern, (match) => match.toUpperCase());
+
+    // Add newlines before major clauses
+    const majorClauses = ['SELECT', 'FROM', 'WHERE', 'ORDER BY', 'GROUP BY', 'HAVING',
+      'INSERT INTO', 'VALUES', 'UPDATE', 'SET', 'DELETE FROM', 'JOIN', 'LEFT JOIN',
+      'RIGHT JOIN', 'INNER JOIN', 'OUTER JOIN', 'FULL JOIN', 'CROSS JOIN',
+      'UNION', 'UNION ALL', 'ON', 'LIMIT', 'OFFSET'];
+
+    for (const clause of majorClauses) {
+      const escaped = clause.replace(/\s+/g, '\\s+');
+      const re = new RegExp('\\b(' + escaped + ')\\b', 'gi');
+      formatted = formatted.replace(re, '\n$1');
+    }
+
+    // Indent the content after each newline
+    const lines = formatted.split('\n');
+    const result: string[] = [];
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (i === 0) {
+        result.push(line);
+      } else {
+        result.push('  ' + line);
+      }
+    }
+
+    return result.join('\n');
+  }
+
   private escapeCsvField(field: string): string {
     if (field.includes(',') || field.includes('"') || field.includes('\n') || field.includes('\r')) {
       return `"${field.replace(/"/g, '""')}"`;

@@ -13,7 +13,7 @@ import { injectable, inject, postConstruct } from '@theia/core/shared/inversify'
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import { MessageService } from '@theia/core/lib/common/message-service';
 import { FileDialogService } from '@theia/filesystem/lib/browser';
-import { KairoTelemetry, type TelemetryStats } from './kairo-telemetry';
+import { KairoTelemetry, type TelemetryStats, type TelemetryEvent } from './kairo-telemetry';
 
 export const KAIRO_TELEMETRY_SETTINGS_ID = 'kairo-telemetry-settings';
 
@@ -106,7 +106,7 @@ interface TelemetrySettingsPanelProps {
   endpoint?: string;
   stats: TelemetryStats | undefined;
   showEvents: boolean;
-  events: any[];
+  events: TelemetryEvent[];
   onToggle: (enabled: boolean) => void;
   onAcceptPrivacy: () => void;
   onSetEndpoint: (endpoint: string) => void;

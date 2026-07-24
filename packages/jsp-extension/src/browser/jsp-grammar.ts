@@ -23,6 +23,7 @@ import { registerElExpressionProviders } from './el-expression-provider';
 import { registerElNavigation } from './el-navigation';
 import { registerXmlStructureView } from './xml-structure-view';
 import { registerJspScriptletProviders } from './jsp-scriptlet-provider';
+import { registerJspScriptletJavaCompletion } from './jsp-scriptlet-java-completion';
 import { registerJspScriptletDiagnostics } from './jsp-scriptlet-diagnostics';
 import { TldCompletionProvider, registerJspTldCompletion } from './jsp-tld-completion';
 import { WebXmlCompletionProvider } from './webxml-completion';
@@ -78,6 +79,7 @@ export class KairoJspLanguageContribution implements FrontendApplicationContribu
     this.subs.push(registerElNavigation());
     this.subs.push(registerXmlStructureView());
     this.subs.push(registerJspScriptletProviders(this.javaProvider));
+    this.subs.push(registerJspScriptletJavaCompletion(this.javaProvider));
     this.subs.push(registerJspScriptletDiagnostics(this.javaClient));
     this.subs.push(Disposable.create(() => registerJspServletNavigation().dispose()));
     this.subs.push(registerJspDebugCodeLens());

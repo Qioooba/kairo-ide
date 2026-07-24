@@ -20,19 +20,22 @@ import {
 } from '@theia/core/lib/browser';
 import { Disposable } from '@theia/core/lib/common/disposable';
 import { RuntimeConnectionService } from '@kairo/runtime-extension';
+import { WorkspaceContextService } from '@kairo/runtime-extension';
 import { ServerStore } from '@kairo/tomcat-extension';
 import { KairoJavaService, JavaServiceState } from '@kairo/java-extension';
 import { KairoEncodingServiceImpl } from '@kairo/encoding-extension';
 import { ActiveProjectService } from '@kairo/project-extension';
 import { EditorManager } from '@theia/editor/lib/browser/editor-manager';
 import { BuildStore } from '@kairo/build-extension';
-import type { ServerInstance } from '@kairo/protocol';
+import type { ServerInstance, WsEvent } from '@kairo/protocol';
+import URI from '@theia/core/lib/common/uri';
 import { debugStatusBarPresentation, KairoJavaDebugService, type KairoJavaDebugStatus } from './kairo-java-debug-service';
 
 @injectable()
 export class KairoStatusBarContribution implements FrontendApplicationContribution {
   @inject(StatusBar) protected statusBar!: StatusBar;
   @inject(RuntimeConnectionService) protected runtime!: RuntimeConnectionService;
+  @inject(WorkspaceContextService) protected workspaceContext!: WorkspaceContextService;
   @inject(KairoJavaService) protected javaSvc!: KairoJavaService;
   @inject(KairoEncodingServiceImpl) protected encodingSvc!: KairoEncodingServiceImpl;
   @inject(EditorManager) protected editorManager!: EditorManager;
@@ -43,6 +46,7 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
 
   protected unsubscribeStatus: (() => void) | undefined;
   protected unsubscribeServerEvents: (() => void) | undefined;
+  protected unsubscribeServerContext: Disposable | undefined;
   protected unsubscribeJdtState: (() => void) | undefined;
   protected unsubscribeEditor: Disposable | undefined;
   protected unsubscribeEncoding: Disposable | undefined;
@@ -110,12 +114,26 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
     this.unsubscribeStatus = this.runtime.onStatusChange(s => {
       this.runtimeStatus = s;
       this.setAgentStatus(s);
-      // Re-render server status to show disconnected state if applicable
       this.renderServerStatus();
     });
-    this.unsubscribeServerEvents = this.runtime.subscribeEvents(this.runtime.workspace(), (e: any) => {
-      if (e.type === 'server.state') {
-        void this.refreshServerStatus();
+    // N-031: use WorkspaceContextService for the canonical workspace ID.
+    // The runtime.workspace() returns empty string on startup, which
+    // prevents the WebSocket from opening and server events from flowing.
+    const subscribeServerEvents = (workspaceId: string) => {
+      this.unsubscribeServerEvents?.();
+      this.unsubscribeServerEvents = this.runtime.subscribeEvents(workspaceId, (e: WsEvent) => {
+        if (e.type === 'server.state') {
+          void this.refreshServerStatus();
+        }
+      });
+    };
+    const ctx = this.workspaceContext.context;
+    if (ctx) {
+      subscribeServerEvents(ctx.workspaceId);
+    }
+    this.unsubscribeServerContext = this.workspaceContext.onDidChangeContext(c => {
+      if (c) {
+        subscribeServerEvents(c.workspaceId);
       }
     });
     this.unsubscribeJdtState = this.javaSvc.onState((s, st) => this.setJdkStatus(s, st));
@@ -140,6 +158,7 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
   onStop(): void {
     this.unsubscribeStatus?.();
     this.unsubscribeServerEvents?.();
+    this.unsubscribeServerContext?.dispose();
     this.unsubscribeJdtState?.();
     this.unsubscribeEditor?.dispose();
     this.unsubscribeEncoding?.dispose();
@@ -255,7 +274,7 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
       });
       return;
     }
-    const enc = this.encodingSvc.getEncodingFor(uri as any);
+    const enc = this.encodingSvc.getEncodingFor(uri as unknown as URI);
     const isOverride = enc !== 'utf-8';
     this.statusBar.setElement('kairo.encoding', {
       text: `$(text) Encoding: ${enc}${isOverride ? ' *' : ''}`,

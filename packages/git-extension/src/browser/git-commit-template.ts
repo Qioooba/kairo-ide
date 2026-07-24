@@ -132,7 +132,7 @@ export class GitCommitTemplateService {
 
     /** 生成提交消息 */
     async generateMessage(
-        type: CommitType | 'default',
+        type: string,
         module: string = '',
         description: string = '',
     ): Promise<string> {

@@ -6,6 +6,13 @@ import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
 
+/** Error shape from Node.js child_process.execFile. */
+interface ExecFileError extends Error {
+  killed?: boolean;
+  stdout?: string;
+  stderr?: string;
+}
+
 /** 单次检查结果 */
 export interface PreCommitCheckResult {
     /** 检查类别 */
@@ -235,8 +242,9 @@ export class GitPreCommitChecker {
                 details: output.slice(-500),
                 errorCount: 0,
             };
-        } catch (err: any) {
-            if (err.killed) {
+        } catch (err: unknown) {
+            const execErr = err as ExecFileError;
+            if (execErr.killed) {
                 return {
                     type: 'build',
                     status: 'timed_out',
@@ -244,8 +252,8 @@ export class GitPreCommitChecker {
                     errorCount: NaN,
                 };
             }
-            const stderr = err.stderr || '';
-            const stdout = err.stdout || '';
+            const stderr = execErr.stderr || '';
+            const stdout = execErr.stdout || '';
             const output = stdout + stderr;
             const errorCount = countErrors(output);
             return {
@@ -296,16 +304,17 @@ export class GitPreCommitChecker {
                 passCount,
                 failCount: 0,
             };
-        } catch (err: any) {
-            if (err.killed) {
+        } catch (err: unknown) {
+            const execErr = err as ExecFileError;
+            if (execErr.killed) {
                 return {
                     type: 'test',
                     status: 'timed_out',
                     message: '测试超时（120秒）',
                 };
             }
-            const stderr = err.stderr || '';
-            const stdout = err.stdout || '';
+            const stderr = execErr.stderr || '';
+            const stdout = execErr.stdout || '';
             const output = stdout + stderr;
             const { passCount, failCount } = countTestResults(output);
             return {
@@ -372,16 +381,17 @@ export class GitPreCommitChecker {
                     message: '编译检查通过，未发现问题',
                     errorCount: 0,
                 };
-            } catch (err: any) {
-                if (err.killed) {
+            } catch (err: unknown) {
+                const execErr = err as ExecFileError;
+                if (execErr.killed) {
                     return {
                         type: 'lint',
                         status: 'timed_out',
                         message: '编译检查超时（30秒）',
                     };
                 }
-                const stderr = err.stderr || '';
-                const stdout = err.stdout || '';
+                const stderr = execErr.stderr || '';
+                const stdout = execErr.stdout || '';
                 const output = stderr + stdout;
                 const errorCount = countErrors(output);
                 return {

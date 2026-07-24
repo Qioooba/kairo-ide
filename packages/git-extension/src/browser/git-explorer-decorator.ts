@@ -1,9 +1,15 @@
 import { injectable, inject } from '@theia/core/shared/inversify';
 import { TreeDecorator } from '@theia/core/lib/browser/tree/tree-decorator';
-import { Tree, TreeNode } from '@theia/core/lib/browser/tree';
+import { Tree, TreeNode, CompositeTreeNode } from '@theia/core/lib/browser/tree';
 import { Emitter, Event, MaybePromise } from '@theia/core/lib/common';
 import { WidgetDecoration } from '@theia/core/lib/browser/widget-decoration';
 import { GitService } from './git-service';
+
+/** Extended node shape for file-system-backed tree nodes. */
+interface FileNode extends TreeNode {
+  uri?: string | { path?: { toString(): string }; toString(): string };
+  fileStat?: { resource?: { path?: { toString(): string } } };
+}
 
 const STATUS_COLORS: Record<string, string> = {
   M: 'var(--theia-list-warningForeground)',
@@ -49,7 +55,7 @@ export class GitExplorerDecorator implements TreeDecorator {
     const repoRoot = this.gitService.getRepoRoot();
     if (!repoRoot) return result;
 
-    const statusResult = (this.gitService as any).cachedStatus;
+    const statusResult = this.gitService.getCachedStatus();
     if (!statusResult) return result;
 
     for (const node of this.collectNodes(tree.root)) {
@@ -92,7 +98,7 @@ export class GitExplorerDecorator implements TreeDecorator {
   protected *collectNodes(node: TreeNode | undefined): Generator<TreeNode> {
     if (!node) return;
     yield node;
-    const children = (node as any).children;
+    const children = CompositeTreeNode.is(node) ? node.children : undefined;
     if (Array.isArray(children)) {
       for (const child of children) {
         yield* this.collectNodes(child);
@@ -101,7 +107,7 @@ export class GitExplorerDecorator implements TreeDecorator {
   }
 
   protected getFilePath(node: TreeNode): string | undefined {
-    const n = node as any;
+    const n = node as FileNode;
     if (n.uri) {
       if (typeof n.uri === 'string') return n.uri;
       if (n.uri.path) return n.uri.path.toString();

@@ -21,8 +21,17 @@ import (
 
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/atomicfile"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/domain"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/log"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/proc"
 )
+
+// Logger is the logging interface for the tomcat6 package.
+type Logger interface {
+	Info(msg string, fields ...log.Fields)
+	Warn(msg string, fields ...log.Fields)
+	Error(msg string, fields ...log.Fields)
+	Debug(msg string, fields ...log.Fields)
+}
 
 const (
 	DefaultStartTimeout = 60 * time.Second
@@ -513,7 +522,7 @@ type Spec struct {
 	ExtraClasspath []string
 	JVMOptions     []string
 	Env            []string
-	Logger         interface{}
+	Logger         Logger
 	StartTimeout   time.Duration
 }
 

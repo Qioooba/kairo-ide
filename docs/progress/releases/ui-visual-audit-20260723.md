@@ -1,9 +1,9 @@
 # Kairo IDE UI 视觉规范验证报告
 
-**生成时间：** 2026/7/23 13:46:45
+**生成时间：** 2026/7/24 02:55:34
 **扫描范围：** packages/ 下所有 CSS (.css) 和 TSX (.tsx) 文件
 **CSS 文件数：** 2
-**总耗时：** 66ms
+**总耗时：** 211ms
 
 ## 汇总
 
@@ -27,7 +27,7 @@
 
 ## 2. ui-kit token 使用
 
-- **CSS 变量引用数：** 320
+- **CSS 变量引用数：** 396
 - **硬编码颜色数：** 0
 - **涉及文件数：** 0
 
@@ -63,8 +63,8 @@
 
 | 文件 | 类型 | 详情 | 严重度 |
 |------|------|------|--------|
-| `packages/search-extension/src/browser/search-center.css` | fixed-height | Fixed height (12px) may cause layout shift with content overflow | low |
-| `packages/ui-kit/src/browser/kairo-theme.css` | fixed-height | Fixed height (28px) may cause layout shift with content overflow | low |
+| `packages\search-extension\src\browser\search-center.css` | fixed-height | Fixed height (12px) may cause layout shift with content overflow | low |
+| `packages\ui-kit\src\browser\kairo-theme.css` | fixed-height | Fixed height (28px) may cause layout shift with content overflow | low |
 
 ---
 

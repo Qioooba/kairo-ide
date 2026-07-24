@@ -297,7 +297,7 @@ async function waitForServerRunning(page, timeoutMs = 120_000) {
     // ---------- Step 2: Verify status bar ----------
     step('2. Verify Kairo status bar entries');
     const sbText = await getStatusBarText(page);
-    const requiredEntries = ['Project:', 'Java:', 'JDT LS:', 'Encoding:', 'Runtime:'];
+    const requiredEntries = ['Project:', 'Java:', 'JDT LS:', 'Encoding:', 'Agent:'];
     const missing = requiredEntries.filter(e => !sbText.includes(e));
     if (missing.length > 0) {
       fail(`Status bar missing: ${missing.join(', ')}`);
@@ -307,8 +307,8 @@ async function waitForServerRunning(page, timeoutMs = 120_000) {
     await screenshot(page, '02-status-bar.png');
 
     // ---------- Step 3: Wait for Runtime connected ----------
-    step('3. Wait for Runtime: connected');
-    const rtStatus = await waitForStatusContains(page, 'Runtime: connected', 30_000);
+    step('3. Wait for Agent: connected');
+    const rtStatus = await waitForStatusContains(page, 'Agent: connected', 30_000);
     if (!rtStatus) {
       fail('Runtime did not connect within 30s');
     } else {

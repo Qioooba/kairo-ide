@@ -6,47 +6,25 @@
 // Registered as a second CompletionItemProvider for the Java
 // language so the JDT LS provider and the snippet provider
 // coexist without conflict.
+// ─────────────────────────────────────────────────────────────────
+// Available Templates by Category:
 //
-// ── Available Templates ──────────────────────────────────────────
-// sout       System.out.println()
-// soutv      System.out.println("variable = " + variable)
-// psvm       public static void main(String[] args)
-// psf        public static final
-// prsf       private static final
-// psfs       private static final String
-// fori       for (int i = 0; i < limit; i++)
-// foreach    for (Type item : collection)
-// ifn        if (xx == null)
-// inn        if (xx != null)
-// ifelse     if-else statement
-// while      while loop
-// dowhile    do-while loop
-// switch     switch statement
-// try        try-catch block
-// trycf      try-catch-finally block
-// thr        throw new Exception
-// log        Logger declaration (SLF4J)
-// logi       Logger.info
-// loge       Logger.error with exception
-// logd       Logger.debug
-// field      private field
-// getter     getter method
-// setter     setter method
-// const      public static final constant
-// list       new ArrayList<>
-// map        new HashMap<>
-// set        new HashSet<>
-// conn       JDBC connection with try-finally
-// doGet      Servlet doGet method
-// doPost     Servlet doPost method
-// fwd        Servlet forward
-// redirect   Servlet redirect
-// tostring   toString method
-// equals     equals method
-// hashcode   hashCode method
-// override   @Override annotation
-// test       JUnit test method
-// before     JUnit setUp method
+// [Output]       sout, soutv, serr, serrv
+// [Main]         psvm, psf, prsf, psfs
+// [Loops]        fori, foreach, while, dowhile, forr, forin
+// [Conditionals] ifn, inn, ifelse, switch, ternary
+// [Exceptions]   try, trycf, thr, catch
+// [Logging]      log, logi, loge, logd, logw
+// [Members]      field, getter, setter, const, constructor
+// [Collections]  list, map, set, queue, stream, streamFilter, streamMap
+// [JDBC]         conn, ps, rs
+// [Servlet]      doGet, doPost, fwd, redirect
+// [Object]       tostring, equals, hashcode, clone, compareTo
+// [Annotations]  override, deprec, suppress, test, before, after, beforeClass, afterClass
+// [Lambda]       lambda, lambdaBody, consumer, supplier, function, predicate
+// [JSP]          jspForTokens, jspIf, jspChoose, jspForEach, jspSetProperty, jspGetProperty, jspUseBean, jspInclude, jspForward, jspExpression
+// [XML]          xmlDecl, xmlTag, xmlTagBody, xmlComment, xmlCDATA, xmlDTD, xmlSchema, xmlNamespace
+// [Spring]       autowired, component, service, repository, controller, requestMapping, bean
 // ─────────────────────────────────────────────────────────────────
 
 import * as monaco from '@theia/monaco-editor-core';
@@ -57,6 +35,7 @@ interface TemplateDef {
   label: string;
   insertText: string;
   detail: string;
+  category?: string;
 }
 
 const TEMPLATES: TemplateDef[] = [
@@ -66,12 +45,28 @@ const TEMPLATES: TemplateDef[] = [
     label: 'sout',
     insertText: 'System.out.println(${1});',
     detail: 'Print to standard output',
+    category: 'Output',
   },
   {
     prefix: 'soutv',
     label: 'soutv',
     insertText: 'System.out.println("${1:variable} = " + ${1:variable});',
     detail: 'Print variable value to standard output',
+    category: 'Output',
+  },
+  {
+    prefix: 'serr',
+    label: 'serr',
+    insertText: 'System.err.println(${1});',
+    detail: 'Print to standard error',
+    category: 'Output',
+  },
+  {
+    prefix: 'serrv',
+    label: 'serrv',
+    insertText: 'System.err.println("${1:variable} = " + ${1:variable});',
+    detail: 'Print variable value to standard error',
+    category: 'Output',
   },
 
   // ===== Main & Constants =====
@@ -80,24 +75,28 @@ const TEMPLATES: TemplateDef[] = [
     label: 'psvm',
     insertText: 'public static void main(String[] args) {\n\t${1}\n}',
     detail: 'Main method declaration',
+    category: 'Main',
   },
   {
     prefix: 'psf',
     label: 'psf',
     insertText: 'public static final ${1}',
     detail: 'Public static final constant',
+    category: 'Main',
   },
   {
     prefix: 'prsf',
     label: 'prsf',
     insertText: 'private static final ${1}',
     detail: 'Private static final constant',
+    category: 'Main',
   },
   {
     prefix: 'psfs',
     label: 'psfs',
     insertText: 'private static final String ${1} = "${2}";',
     detail: 'Private static final String constant',
+    category: 'Main',
   },
 
   // ===== Loops =====
@@ -106,24 +105,42 @@ const TEMPLATES: TemplateDef[] = [
     label: 'fori',
     insertText: 'for (int ${1:i} = 0; ${1:i} < ${2:limit}; ${1:i}++) {\n\t${3}\n}',
     detail: 'Iterate with index',
+    category: 'Loops',
   },
   {
     prefix: 'foreach',
     label: 'foreach',
     insertText: 'for (${1:Type} ${2:item} : ${3:collection}) {\n\t${4}\n}',
     detail: 'Iterate over collection',
+    category: 'Loops',
   },
   {
     prefix: 'while',
     label: 'while',
     insertText: 'while (${1:condition}) {\n\t${2}\n}',
     detail: 'While loop',
+    category: 'Loops',
   },
   {
     prefix: 'dowhile',
     label: 'dowhile',
     insertText: 'do {\n\t${1}\n} while (${2:condition});',
     detail: 'Do-while loop',
+    category: 'Loops',
+  },
+  {
+    prefix: 'forr',
+    label: 'forr',
+    insertText: 'for (int ${1:i} = ${2:max}; ${1:i} >= ${3:0}; ${1:i}--) {\n\t${4}\n}',
+    detail: 'Reverse for loop',
+    category: 'Loops',
+  },
+  {
+    prefix: 'forin',
+    label: 'forin',
+    insertText: 'for (int ${1:i} = ${2:start}; ${1:i} <= ${3:end}; ${1:i}++) {\n\t${4}\n}',
+    detail: 'For loop with inclusive range',
+    category: 'Loops',
   },
 
   // ===== Conditionals =====
@@ -132,24 +149,35 @@ const TEMPLATES: TemplateDef[] = [
     label: 'ifn',
     insertText: 'if (${1:condition} == null) {\n\t${2}\n}',
     detail: 'If null check',
+    category: 'Conditionals',
   },
   {
     prefix: 'inn',
     label: 'inn',
     insertText: 'if (${1:condition} != null) {\n\t${2}\n}',
     detail: 'If not null check',
+    category: 'Conditionals',
   },
   {
     prefix: 'ifelse',
     label: 'ifelse',
     insertText: 'if (${1:condition}) {\n\t${2}\n} else {\n\t${3}\n}',
     detail: 'If-else statement',
+    category: 'Conditionals',
   },
   {
     prefix: 'switch',
     label: 'switch',
     insertText: 'switch (${1:key}) {\n\tcase ${2:value}:\n\t\t${3}\n\t\tbreak;\n\tdefault:\n\t\t${4}\n\t\tbreak;\n}',
     detail: 'Switch statement',
+    category: 'Conditionals',
+  },
+  {
+    prefix: 'ternary',
+    label: 'ternary',
+    insertText: '${1:condition} ? ${2:trueValue} : ${3:falseValue}',
+    detail: 'Ternary operator',
+    category: 'Conditionals',
   },
 
   // ===== Exception Handling =====
@@ -158,18 +186,28 @@ const TEMPLATES: TemplateDef[] = [
     label: 'try',
     insertText: 'try {\n\t${1}\n} catch (${2:Exception} ${3:e}) {\n\t${4}\n}',
     detail: 'Try-catch block',
+    category: 'Exceptions',
   },
   {
     prefix: 'trycf',
     label: 'trycf',
     insertText: 'try {\n\t${1}\n} catch (${2:Exception} ${3:e}) {\n\t${4}\n} finally {\n\t${5}\n}',
     detail: 'Try-catch-finally block',
+    category: 'Exceptions',
   },
   {
     prefix: 'thr',
     label: 'thr',
     insertText: 'throw new ${1:Exception}("${2}");',
     detail: 'Throw exception',
+    category: 'Exceptions',
+  },
+  {
+    prefix: 'catch',
+    label: 'catch',
+    insertText: 'catch (${1:Exception} ${2:e}) {\n\t${3:logger}.error("${4}", ${2:e});\n\t${5}\n}',
+    detail: 'Catch block with logging',
+    category: 'Exceptions',
   },
 
   // ===== Logging (SLF4J) =====
@@ -178,24 +216,35 @@ const TEMPLATES: TemplateDef[] = [
     label: 'log',
     insertText: 'private static final Logger ${1:logger} = LoggerFactory.getLogger(${2:ClassName}.class);',
     detail: 'Logger declaration (SLF4J)',
+    category: 'Logging',
   },
   {
     prefix: 'logi',
     label: 'logi',
     insertText: '${1:logger}.info("${2}");',
     detail: 'Logger info',
+    category: 'Logging',
   },
   {
     prefix: 'loge',
     label: 'loge',
     insertText: '${1:logger}.error("${2}", ${3:e});',
     detail: 'Logger error with exception',
+    category: 'Logging',
   },
   {
     prefix: 'logd',
     label: 'logd',
     insertText: '${1:logger}.debug("${2}");',
     detail: 'Logger debug',
+    category: 'Logging',
+  },
+  {
+    prefix: 'logw',
+    label: 'logw',
+    insertText: '${1:logger}.warn("${2}");',
+    detail: 'Logger warn',
+    category: 'Logging',
   },
 
   // ===== Class Members =====
@@ -204,24 +253,35 @@ const TEMPLATES: TemplateDef[] = [
     label: 'field',
     insertText: 'private ${1:Type} ${2:name};',
     detail: 'Private field',
+    category: 'Members',
   },
   {
     prefix: 'getter',
     label: 'getter',
     insertText: 'public ${1:Type} get${2:Name}() {\n\treturn this.${3:field};\n}',
     detail: 'Getter method',
+    category: 'Members',
   },
   {
     prefix: 'setter',
     label: 'setter',
     insertText: 'public void set${1:Name}(${1:Type} ${2:field}) {\n\tthis.${2:field} = ${2:field};\n}',
     detail: 'Setter method',
+    category: 'Members',
   },
   {
     prefix: 'const',
     label: 'const',
     insertText: 'public static final ${1:Type} ${2:NAME} = ${3:value};',
     detail: 'Public constant',
+    category: 'Members',
+  },
+  {
+    prefix: 'constructor',
+    label: 'constructor',
+    insertText: 'public ${1:ClassName}(${2}) {\n\t${3}\n}',
+    detail: 'Constructor',
+    category: 'Members',
   },
 
   // ===== Collections =====
@@ -230,18 +290,49 @@ const TEMPLATES: TemplateDef[] = [
     label: 'list',
     insertText: 'List<${1:Type}> ${2:list} = new ArrayList<>();',
     detail: 'New ArrayList',
+    category: 'Collections',
   },
   {
     prefix: 'map',
     label: 'map',
     insertText: 'Map<${1:Key}, ${2:Value}> ${3:map} = new HashMap<>();',
     detail: 'New HashMap',
+    category: 'Collections',
   },
   {
     prefix: 'set',
     label: 'set',
     insertText: 'Set<${1:Type}> ${2:set} = new HashSet<>();',
     detail: 'New HashSet',
+    category: 'Collections',
+  },
+  {
+    prefix: 'queue',
+    label: 'queue',
+    insertText: 'Queue<${1:Type}> ${2:queue} = new LinkedList<>();',
+    detail: 'New Queue (LinkedList)',
+    category: 'Collections',
+  },
+  {
+    prefix: 'stream',
+    label: 'stream',
+    insertText: '${1:collection}.stream()',
+    detail: 'Create stream from collection',
+    category: 'Collections',
+  },
+  {
+    prefix: 'streamFilter',
+    label: 'streamFilter',
+    insertText: '${1:collection}.stream().filter(${2:item} -> ${3:condition}).collect(Collectors.toList())',
+    detail: 'Stream filter and collect',
+    category: 'Collections',
+  },
+  {
+    prefix: 'streamMap',
+    label: 'streamMap',
+    insertText: '${1:collection}.stream().map(${2:item} -> ${3:transform}).collect(Collectors.toList())',
+    detail: 'Stream map and collect',
+    category: 'Collections',
   },
 
   // ===== JDBC =====
@@ -250,6 +341,21 @@ const TEMPLATES: TemplateDef[] = [
     label: 'conn',
     insertText: 'Connection ${1:conn} = null;\nPreparedStatement ${2:ps} = null;\nResultSet ${3:rs} = null;\ntry {\n\t${1:conn} = DriverManager.getConnection(${4:url}, ${5:user}, ${6:password});\n\t${2:ps} = ${1:conn}.prepareStatement("${7:sql}");\n\t${3:rs} = ${2:ps}.executeQuery();\n\twhile (${3:rs}.next()) {\n\t\t${8}\n\t}\n} finally {\n\tif (${3:rs} != null) ${3:rs}.close();\n\tif (${2:ps} != null) ${2:ps}.close();\n\tif (${1:conn} != null) ${1:conn}.close();\n}',
     detail: 'JDBC connection with try-finally',
+    category: 'JDBC',
+  },
+  {
+    prefix: 'ps',
+    label: 'ps',
+    insertText: 'PreparedStatement ${1:ps} = ${2:conn}.prepareStatement("${3:sql}");',
+    detail: 'JDBC PreparedStatement',
+    category: 'JDBC',
+  },
+  {
+    prefix: 'rs',
+    label: 'rs',
+    insertText: 'ResultSet ${1:rs} = ${2:ps}.executeQuery();\nwhile (${1:rs}.next()) {\n\t${3}\n}',
+    detail: 'JDBC ResultSet loop',
+    category: 'JDBC',
   },
 
   // ===== Servlet =====
@@ -258,24 +364,28 @@ const TEMPLATES: TemplateDef[] = [
     label: 'doGet',
     insertText: 'protected void doGet(HttpServletRequest ${1:req}, HttpServletResponse ${2:resp}) throws ServletException, IOException {\n\t${3}\n}',
     detail: 'Servlet doGet method',
+    category: 'Servlet',
   },
   {
     prefix: 'doPost',
     label: 'doPost',
     insertText: 'protected void doPost(HttpServletRequest ${1:req}, HttpServletResponse ${2:resp}) throws ServletException, IOException {\n\t${1:req}.setCharacterEncoding("UTF-8");\n\t${2:resp}.setContentType("text/html;charset=UTF-8");\n\t${3}\n}',
     detail: 'Servlet doPost method',
+    category: 'Servlet',
   },
   {
     prefix: 'fwd',
     label: 'fwd',
     insertText: 'request.getRequestDispatcher("${1:/path}").forward(request, response);',
     detail: 'Servlet forward',
+    category: 'Servlet',
   },
   {
     prefix: 'redirect',
     label: 'redirect',
     insertText: 'response.sendRedirect("${1:/path}");',
     detail: 'Servlet redirect',
+    category: 'Servlet',
   },
 
   // ===== Object Methods =====
@@ -284,18 +394,35 @@ const TEMPLATES: TemplateDef[] = [
     label: 'tostring',
     insertText: '@Override\npublic String toString() {\n\treturn "${1:ClassName}{" +\n\t\t${2}\n\t\t+ "}";\n}',
     detail: 'toString method',
+    category: 'Object',
   },
   {
     prefix: 'equals',
     label: 'equals',
     insertText: '@Override\npublic boolean equals(Object ${1:obj}) {\n\tif (this == ${1:obj}) return true;\n\tif (${1:obj} == null || getClass() != ${1:obj}.getClass()) return false;\n\t${2:ClassName} ${3:other} = (${2:ClassName}) ${1:obj};\n\treturn ${4};\n}',
     detail: 'equals method',
+    category: 'Object',
   },
   {
     prefix: 'hashcode',
     label: 'hashcode',
     insertText: '@Override\npublic int hashCode() {\n\treturn Objects.hash(${1});\n}',
     detail: 'hashCode method',
+    category: 'Object',
+  },
+  {
+    prefix: 'clone',
+    label: 'clone',
+    insertText: '@Override\npublic ${1:ClassName} clone() {\n\ttry {\n\t\treturn (${1:ClassName}) super.clone();\n\t} catch (CloneNotSupportedException e) {\n\t\tthrow new RuntimeException(e);\n\t}\n}',
+    detail: 'clone method',
+    category: 'Object',
+  },
+  {
+    prefix: 'compareTo',
+    label: 'compareTo',
+    insertText: '@Override\npublic int compareTo(${1:ClassName} ${2:other}) {\n\treturn ${3};\n}',
+    detail: 'compareTo method',
+    category: 'Object',
   },
 
   // ===== Annotations & Testing =====
@@ -304,18 +431,281 @@ const TEMPLATES: TemplateDef[] = [
     label: 'override',
     insertText: '@Override',
     detail: 'Override annotation',
+    category: 'Annotations',
+  },
+  {
+    prefix: 'deprec',
+    label: 'deprec',
+    insertText: '@Deprecated',
+    detail: 'Deprecated annotation',
+    category: 'Annotations',
+  },
+  {
+    prefix: 'suppress',
+    label: 'suppress',
+    insertText: '@SuppressWarnings("${1:unchecked}")',
+    detail: 'SuppressWarnings annotation',
+    category: 'Annotations',
   },
   {
     prefix: 'test',
     label: 'test',
     insertText: '@Test\npublic void ${1:testMethod}() {\n\t${2}\n}',
     detail: 'JUnit test method',
+    category: 'Annotations',
   },
   {
     prefix: 'before',
     label: 'before',
     insertText: '@Before\npublic void setUp() {\n\t${1}\n}',
     detail: 'JUnit setUp method',
+    category: 'Annotations',
+  },
+  {
+    prefix: 'after',
+    label: 'after',
+    insertText: '@After\npublic void tearDown() {\n\t${1}\n}',
+    detail: 'JUnit tearDown method',
+    category: 'Annotations',
+  },
+  {
+    prefix: 'beforeClass',
+    label: 'beforeClass',
+    insertText: '@BeforeClass\npublic static void setUpBeforeClass() {\n\t${1}\n}',
+    detail: 'JUnit @BeforeClass',
+    category: 'Annotations',
+  },
+  {
+    prefix: 'afterClass',
+    label: 'afterClass',
+    insertText: '@AfterClass\npublic static void tearDownAfterClass() {\n\t${1}\n}',
+    detail: 'JUnit @AfterClass',
+    category: 'Annotations',
+  },
+
+  // ===== Lambda & Functional =====
+  {
+    prefix: 'lambda',
+    label: 'lambda',
+    insertText: '(${1:params}) -> ${2:body}',
+    detail: 'Lambda expression',
+    category: 'Lambda',
+  },
+  {
+    prefix: 'lambdaBody',
+    label: 'lambdaBody',
+    insertText: '(${1:params}) -> {\n\t${2}\n}',
+    detail: 'Lambda with body',
+    category: 'Lambda',
+  },
+  {
+    prefix: 'consumer',
+    label: 'consumer',
+    insertText: 'Consumer<${1:Type}> ${2:consumer} = ${3:param} -> ${4:body};',
+    detail: 'Consumer functional interface',
+    category: 'Lambda',
+  },
+  {
+    prefix: 'supplier',
+    label: 'supplier',
+    insertText: 'Supplier<${1:Type}> ${2:supplier} = () -> ${3:value};',
+    detail: 'Supplier functional interface',
+    category: 'Lambda',
+  },
+  {
+    prefix: 'function',
+    label: 'function',
+    insertText: 'Function<${1:In}, ${2:Out}> ${3:func} = ${4:param} -> ${5:result};',
+    detail: 'Function functional interface',
+    category: 'Lambda',
+  },
+  {
+    prefix: 'predicate',
+    label: 'predicate',
+    insertText: 'Predicate<${1:Type}> ${2:pred} = ${3:param} -> ${4:condition};',
+    detail: 'Predicate functional interface',
+    category: 'Lambda',
+  },
+
+  // ===== JSP Templates =====
+  {
+    prefix: 'jspForTokens',
+    label: 'jspForTokens',
+    insertText: '<c:forTokens items="${${1:items}}" delims="${2:,}" var="${3:token}">\n\t${4}\n</c:forTokens>',
+    detail: 'JSTL forTokens tag',
+    category: 'JSP',
+  },
+  {
+    prefix: 'jspIf',
+    label: 'jspIf',
+    insertText: '<c:if test="${${1:condition}}">\n\t${2}\n</c:if>',
+    detail: 'JSTL if tag',
+    category: 'JSP',
+  },
+  {
+    prefix: 'jspChoose',
+    label: 'jspChoose',
+    insertText: '<c:choose>\n\t<c:when test="${${1:condition}}">\n\t\t${2}\n\t</c:when>\n\t<c:otherwise>\n\t\t${3}\n\t</c:otherwise>\n</c:choose>',
+    detail: 'JSTL choose/when/otherwise',
+    category: 'JSP',
+  },
+  {
+    prefix: 'jspForEach',
+    label: 'jspForEach',
+    insertText: '<c:forEach var="${1:item}" items="${${2:collection}}">\n\t${3}\n</c:forEach>',
+    detail: 'JSTL forEach tag',
+    category: 'JSP',
+  },
+  {
+    prefix: 'jspSetProperty',
+    label: 'jspSetProperty',
+    insertText: '<jsp:setProperty name="${1:bean}" property="${2:property}" value="${3:value}" />',
+    detail: 'JSP setProperty',
+    category: 'JSP',
+  },
+  {
+    prefix: 'jspGetProperty',
+    label: 'jspGetProperty',
+    insertText: '<jsp:getProperty name="${1:bean}" property="${2:property}" />',
+    detail: 'JSP getProperty',
+    category: 'JSP',
+  },
+  {
+    prefix: 'jspUseBean',
+    label: 'jspUseBean',
+    insertText: '<jsp:useBean id="${1:id}" class="${2:ClassName}" scope="${3:request}" />',
+    detail: 'JSP useBean',
+    category: 'JSP',
+  },
+  {
+    prefix: 'jspInclude',
+    label: 'jspInclude',
+    insertText: '<jsp:include page="${1:page}.jsp" />',
+    detail: 'JSP include',
+    category: 'JSP',
+  },
+  {
+    prefix: 'jspForward',
+    label: 'jspForward',
+    insertText: '<jsp:forward page="${1:page}.jsp" />',
+    detail: 'JSP forward',
+    category: 'JSP',
+  },
+  {
+    prefix: 'jspExpression',
+    label: 'jspExpression',
+    insertText: '<%= ${1:expression} %>',
+    detail: 'JSP expression',
+    category: 'JSP',
+  },
+
+  // ===== XML Templates =====
+  {
+    prefix: 'xmlDecl',
+    label: 'xmlDecl',
+    insertText: '<?xml version="1.0" encoding="UTF-8"?>',
+    detail: 'XML declaration',
+    category: 'XML',
+  },
+  {
+    prefix: 'xmlTag',
+    label: 'xmlTag',
+    insertText: '<${1:tag}>${2}</${1:tag}>',
+    detail: 'XML tag with content',
+    category: 'XML',
+  },
+  {
+    prefix: 'xmlTagBody',
+    label: 'xmlTagBody',
+    insertText: '<${1:tag}>\n\t${2}\n</${1:tag}>',
+    detail: 'XML tag with body',
+    category: 'XML',
+  },
+  {
+    prefix: 'xmlComment',
+    label: 'xmlComment',
+    insertText: '<!-- ${1:comment} -->',
+    detail: 'XML comment',
+    category: 'XML',
+  },
+  {
+    prefix: 'xmlCDATA',
+    label: 'xmlCDATA',
+    insertText: '<![CDATA[${1:content}]]>',
+    detail: 'XML CDATA section',
+    category: 'XML',
+  },
+  {
+    prefix: 'xmlDTD',
+    label: 'xmlDTD',
+    insertText: '<!DOCTYPE ${1:root} SYSTEM "${2:file}.dtd">',
+    detail: 'XML DOCTYPE declaration',
+    category: 'XML',
+  },
+  {
+    prefix: 'xmlSchema',
+    label: 'xmlSchema',
+    insertText: 'xsi:schemaLocation="${1:namespace} ${2:location}"',
+    detail: 'XML Schema location',
+    category: 'XML',
+  },
+  {
+    prefix: 'xmlNamespace',
+    label: 'xmlNamespace',
+    insertText: 'xmlns:${1:prefix}="${2:uri}"',
+    detail: 'XML namespace declaration',
+    category: 'XML',
+  },
+
+  // ===== Spring Framework =====
+  {
+    prefix: 'autowired',
+    label: 'autowired',
+    insertText: '@Autowired\nprivate ${1:Type} ${2:bean};',
+    detail: 'Spring @Autowired field',
+    category: 'Spring',
+  },
+  {
+    prefix: 'component',
+    label: 'component',
+    insertText: '@Component\npublic class ${1:ClassName} {\n\t${2}\n}',
+    detail: 'Spring @Component class',
+    category: 'Spring',
+  },
+  {
+    prefix: 'service',
+    label: 'service',
+    insertText: '@Service\npublic class ${1:ClassName} {\n\t${2}\n}',
+    detail: 'Spring @Service class',
+    category: 'Spring',
+  },
+  {
+    prefix: 'repository',
+    label: 'repository',
+    insertText: '@Repository\npublic class ${1:ClassName} {\n\t${2}\n}',
+    detail: 'Spring @Repository class',
+    category: 'Spring',
+  },
+  {
+    prefix: 'controller',
+    label: 'controller',
+    insertText: '@Controller\npublic class ${1:ClassName} {\n\t${2}\n}',
+    detail: 'Spring @Controller class',
+    category: 'Spring',
+  },
+  {
+    prefix: 'requestMapping',
+    label: 'requestMapping',
+    insertText: '@RequestMapping(value = "${1:/path}", method = RequestMethod.${2:GET})\npublic ${3:String} ${4:methodName}(${5}) {\n\t${6}\n}',
+    detail: 'Spring @RequestMapping method',
+    category: 'Spring',
+  },
+  {
+    prefix: 'bean',
+    label: 'bean',
+    insertText: '@Bean\npublic ${1:Type} ${2:beanName}() {\n\treturn new ${1:Type}(${3});\n}',
+    detail: 'Spring @Bean method',
+    category: 'Spring',
   },
 ];
 

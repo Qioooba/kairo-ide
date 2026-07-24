@@ -20,7 +20,7 @@ export class BoundedLogBuffer {
     clear(): void { this.lines = []; this.bytes = 0; }
 }
 
-export function normalizeLogEntry(entry: any): KairoLogLine {
+export function normalizeLogEntry(entry: Record<string, unknown> | undefined): KairoLogLine {
     const raw = entry?.line ?? entry?.message ?? entry;
     const line = typeof raw === 'string' ? raw : JSON.stringify(raw);
     const stream: LogStream = entry?.stream === 'stderr' || entry?.level === 'stderr' ? 'stderr' : (typeof raw === 'object' ? 'structured' : 'stdout');

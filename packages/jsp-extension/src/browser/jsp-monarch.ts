@@ -8,10 +8,18 @@
  * (no nested Java highlighting) — documented v1 limitation.
  */
 
+interface MonarchLanguage {
+  defaultToken: string;
+  tokenPostfix?: string;
+  ignoreCase?: boolean;
+  brackets?: Array<{ open: string; close: string; token: string }>;
+  tokenizer: Record<string, unknown[]>;
+}
+
 export const JSP_LANGUAGE_ID = 'jsp';
 
 
-export const JSP_MONARCH: any = {
+export const JSP_MONARCH: MonarchLanguage = {
   defaultToken: '',
   tokenPostfix: '.jsp',
 

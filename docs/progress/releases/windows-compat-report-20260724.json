@@ -1,0 +1,388 @@
+{
+  "title": "Kairo IDE Windows 兼容性验证报告",
+  "timestamp": "2026-07-24T05:27:47.557Z",
+  "platform": {
+    "os": "win32",
+    "release": "10.0.26200",
+    "arch": "x64",
+    "hostname": "x99"
+  },
+  "nodeVersion": "v20.18.0",
+  "isAdmin": false,
+  "summary": {
+    "total": 61,
+    "pass": 58,
+    "fail": 0,
+    "skip": 3,
+    "passRate": "100.0",
+    "elapsedSeconds": 19.56
+  },
+  "results": [
+    {
+      "section": "fs",
+      "name": "长路径创建/读写 (>260字符)",
+      "status": "PASS",
+      "detail": "路径长度: 271"
+    },
+    {
+      "section": "fs",
+      "name": "UNC 路径支持",
+      "status": "PASS",
+      "detail": "localhost 路径可用"
+    },
+    {
+      "section": "fs",
+      "name": "大小写不敏感 (NTFS 默认)",
+      "status": "PASS",
+      "detail": "UPPER.txt == upper.txt"
+    },
+    {
+      "section": "fs",
+      "name": "文件锁 - 共享读",
+      "status": "PASS",
+      "detail": "文件可被多次打开读取"
+    },
+    {
+      "section": "fs",
+      "name": "临时目录读写权限",
+      "status": "PASS",
+      "detail": "TMP: C:\\Users\\Qi\\AppData\\Local\\Temp\\kairo-win-verify-1784870847837"
+    },
+    {
+      "section": "fs",
+      "name": "非法文件名字符拒绝",
+      "status": "PASS",
+      "detail": "所有非法字符被正确拒绝"
+    },
+    {
+      "section": "fs",
+      "name": "磁盘空间检查",
+      "status": "PASS",
+      "detail": "C盘剩余: 100.41 GB"
+    },
+    {
+      "section": "encoding",
+      "name": "GBK 文件读写",
+      "status": "PASS",
+      "detail": "GBK 编解码正常"
+    },
+    {
+      "section": "encoding",
+      "name": "GB2312 文件读写",
+      "status": "PASS",
+      "detail": "GB2312 编解码正常"
+    },
+    {
+      "section": "encoding",
+      "name": "UTF-8 BOM 处理",
+      "status": "PASS",
+      "detail": "BOM写入: true, utf8含BOM: true, 手动剥离正确: true"
+    },
+    {
+      "section": "encoding",
+      "name": "UTF-16 LE 读写",
+      "status": "PASS",
+      "detail": "UTF-16 LE 正常"
+    },
+    {
+      "section": "encoding",
+      "name": "UTF-16 BE 读写",
+      "status": "PASS",
+      "detail": "UTF-16 BE 正常"
+    },
+    {
+      "section": "encoding",
+      "name": "控制台代码页",
+      "status": "PASS",
+      "detail": "UTF-8 (65001)"
+    },
+    {
+      "section": "encoding",
+      "name": "中文文件名支持",
+      "status": "PASS",
+      "detail": "中文文件名正常读写"
+    },
+    {
+      "section": "encoding",
+      "name": "Emoji 文件名支持",
+      "status": "PASS",
+      "detail": "Emoji 文件名正常"
+    },
+    {
+      "section": "process",
+      "name": "进程创建 (execSync)",
+      "status": "PASS",
+      "detail": "子进程正常创建"
+    },
+    {
+      "section": "process",
+      "name": "进程终止 (kill)",
+      "status": "PASS",
+      "detail": "PID: 26072"
+    },
+    {
+      "section": "process",
+      "name": "进程信息获取",
+      "status": "PASS",
+      "detail": "当前进程: node (PID: 20968)"
+    },
+    {
+      "section": "process",
+      "name": "进程优先级查询",
+      "status": "PASS",
+      "detail": "当前优先级: Normal"
+    },
+    {
+      "section": "process",
+      "name": "Job Object 支持 (PowerShell Jobs)",
+      "status": "PASS",
+      "detail": "PowerShell Job 命令可用"
+    },
+    {
+      "section": "process",
+      "name": "CPU 亲和性",
+      "status": "PASS",
+      "detail": "CPU 核心数: 40, 亲和性: 1099511627775"
+    },
+    {
+      "section": "process",
+      "name": "进程命令行获取",
+      "status": "PASS",
+      "detail": "命令行参数可获取"
+    },
+    {
+      "section": "process",
+      "name": "进程句柄数",
+      "status": "PASS",
+      "detail": "当前句柄数: 198"
+    },
+    {
+      "section": "registry",
+      "name": "注册表读取",
+      "status": "PASS",
+      "detail": "Windows 版本: Windows 10 Pro"
+    },
+    {
+      "section": "registry",
+      "name": "JDK 注册表检测",
+      "status": "SKIP",
+      "detail": "注册表中未检测到 JDK 项"
+    },
+    {
+      "section": "registry",
+      "name": "JAVA_HOME 环境变量",
+      "status": "PASS",
+      "detail": "JAVA_HOME: E:\\Tools\\jdk17"
+    },
+    {
+      "section": "registry",
+      "name": "Tomcat 注册表检测",
+      "status": "SKIP",
+      "detail": "注册表中未检测到 Tomcat"
+    },
+    {
+      "section": "registry",
+      "name": "环境变量",
+      "status": "PASS",
+      "detail": "环境变量数: 175, PATH 条目数: 124"
+    },
+    {
+      "section": "registry",
+      "name": "注册表写入测试 (HKCU)",
+      "status": "PASS",
+      "detail": "注册表读写正常"
+    },
+    {
+      "section": "services",
+      "name": "服务 \"Spooler\" 状态",
+      "status": "PASS",
+      "detail": "状态: Running"
+    },
+    {
+      "section": "services",
+      "name": "服务 \"WSearch\" 状态",
+      "status": "PASS",
+      "detail": "状态: Running"
+    },
+    {
+      "section": "services",
+      "name": "服务 \"WinRM\" 状态",
+      "status": "PASS",
+      "detail": "状态: Stopped"
+    },
+    {
+      "section": "services",
+      "name": "服务依赖查询 (Spooler)",
+      "status": "PASS",
+      "detail": "依赖服务: [\r\n    {\r\n        \"CanPauseAndContinue\":  false,\r\n        \"CanShutdown\":  false,\r\n        \"CanStop\":  false,\r\n        \"DisplayName\":  \"Remote Procedure Call (RPC)\",\r\n        \"DependentServices\":  null,\r\n        \"MachineName\":  \".\",\r\n        \"ServiceName\":  \"RPCSS\",\r\n        \"ServicesDependedOn\":  [\r\n                                   \"System.ServiceProcess.ServiceController\",\r\n                                   \"System.ServiceProcess.ServiceController\"\r\n                               ],\r\n        \"ServiceHandle\":  null,\r\n        \"Status\":  4,\r\n        \"ServiceType\":  32,\r\n        \"StartType\":  2,\r\n        \"Site\":  null,\r\n        \"Container\":  null,\r\n        \"Name\":  \"RPCSS\",\r\n        \"RequiredServices\":  [\r\n                                 \"System.ServiceProcess.ServiceController\",\r\n                                 \"System.ServiceProcess.ServiceController\"\r\n                             ]\r\n    },\r\n    {\r\n        \"CanPauseAndContinue\":  false,\r\n        \"CanShutdown\":  false,\r\n        \"CanStop\":  true,\r\n        \"DisplayName\":  \"HTTP Service\",\r\n        \"DependentServices\":  [\r\n                                  \"System.ServiceProcess.ServiceController\",\r\n                                  \"System.ServiceProcess.ServiceController\",\r\n                                  \"System.ServiceProcess.ServiceController\",\r\n                                  \"System.ServiceProcess.ServiceController\",\r\n                                  \"System.ServiceProcess.ServiceController\",\r\n                                  \"System.ServiceProcess.ServiceController\",\r\n                                  \"System.ServiceProcess.ServiceController\",\r\n                                  \"System.ServiceProcess.ServiceController\",\r\n                                  \"System.ServiceProcess.ServiceController\",\r\n                                  \"System.ServiceProcess.ServiceController\"\r\n                              ],\r\n        \"MachineName\":  \".\",\r\n        \"ServiceName\":  \"http\",\r\n        \"ServicesDependedOn\":  [\r\n\r\n                               ],\r\n        \"ServiceHandle\":  null,\r\n        \"Status\":  4,\r\n        \"ServiceType\":  1,\r\n        \"StartType\":  3,\r\n        \"Site\":  null,\r\n        \"Container\":  null,\r\n        \"Name\":  \"http\",\r\n        \"RequiredServices\":  [\r\n\r\n                             ]\r\n    }\r\n]"
+    },
+    {
+      "section": "services",
+      "name": "服务启动类型 (Spooler)",
+      "status": "PASS",
+      "detail": "启动类型: Automatic"
+    },
+    {
+      "section": "services",
+      "name": "运行中服务统计",
+      "status": "PASS",
+      "detail": "运行中: 101 / 总计: 272"
+    },
+    {
+      "section": "network",
+      "name": "端口 3000 占用检测",
+      "status": "PASS",
+      "detail": "端口已被占用 (IDE 开发端口，正常)"
+    },
+    {
+      "section": "network",
+      "name": "端口 8080 占用检测",
+      "status": "PASS",
+      "detail": "端口空闲"
+    },
+    {
+      "section": "network",
+      "name": "端口 8005 占用检测",
+      "status": "PASS",
+      "detail": "端口空闲"
+    },
+    {
+      "section": "network",
+      "name": "端口 8009 占用检测",
+      "status": "PASS",
+      "detail": "端口空闲"
+    },
+    {
+      "section": "network",
+      "name": "端口 22 占用检测",
+      "status": "PASS",
+      "detail": "端口空闲"
+    },
+    {
+      "section": "network",
+      "name": "端口 80 占用检测",
+      "status": "PASS",
+      "detail": "端口空闲"
+    },
+    {
+      "section": "network",
+      "name": "端口 443 占用检测",
+      "status": "PASS",
+      "detail": "端口空闲"
+    },
+    {
+      "section": "network",
+      "name": "防火墙入站规则",
+      "status": "PASS",
+      "detail": "已启用的入站规则数: 136"
+    },
+    {
+      "section": "network",
+      "name": "防火墙状态",
+      "status": "PASS",
+      "detail": "防火墙已启用"
+    },
+    {
+      "section": "network",
+      "name": "网络接口枚举",
+      "status": "PASS",
+      "detail": "接口数: 2, 活跃 IPv4: 1"
+    },
+    {
+      "section": "network",
+      "name": "DNS 解析支持",
+      "status": "PASS",
+      "detail": "dns.promises 可用"
+    },
+    {
+      "section": "network",
+      "name": "网络连通性 (localhost)",
+      "status": "PASS",
+      "detail": "localhost 可达"
+    },
+    {
+      "section": "system",
+      "name": "操作系统",
+      "status": "PASS",
+      "detail": "Windows_NT 10.0.26200 x64, 平台: win32"
+    },
+    {
+      "section": "system",
+      "name": "内存",
+      "status": "PASS",
+      "detail": "总计: 127.89GB, 可用: 103.03GB"
+    },
+    {
+      "section": "system",
+      "name": "Node.js 版本",
+      "status": "PASS",
+      "detail": "Node.js v20.18.0"
+    },
+    {
+      "section": "system",
+      "name": "npm 版本",
+      "status": "PASS",
+      "detail": "npm 10.8.2"
+    },
+    {
+      "section": "system",
+      "name": "管理员权限",
+      "status": "PASS",
+      "detail": "普通用户权限 (正常，非管理员不影响核心功能)"
+    },
+    {
+      "section": "system",
+      "name": "主机名",
+      "status": "PASS",
+      "detail": "x99"
+    },
+    {
+      "section": "system",
+      "name": "用户目录",
+      "status": "PASS",
+      "detail": "C:\\Users\\Qi"
+    },
+    {
+      "section": "project",
+      "name": "package.json",
+      "status": "PASS",
+      "detail": "项目名: kairo-ide, 版本: 0.1.0"
+    },
+    {
+      "section": "project",
+      "name": "node_modules",
+      "status": "PASS",
+      "detail": "node_modules 已安装"
+    },
+    {
+      "section": "project",
+      "name": "路径分隔符",
+      "status": "PASS",
+      "detail": "当前分隔符: \"\\\" (Windows 标准)"
+    },
+    {
+      "section": "project",
+      "name": "换行符",
+      "status": "PASS",
+      "detail": "CRLF (Windows 标准)"
+    },
+    {
+      "section": "project",
+      "name": "脚本换行符一致性",
+      "status": "PASS",
+      "detail": "verify-windows.cjs: LF, run-compat-scan.cjs: CRLF"
+    },
+    {
+      "section": "project",
+      "name": "Go 运行时 (kairo-runtime.exe)",
+      "status": "SKIP",
+      "detail": "kairo-runtime.exe 不存在"
+    },
+    {
+      "section": "project",
+      "name": "关键目录结构",
+      "status": "PASS",
+      "detail": "所有关键目录存在"
+    }
+  ]
+}

@@ -38,6 +38,21 @@ import {
 } from './runtime-errors';
 import { KairoErrorListener } from './runtime';
 
+/** Window extensions injected by the Kairo preload script. */
+interface KairoWindow {
+  __kairo?: {
+    agentBaseUrl: string;
+    getSecret?: () => string;
+  };
+  kairoConfig?: {
+    agentUrl: string;
+    agentSecret?: string;
+  };
+}
+
+/** WsEvent with optional sequence number for replay support. */
+type WsEventWithSequence = WsEvent & { sequence?: number };
+
 /** Subprotocol name the agent requires for WS auth. */
 export const KAIRO_WS_SUBPROTOCOL = 'kairo-secret-v1' as const;
 
@@ -102,7 +117,7 @@ export class RuntimeConnectionService {
   protected workspaceId: string = '';
   protected lastHealth: HealthResponse | undefined;
   /** Multi-subscriber dispatch: workspaceId → set of callbacks. */
-  private subscribers = new Map<string, Set<(event: any) => void>>();
+  private subscribers = new Map<string, Set<(event: WsEvent) => void>>();
   /**
    * Cached host:port returned by GET /api/v1/endpoints. The
    * frontend used to hardcode 18099; it now fetches this on
@@ -128,15 +143,15 @@ export class RuntimeConnectionService {
     if (!this.config.baseUrl) {
       // Read config from preload script (available before page loads).
       // Primary API: window.__kairo (desktop preload per Wave 5 spec).
-      const kairo = (window as any).__kairo;
+      const kairo = (window as unknown as KairoWindow).__kairo;
       if (kairo && typeof kairo.agentBaseUrl === 'string') {
         const secret = typeof kairo.getSecret === 'function' ? kairo.getSecret() : '';
         this.initialize(kairo.agentBaseUrl, secret);
       } else {
         // Backward-compat: window.kairoConfig (older preload versions).
-        const kairoCfg = (window as any).kairoConfig;
+        const kairoCfg = (window as unknown as KairoWindow).kairoConfig;
         if (kairoCfg && kairoCfg.agentUrl) {
-          this.initialize(kairoCfg.agentUrl, kairoCfg.agentSecret);
+          this.initialize(kairoCfg.agentUrl, kairoCfg.agentSecret ?? '');
         } else {
           // KAIRO-RC-WEB-015: the browser build has no preload to
           // inject the agent URL, so it used to hard-default to
@@ -173,7 +188,7 @@ export class RuntimeConnectionService {
           message: 'fetchEndpoints failed: ' + (err instanceof Error ? err.message : String(err)),
           cause: err,
         }),
-        { endpoint: 'GET /api/v1/endpoints' as any, attempt: 0 },
+        { endpoint: 'GET /api/v1/endpoints' as Endpoint, attempt: 0 },
       );
     });
   }
@@ -226,6 +241,11 @@ export class RuntimeConnectionService {
 
   lastSeenHealth(): HealthResponse | undefined {
     return this.lastHealth;
+  }
+
+  /** Get the active agent secret for WS connections (public accessor). */
+  getAgentSecret(): string | undefined {
+    return this.agentSecret();
   }
 
   /**
@@ -366,7 +386,7 @@ export class RuntimeConnectionService {
     const env: RequestEnvelope = {
       workspaceId: this.workspaceId,
       requestId: newRequestId(),
-      payload: payload as any,
+      payload: payload as unknown as RequestEnvelope['payload'],
     };
     const url = this.url(endpoint, init);
     const method = methodOf(endpoint);
@@ -472,7 +492,7 @@ export class RuntimeConnectionService {
    * this method works even when the agent bound a different
    * port at startup.
    */
-  subscribeEvents(workspaceId: string, onEvent: (event: any) => void): () => void {
+  subscribeEvents(workspaceId: string, onEvent: (event: WsEvent) => void): () => void {
     const key = workspaceId || '__no_workspace__';
     let subs = this.subscribers.get(key);
     if (!subs) {
@@ -514,7 +534,7 @@ export class RuntimeConnectionService {
    * single-callback model is replaced by multi-subscriber
    * dispatch on the single shared EventStream.
    */
-  connectEvents(workspaceId: string, onEvent: (event: any) => void): void {
+  connectEvents(workspaceId: string, onEvent: (event: WsEvent) => void): void {
     this.subscribeEvents(workspaceId, onEvent);
   }
 
@@ -572,8 +592,8 @@ export class RuntimeConnectionService {
     // Wire up multi-subscriber dispatch: every event from
     // the single EventStream is forwarded to ALL registered
     // subscribers across all workspaceIds.
-    this.internalEventStream.on('*', (e: any) => {
-      this.sequence = e.sequence ?? this.sequence;
+    this.internalEventStream.on('*', (e: WsEvent) => {
+      this.sequence = (e as WsEventWithSequence).sequence ?? this.sequence;
       this.internalEventStream?.setSequence(this.sequence);
       for (const subs of this.subscribers.values()) {
         for (const fn of subs) {
@@ -777,8 +797,8 @@ export class EventStream {
       try {
         const e: WsEvent = JSON.parse(typeof ev.data === 'string' ? ev.data : '');
         // Track sequence for replay on reconnect
-        if ((e as any).sequence !== undefined) {
-          this.sequence = Math.max(this.sequence, (e as any).sequence);
+        if ((e as WsEventWithSequence).sequence !== undefined) {
+          this.sequence = Math.max(this.sequence, (e as WsEventWithSequence).sequence!);
         }
         const set = this.listeners.get(e.type);
         if (set) for (const fn of set) fn(e);

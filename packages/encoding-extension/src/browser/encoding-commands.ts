@@ -19,7 +19,7 @@
  */
 
 import { injectable, inject, interfaces } from '@theia/core/shared/inversify';
-import { QuickInputService, ApplicationShell, FrontendApplicationContribution } from '@theia/core/lib/browser';
+import { QuickInputService, ApplicationShell, FrontendApplicationContribution, QuickPickItem } from '@theia/core/lib/browser';
 import { ConfirmDialog } from '@theia/core/lib/browser/dialogs';
 import { KairoProjectEncodingContribution } from './project-encoding-contribution';
 import {
@@ -154,7 +154,7 @@ export class KairoEncodingCommandsContribution implements CommandContribution {
           await this.service.writeWithEncoding(target, text, picked);
           // Mark the document as not dirty without re-saving
           // (we just wrote the bytes ourselves).
-          (document as any).setDirty?.(false);
+          (document as { setDirty?: (dirty: boolean) => void }).setDirty?.(false);
           this.messages.info(`Saved ${target.displayName} as ${picked}.`);
         } catch (err) {
           this.messages.error(`Save with ${picked} failed: ${(err as Error).message}`);
@@ -268,7 +268,7 @@ export class KairoEncodingCommandsContribution implements CommandContribution {
       placeholder: `Pick an encoding (current: ${current})`,
     });
     if (!sel) return undefined;
-    return typeof sel === 'string' ? sel : (sel as any).label;
+    return typeof sel === 'string' ? sel : (sel as QuickPickItem).label;
   }
 }
 

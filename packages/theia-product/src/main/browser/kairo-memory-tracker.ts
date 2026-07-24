@@ -9,6 +9,13 @@ import { injectable, inject, postConstruct } from '@theia/core/shared/inversify'
 import { FrontendApplicationContribution } from '@theia/core/lib/browser';
 import { ILogger } from '@theia/core/lib/common/logger';
 
+/** Chrome's non-standard performance.memory API. */
+interface PerformanceMemory {
+  usedJSHeapSize: number;
+  totalJSHeapSize: number;
+  jsHeapSizeLimit: number;
+}
+
 const MEMORY_TRACK_INTERVAL_MS = 30_000;
 const HEAP_WARNING_THRESHOLD_MB = 500;
 
@@ -35,16 +42,16 @@ export class KairoMemoryTracker implements FrontendApplicationContribution {
   }
 
   getCurrentHeapMB(): number {
-    if (typeof performance !== 'undefined' && (performance as any).memory) {
-      const mem = (performance as any).memory;
+    if (typeof performance !== 'undefined' && (performance as unknown as { memory?: PerformanceMemory }).memory) {
+      const mem = (performance as unknown as { memory: PerformanceMemory }).memory;
       return mem.usedJSHeapSize / (1024 * 1024);
     }
     return 0;
   }
 
   getCurrentTotalMB(): number {
-    if (typeof performance !== 'undefined' && (performance as any).memory) {
-      const mem = (performance as any).memory;
+    if (typeof performance !== 'undefined' && (performance as unknown as { memory?: PerformanceMemory }).memory) {
+      const mem = (performance as unknown as { memory: PerformanceMemory }).memory;
       return mem.totalJSHeapSize / (1024 * 1024);
     }
     return 0;

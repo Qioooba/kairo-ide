@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "Kairo project extension �?owns the workspace and project models, the welcome view, and the project import wizard.",
   "main": "lib/index.js",
-  "types": "lib/src/index.d.ts",
+  "types": "lib/index.d.ts",
   "files": [
     "lib",
     "src"
@@ -12,7 +12,7 @@
     "build": "tsc -p tsconfig.json",
     "clean": "rm -rf lib",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "test": "node -r ./test-setup.cjs -r ts-node/register --no-warnings src/browser/import-wizard-widget.test.ts"
+    "test": "node -r ./test-setup.cjs -r ts-node/register --no-warnings src/browser/import-wizard-widget.test.ts && node --test src/browser/project-exports-extended.test.cjs src/browser/project-logic.test.cjs src/browser/project-service-extended.test.cjs src/browser/import-wizard-widget.test.cjs"
   },
   "dependencies": {
     "@kairo/config-schema": "workspace:*",

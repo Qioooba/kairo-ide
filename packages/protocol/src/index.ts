@@ -907,7 +907,12 @@ export type WsEvent =
       message: string;
       fields?: Record<string, unknown>;
     }
-  | { type: 'audit'; event: AuditEvent };
+  | { type: 'audit'; event: AuditEvent }
+  | {
+      type: 'hotreload.status';
+      data?: { status: string };
+      message?: string;
+    };
 
 /* ------------------------------------------------------------------ */
 /*  Shared display helpers                                             */

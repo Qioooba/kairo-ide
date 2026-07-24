@@ -15,11 +15,17 @@ npmRebuild: false
 #   lib/preload.js       — contextBridge preload
 #   lib/frontend/**/*    — Theia frontend (copied from apps/browser)
 #   lib/backend/**/*     — Theia backend (copied from apps/browser)
+#   bundled/**/*         — JDT LS + Tomcat 6 (copied from project root)
 files:
   - lib/main.js
+  - lib/main.js.map
   - lib/preload.js
+  - lib/preload.js.map
+  - lib/process-manager.js
+  - lib/process-manager.js.map
   - lib/frontend/**/*
   - lib/backend/**/*
+  - bundled/**/*
   - package.json
 
 # Platform-specific agent binary. The desktop prebuild script
@@ -47,12 +53,20 @@ mac:
 # Windows
 win:
   target:
-    - nsis
-    - zip
+    - target: nsis
+      arch:
+        - x64
+    - target: zip
+      arch:
+        - x64
   artifactName: ${name}-${version}-win-${arch}.${ext}
   extraResources:
     - from: ../../runtime-agent/bin/kairo-runtime.exe
       to: bin/kairo-runtime.exe
+  # Sign the executable if a certificate is available.
+  sign: scripts/sign-win.cjs
+  # Ask for admin rights for the installer (needed for Program Files).
+  requestedExecutionLevel: asInvoker
 
 nsis:
   oneClick: false
@@ -60,6 +74,24 @@ nsis:
   allowToChangeInstallationDirectory: true
   # Support paths with spaces and Chinese characters.
   unicode: true
+  # Installer icon
+  installerIcon: resources/icon.ico
+  # Uninstaller icon
+  uninstallerIcon: resources/icon.ico
+  # Installer header image
+  installerHeaderIcon: resources/icon.ico
+  # Create desktop shortcut
+  createDesktopShortcut: true
+  # Create start menu shortcut
+  createStartMenuShortcut: true
+  # Shortcut name
+  shortcutName: Kairo IDE
+  # Include JDT LS and Tomcat in the installer
+  include: scripts/installer/kairo-setup.nsi
+  # Run after install
+  runAfterFinish: false
+  # Delete app data on uninstall prompt
+  deleteAppDataOnUninstall: true
 
 # Linux
 linux:
@@ -70,3 +102,9 @@ linux:
   extraResources:
     - from: ../../runtime-agent/bin/kairo-runtime
       to: bin/kairo-runtime
+  category: Development
+  synopsis: Kairo IDE — Legacy Java Web IDE
+  description: A cross-platform IDE for legacy Java Web projects (JDK 1.6 / Tomcat 6 / JSP / Servlet / GBK).
+
+# Publish configuration (optional, for auto-update)
+publish: null

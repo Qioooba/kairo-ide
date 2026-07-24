@@ -238,6 +238,172 @@ func TestResolveWithinRootSymlink(t *testing.T) {
 	})
 }
 
+func TestResolveWithinNoFollow(t *testing.T) {
+	p := NewDefaultPathPolicy()
+	tmpDir := t.TempDir()
+	tmpDir, err := filepath.EvalSymlinks(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("valid_resolution", func(t *testing.T) {
+		resolved, err := p.ResolveWithinNoFollow(tmpDir, "src/main/java")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		expected := filepath.Join(tmpDir, "src", "main", "java")
+		if resolved != expected {
+			t.Errorf("expected %s, got %s", expected, resolved)
+		}
+	})
+
+	t.Run("traversal_rejected", func(t *testing.T) {
+		_, err := p.ResolveWithinNoFollow(tmpDir, "../outside")
+		if err == nil {
+			t.Error("expected error for path traversal")
+		}
+	})
+
+	t.Run("dot_resolves_to_root", func(t *testing.T) {
+		resolved, err := p.ResolveWithinNoFollow(tmpDir, ".")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if resolved != tmpDir {
+			t.Errorf("expected %s, got %s", tmpDir, resolved)
+		}
+	})
+
+	t.Run("empty_path_rejected", func(t *testing.T) {
+		_, err := p.ResolveWithinNoFollow(tmpDir, "")
+		if err == nil {
+			t.Error("expected error for empty path")
+		}
+	})
+}
+
+func TestAtomicRename(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.txt")
+	dst := filepath.Join(dir, "dst.txt")
+
+	if err := os.WriteFile(src, []byte("rename"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := AtomicRename(src, dst); err != nil {
+		t.Fatalf("AtomicRename failed: %v", err)
+	}
+
+	data, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "rename" {
+		t.Errorf("got %q, want %q", string(data), "rename")
+	}
+}
+
+func TestAtomicRename_Error(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "nonexistent.txt")
+	dst := filepath.Join(dir, "dst.txt")
+	if err := AtomicRename(src, dst); err == nil {
+		t.Fatal("expected error for nonexistent source")
+	}
+}
+
+func TestCanonicalizeAbs_EmptyPath(t *testing.T) {
+	_, err := canonicalizeAbs("")
+	if err == nil {
+		t.Fatal("expected error for empty path")
+	}
+}
+
+func TestIsLexicallyUnder_EdgeCases(t *testing.T) {
+	dir := t.TempDir()
+
+	t.Run("same_path", func(t *testing.T) {
+		if !isLexicallyUnder(dir, dir) {
+			t.Error("expected same path to be under itself")
+		}
+	})
+
+	t.Run("direct_child", func(t *testing.T) {
+		child := filepath.Join(dir, "child")
+		if !isLexicallyUnder(child, dir) {
+			t.Error("expected child to be under parent")
+		}
+	})
+
+	t.Run("not_under", func(t *testing.T) {
+		other := t.TempDir()
+		if isLexicallyUnder(other, dir) {
+			t.Error("expected other dir not to be under parent")
+		}
+	})
+
+	t.Run("dot_relative", func(t *testing.T) {
+		if !isLexicallyUnder(dir, dir) {
+			t.Error("expected dot relative to be under")
+		}
+	})
+}
+
+func TestValidateDeployTarget_DotSegments(t *testing.T) {
+	// Single dot should be valid
+	if err := ValidateDeployTarget("."); err != nil {
+		t.Errorf("expected valid target '.', got: %v", err)
+	}
+
+	// Dot in middle should be invalid
+	if err := ValidateDeployTarget("foo/./bar"); err == nil {
+		t.Error("expected error for dot segment in middle")
+	}
+
+	// Trailing dot
+	if err := ValidateDeployTarget("foo/."); err == nil {
+		t.Error("expected error for trailing dot segment")
+	}
+}
+
+func TestValidateRelativeConfigPath_NULCharacter(t *testing.T) {
+	p := NewDefaultPathPolicy()
+
+	err := p.ValidateRelativeConfigPath("foo\x00bar", false)
+	if err == nil {
+		t.Fatal("expected error for NUL character")
+	}
+	if err != ErrNULCharacter {
+		t.Errorf("expected ErrNULCharacter, got: %v", err)
+	}
+}
+
+func TestValidateRelativeConfigPath_OnlyDot(t *testing.T) {
+	p := NewDefaultPathPolicy()
+	// "." is a valid relative path
+	if err := p.ValidateRelativeConfigPath(".", false); err != nil {
+		t.Errorf("expected valid path '.', got: %v", err)
+	}
+}
+
+func TestIsLexicallyUnder_NotUnder(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Volume-rooted paths behave differently on Windows")
+	}
+	// Two completely different absolute paths
+	if isLexicallyUnder("/tmp/foo", "/tmp/bar") {
+		t.Error("expected /tmp/foo not to be under /tmp/bar")
+	}
+}
+
+func TestIsLexicallyUnder_ParentDir(t *testing.T) {
+	// Child's parent should not be under child
+	if isLexicallyUnder("/tmp", "/tmp/foo") {
+		t.Error("expected parent not to be under child")
+	}
+}
+
 func TestValidateDeployTarget(t *testing.T) {
 	validTargets := []string{
 		"index.html",

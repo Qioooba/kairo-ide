@@ -1,5 +1,5 @@
 import { injectable, inject } from '@theia/core/shared/inversify';
-import { EditorDecoration } from '@theia/editor/lib/browser/decorations/editor-decoration';
+import { EditorDecoration, EditorDecorationOptions } from '@theia/editor/lib/browser/decorations/editor-decoration';
 import { EditorDecorator } from '@theia/editor/lib/browser/decorations/editor-decorator';
 import { EditorManager } from '@theia/editor/lib/browser/editor-manager';
 import { EditorWidget } from '@theia/editor/lib/browser/editor-widget';
@@ -97,7 +97,7 @@ export class GitBlameDecorator extends EditorDecorator {
             contentText: `  ${bl.author}, ${dateStr}  `,
             inlineClassName: 'kairo-git-blame-inline',
           },
-        } as any,
+        } as EditorDecorationOptions,
       };
     });
 

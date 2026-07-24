@@ -10,7 +10,12 @@
     "test:visual": "node visual-regression.cjs",
     "test:a11y": "node a11y-scan.cjs",
     "test:playwright": "npx playwright test --config playwright.config.ts",
-    "test:core": "npx playwright test --config playwright.config.ts --grep 'E2E-0[12459]'"
+    "test:core": "npx playwright test --config playwright.config.ts --grep 'E2E-0[12459]'",
+    "test:frontend": "npx playwright test --config playwright.config.ts frontend-e2e.spec.ts",
+    "test:boundary": "npx playwright test --config playwright.config.ts boundary-e2e.spec.ts",
+    "test:windows": "npx playwright test --config playwright.config.ts windows-e2e.spec.ts",
+    "test:all": "npx playwright test --config playwright.config.ts",
+    "test:report": "node test-report.cjs"
   },
   "dependencies": {
     "@axe-core/playwright": "^4.12.1",

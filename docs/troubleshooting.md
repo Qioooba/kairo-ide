@@ -17,7 +17,8 @@
 6. [调试问题](#6-调试问题)
 7. [编码问题](#7-编码问题)
 8. [性能问题](#8-性能问题)
-9. [诊断信息收集](#9-诊断信息收集)
+9. [Git 问题](#9-git-问题)
+10. [诊断信息收集](#10-诊断信息收集)
 
 ---
 
@@ -1009,9 +1010,103 @@
 
 ---
 
-## 9. 诊断信息收集
+## 9. Git 问题
 
-### 9.1 如何生成诊断包
+### 9.1 SSH 连接失败
+
+**现象**：执行 `git pull` 时报错 "Could not read from remote repository"。
+
+**排查步骤**：
+
+1. **检查远程仓库配置**
+   ```bash
+   git remote -v
+   ```
+
+2. **测试 SSH 连接**
+   ```bash
+   ssh -T git@github.com
+   ```
+   如果连接超时或被拒绝，说明当前网络环境下 SSH 不可用。
+
+3. **切换到 HTTPS 协议**
+   ```bash
+   git remote set-url origin https://github.com/<username>/<repo>.git
+   ```
+
+4. **重新拉取**
+   ```bash
+   git pull origin main
+   ```
+
+### 9.2 GitHub 连接超时
+
+**现象**：无法连接 GitHub，ping 测试显示超时。
+
+**排查步骤**：
+
+1. **测试常用 GitHub IP**
+   ```bash
+   # Windows
+   ping github.com -n 3
+   ping 20.205.243.166 -n 3
+   ping 140.82.113.3 -n 3
+   ```
+
+2. **测试 HTTPS 连通性**
+   ```bash
+   curl -I https://github.com -m 10
+   ```
+
+3. **修改 hosts 文件（Windows）**
+   如果域名解析失败但 IP 可达，修改 `C:\Windows\System32\drivers\etc\hosts`：
+   ```
+   20.205.243.166 github.com
+   20.205.243.167 www.github.com
+   ```
+
+### 9.3 GitHub IP 可用性速查
+
+| IP | 状态 | 延迟参考 |
+|----|------|---------|
+| `20.205.243.166` | ✅ 推荐 | ~100-200ms |
+| `140.82.113.3` | ✅ 备用 | ~200-300ms |
+| `192.30.255.112` | ❌ 常超时 | - |
+| `192.30.255.113` | ❌ 常超时 | - |
+
+### 9.4 连接成功的标准流程
+
+**步骤 1**：确认远程仓库配置
+```bash
+git remote -v
+```
+
+**步骤 2**：测试网络连通性
+```bash
+ping github.com -n 3
+curl -I https://github.com -m 10
+```
+
+**步骤 3**：选择合适的协议
+- **HTTPS**（推荐）：`https://github.com/<username>/<repo>.git`
+- **SSH**：`git@github.com:<username>/<repo>.git`（需要 SSH key 配置）
+
+**步骤 4**：拉取代码
+```bash
+git pull origin main
+```
+
+**步骤 5**：恢复 SSH（可选）
+如果后续网络环境支持 SSH，可以切回：
+```bash
+git remote set-url origin git@github.com:<username>/<repo>.git
+```
+
+---
+
+## 10. 诊断信息收集
+
+### 10.1 如何生成诊断包
 
 **操作步骤**：
 
@@ -1021,7 +1116,7 @@
 4. 在弹出的保存对话框中，选择保存位置
 5. 诊断包会保存为 `kairo-diag-YYYYMMDD-HHMMSS.zip`
 
-### 9.2 诊断包包含什么信息
+### 10.2 诊断包包含什么信息
 
 诊断包（`kairo-diag-*.zip`）包含以下内容：
 
@@ -1036,7 +1131,7 @@
 | `env.txt` | 环境变量（敏感信息已脱敏） |
 | `errors.txt` | 最近 50 条错误信息 |
 
-### 9.3 诊断包不包含什么
+### 10.3 诊断包不包含什么
 
 为保护用户隐私和安全，诊断包**明确排除**以下内容：
 
@@ -1046,7 +1141,7 @@
 - 数据库连接字符串（已在日志中脱敏）
 - 审计日志（`.legacyflow/audit.log.ndjson`）
 
-### 9.4 如何查看日志文件
+### 10.4 如何查看日志文件
 
 日志文件位置（不通过诊断包直接查看）：
 
@@ -1062,7 +1157,7 @@
 - `agent.log`：Runtime Agent 日志
 - `tomcat.log`：Tomcat 运行日志
 
-### 9.5 如何提交问题报告
+### 10.5 如何提交问题报告
 
 提交问题报告时，请提供以下信息：
 

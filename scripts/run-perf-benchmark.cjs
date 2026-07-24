@@ -165,6 +165,41 @@ function measureFrontendTests() {
 
 function countLines() {
   console.error('[perf] counting lines of code...');
+
+  if (isWindows) {
+    // PowerShell fallback for Windows — no WSL/bash required
+    const psCount = (includes, basePaths) => {
+      const r = run('powershell', ['-NoProfile', '-Command',
+        `(Get-ChildItem -Path ${basePaths} -Recurse -File -Include ${includes} -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notmatch 'node_modules|\\\\\\\\.git\\\\' } | Measure-Object -Line).Lines`
+      ], ROOT, 30_000);
+      const m = r.stdout.match(/(\d+)/);
+      return m ? parseInt(m[1]) : 0;
+    };
+    const psFileCount = (includes, basePaths) => {
+      const r = run('powershell', ['-NoProfile', '-Command',
+        `(Get-ChildItem -Path ${basePaths} -Recurse -File -Include ${includes} -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notmatch 'node_modules|\\\\\\\\.git\\\\' } | Measure-Object).Count`
+      ], ROOT, 10_000);
+      const m = r.stdout.match(/(\d+)/);
+      return m ? parseInt(m[1]) : 0;
+    };
+
+    const totalLines = psCount("'*.ts','*.tsx','*.go'", "packages,runtime-agent");
+    const goLines = psCount("'*.go'", "runtime-agent");
+    const tsLines = psCount("'*.ts','*.tsx'", "packages");
+    const testLines = psCount("'*.test.cjs','*.test.ts','*_test.go'", "packages,runtime-agent");
+    const goFiles = psFileCount("'*.go'", "runtime-agent");
+    const tsFiles = psFileCount("'*.ts','*.tsx'", "packages");
+    const testFiles = psFileCount("'*.test.cjs','*.test.ts','*_test.go'", "packages,runtime-agent");
+
+    return {
+      totalLines,
+      go: { files: goFiles, lines: goLines },
+      typescript: { files: tsFiles, lines: tsLines },
+      tests: { files: testFiles, lines: testLines }
+    };
+  }
+
+  // Unix path: use find + xargs + wc
   const result = run('sh', ['-c', "find packages runtime-agent -type f \\( -name '*.ts' -o -name '*.tsx' -o -name '*.go' \\) -not -path '*/node_modules/*' -not -path '*/.git/*' | xargs wc -l 2>/dev/null | tail -1"], ROOT, 30_000);
   const totalMatch = result.stdout.match(/(\d+)\s+total/);
   const totalLines = totalMatch ? parseInt(totalMatch[1]) : 0;
@@ -197,6 +232,14 @@ function countLines() {
 
 function measureSize(dir) {
   try {
+    if (isWindows) {
+      // PowerShell fallback for Windows — no WSL/bash required
+      const result = run('powershell', ['-NoProfile', '-Command',
+        `(Get-ChildItem -Path '${dir}' -Recurse -File -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum`
+      ], ROOT, 30_000);
+      const match = result.stdout.match(/(\d+)/);
+      return match ? parseInt(match[1]) : 0;
+    }
     const result = run('du', ['-sk', dir], ROOT, 30_000);
     const match = result.stdout.match(/^(\d+)/);
     return match ? parseInt(match[1]) * 1024 : 0;

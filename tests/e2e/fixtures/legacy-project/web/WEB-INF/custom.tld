@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<taglib xmlns="http://java.sun.com/xml/ns/j2ee"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://java.sun.com/xml/ns/j2ee
+                            http://java.sun.com/xml/ns/j2ee/web-jsptaglibrary_2_0.xsd"
+        version="2.0">
+    <description>自定义标签库 - 遗留系统</description>
+    <tlib-version>1.0</tlib-version>
+    <short-name>custom</short-name>
+    <uri>/WEB-INF/custom.tld</uri>
+
+    <tag>
+        <name>dataTable</name>
+        <tag-class>com.example.tags.DataTableTag</tag-class>
+        <body-content>empty</body-content>
+        <description>显示数据库表数据</description>
+        <attribute>
+            <name>table</name>
+            <required>true</required>
+            <rtexprvalue>true</rtexprvalue>
+            <type>java.lang.String</type>
+        </attribute>
+        <attribute>
+            <name>rows</name>
+            <required>false</required>
+            <rtexprvalue>true</rtexprvalue>
+            <type>int</type>
+        </attribute>
+    </tag>
+
+    <tag>
+        <name>pageLink</name>
+        <tag-class>com.example.tags.PageLinkTag</tag-class>
+        <body-content>JSP</body-content>
+        <description>分页链接</description>
+        <attribute>
+            <name>url</name>
+            <required>true</required>
+            <rtexprvalue>true</rtexprvalue>
+        </attribute>
+        <attribute>
+            <name>page</name>
+            <required>false</required>
+            <rtexprvalue>true</rtexprvalue>
+            <type>int</type>
+        </attribute>
+    </tag>
+</taglib>

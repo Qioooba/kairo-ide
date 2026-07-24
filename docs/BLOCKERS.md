@@ -130,6 +130,28 @@ work that cannot.
     can be added without touching the core.
 - **Acceptable to ship without it?**: Yes.
 
+## Resolved Blockers (2026-07-24)
+
+### ✅ B-RESOLVED-001 — tomcat-extension EBUSY on Windows
+- **Resolved by**: `rmRetrySync` with exponential backoff retry in `packages/tomcat-extension/`
+- **Evidence**: Build passes on Windows without EBUSY errors
+
+### ✅ B-RESOLVED-002 — search-extension Monaco ESM compatibility
+- **Resolved by**: Monaco mock implementation in `packages/search-extension/`
+- **Evidence**: ESM imports resolve correctly, build passes
+
+### ✅ B-RESOLVED-003 — CR-001 Rate limiting missing
+- **Resolved by**: `internal/api/rate_limiter.go` — per-IP token bucket middleware
+- **Evidence**: 9/9 tests passing, 100 req/min/IP default
+
+### ✅ B-RESOLVED-004 — Go dependency security risks
+- **Resolved by**: Upgraded all `golang.org/x/*` modules to latest versions
+- **Evidence**: `go list -m -u all` shows no outdated security-critical modules
+
+### ✅ B-RESOLVED-005 — Frontend ESM mock gaps
+- **Resolved by**: Created Monaco mock, xterm mock (`__xterm-mock__.js`), p-queue mock (`__p-queue-mock__.js`)
+- **Evidence**: All frontend packages build and test successfully
+
 ## How a blocker is closed
 
 A blocker is closed when the dependency becomes available

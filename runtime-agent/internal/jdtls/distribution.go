@@ -804,7 +804,81 @@ func verifySHA256(path, expected string) (bool, string, error) {
 // tempfile + atomic rename. It uses a dedicated HTTP client with
 // a 10-minute timeout and follows redirects. Progress is
 // reported via the logger at 10 MB intervals.
+//
+// On transient failures (HTTP 5xx, DNS errors, connection
+// resets), the download is retried up to 3 times with
+// exponential backoff (1s, 2s, 4s).
 func downloadTo(ctx context.Context, url, dest string, logger func(string, map[string]any)) error {
+	const maxRetries = 3
+	const baseBackoff = 1 * time.Second
+	var lastErr error
+
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if attempt > 0 {
+			backoff := baseBackoff * (1 << (attempt - 1)) // 1s, 2s, 4s
+			logger("jdtls distribution: retrying download", map[string]any{
+				"attempt": attempt,
+				"max":     maxRetries,
+				"backoff": backoff.String(),
+				"error":   lastErr.Error(),
+			})
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(backoff):
+			}
+		}
+
+		err := downloadOnce(ctx, url, dest, logger)
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+
+		// Only retry on transient errors
+		if !isTransientError(err) {
+			return err
+		}
+	}
+	return fmt.Errorf("download %s failed after %d attempts: %w", url, maxRetries+1, lastErr)
+}
+
+// isTransientError returns true for errors that are worth retrying
+// (HTTP 5xx, DNS/network errors, timeouts). HTTP 4xx errors are
+// not retried because they indicate a permanent client error
+// (e.g. 404 Not Found, 403 Forbidden).
+func isTransientError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	// HTTP 5xx server errors
+	if strings.Contains(msg, "HTTP 5") {
+		return true
+	}
+	// Common transient network errors
+	transientMarkers := []string{
+		"connection refused",
+		"connection reset",
+		"no such host",
+		"dial tcp",
+		"i/o timeout",
+		"deadline exceeded",
+		"TLS handshake timeout",
+		"EOF",
+		"broken pipe",
+		"use of closed network connection",
+	}
+	for _, marker := range transientMarkers {
+		if strings.Contains(strings.ToLower(msg), strings.ToLower(marker)) {
+			return true
+		}
+	}
+	return false
+}
+
+// downloadOnce performs a single download attempt.
+func downloadOnce(ctx context.Context, url, dest string, logger func(string, map[string]any)) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return err

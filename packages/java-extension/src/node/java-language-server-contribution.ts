@@ -7,6 +7,18 @@ import { RuntimeConnectionService } from '@kairo/runtime-extension';
 import type { Endpoint, JdtLaunchDescriptor } from '@kairo/protocol';
 
 /**
+ * Health check result for the JDT LS process.
+ */
+export interface LsHealthCheck {
+  healthy: boolean;
+  state: string;
+  pid?: number;
+  uptimeMs?: number;
+  crashCount: number;
+  lastCrashTime?: string;
+}
+
+/**
  * Kairo Java Language Server Contribution (backend).
  *
  * Owns the JDT LS process lifecycle. The Go Agent only provides
@@ -38,6 +50,10 @@ export class KairoJavaLanguageServerContribution implements Disposable {
     private readonly maxCrashes = 5;
     private readonly crashWindowMs = 60000; // 1 minute
     private crashTimestamps: number[] = [];
+    private startedAt: number | undefined;
+
+    // Health check interval
+    private healthCheckTimer: ReturnType<typeof setInterval> | undefined;
 
     @postConstruct()
     protected init(): void {
@@ -45,6 +61,7 @@ export class KairoJavaLanguageServerContribution implements Disposable {
     }
 
     dispose(): void {
+        this.stopHealthCheck();
         this.toDispose.dispose();
         this.stop().catch(err => this.logger.error(`[KairoJava] Error during disposal: ${err}`));
     }
@@ -114,6 +131,7 @@ export class KairoJavaLanguageServerContribution implements Disposable {
 
         this.process = spawn(descriptor.command, descriptor.args, options);
         this.crashCount = 0;
+        this.startedAt = Date.now();
 
         this.reader = new StreamMessageReader(this.process.stdout!);
         this.writer = new StreamMessageWriter(this.process.stdin!);
@@ -123,6 +141,8 @@ export class KairoJavaLanguageServerContribution implements Disposable {
             this.reader = undefined;
             this.writer = undefined;
             this.process = undefined;
+            this.startedAt = undefined;
+            this.stopHealthCheck();
             this.handleCrash();
         });
 
@@ -131,6 +151,8 @@ export class KairoJavaLanguageServerContribution implements Disposable {
             this.reader = undefined;
             this.writer = undefined;
             this.process = undefined;
+            this.startedAt = undefined;
+            this.stopHealthCheck();
             this.handleCrash();
         });
 
@@ -138,7 +160,25 @@ export class KairoJavaLanguageServerContribution implements Disposable {
             this.logger.debug(`[KairoJava] JDT LS stderr: ${data.toString()}`);
         });
 
+        // Start periodic health checks
+        this.startHealthCheck();
+
         return { reader: this.reader, writer: this.writer };
+    }
+
+    /**
+     * Restart JDT LS. Stops the current process (if any) and
+     * starts a new one with the same or a new descriptor.
+     */
+    async restart(descriptor?: JdtLaunchDescriptor): Promise<void> {
+        this.logger.info('[KairoJava] Restarting JDT LS');
+        await this.stop();
+        // Reset crash circuit breaker on explicit restart
+        this.crashTimestamps = [];
+        this.crashCount = 0;
+        if (descriptor) {
+            await this.start(descriptor);
+        }
     }
 
     /**
@@ -150,6 +190,8 @@ export class KairoJavaLanguageServerContribution implements Disposable {
      * 5. Send SIGKILL if still running.
      */
     async stop(): Promise<void> {
+        this.stopHealthCheck();
+
         if (!this.process) {
             return;
         }
@@ -182,6 +224,45 @@ export class KairoJavaLanguageServerContribution implements Disposable {
         this.reader = undefined;
         this.writer = undefined;
         this.process = undefined;
+        this.startedAt = undefined;
+    }
+
+    /**
+     * Returns a health check object for the JDT LS process.
+     */
+    healthCheck(): LsHealthCheck {
+        const running = this.isRunning();
+        return {
+            healthy: running,
+            state: running ? 'running' : (this.process ? 'stopping' : 'stopped'),
+            pid: this.process?.pid,
+            uptimeMs: this.startedAt ? Date.now() - this.startedAt : undefined,
+            crashCount: this.crashCount,
+            lastCrashTime: this.crashTimestamps.length > 0
+                ? new Date(this.crashTimestamps[this.crashTimestamps.length - 1]).toISOString()
+                : undefined,
+        };
+    }
+
+    /**
+     * Start periodic health checks that log warnings if the
+     * process exits unexpectedly.
+     */
+    private startHealthCheck(): void {
+        this.stopHealthCheck();
+        this.healthCheckTimer = setInterval(() => {
+            const health = this.healthCheck();
+            if (!health.healthy && this.process !== undefined) {
+                this.logger.warn(`[KairoJava] Health check failed: ${JSON.stringify(health)}`);
+            }
+        }, 30000); // Every 30 seconds
+    }
+
+    private stopHealthCheck(): void {
+        if (this.healthCheckTimer) {
+            clearInterval(this.healthCheckTimer);
+            this.healthCheckTimer = undefined;
+        }
     }
 
     /**

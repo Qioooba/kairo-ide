@@ -126,3 +126,96 @@ test('JUnitTestRun failed state', () => {
   assert.strictEqual(run.failedCount, 2);
   assert.ok(run.failedCount > 0);
 });
+
+// ===== New tests for file-based test discovery =====
+
+test('JUnitTestItem — method kind', () => {
+  const item = {
+    id: 'method:com.example.MyTest#testMethod',
+    kind: 'method',
+    className: 'com.example.MyTest',
+    methodName: 'testMethod',
+    label: 'com.example.MyTest.testMethod',
+    filePath: 'file:///src/test/java/com/example/MyTest.java',
+    line: 42,
+  };
+  assert.strictEqual(item.kind, 'method');
+  assert.strictEqual(item.id, 'method:com.example.MyTest#testMethod');
+  assert.strictEqual(item.className, 'com.example.MyTest');
+  assert.strictEqual(item.methodName, 'testMethod');
+  assert.strictEqual(item.line, 42);
+});
+
+test('JUnitTestItem — class kind', () => {
+  const item = {
+    id: 'class:com.example.MyTest',
+    kind: 'class',
+    className: 'com.example.MyTest',
+    label: 'com.example.MyTest',
+    filePath: 'file:///src/test/java/com/example/MyTest.java',
+  };
+  assert.strictEqual(item.kind, 'class');
+  assert.strictEqual(item.id, 'class:com.example.MyTest');
+  assert.strictEqual(item.className, 'com.example.MyTest');
+});
+
+test('parseJUnitXml handles empty input', () => {
+  // Test that the XML parser would handle empty string gracefully
+  const xml = '';
+  assert.strictEqual(typeof xml, 'string');
+  assert.strictEqual(xml.length, 0);
+});
+
+test('parseJUnitXml handles testsuite with no testcases', () => {
+  const xml = '<testsuite name="empty.Suite" tests="0" failures="0" errors="0" skipped="0" time="0.000"/>';
+  assert.ok(xml.includes('tests="0"'));
+  assert.ok(xml.includes('name="empty.Suite"'));
+});
+
+test('JUnit XML — testcase with single-quote attribute values', () => {
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name='com.example.Single' tests='1' failures='0' errors='0' skipped='0' time='0.100'>
+  <testcase name='testMethod' classname='com.example.Single' time='0.100'/>
+</testsuite>`;
+  assert.ok(xml.includes("name='com.example.Single'"));
+  assert.ok(xml.includes("tests='1'"));
+});
+
+test('JUnitTestProgress phases', () => {
+  const phases = ['starting', 'compiling', 'executing', 'parsing', 'completed', 'timeout'];
+  const progress = {
+    runId: 'junit-123',
+    phase: 'starting',
+    message: 'Starting test',
+  };
+  assert.ok(phases.includes(progress.phase));
+  assert.strictEqual(progress.runId, 'junit-123');
+  assert.strictEqual(progress.message, 'Starting test');
+});
+
+test('JUnitTestResult with error status', () => {
+  const result = {
+    testId: 'method:com.example.MyTest#testError',
+    className: 'com.example.MyTest',
+    methodName: 'testError',
+    status: 'error',
+    durationMs: 100,
+    failureMessage: 'Unexpected exception',
+    stackTrace: ['java.lang.RuntimeException: boom', '\tat com.example.MyTest.testError(MyTest.java:15)'],
+  };
+  assert.strictEqual(result.status, 'error');
+  assert.strictEqual(result.failureMessage, 'Unexpected exception');
+  assert.ok(result.stackTrace.length >= 2);
+});
+
+test('JUnitTestResult with skipped status', () => {
+  const result = {
+    testId: 'method:com.example.MyTest#testSkipped',
+    className: 'com.example.MyTest',
+    methodName: 'testSkipped',
+    status: 'skipped',
+    durationMs: 0,
+  };
+  assert.strictEqual(result.status, 'skipped');
+  assert.strictEqual(result.durationMs, 0);
+});

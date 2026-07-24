@@ -1,11 +1,11 @@
 {
-  "generatedAt": "2026-07-23T05:46:45.684Z",
+  "generatedAt": "2026-07-23T18:55:34.399Z",
   "script": "audit-ui-visual.cjs",
   "summary": {
     "total": 7,
     "passed": 7,
     "failed": 0,
-    "elapsedMs": 66
+    "elapsedMs": 211
   },
   "checks": {
     "wcagContrast": {
@@ -50,14 +50,14 @@
       "totalIssues": 2,
       "issues": [
         {
-          "file": "packages/search-extension/src/browser/search-center.css",
+          "file": "packages\\search-extension\\src\\browser\\search-center.css",
           "type": "fixed-height",
           "value": "12px",
           "severity": "low",
           "detail": "Fixed height (12px) may cause layout shift with content overflow"
         },
         {
-          "file": "packages/ui-kit/src/browser/kairo-theme.css",
+          "file": "packages\\ui-kit\\src\\browser\\kairo-theme.css",
           "type": "fixed-height",
           "value": "28px",
           "severity": "low",

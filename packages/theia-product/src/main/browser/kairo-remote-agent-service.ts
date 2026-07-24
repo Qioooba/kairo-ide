@@ -40,14 +40,14 @@ interface WebSocketRequest {
   type: 'request';
   id: string;
   path: string;
-  body: any;
+  body: unknown;
 }
 
 interface WebSocketResponse {
   type: 'response';
   id: string;
   status: number;
-  body: any;
+  body: unknown;
 }
 
 /* ------------------------------------------------------------------ */
@@ -82,7 +82,7 @@ export class KairoRemoteAgentService {
   protected reconnectAttempts = 0;
   protected maxReconnectDelay = MAX_RECONNECT_DELAY;
   protected heartbeatTimer: ReturnType<typeof setInterval> | undefined;
-  protected pendingRequests = new Map<string, { resolve: (value: any) => void; reject: (error: Error) => void }>();
+  protected pendingRequests = new Map<string, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
   protected requestQueue: (() => Promise<void>)[] = [];
   protected isProcessingQueue = false;
 
@@ -148,7 +148,7 @@ export class KairoRemoteAgentService {
   }
 
   /** Proxy an HTTP REST API call to the remote agent. */
-  async apiRequest<T>(method: string, path: string, body?: any): Promise<T> {
+  async apiRequest<T>(method: string, path: string, body?: unknown): Promise<T> {
     const conn = this.connection;
     if (!conn) {
       throw new Error('Not connected to remote agent');
@@ -394,11 +394,11 @@ export class KairoRemoteAgentService {
   }
 
   /** Send a request over the WebSocket and return a promise for the response. */
-  sendWsRequest(path: string, body?: any): Promise<any>;
-  sendWsRequest(method: string, path: string, body?: any): Promise<any>;
-  sendWsRequest(methodOrPath: string, pathOrBody?: any, body?: any): Promise<any> {
+  sendWsRequest(path: string, body?: unknown): Promise<unknown>;
+  sendWsRequest(method: string, path: string, body?: unknown): Promise<unknown>;
+  sendWsRequest(methodOrPath: string, pathOrBody?: unknown, body?: unknown): Promise<unknown> {
     let path: string;
-    let reqBody: any;
+    let reqBody: unknown;
 
     if (body !== undefined) {
       // Three-argument form: sendWsRequest(method, path, body)
@@ -426,7 +426,7 @@ export class KairoRemoteAgentService {
       body: reqBody,
     };
 
-    return new Promise<any>((resolve, reject) => {
+    return new Promise<unknown>((resolve, reject) => {
       const sendRequest = () => {
         this.pendingRequests.set(id, { resolve, reject });
         try {

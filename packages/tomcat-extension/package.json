@@ -3,13 +3,13 @@
   "version": "0.1.0",
   "description": "Kairo Tomcat / Server runtime panel. Tree view of runtimes, deployments, ports, and logs. Talks to /api/v1/servers via the runtime client.",
   "main": "lib/index.js",
-  "types": "lib/src/index.d.ts",
+  "types": "lib/index.d.ts",
   "files": ["lib", "src"],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "clean": "rm -rf lib",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "test": "node --test src/node/tomcat-manager.test.cjs src/browser/server-service.test.cjs src/browser/log-buffer.test.cjs src/browser/log-viewer-contract.test.cjs"
+    "test": "node --test src/node/tomcat-manager.test.cjs src/browser/server-service.test.cjs src/browser/log-buffer.test.cjs src/browser/log-viewer-contract.test.cjs src/browser/server-store-context.test.cjs src/browser/server-view-widget.test.cjs src/browser/log-viewer-widget.test.cjs"
   },
   "dependencies": {
     "@kairo/protocol": "workspace:*",

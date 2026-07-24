@@ -23,6 +23,28 @@ type sqlExecuteRequest struct {
 	MaxRows      int    `json:"maxRows,omitempty"`
 }
 
+// sqlQueryResponse is the structured response for SQL query execution.
+type sqlQueryResponse struct {
+	Columns         []sql.ColumnDef          `json:"columns"`
+	Rows            []map[string]interface{} `json:"rows"`
+	RowCount        int                      `json:"rowCount"`
+	TotalRows       int                      `json:"totalRows,omitempty"`
+	ExecutionTimeMs int64                    `json:"executionTimeMs"`
+	Truncated       bool                     `json:"truncated"`
+}
+
+// sqlTestConnectionResponse is the structured response for connection tests.
+type sqlTestConnectionResponse struct {
+	Success       bool   `json:"success"`
+	OracleVersion string `json:"oracleVersion,omitempty"`
+	InstanceName  string `json:"instanceName,omitempty"`
+}
+
+// sqlErrorDetail provides structured Oracle error information.
+type sqlErrorDetail struct {
+	OracleErrorCode string `json:"oracleErrorCode,omitempty"`
+}
+
 // sqlTestConnectionRequest is the request body for POST /api/v1/sql/test-connection.
 type sqlTestConnectionRequest struct {
 	Host           string `json:"host"`
@@ -119,13 +141,13 @@ func (s *Server) handleSQLExecute(w http.ResponseWriter, r *http.Request) {
 		RequestID:     env.RequestID,
 		CorrelationID: env.CorrelationID,
 		OK:            true,
-		Payload: map[string]interface{}{
-			"columns":         result.Columns,
-			"rows":            result.Rows,
-			"rowCount":        result.RowCount,
-			"totalRows":       result.TotalRows,
-			"executionTimeMs": result.ExecutionTimeMs,
-			"truncated":       result.Truncated,
+		Payload: &sqlQueryResponse{
+			Columns:         result.Columns,
+			Rows:            result.Rows,
+			RowCount:        result.RowCount,
+			TotalRows:       result.TotalRows,
+			ExecutionTimeMs: result.ExecutionTimeMs,
+			Truncated:       result.Truncated,
 		},
 	})
 
@@ -193,10 +215,10 @@ func (s *Server) handleSQLTestConnection(w http.ResponseWriter, r *http.Request)
 			RequestID:     env.RequestID,
 			CorrelationID: env.CorrelationID,
 			OK:            true,
-			Payload: map[string]interface{}{
-				"success":       true,
-				"oracleVersion": testResult.OracleVersion,
-				"instanceName":  testResult.InstanceName,
+			Payload: &sqlTestConnectionResponse{
+				Success:       true,
+				OracleVersion: testResult.OracleVersion,
+				InstanceName:  testResult.InstanceName,
 			},
 		})
 		return
@@ -205,8 +227,8 @@ func (s *Server) handleSQLTestConnection(w http.ResponseWriter, r *http.Request)
 	writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{
 		Code:    protocol.ErrInternal,
 		Message: testResult.Error,
-		Details: map[string]interface{}{
-			"oracleErrorCode": testResult.OracleErrorCode,
+		Details: &sqlErrorDetail{
+			OracleErrorCode: testResult.OracleErrorCode,
 		},
 	})
 }

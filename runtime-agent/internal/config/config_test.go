@@ -176,3 +176,239 @@ func writeFile(t *testing.T, path, contents string) error {
 	t.Helper()
 	return osWriteFile(path, []byte(contents), 0o600)
 }
+
+// =============================================================================
+// Validate additional cases
+// =============================================================================
+
+func TestValidate_PortTooHigh(t *testing.T) {
+	c := Default()
+	c.Port = 70000
+	err := c.Validate()
+	if err == nil {
+		t.Fatal("expected error for port > 65535")
+	}
+}
+
+func TestValidate_NoDataDir(t *testing.T) {
+	c := Default()
+	c.DataDir = ""
+	err := c.Validate()
+	if err == nil {
+		t.Fatal("expected error for empty dataDir")
+	}
+}
+
+func TestValidate_HalfTLSKeyOnly(t *testing.T) {
+	c := Default()
+	c.TLSKey = "key"
+	err := c.Validate()
+	if err == nil {
+		t.Fatal("expected error for TLSKey without TLSCert")
+	}
+}
+
+// =============================================================================
+// String with TLS
+// =============================================================================
+
+func TestString_WithTLS(t *testing.T) {
+	c := Default()
+	c.TLSCert = "/path/to/cert"
+	s := c.String()
+	if s == "" {
+		t.Error("expected non-empty string")
+	}
+}
+
+// =============================================================================
+// ApplyEnv all vars
+// =============================================================================
+
+func TestApplyEnv_All(t *testing.T) {
+	cfg := Default()
+	t.Setenv("KAIRO_RUNTIME_BIND", "0.0.0.0")
+	t.Setenv("KAIRO_RUNTIME_PORT", "9999")
+	t.Setenv("KAIRO_LOG_LEVEL", "debug")
+	t.Setenv("KAIRO_DATA_DIR", "/opt/data")
+	t.Setenv("KAIRO_BUNDLED_DIR", "/opt/bundled")
+	t.Setenv("KAIRO_LOCAL_SECRET", "mysecret")
+	t.Setenv("KAIRO_REQUIRE_AUTH", "true")
+
+	ApplyEnv(&cfg)
+	if cfg.BindAddress != "0.0.0.0" {
+		t.Errorf("BindAddress = %q, want 0.0.0.0", cfg.BindAddress)
+	}
+	if cfg.Port != 9999 {
+		t.Errorf("Port = %d, want 9999", cfg.Port)
+	}
+	if cfg.LogLevel != "debug" {
+		t.Errorf("LogLevel = %q, want debug", cfg.LogLevel)
+	}
+	if cfg.DataDir != "/opt/data" {
+		t.Errorf("DataDir = %q, want /opt/data", cfg.DataDir)
+	}
+	if cfg.BundledDir != "/opt/bundled" {
+		t.Errorf("BundledDir = %q, want /opt/bundled", cfg.BundledDir)
+	}
+	if cfg.Secret != "mysecret" {
+		t.Errorf("Secret = %q, want mysecret", cfg.Secret)
+	}
+	if !cfg.RequireAuth {
+		t.Error("RequireAuth should be true")
+	}
+}
+
+func TestApplyEnv_InvalidPort(t *testing.T) {
+	cfg := Default()
+	t.Setenv("KAIRO_RUNTIME_PORT", "notanumber")
+	ApplyEnv(&cfg)
+	if cfg.Port != 18080 {
+		t.Errorf("Port should not change on invalid env, got %d", cfg.Port)
+	}
+}
+
+func TestApplyEnv_InvalidBool(t *testing.T) {
+	cfg := Default()
+	t.Setenv("KAIRO_REQUIRE_AUTH", "notabool")
+	ApplyEnv(&cfg)
+	if cfg.RequireAuth {
+		t.Error("RequireAuth should not change on invalid env")
+	}
+}
+
+// =============================================================================
+// LoadFromFile with empty path
+// =============================================================================
+
+func TestLoadFromFile_EmptyPath(t *testing.T) {
+	c, err := LoadFromFile("")
+	if err != nil {
+		t.Fatalf("empty path should not error: %v", err)
+	}
+	if c.BindAddress != "127.0.0.1" {
+		t.Errorf("BindAddress = %q, want 127.0.0.1", c.BindAddress)
+	}
+}
+
+// =============================================================================
+// Bind with config file
+// =============================================================================
+
+func TestBind_WithConfigFile(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	contents := `bindAddress: 10.0.0.1
+port: 7777
+logLevel: warn
+`
+	if err := writeFile(t, configPath, contents); err != nil {
+		t.Fatal(err)
+	}
+	c, path, err := Bind([]string{"--config", configPath})
+	if err != nil {
+		t.Fatalf("Bind failed: %v", err)
+	}
+	if path != configPath {
+		t.Errorf("config path = %q, want %q", path, configPath)
+	}
+	if c.BindAddress != "10.0.0.1" {
+		t.Errorf("BindAddress = %q, want 10.0.0.1", c.BindAddress)
+	}
+	if c.Port != 7777 {
+		t.Errorf("Port = %d, want 7777", c.Port)
+	}
+}
+
+func TestBind_FlagOverridesConfig(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	contents := `bindAddress: 10.0.0.1
+port: 7777
+`
+	if err := writeFile(t, configPath, contents); err != nil {
+		t.Fatal(err)
+	}
+	c, _, err := Bind([]string{"--config", configPath, "--bind", "1.2.3.4", "--port", "5555"})
+	if err != nil {
+		t.Fatalf("Bind failed: %v", err)
+	}
+	if c.BindAddress != "1.2.3.4" {
+		t.Errorf("flag should override: BindAddress = %q", c.BindAddress)
+	}
+	if c.Port != 5555 {
+		t.Errorf("flag should override: Port = %d", c.Port)
+	}
+}
+
+// =============================================================================
+// Bind with skip-sha-verify and jdtls-url
+// =============================================================================
+
+func TestBind_SkipSHAVerify(t *testing.T) {
+	c, _, err := Bind([]string{"--skip-sha-verify"})
+	if err != nil {
+		t.Fatalf("Bind failed: %v", err)
+	}
+	if !c.SkipSHAVerify {
+		t.Error("SkipSHAVerify should be true")
+	}
+}
+
+func TestBind_JDTLSURL(t *testing.T) {
+	c, _, err := Bind([]string{"--jdtls-url", "https://mirror.example.com/jdtls"})
+	if err != nil {
+		t.Fatalf("Bind failed: %v", err)
+	}
+	if c.JDTLSURL != "https://mirror.example.com/jdtls" {
+		t.Errorf("JDTLSURL = %q", c.JDTLSURL)
+	}
+}
+
+func TestBind_SecretEnv(t *testing.T) {
+	t.Setenv("KAIRO_LOCAL_SECRET", "env-secret")
+	c, _, err := Bind([]string{})
+	if err != nil {
+		t.Fatalf("Bind failed: %v", err)
+	}
+	if c.Secret != "env-secret" {
+		t.Errorf("Secret = %q, want env-secret", c.Secret)
+	}
+}
+
+func TestBind_SecretFlag(t *testing.T) {
+	t.Setenv("KAIRO_LOCAL_SECRET", "env-secret")
+	c, _, err := Bind([]string{"--secret", "flag-secret"})
+	if err != nil {
+		t.Fatalf("Bind failed: %v", err)
+	}
+	if c.Secret != "flag-secret" {
+		t.Errorf("flag should override env: Secret = %q", c.Secret)
+	}
+}
+
+func TestBind_InvalidFlag(t *testing.T) {
+	_, _, err := Bind([]string{"--nonexistent", "value"})
+	if err == nil {
+		t.Fatal("expected error for invalid flag")
+	}
+}
+
+func TestBind_InvalidConfigFile(t *testing.T) {
+	_, _, err := Bind([]string{"--config", "/nonexistent/path/config.yaml"})
+	if err != nil {
+		t.Fatal("invalid config file should not error (missing is OK)")
+	}
+}
+
+// =============================================================================
+// defaultDataDir with KAIRO_DATA_DIR
+// =============================================================================
+
+func TestDefaultDataDir_Env(t *testing.T) {
+	t.Setenv("KAIRO_DATA_DIR", "/custom/data")
+	got := defaultDataDir()
+	if got != "/custom/data" {
+		t.Errorf("defaultDataDir = %q, want /custom/data", got)
+	}
+}

@@ -7,15 +7,22 @@ import { WidgetManager } from '@theia/core/lib/browser/widget-manager';
 import { KairoDarkTheme } from './kairo-theme';
 import * as monaco from '@theia/monaco-editor-core';
 
+// N-034: Derive Monaco theme and ColorRegistry overrides from the single
+// source of truth — the CSS variables in KairoDarkTheme. The activate()
+// method writes these to :root as inline styles; we mirror the same
+// hex values here for the Monaco editor theme and the ColorRegistry
+// defaults so all three layers agree on every color slot.
+
 /** Monaco editor theme backing `KairoDarkTheme.editorTheme`
  * ('kairo-dark'). Without this definition Monaco silently falls
  * back to a stock theme and the editor drifts from the product
- * palette (KAIRO-RC-WEB-004). Colors mirror the CSS custom
- * properties in kairo-theme.css. */
+ * palette (KAIRO-RC-WEB-004). Colors are derived from the
+ * CSS variables in kairo-theme.ts — the single source of truth. */
 export const KAIRO_MONACO_THEME: monaco.editor.IStandaloneThemeData = {
     base: 'vs-dark',
     inherit: true,
     rules: [
+        // Syntax tokens — mirrored from KairoDarkTheme's editor palette
         { token: 'comment', foreground: '7a7e85', fontStyle: 'italic' },
         { token: 'keyword', foreground: 'c586c0' },
         { token: 'string', foreground: 'ce9178' },
@@ -28,17 +35,19 @@ export const KAIRO_MONACO_THEME: monaco.editor.IStandaloneThemeData = {
         { token: 'attribute.value', foreground: 'ce9178' },
     ],
     colors: {
-        'editor.background': '#1e1f22',
-        'editor.foreground': '#dfe1e5',
+        // All editor colors are derived from the single source of truth
+        // in KairoDarkTheme's CSS variables (kairo-theme.ts).
+        'editor.background': '#1e1f22',            // --theia-editor-background
+        'editor.foreground': '#dfe1e5',            // --theia-editor-foreground
         'editor.lineHighlightBackground': '#252629',
-        'editorLineNumber.foreground': '#5a5d63',
-        'editorLineNumber.activeForeground': '#c5c8cc',
-        'editorCursor.foreground': '#a78bfa',
+        'editorLineNumber.foreground': '#5d6166',   // --theia-editorLineNumber-foreground
+        'editorLineNumber.activeForeground': '#c5c8cc', // --theia-editorLineNumber-activeForeground
+        'editorCursor.foreground': '#c8a8ff',       // --theia-editorCursor-foreground
         'editor.selectionBackground': '#7C3AED55',
         'editor.inactiveSelectionBackground': '#7C3AED33',
-        'editorWidget.background': '#252629',
-        'editorWidget.border': '#3a3d42',
-        'editorBracketMatch.border': '#7C3AED',
+        'editorWidget.background': '#252629',       // --theia-editorWidget-background
+        'editorWidget.border': '#3d4148',           // --theia-editorWidget-border
+        'editorBracketMatch.border': '#7C3AED',     // --theia-editorBracketMatch-border
         'editorBracketMatch.background': '#7C3AED22',
         'editorIndentGuide.background1': '#2c2e33',
         'editorIndentGuide.activeBackground1': '#4a4d54',
@@ -54,7 +63,8 @@ export const KAIRO_MONACO_THEME: monaco.editor.IStandaloneThemeData = {
  * inline `style` on `:root` and `ColorApplicationContribution.updateWindow`
  * runs after `KairoDarkTheme.activate()`. The Theia defaults for
  * these slots are VSCode blue (#007acc) and would otherwise
- * leak through. See N-034. */
+ * leak through. All values are derived from the single source of
+ * truth in kairo-theme.ts (N-034). */
 export const KAIRO_THEME_COLOR_OVERRIDES = [
     { id: 'editor.background', defaults: { dark: '#1e1f22', light: '#fafafa' }, description: 'Editor background' },
     { id: 'editor.foreground', defaults: { dark: '#dfe1e5', light: '#1f1f1f' }, description: 'Editor foreground' },
@@ -108,7 +118,7 @@ export class KairoThemeContribution implements FrontendApplicationContribution, 
         // runtime. We clear both caches here so the next read
         // rebuilds the map with Kairo included.
         if (this.widgetManager) {
-            const wm: any = this.widgetManager;
+            const wm = this.widgetManager as unknown as { _cachedFactories?: Map<string, unknown>; factories: Map<string, unknown> };
             // Only the WidgetManager's own cache is safe to clear.
             // Clearing the factoryProvider's service cache would
             // force a re-walk of the container chain, which can

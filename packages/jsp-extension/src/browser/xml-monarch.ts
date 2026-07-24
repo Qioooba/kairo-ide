@@ -6,9 +6,15 @@
  * sections, DOCTYPE declarations, tags, attributes, and entities.
  */
 
+interface MonarchLanguage {
+  defaultToken: string;
+  tokenPostfix?: string;
+  tokenizer: Record<string, unknown[]>;
+}
+
 export const XML_LANGUAGE_ID = 'xml';
 
-export const XML_MONARCH: any = {
+export const XML_MONARCH: MonarchLanguage = {
   defaultToken: '',
   tokenPostfix: '.xml',
 

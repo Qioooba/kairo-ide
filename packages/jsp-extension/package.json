@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "Kairo JSP / Taglib / EL support. Provides a Monarch grammar for syntax highlight, a TLD / web.xml parser for taglib completion, and the encoding-aware save flow.",
   "main": "lib/index.js",
-  "types": "lib/src/index.d.ts",
+  "types": "lib/index.d.ts",
   "files": [
     "lib",
     "src"
@@ -12,7 +12,7 @@
     "build": "tsc -p tsconfig.json",
     "clean": "rm -rf lib",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "test": "node --require source-map-support/register --import ./test/register-hooks.mjs --test src/browser/tld-parser.test.cjs src/browser/*.test.cjs"
+    "test": "node --require source-map-support/register --import ./test/register-hooks.mjs --test src/browser/tld-parser.test.cjs src/browser/xml-language.test.cjs src/browser/properties-language.test.cjs src/browser/jsp-grammar.test.cjs src/browser/json-language.test.cjs src/browser/jsp-extension.test.cjs"
   },
   "dependencies": {
     "@kairo/java-extension": "workspace:*",

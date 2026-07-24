@@ -51,13 +51,13 @@
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.12.1",
-    "@types/node": "20.14.10",
-    "@typescript-eslint/eslint-plugin": "^8.64.0",
-    "@typescript-eslint/parser": "^8.64.0",
+    "@types/node": "20.17.0",
+    "@typescript-eslint/eslint-plugin": "^8.65.0",
+    "@typescript-eslint/parser": "^8.65.0",
     "axe-core": "^4.12.1",
     "eslint": "^10.7.0",
     "playwright": "^1.61.1",
-    "prettier": "3.3.3",
+    "prettier": "3.9.6",
     "rimraf": "5.0.10",
     "typescript": "5.5.4"
   },

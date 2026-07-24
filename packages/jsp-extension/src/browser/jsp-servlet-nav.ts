@@ -5,6 +5,9 @@
  *   navigates to the matching servlet-class in Java source.
  * - Ctrl+Click on <servlet-class> or <filter-class> in web.xml
  *   navigates to the corresponding Java source file.
+ * - Ctrl+Click on <jsp-file> in web.xml navigates to the JSP file.
+ * - Ctrl+Click on a servlet-name in web.xml navigates to the servlet
+ *   class or JSP file.
  *
  * Registered as Monaco DefinitionProviders.
  */
@@ -82,7 +85,7 @@ function findMatchingServletClass(webXml: WebXml, url: string): string | null {
   for (const m of webXml.mappings) {
     if (m.urlPattern === path) {
       const servlet = webXml.servlets[m.servletName];
-      if (servlet) return servlet.servletClass;
+      if (servlet?.servletClass) return servlet.servletClass;
     }
   }
 
@@ -92,7 +95,7 @@ function findMatchingServletClass(webXml: WebXml, url: string): string | null {
       const prefix = m.urlPattern.slice(0, -2);
       if (path.startsWith(prefix)) {
         const servlet = webXml.servlets[m.servletName];
-        if (servlet) return servlet.servletClass;
+        if (servlet?.servletClass) return servlet.servletClass;
       }
     }
   }
@@ -103,7 +106,7 @@ function findMatchingServletClass(webXml: WebXml, url: string): string | null {
       const ext = m.urlPattern.slice(1);
       if (path.endsWith(ext)) {
         const servlet = webXml.servlets[m.servletName];
-        if (servlet) return servlet.servletClass;
+        if (servlet?.servletClass) return servlet.servletClass;
       }
     }
   }
@@ -112,10 +115,26 @@ function findMatchingServletClass(webXml: WebXml, url: string): string | null {
   for (const m of webXml.mappings) {
     if (m.urlPattern === '/') {
       const servlet = webXml.servlets[m.servletName];
-      if (servlet) return servlet.servletClass;
+      if (servlet?.servletClass) return servlet.servletClass;
     }
   }
 
+  return null;
+}
+
+/**
+ * Find the JSP file that matches a given URL path.
+ * Returns the JSP file path from the servlet definition.
+ */
+function findMatchingJspFile(webXml: WebXml, url: string): string | null {
+  const path = url.split(/[?#]/)[0];
+
+  for (const m of webXml.mappings) {
+    if (m.urlPattern === path || (m.urlPattern.endsWith('/*') && path.startsWith(m.urlPattern.slice(0, -2)))) {
+      const servlet = webXml.servlets[m.servletName];
+      if (servlet?.jspFile) return servlet.jspFile;
+    }
+  }
   return null;
 }
 
@@ -127,33 +146,25 @@ function isJavaClassName(name: string): boolean {
 }
 
 /**
- * Check whether the cursor is inside a <servlet-class> or <filter-class> element.
+ * Check whether the cursor is inside a specific XML element.
  */
-function isInsideClassElement(
+function isInsideElement(
   model: monaco.editor.ITextModel,
   position: monaco.Position,
+  elementName: string,
 ): boolean {
   const text = model.getValue();
   const offset = model.getOffsetAt(position);
   const before = text.substring(0, offset);
-
-  // Check for <servlet-class>
-  const scOpen = before.lastIndexOf('<servlet-class>');
-  const scClose = before.lastIndexOf('</servlet-class>');
-  if (scOpen !== -1 && (scClose === -1 || scClose < scOpen)) {
-    const after = text.substring(offset);
-    if (after.indexOf('</servlet-class>') !== -1) return true;
-  }
-
-  // Check for <filter-class>
-  const fcOpen = before.lastIndexOf('<filter-class>');
-  const fcClose = before.lastIndexOf('</filter-class>');
-  if (fcOpen !== -1 && (fcClose === -1 || fcClose < fcOpen)) {
-    const after = text.substring(offset);
-    if (after.indexOf('</filter-class>') !== -1) return true;
-  }
-
-  return false;
+  const openTag = `<${elementName}>`;
+  const closeTag = `</${elementName}>`;
+  const openIdx = before.lastIndexOf(openTag);
+  if (openIdx === -1) return false;
+  const closeIdx = before.lastIndexOf(closeTag);
+  if (closeIdx > openIdx) return false;
+  const after = text.substring(offset);
+  const endCloseIdx = after.indexOf(closeTag);
+  return endCloseIdx !== -1;
 }
 
 @injectable()
@@ -186,16 +197,26 @@ export class JspServletNavigationProvider implements monaco.languages.Definition
     const webXml = await this.loadWebXml(token);
     if (!webXml) return [];
 
-    const servletClass = findMatchingServletClass(webXml, urlMatch.url);
-    if (!servletClass) return [];
+    // Try to find matching JSP file first
+    const jspFile = findMatchingJspFile(webXml, urlMatch.url);
+    if (jspFile) {
+      const jspUri = await this.resolveJspFile(jspFile, token);
+      if (jspUri.length > 0) return jspUri;
+    }
 
-    return this.resolveJavaClass(servletClass, token);
+    // Try to find matching servlet class
+    const servletClass = findMatchingServletClass(webXml, urlMatch.url);
+    if (servletClass) {
+      return this.resolveJavaClass(servletClass, token);
+    }
+
+    return [];
   }
 
   /**
    * Load and parse web.xml from the workspace.
    */
-  private async loadWebXml(token: monaco.CancellationToken): Promise<WebXml | undefined> {
+  async loadWebXml(token: monaco.CancellationToken): Promise<WebXml | undefined> {
     const roots = await this.workspaceService.roots;
     if (roots.length === 0) return undefined;
 
@@ -217,7 +238,7 @@ export class JspServletNavigationProvider implements monaco.languages.Definition
   /**
    * Resolve a fully qualified Java class name to a file URI in the workspace.
    */
-  private async resolveJavaClass(
+  async resolveJavaClass(
     className: string,
     token: monaco.CancellationToken,
   ): Promise<monaco.languages.Location[]> {
@@ -241,12 +262,56 @@ export class JspServletNavigationProvider implements monaco.languages.Definition
     }
     return [];
   }
+
+  /**
+   * Resolve a JSP file path relative to the web application root.
+   * JSP files in web.xml use paths like "/index.jsp" — they are relative
+   * to the web application root (e.g., "web/" or "WebContent/").
+   */
+  async resolveJspFile(
+    jspPath: string,
+    token: monaco.CancellationToken,
+  ): Promise<monaco.languages.Location[]> {
+    // Normalize the path: remove leading slash
+    const relativePath = jspPath.replace(/^\/+/, '');
+
+    const roots = await this.workspaceService.roots;
+    if (roots.length === 0) return [];
+
+    const rootUri = URI.fromFilePath(roots[0].resource.path.toString());
+
+    // Common web document roots
+    const webRoots = [
+      'web',
+      'WebContent',
+      'webapp',
+      'src/main/webapp',
+      '',
+    ];
+
+    for (const webRoot of webRoots) {
+      if (token.isCancellationRequested) return [];
+      const candidate = webRoot
+        ? rootUri.resolve(webRoot).resolve(relativePath)
+        : rootUri.resolve(relativePath);
+      try {
+        await this.fileService.resolve(candidate, { resolveMetadata: false });
+        return [{
+          uri: monaco.Uri.parse(candidate.toString()),
+          range: new monaco.Range(1, 1, 1, 1),
+        }];
+      } catch {
+        // File doesn't exist at this path; try next
+      }
+    }
+    return [];
+  }
 }
 
 /**
- * Register the JSP form action → Servlet navigation definition provider.
+ * Register the JSP form action → Servlet/JSP navigation definition provider.
  * When user Ctrl+Clicks on form action="/xxx" or href="/xxx" in a JSP file,
- * navigates to the matching servlet's Java class.
+ * navigates to the matching servlet's Java class or the JSP file.
  */
 export function registerJspServletNavigation(): monaco.IDisposable {
   return monaco.languages.registerDefinitionProvider(
@@ -256,9 +321,11 @@ export function registerJspServletNavigation(): monaco.IDisposable {
 }
 
 /**
- * Register the web.xml class navigation definition provider.
- * When user Ctrl+Clicks on <servlet-class> or <filter-class> in web.xml,
- * navigates to the corresponding Java class file.
+ * Register the web.xml class / JSP file navigation definition provider.
+ * When user Ctrl+Clicks on:
+ *  - <servlet-class> or <filter-class> → navigates to Java class
+ *  - <jsp-file> → navigates to the JSP file
+ *  - <servlet-name> → navigates to the servlet class or JSP file
  */
 export function registerWebXmlClassNavigation(): monaco.IDisposable {
   const provider = new JspServletNavigationProvider();
@@ -274,12 +341,41 @@ export function registerWebXmlClassNavigation(): monaco.IDisposable {
 
       const word = model.getWordAtPosition(position);
       if (!word) return [];
-      const className = word.word.trim();
-      if (!isJavaClassName(className)) return [];
 
-      if (!isInsideClassElement(model, position)) return [];
+      const text = word.word.trim();
 
-      return (provider as any).resolveJavaClass(className, token);
+      // ── <servlet-class> → Java class ─────────────────────
+      if (isInsideElement(model, position, 'servlet-class') && isJavaClassName(text)) {
+        return provider.resolveJavaClass(text, token);
+      }
+
+      // ── <filter-class> → Java class ──────────────────────
+      if (isInsideElement(model, position, 'filter-class') && isJavaClassName(text)) {
+        return provider.resolveJavaClass(text, token);
+      }
+
+      // ── <jsp-file> → JSP file ────────────────────────────
+      if (isInsideElement(model, position, 'jsp-file')) {
+        return provider.resolveJspFile(text, token);
+      }
+
+      // ── <servlet-name> → servlet class or JSP file ───────
+      if (isInsideElement(model, position, 'servlet-name')) {
+        const webXml = await provider.loadWebXml(token);
+        if (webXml) {
+          const servlet = webXml.servlets[text];
+          if (servlet) {
+            if (servlet.jspFile) {
+              return provider.resolveJspFile(servlet.jspFile, token);
+            }
+            if (servlet.servletClass) {
+              return provider.resolveJavaClass(servlet.servletClass, token);
+            }
+          }
+        }
+      }
+
+      return [];
     },
   });
 }

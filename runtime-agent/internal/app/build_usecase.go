@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -32,7 +33,39 @@ type BuildUseCase struct {
 
 	mu          sync.Mutex
 	cancelFuncs map[domain.BuildID]context.CancelFunc
+	queue       []queuedBuild
+	logs        map[domain.BuildID]*buildLogBuffer
 }
+
+// queuedBuild represents a build waiting in the queue.
+type queuedBuild struct {
+	Run  domain.BuildRun
+	Plan BuildPlan
+	Clean bool
+}
+
+// buildLogBuffer collects log lines for a build run.
+type buildLogBuffer struct {
+	mu    sync.Mutex
+	lines []string
+}
+
+func (b *buildLogBuffer) append(line string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.lines = append(b.lines, line)
+}
+
+func (b *buildLogBuffer) snapshot() []string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	c := make([]string, len(b.lines))
+	copy(c, b.lines)
+	return c
+}
+
+// MaxConcurrentBuilds is the maximum number of builds that can run concurrently.
+const MaxConcurrentBuilds = 3
 
 // NewBuildUseCase creates a new BuildUseCase.
 func NewBuildUseCase(
@@ -51,6 +84,8 @@ func NewBuildUseCase(
 		resolver:      resolver,
 		eventHub:      eventHub,
 		cancelFuncs:   make(map[domain.BuildID]context.CancelFunc),
+		queue:         make([]queuedBuild, 0),
+		logs:          make(map[domain.BuildID]*buildLogBuffer),
 	}
 }
 
@@ -98,11 +133,12 @@ func (uc *BuildUseCase) Start(ctx context.Context, cmd StartBuildCommand) (domai
 	}
 
 	// Publish build.queued event
+	queuedData, _ := json.Marshal(run)
 	uc.eventHub.Publish(events.Event{
 		Type:        events.EventBuildQueued,
 		WorkspaceID: string(cmd.WorkspaceID),
 		Message:     fmt.Sprintf("Build %s queued", buildID),
-		Data:        run,
+		Data:        queuedData,
 	})
 
 	// Launch async execution
@@ -129,6 +165,11 @@ func (uc *BuildUseCase) executeBuild(ctx context.Context, run domain.BuildRun, p
 		return
 	}
 
+	// Check if context was cancelled before we start
+	if ctx.Err() != nil {
+		return
+	}
+
 	run.State = domain.BuildStateRunning
 	now := domain.UTCNow()
 	run.StartedAt = &now
@@ -142,11 +183,12 @@ func (uc *BuildUseCase) executeBuild(ctx context.Context, run domain.BuildRun, p
 	}
 
 	// Publish build.started event
+	startedData, _ := json.Marshal(run)
 	uc.eventHub.Publish(events.Event{
 		Type:        events.EventBuildStarted,
 		WorkspaceID: string(run.WorkspaceID),
 		Message:     fmt.Sprintf("Build %s started", run.ID),
-		Data:        run,
+		Data:        startedData,
 	})
 
 	// Resolve toolchain for JavaHome
@@ -172,16 +214,25 @@ func (uc *BuildUseCase) executeBuild(ctx context.Context, run domain.BuildRun, p
 
 	// Publish progress events sink
 	progressSink := func(buildEvent domain.BuildEvent) {
+		progressData, _ := json.Marshal(buildEvent)
 		uc.eventHub.Publish(events.Event{
 			Type:        events.EventBuildProgress,
 			WorkspaceID: string(run.WorkspaceID),
 			Message:     buildEvent.Message,
-			Data:        buildEvent,
+			Data:        progressData,
 		})
 	}
 
 	logLine := func(stream domain.LogStream, line string) {
-		// Build logs could be accumulated here
+		// Build logs are accumulated in the log buffer
+		uc.mu.Lock()
+		logBuf, ok := uc.logs[run.ID]
+		if !ok {
+			logBuf = &buildLogBuffer{}
+			uc.logs[run.ID] = logBuf
+		}
+		uc.mu.Unlock()
+		logBuf.append(line)
 	}
 
 	var output *domain.BuildOutput
@@ -191,11 +242,17 @@ func (uc *BuildUseCase) executeBuild(ctx context.Context, run domain.BuildRun, p
 		output, buildErr = uc.buildProvider.Build(ctx, domainPlan, progressSink, logLine)
 	} else {
 		// No provider configured — simulate success for test compatibility
-		exitCode := 0
-		output = &domain.BuildOutput{
-			ExitCode:  exitCode,
-			StartTime: now,
-			EndTime:   domain.UTCNow(),
+		// Check context before simulating to allow cancellation
+		select {
+		case <-ctx.Done():
+			buildErr = ctx.Err()
+		default:
+			exitCode := 0
+			output = &domain.BuildOutput{
+				ExitCode:  exitCode,
+				StartTime: now,
+				EndTime:   domain.UTCNow(),
+			}
 		}
 	}
 
@@ -208,11 +265,12 @@ func (uc *BuildUseCase) executeBuild(ctx context.Context, run domain.BuildRun, p
 			run.FinishedAt = &finishTime
 			run.Summary = "Build cancelled"
 			uc.buildHistory.Save(context.Background(), run)
+			cancelledData, _ := json.Marshal(run)
 			uc.eventHub.Publish(events.Event{
 				Type:        events.EventBuildCancelled,
 				WorkspaceID: string(run.WorkspaceID),
 				Message:     fmt.Sprintf("Build %s cancelled", run.ID),
-				Data:        run,
+				Data:        cancelledData,
 			})
 			return
 		}
@@ -225,11 +283,12 @@ func (uc *BuildUseCase) executeBuild(ctx context.Context, run domain.BuildRun, p
 			run.Diagnostics = output.Diagnostics
 		}
 		uc.buildHistory.Save(context.Background(), run)
+		failedData, _ := json.Marshal(run)
 		uc.eventHub.Publish(events.Event{
 			Type:        events.EventBuildFailed,
 			WorkspaceID: string(run.WorkspaceID),
 			Message:     fmt.Sprintf("Build %s failed", run.ID),
-			Data:        run,
+			Data:        failedData,
 		})
 		return
 	}
@@ -256,11 +315,12 @@ func (uc *BuildUseCase) executeBuild(ctx context.Context, run domain.BuildRun, p
 	}
 
 	// Publish build.completed event
+	completedData, _ := json.Marshal(run)
 	uc.eventHub.Publish(events.Event{
 		Type:        events.EventBuildCompleted,
 		WorkspaceID: string(run.WorkspaceID),
 		Message:     fmt.Sprintf("Build %s succeeded", run.ID),
-		Data:        run,
+		Data:        completedData,
 	})
 }
 
@@ -316,12 +376,75 @@ func (uc *BuildUseCase) Cancel(ctx context.Context, workspaceID domain.Workspace
 		return fmt.Errorf("save cancelled build: %w", err)
 	}
 
+	cancelData, _ := json.Marshal(run)
 	uc.eventHub.Publish(events.Event{
 		Type:        events.EventBuildCancelled,
 		WorkspaceID: string(run.WorkspaceID),
 		Message:     fmt.Sprintf("Build %s cancelled by user", buildID),
-		Data:        run,
+		Data:        cancelData,
 	})
 
 	return nil
+}
+
+// GetLogs returns the build logs for a given build run.
+func (uc *BuildUseCase) GetLogs(buildID domain.BuildID) []string {
+	uc.mu.Lock()
+	defer uc.mu.Unlock()
+	logBuf, ok := uc.logs[buildID]
+	if !ok {
+		return nil
+	}
+	return logBuf.snapshot()
+}
+
+// ActiveCount returns the number of currently running builds and pending queue items.
+func (uc *BuildUseCase) ActiveCount() (running int, queued int) {
+	uc.mu.Lock()
+	defer uc.mu.Unlock()
+	running = len(uc.cancelFuncs)
+	queued = len(uc.queue)
+	return
+}
+
+// Enqueue adds a build to the queue. Returns true if added to queue, false if
+// started immediately (under MaxConcurrentBuilds).
+func (uc *BuildUseCase) enqueue(qb queuedBuild) bool {
+	uc.mu.Lock()
+	defer uc.mu.Unlock()
+	queueLen := len(uc.queue)
+	if queueLen < MaxConcurrentBuilds {
+		return false
+	}
+	uc.queue = append(uc.queue, qb)
+	return true
+}
+
+// dequeueNext removes and returns the next queued build for execution.
+func (uc *BuildUseCase) dequeueNext() *queuedBuild {
+	uc.mu.Lock()
+	defer uc.mu.Unlock()
+	if len(uc.queue) == 0 {
+		return nil
+	}
+	qb := uc.queue[0]
+	uc.queue = uc.queue[1:]
+	return &qb
+}
+
+// DrainQueue removes all queued builds for a given project and returns them.
+func (uc *BuildUseCase) DrainQueue(workspaceID domain.WorkspaceID, projectID domain.ProjectID) []domain.BuildRun {
+	uc.mu.Lock()
+	defer uc.mu.Unlock()
+	var drained []domain.BuildRun
+	remaining := uc.queue[:0]
+	for _, qb := range uc.queue {
+		if qb.Run.WorkspaceID == workspaceID && qb.Run.ProjectID == projectID {
+			drained = append(drained, qb.Run)
+		} else {
+			remaining = append(remaining, qb)
+		}
+	}
+	uc.queue = remaining
+	return drained
 }

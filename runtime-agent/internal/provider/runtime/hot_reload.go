@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -134,14 +135,15 @@ func (w *HotReloadWatcher) publishStatusEvent(status HotReloadStatus) {
 	if w.eventHub == nil {
 		return
 	}
+	hotReloadData, _ := json.Marshal(map[string]interface{}{
+		"serverId": w.serverID,
+		"status":   string(status),
+	})
 	w.eventHub.Publish(events.Event{
 		Type:        events.EventHotReloadStatus,
 		WorkspaceID: w.workspaceID,
 		Message:     string(status),
-		Data: map[string]interface{}{
-			"serverId": w.serverID,
-			"status":   string(status),
-		},
+		Data:        hotReloadData,
 	})
 }
 

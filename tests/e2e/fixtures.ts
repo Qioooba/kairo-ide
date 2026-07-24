@@ -219,7 +219,7 @@ export async function runCommandViaPalette(
   commandLabel: string,
 ): Promise<void> {
   await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Shift+P' : 'Control+Shift+P');
-  await page.waitForSelector('.quick-open-overlay, .monaco-quick-open-widget', { timeout: 5_000 });
+  await page.waitForSelector('.quick-input-widget', { timeout: 5_000 });
   await page.waitForTimeout(300);
   // Delete the '>' prefix if it's there
   await page.keyboard.press('Control+A');
@@ -307,7 +307,7 @@ export async function openFileViaQuickOpen(
   fileName: string,
 ): Promise<void> {
   await page.keyboard.press(process.platform === 'darwin' ? 'Meta+P' : 'Control+P');
-  await page.waitForSelector('.quick-open-overlay, .monaco-quick-open-widget', { timeout: 5_000 });
+  await page.waitForSelector('.quick-input-widget', { timeout: 5_000 });
   await page.keyboard.type(fileName, { delay: 50 });
   await page.waitForTimeout(500);
   await page.keyboard.press('Enter');

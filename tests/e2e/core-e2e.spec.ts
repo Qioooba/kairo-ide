@@ -55,7 +55,7 @@ test.describe('E2E-01: First Launch → Import Project → Encoding Correct', ()
       const sbText = await getStatusBarText(page);
       expect(sbText).toBeTruthy();
       // Verify the status bar contains key Kairo entries
-      expect(sbText).toContain('Runtime:');
+      expect(sbText).toContain('Agent:');
     });
 
     // ------------------------------------------------------------------
@@ -146,7 +146,7 @@ test.describe('E2E-01: First Launch → Import Project → Encoding Correct', ()
     // ------------------------------------------------------------------
     await test.step('6. Verify all Kairo status bar entries are present', async () => {
       const sbText = await getStatusBarText(page);
-      const requiredEntries = ['Project:', 'Java:', 'JDT LS:', 'Encoding:', 'Runtime:'];
+      const requiredEntries = ['Project:', 'Java:', 'JDT LS:', 'Encoding:', 'Agent:'];
       for (const entry of requiredEntries) {
         expect(sbText, `Status bar should contain "${entry}"`).toContain(entry);
       }
@@ -1334,7 +1334,7 @@ test.describe('E2E-08: Close → Reopen → Projects & Config Recovery', () => {
 
       // Verify the status bar shows the runtime configuration
       const sbText = await getStatusBarText(page);
-      expect(sbText).toContain('Runtime:');
+      expect(sbText).toContain('Agent:');
       console.log('  Run configuration present in status bar');
     });
 
@@ -1353,7 +1353,7 @@ test.describe('E2E-08: Close → Reopen → Projects & Config Recovery', () => {
 
       // Verify the status bar contains all expected entries
       const sbText = await getStatusBarText(page);
-      const requiredEntries = ['Project:', 'Runtime:'];
+      const requiredEntries = ['Project:', 'Agent:'];
       for (const entry of requiredEntries) {
         expect(sbText, `Status bar should contain "${entry}" after restart`).toContain(entry);
       }
@@ -1714,7 +1714,7 @@ test.describe('E2E-10: Agent/JDT LS Crash → Recovery', () => {
       // Verify the status bar contains expected entries
       const sbText = await getStatusBarText(page);
       expect(sbText).toContain('Project:');
-      expect(sbText).toContain('Runtime:');
+      expect(sbText).toContain('Agent:');
       console.log('  Workspace state preserved after agent reconnection');
     });
   });

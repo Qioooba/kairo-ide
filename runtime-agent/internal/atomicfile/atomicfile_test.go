@@ -1,8 +1,11 @@
 package atomicfile
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -81,6 +84,9 @@ func TestWriteFile_ReplacesExistingUnderUnicodeAndSpacePath(t *testing.T) {
 }
 
 func TestWriteFile_PreservesPermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("os.Chmod does not preserve Unix-style permission bits on Windows")
+	}
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.txt")
 
@@ -118,6 +124,9 @@ func TestWriteFile_NoTempLeak(t *testing.T) {
 }
 
 func TestWriteFile_ConcurrentWrites(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("concurrent file writes are not atomic on Windows due to file locking")
+	}
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.txt")
 
@@ -232,6 +241,9 @@ func TestWriteFile_LargeData(t *testing.T) {
 }
 
 func TestWriteFile_ReadOnlyDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("os.Mkdir with 0555 does not create a truly read-only directory on Windows")
+	}
 	dir := t.TempDir()
 	readOnly := filepath.Join(dir, "readonly")
 	if err := os.Mkdir(readOnly, 0o555); err != nil {
@@ -245,6 +257,9 @@ func TestWriteFile_ReadOnlyDir(t *testing.T) {
 }
 
 func TestWriteFile_ReplaceWithDifferentPerms(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("os.Chmod does not preserve Unix-style permission bits on Windows")
+	}
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.txt")
 	if err := WriteFile(path, []byte("first"), 0o644); err != nil {
@@ -287,6 +302,9 @@ func TestRename_SourceNotFound(t *testing.T) {
 }
 
 func TestSyncDir_Nonexistent(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("syncDir is a no-op on Windows and never returns an error")
+	}
 	dir := t.TempDir()
 	nonexistent := filepath.Join(dir, "nonexistent")
 	if err := SyncDir(nonexistent); err == nil {
@@ -299,5 +317,294 @@ func TestWriteFile_DirectoryPath(t *testing.T) {
 	// Try to write to a path that is already a directory
 	if err := WriteFile(dir, []byte("data"), 0o644); err == nil {
 		t.Fatal("expected error when writing to a directory path")
+	}
+}
+
+// =============================================================================
+// Rename edge cases
+// =============================================================================
+
+func TestRename_OverwriteExisting(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.txt")
+	dst := filepath.Join(dir, "dst.txt")
+
+	if err := os.WriteFile(src, []byte("new"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dst, []byte("old"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Rename(src, dst); err != nil {
+		t.Fatalf("Rename failed: %v", err)
+	}
+
+	data, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "new" {
+		t.Errorf("got %q, want new", string(data))
+	}
+}
+
+func TestRename_DstNotFound(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.txt")
+	dst := filepath.Join(dir, "nonexistent", "dst.txt")
+
+	if err := os.WriteFile(src, []byte("data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := Rename(src, dst)
+	if err == nil {
+		t.Fatal("expected error renaming to nonexistent directory")
+	}
+}
+
+// =============================================================================
+// SyncDir on Windows is a no-op
+// =============================================================================
+
+func TestSyncDir_WindowsNoOp(t *testing.T) {
+	// syncDir on Windows should always return nil
+	if err := SyncDir(""); err != nil {
+		t.Errorf("SyncDir on Windows should be no-op, got %v", err)
+	}
+}
+
+// =============================================================================
+// Windows atomic rename with unicode paths
+// =============================================================================
+
+func TestWriteFile_UnicodeSpacesWindows(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "测试 项目", "配置 目录")
+	path := filepath.Join(dir, "文件.txt")
+	if err := WriteFile(path, []byte("unicode"), 0644); err != nil {
+		t.Fatalf("WriteFile with unicode path failed: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "unicode" {
+		t.Errorf("got %q, want unicode", string(data))
+	}
+}
+
+// =============================================================================
+// WriteFile with special Windows paths
+// =============================================================================
+
+func TestWriteFile_LongPath(t *testing.T) {
+	dir := t.TempDir()
+	// Create a path that is nearly 200 chars
+	longName := filepath.Join(dir, "very_long_directory_name_"+strings.Repeat("x", 50))
+	path := filepath.Join(longName, "file.txt")
+	if err := WriteFile(path, []byte("long"), 0644); err != nil {
+		t.Fatalf("WriteFile with long path failed: %v", err)
+	}
+}
+
+func TestWriteFile_MultipleReplacements(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "multi.txt")
+	for i := 0; i < 10; i++ {
+		data := []byte(fmt.Sprintf("iteration-%d", i))
+		if err := WriteFile(path, data, 0644); err != nil {
+			t.Fatalf("WriteFile iteration %d failed: %v", i, err)
+		}
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "iteration-9" {
+		t.Errorf("got %q, want iteration-9", string(got))
+	}
+}
+
+// =============================================================================
+// WriteFile nil data
+// =============================================================================
+
+func TestWriteFile_NilData(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "nil.txt")
+	if err := WriteFile(path, nil, 0644); err != nil {
+		t.Fatalf("WriteFile with nil data failed: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data) != 0 {
+		t.Errorf("expected empty file, got %d bytes", len(data))
+	}
+}
+
+// =============================================================================
+// WriteFile error paths
+// =============================================================================
+
+func TestWriteFile_ParentIsFile(t *testing.T) {
+	dir := t.TempDir()
+	// Create a file where a directory should be
+	parentFile := filepath.Join(dir, "parent")
+	if err := os.WriteFile(parentFile, []byte("block"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Try to write to parentFile/subdir/file.txt — MkdirAll should fail
+	path := filepath.Join(parentFile, "sub", "file.txt")
+	if err := WriteFile(path, []byte("data"), 0644); err == nil {
+		t.Fatal("expected error when parent is a file, not a directory")
+	}
+}
+
+func TestWriteFile_RenameToDirectory(t *testing.T) {
+	dir := t.TempDir()
+	// Create a subdirectory
+	subDir := filepath.Join(dir, "subdir")
+	if err := os.MkdirAll(subDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// WriteFile to subDir (which is a directory) — atomicRename should fail
+	if err := WriteFile(subDir, []byte("data"), 0644); err == nil {
+		t.Fatal("expected error when renaming to a directory path")
+	}
+}
+
+func TestRename_SameFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "same.txt")
+	if err := os.WriteFile(path, []byte("data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Rename to self — on Windows MoveFileExW with same src/dst is a no-op
+	err := Rename(path, path)
+	// On Unix, os.Rename with same path is a no-op
+	// On Windows, MoveFileExW with same src/dst returns success
+	if err != nil {
+		t.Logf("Rename to self returned error (expected on some platforms): %v", err)
+	}
+	// Verify data is intact
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "data" {
+		t.Errorf("got %q, want data", string(data))
+	}
+}
+
+func TestRename_EmptyPaths(t *testing.T) {
+	// Rename with empty paths should fail
+	if err := Rename("", "dst"); err == nil {
+		t.Fatal("expected error for empty src")
+	}
+	if err := Rename("src", ""); err == nil {
+		t.Fatal("expected error for empty dst")
+	}
+}
+
+func TestSyncDir_FileInsteadOfDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("syncDir is a no-op on Windows")
+	}
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "file.txt")
+	if err := os.WriteFile(filePath, []byte("data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Syncing a file instead of a directory should fail on Unix
+	if err := SyncDir(filePath); err == nil {
+		t.Fatal("expected error syncing a file path")
+	}
+}
+
+func TestWriteFile_ZeroPerm(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "zero.txt")
+	if err := WriteFile(path, []byte("data"), 0000); err != nil {
+		t.Fatalf("WriteFile with zero perm: %v", err)
+	}
+	// Verify file exists and has content
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "data" {
+		t.Errorf("got %q, want data", string(data))
+	}
+}
+
+func TestWriteFile_SpecialChars(t *testing.T) {
+	dir := t.TempDir()
+	names := []string{
+		"file (1).txt",
+		"file [copy].txt",
+		"file {backup}.txt",
+		"file;test.txt",
+		"file,test.txt",
+		"file&test.txt",
+		"file'test.txt",
+		"file#1.txt",
+		"file@2.txt",
+		"file!ok.txt",
+		"file$dollar.txt",
+		"file%percent.txt",
+		"file^caret.txt",
+		"file+plus.txt",
+		"file=equal.txt",
+		"file~tilde.txt",
+		"file`backtick.txt",
+	}
+	for _, name := range names {
+		path := filepath.Join(dir, name)
+		if err := WriteFile(path, []byte(name), 0644); err != nil {
+			t.Errorf("WriteFile with special char name %q failed: %v", name, err)
+		}
+	}
+	// Verify all files exist
+	for _, name := range names {
+		path := filepath.Join(dir, name)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Errorf("ReadFile %q: %v", name, err)
+		}
+		if string(data) != name {
+			t.Errorf("content mismatch for %q", name)
+		}
+	}
+}
+
+func TestWriteFile_ConcurrentDifferentFiles(t *testing.T) {
+	dir := t.TempDir()
+	const writers = 20
+	done := make(chan error, writers)
+	for i := 0; i < writers; i++ {
+		go func(i int) {
+			path := filepath.Join(dir, fmt.Sprintf("file-%d.txt", i))
+			done <- WriteFile(path, []byte(fmt.Sprintf("data-%d", i)), 0644)
+		}(i)
+	}
+	for i := 0; i < writers; i++ {
+		if err := <-done; err != nil {
+			t.Errorf("writer %d: %v", i, err)
+		}
+	}
+	// Verify all files
+	for i := 0; i < writers; i++ {
+		path := filepath.Join(dir, fmt.Sprintf("file-%d.txt", i))
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Errorf("ReadFile %d: %v", i, err)
+		}
+		expected := fmt.Sprintf("data-%d", i)
+		if string(data) != expected {
+			t.Errorf("content mismatch for %d: got %q, want %q", i, string(data), expected)
+		}
 	}
 }

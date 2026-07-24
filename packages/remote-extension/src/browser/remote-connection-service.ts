@@ -12,6 +12,11 @@ import { Emitter, Event } from '@theia/core/lib/common/event';
 import { ILogger } from '@theia/core/lib/common/logger';
 import { MessageService } from '@theia/core/lib/common/message-service';
 
+/** Generic error response from remote API. */
+interface RemoteErrorResponse {
+  error?: { message?: string };
+}
+
 /** Remote connection state. */
 export type RemoteConnectionState =
   | 'disconnected'
@@ -97,8 +102,8 @@ export class RemoteConnectionService {
   private readonly onStatusChangeEmitter = new Emitter<RemoteConnectionStatus>();
   readonly onStatusChange: Event<RemoteConnectionStatus> = this.onStatusChangeEmitter.event;
 
-  private readonly onMessageEmitter = new Emitter<{ type: string; data: any }>();
-  readonly onMessage: Event<{ type: string; data: any }> = this.onMessageEmitter.event;
+  private readonly onMessageEmitter = new Emitter<{ type: string; data: unknown }>();
+  readonly onMessage: Event<{ type: string; data: unknown }> = this.onMessageEmitter.event;
 
   private _state: RemoteConnectionState = 'disconnected';
   private _connectedAt: number = 0;
@@ -183,9 +188,9 @@ export class RemoteConnectionService {
       });
 
       if (!response.ok) {
-        const error = await response.json().catch(() => ({}));
+        const error = await response.json().catch(() => ({})) as RemoteErrorResponse;
         throw new Error(
-          (error as any).error?.message || `Login failed with status ${response.status}`
+          error.error?.message || `Login failed with status ${response.status}`
         );
       }
 
@@ -196,7 +201,7 @@ export class RemoteConnectionService {
       this.emitStatus();
       this.logger.info('[Remote] Login successful');
       return session;
-    } catch (err: any) {
+    } catch (err: unknown) {
       this._state = 'error';
       this.emitStatus();
       this.logger.error('[Remote] Login failed', err);
@@ -269,7 +274,7 @@ export class RemoteConnectionService {
           }
         }, 100);
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
       this._state = 'error';
       this.emitStatus();
       this.logger.error('[Remote] Connection failed', err);
@@ -298,7 +303,7 @@ export class RemoteConnectionService {
   }
 
   /** Send a message through the WebSocket. */
-  send(type: string, data: any): void {
+  send(type: string, data: unknown): void {
     if (!this.ws || this._state !== 'connected') {
       throw new Error('[Remote] Not connected');
     }
@@ -306,7 +311,7 @@ export class RemoteConnectionService {
   }
 
   /** Send an API request through the remote tunnel. */
-  async apiRequest<T = any>(method: string, path: string, body?: any): Promise<T> {
+  async apiRequest<T = unknown>(method: string, path: string, body?: unknown): Promise<T> {
     if (!this.config.sessionToken) {
       throw new Error('[Remote] No session token');
     }
@@ -322,9 +327,9 @@ export class RemoteConnectionService {
     });
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({}));
+      const error = await response.json().catch(() => ({})) as RemoteErrorResponse;
       throw new Error(
-        (error as any).error?.message || `API request failed with status ${response.status}`
+        error.error?.message || `API request failed with status ${response.status}`
       );
     }
 

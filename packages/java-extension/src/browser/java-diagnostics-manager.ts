@@ -8,6 +8,10 @@
 // manager additionally feeds them into the Theia problem
 // infrastructure so the Problems panel shows them, with
 // filtering by file and severity.
+//
+// When JDT LS is not running, a fallback IntelliSense
+// diagnostics provider detects basic Java errors (syntax,
+// type, unused-variable, missing-import) through text analysis.
 
 import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
 import { URI } from '@theia/core/lib/common/uri';
@@ -17,7 +21,9 @@ import type { FrontendApplication } from '@theia/core/lib/browser/frontend-appli
 import { MarkerManager } from '@theia/markers/lib/browser/marker-manager';
 import { Diagnostic } from '@theia/core/shared/vscode-languageserver-protocol';
 import { JavaLanguageClient } from './java-language-client';
+import { JavaIntelliSenseProvider } from './java-intellisense-provider';
 import type { LSPDiagnostic } from '../common/lsp-protocol';
+import * as monaco from '@theia/monaco-editor-core';
 
 /** Owner string used to distinguish Java diagnostics from other sources. */
 export const JAVA_DIAGNOSTICS_OWNER = 'kairo-java';
@@ -28,7 +34,13 @@ export class JavaDiagnosticsManager extends MarkerManager<Diagnostic> implements
   @inject(JavaLanguageClient)
   protected readonly client!: JavaLanguageClient;
 
+  @inject(JavaIntelliSenseProvider)
+  protected readonly intellisense!: JavaIntelliSenseProvider;
+
   protected subs: Disposable[] = [];
+
+  /** Track source text for fallback diagnostics. */
+  private sourceCache = new Map<string, string>();
 
   getKind(): string {
     return JAVA_DIAGNOSTICS_KIND;
@@ -44,6 +56,51 @@ export class JavaDiagnosticsManager extends MarkerManager<Diagnostic> implements
         this.setMarkers(uri, JAVA_DIAGNOSTICS_OWNER, diagnostics);
       }),
     );
+
+    // Listen to Monaco model changes for fallback diagnostics.
+    this.subs.push(
+      monaco.editor.onDidCreateModel(model => {
+        if (model.getLanguageId() === 'java') {
+          this.sourceCache.set(model.uri.toString(), model.getValue());
+          this.runFallbackDiagnostics(model.uri.toString());
+          this.subs.push(model.onDidChangeContent(() => {
+            this.sourceCache.set(model.uri.toString(), model.getValue());
+            this.runFallbackDiagnostics(model.uri.toString());
+          }));
+        }
+      }),
+    );
+    this.subs.push(
+      monaco.editor.onWillDisposeModel(model => {
+        this.sourceCache.delete(model.uri.toString());
+      }),
+    );
+  }
+
+  /** Run fallback diagnostics for a given URI. */
+  private async runFallbackDiagnostics(uriStr: string): Promise<void> {
+    try {
+      if (await this.client.fetchState() === 'ready') {
+        // JDT LS is running — it will provide diagnostics.
+        return;
+      }
+    } catch {
+      // Can't check state, run fallback anyway.
+    }
+    const source = this.sourceCache.get(uriStr);
+    if (!source) return;
+    const diags = this.intellisense.provideDiagnostics(source, uriStr);
+    const vscodeDiags: Diagnostic[] = diags.map(d => ({
+      range: {
+        start: { line: d.line, character: d.startColumn },
+        end: { line: d.endLine, character: d.endColumn },
+      },
+      severity: d.severity,
+      code: d.code,
+      source: JAVA_DIAGNOSTICS_OWNER,
+      message: d.message,
+    }));
+    this.setMarkers(new URI(uriStr), JAVA_DIAGNOSTICS_OWNER, vscodeDiags);
   }
 
   onStart(_app: FrontendApplication): void {

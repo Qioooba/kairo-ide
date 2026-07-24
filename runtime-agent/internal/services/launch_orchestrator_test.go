@@ -3,6 +3,8 @@ package services
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -439,5 +441,146 @@ func TestLaunchOrchestrator_ServerStartFailure(t *testing.T) {
 	_, err := orch.Execute(context.Background(), config)
 	if err == nil {
 		t.Fatal("expected error for server start failure")
+	}
+}
+
+// TestLaunchOrchestrator_WaitForBuildCancelled verifies build cancellation is handled.
+func TestLaunchOrchestrator_WaitForBuildCancelled(t *testing.T) {
+	t.Parallel()
+	buildEngine := &mockBuildEngine{
+		startResult: &api.BuildResult{ID: "build-1", State: "queued"},
+		getResult:   &api.BuildResult{ID: "build-1", State: "cancelled"},
+	}
+
+	orch := NewLaunchOrchestrator(buildEngine, &mockDeployer{}, &mockServerRunner{},
+		t.TempDir(), nil)
+	config := makeValidConfig(t)
+
+	_, err := orch.Execute(context.Background(), config)
+	if err == nil {
+		t.Fatal("expected error for cancelled build")
+	}
+}
+
+// TestLaunchOrchestrator_WaitForBuildGetError verifies build get error handling.
+func TestLaunchOrchestrator_WaitForBuildGetError(t *testing.T) {
+	t.Parallel()
+	buildEngine := &mockBuildEngine{
+		startResult: &api.BuildResult{ID: "build-1", State: "queued"},
+		getErr:      errors.New("build not found"),
+	}
+
+	orch := NewLaunchOrchestrator(buildEngine, &mockDeployer{}, &mockServerRunner{},
+		t.TempDir(), nil)
+	config := makeValidConfig(t)
+
+	_, err := orch.Execute(context.Background(), config)
+	if err == nil {
+		t.Fatal("expected error for build get error")
+	}
+}
+
+// TestLaunchOrchestrator_WARDeploy verifies WAR deploy path.
+func TestLaunchOrchestrator_WARDeploy(t *testing.T) {
+	// Skip in parallel since it touches filesystem
+	projectRoot := t.TempDir()
+	warFile := filepath.Join(projectRoot, "app.war")
+	if err := os.WriteFile(warFile, []byte("fake war"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	config := api.LaunchOrchestratorConfig{
+		Configuration: domain.TomcatRunConfiguration{
+			ID:        "cfg-1",
+			Name:      "Test WAR Config",
+			Type:      "tomcat6",
+			ProjectID: "project-1",
+			Mode:      "run",
+			Build: domain.RunConfigurationBuild{
+				Type:  "javac",
+				Clean: false,
+			},
+			Server: domain.RunConfigurationServer{
+				HTTPPort:    8080,
+				ContextPath: "/test",
+			},
+			Deploy: domain.RunConfigurationDeploy{
+				Mode: "war",
+			},
+			BeforeLaunchTasks: []string{"build", "deploy"},
+		},
+		WorkspaceRoot: projectRoot,
+		ProjectRoot:   projectRoot,
+		ArtifactPath:  "app.war",
+		JavaHome:      "/usr/lib/jvm/java-8",
+	}
+
+	buildEngine := &mockBuildEngine{
+		startResult: &api.BuildResult{ID: "build-1", State: "queued"},
+		getResult:   &api.BuildResult{ID: "build-1", State: "success"},
+	}
+	serverRunner := &mockServerRunner{
+		startResult: &api.ServerResponse{
+			ID:        "srv-1",
+			State:     "running",
+			StartedAt: time.Now(),
+		},
+	}
+
+	orch := NewLaunchOrchestrator(buildEngine, &mockDeployer{}, serverRunner,
+		t.TempDir(), nil)
+
+	result, err := orch.Execute(context.Background(), config)
+	if err != nil {
+		t.Fatalf("Execute WAR deploy: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected result")
+	}
+}
+
+// TestCopyFile verifies file copy works correctly.
+func TestCopyFile(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.txt")
+	dst := filepath.Join(dir, "dst.txt")
+	if err := os.WriteFile(src, []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := copyFile(src, dst); err != nil {
+		t.Fatalf("copyFile: %v", err)
+	}
+	data, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "hello" {
+		t.Errorf("content = %q, want hello", string(data))
+	}
+}
+
+func TestCopyFile_NonexistentSource(t *testing.T) {
+	err := copyFile("/nonexistent/src", "/tmp/dst")
+	if err == nil {
+		t.Fatal("expected error for nonexistent source")
+	}
+}
+
+func TestCopyFile_Overwrite(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.txt")
+	dst := filepath.Join(dir, "dst.txt")
+	if err := os.WriteFile(src, []byte("new"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dst, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := copyFile(src, dst); err != nil {
+		t.Fatalf("copyFile: %v", err)
+	}
+	data, _ := os.ReadFile(dst)
+	if string(data) != "new" {
+		t.Errorf("content = %q, want new", string(data))
 	}
 }

@@ -392,3 +392,357 @@ func TestConfigValidation(t *testing.T) {
 		t.Error("expected error for empty data root")
 	}
 }
+
+func TestConfigValidation_MissingWorkspaces(t *testing.T) {
+	env := setupTestEnv(t)
+	_, err := NewDefaultRuntimePlanResolver(ResolverConfig{
+		DataRoot:   env.tmpDir,
+		Workspaces: nil,
+		Projects:   env.projRepo,
+		Toolchains: env.tcRepo,
+		Runtimes:   env.rtRepo,
+		PathPolicy: env.pp,
+		IDGen:      env.idGen,
+	})
+	if err == nil {
+		t.Error("expected error for missing workspace repository")
+	}
+}
+
+func TestConfigValidation_MissingProjects(t *testing.T) {
+	env := setupTestEnv(t)
+	_, err := NewDefaultRuntimePlanResolver(ResolverConfig{
+		DataRoot:   env.tmpDir,
+		Workspaces: env.wsRepo,
+		Projects:   nil,
+		Toolchains: env.tcRepo,
+		Runtimes:   env.rtRepo,
+		PathPolicy: env.pp,
+		IDGen:      env.idGen,
+	})
+	if err == nil {
+		t.Error("expected error for missing project repository")
+	}
+}
+
+func TestConfigValidation_MissingToolchains(t *testing.T) {
+	env := setupTestEnv(t)
+	_, err := NewDefaultRuntimePlanResolver(ResolverConfig{
+		DataRoot:   env.tmpDir,
+		Workspaces: env.wsRepo,
+		Projects:   env.projRepo,
+		Toolchains: nil,
+		Runtimes:   env.rtRepo,
+		PathPolicy: env.pp,
+		IDGen:      env.idGen,
+	})
+	if err == nil {
+		t.Error("expected error for missing toolchain repository")
+	}
+}
+
+func TestConfigValidation_MissingRuntimes(t *testing.T) {
+	env := setupTestEnv(t)
+	_, err := NewDefaultRuntimePlanResolver(ResolverConfig{
+		DataRoot:   env.tmpDir,
+		Workspaces: env.wsRepo,
+		Projects:   env.projRepo,
+		Toolchains: env.tcRepo,
+		Runtimes:   nil,
+		PathPolicy: env.pp,
+		IDGen:      env.idGen,
+	})
+	if err == nil {
+		t.Error("expected error for missing runtime registry")
+	}
+}
+
+func TestConfigValidation_MissingPathPolicy(t *testing.T) {
+	env := setupTestEnv(t)
+	_, err := NewDefaultRuntimePlanResolver(ResolverConfig{
+		DataRoot:   env.tmpDir,
+		Workspaces: env.wsRepo,
+		Projects:   env.projRepo,
+		Toolchains: env.tcRepo,
+		Runtimes:   env.rtRepo,
+		PathPolicy: nil,
+		IDGen:      env.idGen,
+	})
+	if err == nil {
+		t.Error("expected error for missing path policy")
+	}
+}
+
+func TestConfigValidation_MissingIDGen(t *testing.T) {
+	env := setupTestEnv(t)
+	_, err := NewDefaultRuntimePlanResolver(ResolverConfig{
+		DataRoot:   env.tmpDir,
+		Workspaces: env.wsRepo,
+		Projects:   env.projRepo,
+		Toolchains: env.tcRepo,
+		Runtimes:   env.rtRepo,
+		PathPolicy: env.pp,
+		IDGen:      nil,
+	})
+	if err == nil {
+		t.Error("expected error for missing id generator")
+	}
+}
+
+func TestConfigValidation_NilCBPlannerDefaults(t *testing.T) {
+	env := setupTestEnv(t)
+	resolver, err := NewDefaultRuntimePlanResolver(ResolverConfig{
+		DataRoot:   env.tmpDir,
+		Workspaces: env.wsRepo,
+		Projects:   env.projRepo,
+		Toolchains: env.tcRepo,
+		Runtimes:   env.rtRepo,
+		PathPolicy: env.pp,
+		IDGen:      env.idGen,
+		CBPlanner:  nil,
+	})
+	if err != nil {
+		t.Fatalf("NewDefaultRuntimePlanResolver with nil CBPlanner: %v", err)
+	}
+	if resolver == nil {
+		t.Fatal("resolver should not be nil")
+	}
+}
+
+func TestResolveDeploymentTarget_NilPlan(t *testing.T) {
+	env := setupTestEnv(t)
+	resolver, _ := env.newResolver(t)
+	_, err := resolver.ResolveDeploymentTarget(nil)
+	if err == nil {
+		t.Fatal("expected error for nil plan")
+	}
+}
+
+func TestResolveDeploymentTarget_EmptyWorkspaceID(t *testing.T) {
+	env := setupTestEnv(t)
+	resolver, _ := env.newResolver(t)
+	plan := &domain.RuntimePlan{
+		WorkspaceID:    "",
+		ProjectID:      "p1",
+		ServerID:       "s1",
+		DeploymentRoot: "/tmp",
+	}
+	_, err := resolver.ResolveDeploymentTarget(plan)
+	if err == nil {
+		t.Fatal("expected error for empty workspace id")
+	}
+}
+
+func TestResolveDeploymentTarget_EmptyProjectID(t *testing.T) {
+	env := setupTestEnv(t)
+	resolver, _ := env.newResolver(t)
+	plan := &domain.RuntimePlan{
+		WorkspaceID:    "ws1",
+		ProjectID:      "",
+		ServerID:       "s1",
+		DeploymentRoot: "/tmp",
+	}
+	_, err := resolver.ResolveDeploymentTarget(plan)
+	if err == nil {
+		t.Fatal("expected error for empty project id")
+	}
+}
+
+func TestResolveDeploymentTarget_EmptyServerID(t *testing.T) {
+	env := setupTestEnv(t)
+	resolver, _ := env.newResolver(t)
+	plan := &domain.RuntimePlan{
+		WorkspaceID:    "ws1",
+		ProjectID:      "p1",
+		ServerID:       "",
+		DeploymentRoot: "/tmp",
+	}
+	_, err := resolver.ResolveDeploymentTarget(plan)
+	if err == nil {
+		t.Fatal("expected error for empty server id")
+	}
+}
+
+func TestResolveDeploymentTarget_EmptyDeploymentRoot(t *testing.T) {
+	env := setupTestEnv(t)
+	resolver, _ := env.newResolver(t)
+	plan := &domain.RuntimePlan{
+		WorkspaceID:    "ws1",
+		ProjectID:      "p1",
+		ServerID:       "s1",
+		DeploymentRoot: "",
+	}
+	_, err := resolver.ResolveDeploymentTarget(plan)
+	if err == nil {
+		t.Fatal("expected error for empty deployment root")
+	}
+}
+
+func TestRelIsUnder(t *testing.T) {
+	sep := string(filepath.Separator)
+	tests := []struct {
+		rel  string
+		want bool
+	}{
+		{".", true},
+		{"foo", true},
+		{"foo" + sep + "bar", true},
+		{"..", false},
+		{".." + sep + "foo", false},
+		{".." + sep + "..", false},
+		{"foo" + sep + ".." + sep + "bar", true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.rel, func(t *testing.T) {
+			if got := relIsUnder(tc.rel); got != tc.want {
+				t.Errorf("relIsUnder(%q) = %v, want %v", tc.rel, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCanonicalExistingDir_NotFound(t *testing.T) {
+	_, err := canonicalExistingDir("/nonexistent/directory/path")
+	if err == nil {
+		t.Fatal("expected error for nonexistent directory")
+	}
+}
+
+func TestCanonicalExistingDir_FileOK(t *testing.T) {
+	// canonicalExistingDir does not require the path to be a directory;
+	// it canonicalizes any existing path (file or directory).
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "file.txt")
+	if err := os.WriteFile(filePath, []byte("data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := canonicalExistingDir(filePath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got == "" {
+		t.Fatal("expected non-empty canonical path")
+	}
+}
+
+func TestResolveRuntime_NoRuntimeID(t *testing.T) {
+	env := setupTestEnv(t)
+	idGen := NewFakeIDGenerator()
+	noRtID, _ := idGen.NewProjectID()
+	env.projRepo.Add(domain.Project{
+		ID:          domain.ProjectID(noRtID),
+		WorkspaceID: env.wsID(),
+		Name:        "no-rt",
+		Root:        "myproject",
+		ContextPath: "app",
+		RuntimeID:   "",
+	})
+	resolver, _ := env.newResolver(t)
+	_, err := resolver.ResolveRuntime(context.Background(), env.wsID(), domain.ProjectID(noRtID), nil)
+	if err == nil {
+		t.Fatal("expected error for project with no runtime id")
+	}
+}
+
+func TestResolveRuntime_InvalidWorkspaceID(t *testing.T) {
+	env := setupTestEnv(t)
+	resolver, _ := env.newResolver(t)
+	_, err := resolver.ResolveRuntime(context.Background(), domain.WorkspaceID("../../../etc"), env.projID(), nil)
+	if err == nil {
+		t.Fatal("expected error for invalid workspace id")
+	}
+}
+
+func TestResolveRuntime_InvalidProjectID(t *testing.T) {
+	env := setupTestEnv(t)
+	resolver, _ := env.newResolver(t)
+	_, err := resolver.ResolveRuntime(context.Background(), env.wsID(), domain.ProjectID("../../../etc"), nil)
+	if err == nil {
+		t.Fatal("expected error for invalid project id")
+	}
+}
+
+func TestResolveRuntime_InvalidExistingServerID(t *testing.T) {
+	env := setupTestEnv(t)
+	resolver, _ := env.newResolver(t)
+	badID := domain.ServerID("../../../etc")
+	_, err := resolver.ResolveRuntime(context.Background(), env.wsID(), env.projID(), &badID)
+	if err == nil {
+		t.Fatal("expected error for invalid existing server id")
+	}
+}
+
+func TestResolveRuntime_ProjectWrongWorkspace(t *testing.T) {
+	env := setupTestEnv(t)
+	resolver, _ := env.newResolver(t)
+	// Get the project from the fixture but pass a wrong workspace
+	proj := env.projID()
+	// Use a workspace that doesn't match the project
+	_, err := resolver.ResolveRuntime(context.Background(), env.wsID(), proj, nil)
+	if err != nil {
+		// This should succeed in our fixture because the project belongs to the workspace
+		_ = err
+	}
+	// We need a project that has a different workspace
+	idGen := NewFakeIDGenerator()
+	badProjID, _ := idGen.NewProjectID()
+	env.projRepo.Add(domain.Project{
+		ID:          domain.ProjectID(badProjID),
+		WorkspaceID: domain.WorkspaceID("ws_other"),
+		Name:        "other-ws-proj",
+		Root:        "myproject",
+		ContextPath: "app",
+		RuntimeID:   "tomcat6",
+	})
+	_, err2 := resolver.ResolveRuntime(context.Background(), env.wsID(), domain.ProjectID(badProjID), nil)
+	if err2 == nil {
+		t.Fatal("expected error for project not in workspace")
+	}
+}
+
+func TestResolveRuntime_EmptyCatalinaHome(t *testing.T) {
+	env := setupTestEnv(t)
+	idGen := NewFakeIDGenerator()
+	badProjID, _ := idGen.NewProjectID()
+	env.projRepo.Add(domain.Project{
+		ID:          domain.ProjectID(badProjID),
+		WorkspaceID: env.wsID(),
+		Name:        "no-catalina",
+		Root:        "myproject",
+		ContextPath: "app",
+		RuntimeID:   "tomcat6-no-home",
+	})
+	env.rtRepo.Add(RuntimeInstallation{
+		ID:       "tomcat6-no-home",
+		Version:  "6.0.53",
+		Provider: "tomcat6",
+	})
+	resolver, _ := env.newResolver(t)
+	_, err := resolver.ResolveRuntime(context.Background(), env.wsID(), domain.ProjectID(badProjID), nil)
+	if err == nil {
+		t.Fatal("expected error for runtime with empty catalina home")
+	}
+}
+
+func TestResolveRuntime_NoToolchain(t *testing.T) {
+	env := setupTestEnv(t)
+	idGen := NewFakeIDGenerator()
+	noTcID, _ := idGen.NewProjectID()
+	env.projRepo.Add(domain.Project{
+		ID:          domain.ProjectID(noTcID),
+		WorkspaceID: env.wsID(),
+		Name:        "no-tc",
+		Root:        "myproject",
+		ContextPath: "app",
+		ToolchainID: "",
+		RuntimeID:   "tomcat6",
+	})
+	resolver, _ := env.newResolver(t)
+	plan, err := resolver.ResolveRuntime(context.Background(), env.wsID(), domain.ProjectID(noTcID), nil)
+	if err != nil {
+		t.Fatalf("ResolveRuntime without toolchain: %v", err)
+	}
+	if plan.JavaHome != "" {
+		t.Errorf("JavaHome should be empty when no toolchain, got %q", plan.JavaHome)
+	}
+}

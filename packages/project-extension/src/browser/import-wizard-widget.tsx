@@ -7,6 +7,7 @@ import URI from '@theia/core/lib/common/uri';
 import { KairoProjectService } from './project-service';
 import { ActiveProjectService } from './active-project-service';
 import { RuntimeConnectionService } from '@kairo/runtime-extension';
+import { WorkspaceContextService } from '@kairo/runtime-extension';
 import type { ProjectDetection, ProjectImportConfirmRequest } from '@kairo/protocol';
 
 /** Normalize a user-visible encoding label to the wire encoding id. */
@@ -41,6 +42,9 @@ export class ImportWizardWidget extends ReactWidget {
     @inject(RuntimeConnectionService)
     protected readonly runtime!: RuntimeConnectionService;
 
+    @inject(WorkspaceContextService)
+    protected readonly workspaceContext!: WorkspaceContextService;
+
     @inject(WorkspaceService)
     protected readonly workspaceService!: WorkspaceService;
 
@@ -59,6 +63,7 @@ export class ImportWizardWidget extends ReactWidget {
             projectService: this.projectService,
             activeProject: this.activeProject,
             runtime: this.runtime,
+            workspaceContext: this.workspaceContext,
             workspaceService: this.workspaceService,
             onClose: () => this.close(),
         });
@@ -70,12 +75,13 @@ interface ImportWizardProps {
     projectService: KairoProjectService;
     activeProject: ActiveProjectService;
     runtime: RuntimeConnectionService;
+    workspaceContext: WorkspaceContextService;
     workspaceService: WorkspaceService;
     onClose: () => void;
 }
 
 const ImportWizard: React.FC<ImportWizardProps> = ({
-    fileDialogService, projectService, activeProject, runtime, workspaceService, onClose,
+    fileDialogService, projectService, activeProject, runtime, workspaceContext, workspaceService, onClose,
 }) => {
     const [step, setStep] = React.useState(1);
     const [workspacePath, setWorkspacePath] = React.useState('');
@@ -115,7 +121,9 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
             setScanError('');
 
             try {
-                const activeWorkspaceId = runtime.workspace();
+                // N-027: use WorkspaceContextService for the canonical workspace ID.
+                const ctx = workspaceContext.context;
+                const activeWorkspaceId = ctx?.workspaceId ?? runtime.workspace();
                 if (!activeWorkspaceId) {
                     throw new Error('No workspace is open. Please open a workspace first.');
                 }
@@ -182,6 +190,12 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
 
             const saved = await projectService.importProjectNew(params);
 
+            // N-027: ensure the workspace is set on the runtime so the
+            // event stream and subsequent API calls use the correct workspace.
+            if (workspaceId) {
+                runtime.setWorkspace(workspaceId);
+            }
+
             await activeProject.setProject({
                 workspaceId,
                 projectId: saved.id,
@@ -202,7 +216,7 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
         } finally {
             setImporting(false);
         }
-    }, [projectService, activeProject, workspaceId, workspacePath, projectName,
+    }, [projectService, activeProject, runtime, workspaceId, workspacePath, projectName,
         sourceDirs, webRoot, libDirs, buildScript, defaultEncoding,
         jdkVersion, sourceVersion, targetVersion, outputDir, buildTool, contextPath]);
 

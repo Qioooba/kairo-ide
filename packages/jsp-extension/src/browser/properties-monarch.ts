@@ -13,9 +13,15 @@
  *  - Empty lines
  */
 
+interface MonarchLanguage {
+  defaultToken: string;
+  tokenPostfix?: string;
+  tokenizer: Record<string, unknown[]>;
+}
+
 export const PROPERTIES_LANGUAGE_ID = 'properties';
 
-export const PROPERTIES_MONARCH: any = {
+export const PROPERTIES_MONARCH: MonarchLanguage = {
   defaultToken: '',
   tokenPostfix: '.properties',
 

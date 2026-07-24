@@ -7,6 +7,9 @@ export function resolve(specifier, context, nextResolve) {
   if (/\.(css|svg|ttf|woff|woff2|png|jpg|gif)$/.test(specifier)) {
     return { url: 'data:text/javascript,export default {};', format: 'module', shortCircuit: true };
   }
+  if (specifier === '@theia/monaco-editor-core' || specifier.includes('monaco-editor-core')) {
+    return { url: 'data:text/javascript,export default {};', format: 'module', shortCircuit: true };
+  }
   return nextResolve(specifier, context);
 }
 `), pathToFileURL(__filename));
@@ -30,6 +33,19 @@ if (!global.ResizeObserver) {
 const Module = require('module');
 Module._extensions['.css'] = function (module, filename) {
   module._compile('module.exports = {};', filename);
+};
+
+// Mock @theia/monaco-editor-core to avoid the ESM import issue in CJS tests.
+// @kairo/ui-kit → kairo-theme-contribution.ts → @theia/monaco-editor-core
+// which uses ESM `import` that cannot be loaded via `require` in Node CJS mode.
+// We intercept the module resolution before the ESM file is ever loaded.
+const origResolveFilename = Module._resolveFilename;
+Module._resolveFilename = function (request, parent, ...args) {
+  if (request === '@theia/monaco-editor-core' || request.endsWith('/@theia/monaco-editor-core')) {
+    const mockPath = require('node:path').join(__dirname, '__monaco-mock__.js');
+    return origResolveFilename.call(this, mockPath, parent, ...args);
+  }
+  return origResolveFilename.call(this, request, parent, ...args);
 };
 
 const { FrontendApplicationConfigProvider } =

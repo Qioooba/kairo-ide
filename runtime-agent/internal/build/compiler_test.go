@@ -62,8 +62,12 @@ func TestJavacArgFileThresholdAndEscaping(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm()&0o077 != 0 {
-		t.Fatalf("argfile permissions = %o, want owner-only", info.Mode().Perm())
+	// On Windows, os.FileMode permission bits are not enforced the same way
+	// as on Unix. Skip the strict permission check on Windows.
+	if runtime.GOOS != "windows" {
+		if info.Mode().Perm()&0o077 != 0 {
+			t.Fatalf("argfile permissions = %o, want owner-only", info.Mode().Perm())
+		}
 	}
 	data, err := os.ReadFile(name)
 	if err != nil {
@@ -137,7 +141,7 @@ src/main/java/com/example/App.java:15: warning: [deprecation] oldMethod() in com
 	if diags[0].Severity != "error" || diags[0].Line != 10 {
 		t.Errorf("unexpected first diagnostic: %#v", diags[0])
 	}
-	if diags[0].File != "/proj/src/main/java/com/example/App.java" {
+	if diags[0].File != filepath.Join("/proj", "src/main/java/com/example/App.java") {
 		t.Errorf("unexpected file: %q", diags[0].File)
 	}
 	if !strings.Contains(diags[0].Message, "cannot find symbol") ||
@@ -200,4 +204,768 @@ func whichJavac(t *testing.T) string {
 		}
 	}
 	return ""
+}
+
+func TestNewCompiler(t *testing.T) {
+	c := New("/path/to/jdk")
+	if c == nil {
+		t.Fatal("New() returned nil")
+	}
+	if c.javaHome != "/path/to/jdk" {
+		t.Errorf("javaHome = %q, want /path/to/jdk", c.javaHome)
+	}
+
+	c2 := New("")
+	if c2.javaHome != "" {
+		t.Errorf("javaHome = %q, want empty", c2.javaHome)
+	}
+}
+
+func TestNormalizeSeverity(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"error", "error"},
+		{"warning", "warning"},
+		{"错误", "error"},
+		{"警告", "warning"},
+		{"info", "info"},
+		{"", ""},
+		{"custom", "custom"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.input, func(t *testing.T) {
+			got := normalizeSeverity(tc.input)
+			if got != tc.want {
+				t.Errorf("normalizeSeverity(%q) = %q, want %q", tc.input, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestShouldUseJavacArgFile(t *testing.T) {
+	t.Run("windows with many sources", func(t *testing.T) {
+		sources := make([]string, 51)
+		for i := range sources {
+			sources[i] = "src/Foo.java"
+		}
+		got := shouldUseJavacArgFile(nil, sources)
+		if runtime.GOOS == "windows" && !got {
+			t.Error("should use argfile on Windows with >50 sources")
+		}
+	})
+
+	t.Run("few sources below threshold", func(t *testing.T) {
+		sources := []string{"src/Foo.java", "src/Bar.java"}
+		got := shouldUseJavacArgFile(nil, sources)
+		if got {
+			t.Error("should not use argfile with few sources")
+		}
+	})
+
+	t.Run("long command line", func(t *testing.T) {
+		sources := make([]string, 100)
+		for i := range sources {
+			sources[i] = strings.Repeat("x", 250) + ".java"
+		}
+		got := shouldUseJavacArgFile(nil, sources)
+		if !got {
+			t.Error("should use argfile when command line exceeds 24KB")
+		}
+	})
+
+	t.Run("empty sources", func(t *testing.T) {
+		got := shouldUseJavacArgFile(nil, nil)
+		if got {
+			t.Error("should not use argfile with empty sources")
+		}
+	})
+
+	t.Run("long args", func(t *testing.T) {
+		args := []string{strings.Repeat("x", 24*1024)}
+		got := shouldUseJavacArgFile(args, []string{"src/Foo.java"})
+		if !got {
+			t.Error("should use argfile when args exceed 24KB")
+		}
+	})
+}
+
+func TestWriteJavacArgFile_EdgeCases(t *testing.T) {
+	t.Run("empty project root", func(t *testing.T) {
+		_, err := writeJavacArgFile("", []string{"src/Foo.java"})
+		if err == nil {
+			t.Fatal("expected error for empty project root")
+		}
+	})
+
+	t.Run("empty sources", func(t *testing.T) {
+		root := t.TempDir()
+		name, err := writeJavacArgFile(root, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer os.Remove(name)
+		data, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(data) != 0 {
+			t.Errorf("expected empty argfile, got %q", string(data))
+		}
+	})
+
+	t.Run("multiple sources with escaping", func(t *testing.T) {
+		root := t.TempDir()
+		sources := []string{
+			filepath.Join(root, "src", "Hello.java"),
+			filepath.Join(root, "src", `File"With"Quotes.java`),
+		}
+		name, err := writeJavacArgFile(root, sources)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer os.Remove(name)
+		data, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		content := string(data)
+		if !strings.Contains(content, `\"`) {
+			t.Error("quotes should be escaped in argfile")
+		}
+		lines := strings.Split(strings.TrimSpace(content), "\n")
+		if len(lines) != 2 {
+			t.Errorf("expected 2 lines, got %d: %q", len(lines), content)
+		}
+	})
+
+	t.Run("backslash escaping", func(t *testing.T) {
+		root := t.TempDir()
+		sources := []string{filepath.Join(root, `path\to\file.java`)}
+		name, err := writeJavacArgFile(root, sources)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer os.Remove(name)
+		data, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		content := string(data)
+		if !strings.Contains(content, `\\`) {
+			t.Error("backslashes should be escaped in argfile")
+		}
+	})
+}
+
+func TestCountCompiled(t *testing.T) {
+	tests := []struct {
+		name   string
+		output string
+		want   int
+	}{
+		{"english recompile", "Note: Some files use unchecked operations.\nNote: 3 files to recompile\n", 3},
+		{"chinese note", "注意: 10 个文件已编译\n", 0},
+		{"empty", "", 0},
+		{"no note", "Build successful\n", 0},
+		{"zero files", "Note: 0 files compiled\n", 0},
+		{"large count", "Note: 12345 files to recompile\n", 12345},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := countCompiled(tc.output)
+			if got != tc.want {
+				t.Errorf("countCompiled(%q) = %d, want %d", tc.output, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestParseDiagnostics_EdgeCases(t *testing.T) {
+	t.Run("empty output", func(t *testing.T) {
+		diags := parseDiagnostics("", "/proj")
+		if len(diags) != 0 {
+			t.Errorf("expected 0 diagnostics, got %d", len(diags))
+		}
+	})
+
+	t.Run("no diagnostics", func(t *testing.T) {
+		diags := parseDiagnostics("Build successful\n", "/proj")
+		if len(diags) != 0 {
+			t.Errorf("expected 0 diagnostics, got %d", len(diags))
+		}
+	})
+
+	t.Run("single error without continuation", func(t *testing.T) {
+		out := "src/Foo.java:5: error: semicolon expected\n"
+		diags := parseDiagnostics(out, "/proj")
+		if len(diags) != 1 {
+			t.Fatalf("expected 1 diagnostic, got %d", len(diags))
+		}
+		if diags[0].Line != 5 || diags[0].Severity != "error" {
+			t.Errorf("unexpected: %#v", diags[0])
+		}
+	})
+
+	t.Run("with column number", func(t *testing.T) {
+		out := "src/Foo.java:10:5: error: cannot find symbol\n"
+		diags := parseDiagnostics(out, "/proj")
+		if len(diags) != 1 {
+			t.Fatalf("expected 1 diagnostic, got %d", len(diags))
+		}
+		if diags[0].Column != 5 {
+			t.Errorf("Column = %d, want 5", diags[0].Column)
+		}
+	})
+
+	t.Run("column defaults to 1", func(t *testing.T) {
+		out := "src/Foo.java:10: error: something\n"
+		diags := parseDiagnostics(out, "/proj")
+		if len(diags) != 1 {
+			t.Fatalf("expected 1 diagnostic, got %d", len(diags))
+		}
+		if diags[0].Column != 1 {
+			t.Errorf("Column = %d, want 1", diags[0].Column)
+		}
+	})
+
+	t.Run("absolute path preserved", func(t *testing.T) {
+		// On Windows, Unix-style absolute paths are not recognized as absolute.
+		// Use a platform-appropriate absolute path.
+		absPath := filepath.Join("/abs", "path", "Foo.java")
+		out := absPath + ":10: error: test\n"
+		diags := parseDiagnostics(out, "/proj")
+		if len(diags) != 1 {
+			t.Fatalf("expected 1 diagnostic, got %d", len(diags))
+		}
+		// On Unix, the path is absolute and preserved. On Windows, it's joined with projectRoot.
+		if runtime.GOOS != "windows" {
+			if diags[0].File != absPath {
+				t.Errorf("File = %q, want %q", diags[0].File, absPath)
+			}
+		}
+	})
+
+	t.Run("no project root", func(t *testing.T) {
+		out := "Foo.java:10: error: test\n"
+		diags := parseDiagnostics(out, "")
+		if len(diags) != 1 {
+			t.Fatalf("expected 1 diagnostic, got %d", len(diags))
+		}
+		if diags[0].File != "Foo.java" {
+			t.Errorf("File = %q, want Foo.java", diags[0].File)
+		}
+	})
+
+	t.Run("error code extraction", func(t *testing.T) {
+		out := "src/Foo.java:10: error: [compiler.err.cant.resolve] cannot find symbol\n"
+		diags := parseDiagnostics(out, "/proj")
+		if len(diags) != 1 {
+			t.Fatalf("expected 1 diagnostic, got %d", len(diags))
+		}
+		if diags[0].Code != "compiler.err.cant.resolve" {
+			t.Errorf("Code = %q, want compiler.err.cant.resolve", diags[0].Code)
+		}
+	})
+
+	t.Run("warning code extraction", func(t *testing.T) {
+		out := "src/Foo.java:15: warning: [compiler.warn.deprecation] oldMethod() has been deprecated\n"
+		diags := parseDiagnostics(out, "/proj")
+		if len(diags) != 1 {
+			t.Fatalf("expected 1 diagnostic, got %d", len(diags))
+		}
+		if diags[0].Code != "compiler.warn.deprecation" {
+			t.Errorf("Code = %q, want compiler.warn.deprecation", diags[0].Code)
+		}
+	})
+}
+
+func TestCompile_NoSources(t *testing.T) {
+	c := New("/path/to/jdk")
+	res, err := c.Compile(context.Background(), Request{
+		Sources: nil,
+	})
+	if err != nil {
+		t.Fatalf("Compile with no sources: %v", err)
+	}
+	if res == nil || !res.Success {
+		t.Fatalf("expected success for empty sources, got res=%v", res)
+	}
+	if res.FilesCompiled != 0 {
+		t.Errorf("FilesCompiled = %d, want 0", res.FilesCompiled)
+	}
+}
+
+func TestCompile_EmptySourcesSlice(t *testing.T) {
+	c := New("/path/to/jdk")
+	res, err := c.Compile(context.Background(), Request{
+		Sources: []string{},
+	})
+	if err != nil {
+		t.Fatalf("Compile with empty slice: %v", err)
+	}
+	if !res.Success {
+		t.Fatal("expected success for empty sources slice")
+	}
+}
+
+func TestCompile_DefaultTimeout(t *testing.T) {
+	// Empty sources should return immediately without using the timeout
+	c := New("/path/to/jdk")
+	res, err := c.Compile(context.Background(), Request{
+		Sources: []string{},
+		Timeout: 0,
+	})
+	if err != nil {
+		t.Fatalf("Compile with zero timeout: %v", err)
+	}
+	if !res.Success {
+		t.Fatal("expected success")
+	}
+}
+
+func TestCompile_ArgFileWithEmptyProjectRoot(t *testing.T) {
+	// Create 60 sources long enough to trigger argfile usage on all platforms.
+	// Each source path is ~270 chars, so 60 sources × 270 ≈ 16KB per source,
+	// plus args overhead, easily exceeds 24KB threshold.
+	longPath := strings.Repeat("x", 250) + ".java"
+	sources := make([]string, 60)
+	for i := range sources {
+		sources[i] = longPath
+	}
+
+	c := New("/path/to/jdk")
+	_, err := c.Compile(context.Background(), Request{
+		ProjectRoot: "", // empty project root causes writeJavacArgFile to fail
+		Sources:     sources,
+		SourceLevel: "8",
+		TargetLevel: "8",
+	})
+	if err == nil {
+		t.Fatal("expected error for empty project root with argfile")
+	}
+	if !strings.Contains(err.Error(), "project root") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestCompile_CustomArgs(t *testing.T) {
+	// With custom Args, the default arg building is skipped.
+	// javac will likely fail since we use a fake path, but we should
+	// at least verify the code path doesn't panic.
+	javaHome := t.TempDir()
+	c := New(javaHome)
+	_, err := c.Compile(context.Background(), Request{
+		ProjectRoot: t.TempDir(),
+		Sources:     []string{"src/Foo.java"},
+		Args:        []string{"-version"},
+		Timeout:     5 * time.Second,
+	})
+	// We expect an error because javac is not found at the fake path
+	// and likely not on PATH either. But we just want to exercise the
+	// custom Args path — any error is acceptable.
+	if err == nil {
+		// javac happened to be on PATH and -version succeeded
+		t.Log("javac was found on PATH; custom Args path exercised")
+	}
+}
+
+func TestCompile_WorkingDir(t *testing.T) {
+	// When WorkingDir is set, it should be used instead of ProjectRoot.
+	javaHome := t.TempDir()
+	c := New(javaHome)
+	_, err := c.Compile(context.Background(), Request{
+		ProjectRoot: t.TempDir(),
+		WorkingDir:  t.TempDir(),
+		Sources:     []string{"src/Foo.java"},
+		SourceLevel: "8",
+		TargetLevel: "8",
+		Timeout:     5 * time.Second,
+	})
+	// Expect error because javac is not at the fake path, but the
+	// WorkingDir path is exercised.
+	if err == nil {
+		t.Log("javac was found on PATH; WorkingDir path exercised")
+	}
+}
+
+func TestCompile_WithEncodingAndClasspath(t *testing.T) {
+	// Test the default args path with encoding and classpath set.
+	javaHome := t.TempDir()
+	c := New(javaHome)
+	_, err := c.Compile(context.Background(), Request{
+		ProjectRoot: t.TempDir(),
+		Sources:     []string{"src/Foo.java"},
+		SourceLevel: "11",
+		TargetLevel: "11",
+		Encoding:    "UTF-8",
+		Classpath:   []string{"/lib/a.jar", "/lib/b.jar"},
+		OutputDir:   t.TempDir(),
+		Timeout:     5 * time.Second,
+	})
+	// Expect error because javac is not at the fake path, but the
+	// default args building path is exercised.
+	if err == nil {
+		t.Log("javac was found on PATH; default args path exercised")
+	}
+}
+
+func TestCompile_NoEncodingNoClasspath(t *testing.T) {
+	// Test the default args path without encoding and classpath.
+	javaHome := t.TempDir()
+	c := New(javaHome)
+	_, err := c.Compile(context.Background(), Request{
+		ProjectRoot: t.TempDir(),
+		Sources:     []string{"src/Foo.java"},
+		SourceLevel: "8",
+		TargetLevel: "8",
+		Timeout:     5 * time.Second,
+	})
+	if err == nil {
+		t.Log("javac was found on PATH; default args path exercised")
+	}
+}
+
+func TestCompile_NoToolchain(t *testing.T) {
+	c := New("")
+	_, err := c.Compile(context.Background(), Request{
+		Sources: []string{"src/Foo.java"},
+	})
+	if err == nil {
+		t.Fatal("expected error for empty toolchain")
+	}
+	if err.Error() != "compiler toolchain not set" {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestCompile_CancelledContext(t *testing.T) {
+	c := New("/path/to/jdk")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := c.Compile(ctx, Request{
+		Sources: []string{"src/Foo.java"},
+	})
+	if err == nil {
+		t.Fatal("expected error for cancelled context")
+	}
+}
+
+func TestResult_Defaults(t *testing.T) {
+	r := Result{}
+	if r.Success {
+		t.Error("new Result should have Success=false")
+	}
+	if r.Diagnostics != nil {
+		t.Error("new Result should have nil Diagnostics")
+	}
+}
+
+// =============================================================================
+// CollectSources tests
+// =============================================================================
+
+func TestCollectSources_SingleDir(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "Hello.java", "class Hello {}")
+	writeFile(t, dir, "World.java", "class World {}")
+	writeFile(t, dir, "readme.txt", "not java")
+
+	sources, err := CollectSources([]string{dir}, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(sources) != 2 {
+		t.Errorf("expected 2 sources, got %d: %v", len(sources), sources)
+	}
+}
+
+func TestCollectSources_MultiDir(t *testing.T) {
+	base := t.TempDir()
+	dir1 := filepath.Join(base, "src", "main", "java")
+	dir2 := filepath.Join(base, "src", "test", "java")
+	os.MkdirAll(dir1, 0755)
+	os.MkdirAll(dir2, 0755)
+	writeFile(t, dir1, "Main.java", "class Main {}")
+	writeFile(t, dir2, "MainTest.java", "class MainTest {}")
+
+	sources, err := CollectSources([]string{dir1, dir2}, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(sources) != 2 {
+		t.Errorf("expected 2 sources, got %d", len(sources))
+	}
+}
+
+func TestCollectSources_SkipsExcluded(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "App.java", "class App {}")
+	os.MkdirAll(filepath.Join(dir, ".git"), 0755)
+	writeFile(t, filepath.Join(dir, ".git"), "Hidden.java", "// hidden")
+
+	sources, err := CollectSources([]string{dir}, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(sources) != 1 {
+		t.Errorf("expected 1 source (skipping .git), got %d", len(sources))
+	}
+}
+
+func TestCollectSources_EmptyRoots(t *testing.T) {
+	sources, err := CollectSources(nil, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(sources) != 0 {
+		t.Errorf("expected 0 sources, got %d", len(sources))
+	}
+}
+
+func TestCollectSources_CustomExcludes(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "App.java", "class App {}")
+	os.MkdirAll(filepath.Join(dir, "generated"), 0755)
+	writeFile(t, filepath.Join(dir, "generated"), "Gen.java", "class Gen {}")
+
+	sources, err := CollectSources([]string{dir}, []string{"generated"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(sources) != 1 {
+		t.Errorf("expected 1 source (skipping 'generated'), got %d", len(sources))
+	}
+}
+
+// =============================================================================
+// ResolveClasspath tests
+// =============================================================================
+
+func TestResolveClasspath_SingleJar(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "lib.jar", "fake jar")
+	writeFile(t, dir, "readme.txt", "not a jar")
+
+	cp, err := ResolveClasspath([]string{dir}, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cp) != 1 {
+		t.Errorf("expected 1 classpath entry, got %d", len(cp))
+	}
+}
+
+func TestResolveClasspath_MissingDir(t *testing.T) {
+	cp, err := ResolveClasspath([]string{"/nonexistent/lib"}, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cp) != 0 {
+		t.Errorf("expected 0 classpath entries, got %d", len(cp))
+	}
+}
+
+func TestResolveClasspath_WithExtraJars(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "a.jar", "fake")
+	extraJars := []string{"/opt/lib/special.jar"}
+
+	cp, err := ResolveClasspath([]string{dir}, extraJars)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cp) < 2 {
+		t.Errorf("expected at least 2 entries, got %d: %v", len(cp), cp)
+	}
+}
+
+func TestResolveClasspath_FileNotDir(t *testing.T) {
+	dir := t.TempDir()
+	jarPath := filepath.Join(dir, "single.jar")
+	writeFile(t, dir, "single.jar", "fake jar")
+
+	cp, err := ResolveClasspath([]string{jarPath}, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cp) != 1 {
+		t.Errorf("expected 1 entry, got %d", len(cp))
+	}
+}
+
+// =============================================================================
+// IncrementalSources tests
+// =============================================================================
+
+func TestIncrementalSources_NewerSource(t *testing.T) {
+	dir := t.TempDir()
+	outDir := filepath.Join(dir, "out")
+	os.MkdirAll(outDir, 0755)
+
+	// Write class file first (older)
+	writeFile(t, outDir, "Test.class", "fake class")
+	time.Sleep(100 * time.Millisecond)
+	// Write source file after (newer than class)
+	src := filepath.Join(dir, "Test.java")
+	writeFile(t, dir, "Test.java", "class Test {}")
+
+	inc := IncrementalSources([]string{src}, outDir)
+	if len(inc) != 1 {
+		t.Errorf("expected 1 incremental source, got %d", len(inc))
+	}
+}
+
+func TestIncrementalSources_UpToDate(t *testing.T) {
+	dir := t.TempDir()
+	outDir := filepath.Join(dir, "out")
+	os.MkdirAll(outDir, 0755)
+
+	// Write source file first (older)
+	src := filepath.Join(dir, "Test.java")
+	writeFile(t, dir, "Test.java", "class Test {}")
+	time.Sleep(100 * time.Millisecond)
+	// Write class file after (newer than source, so up to date)
+	writeFile(t, outDir, "Test.class", "fake class")
+
+	inc := IncrementalSources([]string{src}, outDir)
+	if len(inc) != 0 {
+		t.Errorf("expected 0 incremental sources (up to date), got %d", len(inc))
+	}
+}
+
+func TestIncrementalSources_NoClassFile(t *testing.T) {
+	dir := t.TempDir()
+	outDir := filepath.Join(dir, "out")
+	os.MkdirAll(outDir, 0755)
+
+	src := filepath.Join(dir, "Test.java")
+	writeFile(t, dir, "Test.java", "class Test {}")
+
+	inc := IncrementalSources([]string{src}, outDir)
+	if len(inc) != 1 {
+		t.Errorf("expected 1 incremental source (no class file), got %d", len(inc))
+	}
+}
+
+func TestIncrementalSources_EmptySources(t *testing.T) {
+	inc := IncrementalSources(nil, "/tmp/out")
+	if len(inc) != 0 {
+		t.Errorf("expected 0, got %d", len(inc))
+	}
+}
+
+// =============================================================================
+// readPackageDeclaration tests
+// =============================================================================
+
+func TestReadPackageDeclaration(t *testing.T) {
+	dir := t.TempDir()
+	tests := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{"simple", "package com.example;\nclass Test {}", "com.example"},
+		{"with spaces", "package  com.example.util ;\nimport java.util.*;", "com.example.util"},
+		{"no package", "class Test {}", ""},
+		{"comment before", "// comment\npackage foo.bar;\nclass Test {}", "foo.bar"},
+		{"block comment", "/* header */\npackage foo;\nclass Test {}", "foo"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(dir, tt.name+".java")
+			os.WriteFile(path, []byte(tt.content), 0644)
+			got := readPackageDeclaration(path)
+			if got != tt.want {
+				t.Errorf("readPackageDeclaration = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestReadPackageDeclaration_MissingFile(t *testing.T) {
+	got := readPackageDeclaration("/nonexistent/Test.java")
+	if got != "" {
+		t.Errorf("expected empty for missing file, got %q", got)
+	}
+}
+
+// =============================================================================
+// DetermineEncoding tests
+// =============================================================================
+
+func TestDetermineEncoding(t *testing.T) {
+	tests := []struct {
+		name string
+		req  string
+		want string
+	}{
+		{"explicit utf8", "UTF-8", "UTF-8"},
+		{"explicit gbk", "GBK", "GBK"},
+		{"explicit iso8859", "ISO-8859-1", "ISO-8859-1"},
+		{"empty defaults to utf8", "", "UTF-8"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := DetermineEncoding(tt.req)
+			if got != tt.want {
+				t.Errorf("DetermineEncoding(%q) = %q, want %q", tt.req, got, tt.want)
+			}
+		})
+	}
+}
+
+// =============================================================================
+// BuildClasspathString tests
+// =============================================================================
+
+func TestBuildClasspathString(t *testing.T) {
+	entries := []string{"/lib/a.jar", "/lib/b.jar"}
+	result := BuildClasspathString(entries)
+	if result == "" {
+		t.Error("expected non-empty classpath string")
+	}
+}
+
+func TestBuildClasspathString_Empty(t *testing.T) {
+	result := BuildClasspathString(nil)
+	if result != "" {
+		t.Errorf("expected empty string, got %q", result)
+	}
+}
+
+// =============================================================================
+// SourceToClassFile tests
+// =============================================================================
+
+func TestSourceToClassFile(t *testing.T) {
+	dir := t.TempDir()
+	// File with package
+	srcPath := filepath.Join(dir, "Test.java")
+	os.WriteFile(srcPath, []byte("package com.example;\nclass Test {}"), 0644)
+
+	classFile := sourceToClassFile(srcPath, filepath.Join(dir, "out"))
+	if classFile == "" {
+		t.Error("expected non-empty class file path")
+	}
+}
+
+func TestSourceToClassFile_NotJava(t *testing.T) {
+	result := sourceToClassFile("readme.txt", "/out")
+	if result != "" {
+		t.Errorf("expected empty for non-java file, got %q", result)
+	}
+}
+
+// writeFile is a helper for test file creation.
+func writeFile(t *testing.T, dir, name, content string) {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
 }

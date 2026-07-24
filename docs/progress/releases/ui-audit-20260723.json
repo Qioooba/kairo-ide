@@ -1,21 +1,51 @@
 {
-  "generatedAt": "2026-07-23T02:46:02.529Z",
+  "generatedAt": "2026-07-23T18:55:32.829Z",
   "script": "audit-ui-states.cjs",
   "summary": {
-    "total": 30,
-    "complete": 29,
-    "partial": 1,
+    "total": 42,
+    "complete": 40,
+    "partial": 2,
     "missing": 0,
-    "loadingCoverage": 22,
-    "emptyCoverage": 30,
-    "errorCoverage": 29,
-    "disabledCoverage": 30,
-    "normalCoverage": 30,
-    "avgCoverage": 94
+    "loadingCoverage": 27,
+    "emptyCoverage": 42,
+    "errorCoverage": 40,
+    "disabledCoverage": 42,
+    "normalCoverage": 42,
+    "avgCoverage": 92
   },
   "results": [
     {
-      "file": "packages/ui-kit/src/browser/virtual-list.tsx",
+      "file": "packages\\theia-product\\src\\main\\browser\\kairo-shortcuts-widget.tsx",
+      "widget": "kairo-shortcuts-widget",
+      "package": "theia-product",
+      "states": {
+        "normal": {
+          "covered": true,
+          "label": "正常状态"
+        },
+        "loading": {
+          "covered": false,
+          "label": "加载状态"
+        },
+        "empty": {
+          "covered": true,
+          "label": "空状态"
+        },
+        "error": {
+          "covered": false,
+          "label": "错误状态"
+        },
+        "disabled": {
+          "covered": true,
+          "label": "禁用状态"
+        }
+      },
+      "coverage": 60,
+      "status": "⚠️ Partial",
+      "priority": "medium"
+    },
+    {
+      "file": "packages\\ui-kit\\src\\browser\\virtual-list.tsx",
       "widget": "virtual-list",
       "package": "ui-kit",
       "states": {
@@ -45,7 +75,7 @@
       "priority": "medium"
     },
     {
-      "file": "packages/java-extension/src/browser/java-hotswap-widget.tsx",
+      "file": "packages\\java-extension\\src\\browser\\java-hotswap-widget.tsx",
       "widget": "java-hotswap-widget",
       "package": "java-extension",
       "states": {
@@ -75,7 +105,37 @@
       "priority": "low"
     },
     {
-      "file": "packages/sql-extension/src/browser/sql-results-widget.tsx",
+      "file": "packages\\java-extension\\src\\browser\\java-remote-debug-config.tsx",
+      "widget": "java-remote-debug-config",
+      "package": "java-extension",
+      "states": {
+        "normal": {
+          "covered": true,
+          "label": "正常状态"
+        },
+        "loading": {
+          "covered": false,
+          "label": "加载状态"
+        },
+        "empty": {
+          "covered": true,
+          "label": "空状态"
+        },
+        "error": {
+          "covered": true,
+          "label": "错误状态"
+        },
+        "disabled": {
+          "covered": true,
+          "label": "禁用状态"
+        }
+      },
+      "coverage": 80,
+      "status": "✅ Complete",
+      "priority": "low"
+    },
+    {
+      "file": "packages\\sql-extension\\src\\browser\\sql-results-widget.tsx",
       "widget": "sql-results-widget",
       "package": "sql-extension",
       "states": {
@@ -105,7 +165,7 @@
       "priority": "low"
     },
     {
-      "file": "packages/test-extension/src/browser/test-output-widget.tsx",
+      "file": "packages\\test-extension\\src\\browser\\test-output-widget.tsx",
       "widget": "test-output-widget",
       "package": "test-extension",
       "states": {
@@ -135,7 +195,67 @@
       "priority": "low"
     },
     {
-      "file": "packages/theia-product/src/main/browser/kairo-keymap-widget.tsx",
+      "file": "packages\\theia-product\\src\\main\\browser\\debug-breakpoints-widget.tsx",
+      "widget": "debug-breakpoints-widget",
+      "package": "theia-product",
+      "states": {
+        "normal": {
+          "covered": true,
+          "label": "正常状态"
+        },
+        "loading": {
+          "covered": false,
+          "label": "加载状态"
+        },
+        "empty": {
+          "covered": true,
+          "label": "空状态"
+        },
+        "error": {
+          "covered": true,
+          "label": "错误状态"
+        },
+        "disabled": {
+          "covered": true,
+          "label": "禁用状态"
+        }
+      },
+      "coverage": 80,
+      "status": "✅ Complete",
+      "priority": "low"
+    },
+    {
+      "file": "packages\\theia-product\\src\\main\\browser\\debug-callstack-widget.tsx",
+      "widget": "debug-callstack-widget",
+      "package": "theia-product",
+      "states": {
+        "normal": {
+          "covered": true,
+          "label": "正常状态"
+        },
+        "loading": {
+          "covered": false,
+          "label": "加载状态"
+        },
+        "empty": {
+          "covered": true,
+          "label": "空状态"
+        },
+        "error": {
+          "covered": true,
+          "label": "错误状态"
+        },
+        "disabled": {
+          "covered": true,
+          "label": "禁用状态"
+        }
+      },
+      "coverage": 80,
+      "status": "✅ Complete",
+      "priority": "low"
+    },
+    {
+      "file": "packages\\theia-product\\src\\main\\browser\\kairo-keymap-widget.tsx",
       "widget": "kairo-keymap-widget",
       "package": "theia-product",
       "states": {
@@ -165,7 +285,7 @@
       "priority": "low"
     },
     {
-      "file": "packages/theia-product/src/main/browser/kairo-notification-center.tsx",
+      "file": "packages\\theia-product\\src\\main\\browser\\kairo-notification-center.tsx",
       "widget": "kairo-notification-center",
       "package": "theia-product",
       "states": {
@@ -195,7 +315,37 @@
       "priority": "low"
     },
     {
-      "file": "packages/theia-product/src/main/browser/kairo-problems-widget.tsx",
+      "file": "packages\\theia-product\\src\\main\\browser\\kairo-perf-dashboard-widget.tsx",
+      "widget": "kairo-perf-dashboard-widget",
+      "package": "theia-product",
+      "states": {
+        "normal": {
+          "covered": true,
+          "label": "正常状态"
+        },
+        "loading": {
+          "covered": false,
+          "label": "加载状态"
+        },
+        "empty": {
+          "covered": true,
+          "label": "空状态"
+        },
+        "error": {
+          "covered": true,
+          "label": "错误状态"
+        },
+        "disabled": {
+          "covered": true,
+          "label": "禁用状态"
+        }
+      },
+      "coverage": 80,
+      "status": "✅ Complete",
+      "priority": "low"
+    },
+    {
+      "file": "packages\\theia-product\\src\\main\\browser\\kairo-problems-widget.tsx",
       "widget": "kairo-problems-widget",
       "package": "theia-product",
       "states": {
@@ -225,7 +375,67 @@
       "priority": "low"
     },
     {
-      "file": "packages/theia-product/src/main/browser/kairo-toolbar-widget.tsx",
+      "file": "packages\\theia-product\\src\\main\\browser\\kairo-telemetry-settings.tsx",
+      "widget": "kairo-telemetry-settings",
+      "package": "theia-product",
+      "states": {
+        "normal": {
+          "covered": true,
+          "label": "正常状态"
+        },
+        "loading": {
+          "covered": false,
+          "label": "加载状态"
+        },
+        "empty": {
+          "covered": true,
+          "label": "空状态"
+        },
+        "error": {
+          "covered": true,
+          "label": "错误状态"
+        },
+        "disabled": {
+          "covered": true,
+          "label": "禁用状态"
+        }
+      },
+      "coverage": 80,
+      "status": "✅ Complete",
+      "priority": "low"
+    },
+    {
+      "file": "packages\\theia-product\\src\\main\\browser\\kairo-test-results-widget.tsx",
+      "widget": "kairo-test-results-widget",
+      "package": "theia-product",
+      "states": {
+        "normal": {
+          "covered": true,
+          "label": "正常状态"
+        },
+        "loading": {
+          "covered": false,
+          "label": "加载状态"
+        },
+        "empty": {
+          "covered": true,
+          "label": "空状态"
+        },
+        "error": {
+          "covered": true,
+          "label": "错误状态"
+        },
+        "disabled": {
+          "covered": true,
+          "label": "禁用状态"
+        }
+      },
+      "coverage": 80,
+      "status": "✅ Complete",
+      "priority": "low"
+    },
+    {
+      "file": "packages\\theia-product\\src\\main\\browser\\kairo-toolbar-widget.tsx",
       "widget": "kairo-toolbar-widget",
       "package": "theia-product",
       "states": {
@@ -255,7 +465,7 @@
       "priority": "low"
     },
     {
-      "file": "packages/build-extension/src/browser/build-view-widget.tsx",
+      "file": "packages\\build-extension\\src\\browser\\build-view-widget.tsx",
       "widget": "build-view-widget",
       "package": "build-extension",
       "states": {
@@ -285,7 +495,37 @@
       "priority": "low"
     },
     {
-      "file": "packages/git-extension/src/browser/git-changes-widget.tsx",
+      "file": "packages\\build-extension\\src\\browser\\maven-view-widget.tsx",
+      "widget": "maven-view-widget",
+      "package": "build-extension",
+      "states": {
+        "normal": {
+          "covered": true,
+          "label": "正常状态"
+        },
+        "loading": {
+          "covered": true,
+          "label": "加载状态"
+        },
+        "empty": {
+          "covered": true,
+          "label": "空状态"
+        },
+        "error": {
+          "covered": true,
+          "label": "错误状态"
+        },
+        "disabled": {
+          "covered": true,
+          "label": "禁用状态"
+        }
+      },
+      "coverage": 100,
+      "status": "✅ Complete",
+      "priority": "low"
+    },
+    {
+      "file": "packages\\git-extension\\src\\browser\\git-changes-widget.tsx",
       "widget": "git-changes-widget",
       "package": "git-extension",
       "states": {
@@ -315,7 +555,7 @@
       "priority": "low"
     },
     {
-      "file": "packages/git-extension/src/browser/git-commit-widget.tsx",
+      "file": "packages\\git-extension\\src\\browser\\git-commit-widget.tsx",
       "widget": "git-commit-widget",
       "package": "git-extension",
       "states": {
@@ -345,7 +585,7 @@
       "priority": "low"
     },
     {
-      "file": "packages/git-extension/src/browser/git-diff-widget.tsx",
+      "file": "packages\\git-extension\\src\\browser\\git-diff-widget.tsx",
       "widget": "git-diff-widget",
       "package": "git-extension",
       "states": {
@@ -375,7 +615,7 @@
       "priority": "low"
     },
     {
-      "file": "packages/git-extension/src/browser/git-history-widget.tsx",
+      "file": "packages\\git-extension\\src\\browser\\git-history-widget.tsx",
       "widget": "git-history-widget",
       "package": "git-extension",
       "states": {
@@ -405,7 +645,7 @@
       "priority": "low"
     },
     {
-      "file": "packages/java-extension/src/browser/java-hierarchy-widget.tsx",
+      "file": "packages\\java-extension\\src\\browser\\java-hierarchy-widget.tsx",
       "widget": "java-hierarchy-widget",
       "package": "java-extension",
       "states": {
@@ -435,7 +675,7 @@
       "priority": "low"
     },
     {
-      "file": "packages/project-extension/src/browser/import-wizard-widget.tsx",
+      "file": "packages\\project-extension\\src\\browser\\import-wizard-widget.tsx",
       "widget": "import-wizard-widget",
       "package": "project-extension",
       "states": {
@@ -465,7 +705,7 @@
       "priority": "low"
     },
     {
-      "file": "packages/project-extension/src/browser/project-selector-widget.tsx",
+      "file": "packages\\project-extension\\src\\browser\\project-selector-widget.tsx",
       "widget": "project-selector-widget",
       "package": "project-extension",
       "states": {
@@ -495,7 +735,7 @@
       "priority": "low"
     },
     {
-      "file": "packages/search-extension/src/browser/find-action-widget.tsx",
+      "file": "packages\\search-extension\\src\\browser\\find-action-widget.tsx",
       "widget": "find-action-widget",
       "package": "search-extension",
       "states": {
@@ -525,7 +765,7 @@
       "priority": "low"
     },
     {
-      "file": "packages/search-extension/src/browser/find-class-widget.tsx",
+      "file": "packages\\search-extension\\src\\browser\\find-class-widget.tsx",
       "widget": "find-class-widget",
       "package": "search-extension",
       "states": {
@@ -555,7 +795,7 @@
       "priority": "low"
     },
     {
-      "file": "packages/search-extension/src/browser/find-file-widget.tsx",
+      "file": "packages\\search-extension\\src\\browser\\find-file-widget.tsx",
       "widget": "find-file-widget",
       "package": "search-extension",
       "states": {
@@ -585,7 +825,7 @@
       "priority": "low"
     },
     {
-      "file": "packages/search-extension/src/browser/find-symbol-widget.tsx",
+      "file": "packages\\search-extension\\src\\browser\\find-symbol-widget.tsx",
       "widget": "find-symbol-widget",
       "package": "search-extension",
       "states": {
@@ -615,7 +855,7 @@
       "priority": "low"
     },
     {
-      "file": "packages/search-extension/src/browser/search-center-widget.tsx",
+      "file": "packages\\search-extension\\src\\browser\\search-center-widget.tsx",
       "widget": "search-center-widget",
       "package": "search-extension",
       "states": {
@@ -645,7 +885,7 @@
       "priority": "low"
     },
     {
-      "file": "packages/search-extension/src/browser/search-everywhere-widget.tsx",
+      "file": "packages\\search-extension\\src\\browser\\search-everywhere-widget.tsx",
       "widget": "search-everywhere-widget",
       "package": "search-extension",
       "states": {
@@ -675,7 +915,7 @@
       "priority": "low"
     },
     {
-      "file": "packages/sql-extension/src/browser/sql-connection-widget.tsx",
+      "file": "packages\\sql-extension\\src\\browser\\sql-connection-widget.tsx",
       "widget": "sql-connection-widget",
       "package": "sql-extension",
       "states": {
@@ -705,7 +945,7 @@
       "priority": "low"
     },
     {
-      "file": "packages/sql-extension/src/browser/sql-editor-widget.tsx",
+      "file": "packages\\sql-extension\\src\\browser\\sql-editor-widget.tsx",
       "widget": "sql-editor-widget",
       "package": "sql-extension",
       "states": {
@@ -735,7 +975,7 @@
       "priority": "low"
     },
     {
-      "file": "packages/test-extension/src/browser/test-tree-widget.tsx",
+      "file": "packages\\test-extension\\src\\browser\\test-tree-widget.tsx",
       "widget": "test-tree-widget",
       "package": "test-extension",
       "states": {
@@ -765,7 +1005,67 @@
       "priority": "low"
     },
     {
-      "file": "packages/theia-product/src/main/browser/kairo-run-configurations-widget.tsx",
+      "file": "packages\\theia-product\\src\\main\\browser\\debug-variables-widget.tsx",
+      "widget": "debug-variables-widget",
+      "package": "theia-product",
+      "states": {
+        "normal": {
+          "covered": true,
+          "label": "正常状态"
+        },
+        "loading": {
+          "covered": true,
+          "label": "加载状态"
+        },
+        "empty": {
+          "covered": true,
+          "label": "空状态"
+        },
+        "error": {
+          "covered": true,
+          "label": "错误状态"
+        },
+        "disabled": {
+          "covered": true,
+          "label": "禁用状态"
+        }
+      },
+      "coverage": 100,
+      "status": "✅ Complete",
+      "priority": "low"
+    },
+    {
+      "file": "packages\\theia-product\\src\\main\\browser\\kairo-remote-widget.tsx",
+      "widget": "kairo-remote-widget",
+      "package": "theia-product",
+      "states": {
+        "normal": {
+          "covered": true,
+          "label": "正常状态"
+        },
+        "loading": {
+          "covered": true,
+          "label": "加载状态"
+        },
+        "empty": {
+          "covered": true,
+          "label": "空状态"
+        },
+        "error": {
+          "covered": true,
+          "label": "错误状态"
+        },
+        "disabled": {
+          "covered": true,
+          "label": "禁用状态"
+        }
+      },
+      "coverage": 100,
+      "status": "✅ Complete",
+      "priority": "low"
+    },
+    {
+      "file": "packages\\theia-product\\src\\main\\browser\\kairo-run-configurations-widget.tsx",
       "widget": "kairo-run-configurations-widget",
       "package": "theia-product",
       "states": {
@@ -795,7 +1095,67 @@
       "priority": "low"
     },
     {
-      "file": "packages/theia-product/src/main/browser/kairo-welcome-widget.tsx",
+      "file": "packages\\theia-product\\src\\main\\browser\\kairo-sql-console-widget.tsx",
+      "widget": "kairo-sql-console-widget",
+      "package": "theia-product",
+      "states": {
+        "normal": {
+          "covered": true,
+          "label": "正常状态"
+        },
+        "loading": {
+          "covered": true,
+          "label": "加载状态"
+        },
+        "empty": {
+          "covered": true,
+          "label": "空状态"
+        },
+        "error": {
+          "covered": true,
+          "label": "错误状态"
+        },
+        "disabled": {
+          "covered": true,
+          "label": "禁用状态"
+        }
+      },
+      "coverage": 100,
+      "status": "✅ Complete",
+      "priority": "low"
+    },
+    {
+      "file": "packages\\theia-product\\src\\main\\browser\\kairo-todo-widget.tsx",
+      "widget": "kairo-todo-widget",
+      "package": "theia-product",
+      "states": {
+        "normal": {
+          "covered": true,
+          "label": "正常状态"
+        },
+        "loading": {
+          "covered": true,
+          "label": "加载状态"
+        },
+        "empty": {
+          "covered": true,
+          "label": "空状态"
+        },
+        "error": {
+          "covered": true,
+          "label": "错误状态"
+        },
+        "disabled": {
+          "covered": true,
+          "label": "禁用状态"
+        }
+      },
+      "coverage": 100,
+      "status": "✅ Complete",
+      "priority": "low"
+    },
+    {
+      "file": "packages\\theia-product\\src\\main\\browser\\kairo-welcome-widget.tsx",
       "widget": "kairo-welcome-widget",
       "package": "theia-product",
       "states": {
@@ -825,7 +1185,7 @@
       "priority": "low"
     },
     {
-      "file": "packages/theia-product/src/main/browser/maven-view-widget.tsx",
+      "file": "packages\\theia-product\\src\\main\\browser\\maven-view-widget.tsx",
       "widget": "maven-view-widget",
       "package": "theia-product",
       "states": {
@@ -855,7 +1215,7 @@
       "priority": "low"
     },
     {
-      "file": "packages/tomcat-extension/src/browser/log-viewer-widget.tsx",
+      "file": "packages\\tomcat-extension\\src\\browser\\log-viewer-widget.tsx",
       "widget": "log-viewer-widget",
       "package": "tomcat-extension",
       "states": {
@@ -885,7 +1245,7 @@
       "priority": "low"
     },
     {
-      "file": "packages/tomcat-extension/src/browser/server-view-widget.tsx",
+      "file": "packages\\tomcat-extension\\src\\browser\\server-view-widget.tsx",
       "widget": "server-view-widget",
       "package": "tomcat-extension",
       "states": {

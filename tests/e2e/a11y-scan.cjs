@@ -64,8 +64,8 @@ async function openViaPalette(page, commandLabel) {
 }
 
 (async () => {
-  step(`Navigating to ${theiaUrl} (headed)`);
-  const browser = await chromium.launch({ headless: false });
+  step(`Navigating to ${theiaUrl} (headless)`);
+  const browser = await chromium.launch({ headless: true, executablePath: process.env.CHROMIUM_PATH || 'C:\\Users\\Qi\\AppData\\Local\\ms-playwright\\chromium-1228\\chrome-win64\\chrome.exe' });
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const page = await ctx.newPage();
 

@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -152,11 +153,12 @@ func (uc *ServerUseCase) Start(ctx context.Context, cmd StartServerCommand) (*do
 		return nil, fmt.Errorf("save server record: %w", err)
 	}
 
+	serverPreparingData, _ := json.Marshal(record)
 	uc.eventHub.Publish(events.Event{
 		Type:        events.EventServerStarted,
 		WorkspaceID: string(cmd.WorkspaceID),
 		Message:     fmt.Sprintf("Server %s preparing", serverID),
-		Data:        record,
+		Data:        serverPreparingData,
 	})
 
 	// Start the runtime asynchronously
@@ -226,11 +228,12 @@ func (uc *ServerUseCase) startRuntime(ctx context.Context, record domain.ServerR
 		return
 	}
 
+	serverRunningData, _ := json.Marshal(record)
 	uc.eventHub.Publish(events.Event{
 		Type:        events.EventServerStarted,
 		WorkspaceID: string(record.WorkspaceID),
 		Message:     fmt.Sprintf("Server %s running (PID=%d)", record.ID, record.PID),
-		Data:        record,
+		Data:        serverRunningData,
 	})
 }
 
@@ -376,11 +379,12 @@ func (uc *ServerUseCase) Restart(ctx context.Context, cmd RestartServerCommand) 
 		return nil, fmt.Errorf("save restarted state: %w", err)
 	}
 
+	serverRestartData, _ := json.Marshal(record)
 	uc.eventHub.Publish(events.Event{
 		Type:        events.EventServerStarted,
 		WorkspaceID: string(cmd.WorkspaceID),
 		Message:     fmt.Sprintf("Server %s restarted (PID=%d, gen=%d)", cmd.ServerID, record.PID, record.Generation),
-		Data:        record,
+		Data:        serverRestartData,
 	})
 
 	return record, nil

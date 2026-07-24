@@ -54,6 +54,9 @@ type Server struct {
 	port     int
 	secret   string
 
+	// rateLimiter enforces per-IP request rate limiting.
+	rateLimiter *RateLimiter
+
 	// httpServer is the live *http.Server. It is created
 	// lazily by ListenAndServe so Shutdown can be called by
 	// the runtime-restart handler.
@@ -155,9 +158,23 @@ func NewServer(services *Services, l *log.Logger, a *audit.Log, version string, 
 		version:  version,
 		secret:   secret,
 		Services: services,
+		rateLimiter: NewRateLimiter(0), // default 100 req/min
 	}
 	s.routes()
 	return s
+}
+
+// SetRateLimit configures the per-IP rate limit. A value <= 0
+// disables rate limiting. Safe to call before ListenAndServe.
+func (s *Server) SetRateLimit(perMinute int) {
+	if perMinute <= 0 {
+		s.rateLimiter = nil
+	} else {
+		if s.rateLimiter != nil {
+			s.rateLimiter.Stop()
+		}
+		s.rateLimiter = NewRateLimiter(perMinute)
+	}
 }
 
 // SetRestartConfig configures how /api/v1/runtime/restart
@@ -216,12 +233,17 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	return srv.Shutdown(ctx)
 }
 
-// middleware applies request ID, logging, audit, CORS, secret
-// auth check, and recovery in that order.
+// middleware applies request ID, logging, audit, CORS, rate
+// limiting, secret auth check, and recovery in that order.
 func (s *Server) middleware(next http.Handler) http.Handler {
 	// Wrap with CORS first (outermost) so OPTIONS preflight
 	// doesn't need auth or request ID.
 	next = s.corsMiddleware(next)
+	// Rate limiting after CORS but before auth so preflight
+	// requests are not counted against the limit.
+	if s.rateLimiter != nil {
+		next = s.rateLimiter.RateLimitMiddleware(next)
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rid := r.Header.Get("X-Kairo-Request-Id")
 		if rid == "" {

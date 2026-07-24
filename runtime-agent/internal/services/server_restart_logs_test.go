@@ -162,3 +162,142 @@ func TestServerRestart_NotFound(t *testing.T) {
 		t.Fatalf("expected error for missing restart metadata")
 	}
 }
+
+// =========================================================================
+// splitLines tests
+// =========================================================================
+
+func TestSplitLines(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		max     int
+		want    []string
+	}{
+		{"single line", "hello", 10, []string{"hello"}},
+		{"two lines", "hello\nworld", 10, []string{"hello", "world"}},
+		{"trailing newline", "hello\n", 10, []string{"hello"}},
+		{"empty", "", 10, nil},
+		{"max limit", "a\nb\nc\nd", 2, []string{"c", "d"}},
+		{"max zero", "a\nb\nc", 0, []string{"a", "b", "c"}},
+		{"max larger than lines", "a\nb", 10, []string{"a", "b"}},
+		{"only newlines", "\n\n\n", 10, []string{"", "", ""}},
+	}
+	for _, tt := range tests {
+		got := splitLines(tt.input, tt.max)
+		if len(got) != len(tt.want) {
+			t.Errorf("splitLines(%q, %d) len = %d, want %d", tt.input, tt.max, len(got), len(tt.want))
+			continue
+		}
+		for i := range got {
+			if got[i] != tt.want[i] {
+				t.Errorf("splitLines(%q, %d)[%d] = %q, want %q", tt.input, tt.max, i, got[i], tt.want[i])
+			}
+		}
+	}
+}
+
+// =========================================================================
+// normalizePersistedLogLine tests
+// =========================================================================
+
+func TestNormalizePersistedLogLine(t *testing.T) {
+	tests := []struct {
+		input      string
+		wantLine   string
+		wantStream string
+	}{
+		{"[stderr] error message", "error message", "stderr"},
+		{"[stdout] output message", "output message", "stdout"},
+		{"plain message", "plain message", "stdout"},
+		{"[stderr] ", "", "stderr"},
+		{"[stdout] ", "", "stdout"},
+		{"", "", "stdout"},
+	}
+	for _, tt := range tests {
+		line, stream := normalizePersistedLogLine(tt.input)
+		if line != tt.wantLine || stream != tt.wantStream {
+			t.Errorf("normalizePersistedLogLine(%q) = (%q, %q), want (%q, %q)",
+				tt.input, line, stream, tt.wantLine, tt.wantStream)
+		}
+	}
+}
+
+// =========================================================================
+// pickFreePort tests
+// =========================================================================
+
+func TestPickFreePort(t *testing.T) {
+	port, err := pickFreePort()
+	if err != nil {
+		t.Fatalf("pickFreePort: %v", err)
+	}
+	if port <= 0 || port > 65535 {
+		t.Errorf("invalid port: %d", port)
+	}
+}
+
+// =========================================================================
+// splitLinesWithOrdinals tests
+// =========================================================================
+
+func TestSplitLinesWithOrdinals_Empty(t *testing.T) {
+	lines := splitLinesWithOrdinals(nil, 0)
+	if len(lines) != 0 {
+		t.Errorf("len = %d, want 0", len(lines))
+	}
+}
+
+func TestSplitLinesWithOrdinals_SingleLine(t *testing.T) {
+	lines := splitLinesWithOrdinals([]byte("hello"), 100)
+	if len(lines) != 1 {
+		t.Fatalf("len = %d, want 1", len(lines))
+	}
+	if lines[0].line != "hello" || lines[0].ordinal != 100 {
+		t.Errorf("line = (%q, %d), want (hello, 100)", lines[0].line, lines[0].ordinal)
+	}
+}
+
+// =========================================================================
+// readRegularFileTail tests
+// =========================================================================
+
+func TestReadRegularFileTail_SmallFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "small.log")
+	if err := os.WriteFile(path, []byte("line1\nline2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	data, offset, err := readRegularFileTail(path, 1024)
+	if err != nil {
+		t.Fatalf("readRegularFileTail: %v", err)
+	}
+	if offset != 0 {
+		t.Errorf("offset = %d, want 0", offset)
+	}
+	if string(data) != "line1\nline2\n" {
+		t.Errorf("data = %q, want line1\nline2\n", string(data))
+	}
+}
+
+func TestReadRegularFileTail_Nonexistent(t *testing.T) {
+	_, _, err := readRegularFileTail("/nonexistent/file.log", 1024)
+	if err == nil {
+		t.Fatal("expected error for nonexistent file")
+	}
+}
+
+func TestReadRegularFileTail_EmptyFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "empty.log")
+	if err := os.WriteFile(path, []byte{}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	data, _, err := readRegularFileTail(path, 1024)
+	if err != nil {
+		t.Fatalf("readRegularFileTail: %v", err)
+	}
+	if len(data) != 0 {
+		t.Errorf("data = %q, want empty", string(data))
+	}
+}

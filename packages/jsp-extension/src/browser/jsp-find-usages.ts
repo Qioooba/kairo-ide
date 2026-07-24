@@ -421,7 +421,7 @@ export function registerJspFindUsages(): monaco.IDisposable {
         if (token.isCancellationRequested) return [];
 
         const content = model.getValue();
-        const parser = new (JspJavaParser as any)();
+        const parser = new JspJavaParser();
         const offset = parser.positionToOffset(content, position.lineNumber - 1, position.column - 1);
 
         const blocks = parser.findJavaBlocks(content);

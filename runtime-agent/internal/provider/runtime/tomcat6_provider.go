@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -28,6 +29,12 @@ type Tomcat6Provider struct {
 	preparer       catalinabase.Preparer
 	eventHub       *events.EventHub
 	cfg            Tomcat6ProviderConfig
+}
+
+type serverStartedData struct {
+	ServerID domain.ServerID `json:"serverId"`
+	Port     int             `json:"port"`
+	PID      int             `json:"pid"`
 }
 
 type runningInstance struct {
@@ -65,7 +72,7 @@ func NewTomcat6Provider(processFactory ProcessFactory, preparer catalinabase.Pre
 func (p *Tomcat6Provider) ID() string { return "tomcat6" }
 
 // publishEvent publishes a server lifecycle event via EventHub if configured.
-func (p *Tomcat6Provider) publishEvent(eventType events.EventType, workspaceID, message string, data interface{}) {
+func (p *Tomcat6Provider) publishEvent(eventType events.EventType, workspaceID, message string, data json.RawMessage) {
 	if p.eventHub == nil {
 		return
 	}
@@ -213,11 +220,11 @@ func (p *Tomcat6Provider) Start(ctx context.Context, plan domain.RuntimePlan, lo
 
 	p.publishEvent(events.EventServerStarted, string(plan.WorkspaceID),
 		fmt.Sprintf("Server %s started on port %d", plan.ServerID, plan.HTTPPort),
-		map[string]interface{}{
-			"serverId": plan.ServerID,
-			"port":     plan.HTTPPort,
-			"pid":      obs.Identity.PID,
-		})
+		jsonMarshal(serverStartedData{
+			ServerID: plan.ServerID,
+			Port:     plan.HTTPPort,
+			PID:      obs.Identity.PID,
+		}))
 
 	return &obs.Identity, nil
 }
@@ -362,4 +369,14 @@ func (p *Tomcat6Provider) cleanupInstance(inst *runningInstance) {
 			return
 		}
 	}
+}
+
+// jsonMarshal marshals a value to json.RawMessage, panicking on error
+// (only used for known-safe structs).
+func jsonMarshal(v any) json.RawMessage {
+	data, err := json.Marshal(v)
+	if err != nil {
+		panic("jsonMarshal: " + err.Error())
+	}
+	return data
 }

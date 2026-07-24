@@ -12,6 +12,8 @@ import { ILogger } from '@theia/core/lib/common/logger';
 import { Disposable } from '@theia/core/lib/common/disposable';
 import { Emitter, Event } from '@theia/core/lib/common/event';
 import { JavaLanguageClient } from './java-language-client';
+import { JavaIntelliSenseProvider } from './java-intellisense-provider';
+import type { JavaIntelliSenseCompletionItem } from './java-intellisense-provider';
 import {
   LSPCompletionItem,
   LSPPublishDiagnosticsParams,
@@ -63,12 +65,16 @@ export interface JavaDefinitionResponse {
 export class JavaCompletionProvider {
   @inject(ILogger) protected readonly logger!: ILogger;
   @inject(JavaLanguageClient) protected readonly client!: JavaLanguageClient;
+  @inject(JavaIntelliSenseProvider) protected readonly intellisense!: JavaIntelliSenseProvider;
 
   protected readonly onDiagnosticsEmitter = new Emitter<{ uri: string; diagnostics: LSPPublishDiagnosticsParams['diagnostics'] }>();
   readonly onDiagnostics: Event<{ uri: string; diagnostics: LSPPublishDiagnosticParams['diagnostics'] }> =
     this.onDiagnosticsEmitter.event;
 
   protected subs: Disposable[] = [];
+
+  /** Tracks the last known source for each URI, used for fallback. */
+  private sourceCache = new Map<string, string>();
 
   @postConstruct()
   protected init(): void {
@@ -79,11 +85,26 @@ export class JavaCompletionProvider {
     );
   }
 
+  /** Cache the source text of a document for fallback operations. */
+  cacheSource(uri: string, source: string): void {
+    this.sourceCache.set(uri, source);
+  }
+
+  /** Clear cached source when a document is closed. */
+  clearSource(uri: string): void {
+    this.sourceCache.delete(uri);
+  }
+
   /**
    * Provide completions at a given position. This is the
    * entry point for the monaco
    * registerCompletionItemProvider adapter (see
    * `JavaCompletionProviderRegistration`).
+   *
+   * When JDT LS is ready, completions come from the LS.
+   * When the LS is not ready, a fallback IntelliSense
+   * provider supplies keyword, type, snippet, variable,
+   * method, and import completions.
    */
   async provideCompletions(req: JavaCompletionRequest): Promise<JavaCompletionResponse> {
     // fetchState() prefers the backend RPC proxy — the sync
@@ -91,10 +112,14 @@ export class JavaCompletionProvider {
     // permanently 'uninitialized' in the web product and made
     // every provider short-circuit (KAIRO-RC-WEB-251).
     if (await this.client.fetchState() !== 'ready') {
-      return { isIncomplete: false, items: [] };
+      return this.fallbackCompletions(req);
     }
     try {
       const list = await this.client.completion(req);
+      if (list.items.length === 0) {
+        // LS returned empty — try fallback
+        return this.fallbackCompletions(req);
+      }
       this.logger.info(`[JavaCompletionProvider] completion: ${list.items.length} items from client`);
       return {
         isIncomplete: list.isIncomplete,
@@ -102,32 +127,60 @@ export class JavaCompletionProvider {
       };
     } catch (err) {
       this.logger.warn(`[JavaCompletionProvider] completion failed: ${String(err)}`);
+      return this.fallbackCompletions(req);
+    }
+  }
+
+  /** Fallback completions using the IntelliSense provider. */
+  private fallbackCompletions(req: JavaCompletionRequest): JavaCompletionResponse {
+    const source = this.sourceCache.get(req.uri);
+    if (!source) {
       return { isIncomplete: false, items: [] };
     }
+    const result = this.intellisense.provideCompletions(
+      source, req.line, req.character, req.triggerCharacter,
+    );
+    return {
+      isIncomplete: result.isIncomplete,
+      items: result.items.map(adaptIntelliSenseCompletion),
+    };
   }
 
   /** Provide Go-to-Definition locations. */
   async provideDefinition(uri: string, line: number, character: number): Promise<JavaDefinitionResponse[]> {
     if (await this.client.fetchState() !== 'ready') {
-      return [];
+      return this.fallbackDefinition(uri, line, character);
     }
     try {
       const r = await this.client.definition({ uri, line, character });
-      if (!r) return [];
+      if (!r) return this.fallbackDefinition(uri, line, character);
       const arr = Array.isArray(r) ? r : [r];
-      return arr
-        .filter((x): x is LSPLocation => !!x)
-        .map(x => ({
-          uri: x.uri,
-          range: {
-            start: { line: x.range.start.line, character: x.range.start.character },
-            end: { line: x.range.end.line, character: x.range.end.character },
-          },
-        }));
+      const filtered = arr.filter((x): x is LSPLocation => !!x);
+      if (filtered.length === 0) return this.fallbackDefinition(uri, line, character);
+      return filtered.map(x => ({
+        uri: x.uri,
+        range: {
+          start: { line: x.range.start.line, character: x.range.start.character },
+          end: { line: x.range.end.line, character: x.range.end.character },
+        },
+      }));
     } catch (err) {
       this.logger.warn(`[JavaCompletionProvider] definition failed: ${String(err)}`);
-      return [];
+      return this.fallbackDefinition(uri, line, character);
     }
+  }
+
+  /** Fallback definition using the IntelliSense provider. */
+  private fallbackDefinition(uri: string, line: number, character: number): JavaDefinitionResponse[] {
+    const source = this.sourceCache.get(uri);
+    if (!source) return [];
+    return this.intellisense.provideDefinition(uri, source, line, character).map(d => ({
+      uri: d.uri,
+      range: {
+        start: { line: d.line, character: d.character },
+        end: { line: d.endLine, character: d.endCharacter },
+      },
+    }));
   }
 
   async provideImplementation(uri: string, line: number, character: number): Promise<LSPLocation[]> {
@@ -222,6 +275,19 @@ function adaptLspCompletion(it: LSPCompletionItem): JavaCompletionResponseItem {
     filterText: it.filterText,
     insertText: it.insertText ?? it.label,
     isDeprecated: (it as { tags?: number[] }).tags?.includes(1) ?? false,
+  };
+}
+
+function adaptIntelliSenseCompletion(it: JavaIntelliSenseCompletionItem): JavaCompletionResponseItem {
+  return {
+    label: it.label,
+    kind: it.kind,
+    detail: it.detail,
+    documentation: it.documentation,
+    sortText: it.sortText,
+    filterText: it.filterText,
+    insertText: it.insertText,
+    isDeprecated: it.isDeprecated,
   };
 }
 

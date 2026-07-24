@@ -29,16 +29,39 @@ const (
 
 // GateProbeResult holds the structured results of a gate probe run.
 type GateProbeResult struct {
-	JDK6JDWP         bool     `json:"jdk6Jdwp"`
-	Tomcat6Debug     bool     `json:"tomcat6Debug"`
-	JDWPHandshake    bool     `json:"jdwpHandshake"`
-	DebugPortOpen    bool     `json:"debugPortOpen"`
-	Platform         string   `json:"platform"`
-	Errors           []string `json:"errors"`
-	DurationMs       int64    `json:"durationMs"`
-	JDKVersion       string   `json:"jdkVersion,omitempty"`
-	TomcatHome       string   `json:"tomcatHome,omitempty"`
-	DebugPort        int      `json:"debugPort,omitempty"`
+	JDK6JDWP         bool          `json:"jdk6Jdwp"`
+	Tomcat6Debug     bool          `json:"tomcat6Debug"`
+	JDWPHandshake    bool          `json:"jdwpHandshake"`
+	DebugPortOpen    bool          `json:"debugPortOpen"`
+	Platform         string        `json:"platform"`
+	Errors           []string      `json:"errors"`
+	DurationMs       int64         `json:"durationMs"`
+	JDKVersion       string        `json:"jdkVersion,omitempty"`
+	TomcatHome       string        `json:"tomcatHome,omitempty"`
+	DebugPort        int           `json:"debugPort,omitempty"`
+	JDWPVersion      *JDWPVersion  `json:"jdwpVersion,omitempty"`
+	Capabilities     *DebugCapabilities `json:"capabilities,omitempty"`
+}
+
+// DebugCapabilities describes what the target JVM supports via JDWP.
+type DebugCapabilities struct {
+	CanWatchFieldAccess      bool `json:"canWatchFieldAccess"`
+	CanWatchFieldModification bool `json:"canWatchFieldModification"`
+	CanGetBytecodes           bool `json:"canGetBytecodes"`
+	CanGetSyntheticAttribute  bool `json:"canGetSyntheticAttribute"`
+	CanGetOwnedMonitorInfo    bool `json:"canGetOwnedMonitorInfo"`
+	CanGetCurrentContendedMonitor bool `json:"canGetCurrentContendedMonitor"`
+	CanGetMonitorInfo         bool `json:"canGetMonitorInfo"`
+	CanRedefineClasses        bool `json:"canRedefineClasses"`
+	CanAddMethod              bool `json:"canAddMethod"`
+	CanUnrestrictedlyRedefineClasses bool `json:"canUnrestrictedlyRedefineClasses"`
+	CanPopFrames              bool `json:"canPopFrames"`
+	CanUseInstanceFilters     bool `json:"canUseInstanceFilters"`
+	CanGetSourceDebugExtension bool `json:"canGetSourceDebugExtension"`
+	CanRequestVMDeathEvent    bool `json:"canRequestVMDeathEvent"`
+	CanSetDefaultStratum      bool `json:"canSetDefaultStratum"`
+	CanGetConstantPool        bool `json:"canGetConstantPool"`
+	CanForceEarlyReturn       bool `json:"canForceEarlyReturn"`
 }
 
 // GateProbeConfig configures the gate probe.
@@ -51,6 +74,10 @@ type GateProbeConfig struct {
 	DebugPort int
 	// Timeout is the per-check timeout. Defaults to DefaultProbeTimeout.
 	Timeout time.Duration
+	// ProbeVersion enables JDWP version probing.
+	ProbeVersion bool
+	// ProbeCapabilities enables capability probing.
+	ProbeCapabilities bool
 }
 
 // RunGate executes all gate probes and returns a structured result.
@@ -107,6 +134,22 @@ func RunGate(ctx context.Context, cfg GateProbeConfig) GateProbeResult {
 	result.JDWPHandshake = handshakeOk
 	if !handshakeOk {
 		addError("JDWP handshake failed")
+	}
+
+	// Probe 5: JDWP version (only if handshake succeeded and requested)
+	if cfg.ProbeVersion && handshakeOk {
+		probeCtx, cancel = context.WithTimeout(ctx, cfg.Timeout)
+		version := probeJDWPVersion(probeCtx, cfg.DebugPort, addError)
+		cancel()
+		result.JDWPVersion = version
+	}
+
+	// Probe 6: JDWP capabilities (only if handshake succeeded and requested)
+	if cfg.ProbeCapabilities && handshakeOk {
+		probeCtx, cancel = context.WithTimeout(ctx, cfg.Timeout)
+		caps := probeDebugCapabilities(probeCtx, cfg.DebugPort, addError)
+		cancel()
+		result.Capabilities = caps
 	}
 
 	result.DurationMs = time.Since(start).Milliseconds()
@@ -315,4 +358,223 @@ func firstLine(data []byte) string {
 		}
 	}
 	return ""
+}
+
+// probeJDWPVersion connects to the JDWP port, performs the handshake,
+// sends a VirtualMachine.Version command, and returns the parsed version.
+func probeJDWPVersion(ctx context.Context, port int, addError func(string)) *JDWPVersion {
+	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
+	conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
+	if err != nil {
+		addError(fmt.Sprintf("JDWP version probe: dial failed: %v", err))
+		return nil
+	}
+	defer conn.Close()
+
+	conn.SetDeadline(time.Now().Add(10 * time.Second))
+
+	// Perform handshake
+	if _, err := conn.Write([]byte(jdwpHandshake)); err != nil {
+		addError(fmt.Sprintf("JDWP version probe: handshake write failed: %v", err))
+		return nil
+	}
+	buf := make([]byte, len(jdwpHandshake))
+	if _, err := conn.Read(buf); err != nil {
+		addError(fmt.Sprintf("JDWP version probe: handshake read failed: %v", err))
+		return nil
+	}
+
+	// Send VirtualMachine.Version command (cmdSet=1, cmd=1)
+	cmd := &JDWPPacket{
+		ID:     1,
+		Flags:  0,
+		CmdSet: 1,
+		Cmd:    1,
+		Data:   BuildVersionCommand(),
+	}
+	if err := WriteJDWPPacket(conn, cmd); err != nil {
+		addError(fmt.Sprintf("JDWP version probe: send command failed: %v", err))
+		return nil
+	}
+
+	reply, err := ReadJDWPPacket(conn)
+	if err != nil {
+		addError(fmt.Sprintf("JDWP version probe: read reply failed: %v", err))
+		return nil
+	}
+
+	version, err := ParseVersion(reply.Data)
+	if err != nil {
+		addError(fmt.Sprintf("JDWP version probe: parse failed: %v", err))
+		return nil
+	}
+
+	return version
+}
+
+// probeDebugCapabilities connects to the JDWP port, performs the
+// handshake, sends a VirtualMachine.Capabilities command, and returns
+// the parsed capabilities.
+func probeDebugCapabilities(ctx context.Context, port int, addError func(string)) *DebugCapabilities {
+	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
+	conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
+	if err != nil {
+		addError(fmt.Sprintf("JDWP capabilities probe: dial failed: %v", err))
+		return nil
+	}
+	defer conn.Close()
+
+	conn.SetDeadline(time.Now().Add(10 * time.Second))
+
+	// Perform handshake
+	if _, err := conn.Write([]byte(jdwpHandshake)); err != nil {
+		addError(fmt.Sprintf("JDWP capabilities probe: handshake write failed: %v", err))
+		return nil
+	}
+	buf := make([]byte, len(jdwpHandshake))
+	if _, err := conn.Read(buf); err != nil {
+		addError(fmt.Sprintf("JDWP capabilities probe: handshake read failed: %v", err))
+		return nil
+	}
+
+	// VirtualMachine.Capabilities (cmdSet=1, cmd=12) — optional in JDWP 1.6
+	capCmd := &JDWPPacket{
+		ID:     2,
+		Flags:  0,
+		CmdSet: 1,
+		Cmd:    12,
+	}
+	if err := WriteJDWPPacket(conn, capCmd); err != nil {
+		addError(fmt.Sprintf("JDWP capabilities probe: send command failed: %v", err))
+		return nil
+	}
+
+	reply, err := ReadJDWPPacket(conn)
+	if err != nil {
+		addError(fmt.Sprintf("JDWP capabilities probe: read reply failed: %v", err))
+		return nil
+	}
+
+	caps, err := parseCapabilities(reply.Data)
+	if err != nil {
+		addError(fmt.Sprintf("JDWP capabilities probe: parse failed: %v", err))
+		return nil
+	}
+
+	return caps
+}
+
+// parseCapabilities parses the reply to VirtualMachine.Capabilities.
+//
+// Reply format:
+//
+//	bool: canWatchFieldModification
+//	bool: canWatchFieldAccess
+//	bool: canGetBytecodes
+//	bool: canGetSyntheticAttribute
+//	bool: canGetOwnedMonitorInfo
+//	bool: canGetCurrentContendedMonitor
+//	bool: canGetMonitorInfo
+//	bool: canRedefineClasses
+//	bool: canAddMethod
+//	bool: canUnrestrictedlyRedefineClasses
+//	bool: canPopFrames
+//	bool: canUseInstanceFilters
+//	bool: canGetSourceDebugExtension
+//	bool: canRequestVMDeathEvent
+//	bool: canSetDefaultStratum
+//	(JDWP 1.6+):
+//	bool: canGetInstanceInfo
+//	bool: canRequestMonitorEvents
+//	bool: canGetMonitorFrameInfo
+//	bool: canUseSourceNameFilters
+//	bool: canGetConstantPool
+//	bool: canForceEarlyReturn
+func parseCapabilities(data []byte) (*DebugCapabilities, error) {
+	r := NewJDWPDataReader(data)
+
+	caps := &DebugCapabilities{}
+
+	var err error
+	caps.CanWatchFieldModification, err = r.ReadBool()
+	if err != nil {
+		return nil, err
+	}
+	caps.CanWatchFieldAccess, err = r.ReadBool()
+	if err != nil {
+		return nil, err
+	}
+	caps.CanGetBytecodes, err = r.ReadBool()
+	if err != nil {
+		return nil, err
+	}
+	caps.CanGetSyntheticAttribute, err = r.ReadBool()
+	if err != nil {
+		return nil, err
+	}
+	caps.CanGetOwnedMonitorInfo, err = r.ReadBool()
+	if err != nil {
+		return nil, err
+	}
+	caps.CanGetCurrentContendedMonitor, err = r.ReadBool()
+	if err != nil {
+		return nil, err
+	}
+	caps.CanGetMonitorInfo, err = r.ReadBool()
+	if err != nil {
+		return nil, err
+	}
+	caps.CanRedefineClasses, err = r.ReadBool()
+	if err != nil {
+		return nil, err
+	}
+	caps.CanAddMethod, err = r.ReadBool()
+	if err != nil {
+		return nil, err
+	}
+	caps.CanUnrestrictedlyRedefineClasses, err = r.ReadBool()
+	if err != nil {
+		return nil, err
+	}
+	caps.CanPopFrames, err = r.ReadBool()
+	if err != nil {
+		return nil, err
+	}
+	caps.CanUseInstanceFilters, err = r.ReadBool()
+	if err != nil {
+		return nil, err
+	}
+	caps.CanGetSourceDebugExtension, err = r.ReadBool()
+	if err != nil {
+		return nil, err
+	}
+	caps.CanRequestVMDeathEvent, err = r.ReadBool()
+	if err != nil {
+		return nil, err
+	}
+	caps.CanSetDefaultStratum, err = r.ReadBool()
+	if err != nil {
+		return nil, err
+	}
+
+	// Remaining JDWP 1.6+ capabilities (optional)
+	if r.Remaining() >= 5 {
+		// Skip canGetInstanceInfo, canRequestMonitorEvents,
+		// canGetMonitorFrameInfo, canUseSourceNameFilters
+		_ = r.SkipBytes(4)
+		var err2 error
+		caps.CanGetConstantPool, err2 = r.ReadBool()
+		if err2 != nil {
+			return nil, err2
+		}
+	}
+	if r.Remaining() >= 1 {
+		var err2 error
+		caps.CanForceEarlyReturn, err2 = r.ReadBool()
+		if err2 != nil {
+			return nil, err2
+		}
+	}
+
+	return caps, nil
 }

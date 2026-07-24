@@ -380,7 +380,7 @@ const SqlConsole: React.FC<SqlConsoleProps> = ({ sqlService }) => {
                   <tbody>
                     {result.rows.map((row, ri) => (
                       <tr key={ri}>
-                        {row.map((cell: any, ci: number) => (
+                        {row.map((cell: unknown, ci: number) => (
                           <td key={ci}>{cell === null ? <em>NULL</em> : String(cell)}</td>
                         ))}
                       </tr>

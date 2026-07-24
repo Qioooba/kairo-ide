@@ -450,6 +450,175 @@ func TestBuild_SuccessfulCompilation(t *testing.T) {
 }
 
 // TestBuild_PersistAndLoadFinished 验证构建结果持久化
+// TestEvalSymlinksNearestBuildPath verifies symlink resolution for
+// paths that may or may not exist.
+func TestEvalSymlinksNearestBuildPath(t *testing.T) {
+	// Test with a real directory that exists
+	dir := t.TempDir()
+	resolved, err := evalSymlinksNearestBuildPath(dir)
+	if err != nil {
+		t.Fatalf("evalSymlinksNearestBuildPath on real dir: %v", err)
+	}
+	if resolved != dir {
+		t.Errorf("resolved = %q, want %q", resolved, dir)
+	}
+
+	// Test with a path that doesn't exist but has a real parent
+	nonexistent := filepath.Join(dir, "nonexistent", "sub", "file.java")
+	resolved, err = evalSymlinksNearestBuildPath(nonexistent)
+	if err != nil {
+		t.Fatalf("evalSymlinksNearestBuildPath on nonexistent child: %v", err)
+	}
+	if resolved != filepath.Clean(nonexistent) {
+		t.Errorf("resolved = %q, want %q", resolved, filepath.Clean(nonexistent))
+	}
+}
+
+// TestAuthorizeAbsoluteWithin_EdgeCases verifies additional edge cases.
+func TestAuthorizeAbsoluteWithin_EdgeCases(t *testing.T) {
+	root := t.TempDir()
+	// Test with a valid path within root
+	valid := filepath.Join(root, "src", "Main.java")
+	if err := os.MkdirAll(filepath.Dir(valid), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(valid, []byte("class Main{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := authorizeAbsoluteWithin(root, valid)
+	if err != nil {
+		t.Fatalf("authorizeAbsoluteWithin valid path: %v", err)
+	}
+	if resolved != valid {
+		t.Errorf("resolved = %q, want %q", resolved, valid)
+	}
+}
+
+// TestValidateTrustedBuildRequest_SourceFileEdgeCases verifies source file validation.
+func TestValidateTrustedBuildRequest_SourceFileEdgeCases(t *testing.T) {
+	root := t.TempDir()
+
+	// Test with non-existent source file
+	req := &api.BuildRequest{
+		ProjectID:   "test",
+		ProjectRoot: root,
+		OutputDir:   filepath.Join(root, "build"),
+		Files:       []string{filepath.Join(root, "DoesNotExist.java")},
+	}
+	err := validateTrustedBuildRequest(req)
+	if err == nil {
+		t.Fatal("expected error for non-existent source file")
+	}
+
+	// Test with non-.java file
+	readme := filepath.Join(root, "README.txt")
+	if err := os.WriteFile(readme, []byte("hello"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	req.Files = []string{readme}
+	err = validateTrustedBuildRequest(req)
+	if err == nil {
+		t.Fatal("expected error for non-.java file")
+	}
+
+	// Test with classpath entry outside root
+	req.Files = nil
+	req.Classpath = []string{t.TempDir()}
+	err = validateTrustedBuildRequest(req)
+	if err == nil {
+		t.Fatal("expected error for classpath outside root")
+	}
+}
+
+// TestSanitizeBuildText_EmptyValues verifies empty project/toolchain.
+func TestSanitizeBuildText_EmptyValues(t *testing.T) {
+	got := sanitizeBuildText("hello world", "", "", 100)
+	if got != "hello world" {
+		t.Errorf("sanitizeBuildText with empty values = %q, want hello world", got)
+	}
+}
+
+// TestSanitizeBuildText_NoTruncation verifies no truncation when under limit.
+func TestSanitizeBuildText_NoTruncation(t *testing.T) {
+	got := sanitizeBuildText("short text", "/root", "/jdk", 100)
+	if strings.Contains(got, "[truncated]") {
+		t.Error("short text should not be truncated")
+	}
+}
+
+// TestSanitizeBuildText_ZeroMaxBytes verifies zero maxBytes means no truncation.
+func TestSanitizeBuildText_ZeroMaxBytes(t *testing.T) {
+	got := sanitizeBuildText("hello", "/root", "/jdk", 0)
+	if got != "hello" {
+		t.Errorf("sanitizeBuildText with 0 maxBytes = %q, want hello", got)
+	}
+}
+
+// TestCloneBuildResult_Nil verifies nil handling.
+func TestCloneBuildResult_Nil(t *testing.T) {
+	if cloneBuildResult(nil) != nil {
+		t.Error("cloneBuildResult(nil) should return nil")
+	}
+}
+
+// TestAsyncBuildEngine_CancelAlreadyCancelled verifies cancellation of a
+// build that is already in terminal state.
+func TestAsyncBuildEngine_CancelAlreadyCancelled(t *testing.T) {
+	engine := newTestAsyncBuildEngine(t)
+	engine.compile = func(ctx context.Context, _ build.Request) (*build.Result, error) {
+		return nil, context.Canceled
+	}
+	result, err := engine.Start(trustedBuildRequest(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(200 * time.Millisecond)
+	// Cancel again should return the same result
+	again, err := engine.Cancel(context.Background(), result.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.State != "cancelled" {
+		t.Errorf("state = %q, want cancelled", again.State)
+	}
+}
+
+// TestAsyncBuildEngine_Cancel_ContextDone verifies that a cancelled context
+// passed to Cancel returns immediately.
+func TestAsyncBuildEngine_Cancel_ContextDone(t *testing.T) {
+	engine := newTestAsyncBuildEngine(t)
+	engine.compile = func(ctx context.Context, _ build.Request) (*build.Result, error) {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	result, err := engine.Start(trustedBuildRequest(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = engine.Cancel(ctx, result.ID)
+	if err == nil {
+		// Clean up the running goroutine before failing.
+		engine.Cancel(context.Background(), result.ID)
+		t.Fatal("expected error for cancelled context")
+	}
+	// Properly cancel the running build so the goroutine exits
+	// before TempDir cleanup on Windows.
+	engine.Cancel(context.Background(), result.ID)
+}
+
+// TestBuildRequest_WithToolchain looks up toolchain.
+func TestBuildRequest_WithToolchain(t *testing.T) {
+	engine := newTestAsyncBuildEngine(t)
+	req := trustedBuildRequest(t)
+	req.Toolchain = "nonexistent-toolchain"
+	_, err := engine.Start(req)
+	if err == nil {
+		t.Fatal("expected error for nonexistent toolchain")
+	}
+}
+
 func TestBuild_PersistAndLoadFinished(t *testing.T) {
 	engine := newTestAsyncBuildEngine(t)
 	engine.compile = func(ctx context.Context, _ build.Request) (*build.Result, error) {

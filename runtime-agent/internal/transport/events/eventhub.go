@@ -3,7 +3,9 @@ package events
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -29,12 +31,12 @@ const (
 
 // Event represents a system event published to subscribers.
 type Event struct {
-	Sequence    int64       `json:"sequence"`
-	Type        EventType   `json:"type"`
-	WorkspaceID string      `json:"workspaceId"`
-	Message     string      `json:"message,omitempty"`
-	Data        interface{} `json:"data,omitempty"`
-	Time        time.Time   `json:"time"`
+	Sequence    int64           `json:"sequence"`
+	Type        EventType       `json:"type"`
+	WorkspaceID string          `json:"workspaceId"`
+	Message     string          `json:"message,omitempty"`
+	Data        json.RawMessage `json:"data,omitempty"`
+	Time        time.Time       `json:"time"`
 }
 
 const (
@@ -49,7 +51,7 @@ const (
 type EventHub struct {
 	mu           sync.RWMutex
 	subscribers  map[string]map[string]chan Event // workspaceID → subscriberID → channel
-	sequence     int64
+	sequence     atomic.Int64
 	history      []Event // ring buffer
 	historyHead  int     // index of oldest entry in ring buffer
 	historyCount int     // number of entries currently in ring buffer
@@ -172,9 +174,9 @@ func (h *EventHub) unsubscribe(workspaceID, subscriberID string) {
 // If a subscriber's channel is full, a gap event is sent and the
 // subscriber is disconnected.
 func (h *EventHub) Publish(event Event) {
+	seq := h.sequence.Add(1)
+	event.Sequence = seq
 	h.mu.Lock()
-	h.sequence++
-	event.Sequence = h.sequence
 	if event.Time.IsZero() {
 		event.Time = time.Now()
 	}

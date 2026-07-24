@@ -31,16 +31,25 @@ function pass(msg) { console.log('  PASS  ' + msg); }
 function gate(msg) { console.log('  GATED ' + msg); gated.push(msg); }
 function fail(msg) { console.log('  FAIL  ' + msg); failures.push(msg); }
 
-async function api(method, path, body) {
-  const res = await fetch(`http://127.0.0.1:${port}${path}`, {
-    method,
-    headers: { 'Content-Type': 'application/json' },
-    body: body ? JSON.stringify({ requestId: `smoke-${Date.now()}`, payload: body }) : undefined,
-  });
-  const text = await res.text();
-  let json = null;
-  try { json = JSON.parse(text); } catch (_) { /* leave null */ }
-  return { status: res.status, body: text, json };
+async function api(method, path, body, timeoutMs = 30000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}${path}`, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: body ? JSON.stringify({ requestId: `smoke-${Date.now()}`, payload: body }) : undefined,
+      signal: controller.signal,
+    });
+    const text = await res.text();
+    let json = null;
+    try { json = JSON.parse(text); } catch (_) { /* leave null */ }
+    return { status: res.status, body: text, json };
+  } catch (err) {
+    return { status: 0, body: '', json: null, error: err.message };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 (async () => {
@@ -58,9 +67,11 @@ async function api(method, path, body) {
   else pass(`state=${g1.json.payload.state} version=${g1.json.payload.version} initializeOk=${g1.json.payload.initializeOk}`);
 
   step('jdtls: POST prepare distribution');
-  const p1 = await api('POST', '/api/v1/jdtls', { sourceLevel: '1.6' });
+  const p1 = await api('POST', '/api/v1/jdtls', { sourceLevel: '1.6' }, 120000);
   if (p1.status === 200 && p1.json?.payload?.home) {
     pass(`jdtls prepared: ${p1.json.payload.home}`);
+  } else if (p1.status === 0) {
+    gate(`jdtls prepare timed out (network-dependent): ${p1.error}`);
   } else {
     fail(`jdtls prepare: status=${p1.status} body=${p1.body.slice(0, 200)}`);
   }

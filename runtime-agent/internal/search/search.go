@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -27,6 +28,39 @@ var DefaultExcludes = []string{
 	"logs",
 	"work", "temp", // Tomcat
 	".legacyflow", ".kairo", // runtime state
+}
+
+// excludedDirSet is a map-based lookup for O(1) excluded dir checks.
+var excludedDirSet = func() map[string]bool {
+	m := make(map[string]bool, len(DefaultExcludes))
+	for _, d := range DefaultExcludes {
+		m[d] = true
+	}
+	return m
+}()
+
+// scannerBufPool reuses 64KB buffers for bufio.Scanner.
+var scannerBufPool = sync.Pool{
+	New: func() any {
+		buf := make([]byte, 64*1024)
+		return &buf
+	},
+}
+
+// chunkBufPool reuses 64KB chunk buffers for readAllContext.
+var chunkBufPool = sync.Pool{
+	New: func() any {
+		buf := make([]byte, 64*1024)
+		return &buf
+	},
+}
+
+// headBufPool reuses 4KB buffers for encoding detection in searchFileToSink.
+var headBufPool = sync.Pool{
+	New: func() any {
+		buf := make([]byte, 4096)
+		return &buf
+	},
 }
 
 // Options configures a search.
@@ -268,13 +302,7 @@ func (r *Result) recordError(path string, err error) {
 }
 
 func isExcludedDir(rel string) bool {
-	base := filepath.Base(rel)
-	for _, e := range DefaultExcludes {
-		if base == e {
-			return true
-		}
-	}
-	return false
+	return excludedDirSet[filepath.Base(rel)]
 }
 
 // isLikelyBinary returns true if the file has a known binary
@@ -336,30 +364,32 @@ func searchFileToSink(absPath, rel, root string, m *compiledMatcher, opts Option
 		return nil
 	}
 	defer f.Close()
-	// Sniff a small sample to detect encoding.
-	head := make([]byte, 4096)
+	// Sniff a small sample to detect encoding using a pooled buffer.
+	headPtr := headBufPool.Get().(*[]byte)
+	head := *headPtr
 	n, _ := f.Read(head)
 	detID, _, _, _ := encoding.Detect(head[:n], opts.ProjectEncoding, opts.EncodingAliases)
+	headBufPool.Put(headPtr)
 
-	// Re-open and stream line-by-line.
+	// Seek back to start for line-by-line scanning.
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
 		return nil
 	}
 	scanner := bufio.NewScanner(f)
 	const maxLine = 4 * 1024 * 1024
-	scanner.Buffer(make([]byte, 64*1024), maxLine)
+	bufPtr := scannerBufPool.Get().(*[]byte)
+	scanner.Buffer(*bufPtr, maxLine)
+	defer func() {
+		scannerBufPool.Put(bufPtr)
+	}()
 
-	_ = encoding.Encoder(detID, opts.EncodingAliases)
-
-	if _, err := f.Seek(0, io.SeekStart); err != nil {
-		return nil
-	}
 	if detID == encoding.UTF8 || detID == encoding.UTF8BOM {
 		return scanUTF8ToSink(scanner, rel, m, opts, sink, matchedCount)
 	}
 	if err := opts.Cancel.Err(); err != nil {
 		return err
 	}
+	// For non-UTF8, re-read the file content from the already-seeked position.
 	data, err := readAllContext(opts.Cancel, f)
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
@@ -384,9 +414,10 @@ func searchFileToSink(absPath, rel, root string, m *compiledMatcher, opts Option
 // filesystem read chunk. It intentionally avoids a helper goroutine, which
 // could leak forever when a network filesystem blocks in Read.
 func readAllContext(ctx context.Context, reader io.Reader) ([]byte, error) {
-	const chunkSize = 64 * 1024
 	var out bytes.Buffer
-	chunk := make([]byte, chunkSize)
+	chunkPtr := chunkBufPool.Get().(*[]byte)
+	chunk := *chunkPtr
+	defer chunkBufPool.Put(chunkPtr)
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -417,13 +448,13 @@ func scanUTF8ToSink(scanner *bufio.Scanner, rel string, m *compiledMatcher, opts
 			break
 		}
 		line++
-		s := scanner.Text()
-		matches := m.re.FindAllStringIndex(s, -1)
+		b := scanner.Bytes()
+		matches := m.re.FindAllIndex(b, -1)
 		if err := opts.Cancel.Err(); err != nil {
 			return err
 		}
 		for _, idx := range matches {
-			sink.addMatch(buildMatch(rel, line, idx[0], idx[1], s, m, opts))
+			sink.addMatch(buildMatchBytes(rel, line, idx[0], idx[1], b, m, opts))
 			*matchedCount++
 		}
 	}
@@ -433,7 +464,9 @@ func scanUTF8ToSink(scanner *bufio.Scanner, rel string, m *compiledMatcher, opts
 func scanBytesToSink(data []byte, rel string, m *compiledMatcher, opts Options, sink matchSink, matchedCount *int) error {
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	const maxLine = 4 * 1024 * 1024
-	scanner.Buffer(make([]byte, 64*1024), maxLine)
+	bufPtr := scannerBufPool.Get().(*[]byte)
+	scanner.Buffer(*bufPtr, maxLine)
+	defer scannerBufPool.Put(bufPtr)
 	line := 0
 	for {
 		if err := opts.Cancel.Err(); err != nil {
@@ -443,24 +476,24 @@ func scanBytesToSink(data []byte, rel string, m *compiledMatcher, opts Options, 
 			break
 		}
 		line++
-		s := scanner.Text()
-		matches := m.re.FindAllStringIndex(s, -1)
+		b := scanner.Bytes()
+		matches := m.re.FindAllIndex(b, -1)
 		if err := opts.Cancel.Err(); err != nil {
 			return err
 		}
 		for _, idx := range matches {
-			sink.addMatch(buildMatch(rel, line, idx[0], idx[1], s, m, opts))
+			sink.addMatch(buildMatchBytes(rel, line, idx[0], idx[1], b, m, opts))
 			*matchedCount++
 		}
 	}
 	return nil
 }
 
-func buildMatch(rel string, line, start, end int, s string, m *compiledMatcher, opts Options) Match {
-	// IDEs expect a rune-based column, but FindAllStringIndex
+func buildMatchBytes(rel string, line, start, end int, b []byte, m *compiledMatcher, opts Options) Match {
+	// IDEs expect a rune-based column, but FindAllIndex
 	// returns byte offsets. Convert bytes-to-runes for the prefix
 	// so non-ASCII text gets the right column.
-	col := utf8.RuneCountInString(s[:start]) + 1
+	col := utf8.RuneCount(b[:start]) + 1
 	before := ""
 	after := ""
 	if opts.ContextLines > 0 {
@@ -473,14 +506,19 @@ func buildMatch(rel string, line, start, end int, s string, m *compiledMatcher, 
 		File:          rel,
 		Line:          line,
 		Column:        col,
-		MatchText:     s[start:end],
+		MatchText:     string(b[start:end]),
 		ContextBefore: before,
 		ContextAfter:  after,
 	}
 	if m.preview != "" {
-		match.Replacement = m.re.ReplaceAllString(s[start:end], m.preview)
+		match.Replacement = m.re.ReplaceAllString(string(b[start:end]), m.preview)
 	}
 	return match
+}
+
+// buildMatch is kept for backward compatibility with existing callers.
+func buildMatch(rel string, line, start, end int, s string, m *compiledMatcher, opts Options) Match {
+	return buildMatchBytes(rel, line, start, end, []byte(s), m, opts)
 }
 
 // globSet is a small wrapper around a list of compiled globs.

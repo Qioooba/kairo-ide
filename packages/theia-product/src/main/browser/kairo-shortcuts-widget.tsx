@@ -285,7 +285,7 @@ export class KairoShortcutsWidget extends BaseWidget {
       if (typeof keybindings === 'function') {
         const bindings = keybindings.call(this.keybindingRegistry, commandId);
         if (bindings && bindings.length > 0) {
-          keybindingStr = bindings.map((b: any) => this.formatKeybinding(b)).join(', ');
+          keybindingStr = bindings.map((b: { keybinding?: string; command?: string }) => this.formatKeybinding(b)).join(', ');
         }
       }
 
@@ -327,7 +327,7 @@ export class KairoShortcutsWidget extends BaseWidget {
   }
 
   /** Format a keybinding string for display. */
-  protected formatKeybinding(keybinding: any): string {
+  protected formatKeybinding(keybinding: { keybinding?: string; command?: string } | string): string {
     if (typeof keybinding === 'string') {
       return keybinding
         .replace(/ctrlcmd/g, navigator.platform.includes('Mac') ? 'Cmd' : 'Ctrl')
