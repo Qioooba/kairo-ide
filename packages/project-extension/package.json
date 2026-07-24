@@ -12,7 +12,7 @@
     "build": "tsc -p tsconfig.json",
     "clean": "rm -rf lib",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "test": "node -r ./test-setup.cjs -r ts-node/register --no-warnings src/browser/import-wizard-widget.test.ts && node --test src/browser/project-exports-extended.test.cjs src/browser/project-logic.test.cjs src/browser/project-service-extended.test.cjs src/browser/import-wizard-widget.test.cjs"
+    "test": "node -r ./test-setup.cjs -r ts-node/register --no-warnings src/browser/import-wizard-widget.test.ts && node --test src/browser/project-exports-extended.test.cjs src/browser/project-logic.test.cjs src/browser/project-service-extended.test.cjs src/browser/import-wizard-widget.test.cjs src/browser/project-extra.test.cjs"
   },
   "dependencies": {
     "@kairo/config-schema": "workspace:*",

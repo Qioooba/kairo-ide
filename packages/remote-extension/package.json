@@ -12,7 +12,7 @@
     "build": "tsc -p tsconfig.json",
     "clean": "rm -rf lib",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "test": "node --test src/browser/remote-exports.test.cjs src/browser/remote-sandbox.test.cjs src/browser/remote-connection-service.test.cjs"
+    "test": "node --test src/browser/remote-exports.test.cjs src/browser/remote-sandbox.test.cjs src/browser/remote-connection-service.test.cjs src/browser/remote-panel-widget.test.cjs"
   },
   "dependencies": {
     "@kairo/protocol": "workspace:*",

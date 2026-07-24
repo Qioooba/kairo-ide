@@ -1375,7 +1375,7 @@ func (f *fakeServerHistoryRepo) ListByProject(ctx context.Context, wsID domain.W
 func (f *fakeServerHistoryRepo) ListNonTerminal(ctx context.Context) ([]*domain.ServerRecord, error) {
 	var result []*domain.ServerRecord
 	for _, r := range f.records {
-		if !r.ObservedState.IsTerminal() {
+		if r == nil || !r.ObservedState.IsTerminal() {
 			result = append(result, r)
 		}
 	}

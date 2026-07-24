@@ -3,6 +3,7 @@ package services
 import (
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -64,8 +65,8 @@ func (a *diskAuthenticator) Login(payload json.RawMessage, w http.ResponseWriter
 			}
 		}
 	} else if sharedSecret != "" {
-		// 配置了 shared secret
-		if req.Password != sharedSecret {
+		// 配置了 shared secret - 使用恒定时间比较防止时序攻击
+		if subtle.ConstantTimeCompare([]byte(req.Password), []byte(sharedSecret)) != 1 {
 			return nil, fmt.Errorf("invalid credentials")
 		}
 	} else {

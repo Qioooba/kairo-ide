@@ -307,9 +307,11 @@ func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
 		if origin != "" {
-			w.Header().Set("Access-Control-Allow-Origin", origin)
-			w.Header().Set("Vary", "Origin")
-			w.Header().Set("Access-Control-Allow-Credentials", "true")
+			if isSafeOrigin(origin) {
+				w.Header().Set("Access-Control-Allow-Origin", origin)
+				w.Header().Set("Vary", "Origin")
+				w.Header().Set("Access-Control-Allow-Credentials", "true")
+			}
 			w.Header().Set("Access-Control-Allow-Headers", allowedHeaders)
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		}
@@ -319,6 +321,31 @@ func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// isSafeOrigin returns true if the origin is a localhost/loopback URL.
+// This prevents arbitrary websites from making credentialed cross-origin
+// requests to the agent. The desktop form runs on loopback; the browser
+// form runs on localhost.
+func isSafeOrigin(origin string) bool {
+	// Allow any localhost origin.
+	if strings.HasPrefix(origin, "http://localhost") ||
+		strings.HasPrefix(origin, "https://localhost") ||
+		strings.HasPrefix(origin, "http://127.0.0.1") ||
+		strings.HasPrefix(origin, "https://127.0.0.1") ||
+		strings.HasPrefix(origin, "http://[::1]") ||
+		strings.HasPrefix(origin, "https://[::1]") {
+		return true
+	}
+	// Allow file:// origins (Electron renderer).
+	if strings.HasPrefix(origin, "file://") {
+		return true
+	}
+	// Allow vscode-webview:// origins (VS Code / Theia webviews).
+	if strings.HasPrefix(origin, "vscode-webview://") {
+		return true
+	}
+	return false
 }
 
 func (s *Server) routes() {

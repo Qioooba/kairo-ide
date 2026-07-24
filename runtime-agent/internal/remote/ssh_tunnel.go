@@ -13,16 +13,19 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"net"
 	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/log"
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/knownhosts"
 )
 
 // SSHConnectionState represents the current state of an SSH tunnel.
@@ -80,6 +83,9 @@ type SSHConfig struct {
 	KeyData []byte
 	// KeyPassphrase is the passphrase for the private key (optional).
 	KeyPassphrase string
+	// KnownHostsFile is the path to a known_hosts file for host key verification.
+	// If empty, host key verification is skipped (development only).
+	KnownHostsFile string
 	// LocalPort is the local port to forward to the remote agent port.
 	LocalPort int
 	// RemotePort is the remote agent port to forward to.
@@ -204,10 +210,16 @@ func (t *SSHTunnel) Connect(ctx context.Context) error {
 		return err
 	}
 
+	hostKeyCallback, err := t.buildHostKeyCallback()
+	if err != nil {
+		t.setError(fmt.Errorf("ssh_tunnel: host key callback: %w", err))
+		return err
+	}
+
 	clientConfig := &ssh.ClientConfig{
 		User:            t.cfg.User,
 		Auth:            authMethods,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // TODO: proper host key verification
+		HostKeyCallback: hostKeyCallback,
 		Timeout:         30 * time.Second,
 	}
 
@@ -296,6 +308,37 @@ func (t *SSHTunnel) parseKeyAuth(keyData []byte) ([]ssh.AuthMethod, error) {
 		return nil, fmt.Errorf("parse private key: %w", err)
 	}
 	return []ssh.AuthMethod{ssh.PublicKeys(signer)}, nil
+}
+
+// buildHostKeyCallback returns a host key callback function.
+// If KnownHostsFile is configured, it validates against the known_hosts file.
+// Otherwise, it falls back to insecure mode (development only) with a warning.
+func (t *SSHTunnel) buildHostKeyCallback() (ssh.HostKeyCallback, error) {
+	if t.cfg.KnownHostsFile != "" {
+		cb, err := knownhosts.New(t.cfg.KnownHostsFile)
+		if err != nil {
+			return nil, fmt.Errorf("ssh_tunnel: known_hosts file %s: %w", t.cfg.KnownHostsFile, err)
+		}
+		return cb, nil
+	}
+
+	// No KnownHostsFile configured — verify host key against the system
+	// known_hosts file (~/.ssh/known_hosts) as a safe default. If that
+	// also fails, fall back to insecure mode with a warning (acceptable
+	// only for development environments where the user explicitly opts
+	// in by not providing a known_hosts file).
+	homeDir, err := os.UserHomeDir()
+	if err == nil {
+		systemKnownHosts := filepath.Join(homeDir, ".ssh", "known_hosts")
+		if _, statErr := os.Stat(systemKnownHosts); statErr == nil {
+			cb, khErr := knownhosts.New(systemKnownHosts)
+			if khErr == nil {
+				return cb, nil
+			}
+		}
+	}
+	t.logger.Warn("no KnownHostsFile configured; host key verification is disabled (INSECURE for production)", log.Fields{})
+	return ssh.InsecureIgnoreHostKey(), nil
 }
 
 // startPortForwarding starts local port forwarding to the remote agent.
@@ -561,13 +604,23 @@ func (t *SSHTunnel) setError(err error) {
 
 // GenerateSSHKey generates a new ED25519 SSH key pair for testing.
 func GenerateSSHKey() (privateKey []byte, publicKey []byte, err error) {
-	_, priv, err := GenerateED25519Key()
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("generate ed25519 key: %w", err)
+	}
+	signer, err := ssh.NewSignerFromSigner(priv)
+	if err != nil {
+		return nil, nil, fmt.Errorf("create ssh signer: %w", err)
 	}
 
-	privateKey = ssh.MarshalAuthorizedKey(priv.PublicKey())
-	publicKey = ssh.MarshalAuthorizedKey(priv.PublicKey())
+	publicKey = ssh.MarshalAuthorizedKey(signer.PublicKey())
+
+	// Marshal the ed25519.PrivateKey (implements crypto.Signer) to OpenSSH PEM format
+	pemBlock, err := ssh.MarshalPrivateKey(priv, "")
+	if err != nil {
+		return nil, nil, fmt.Errorf("marshal private key: %w", err)
+	}
+	privateKey = pem.EncodeToMemory(pemBlock)
 	return privateKey, publicKey, nil
 }
 

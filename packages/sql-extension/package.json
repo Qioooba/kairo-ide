@@ -12,7 +12,7 @@
     "build": "tsc -p tsconfig.json",
     "clean": "rm -rf lib",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "test": "node --test src/browser/sql-exports.test.cjs src/browser/sql-execution-extended.test.cjs src/browser/sql-connection-widget.test.cjs"
+    "test": "node --test src/browser/sql-exports.test.cjs src/browser/sql-execution-extended.test.cjs src/browser/sql-connection-widget.test.cjs src/browser/sql-connection-service-extra.test.cjs src/browser/sql-execution-extra.test.cjs"
   },
   "dependencies": {
     "@theia/core": "^1.58.0",

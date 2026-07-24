@@ -21,6 +21,22 @@ import * as assert from 'node:assert/strict';
 import { KairoProjectService } from './project-service';
 import type { ProjectConfig } from '@kairo/protocol';
 
+/** Minimal mock of RuntimeConnectionService for tests. */
+interface MockRuntime {
+  setWorkspace: (id: string) => void;
+  request: (endpoint: string, payload?: unknown, init?: Record<string, unknown>) => Promise<unknown>;
+}
+
+/** Access the private runtime field on KairoProjectService for test injection. */
+interface KairoProjectServicePrivate {
+  runtime: MockRuntime;
+  projects: Map<string, ProjectConfig>;
+}
+
+function asPrivate(svc: KairoProjectService): KairoProjectServicePrivate {
+  return svc as unknown as KairoProjectServicePrivate;
+}
+
 function makeSampleConfig(overrides: Partial<ProjectConfig> = {}): ProjectConfig {
   const base: ProjectConfig = {
     schemaVersion: 1,
@@ -48,67 +64,67 @@ function makeSampleConfig(overrides: Partial<ProjectConfig> = {}): ProjectConfig
 }
 
 test('KairoProjectService.create() issues PUT /api/v1/projects/{projectId} with the config', async () => {
-  const calls: Array<{ endpoint: string; payload: any; init: any }> = [];
-  const fakeRuntime: any = {
+  const calls: Array<{ endpoint: string; payload: unknown; init: Record<string, unknown> }> = [];
+  const fakeRuntime: MockRuntime = {
     setWorkspace: () => {},
-    request: async (endpoint: string, payload: any, init: any) => {
-      calls.push({ endpoint, payload, init });
-      return { ...payload, _saved: true };
+    request: async (endpoint: string, payload?: unknown, init?: Record<string, unknown>) => {
+      calls.push({ endpoint, payload, init: init ?? {} });
+      return { ...(payload as Record<string, unknown>), _saved: true };
     },
   };
   const svc = new KairoProjectService();
   // Bypass Inversify — the contract under test is the
   // service method, not the DI wiring.
-  (svc as any).runtime = fakeRuntime;
+  asPrivate(svc).runtime = fakeRuntime;
 
   const config = makeSampleConfig();
   const result = await svc.create(config);
 
   assert.equal(calls.length, 1, 'create() must make exactly one runtime call');
   assert.equal(calls[0].endpoint, 'PUT /api/v1/projects/{projectId}');
-  assert.equal(calls[0].init.pathParams.projectId, config.id);
+  assert.equal((calls[0].init.pathParams as Record<string, unknown>).projectId, config.id);
   assert.deepEqual(calls[0].payload, config, 'payload must be the FLAT project — the agent unmarshals into domain.Project directly (KAIRO-RC-WEB-202)');
-  assert.equal((calls[0].payload as any).config, undefined, 'payload must NOT be wrapped in { config }');
-  assert.equal((result as any)._saved, true, 'create() must return the runtime response');
+  assert.equal((calls[0].payload as unknown as Record<string, unknown>).config, undefined, 'payload must NOT be wrapped in { config }');
+  assert.equal((result as unknown as Record<string, unknown>)._saved, true, 'create() must return the runtime response');
 });
 
 test('KairoProjectService.create() caches the saved config under its id', async () => {
-  const fakeRuntime: any = {
+  const fakeRuntime: MockRuntime = {
     setWorkspace: () => {},
-    request: async (_endpoint: string, payload: any) => ({ ...payload, _saved: true }),
+    request: async (_endpoint: string, payload?: unknown) => ({ ...(payload as Record<string, unknown>), _saved: true }),
   };
   const svc = new KairoProjectService();
-  (svc as any).runtime = fakeRuntime;
+  asPrivate(svc).runtime = fakeRuntime;
 
   const config = makeSampleConfig({ id: 'prj_cached' });
   await svc.create(config);
 
-  const cached = (svc as any).projects.get('prj_cached') as ProjectConfig;
+  const cached = asPrivate(svc).projects.get('prj_cached') as ProjectConfig;
   assert.ok(cached, 'create() must populate the projects map');
   assert.equal(cached.id, 'prj_cached');
 });
 
 test('KairoProjectService.create() rejects a config with no id and never calls the runtime', async () => {
-  const fakeRuntime: any = {
+  const fakeRuntime: MockRuntime = {
     setWorkspace: () => {},
     request: async () => { throw new Error('runtime must not be called'); },
   };
   const svc = new KairoProjectService();
-  (svc as any).runtime = fakeRuntime;
+  asPrivate(svc).runtime = fakeRuntime;
 
   await assert.rejects(
-    () => svc.create({ ...makeSampleConfig(), id: '' } as any),
+    () => svc.create({ ...makeSampleConfig(), id: '' } as unknown as ProjectConfig),
     /id is required/,
   );
 });
 
 test('KairoProjectService.create() surfaces runtime errors to the caller', async () => {
-  const fakeRuntime: any = {
+  const fakeRuntime: MockRuntime = {
     setWorkspace: () => {},
     request: async () => { throw new Error('agent says no'); },
   };
   const svc = new KairoProjectService();
-  (svc as any).runtime = fakeRuntime;
+  asPrivate(svc).runtime = fakeRuntime;
 
   await assert.rejects(
     () => svc.create(makeSampleConfig()),
@@ -122,15 +138,16 @@ test('KairoProjectService.create() surfaces runtime errors to the caller', async
 test('importProjectNew calls runtime.setWorkspace after successful import (N-027)', async () => {
   const calls: string[] = [];
   const setWorkspaceCalls: string[] = [];
-  const fakeRuntime: any = {
+  const fakeRuntime: MockRuntime = {
     setWorkspace: (id: string) => { setWorkspaceCalls.push(id); },
-    request: async (endpoint: string, payload: any) => {
+    request: async (endpoint: string, payload?: unknown) => {
       calls.push(endpoint);
-      return { id: 'imported-prj', name: payload.name, rootPath: payload.rootPath };
+      const p = payload as Record<string, unknown>;
+      return { id: 'imported-prj', name: p.name, rootPath: p.rootPath };
     },
   };
   const svc = new KairoProjectService();
-  (svc as any).runtime = fakeRuntime;
+  asPrivate(svc).runtime = fakeRuntime;
 
   const params = {
     workspaceId: 'ws-import',

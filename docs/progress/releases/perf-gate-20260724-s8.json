@@ -1,0 +1,203 @@
+{
+  "timestamp": "2026-07-24T14:22:42.079Z",
+  "platform": {
+    "os": "win32",
+    "release": "10.0.26200",
+    "arch": "x64",
+    "cpus": 40,
+    "hostname": "x99",
+    "node": "v20.18.0"
+  },
+  "metrics": {
+    "coldStart": {
+      "value": 0.121,
+      "unit": "s",
+      "target": 8,
+      "pass": true,
+      "method": "Node.js module load time (proxy for cold start)",
+      "details": {
+        "trials": [
+          129,
+          121,
+          120
+        ],
+        "agentStartupMs": null,
+        "stats": {
+          "n": 3,
+          "min": 120,
+          "max": 129,
+          "mean": 123.333,
+          "median": 121,
+          "p95": 129
+        }
+      }
+    },
+    "fileOpenP95": {
+      "value": 0,
+      "unit": "s",
+      "target": 0.3,
+      "pass": true,
+      "method": "fs.readFile 10KB text file, 100 iterations, P95",
+      "details": {
+        "iterations": 100,
+        "stats": {
+          "n": 100,
+          "min": 0.13419999999996435,
+          "max": 22.58280000000002,
+          "mean": 0.422,
+          "median": 0.16140000000001464,
+          "p95": 0.38149999999996
+        }
+      }
+    },
+    "firstCompletion": {
+      "value": null,
+      "unit": "s",
+      "target": 1.5,
+      "pass": false,
+      "skipped": true,
+      "skipReason": "Go agent not running, JDT LS not measured in headless mode",
+      "method": "SKIPPED — Go agent unreachable",
+      "details": {
+        "agentRunning": false,
+        "jdtAvailable": false
+      }
+    },
+    "subsequentCompletionP95": {
+      "value": null,
+      "unit": "s",
+      "target": 0.5,
+      "pass": false,
+      "skipped": true,
+      "skipReason": "Go agent not running",
+      "method": "SKIPPED — Go agent unreachable",
+      "details": {
+        "agentRunning": false
+      }
+    },
+    "incrementalBuild": {
+      "value": 0.762,
+      "unit": "s",
+      "target": 2,
+      "pass": true,
+      "method": "go build ./internal/domain/...",
+      "details": {
+        "trials": [
+          888,
+          787,
+          749,
+          762,
+          753
+        ],
+        "stats": {
+          "n": 5,
+          "min": 749,
+          "max": 888,
+          "mean": 787.8,
+          "median": 762,
+          "p95": 888
+        }
+      }
+    },
+    "fullTextSearch10k": {
+      "value": 0.564,
+      "unit": "s",
+      "target": 3,
+      "pass": true,
+      "method": "ripgrep -l on .js files in node_modules",
+      "details": {
+        "trials": [
+          26536,
+          564,
+          521
+        ],
+        "stats": {
+          "n": 3,
+          "min": 521,
+          "max": 26536,
+          "mean": 9207,
+          "median": 564,
+          "p95": 26536
+        }
+      }
+    },
+    "searchFirstResult": {
+      "value": 0.165,
+      "unit": "s",
+      "target": 0.2,
+      "pass": true,
+      "method": "ripgrep --files node_modules (first results, 200ms target)",
+      "details": {
+        "iterations": 20,
+        "stats": {
+          "n": 20,
+          "min": 153,
+          "max": 173,
+          "mean": 164,
+          "median": 165,
+          "p95": 173
+        },
+        "ripgrep": true
+      }
+    },
+    "uiInputResponseP95": {
+      "value": 0.000402,
+      "unit": "s",
+      "target": 0.1,
+      "pass": true,
+      "method": "process.hrtime() event loop lag measurement, 200 samples, P95",
+      "details": {
+        "samples": 200,
+        "stats": {
+          "n": 200,
+          "min": 0,
+          "max": 0.7484,
+          "mean": 0.094,
+          "median": 0.012,
+          "p95": 0.402
+        }
+      }
+    },
+    "idleCPU": {
+      "value": 17.27,
+      "unit": "%",
+      "target": 15,
+      "pass": false,
+      "method": "os.cpus() delta-based usage, 3 samples over 5s each, script CPU excluded (Windows 15% threshold)",
+      "details": {
+        "samples": [
+          6.05387862376553,
+          21.33514093319826,
+          24.411005164878823
+        ],
+        "avgUsage": 17.266674907280873,
+        "numCpus": 40,
+        "platform": "win32",
+        "target": 15,
+        "winCpuUsage": 4179821328125
+      }
+    },
+    "steadyMemory": {
+      "value": 43.08,
+      "unit": "MB",
+      "target": 1228,
+      "pass": true,
+      "method": "process.memoryUsage().rss + Go agent ps RSS",
+      "details": {
+        "nodeRssMB": 43.08,
+        "nodeHeapMB": 7.2,
+        "goAgentRssMB": null,
+        "totalMB": 43.08,
+        "formatted": "43.0 MB"
+      }
+    }
+  },
+  "summary": {
+    "total": 10,
+    "passed": 7,
+    "failed": 1,
+    "skipped": 2,
+    "passRate": 88,
+    "elapsedMs": 60585
+  }
+}

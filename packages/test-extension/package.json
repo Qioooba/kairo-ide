@@ -12,7 +12,7 @@
     "build": "tsc -p tsconfig.json",
     "clean": "rm -rf lib",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "test": "node --test src/browser/test-exports.test.cjs src/browser/test-runner.test.cjs src/browser/test-discovery.test.cjs src/browser/test-store.test.cjs"
+    "test": "node --test src/browser/test-exports.test.cjs src/browser/test-runner.test.cjs src/browser/test-discovery.test.cjs src/browser/test-store.test.cjs src/browser/test-extra.test.cjs"
   },
   "dependencies": {
     "@kairo/protocol": "workspace:*",

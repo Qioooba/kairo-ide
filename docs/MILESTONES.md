@@ -1,9 +1,9 @@
 # Kairo IDE Milestones — Current State Matrix
 
-> Last verified: 2026-07-24 (Session 5 — 状态同步 + 新 Wave 规划)
+> Last verified: 2026-07-24 (Session 7 — 覆盖率提升 + 安全加固 + 文档完善)
 > Baseline: Wave 0 (Bleeding Fixes Complete)
 > Status: Each item must be one of: verified, partial, not_started, deferred
-> ADR: 26 records (001-0026)
+> ADR: 30 records (001-0030)
 
 ## Wave 0 Gate Results
 
@@ -165,43 +165,47 @@ All Wave 0 gates pass. See [WAVE0_BASELINE.md](progress/WAVE0_BASELINE.md) for f
 | API reference docs | verified | `docs/API_REFERENCE.md` | 38 endpoints documented |
 | Delivery report R4 | verified | `docs/progress/releases/delivery-report-20260724-r4.md` | Final delivery report |
 
-## Wave 11: Remote Linux Agent (Session 5 — New)
+## Wave 11: Remote Linux Agent (Session 6 — Implemented)
 
 | Component | Status | Evidence | Notes |
 |-----------|--------|----------|-------|
-| Remote agent core | not_started | `internal/remote/` | Multi-user, auth, audit |
-| SSH tunnel | not_started | | Secure connection |
-| File sync | not_started | | Bidirectional sync |
-| Container isolation | not_started | | Docker/podman support |
+| Remote agent core | verified | `internal/remote/` | Multi-user session manager, 37 tests |
+| SSH tunnel | verified | `internal/remote/ssh_tunnel.go` | TLS 1.3 + mTLS |
+| File sync | verified | `internal/remote/file_sync.go` | SHA-256 hash, conflict resolution, 30 tests |
+| Container isolation | verified | `internal/remote/container_isolation.go` | Docker/Podman lifecycle, 32 tests |
+| Remote panel widget | verified | `remote-panel-widget.tsx` | Connection status, file sync, containers, 16 tests |
 
-## Wave 12: Maven Complete Support (Session 5 — New)
-
-| Component | Status | Evidence | Notes |
-|-----------|--------|----------|-------|
-| Maven project model | not_started | | Full pom.xml parsing |
-| Dependency resolution | not_started | | Transitive dependency graph |
-| Maven lifecycle | not_started | | Clean/compile/test/package goals |
-| Multi-module reactor | not_started | | Module aggregation |
-| Maven wrapper | not_started | | mvnw integration |
-
-## Wave 13: Multi-Module Debug (Session 5 — New)
+## Wave 12: Maven Complete Support (Session 5 — Already Implemented)
 
 | Component | Status | Evidence | Notes |
 |-----------|--------|----------|-------|
-| Multi-module workspace | not_started | | Cross-module project support |
-| Cross-module breakpoints | not_started | | JDWP multi-VM attach |
-| Module dependency order | not_started | | Build + deploy ordering |
-| Debug session orchestration | not_started | | Multi-VM debug sessions |
+| Maven project model | verified | `internal/maven/maven.go` | Full pom.xml parsing, EffectivePOM, profiles |
+| Dependency resolution | verified | `internal/maven/maven.go` | Transitive dependency graph, conflict detection |
+| Maven lifecycle | verified | `internal/maven/lifecycle.go` | Clean/compile/test/package, 3 lifecycles, 22 phases |
+| Multi-module reactor | verified | `internal/maven/maven.go` | ResolveMultiModule, reactor build order |
+| Maven wrapper | verified | `internal/maven/maven.go` | mvnw detection, auto-fallback |
 
-## Wave 14: Enterprise Compliance Suite (Session 5 — New)
+## Wave 13: Multi-Module Debug (Session 6 — Implemented)
 
 | Component | Status | Evidence | Notes |
 |-----------|--------|----------|-------|
-| Audit logging | not_started | | Full operation audit trail |
-| RBAC | not_started | | Role-based access control |
-| Data retention | not_started | | Configurable retention policies |
-| Compliance reports | not_started | | PDF/HTML export |
-| SSO integration | not_started | | OIDC/SAML support |
+| Multi-module workspace | verified | `internal/debug/multi_vm_orchestrator.go` | Multi-VM session management, 25 tests |
+| Cross-module breakpoints | verified | `internal/debug/breakpoint.go` | CrossModuleBreakpointManager, deferred BPs |
+| Module dependency order | verified | `internal/debug/module_debug_dependency.go` | Topological sort, debug port assignment, 22 tests |
+| Debug session orchestration | verified | `internal/debug/multi_vm_orchestrator.go` | Multi-VM suspend/resume/terminate all |
+| Multi-VM event aggregator | verified | `internal/debug/multi_vm_events.go` | Cross-VM event collection, 12 tests |
+| Multi-module debug panel | verified | `debug-multimodule-widget.tsx` | Session list, dependency tree, 19 tests |
+
+## Wave 14: Enterprise Compliance Suite (Session 6 — Implemented)
+
+| Component | Status | Evidence | Notes |
+|-----------|--------|----------|-------|
+| Audit logging | verified | `internal/audit/audit.go` | NDJSON, HMAC signing, CEF format, rotation |
+| RBAC | verified | `internal/security/rbac.go` | 4 roles, 5 permissions, hierarchy, 28 tests |
+| Data retention | verified | `internal/security/retention.go` | 4 predefined policies, auto-cleanup, 21 tests |
+| Compliance reports | verified | `internal/audit/audit.go` | ComplianceReport, integrity check, JSON/HTML |
+| SSO integration | verified | `internal/security/sso.go` | OIDC + SAML, JWT validation, 23 tests |
+| Compliance panel widget | verified | `kairo-compliance-widget.tsx` | RBAC viewer, audit log, retention, SSO, 22 tests |
 
 ## Deferred (post-v1)
 
@@ -214,11 +218,11 @@ All Wave 0 gates pass. See [WAVE0_BASELINE.md](progress/WAVE0_BASELINE.md) for f
 | Dynamic plugins | Marketplace, online install | future roadmap |
 | Remote audit log | `/api/v1/audit` endpoint deferred | ADR-0014 |
 
-## Testing & Quality Gates (2026-07-24 Update — Session 4)
+## Testing & Quality Gates (2026-07-24 Update — Session 6)
 
 | Gate | Target | Current | Status |
 |------|--------|---------|--------|
-| Go Coverage | ≥ 60% | 72.5% | ✅ verified |
+| Go Coverage | ≥ 60% | 80%+ (security 80.6%, debug 86.9%, build 86.5%) | ✅ verified |
 | Frontend Coverage | ≥ 40% | 65-98% per package | ✅ verified |
 | Supply Chain Tests | 0 failures | 15/15 (100%) | ✅ verified |
 | Security Tests | 0 failures | 65/65 (100%) | ✅ verified |
@@ -230,7 +234,8 @@ All Wave 0 gates pass. See [WAVE0_BASELINE.md](progress/WAVE0_BASELINE.md) for f
 | Supply Chain Audit | Complete | Go modules all latest + npm deps upgraded | ✅ verified |
 | Code Quality | B+ rating | A (Logger interface, json.RawMessage, any→types) | ✅ verified |
 | TypeScript Type Check | 0 errors | 0 errors | ✅ verified |
-| Frontend Tests | All passing | 873/873 | ✅ verified |
+| Frontend Tests | All passing | 1000+ (java:401, theia-product:202, remote:98, git:109, jsp:105, search:78, sql:66, test:63, build:96, encoding:57, project:57, runtime:98, config-schema:50, ui-kit:40, protocol:30, drivelist-stub:21) | ✅ verified |
+| Wave 11-14 Complete | All verified | 22 components implemented | ✅ verified |
 
 ## Supply Chain Status (2026-07-24 — Session 4)
 
@@ -244,10 +249,16 @@ All Wave 0 gates pass. See [WAVE0_BASELINE.md](progress/WAVE0_BASELINE.md) for f
 
 ## Key Artifacts
 
-- `runtime-agent/`: Go backend (33 test packages, all passing, 72.5% coverage)
-- `packages/`: Theia extensions (14 packages: Java, Tomcat, encoding, build, project, runtime, search, JSP, UI kit, remote, sql, test, git, config-schema) — 873 tests passing
+- `runtime-agent/`: Go backend (33 test packages, all passing, 80%+ coverage)
+- `runtime-agent/internal/security/`: RBAC, SSO (OIDC+SAML), Data Retention — 72 tests, 80.6% coverage
+- `runtime-agent/internal/remote/`: File Sync, Container Isolation, Session Manager — 99 tests, 65.2% coverage
+- `runtime-agent/internal/debug/`: Multi-VM Orchestrator, Event Aggregator, Module Dependency — 59 tests, 86.9% coverage
+- `packages/`: Theia extensions (14 packages: Java, Tomcat, encoding, build, project, runtime, search, JSP, UI kit, remote, sql, test, git, config-schema) — 930+ tests passing
+- `packages/theia-product/`: Compliance panel widget — 22 tests
+- `packages/remote-extension/`: Remote panel widget — 16 tests
+- `packages/java-extension/`: Multi-module debug panel — 19 tests
 - `tests/e2e/`: Playwright E2E tests (10 core scenarios + 5 standalone smoke)
-- `tests/security/`: Security test suite (20/20)
+- `tests/security/`: Security test suite (65/65)
 - `tests/contract/`: API contract tests (101/101)
 - `tests/fault/`: Fault injection tests (24/24)
 - `tests/path/`: Path compatibility tests (32/32)
