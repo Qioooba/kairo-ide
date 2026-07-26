@@ -18,17 +18,34 @@
 
   <target name="compile" depends="init"
           description="Compile Java sources with the configured JDK.">
+    <!--
+      Source/target level: defaults to 1.6 to match the legacy
+      Kairo target on Windows 10 + JDK 6, but can be overridden
+      via the KAIRO_JAVA_TARGET env var or -Dkairo.java.target
+      Ant property. The override is required for newer JDKs
+      (9+) that removed support for `source=1.6`. The K4 macOS
+      regression environment ships a modern JDK so we let it
+      bump the level to 1.8 by setting KAIRO_JAVA_TARGET=1.8
+      in the test harness.
+    -->
+    <property name="kairo.java.target" value="1.6"/>
     <javac srcdir="${src.dir}"
            destdir="${build.dir}"
            includeantruntime="false"
-           source="1.6"
-           target="1.6"
+           source="${kairo.java.target}"
+           target="${kairo.java.target}"
            encoding="UTF-8"
            classpathref="classpath">
       <compilerarg value="-Xlint:all"/>
     </javac>
     <copy todir="${build.dir}">
       <fileset dir="${res.dir}"/>
+    </copy>
+    <!-- KAIRO-RC-WEB-2026-07-26-07: keep WebRoot/WEB-INF/classes in sync
+         so the embedded Tomcat server serves freshly compiled bytecode
+         without requiring a separate package step. -->
+    <copy todir="${webinf.dir}/classes">
+      <fileset dir="${build.dir}"/>
     </copy>
   </target>
 

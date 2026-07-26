@@ -14,8 +14,9 @@ import (
 
 // CreateWorkspaceRequest is the request body for POST /api/v1/workspaces.
 type CreateWorkspaceRequest struct {
-	Name string `json:"name"`
-	Root string `json:"root"`
+	Name     string `json:"name"`
+	Root     string `json:"root"`
+	RootPath string `json:"rootPath"`
 }
 
 // WorkspaceResponse is the response for workspace endpoints.

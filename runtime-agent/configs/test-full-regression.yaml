@@ -1,0 +1,23 @@
+# Test config for full regression testing (ports: agent=19090)
+version: 0.1.0
+
+bindAddress: 127.0.0.1
+port: 19090
+
+tlsCert: ""
+tlsKey: ""
+
+dataDir: ./.runtime/data-test
+bundledDir: ./.runtime/bundled
+
+logLevel: debug
+requireAuth: false
+
+tomcatStartTimeout: 90s
+tomcatShutdownTimeout: 20s
+buildFileTimeout: 60s
+
+workspaceScanMaxDepth: 8
+workspaceScanMaxFiles: 50000
+
+logBufferLines: 10000

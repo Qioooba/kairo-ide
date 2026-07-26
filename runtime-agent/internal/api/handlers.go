@@ -193,6 +193,19 @@ func (s *Server) handleProjectByID(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeOK(w, env, p)
+	case http.MethodDelete:
+		// KAIRO-RC-WEB-040: support deleting projects from the HTTP
+		// catalog so E2E tests can re-import the same project name
+		// without hitting "project already exists: 409 Conflict".
+		if s.Services.ProjectStore == nil {
+			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInternal, Message: "ProjectStore not configured"})
+			return
+		}
+		if err := s.Services.ProjectStore.Delete(rest); err != nil {
+			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrNotFound, Message: err.Error()})
+			return
+		}
+		writeOK(w, env, map[string]bool{"ok": true})
 	case http.MethodPut:
 		var project domain.Project
 		if err := json.Unmarshal(extractPayload(body), &project); err != nil {

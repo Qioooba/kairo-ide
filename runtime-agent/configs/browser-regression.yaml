@@ -1,0 +1,33 @@
+# Browser Regression test config (port-shifted)
+# Frontend:  3050 (Theia Browser)
+# Agent:     18180 (Runtime Agent)
+# Tomcat:    8088
+# Debug:     9555
+
+version: 0.1.0
+
+bindAddress: 127.0.0.1
+port: 18180
+
+tlsCert: ""
+tlsKey: ""
+
+dataDir: ./.runtime-qa/data
+bundledDir: ./.runtime-qa/bundled
+
+logLevel: info
+
+requireAuth: false
+
+tomcatStartTimeout: 60s
+tomcatShutdownTimeout: 15s
+buildFileTimeout: 30s
+
+workspaceScanMaxDepth: 8
+workspaceScanMaxFiles: 50000
+
+logBufferLines: 5000
+
+# Browser test port hints consumed by theia-product / tomcat extension
+tomcatDefaultPort: 8088
+jdwpDefaultPort: 9555

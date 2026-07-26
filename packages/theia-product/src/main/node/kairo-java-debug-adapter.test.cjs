@@ -15,6 +15,27 @@ const {
   probeKairoJavaDebugAdapter,
 } = require('../../../lib/node/kairo-java-debug-adapter-contribution');
 
+function withIsolatedJavaEnv(fn) {
+  const prevJavaHome = process.env.JAVA_HOME;
+  const prevJdtJre = process.env.KAIRO_JDT_LS_JRE;
+  const prevPath = process.env.PATH;
+  const emptyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kairo-empty-path-'));
+  delete process.env.JAVA_HOME;
+  delete process.env.KAIRO_JDT_LS_JRE;
+  process.env.PATH = emptyDir;
+  try {
+    return fn();
+  } finally {
+    if (prevJavaHome === undefined) delete process.env.JAVA_HOME;
+    else process.env.JAVA_HOME = prevJavaHome;
+    if (prevJdtJre === undefined) delete process.env.KAIRO_JDT_LS_JRE;
+    else process.env.KAIRO_JDT_LS_JRE = prevJdtJre;
+    if (prevPath === undefined) delete process.env.PATH;
+    else process.env.PATH = prevPath;
+    try { fs.rmdirSync(emptyDir); } catch {}
+  }
+}
+
 test('adapter capability fails closed when command is absent, relative, or args are malformed', () => {
   assert.equal(probeKairoJavaDebugAdapter({}, () => true).available, false);
   assert.match(probeKairoJavaDebugAdapter({ KAIRO_JAVA_DEBUG_ADAPTER_COMMAND: 'adapter' }, () => true).reason, /absolute/);
@@ -59,7 +80,7 @@ test('adapter capability bounds argv size and rejects NUL characters', () => {
 
   const nulCommand = probeKairoJavaDebugAdapter({
     KAIRO_JAVA_DEBUG_ADAPTER_COMMAND: `${command}\0suffix`,
-  }, () => true);
+  }, candidate => candidate === command || candidate === `${command}\0suffix`);
   assert.match(nulCommand.reason, /NUL/);
 });
 
@@ -85,23 +106,26 @@ test('backend module registers the Kairo Java debug adapter contribution', () =>
 });
 
 test('configured contribution returns an argv-safe stdio executable', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kairo-debug-adapter-'));
-  const command = path.join(dir, 'adapter');
-  fs.writeFileSync(command, '#!/bin/sh\nexit 0\n');
-  fs.chmodSync(command, 0o755);
-  const previousCommand = process.env.KAIRO_JAVA_DEBUG_ADAPTER_COMMAND;
-  const previousArgs = process.env.KAIRO_JAVA_DEBUG_ADAPTER_ARGS;
-  process.env.KAIRO_JAVA_DEBUG_ADAPTER_COMMAND = command;
-  process.env.KAIRO_JAVA_DEBUG_ADAPTER_ARGS = '["--stdio","two words"]';
-  try {
-    const executable = new KairoJavaDebugAdapterContribution().provideDebugAdapterExecutable({
-      type: 'kairo-java', name: 'attach', request: 'attach', hostName: '127.0.0.1', port: 5005,
-    });
-    assert.deepEqual(executable, { command, args: ['--stdio', 'two words'] });
-  } finally {
-    if (previousCommand === undefined) delete process.env.KAIRO_JAVA_DEBUG_ADAPTER_COMMAND;
-    else process.env.KAIRO_JAVA_DEBUG_ADAPTER_COMMAND = previousCommand;
-    if (previousArgs === undefined) delete process.env.KAIRO_JAVA_DEBUG_ADAPTER_ARGS;
-    else process.env.KAIRO_JAVA_DEBUG_ADAPTER_ARGS = previousArgs;
-  }
+  withIsolatedJavaEnv(() => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kairo-debug-adapter-'));
+    const command = path.join(dir, 'adapter');
+    fs.writeFileSync(command, '#!/bin/sh\nexit 0\n');
+    fs.chmodSync(command, 0o755);
+    const previousCommand = process.env.KAIRO_JAVA_DEBUG_ADAPTER_COMMAND;
+    const previousArgs = process.env.KAIRO_JAVA_DEBUG_ADAPTER_ARGS;
+    process.env.KAIRO_JAVA_DEBUG_ADAPTER_COMMAND = command;
+    process.env.KAIRO_JAVA_DEBUG_ADAPTER_ARGS = '["--stdio","two words"]';
+    try {
+      const executable = new KairoJavaDebugAdapterContribution().provideDebugAdapterExecutable({
+        type: 'kairo-java', name: 'attach', request: 'attach', hostName: '127.0.0.1', port: 5005,
+      });
+      assert.deepEqual(executable, { command, args: ['--stdio', 'two words', '127.0.0.1', '5005'] });
+    } finally {
+      if (previousCommand === undefined) delete process.env.KAIRO_JAVA_DEBUG_ADAPTER_COMMAND;
+      else process.env.KAIRO_JAVA_DEBUG_ADAPTER_COMMAND = previousCommand;
+      if (previousArgs === undefined) delete process.env.KAIRO_JAVA_DEBUG_ADAPTER_ARGS;
+      else process.env.KAIRO_JAVA_DEBUG_ADAPTER_ARGS = previousArgs;
+      try { fs.rmSync(dir, { recursive: true }); } catch {}
+    }
+  });
 });

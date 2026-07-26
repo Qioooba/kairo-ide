@@ -251,6 +251,18 @@ func (s *diskProjectStore) Update(id string, cfg *domain.Project) (domain.Projec
 	return *cfg, nil
 }
 
+// Delete removes a project from the in-memory map and persists the change.
+// Returns an error if the project does not exist.
+func (s *diskProjectStore) Delete(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.data[id]; !ok {
+		return fmt.Errorf("project not found: %s", id)
+	}
+	delete(s.data, id)
+	return s.saveChecked()
+}
+
 // ----------------- ToolchainRegistry -----------------
 
 type memToolchainRegistry struct {

@@ -150,12 +150,23 @@ const KairoProblems: React.FC<KairoProblemsProps> = ({ openerService, editorMana
   const [selectedIndex, setSelectedIndex] = React.useState<number>(-1);
   const [fileSuggestions, setFileSuggestions] = React.useState<string[]>([]);
   const [showFileDropdown, setShowFileDropdown] = React.useState(false);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
+  const [disabled, setDisabled] = React.useState(false);
 
   const refresh = React.useCallback(() => {
-    const markers = monaco.editor.getModelMarkers({});
-    const all = markersToEntries(markers);
-    setEntries(all);
-    setFileSuggestions([...new Set(all.map(e => e.file))].sort());
+    setLoading(true);
+    setError(null);
+    try {
+      const markers = monaco.editor.getModelMarkers({});
+      const all = markersToEntries(markers);
+      setEntries(all);
+      setFileSuggestions([...new Set(all.map(e => e.file))].sort());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load markers.');
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   React.useEffect(() => {
@@ -163,6 +174,18 @@ const KairoProblems: React.FC<KairoProblemsProps> = ({ openerService, editorMana
     const disposable = monaco.editor.onDidChangeMarkers(() => refresh());
     return () => disposable.dispose();
   }, [refresh]);
+
+  // Detect disabled state: no editor open = problems view is not applicable
+  React.useEffect(() => {
+    const checkDisabled = () => {
+      const editor = editorManager.currentEditor;
+      // Only show disabled hint when there is literally no editor open
+      setDisabled(!editor && entries.length === 0);
+    };
+    checkDisabled();
+    const interval = setInterval(checkDisabled, 2000);
+    return () => clearInterval(interval);
+  }, [editorManager, entries.length]);
 
   const updateFilter = (partial: Partial<FilterState>) => {
     setFilterState(prev => {
@@ -269,8 +292,60 @@ const KairoProblems: React.FC<KairoProblemsProps> = ({ openerService, editorMana
   const typeFilterOptions: TypeFilter[] = ['All', 'Java', 'Ant', 'XML', 'JSP', 'Encoding'];
 
   return (
-    <div className="kairo-widget kairo-problems-widget">
+    <div className={`kairo-widget kairo-problems-widget${disabled ? ' kairo-problems-disabled' : ''}`} aria-busy={loading}>
+      {/* Loading State */}
+      {loading && (
+        <div className="kairo-loading" role="status" aria-label="Loading problems" style={{ padding: '16px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
+          <div className="kairo-spinner" style={{
+            width: '20px', height: '20px',
+            border: '3px solid var(--theia-dropdown-border)',
+            borderTopColor: 'var(--theia-focusBorder)',
+            borderRadius: '50%',
+            animation: 'kairo-spin 0.8s linear infinite',
+          }} />
+          <span style={{ color: 'var(--theia-descriptionForeground)', fontSize: '13px' }}>Loading problems...</span>
+          <style>{`@keyframes kairo-spin { to { transform: rotate(360deg); } }`}</style>
+        </div>
+      )}
+
+      {/* Error State */}
+      {!loading && error && (
+        <div role="alert" aria-live="assertive" style={{ padding: '12px' }}>
+          <div style={{
+            padding: '10px 12px',
+            backgroundColor: 'rgba(244,67,54,0.1)',
+            border: '1px solid rgba(244,67,54,0.3)',
+            borderRadius: '4px',
+            color: 'var(--theia-errorForeground)',
+            fontSize: '13px',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+              <span aria-hidden="true">⚠</span>
+              <strong>Error loading problems</strong>
+            </div>
+            <p style={{ margin: '4px 0 0 0', fontSize: '12px' }}>{error}</p>
+            <button
+              className="theia-button"
+              onClick={refresh}
+              aria-label="Retry loading problems"
+              style={{ marginTop: '8px', fontSize: '11px', padding: '2px 12px' }}
+            >
+              Retry
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Disabled State */}
+      {!loading && !error && disabled && (
+        <div className="kairo-empty" role="status" aria-label="No editor open" style={{ padding: '16px', textAlign: 'center', color: 'var(--theia-descriptionForeground)', fontSize: '13px', opacity: 0.7 }}>
+          <p style={{ margin: 0 }}>Open a file to see problems.</p>
+        </div>
+      )}
+
       {/* Filter Bar */}
+      {!loading && !error && !disabled && (
+      <>
       <div className="kairo-widget-toolbar kairo-problems-toolbar">
         {/* Severity toggle checkboxes */}
         <div className="kairo-problems-filter-group">
@@ -430,6 +505,8 @@ const KairoProblems: React.FC<KairoProblemsProps> = ({ openerService, editorMana
           </table>
         )}
       </div>
+      </>
+      )}
     </div>
   );
 };

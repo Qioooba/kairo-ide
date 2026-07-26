@@ -112,8 +112,6 @@ const DEFINITION_SAMPLE = {
   },
 };
 
-let messageId = 0;
-
 function sendMessage(msg: LSPMessage): void {
   const body = JSON.stringify(msg);
   const header = `Content-Length: ${Buffer.byteLength(body, 'utf-8')}\r\n\r\n`;
@@ -358,7 +356,7 @@ function parseHeaders(line: string): number | null {
 const rl = createInterface({ input: process.stdin });
 
 let contentLength: number | null = null;
-let bodyBuffer = '';
+const _bodyBuffer = '';
 
 rl.on('line', (line: string) => {
   if (contentLength === null) {

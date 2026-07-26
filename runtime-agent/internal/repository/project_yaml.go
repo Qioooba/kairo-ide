@@ -256,7 +256,7 @@ func ProjectToConfig(project *domain.Project) *ProjectConfig {
 	return &ProjectConfig{
 		SchemaVersion: currentSchemaVersion,
 		Name:          project.Name,
-		Root:          project.Root,
+		Root:          ".",
 		SourceRoots:   project.SourceRoots,
 		ResourceRoots: project.ResourceRoots,
 		LibraryDirs:   project.LibraryDirs,

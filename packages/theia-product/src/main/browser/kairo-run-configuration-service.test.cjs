@@ -192,7 +192,7 @@ test('UI contract blocks unsafe execution and exposes accessibility/error states
   const source = fs.readFileSync(path.join(__dirname, 'kairo-run-configurations-widget.tsx'), 'utf8');
   assert.match(source, /aria-busy=\{busy\}/);
   assert.match(source, /role="alert"/);
-  assert.match(source, /Stored only; this version never executes custom commands/);
+  assert.match(source, /service\.debugConfiguration\(configuration\)/);
   assert.match(source, /idReadOnly=\{Boolean\(editing\.originalId\)\}/);
   assert.match(source, /Launch progress/);
   assert.match(source, /service\.launch\(configuration\)/);

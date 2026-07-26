@@ -39,6 +39,7 @@ type ProjectStore interface {
 	List() []domain.Project
 	Get(id string) (domain.Project, error)
 	Update(id string, cfg *domain.Project) (domain.Project, error)
+	Delete(id string) error
 }
 
 // RunConfigurationStore persists project-level Tomcat Run/Debug configurations.

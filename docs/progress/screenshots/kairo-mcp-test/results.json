@@ -1,0 +1,440 @@
+{
+  "navigation": {
+    "domContentLoaded": 601,
+    "theiaLoaded": true
+  },
+  "menuBar": {
+    "itemCount": 0,
+    "labels": [],
+    "html": "NOT FOUND",
+    "items": [],
+    "hasKairoMenu": false
+  },
+  "consoleMessages": [
+    {
+      "type": "debug",
+      "text": "Frontend: loading modules... [0.206 s since frontend page start]",
+      "location": {
+        "url": "http://127.0.0.1:3050/bundle.js",
+        "line": 2931,
+        "column": 34388,
+        "lineNumber": 2931,
+        "columnNumber": 34388
+      }
+    },
+    {
+      "type": "debug",
+      "text": "Frontend: container created [0.593 s since frontend page start]",
+      "location": {
+        "url": "http://127.0.0.1:3050/bundle.js",
+        "line": 2931,
+        "column": 34388,
+        "lineNumber": 2931,
+        "columnNumber": 34388
+      }
+    },
+    {
+      "type": "info",
+      "text": "sending initial connect on 5kCsbz5fZSbW0sCrAAAB",
+      "location": {
+        "url": "http://127.0.0.1:3050/bundle.js",
+        "line": 432,
+        "column": 109958,
+        "lineNumber": 432,
+        "columnNumber": 109958
+      }
+    },
+    {
+      "type": "info",
+      "text": "initial connect received on 5kCsbz5fZSbW0sCrAAAB",
+      "location": {
+        "url": "http://127.0.0.1:3050/bundle.js",
+        "line": 432,
+        "column": 109733,
+        "lineNumber": 432,
+        "columnNumber": 109733
+      }
+    },
+    {
+      "type": "debug",
+      "text": "Frontend: preloaded [0.619 s since frontend page start]",
+      "location": {
+        "url": "http://127.0.0.1:3050/bundle.js",
+        "line": 2931,
+        "column": 34388,
+        "lineNumber": 2931,
+        "columnNumber": 34388
+      }
+    },
+    {
+      "type": "debug",
+      "text": "Frontend: core modules loaded [0.850 s since frontend page start]",
+      "location": {
+        "url": "http://127.0.0.1:3050/bundle.js",
+        "line": 2931,
+        "column": 34388,
+        "lineNumber": 2931,
+        "columnNumber": 34388
+      }
+    },
+    {
+      "type": "log",
+      "text": "[kairo] DIAGNOSTIC V2: loading bindKairoFrontend only",
+      "location": {
+        "url": "http://127.0.0.1:3050/bundle.js",
+        "line": 2931,
+        "column": 33045,
+        "lineNumber": 2931,
+        "columnNumber": 33045
+      }
+    },
+    {
+      "type": "log",
+      "text": "[kairo] DIAGNOSTIC V2: bindKairoFrontend OK",
+      "location": {
+        "url": "http://127.0.0.1:3050/bundle.js",
+        "line": 2931,
+        "column": 33270,
+        "lineNumber": 2931,
+        "columnNumber": 33270
+      }
+    },
+    {
+      "type": "error",
+      "text": "Error: You are attempting to construct Symbol(PreferenceContribution) in a synchronous way but it has asynchronous dependencies.\n    at n._getButThrowIfAsync (http://127.0.0.1:3050/bundle.js:11:36252)\n    at n.getAll (http://127.0.0.1:3050/bundle.js:11:32004)\n    at UXe.getContributions (http://127.0.0.1:3050/bundle.js:11:73624)\n    at hve.init (http://127.0.0.1:3050/bundle.js:1113:8653)\n    at nOr (http://127.0.0.1:3050/bundle.js:11:7179)\n    at LUi (http://127.0.0.1:3050/bundle.js:11:6992)\n    at sOr (http://127.0.0.1:3050/bundle.js:11:7763)\n    at mOr (http://127.0.0.1:3050/bundle.js:11:9650)\n    at http://127.0.0.1:3050/bundle.js:11:9869\n    at gOr (http://127.0.0.1:3050/bundle.js:11:9802)",
+      "location": {
+        "url": "http://127.0.0.1:3050/bundle.js",
+        "line": 10,
+        "column": 73672,
+        "lineNumber": 10,
+        "columnNumber": 73672
+      }
+    },
+    {
+      "type": "debug",
+      "text": "Frontend: modules loaded [1.006 s since frontend page start]",
+      "location": {
+        "url": "http://127.0.0.1:3050/bundle.js",
+        "line": 2931,
+        "column": 34388,
+        "lineNumber": 2931,
+        "columnNumber": 34388
+      }
+    },
+    {
+      "type": "debug",
+      "text": "Frontend: resolving application [1.006 s since frontend page start]",
+      "location": {
+        "url": "http://127.0.0.1:3050/bundle.js",
+        "line": 2931,
+        "column": 34388,
+        "lineNumber": 2931,
+        "columnNumber": 34388
+      }
+    },
+    {
+      "type": "debug",
+      "text": "Frontend: application resolved [1.008 s since frontend page start]",
+      "location": {
+        "url": "http://127.0.0.1:3050/bundle.js",
+        "line": 2931,
+        "column": 34388,
+        "lineNumber": 2931,
+        "columnNumber": 34388
+      }
+    },
+    {
+      "type": "error",
+      "text": "Error: You are attempting to construct Symbol(FrontendApplicationContribution) in a synchronous way but it has asynchronous dependencies.\n    at n._getButThrowIfAsync (http://127.0.0.1:3050/bundle.js:11:36252)\n    at n.getAll (http://127.0.0.1:3050/bundle.js:11:32004)\n    at UXe.getContributions (http://127.0.0.1:3050/bundle.js:11:73624)\n    at EW.startContributions (http://127.0.0.1:3050/bundle.js:1358:7763)\n    at http://127.0.0.1:3050/bundle.js:1358:4712\n    at e2i.startAsync (http://127.0.0.1:3050/bundle.js:1148:60722)\n    at EW.measure (http://127.0.0.1:3050/bundle.js:1358:9080)\n    at EW.start (http://127.0.0.1:3050/bundle.js:1358:4674)\n    at s (http://127.0.0.1:3050/bundle.js:2932:36339)\n    at http://127.0.0.1:3050/bundle.js:2932:36109",
+      "location": {
+        "url": "http://127.0.0.1:3050/bundle.js",
+        "line": 10,
+        "column": 73672,
+        "lineNumber": 10,
+        "columnNumber": 73672
+      }
+    },
+    {
+      "type": "error",
+      "text": "Error: You are attempting to construct Symbol(CommandContribution) in a synchronous way but it has asynchronous dependencies.\n    at n._getButThrowIfAsync (http://127.0.0.1:3050/bundle.js:11:36252)\n    at n.getAll (http://127.0.0.1:3050/bundle.js:11:32004)\n    at UXe.getContributions (http://127.0.0.1:3050/bundle.js:11:73624)\n    at Eat.onStart (http://127.0.0.1:3050/bundle.js:1112:217790)\n    at http://127.0.0.1:3050/bundle.js:1358:8193\n    at e2i.startAsync (http://127.0.0.1:3050/bundle.js:1148:60722)\n    at EW.measure (http://127.0.0.1:3050/bundle.js:1358:9080)\n    at EW.startContributions (http://127.0.0.1:3050/bundle.js:1358:8148)\n    at http://127.0.0.1:3050/bundle.js:1358:4712\n    at e2i.startAsync (http://127.0.0.1:3050/bundle.js:1148:60722)",
+      "location": {
+        "url": "http://127.0.0.1:3050/bundle.js",
+        "line": 10,
+        "column": 73672,
+        "lineNumber": 10,
+        "columnNumber": 73672
+      }
+    },
+    {
+      "type": "pageerror",
+      "text": "No matching bindings found for serviceIdentifier: Rji",
+      "stack": "Error: No matching bindings found for serviceIdentifier: Rji\n    at PMr (http://127.0.0.1:3050/bundle.js:11:96)\n    at SUi (http://127.0.0.1:3050/bundle.js:10:6040)\n    at AUi (http://127.0.0.1:3050/bundle.js:11:456)\n    at MMr (http://127.0.0.1:3050/bundle.js:11:1325)\n    at http://127.0.0.1:3050/bundle.js:11:36775\n    at n._get (http://127.0.0.1:3050/bundle.js:11:36159)\n    at n.getAsync (http://127.0.0.1:3050/bundle.js:11:31639)\n    at _binding.dynamicValue (http://127.0.0.1:3050/bundle.js:11:22516)\n    at http://127.0.0.1:3050/bundle.js:11:9238\n    at rMr (http://127.0.0.1:3050/bundle.js:5:12880)"
+    },
+    {
+      "type": "pageerror",
+      "text": "No matching bindings found for serviceIdentifier: XF\nTrying to resolve bindings for \"H2\"",
+      "stack": "Error: No matching bindings found for serviceIdentifier: XF\nTrying to resolve bindings for \"H2\"\n    at PMr (http://127.0.0.1:3050/bundle.js:11:96)\n    at SUi (http://127.0.0.1:3050/bundle.js:10:6040)\n    at AUi (http://127.0.0.1:3050/bundle.js:11:550)\n    at http://127.0.0.1:3050/bundle.js:11:1101\n    at Array.forEach (<anonymous>)\n    at http://127.0.0.1:3050/bundle.js:11:1089\n    at Array.forEach (<anonymous>)\n    at AUi (http://127.0.0.1:3050/bundle.js:11:612)\n    at MMr (http://127.0.0.1:3050/bundle.js:11:1325)\n    at http://127.0.0.1:3050/bundle.js:11:36775"
+    },
+    {
+      "type": "pageerror",
+      "text": "No matching bindings found for serviceIdentifier: XU\nTrying to resolve bindings for \"q2\"",
+      "stack": "Error: No matching bindings found for serviceIdentifier: XU\nTrying to resolve bindings for \"q2\"\n    at PMr (http://127.0.0.1:3050/bundle.js:11:96)\n    at SUi (http://127.0.0.1:3050/bundle.js:10:6040)\n    at AUi (http://127.0.0.1:3050/bundle.js:11:550)\n    at http://127.0.0.1:3050/bundle.js:11:1101\n    at Array.forEach (<anonymous>)\n    at http://127.0.0.1:3050/bundle.js:11:1089\n    at Array.forEach (<anonymous>)\n    at AUi (http://127.0.0.1:3050/bundle.js:11:612)\n    at MMr (http://127.0.0.1:3050/bundle.js:11:1325)\n    at http://127.0.0.1:3050/bundle.js:11:36775"
+    },
+    {
+      "type": "pageerror",
+      "text": "No matching bindings found for serviceIdentifier: bL\nTrying to resolve bindings for \"vO\"",
+      "stack": "Error: No matching bindings found for serviceIdentifier: bL\nTrying to resolve bindings for \"vO\"\n    at PMr (http://127.0.0.1:3050/bundle.js:11:96)\n    at SUi (http://127.0.0.1:3050/bundle.js:10:6040)\n    at AUi (http://127.0.0.1:3050/bundle.js:11:550)\n    at http://127.0.0.1:3050/bundle.js:11:1101\n    at Array.forEach (<anonymous>)\n    at http://127.0.0.1:3050/bundle.js:11:1089\n    at Array.forEach (<anonymous>)\n    at AUi (http://127.0.0.1:3050/bundle.js:11:612)\n    at MMr (http://127.0.0.1:3050/bundle.js:11:1325)\n    at http://127.0.0.1:3050/bundle.js:11:36775"
+    },
+    {
+      "type": "pageerror",
+      "text": "No matching bindings found for serviceIdentifier: XU\nTrying to resolve bindings for \"q2\"",
+      "stack": "Error: No matching bindings found for serviceIdentifier: XU\nTrying to resolve bindings for \"q2\"\n    at PMr (http://127.0.0.1:3050/bundle.js:11:96)\n    at SUi (http://127.0.0.1:3050/bundle.js:10:6040)\n    at AUi (http://127.0.0.1:3050/bundle.js:11:550)\n    at http://127.0.0.1:3050/bundle.js:11:1101\n    at Array.forEach (<anonymous>)\n    at http://127.0.0.1:3050/bundle.js:11:1089\n    at Array.forEach (<anonymous>)\n    at AUi (http://127.0.0.1:3050/bundle.js:11:612)\n    at MMr (http://127.0.0.1:3050/bundle.js:11:1325)\n    at http://127.0.0.1:3050/bundle.js:11:36775"
+    },
+    {
+      "type": "pageerror",
+      "text": "No matching bindings found for serviceIdentifier: dO",
+      "stack": "Error: No matching bindings found for serviceIdentifier: dO\n    at PMr (http://127.0.0.1:3050/bundle.js:11:96)\n    at SUi (http://127.0.0.1:3050/bundle.js:10:6040)\n    at AUi (http://127.0.0.1:3050/bundle.js:11:456)\n    at MMr (http://127.0.0.1:3050/bundle.js:11:1325)\n    at http://127.0.0.1:3050/bundle.js:11:36775\n    at n._get (http://127.0.0.1:3050/bundle.js:11:36159)\n    at n.getAsync (http://127.0.0.1:3050/bundle.js:11:31639)\n    at _binding.dynamicValue (http://127.0.0.1:3050/bundle.js:11:22516)\n    at http://127.0.0.1:3050/bundle.js:11:9238\n    at rMr (http://127.0.0.1:3050/bundle.js:5:12880)"
+    },
+    {
+      "type": "pageerror",
+      "text": "No matching bindings found for serviceIdentifier: bL\nTrying to resolve bindings for \"vO\"",
+      "stack": "Error: No matching bindings found for serviceIdentifier: bL\nTrying to resolve bindings for \"vO\"\n    at PMr (http://127.0.0.1:3050/bundle.js:11:96)\n    at SUi (http://127.0.0.1:3050/bundle.js:10:6040)\n    at AUi (http://127.0.0.1:3050/bundle.js:11:550)\n    at http://127.0.0.1:3050/bundle.js:11:1101\n    at Array.forEach (<anonymous>)\n    at http://127.0.0.1:3050/bundle.js:11:1089\n    at Array.forEach (<anonymous>)\n    at AUi (http://127.0.0.1:3050/bundle.js:11:612)\n    at MMr (http://127.0.0.1:3050/bundle.js:11:1325)\n    at http://127.0.0.1:3050/bundle.js:11:36775"
+    },
+    {
+      "type": "pageerror",
+      "text": "No matching bindings found for serviceIdentifier: Nm\nTrying to resolve bindings for \"WM\"",
+      "stack": "Error: No matching bindings found for serviceIdentifier: Nm\nTrying to resolve bindings for \"WM\"\n    at PMr (http://127.0.0.1:3050/bundle.js:11:96)\n    at SUi (http://127.0.0.1:3050/bundle.js:10:6040)\n    at AUi (http://127.0.0.1:3050/bundle.js:11:550)\n    at http://127.0.0.1:3050/bundle.js:11:1101\n    at Array.forEach (<anonymous>)\n    at http://127.0.0.1:3050/bundle.js:11:1089\n    at Array.forEach (<anonymous>)\n    at AUi (http://127.0.0.1:3050/bundle.js:11:612)\n    at MMr (http://127.0.0.1:3050/bundle.js:11:1325)\n    at http://127.0.0.1:3050/bundle.js:11:36775"
+    },
+    {
+      "type": "error",
+      "text": "Error: You are attempting to construct Symbol(KeybindingContribution) in a synchronous way but it has asynchronous dependencies.\n    at n._getButThrowIfAsync (http://127.0.0.1:3050/bundle.js:11:36252)\n    at n.getAll (http://127.0.0.1:3050/bundle.js:11:32004)\n    at UXe.getContributions (http://127.0.0.1:3050/bundle.js:11:73624)\n    at ZA.onStart (http://127.0.0.1:3050/bundle.js:1184:175643)\n    at async e2i.startAsync (http://127.0.0.1:3050/bundle.js:1148:60716)\n    at async EW.startContributions (http://127.0.0.1:3050/bundle.js:1358:8204)\n    at async e2i.startAsync (http://127.0.0.1:3050/bundle.js:1148:60716)\n    at async EW.start (http://127.0.0.1:3050/bundle.js:1358:4663)\n    at async http://127.0.0.1:3050/bundle.js:2932:36103",
+      "location": {
+        "url": "http://127.0.0.1:3050/bundle.js",
+        "line": 10,
+        "column": 73672,
+        "lineNumber": 10,
+        "columnNumber": 73672
+      }
+    },
+    {
+      "type": "error",
+      "text": "Error: You are attempting to construct Symbol(MenuContribution) in a synchronous way but it has asynchronous dependencies.\n    at n._getButThrowIfAsync (http://127.0.0.1:3050/bundle.js:11:36252)\n    at n.getAll (http://127.0.0.1:3050/bundle.js:11:32004)\n    at UXe.getContributions (http://127.0.0.1:3050/bundle.js:11:73624)\n    at Nlt.onStart (http://127.0.0.1:3050/bundle.js:1148:52182)\n    at http://127.0.0.1:3050/bundle.js:1358:8327\n    at e2i.startAsync (http://127.0.0.1:3050/bundle.js:1148:60722)\n    at EW.measure (http://127.0.0.1:3050/bundle.js:1358:9080)\n    at EW.startContributions (http://127.0.0.1:3050/bundle.js:1358:8288)\n    at async e2i.startAsync (http://127.0.0.1:3050/bundle.js:1148:60716)\n    at async EW.start (http://127.0.0.1:3050/bundle.js:1358:4663)",
+      "location": {
+        "url": "http://127.0.0.1:3050/bundle.js",
+        "line": 10,
+        "column": 73672,
+        "lineNumber": 10,
+        "columnNumber": 73672
+      }
+    },
+    {
+      "type": "pageerror",
+      "text": "No matching bindings found for serviceIdentifier: XU\nTrying to resolve bindings for \"q2\"",
+      "stack": "Error: No matching bindings found for serviceIdentifier: XU\nTrying to resolve bindings for \"q2\"\n    at PMr (http://127.0.0.1:3050/bundle.js:11:96)\n    at SUi (http://127.0.0.1:3050/bundle.js:10:6040)\n    at AUi (http://127.0.0.1:3050/bundle.js:11:550)\n    at http://127.0.0.1:3050/bundle.js:11:1101\n    at Array.forEach (<anonymous>)\n    at http://127.0.0.1:3050/bundle.js:11:1089\n    at Array.forEach (<anonymous>)\n    at AUi (http://127.0.0.1:3050/bundle.js:11:612)\n    at MMr (http://127.0.0.1:3050/bundle.js:11:1325)\n    at http://127.0.0.1:3050/bundle.js:11:36775"
+    },
+    {
+      "type": "pageerror",
+      "text": "No matching bindings found for serviceIdentifier: bL\nTrying to resolve bindings for \"vO\"",
+      "stack": "Error: No matching bindings found for serviceIdentifier: bL\nTrying to resolve bindings for \"vO\"\n    at PMr (http://127.0.0.1:3050/bundle.js:11:96)\n    at SUi (http://127.0.0.1:3050/bundle.js:10:6040)\n    at AUi (http://127.0.0.1:3050/bundle.js:11:550)\n    at http://127.0.0.1:3050/bundle.js:11:1101\n    at Array.forEach (<anonymous>)\n    at http://127.0.0.1:3050/bundle.js:11:1089\n    at Array.forEach (<anonymous>)\n    at AUi (http://127.0.0.1:3050/bundle.js:11:612)\n    at MMr (http://127.0.0.1:3050/bundle.js:11:1325)\n    at http://127.0.0.1:3050/bundle.js:11:36775"
+    },
+    {
+      "type": "pageerror",
+      "text": "No matching bindings found for serviceIdentifier: Nm\nTrying to resolve bindings for \"WM\"",
+      "stack": "Error: No matching bindings found for serviceIdentifier: Nm\nTrying to resolve bindings for \"WM\"\n    at PMr (http://127.0.0.1:3050/bundle.js:11:96)\n    at SUi (http://127.0.0.1:3050/bundle.js:10:6040)\n    at AUi (http://127.0.0.1:3050/bundle.js:11:550)\n    at http://127.0.0.1:3050/bundle.js:11:1101\n    at Array.forEach (<anonymous>)\n    at http://127.0.0.1:3050/bundle.js:11:1089\n    at Array.forEach (<anonymous>)\n    at AUi (http://127.0.0.1:3050/bundle.js:11:612)\n    at MMr (http://127.0.0.1:3050/bundle.js:11:1325)\n    at http://127.0.0.1:3050/bundle.js:11:36775"
+    },
+    {
+      "type": "pageerror",
+      "text": "No matching bindings found for serviceIdentifier: XU\nTrying to resolve bindings for \"q2\"",
+      "stack": "Error: No matching bindings found for serviceIdentifier: XU\nTrying to resolve bindings for \"q2\"\n    at PMr (http://127.0.0.1:3050/bundle.js:11:96)\n    at SUi (http://127.0.0.1:3050/bundle.js:10:6040)\n    at AUi (http://127.0.0.1:3050/bundle.js:11:550)\n    at http://127.0.0.1:3050/bundle.js:11:1101\n    at Array.forEach (<anonymous>)\n    at http://127.0.0.1:3050/bundle.js:11:1089\n    at Array.forEach (<anonymous>)\n    at AUi (http://127.0.0.1:3050/bundle.js:11:612)\n    at MMr (http://127.0.0.1:3050/bundle.js:11:1325)\n    at http://127.0.0.1:3050/bundle.js:11:36775"
+    },
+    {
+      "type": "pageerror",
+      "text": "No matching bindings found for serviceIdentifier: bL\nTrying to resolve bindings for \"vO\"",
+      "stack": "Error: No matching bindings found for serviceIdentifier: bL\nTrying to resolve bindings for \"vO\"\n    at PMr (http://127.0.0.1:3050/bundle.js:11:96)\n    at SUi (http://127.0.0.1:3050/bundle.js:10:6040)\n    at AUi (http://127.0.0.1:3050/bundle.js:11:550)\n    at http://127.0.0.1:3050/bundle.js:11:1101\n    at Array.forEach (<anonymous>)\n    at http://127.0.0.1:3050/bundle.js:11:1089\n    at Array.forEach (<anonymous>)\n    at AUi (http://127.0.0.1:3050/bundle.js:11:612)\n    at MMr (http://127.0.0.1:3050/bundle.js:11:1325)\n    at http://127.0.0.1:3050/bundle.js:11:36775"
+    },
+    {
+      "type": "info",
+      "text": "2026-07-24T20:14:39.137Z root INFO [Perf] 内存追踪器已初始化",
+      "location": {
+        "url": "http://127.0.0.1:3050/bundle.js",
+        "line": 1111,
+        "column": 210476,
+        "lineNumber": 1111,
+        "columnNumber": 210476
+      }
+    },
+    {
+      "type": "info",
+      "text": "2026-07-24T20:14:39.138Z root INFO Detected keyboard layout from browser API: US (Mac)",
+      "location": {
+        "url": "http://127.0.0.1:3050/bundle.js",
+        "line": 1111,
+        "column": 210476,
+        "lineNumber": 1111,
+        "columnNumber": 210476
+      }
+    },
+    {
+      "type": "info",
+      "text": "2026-07-24T20:14:39.138Z root INFO Start frontend contributions: 62.8 ms [1.071 s since frontend page start]",
+      "location": {
+        "url": "http://127.0.0.1:3050/bundle.js",
+        "line": 1111,
+        "column": 210476,
+        "lineNumber": 1111,
+        "columnNumber": 210476
+      }
+    },
+    {
+      "type": "info",
+      "text": "2026-07-24T20:14:39.138Z root INFO Changed application state from 'init' to 'started_contributions'.",
+      "location": {
+        "url": "http://127.0.0.1:3050/bundle.js",
+        "line": 1111,
+        "column": 210476,
+        "lineNumber": 1111,
+        "columnNumber": 210476
+      }
+    },
+    {
+      "type": "info",
+      "text": "2026-07-24T20:14:39.138Z root INFO Changed application state from 'started_contributions' to 'attached_shell'.",
+      "location": {
+        "url": "http://127.0.0.1:3050/bundle.js",
+        "line": 1111,
+        "column": 210476,
+        "lineNumber": 1111,
+        "columnNumber": 210476
+      }
+    },
+    {
+      "type": "info",
+      "text": "2026-07-24T20:14:39.138Z root INFO >>> Restoring the layout state...",
+      "location": {
+        "url": "http://127.0.0.1:3050/bundle.js",
+        "line": 1111,
+        "column": 210476,
+        "lineNumber": 1111,
+        "columnNumber": 210476
+      }
+    },
+    {
+      "type": "info",
+      "text": "2026-07-24T20:14:39.165Z root INFO <<< Nothing to restore.",
+      "location": {
+        "url": "http://127.0.0.1:3050/bundle.js",
+        "line": 1111,
+        "column": 210476,
+        "lineNumber": 1111,
+        "columnNumber": 210476
+      }
+    },
+    {
+      "type": "info",
+      "text": "2026-07-24T20:14:39.165Z root INFO Initialize the workbench layout: 37.4 ms [1.113 s since frontend page start]",
+      "location": {
+        "url": "http://127.0.0.1:3050/bundle.js",
+        "line": 1111,
+        "column": 210476,
+        "lineNumber": 1111,
+        "columnNumber": 210476
+      }
+    },
+    {
+      "type": "info",
+      "text": "2026-07-24T20:14:39.165Z root INFO Changed application state from 'attached_shell' to 'initialized_layout'.",
+      "location": {
+        "url": "http://127.0.0.1:3050/bundle.js",
+        "line": 1111,
+        "column": 210476,
+        "lineNumber": 1111,
+        "columnNumber": 210476
+      }
+    },
+    {
+      "type": "pageerror",
+      "text": "Cannot convert undefined or null to object",
+      "stack": "TypeError: Cannot convert undefined or null to object\n    at Object.keys (<anonymous>)\n    at Tg.getExcludes (http://127.0.0.1:3050/bundle.js:1708:1199477)\n    at Tg.watchRoot (http://127.0.0.1:3050/bundle.js:1708:1199191)\n    at Tg.watchRoots (http://127.0.0.1:3050/bundle.js:1708:1198981)\n    at Tg.updateWorkspace (http://127.0.0.1:3050/bundle.js:1708:1191335)\n    at async Tg.setWorkspace (http://127.0.0.1:3050/bundle.js:1708:1191251)\n    at async Tg.doInit (http://127.0.0.1:3050/bundle.js:1708:1189048)"
+    },
+    {
+      "type": "info",
+      "text": "2026-07-24T20:14:39.966Z root INFO Replace loading indicator with ready workbench UI (animation): 800.8 ms [1.914 s since frontend page start]",
+      "location": {
+        "url": "http://127.0.0.1:3050/bundle.js",
+        "line": 1111,
+        "column": 210476,
+        "lineNumber": 1111,
+        "columnNumber": 210476
+      }
+    },
+    {
+      "type": "info",
+      "text": "2026-07-24T20:14:39.967Z root INFO Changed application state from 'initialized_layout' to 'ready'.",
+      "location": {
+        "url": "http://127.0.0.1:3050/bundle.js",
+        "line": 1111,
+        "column": 210476,
+        "lineNumber": 1111,
+        "columnNumber": 210476
+      }
+    },
+    {
+      "type": "info",
+      "text": "2026-07-24T20:14:39.967Z root INFO All frontend contributions settled: 906.9 ms [1.915 s since frontend page start]",
+      "location": {
+        "url": "http://127.0.0.1:3050/bundle.js",
+        "line": 1111,
+        "column": 210476,
+        "lineNumber": 1111,
+        "columnNumber": 210476
+      }
+    }
+  ],
+  "networkFailures": [],
+  "kairoCommands": [],
+  "domStructure": {
+    "hasMenubar": false,
+    "menubarChildren": 0,
+    "hasStatusbar": false,
+    "hasSidebar": false,
+    "hasMainPanel": false,
+    "shellClassList": [
+      "lm-Widget",
+      "theia-ApplicationShell",
+      "monaco-workbench"
+    ],
+    "bodyClasses": [
+      "monaco-enable-motion",
+      "underline-links",
+      "vs"
+    ],
+    "childTags": [
+      {
+        "tag": "DIV",
+        "classes": "lm-Widget lm-Panel",
+        "id": "theia-top-panel"
+      },
+      {
+        "tag": "DIV",
+        "classes": "lm-Widget lm-Panel lm-SplitPanel",
+        "id": "theia-left-right-split-panel"
+      },
+      {
+        "tag": "DIV",
+        "classes": "lm-Widget noselect",
+        "id": "theia-statusBar"
+      },
+      {
+        "tag": "DIV",
+        "classes": "context-view",
+        "id": ""
+      }
+    ]
+  },
+  "commandPalette": {
+    "open": false,
+    "alt": {
+      "open": false
+    }
+  }
+}

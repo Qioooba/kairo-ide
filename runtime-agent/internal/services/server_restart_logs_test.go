@@ -40,7 +40,7 @@ func TestServerLogs_TailsKairoStdoutLog(t *testing.T) {
 	}
 	seedServerMeta(t, dataDir, &serverMeta{ID: "srv_1", State: "stopped", CatalinaBase: base})
 
-	r := newRealServerRunner(dataDir, "", "", nil)
+	r := newRealServerRunner(dataDir, "", "", nil, 0, 0)
 
 	// Default tail: last 500 lines.
 	entries, err := r.Logs("srv_1", 0)
@@ -100,7 +100,7 @@ func TestServerLogs_BoundedLargeFileTailAndSkipsSymlinks(t *testing.T) {
 	}
 	seedServerMeta(t, dataDir, &serverMeta{ID: "srv_1", State: "running", CatalinaBase: base})
 
-	r := newRealServerRunner(dataDir, "", "", nil)
+	r := newRealServerRunner(dataDir, "", "", nil, 0, 0)
 	entries, err := r.Logs("srv_1", 10)
 	if err != nil {
 		t.Fatalf("Logs: %v", err)
@@ -129,7 +129,7 @@ func TestServerLogs_NoLogFileYet(t *testing.T) {
 	base := filepath.Join(dataDir, "runtime", "srv_1")
 	seedServerMeta(t, dataDir, &serverMeta{ID: "srv_1", State: "running", CatalinaBase: base})
 
-	r := newRealServerRunner(dataDir, "", "", nil)
+	r := newRealServerRunner(dataDir, "", "", nil, 0, 0)
 	entries, err := r.Logs("srv_1", 0)
 	if err != nil {
 		t.Fatalf("Logs: %v", err)
@@ -149,7 +149,7 @@ func TestServerLogs_NoLogFileYet(t *testing.T) {
 // must fail before any process work happens.
 func TestServerRestart_NotFound(t *testing.T) {
 	dataDir := t.TempDir()
-	r := newRealServerRunner(dataDir, "", "", nil)
+	r := newRealServerRunner(dataDir, "", "", nil, 0, 0)
 	if _, err := r.Restart("srv_nope"); err == nil {
 		t.Fatalf("expected error for unknown server")
 	} else if !strings.HasPrefix(err.Error(), "server not found") {
@@ -157,7 +157,7 @@ func TestServerRestart_NotFound(t *testing.T) {
 	}
 
 	seedServerMeta(t, dataDir, &serverMeta{ID: "srv_1", State: "stopped"})
-	r2 := newRealServerRunner(dataDir, "", "", nil)
+	r2 := newRealServerRunner(dataDir, "", "", nil, 0, 0)
 	if _, err := r2.Restart("srv_1"); err == nil {
 		t.Fatalf("expected error for missing restart metadata")
 	}

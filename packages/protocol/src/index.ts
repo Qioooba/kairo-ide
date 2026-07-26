@@ -298,6 +298,8 @@ export interface Toolchain {
   home: string;
   vendor: string;
   version: string;
+  /** Optional human label. */
+  label?: string;
   /** `javac -source` levels this JDK can compile natively. */
   sourceLevels: string[];
   fingerprint: string;
@@ -589,6 +591,10 @@ export interface JdtProjectRequest {
   rootPath: string;
   /** Optional projectId; default = basename of rootPath. */
   projectId?: string;
+  /** Whether to auto-detect classpath from build.xml / lib/ etc. Default true. */
+  autoDetectClasspath?: boolean;
+  /** Optional explicit build file path (e.g. build.xml). */
+  buildFile?: string;
 }
 
 export interface JdtProjectResponse {
@@ -604,6 +610,10 @@ export interface JdtProjectResponse {
   generatedAt: string;
   fromCache: boolean;
   classpathEntries: string[];
+  /** How the classpath was resolved: "ant" | "yaml" | "autodetect" | "manual". */
+  classpathSource: string;
+  /** Jar/dir paths that could not be resolved on disk. */
+  unresolvedPaths: string[];
 }
 
 /* ------------------------------------------------------------------ */
@@ -753,6 +763,11 @@ export interface EndpointMap {
   'POST /api/v1/maven/detect': { request: { rootPath: string }; response: MavenDetectResult };
   'GET /api/v1/maven/dependencies': { request: { rootPath: string; offline?: boolean }; response: MavenDetectResult };
   'POST /api/v1/maven/run': { request: { rootPath: string; task: string; offline?: boolean }; response: MavenRunResult };
+  // Custom build
+  'POST /api/v1/build/custom': { request: CustomBuildStartRequest; response: CustomBuildStartResponse };
+  'POST /api/v1/build/custom/{buildId}/cancel': { request: undefined; response: CustomBuildCancelResponse };
+  // Ant classpath
+  'POST /api/v1/ant/classpath/analyze': { request: AntClasspathAnalyzeRequest; response: AntClasspathAnalyzeResponse };
 }
 
 export interface DetectedProjectLayout {
@@ -874,6 +889,48 @@ export interface MavenRunResult {
   exitCode: number;
   output: string;
   error?: string;
+}
+
+export interface CustomBuildStartRequest {
+  command: string;
+  projectRoot: string;
+  workingDir: string;
+  buildId?: string;
+  env?: Record<string, string>;
+}
+
+export interface CustomBuildStartResponse {
+  buildId: string;
+  status: string;
+}
+
+export interface CustomBuildCancelResponse {
+  buildId: string;
+  status: string;
+}
+
+export interface AntClasspathAnalyzeRequest {
+  projectRoot: string;
+  buildFile?: string;
+}
+
+export interface AntClasspathWarning {
+  file?: string;
+  line?: number;
+  message: string;
+  severity: 'warning' | 'info' | 'error';
+}
+
+export interface AntClasspathAnalyzeResponse {
+  success: boolean;
+  buildFile?: string;
+  classpath: string[];
+  classpathCount: number;
+  sourceRoots: string[];
+  outputDir?: string;
+  properties: Record<string, string>;
+  warnings: AntClasspathWarning[];
+  message?: string;
 }
 
 export type Endpoint = keyof EndpointMap;

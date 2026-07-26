@@ -175,7 +175,7 @@ function buildContextCompletions(
 export function registerJspScriptletJavaCompletion(
   javaProvider: JavaCompletionProvider,
 ): monaco.IDisposable {
-  const parser = new JspJavaParser();
+  const _parser = new JspJavaParser();
 
   return monaco.languages.registerCompletionItemProvider(
     JSP_LANGUAGE_ID,

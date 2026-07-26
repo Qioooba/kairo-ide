@@ -1,0 +1,34 @@
+# Browser Regression test config for K2.7 isolated run (Wave 3).
+# Uses shifted ports to avoid collisions with other AI model test runs.
+# Frontend:  18201 (Theia Browser)
+# Agent:     18200 (Runtime Agent)
+# Tomcat:    18202
+# Debug:     18203
+
+version: 0.1.0
+
+bindAddress: 127.0.0.1
+port: 18200
+
+tlsCert: ""
+tlsKey: ""
+
+dataDir: /Users/qi/Documents/spaces/kairo-ide/.runtime-k3/data
+bundledDir: /Users/qi/Documents/spaces/kairo-ide/.runtime-k3/bundled
+
+logLevel: info
+
+requireAuth: false
+
+tomcatStartTimeout: 60s
+tomcatShutdownTimeout: 15s
+buildFileTimeout: 30s
+
+workspaceScanMaxDepth: 8
+workspaceScanMaxFiles: 50000
+
+logBufferLines: 5000
+
+# Browser test port hints consumed by theia-product / tomcat extension
+tomcatDefaultPort: 18202
+jdwpDefaultPort: 18203

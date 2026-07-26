@@ -84,6 +84,7 @@ dist/
 *.AppImage
 *.deb
 *.rpm
+*.part
 
 # Runtime / state
 .runtime/
@@ -103,17 +104,8 @@ logs/
 *.log
 
 # Bundled third-party (large)
-bundled/tomcat6/apache-tomcat-*/
-bundled/tomcat6/bin/
-bundled/tomcat6/lib/
-bundled/tomcat6/conf/
-bundled/tomcat6/logs/
-bundled/tomcat6/temp/
-bundled/tomcat6/work/
-bundled/tomcat6/webapps/
-bundled/jdk*/
-bundled/jre*/
-bundled/eclipse-jdt-ls/
+bundled/
+!bundled/README.md
 # Pre-stage dir for electron-builder — populated by
 # `pnpm --filter @kairo/desktop build:win` from bundled/ at
 # packaging time, then removed by clean().
@@ -182,3 +174,38 @@ scratchpad/
 
 # legacy sample build output
 legacy-sample/*.war
+
+# Additional runtime state
+.runtime-k*/
+.runtime-iso/
+.nyc_output/
+.trae/
+coverage/
+
+# Test output files
+*test-output*.txt
+
+# Scratch files
+checksums*.sha256
+checksums.json
+checksums.json.sig
+baseline.json
+perf-gate.json
+01-shell-loaded.png.jpg
+HANDOVER_SHARD05.md
+
+# Legacy sample transient
+legacy-sample/.kairo-cache-key
+legacy-sample/.kairo-generated-at
+legacy-sample/.theia/
+legacy-sample/KairoJavaConfig.ini
+
+# Runtime agent temp dirs
+runtime-agent/.runtime-*/
+
+# Test probe scripts (one-off)
+test-import-*.cjs
+
+# Bundled binaries (built artifacts)
+bundled/kairo-jdi-bridge.jar
+bundled/tomcat6/tomcat6

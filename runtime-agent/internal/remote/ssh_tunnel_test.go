@@ -3,6 +3,7 @@ package remote
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -375,5 +376,161 @@ func TestSSHTunnel_Reconnect_Disabled(t *testing.T) {
 	// Should go to disconnected state without attempting reconnect
 	if tunnel.Status().State != SSHStateDisconnected {
 		t.Errorf("state = %v, want disconnected when reconnect is disabled", tunnel.Status().State)
+	}
+}
+
+// TestBuildHostKeyCallback_InsecureFallback tests the insecure fallback
+// when no known_hosts file is configured and system file is not available.
+func TestBuildHostKeyCallback_InsecureFallback(t *testing.T) {
+	// Override home dir to ensure no system known_hosts is found
+	t.Setenv("HOME", "/nonexistent/home/dir")
+
+	tunnel, _ := NewSSHTunnel(SSHConfig{
+		Host:     "example.com",
+		User:     "testuser",
+		Password: "secret",
+		Logger:   log.New("test"),
+	})
+
+	cb, err := tunnel.buildHostKeyCallback()
+	if err != nil {
+		t.Fatalf("buildHostKeyCallback: %v", err)
+	}
+	if cb == nil {
+		t.Fatal("host key callback should not be nil")
+	}
+}
+
+// TestBuildHostKeyCallback_WithKnownHostsFile tests the known_hosts file path.
+func TestBuildHostKeyCallback_WithKnownHostsFile(t *testing.T) {
+	dir := t.TempDir()
+	khFile := filepath.Join(dir, "known_hosts")
+	os.WriteFile(khFile, []byte{}, 0o644)
+
+	tunnel, _ := NewSSHTunnel(SSHConfig{
+		Host:           "example.com",
+		User:           "testuser",
+		Password:       "secret",
+		KnownHostsFile: khFile,
+		Logger:         log.New("test"),
+	})
+
+	cb, err := tunnel.buildHostKeyCallback()
+	if err != nil {
+		t.Fatalf("buildHostKeyCallback: %v", err)
+	}
+	if cb == nil {
+		t.Fatal("host key callback should not be nil")
+	}
+}
+
+// TestBuildHostKeyCallback_InvalidKnownHosts tests invalid known_hosts file.
+func TestBuildHostKeyCallback_InvalidKnownHosts(t *testing.T) {
+	dir := t.TempDir()
+	khFile := filepath.Join(dir, "known_hosts")
+	os.WriteFile(khFile, []byte("invalid content\n"), 0o644)
+
+	tunnel, _ := NewSSHTunnel(SSHConfig{
+		Host:           "example.com",
+		User:           "testuser",
+		Password:       "secret",
+		KnownHostsFile: khFile,
+		Logger:         log.New("test"),
+	})
+
+	_, err := tunnel.buildHostKeyCallback()
+	if err == nil {
+		t.Fatal("expected error for invalid known_hosts file")
+	}
+}
+
+// TestBuildAuthMethods_DefaultPassword tests default auth fallback to password.
+func TestBuildAuthMethods_DefaultPassword(t *testing.T) {
+	tunnel, _ := NewSSHTunnel(SSHConfig{
+		Host:     "example.com",
+		User:     "testuser",
+		Password: "mypassword",
+	})
+
+	// AuthMethod defaults to 0 (SSHAuthPassword), and password is set
+	methods, err := tunnel.buildAuthMethods()
+	if err != nil {
+		t.Fatalf("buildAuthMethods: %v", err)
+	}
+	if len(methods) != 1 {
+		t.Fatalf("expected 1 auth method, got %d", len(methods))
+	}
+}
+
+// TestBuildAuthMethods_DefaultFallbackKeyFile tests the default switch case
+// falling back to key file when AuthMethod is an unknown value.
+func TestBuildAuthMethods_DefaultFallbackKeyFile(t *testing.T) {
+	dir := t.TempDir()
+	keyFile := filepath.Join(dir, "id_rsa")
+	// Generate a valid ED25519 key for testing
+	privKey, _, err := GenerateSSHKey()
+	if err != nil {
+		t.Fatalf("GenerateSSHKey: %v", err)
+	}
+	os.WriteFile(keyFile, privKey, 0o600)
+
+	tunnel, _ := NewSSHTunnel(SSHConfig{
+		Host:       "example.com",
+		User:       "testuser",
+		AuthMethod: SSHAuthMethod(99), // Unknown, triggers default case
+		KeyFile:    keyFile,
+	})
+
+	methods, err := tunnel.buildAuthMethods()
+	if err != nil {
+		t.Fatalf("buildAuthMethods: %v", err)
+	}
+	if len(methods) != 1 {
+		t.Fatalf("expected 1 auth method, got %d", len(methods))
+	}
+}
+
+// TestBuildAuthMethods_EmptyPassword tests empty password in password auth.
+func TestBuildAuthMethods_EmptyPassword(t *testing.T) {
+	tunnel, _ := NewSSHTunnel(SSHConfig{
+		Host:       "example.com",
+		User:       "testuser",
+		AuthMethod: SSHAuthPassword,
+		Password:   "",
+	})
+
+	_, err := tunnel.buildAuthMethods()
+	if err == nil {
+		t.Fatal("expected error for empty password")
+	}
+}
+
+// TestBuildAuthMethods_EmptyKeyFile tests empty key file path.
+func TestBuildAuthMethods_EmptyKeyFile(t *testing.T) {
+	tunnel, _ := NewSSHTunnel(SSHConfig{
+		Host:       "example.com",
+		User:       "testuser",
+		AuthMethod: SSHAuthKeyFile,
+		KeyFile:    "",
+	})
+
+	_, err := tunnel.buildAuthMethods()
+	if err == nil {
+		t.Fatal("expected error for empty key file path")
+	}
+}
+
+// TestBuildAuthMethods_EmptyKeyData tests empty key data.
+func TestBuildAuthMethods_EmptyKeyData(t *testing.T) {
+	tunnel, _ := NewSSHTunnel(SSHConfig{
+		Host:       "example.com",
+		User:       "testuser",
+		AuthMethod: SSHAuthKeyData,
+		KeyData:    nil,
+	})
+
+	_, err := tunnel.buildAuthMethods()
+	if err == nil {
+		t.Fatal("expected error for empty key data")
 	}
 }

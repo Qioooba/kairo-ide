@@ -46,13 +46,15 @@ type Container struct {
 
 // Config holds bootstrap configuration.
 type Config struct {
-	DataDir       string
-	BundledDir    string
-	Logger        *log.Logger
-	Tomcat6Home   string
-	Secret        string
-	SkipSHAVerify bool
-	JDTLSURL      string
+	DataDir           string
+	BundledDir        string
+	Logger            *log.Logger
+	Tomcat6Home       string
+	Secret            string
+	SkipSHAVerify     bool
+	JDTLSURL          string
+	TomcatDefaultPort int
+	JDWPDefaultPort   int
 }
 
 // NewContainer builds and wires all dependencies.
@@ -85,12 +87,14 @@ func NewContainer(cfg Config) (*Container, error) {
 	// In future waves, the HTTP layer will use use cases directly
 	// and this will be replaced with app layer injection.
 	svcs := services.NewMemoryServices(services.Config{
-		DataDir:       cfg.DataDir,
-		BundledDir:    cfg.BundledDir,
-		Logger:        cfg.Logger,
-		Tomcat6Home:   cfg.Tomcat6Home,
-		SkipSHAVerify: cfg.SkipSHAVerify,
-		JDTLSURL:      cfg.JDTLSURL,
+		DataDir:           cfg.DataDir,
+		BundledDir:        cfg.BundledDir,
+		Logger:            cfg.Logger,
+		Tomcat6Home:       cfg.Tomcat6Home,
+		SkipSHAVerify:     cfg.SkipSHAVerify,
+		JDTLSURL:          cfg.JDTLSURL,
+		TomcatDefaultPort: cfg.TomcatDefaultPort,
+		JDWPDefaultPort:   cfg.JDWPDefaultPort,
 	}, sandbox)
 
 	// 4. Build container

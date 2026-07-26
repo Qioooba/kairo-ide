@@ -136,6 +136,8 @@ const TestResultsView: React.FC<TestResultsViewProps> = ({ runner }) => {
   const [selectedRunId, setSelectedRunId] = React.useState<string | null>(null);
   const [statusFilter, setStatusFilter] = React.useState<TestStatusFilter>('all');
   const [rerunningFailed, setRerunningFailed] = React.useState(false);
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     const sub = runner.onDidCompleteRun((run: JUnitTestRun) => {
@@ -143,8 +145,12 @@ const TestResultsView: React.FC<TestResultsViewProps> = ({ runner }) => {
       setLatestRun(run);
       setSelectedRunId(run.id);
       setRerunningFailed(false);
+      setLoading(false);
+      setError(null);
     });
-    return () => sub.dispose();
+    return () => {
+      sub.dispose();
+    };
   }, [runner]);
 
   const selectedRun = pastRuns.find(r => r.id === selectedRunId) || latestRun;
@@ -163,24 +169,88 @@ const TestResultsView: React.FC<TestResultsViewProps> = ({ runner }) => {
     if (failedResults.length === 0) return;
 
     setRerunningFailed(true);
+    setError(null);
+    setLoading(true);
     // Collect unique class names and run them
     const uniqueClasses = [...new Set(failedResults.map(r => r.className))];
-    for (const className of uniqueClasses) {
-      const failedMethods = failedResults
-        .filter(r => r.className === className)
-        .map(r => r.methodName)
-        .filter((m): m is string => !!m);
-      if (failedMethods.length > 0) {
-        // Run each failed method individually
-        for (const method of failedMethods) {
-          await runner.runTest(className, method);
+    try {
+      for (const className of uniqueClasses) {
+        const failedMethods = failedResults
+          .filter(r => r.className === className)
+          .map(r => r.methodName)
+          .filter((m): m is string => !!m);
+        if (failedMethods.length > 0) {
+          // Run each failed method individually
+          for (const method of failedMethods) {
+            await runner.runTest(className, method);
+          }
+        } else {
+          await runner.runTest(className);
         }
-      } else {
-        await runner.runTest(className);
       }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Rerun failed tests failed.');
     }
     setRerunningFailed(false);
+    setLoading(false);
   };
+
+  if (loading) {
+    return (
+      <div className="kairo-widget" role="status" aria-label="Running tests" aria-busy="true">
+        <div className="kairo-widget-header">
+          <span className="kairo-widget-title">Test Results</span>
+        </div>
+        <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
+          <div style={{
+            width: '24px', height: '24px',
+            border: '3px solid var(--theia-dropdown-border)',
+            borderTopColor: 'var(--theia-focusBorder)',
+            borderRadius: '50%',
+            animation: 'kairo-spin 0.8s linear infinite',
+          }} />
+          <span style={{ color: 'var(--theia-descriptionForeground)', fontSize: '13px' }}>
+            {rerunningFailed ? 'Rerunning failed tests...' : 'Running tests...'}
+          </span>
+          <style>{`@keyframes kairo-spin { to { transform: rotate(360deg); } }`}</style>
+        </div>
+      </div>
+    );
+  }
+
+  if (error && !selectedRun) {
+    return (
+      <div className="kairo-widget" role="alert" aria-live="assertive">
+        <div className="kairo-widget-header">
+          <span className="kairo-widget-title">Test Results</span>
+        </div>
+        <div style={{ padding: '12px' }}>
+          <div style={{
+            padding: '10px 12px',
+            backgroundColor: 'rgba(244,67,54,0.1)',
+            border: '1px solid rgba(244,67,54,0.3)',
+            borderRadius: '4px',
+            color: 'var(--theia-errorForeground)',
+            fontSize: '13px',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+              <span aria-hidden="true">⚠</span>
+              <strong>Error running tests</strong>
+            </div>
+            <p style={{ margin: '4px 0 0 0', fontSize: '12px' }}>{error}</p>
+            <button
+              className="theia-button"
+              onClick={() => setError(null)}
+              aria-label="Dismiss error"
+              style={{ marginTop: '8px', fontSize: '11px', padding: '2px 12px' }}
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (!selectedRun) {
     return (
@@ -205,6 +275,33 @@ const TestResultsView: React.FC<TestResultsViewProps> = ({ runner }) => {
           {selectedRun.state.toUpperCase()}
         </span>
       </div>
+
+      {error && (
+        <div role="alert" aria-live="assertive" style={{ padding: '8px 12px' }}>
+          <div style={{
+            padding: '6px 10px',
+            backgroundColor: 'rgba(244,67,54,0.1)',
+            border: '1px solid rgba(244,67,54,0.3)',
+            borderRadius: '4px',
+            color: 'var(--theia-errorForeground)',
+            fontSize: '12px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+          }}>
+            <span aria-hidden="true">⚠</span>
+            <span style={{ flex: 1 }}>{error}</span>
+            <button
+              className="theia-button secondary"
+              onClick={() => setError(null)}
+              aria-label="Dismiss error"
+              style={{ fontSize: '10px', padding: '1px 8px' }}
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
 
       {pastRuns.length > 1 && (
         <div className="kairo-widget-toolbar">

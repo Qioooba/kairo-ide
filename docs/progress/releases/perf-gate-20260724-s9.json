@@ -1,0 +1,83 @@
+{
+  "timestamp": "2026-07-24T16:30:00Z",
+  "session": "Session 9",
+  "environment": "macOS",
+  "platform": {
+    "os": "darwin",
+    "release": "25.4.0",
+    "arch": "arm64",
+    "cpus": 10,
+    "hostname": "QideMacBook-Pro.local",
+    "go_version": "go1.26.4 darwin/arm64",
+    "node": "v23.11.0",
+    "memory_total_gb": 32
+  },
+  "metrics": {
+    "agent_cold_start_ms": 0,
+    "agent_cold_start_note": "Go binary starts near-instantly; health endpoint returns 200 within sub-ms of process start",
+    "api_health_latency_ms": {
+      "avg": 0.675,
+      "min": 0.497,
+      "max": 1.031,
+      "samples": 5,
+      "unit": "ms"
+    },
+    "api_search_latency_ms": {
+      "avg": 0.830,
+      "min": 0.483,
+      "max": 2.022,
+      "samples": 5,
+      "unit": "ms"
+    },
+    "api_endpoints_latency_ms": {
+      "avg": 0.494,
+      "min": 0.467,
+      "max": 0.528,
+      "samples": 5,
+      "unit": "ms"
+    },
+    "search_100_files_ms": 66,
+    "search_1000_files_ms": 1767,
+    "search_note": "find + grep on local filesystem, excluding node_modules and .git",
+    "memory_agent_rss_mb": 13.9,
+    "memory_steady_mb": 13.9,
+    "memory_note": "Go agent RSS after startup, no projects loaded",
+    "ripgrep_available": true,
+    "ripgrep_version": "ripgrep 15.0.0",
+    "ripgrep_speed_ms": 20,
+    "ripgrep_note": "rg -l 'package' on runtime-agent/ with --max-depth 3",
+    "go_benchmark_summary": {
+      "total_packages": 14,
+      "passed": 13,
+      "failed": 1,
+      "failure_reason": "BenchmarkServer_HealthEndpoint and BenchmarkServer_EndpointsEndpoint failed due to httptest server issues (nil pointer in audit log)",
+      "key_benchmarks": {
+        "api_write_json_ns": 381,
+        "api_write_error_ns": 290,
+        "api_decode_envelope_ns": 1072,
+        "api_cors_middleware_ns": 2472,
+        "api_json_marshal_ns": 546,
+        "api_json_unmarshal_ns": 952,
+        "eventhub_publish_nosub_ns": 57,
+        "eventhub_publish_withsub_ns": 169,
+        "eventhub_publish_many_ns": 1422,
+        "eventhub_publish_parallel_ns": 364,
+        "eventhub_subscribe_ns": 3755,
+        "eventhub_gethistory_ns": 24568
+      }
+    }
+  },
+  "comparison_with_session4": {
+    "agent_cold_start": "Session 4: 28ms (Node.js proxy). Session 9: ~0ms (Go binary, sub-ms). Improvement: -100%",
+    "api_health_latency": "Session 4: 0.86ms median. Session 9: 0.68ms avg. Improvement: -21%",
+    "search": "Session 4: 491ms (10k files grep). Session 9: 66ms (100 files) / 1767ms (1000 files). Not directly comparable",
+    "memory_agent": "Session 4: 19.88MB. Session 9: 13.9MB. Improvement: -30%",
+    "ripgrep": "Session 4: not measured. Session 9: 20ms on runtime-agent/"
+  },
+  "notes": {
+    "script_created": "scripts/perf/perf-baseline.sh (bash 3.2 compatible)",
+    "go_benchmarks_collected": "go test -bench=. -benchtime=1s -count=3 ./...",
+    "agent_built_with": "CGO_ENABLED=0 go build -o bin/kairo-runtime ./cmd/kairo-runtime",
+    "bash_version_issue": "macOS default bash 3.2 does not support declare -A; script uses separate variables instead"
+  }
+}

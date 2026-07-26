@@ -526,11 +526,11 @@ func TestCompile_DefaultTimeout(t *testing.T) {
 }
 
 func TestCompile_ArgFileWithEmptyProjectRoot(t *testing.T) {
-	// Create 60 sources long enough to trigger argfile usage on all platforms.
-	// Each source path is ~270 chars, so 60 sources × 270 ≈ 16KB per source,
-	// plus args overhead, easily exceeds 24KB threshold.
+	// Create enough sources to trigger argfile usage on all platforms.
+	// Each source path is ~255 chars, so 100 sources × 255 ≈ 25KB,
+	// plus args overhead, exceeds the 24KB threshold.
 	longPath := strings.Repeat("x", 250) + ".java"
-	sources := make([]string, 60)
+	sources := make([]string, 100)
 	for i := range sources {
 		sources[i] = longPath
 	}

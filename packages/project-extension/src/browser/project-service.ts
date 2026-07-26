@@ -98,4 +98,9 @@ export class KairoProjectService {
 
 export function bindProjectExtension(bind: interfaces.Bind): void {
   bind(KairoProjectService).toSelf().inSingletonScope();
+  // KAIRO-RC-WEB-2026-07-25-11: ActiveProjectService is bound as a singleton
+  // in packages/theia-product/src/main/product-bindings.ts. Do not add a
+  // second binding here — that triggers an "Ambiguous match" Inversify
+  // error at frontend boot and silently disables the Kairo status bar /
+  // commands contributions.
 }

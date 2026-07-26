@@ -2,6 +2,9 @@ export { KairoJavaService, bindJavaExtension } from './java-service';
 export type { JavaServiceState } from './java-service';
 export { KairoMavenService } from './maven-service';
 export type { MavenDetectResult, MavenDependency, MavenDependencyConflict, MavenDependencyTreeNode, MavenLifecycleTask, MavenRunResult, MavenBuildProgress, MavenViewTab } from './maven-service';
+export { AntClasspathService } from './ant-classpath-service';
+export type { AntClasspathAnalysis, AntResolveWarning, ClasspathInfo } from './ant-classpath-service';
+export { AntClasspathContribution } from './ant-classpath-contribution';
 export { MavenViewWidget } from './maven-view-widget';
 export { KairoJavaLanguageClientContribution } from './java-language-client-contribution';
 export {
@@ -25,6 +28,7 @@ export type {
 } from './java-intellisense-provider';
 export { JavaMonacoRegistrationContribution } from './java-monaco-registration';
 export { JdtClassFileFsProvider } from './jdt-fs-provider';
+export { JavaClassDecompilerContribution } from './java-class-decompiler';
 export { JavaDocumentSyncContribution } from './java-document-sync';
 export { JavaDocumentSync, lspDiagnosticsToMarkers, toMonacoMarkerSeverity, JAVA_DOCUMENT_SYNC_DEBOUNCE_MS } from './java-document-sync-core';
 export type { JavaDocumentSnapshot, JavaMarkerData } from './java-document-sync-core';
@@ -100,6 +104,7 @@ import { JavaCompletionProvider } from './java-completion-provider';
 import { JavaIntelliSenseProvider } from './java-intellisense-provider';
 import { JavaMonacoRegistrationContribution } from './java-monaco-registration';
 import { JdtClassFileFsProvider } from './jdt-fs-provider';
+import { JavaClassDecompilerContribution } from './java-class-decompiler';
 import { JavaDocumentSyncContribution } from './java-document-sync';
 import { JavaDiagnosticsManager } from './java-diagnostics-manager';
 import { JavaIndexProgressService } from './java-index-progress';
@@ -125,6 +130,8 @@ import { JavaSaveActionsService } from './java-save-actions';
 import { JavaPreferenceContribution } from './java-preference-schema';
 import { KairoMavenService } from './maven-service';
 import { MavenViewWidget } from './maven-view-widget';
+import { AntClasspathService } from './ant-classpath-service';
+import { AntClasspathContribution } from './ant-classpath-contribution';
 
 export function bindJavaLanguageClientContribution(bind: interfaces.Bind): void {
     bind(KairoJavaLanguageClientContribution).toSelf().inSingletonScope();
@@ -141,9 +148,13 @@ export function bindJavaLanguageClientContribution(bind: interfaces.Bind): void 
     bind(JavaIntelliSenseProvider).toSelf().inSingletonScope();
     bind(JavaMonacoRegistrationContribution).toSelf().inSingletonScope();
     bind(JdtClassFileFsProvider).toSelf().inSingletonScope();
+    bind(JavaClassDecompilerContribution).toSelf().inSingletonScope();
     // Registers the Java completion + definition providers with
     // Monaco at application start.
     bind(FrontendApplicationContribution).toService(JavaMonacoRegistrationContribution);
+    // Decompiles standalone .class files opened from disk and
+    // ensures jdt:// library classes get Java highlighting.
+    bind(FrontendApplicationContribution).toService(JavaClassDecompilerContribution);
     bind(JavaDocumentSyncContribution).toSelf().inSingletonScope();
     // Syncs open Java editor buffers (didOpen/didChange/didClose)
     // to the JDT LS and renders backend diagnostics as markers.
@@ -213,4 +224,9 @@ export function bindJavaLanguageClientContribution(bind: interfaces.Bind): void 
     // ── Maven View ───────────────────────────────────────────────────
     bind(KairoMavenService).toSelf().inSingletonScope();
     bind(MavenViewWidget).toSelf();
+
+    // ── Ant Classpath Service ─────────────────────────────────────────
+    bind(AntClasspathService).toSelf().inSingletonScope();
+    bind(AntClasspathContribution).toSelf().inSingletonScope();
+    bind(FrontendApplicationContribution).toService(AntClasspathContribution);
 }

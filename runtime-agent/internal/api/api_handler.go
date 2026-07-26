@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path/filepath"
 	"strings"
 
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/api/protocol"
@@ -102,6 +103,13 @@ func (h *APIHandler) HandleWorkspaces(w http.ResponseWriter, r *http.Request) {
 				Message: err.Error(),
 			})
 			return
+		}
+		// Accept either root (canonical) or rootPath (test/legacy alias).
+		if req.Root == "" && req.RootPath != "" {
+			req.Root = req.RootPath
+		}
+		if req.Name == "" && req.Root != "" {
+			req.Name = filepath.Base(req.Root)
 		}
 		if req.Name == "" || req.Root == "" {
 			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{

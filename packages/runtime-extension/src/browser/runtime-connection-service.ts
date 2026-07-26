@@ -697,8 +697,11 @@ function wsHostPortFromBase(baseUrl: string): string {
  * Dev default for the browser entry (which has no preload to
  * inject the agent URL). Matches runtime-agent/configs/dev.yaml
  * port 18080. The desktop app overrides this via preload.
+ * Supports AGENT_PORT environment variable for testing.
  */
-const DEFAULT_RUNTIME_BASE_URL = 'http://127.0.0.1:18080';
+const DEFAULT_RUNTIME_BASE_URL = typeof process !== 'undefined' && process.env?.AGENT_PORT
+  ? `http://127.0.0.1:${process.env.AGENT_PORT}`
+  : 'http://127.0.0.1:18080';
 
 /**
  * A typed WebSocket subscription with exponential backoff

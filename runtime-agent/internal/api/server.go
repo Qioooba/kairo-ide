@@ -22,6 +22,8 @@ import (
 
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/api/protocol"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/audit"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/build"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/jdkmanager"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/log"
 )
 
@@ -146,6 +148,12 @@ type Services struct {
 	DataDir string
 	// Orchestrator executes before-launch tasks and starts the server.
 	Orchestrator LaunchOrchestrator
+	// CustomBuild executes custom build commands.
+	CustomBuild *build.CustomBuildExecutor
+	// JDKManager detects and reports the host JDK status for the
+	// Java Debug Adapter (JDI Bridge). Optional: when nil,
+	// /api/v1/debug/adapter/status returns a 500.
+	JDKManager *jdkmanager.Manager
 }
 
 // NewServer creates a Server.
@@ -382,6 +390,11 @@ func (s *Server) routes() {
 	// Builds
 	s.router.HandleFunc("/api/v1/builds", s.handleBuilds)
 	s.router.HandleFunc("/api/v1/builds/", s.handleBuildByID)
+	// Custom build
+	s.router.HandleFunc("/api/v1/build/custom", s.handleCustomBuild)
+	s.router.HandleFunc("/api/v1/build/custom/", s.handleCustomBuildSub)
+	// Ant classpath
+	s.router.HandleFunc("/api/v1/ant/classpath/analyze", s.handleAntClasspathAnalyze)
 	// Deployments
 	s.router.HandleFunc("/api/v1/deployments", s.handleDeployments)
 	s.router.HandleFunc("/api/v1/deployments/", s.handleDeploymentByID)
@@ -417,6 +430,10 @@ func (s *Server) routes() {
 	// SQL — EXPERIMENTAL: Oracle 11g database operations
 	s.router.HandleFunc("/api/v1/sql/execute", s.handleSQLExecute)
 	s.router.HandleFunc("/api/v1/sql/test-connection", s.handleSQLTestConnection)
+	// Debug adapter status
+	s.router.HandleFunc("/api/v1/debug/adapter/status", s.handleDebugAdapterStatus)
+	// JDK download
+	s.router.HandleFunc("/api/v1/debug/jdk/download", s.handleJDKDownload)
 }
 
 // doRestart performs the actual restart sequence after

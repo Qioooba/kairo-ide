@@ -224,7 +224,7 @@ export class TldCompletionProvider {
 const TAGLIB_DIRECTIVE_RE = /<%@\s+taglib\b/gi;
 
 /** Regex to extract the prefix attribute value from a taglib directive. */
-const TAGLIB_PREFIX_RE = /<%@\s+taglib\b[^%]*\bprefix\s*=\s*"([^"]*)"/i;
+const _TAGLIB_PREFIX_RE = /<%@\s+taglib\b[^%]*\bprefix\s*=\s*"([^"]*)"/i;
 
 /** Regex to detect a known tag with attributes: <prefix:tagname */
 const TAG_WITH_ATTRS_RE = /<([a-zA-Z_][\w-]*):([a-zA-Z_][\w-]*)\s+([^>]*)$/;

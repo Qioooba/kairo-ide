@@ -15,7 +15,7 @@ import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import { OpenerService, open } from '@theia/core/lib/browser/opener-service';
 import { MessageService } from '@theia/core/lib/common/message-service';
 import { SearchInWorkspaceService } from '@theia/search-in-workspace/lib/browser/search-in-workspace-service';
-import type { SearchInWorkspaceResult, SearchMatch } from '@theia/search-in-workspace/lib/common/search-in-workspace-interface';
+import type { SearchInWorkspaceResult } from '@theia/search-in-workspace/lib/common/search-in-workspace-interface';
 import URI from '@theia/core/lib/common/uri';
 
 export const KAIRO_TODO_FACTORY_ID = 'kairo-todo-view';

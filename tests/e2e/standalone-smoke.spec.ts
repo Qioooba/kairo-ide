@@ -87,7 +87,11 @@ test.describe('Standalone-01: Theia Browser Start', () => {
       console.log(`  Navigated to ${THEIA_URL}`);
     });
 
-    await test.step('2. Verify page loaded (non-empty body)', async () => {
+    await test.step('2. Wait for Theia shell and verify non-empty body', async () => {
+      // Theia starts with a loading spinner; wait for the real shell.
+      await page.waitForSelector('#theia-app-shell, #theia-shell, .theia-shell', {
+        timeout: NAVIGATION_TIMEOUT,
+      });
       const bodyContent = await page.textContent('body');
       expect(bodyContent).toBeTruthy();
       expect(bodyContent!.length).toBeGreaterThan(30);

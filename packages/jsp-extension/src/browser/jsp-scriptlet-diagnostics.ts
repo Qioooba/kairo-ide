@@ -149,7 +149,7 @@ export function registerJspScriptletDiagnostics(
     const blocks = parser.findJavaBlocks(content);
 
     const newVirtualUris = new Set<string>();
-    const markers: monaco.editor.IMarkerData[] = [];
+    const _markers: monaco.editor.IMarkerData[] = [];
 
     for (let i = 0; i < blocks.length; i++) {
       const block = blocks[i];

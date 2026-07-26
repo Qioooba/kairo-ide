@@ -17,7 +17,7 @@ export {
 export { KairoError, normaliseThrown, unwrapResponse, FALLBACK_ERROR_CODE } from './runtime-errors';
 
 export { WorkspaceContextService } from './workspace-context-service';
-export type { WorkspaceContext } from './workspace-context-service';
+export type { WorkspaceContext, KairoProjectYaml } from './workspace-context-service';
 
 export {
   RuntimeConnectionService,

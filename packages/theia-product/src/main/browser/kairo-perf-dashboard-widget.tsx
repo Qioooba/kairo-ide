@@ -46,6 +46,7 @@ const PerfDashboard: React.FC<PerfDashboardProps> = ({
   const [benchmarkResult, setBenchmarkResult] = React.useState<string | undefined>();
   const [memoryAvailable, setMemoryAvailable] = React.useState(true);
   const [lsError, setLsError] = React.useState(false);
+  const [initialLoading, setInitialLoading] = React.useState(true);
   const intervalRef = React.useRef<ReturnType<typeof setInterval> | undefined>();
 
   React.useEffect(() => {
@@ -87,6 +88,8 @@ const PerfDashboard: React.FC<PerfDashboardProps> = ({
         logger.warn(`[Perf] Failed to read JDT LS state: ${String(err)}`);
         setLsError(true);
       }
+
+      setInitialLoading(false);
     };
 
     refresh();
@@ -111,6 +114,7 @@ const PerfDashboard: React.FC<PerfDashboardProps> = ({
         const obj = { a: i, b: String(i), c: [i] };
         count += obj.a;
       }
+      void count;
       const elapsed = performance.now() - start;
       const result = `基准测试完成: ${elapsed.toFixed(1)}ms (100000 次迭代)`;
       setBenchmarkResult(result);
@@ -182,6 +186,38 @@ const PerfDashboard: React.FC<PerfDashboardProps> = ({
       <h2 style={{ margin: '0 0 16px', fontSize: '16px', fontWeight: 600 }}>
         性能仪表盘
       </h2>
+
+      {/* Loading skeleton */}
+      {initialLoading && (
+        <div role="status" aria-label="Loading performance data" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
+          <div style={{
+            width: '24px', height: '24px',
+            border: '3px solid var(--theia-dropdown-border)',
+            borderTopColor: 'var(--theia-focusBorder)',
+            borderRadius: '50%',
+            animation: 'kairo-spin 0.8s linear infinite',
+          }} />
+          <p style={{ color: 'var(--theia-descriptionForeground)', fontSize: '13px', margin: 0 }}>
+            Loading performance metrics...
+          </p>
+          <div style={{ width: '80%', maxWidth: '400px' }}>
+            {[0, 1, 2, 3].map(i => (
+              <div key={i} style={{
+                height: '12px',
+                backgroundColor: 'var(--theia-dropdown-border)',
+                borderRadius: '3px',
+                marginBottom: '8px',
+                opacity: 0.5 - i * 0.12,
+                width: `${85 - i * 12}%`,
+              }} />
+            ))}
+          </div>
+          <style>{`@keyframes kairo-spin { to { transform: rotate(360deg); } }`}</style>
+        </div>
+      )}
+
+      {!initialLoading && (
+      <>
 
       {/* 冷启动历史 */}
       <section style={{ marginBottom: '20px' }}>
@@ -284,6 +320,8 @@ const PerfDashboard: React.FC<PerfDashboardProps> = ({
           </p>
         )}
       </section>
+      </>
+      )}
     </div>
   );
 };

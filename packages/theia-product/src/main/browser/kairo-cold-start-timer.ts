@@ -5,7 +5,7 @@
  * KairoCompletionTimer: 测量首次 Java 代码补全延迟。
  */
 
-import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
+import { injectable, inject } from '@theia/core/shared/inversify';
 import { FrontendApplicationContribution } from '@theia/core/lib/browser';
 import { ILogger } from '@theia/core/lib/common/logger';
 import { JavaCompletionProvider } from '@kairo/java-extension';

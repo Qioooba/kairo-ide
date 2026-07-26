@@ -12,6 +12,6 @@
     "build": "tsc -p tsconfig.json",
     "clean": "rm -rf lib",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "test": "node --require ts-node/register --require source-map-support/register --test src/list.test.ts src/list-extended.test.ts"
+    "test": "node --require ts-node/register --require source-map-support/register --test src/list.test.ts src/list-extended.test.ts src/list-edge-cases.test.ts"
   }
 }

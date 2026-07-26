@@ -147,6 +147,7 @@ const KairoWelcome: React.FC<KairoWelcomeProps> = ({
 }) => {
   const [recentProjects, setRecentProjects] = React.useState<RecentProject[]>([]);
   const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -154,11 +155,13 @@ const KairoWelcome: React.FC<KairoWelcomeProps> = ({
       if (!cancelled) {
         setRecentProjects(list);
         setLoading(false);
+        setError(null);
       }
-    }).catch(() => {
+    }).catch((err: Error) => {
       if (!cancelled) {
         setRecentProjects([]);
         setLoading(false);
+        setError(err.message || 'Failed to load recent projects.');
       }
     });
     return () => { cancelled = true; };
@@ -207,6 +210,20 @@ const KairoWelcome: React.FC<KairoWelcomeProps> = ({
               </li>
             ))}
           </ul>
+        </div>
+      )}
+      {!loading && error && (
+        <div className="kairo-welcome-error" role="alert" data-testid="welcome-error" style={{ padding: '12px', margin: '8px 0' }}>
+          <div style={{
+            padding: '8px 12px',
+            backgroundColor: 'rgba(244,67,54,0.1)',
+            border: '1px solid rgba(244,67,54,0.3)',
+            borderRadius: '4px',
+            color: 'var(--theia-errorForeground)',
+            fontSize: '13px',
+          }}>
+            <span aria-hidden="true">⚠</span> Failed to load recent projects: {error}
+          </div>
         </div>
       )}
       <div className="kairo-welcome-quickstart" data-testid="welcome-quickstart">

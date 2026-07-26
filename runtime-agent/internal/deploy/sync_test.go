@@ -1130,8 +1130,13 @@ func TestExecute_DeleteSymlink(t *testing.T) {
 	_, deployRoot, outsideRoot := setupTestEnv(t)
 	defer verifySentinel(t, outsideRoot)
 
+	// Create a symlink pointing to a file inside the deployment root.
+	// The symlink escape check in verifyNoSymlinkEscape would reject
+	// symlinks pointing outside the root.
+	insideTarget := filepath.Join(deployRoot, "real-file.txt")
+	os.WriteFile(insideTarget, []byte("inside"), 0644)
 	symlinkPath := filepath.Join(deployRoot, "symlink")
-	os.Symlink(outsideRoot, symlinkPath)
+	os.Symlink(insideTarget, symlinkPath)
 
 	engine := NewDeployEngine()
 	plan := domain.DeployPlan{
@@ -1375,10 +1380,13 @@ func TestDeploy_DeleteSymlinkTarget(t *testing.T) {
 	_, deployRoot, outsideRoot := setupTestEnv(t)
 	defer verifySentinel(t, outsideRoot)
 
-	outsideTarget := filepath.Join(outsideRoot, "target.txt")
-	os.WriteFile(outsideTarget, []byte("outside"), 0644)
+	// Create a symlink pointing to a file inside the deployment root.
+	// The symlink escape check in verifyNoSymlinkEscape would reject
+	// symlinks pointing outside the root.
+	insideTarget := filepath.Join(deployRoot, "target.txt")
+	os.WriteFile(insideTarget, []byte("inside"), 0644)
 	symlinkPath := filepath.Join(deployRoot, "link-to-outside")
-	os.Symlink(outsideTarget, symlinkPath)
+	os.Symlink(insideTarget, symlinkPath)
 
 	engine := NewDeployEngine()
 	plan := domain.DeployPlan{

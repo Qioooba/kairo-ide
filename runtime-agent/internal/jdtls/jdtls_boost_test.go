@@ -22,6 +22,11 @@ import (
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/log"
 )
 
+func init() {
+	// Speed up download retries in tests: 5ms base → 5ms, 10ms, 20ms (35ms total)
+	downloadBaseBackoff = 5 * time.Millisecond
+}
+
 // =============================================================================
 // Start state machine tests — improve from 11.0%
 // =============================================================================
@@ -354,13 +359,15 @@ func TestManager_Start_FromCrashed(t *testing.T) {
 // =============================================================================
 
 func TestTerminateProcessTree_ZeroPID(t *testing.T) {
-	// terminateProcessTree with 0 PID
+	// terminateProcessTree with 0 PID must return an error and not
+	// attempt to signal the process group (which on Unix would kill
+	// every process in the test runner's own group — including us).
 	err := terminateProcessTree(0)
-	if runtime.GOOS == "windows" {
-		// taskkill /PID 0 should fail
-		if err == nil {
-			t.Log("taskkill succeeded on PID 0")
-		}
+	if err == nil {
+		t.Fatal("terminateProcessTree(0) should return an error for invalid PID")
+	}
+	if !strings.Contains(err.Error(), "invalid pid") {
+		t.Fatalf("error %q should mention invalid pid", err.Error())
 	}
 }
 

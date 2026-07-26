@@ -194,7 +194,7 @@ function semanticIssues(document: RunConfigurationDocument): RunConfigurationVal
       }
       envNames.add(folded);
       const sensitive = /(PASSWORD|PASSWD|SECRET|TOKEN|API_KEY|PRIVATE_KEY)/i.test(name);
-      if (sensitive && !/^\$\{env:[A-Za-z_][A-Za-z0-9_]*\}$/.test(value)) {
+      if (sensitive && !/^\$\{env:[A-Za-z_][A-Za-z0-9_]*\}$/.test(String(value as string))) {
         issues.push({ path: `${base}/env/${name}`, message: 'sensitive values must use a ${env:HOST_NAME} reference' });
       }
     }

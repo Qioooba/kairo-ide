@@ -1,5 +1,6 @@
 import { accessSync, constants, existsSync, statSync } from 'node:fs';
-import { isAbsolute } from 'node:path';
+import { delimiter, isAbsolute, resolve } from 'node:path';
+import { platform } from 'node:os';
 import { injectable } from '@theia/core/shared/inversify';
 import type { DebugConfiguration } from '@theia/debug/lib/common/debug-configuration';
 import type {
@@ -23,10 +24,78 @@ export const KAIRO_DEBUG_ADAPTER_MAX_ARGS = 64;
 export const KAIRO_DEBUG_ADAPTER_MAX_ARG_LENGTH = 8_192;
 export const KAIRO_DEBUG_ADAPTER_MAX_ENCODED_ARGS_LENGTH = 65_536;
 
+function isExecutable(path: string): boolean {
+  try {
+    if (!existsSync(path) || !statSync(path).isFile()) return false;
+    if (platform() !== 'win32') accessSync(path, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Resolve the path to the built-in kairo-jdi-bridge.jar.
+ * Looks in several locations relative to the app root.
+ */
+export function resolveBridgeJar(appRoot?: string): string | undefined {
+  const root = appRoot ?? process.cwd();
+  const candidates = [
+    resolve(root, 'bundled', 'kairo-jdi-bridge.jar'),
+    resolve(root, '..', 'bundled', 'kairo-jdi-bridge.jar'),
+    resolve(root, '..', '..', 'bundled', 'kairo-jdi-bridge.jar'),
+    resolve(root, 'packages', 'theia-product', 'bundled', 'kairo-jdi-bridge.jar'),
+  ];
+  for (const candidate of candidates) {
+    if (existsSync(candidate) && statSync(candidate).isFile()) {
+      return candidate;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Resolve the path to a suitable JDK 17+ java executable.
+ * Priority: bundled/jdk17/bin/java > KAIRO_JDT_LS_JRE > JAVA_HOME > PATH java
+ */
+export function resolveHostJava(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  const javaExe = platform() === 'win32' ? 'java.exe' : 'java';
+
+  // 1. Bundled JDK 17
+  const bundled = resolve(process.cwd(), 'bundled', 'jdk17', 'bin', javaExe);
+  if (existsSync(bundled) && isExecutable(bundled)) return bundled;
+
+  // 2. KAIRO_JDT_LS_JRE (same JRE used by JDT LS)
+  const jdtJre = env['KAIRO_JDT_LS_JRE'];
+  if (jdtJre) {
+    const javaPath = resolve(jdtJre, 'bin', javaExe);
+    if (existsSync(javaPath) && isExecutable(javaPath)) return javaPath;
+  }
+
+  // 3. JAVA_HOME
+  const javaHome = env['JAVA_HOME'];
+  if (javaHome) {
+    const javaPath = resolve(javaHome, 'bin', javaExe);
+    if (existsSync(javaPath) && isExecutable(javaPath)) return javaPath;
+  }
+
+  // 4. PATH - search PATH directories for java
+  const pathEnv = env['PATH'] || env['Path'];
+  if (pathEnv) {
+    for (const dir of pathEnv.split(delimiter)) {
+      if (!dir) continue;
+      const javaPath = resolve(dir, javaExe);
+      if (existsSync(javaPath) && isExecutable(javaPath)) return javaPath;
+    }
+  }
+
+  return undefined;
+}
+
 /** Pure capability probe, exported so failure-closed behaviour is testable. */
 export function probeKairoJavaDebugAdapter(
   env: NodeJS.ProcessEnv = process.env,
-  isExecutable: (path: string) => boolean = path => {
+  isExecutableFn: (path: string) => boolean = path => {
     try {
       if (!existsSync(path) || !statSync(path).isFile()) return false;
       if (process.platform !== 'win32') accessSync(path, constants.X_OK);
@@ -35,13 +104,26 @@ export function probeKairoJavaDebugAdapter(
       return false;
     }
   },
+  resolved?: { bridgeJar?: string | null; hostJava?: string | null },
 ): KairoJavaDebugAdapterCapability {
+  // 1. Try the built-in JDI bridge (no env var needed)
+  const bridgeJar = resolved?.bridgeJar !== undefined ? resolved.bridgeJar ?? undefined : resolveBridgeJar();
+  if (bridgeJar) {
+    const hostJava = resolved?.hostJava !== undefined ? resolved.hostJava ?? undefined : resolveHostJava(env);
+    if (hostJava && isAbsolute(hostJava) && !hostJava.includes('\0') && isExecutableFn(hostJava)) {
+      return { available: true, command: hostJava, args: ['-jar', bridgeJar, '127.0.0.1', '8000'] };
+    }
+  }
+
+  // 2. Fall back to env-var-configured external adapter
   const command = env[KAIRO_JAVA_DEBUG_ADAPTER_COMMAND_ENV]?.trim();
   if (!command) {
     return {
       available: false,
       args: [],
-      reason: `${KAIRO_JAVA_DEBUG_ADAPTER_COMMAND_ENV} is not configured`,
+      reason: bridgeJar
+        ? 'Host Java not found for built-in JDI bridge'
+        : `${KAIRO_JAVA_DEBUG_ADAPTER_COMMAND_ENV} is not configured, and kairo-jdi-bridge.jar not found`,
     };
   }
   if (!isAbsolute(command)) {
@@ -50,7 +132,7 @@ export function probeKairoJavaDebugAdapter(
   if (command.includes('\0')) {
     return { available: false, args: [], reason: 'Debug adapter command must not contain NUL characters' };
   }
-  if (!isExecutable(command)) {
+  if (!isExecutableFn(command)) {
     return { available: false, args: [], reason: `Debug adapter command is not an executable file: ${command}` };
   }
 
@@ -110,24 +192,27 @@ function validateAttachConfiguration(config: DebugConfiguration): void {
 }
 
 /**
- * Theia backend contribution for an operator-supplied, mature Java DAP
- * adapter speaking DAP over stdio. Kairo never downloads or guesses one.
+ * Theia backend contribution for the built-in Kairo JDI Bridge
+ * that speaks DAP over stdio. Automatically locates the bundled
+ * kairo-jdi-bridge.jar and a suitable JDK 17, launching the bridge
+ * as a child process — no environment variable configuration needed.
  */
 @injectable()
 export class KairoJavaDebugAdapterContribution implements DebugAdapterContribution {
   readonly type = KAIRO_JAVA_DEBUG_TYPE;
-  readonly label = 'Kairo Java (configured adapter)';
+  readonly label = 'Kairo Java (built-in JDI Bridge)';
   readonly languages = ['java'];
 
   provideDebugConfigurations(): DebugConfiguration[] {
     const capability = probeKairoJavaDebugAdapter();
-    if (!capability.available) return [];
     return [{
       type: this.type,
-      name: 'Kairo Java: Attach to local JDWP',
+      name: 'Kairo Java: Attach to Tomcat (JDWP)',
       request: 'attach',
       hostName: '127.0.0.1',
-      port: 0,
+      port: 8000,
+      __kairoAdapterAvailable: capability.available,
+      __kairoAdapterReason: capability.reason,
     }];
   }
 
@@ -137,6 +222,9 @@ export class KairoJavaDebugAdapterContribution implements DebugAdapterContributi
     if (!capability.available || !capability.command) {
       throw new Error(`Java Debug Adapter unavailable: ${capability.reason ?? 'capability probe failed'}`);
     }
-    return { command: capability.command, args: capability.args };
+    return {
+      command: capability.command,
+      args: [...capability.args, config.hostName ?? '127.0.0.1', String(config.port)],
+    };
   }
 }

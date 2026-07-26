@@ -1,0 +1,33 @@
+# Isolated regression config: my own ports to avoid conflict with other AIs.
+# Frontend:  3070 (Theia Browser)
+# Agent:     18280 (Runtime Agent)
+# Tomcat:    8098
+# Debug:     9555
+
+version: 0.1.0
+
+bindAddress: 127.0.0.1
+port: 18280
+
+tlsCert: ""
+tlsKey: ""
+
+dataDir: ./.runtime-iso/data
+bundledDir: ./.runtime-iso/bundled
+
+logLevel: info
+
+requireAuth: false
+
+tomcatStartTimeout: 60s
+tomcatShutdownTimeout: 15s
+buildFileTimeout: 30s
+
+workspaceScanMaxDepth: 8
+workspaceScanMaxFiles: 50000
+
+logBufferLines: 5000
+
+# Browser test port hints consumed by theia-product / tomcat extension
+tomcatDefaultPort: 8098
+jdwpDefaultPort: 9555

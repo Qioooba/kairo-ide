@@ -25,14 +25,16 @@ import (
 // ----------------- ServerRunner (real Tomcat 6) -----------------
 
 type realServerRunner struct {
-	mu          sync.Mutex
-	dataDir     string
-	bundledDir  string
-	tomcat6Home string
-	logger      *log.Logger
-	instances   map[string]*tomcat6.Instance
-	meta        map[string]*serverMeta
-	ports       *runtimeplan.DefaultPortAllocator
+	mu               sync.Mutex
+	dataDir          string
+	bundledDir       string
+	tomcat6Home      string
+	logger           *log.Logger
+	instances        map[string]*tomcat6.Instance
+	meta             map[string]*serverMeta
+	ports            *runtimeplan.DefaultPortAllocator
+	defaultHTTPPort  int
+	defaultDebugPort int
 }
 
 type serverMeta struct {
@@ -80,15 +82,17 @@ func (m *serverMeta) toResponse() *api.ServerResponse {
 	return resp
 }
 
-func newRealServerRunner(dataDir, bundledDir, tomcat6Home string, logger *log.Logger) *realServerRunner {
+func newRealServerRunner(dataDir, bundledDir, tomcat6Home string, logger *log.Logger, defaultHTTPPort, defaultDebugPort int) *realServerRunner {
 	r := &realServerRunner{
-		dataDir:     dataDir,
-		bundledDir:  bundledDir,
-		tomcat6Home: tomcat6Home,
-		logger:      logger,
-		instances:   map[string]*tomcat6.Instance{},
-		meta:        map[string]*serverMeta{},
-		ports:       runtimeplan.NewDefaultPortAllocator(runtimeplan.DefaultPortConfig()),
+		dataDir:          dataDir,
+		bundledDir:       bundledDir,
+		tomcat6Home:      tomcat6Home,
+		logger:           logger,
+		instances:        map[string]*tomcat6.Instance{},
+		meta:             map[string]*serverMeta{},
+		ports:            runtimeplan.NewDefaultPortAllocator(runtimeplan.DefaultPortConfig()),
+		defaultHTTPPort:  defaultHTTPPort,
+		defaultDebugPort: defaultDebugPort,
 	}
 	r.load()
 	return r
@@ -156,6 +160,15 @@ func (r *realServerRunner) Start(req api.StartServerRequest) (*api.ServerRespons
 	// Accepting an explicit debugPort/suspend flag also opts in for backwards
 	// compatibility with advanced callers.
 	debugEnabled := req.Debug || req.DebugPort > 0 || req.DebugSuspend
+	// KAIRO-RC-WEB-2026-07-26: when the caller does not supply a port,
+	// fall back to configured defaults so isolated test environments can
+	// pin Tomcat/JDWP to predictable ports (e.g. K4 uses 18302/18303).
+	if req.HTTPPort <= 0 && r.defaultHTTPPort > 0 {
+		req.HTTPPort = r.defaultHTTPPort
+	}
+	if debugEnabled && req.DebugPort <= 0 && r.defaultDebugPort > 0 {
+		req.DebugPort = r.defaultDebugPort
+	}
 	lease, err := r.ports.AllocateServer(req.HTTPPort, req.ShutdownPort, req.DebugPort, debugEnabled)
 	if err != nil {
 		return nil, fmt.Errorf("allocate ports: %w", err)

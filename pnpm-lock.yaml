@@ -412,6 +412,28 @@ importers:
         specifier: 5.5.4
         version: 5.5.4
 
+  packages/svn-extension:
+    dependencies:
+      '@theia/core':
+        specifier: 1.73.1
+        version: 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@theia/editor':
+        specifier: 1.73.1
+        version: 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@theia/filesystem':
+        specifier: 1.73.1
+        version: 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.5.4)
+      '@theia/navigator':
+        specifier: 1.73.1
+        version: 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.5.4)
+      '@theia/workspace':
+        specifier: 1.73.1
+        version: 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.5.4)
+    devDependencies:
+      typescript:
+        specifier: 5.5.4
+        version: 5.5.4
+
   packages/test-extension:
     dependencies:
       '@kairo/project-extension':
@@ -463,6 +485,9 @@ importers:
       '@kairo/search-extension':
         specifier: workspace:*
         version: link:../search-extension
+      '@kairo/svn-extension':
+        specifier: workspace:*
+        version: link:../svn-extension
       '@kairo/test-extension':
         specifier: workspace:*
         version: link:../test-extension

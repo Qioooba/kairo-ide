@@ -621,6 +621,9 @@ func (m *Manager) Stop(ctx context.Context) error {
 }
 
 func terminateProcessTree(pid int) error {
+	if pid <= 0 {
+		return fmt.Errorf("invalid pid: %d", pid)
+	}
 	if runtime.GOOS == "windows" {
 		// taskkill /T walks the child process tree, /F forces.
 		return exec.Command("taskkill", "/T", "/F", "/PID", strconv.Itoa(pid)).Run()

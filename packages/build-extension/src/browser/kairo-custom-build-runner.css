@@ -1,0 +1,83 @@
+.kairo-custom-build {
+    padding: 12px;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    font-family: var(--theia-ui-font-family);
+    background: var(--theia-editor-background);
+    color: var(--theia-foreground);
+}
+
+.kairo-custom-build-header {
+    margin-bottom: 8px;
+}
+
+.kairo-custom-build-header h3 {
+    margin: 0 0 8px 0;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.kairo-custom-build-controls {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.kairo-custom-build-input {
+    flex: 1;
+    font-family: var(--theia-editor-font-family);
+    font-size: 13px;
+    padding: 6px 10px;
+}
+
+.kairo-build-run {
+    background-color: var(--theia-button-background);
+    padding: 6px 16px;
+    font-size: 13px;
+}
+
+.kairo-build-cancel {
+    background-color: var(--theia-terminal-ansiRed);
+    color: white;
+    padding: 6px 16px;
+    font-size: 13px;
+}
+
+.kairo-build-result {
+    padding: 8px 12px;
+    margin-bottom: 8px;
+    border-radius: 4px;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.kairo-build-success {
+    background-color: rgba(0, 255, 0, 0.1);
+    color: var(--theia-terminal-ansiGreen);
+    border: 1px solid var(--theia-terminal-ansiGreen);
+}
+
+.kairo-build-failed {
+    background-color: rgba(255, 0, 0, 0.1);
+    color: var(--theia-terminal-ansiRed);
+    border: 1px solid var(--theia-terminal-ansiRed);
+}
+
+.kairo-custom-build-output {
+    flex: 1;
+    overflow-y: auto;
+    background: var(--theia-terminal-background);
+    border: 1px solid var(--theia-panel-border);
+    border-radius: 4px;
+    padding: 8px;
+    font-family: var(--theia-editor-font-family);
+    font-size: 12px;
+    line-height: 1.4;
+}
+
+.kairo-build-log-line {
+    white-space: pre-wrap;
+    word-break: break-all;
+    padding: 1px 0;
+}

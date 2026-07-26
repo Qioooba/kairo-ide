@@ -1,0 +1,506 @@
+{
+  "consoleMessages": [
+    {
+      "type": "debug",
+      "text": "Frontend: loading modules... [0.184 s since frontend page start]",
+      "location": {
+        "url": "http://127.0.0.1:3050/bundle.js",
+        "line": 2931,
+        "column": 34279,
+        "lineNumber": 2931,
+        "columnNumber": 34279
+      },
+      "timestamp": "2026-07-24T20:20:46.135Z"
+    },
+    {
+      "type": "debug",
+      "text": "Frontend: container created [0.546 s since frontend page start]",
+      "location": {
+        "url": "http://127.0.0.1:3050/bundle.js",
+        "line": 2931,
+        "column": 34279,
+        "lineNumber": 2931,
+        "columnNumber": 34279
+      },
+      "timestamp": "2026-07-24T20:20:46.146Z"
+    },
+    {
+      "type": "info",
+      "text": "sending initial connect on leIe8_LCxQMkPoJ3AAAD",
+      "location": {
+        "url": "http://127.0.0.1:3050/bundle.js",
+        "line": 432,
+        "column": 109958,
+        "lineNumber": 432,
+        "columnNumber": 109958
+      },
+      "timestamp": "2026-07-24T20:20:46.157Z"
+    },
+    {
+      "type": "info",
+      "text": "initial connect received on leIe8_LCxQMkPoJ3AAAD",
+      "location": {
+        "url": "http://127.0.0.1:3050/bundle.js",
+        "line": 432,
+        "column": 109733,
+        "lineNumber": 432,
+        "columnNumber": 109733
+      },
+      "timestamp": "2026-07-24T20:20:46.158Z"
+    },
+    {
+      "type": "debug",
+      "text": "Frontend: preloaded [0.662 s since frontend page start]",
+      "location": {
+        "url": "http://127.0.0.1:3050/bundle.js",
+        "line": 2931,
+        "column": 34279,
+        "lineNumber": 2931,
+        "columnNumber": 34279
+      },
+      "timestamp": "2026-07-24T20:20:46.261Z"
+    },
+    {
+      "type": "debug",
+      "text": "Frontend: core modules loaded [0.877 s since frontend page start]",
+      "location": {
+        "url": "http://127.0.0.1:3050/bundle.js",
+        "line": 2931,
+        "column": 34279,
+        "lineNumber": 2931,
+        "columnNumber": 34279
+      },
+      "timestamp": "2026-07-24T20:20:46.476Z"
+    },
+    {
+      "type": "log",
+      "text": "[kairo] DIAG V3: product-frontend.ts module loaded",
+      "location": {
+        "url": "http://127.0.0.1:3050/bundle.js",
+        "line": 2931,
+        "column": 32952,
+        "lineNumber": 2931,
+        "columnNumber": 32952
+      },
+      "timestamp": "2026-07-24T20:20:46.610Z"
+    },
+    {
+      "type": "log",
+      "text": "[kairo] DIAG V3: ContainerModule initializing",
+      "location": {
+        "url": "http://127.0.0.1:3050/bundle.js",
+        "line": 2931,
+        "column": 33166,
+        "lineNumber": 2931,
+        "columnNumber": 33166
+      },
+      "timestamp": "2026-07-24T20:20:46.610Z"
+    },
+    {
+      "type": "log",
+      "text": "[kairo] DIAG V3: bindKairoFrontend called (no-op)",
+      "location": {
+        "url": "http://127.0.0.1:3050/bundle.js",
+        "line": 2931,
+        "column": 33040,
+        "lineNumber": 2931,
+        "columnNumber": 33040
+      },
+      "timestamp": "2026-07-24T20:20:46.610Z"
+    },
+    {
+      "type": "log",
+      "text": "[kairo] DIAG V3: ContainerModule initialized OK",
+      "location": {
+        "url": "http://127.0.0.1:3050/bundle.js",
+        "line": 2931,
+        "column": 33240,
+        "lineNumber": 2931,
+        "columnNumber": 33240
+      },
+      "timestamp": "2026-07-24T20:20:46.610Z"
+    },
+    {
+      "type": "debug",
+      "text": "Frontend: modules loaded [1.035 s since frontend page start]",
+      "location": {
+        "url": "http://127.0.0.1:3050/bundle.js",
+        "line": 2931,
+        "column": 34279,
+        "lineNumber": 2931,
+        "columnNumber": 34279
+      },
+      "timestamp": "2026-07-24T20:20:46.634Z"
+    },
+    {
+      "type": "debug",
+      "text": "Frontend: resolving application [1.035 s since frontend page start]",
+      "location": {
+        "url": "http://127.0.0.1:3050/bundle.js",
+        "line": 2931,
+        "column": 34279,
+        "lineNumber": 2931,
+        "columnNumber": 34279
+      },
+      "timestamp": "2026-07-24T20:20:46.634Z"
+    },
+    {
+      "type": "debug",
+      "text": "Frontend: application resolved [1.035 s since frontend page start]",
+      "location": {
+        "url": "http://127.0.0.1:3050/bundle.js",
+        "line": 2931,
+        "column": 34279,
+        "lineNumber": 2931,
+        "columnNumber": 34279
+      },
+      "timestamp": "2026-07-24T20:20:46.634Z"
+    },
+    {
+      "type": "info",
+      "text": "2026-07-24T20:20:46.721Z root INFO Detected keyboard layout from browser API: US (Mac)",
+      "location": {
+        "url": "http://127.0.0.1:3050/bundle.js",
+        "line": 1111,
+        "column": 210476,
+        "lineNumber": 1111,
+        "columnNumber": 210476
+      },
+      "timestamp": "2026-07-24T20:20:46.722Z"
+    },
+    {
+      "type": "info",
+      "text": "2026-07-24T20:20:46.753Z root INFO [kairo] WidgetManager cache reset; factories: ",
+      "location": {
+        "url": "http://127.0.0.1:3050/bundle.js",
+        "line": 1111,
+        "column": 210476,
+        "lineNumber": 1111,
+        "columnNumber": 210476
+      },
+      "timestamp": "2026-07-24T20:20:46.787Z"
+    },
+    {
+      "type": "info",
+      "text": "2026-07-24T20:20:46.763Z root INFO Start frontend contributions: 119.2 ms [1.155 s since frontend page start]",
+      "location": {
+        "url": "http://127.0.0.1:3050/bundle.js",
+        "line": 1111,
+        "column": 210476,
+        "lineNumber": 1111,
+        "columnNumber": 210476
+      },
+      "timestamp": "2026-07-24T20:20:46.787Z"
+    },
+    {
+      "type": "info",
+      "text": "2026-07-24T20:20:46.763Z root INFO Changed application state from 'init' to 'started_contributions'.",
+      "location": {
+        "url": "http://127.0.0.1:3050/bundle.js",
+        "line": 1111,
+        "column": 210476,
+        "lineNumber": 1111,
+        "columnNumber": 210476
+      },
+      "timestamp": "2026-07-24T20:20:46.788Z"
+    },
+    {
+      "type": "info",
+      "text": "2026-07-24T20:20:46.775Z root INFO Changed application state from 'started_contributions' to 'attached_shell'.",
+      "location": {
+        "url": "http://127.0.0.1:3050/bundle.js",
+        "line": 1111,
+        "column": 210476,
+        "lineNumber": 1111,
+        "columnNumber": 210476
+      },
+      "timestamp": "2026-07-24T20:20:46.788Z"
+    },
+    {
+      "type": "info",
+      "text": "2026-07-24T20:20:46.775Z root INFO >>> Restoring the layout state...",
+      "location": {
+        "url": "http://127.0.0.1:3050/bundle.js",
+        "line": 1111,
+        "column": 210476,
+        "lineNumber": 1111,
+        "columnNumber": 210476
+      },
+      "timestamp": "2026-07-24T20:20:46.788Z"
+    },
+    {
+      "type": "info",
+      "text": "2026-07-24T20:20:46.857Z root INFO <<< Nothing to restore.",
+      "location": {
+        "url": "http://127.0.0.1:3050/bundle.js",
+        "line": 1111,
+        "column": 210476,
+        "lineNumber": 1111,
+        "columnNumber": 210476
+      },
+      "timestamp": "2026-07-24T20:20:46.858Z"
+    },
+    {
+      "type": "warning",
+      "text": "2026-07-24T20:20:46.960Z root WARN Linked preference \"workbench.colorCustomizations\" not found.",
+      "location": {
+        "url": "http://127.0.0.1:3050/bundle.js",
+        "line": 1111,
+        "column": 210476,
+        "lineNumber": 1111,
+        "columnNumber": 210476
+      },
+      "timestamp": "2026-07-24T20:20:46.967Z"
+    },
+    {
+      "type": "warning",
+      "text": "2026-07-24T20:20:46.960Z root WARN Linked preference \"editor.experimental.preferTreeSitter\" not found.",
+      "location": {
+        "url": "http://127.0.0.1:3050/bundle.js",
+        "line": 1111,
+        "column": 210476,
+        "lineNumber": 1111,
+        "columnNumber": 210476
+      },
+      "timestamp": "2026-07-24T20:20:46.967Z"
+    },
+    {
+      "type": "warning",
+      "text": "2026-07-24T20:20:46.980Z root WARN Frontend $f.initializeLayout took longer than the expected maximum 100 milliseconds: 111.0 ms [1.379 s since frontend page start]",
+      "location": {
+        "url": "http://127.0.0.1:3050/bundle.js",
+        "line": 1111,
+        "column": 210476,
+        "lineNumber": 1111,
+        "columnNumber": 210476
+      },
+      "timestamp": "2026-07-24T20:20:46.980Z"
+    },
+    {
+      "type": "info",
+      "text": "2026-07-24T20:20:47.000Z root INFO Initialize the workbench layout: 222.9 ms [1.399 s since frontend page start]",
+      "location": {
+        "url": "http://127.0.0.1:3050/bundle.js",
+        "line": 1111,
+        "column": 210476,
+        "lineNumber": 1111,
+        "columnNumber": 210476
+      },
+      "timestamp": "2026-07-24T20:20:47.001Z"
+    },
+    {
+      "type": "info",
+      "text": "2026-07-24T20:20:47.001Z root INFO Changed application state from 'attached_shell' to 'initialized_layout'.",
+      "location": {
+        "url": "http://127.0.0.1:3050/bundle.js",
+        "line": 1111,
+        "column": 210476,
+        "lineNumber": 1111,
+        "columnNumber": 210476
+      },
+      "timestamp": "2026-07-24T20:20:47.001Z"
+    },
+    {
+      "type": "error",
+      "text": "2026-07-24T20:20:47.029Z root ERROR Error: Unable to write file '/user/settings.json' (NoPermissions (FileSystemError): Error: EPERM: operation not permitted, open '/Users/qi/.theia/settings.json')\n    at tR.asFileOperationError (http://127.0.0.1:3050/bundle.js:1661:64614)\n    at tR.rethrowAsFileOperationError (http://127.0.0.1:3050/bundle.js:1661:64548)\n    at tR.writeFile (http://127.0.0.1:3050/bundle.js:1661:62193)\n    at async tR.write (http://127.0.0.1:3050/bundle.js:1661:59412)\n    at async nxt.doWrite (http://127.0.0.1:3050/bundle.js:1664:65941)\n    at async Object.e [as save] (http://127.0.0.1:3050/bundle.js:1153:429058)\n    at async y1i.doSave (http://127.0.0.1:3050/bundle.js:1661:6455)\n    at async http://127.0.0.1:3050/bundle.js:1661:2866\n    at async NM.tearDown (http://127.0.0.1:3050/bundle.js:2073:3850)\n    at async NM.conclude (http://127.0.0.1:3050/bundle.js:2073:1856)\nCaused by: Error: Request 'writeFile' failed\n    at Proxy.<anonymous> (http://127.0.0.1:3050/bundle.js:432:49198)\n    at Rqe.writeFile (http://127.0.0.1:3050/bundle.js:1894:300)\n    at E1i.writeFile (http://127.0.0.1:3050/bundle.js:1661:20401)\n    at tR.doWriteUnbufferedQueued (http://127.0.0.1:3050/bundle.js:1662:13362)\n    at http://127.0.0.1:3050/bundle.js:1662:13037\nCaused by: NoPermissions (FileSystemError): Error: EPERM: operation not permitted, open '/Users/qi/.theia/settings.json'\n    at QGe (/Users/qi/Documents/spaces/kairo-ide/apps/browser/lib/backend/main.js:1622:78475)\n    at eA.toFileSystemProviderError (/Users/qi/Documents/spaces/kairo-ide/apps/browser/lib/backend/main.js:1664:18932)\n    at eA.open (/Users/qi/Documents/spaces/kairo-ide/apps/browser/lib/backend/main.js:1664:12177)\n    at async eA.writeFile (/Users/qi/Documents/spaces/kairo-ide/apps/browser/lib/backend/main.js:1664:11657)\n    at async hse.onRequest (/Users/qi/Documents/spaces/kairo-ide/apps/browser/lib/backend/main.js:526:55143)\n    at async t.handleRequest (/Users/qi/Documents/spaces/kairo-ide/apps/browser/lib/backend/main.js:526:50560)",
+      "location": {
+        "url": "http://127.0.0.1:3050/bundle.js",
+        "line": 1111,
+        "column": 210476,
+        "lineNumber": 1111,
+        "columnNumber": 210476
+      },
+      "timestamp": "2026-07-24T20:20:47.030Z"
+    },
+    {
+      "type": "info",
+      "text": "2026-07-24T20:20:47.812Z root INFO Replace loading indicator with ready workbench UI (animation): 811.2 ms [2.213 s since frontend page start]",
+      "location": {
+        "url": "http://127.0.0.1:3050/bundle.js",
+        "line": 1111,
+        "column": 210476,
+        "lineNumber": 1111,
+        "columnNumber": 210476
+      },
+      "timestamp": "2026-07-24T20:20:47.813Z"
+    },
+    {
+      "type": "info",
+      "text": "2026-07-24T20:20:47.812Z root INFO Changed application state from 'initialized_layout' to 'ready'.",
+      "location": {
+        "url": "http://127.0.0.1:3050/bundle.js",
+        "line": 1111,
+        "column": 210476,
+        "lineNumber": 1111,
+        "columnNumber": 210476
+      },
+      "timestamp": "2026-07-24T20:20:47.813Z"
+    },
+    {
+      "type": "info",
+      "text": "2026-07-24T20:20:47.812Z root INFO All frontend contributions settled: 1178.1 ms [2.213 s since frontend page start]",
+      "location": {
+        "url": "http://127.0.0.1:3050/bundle.js",
+        "line": 1111,
+        "column": 210476,
+        "lineNumber": 1111,
+        "columnNumber": 210476
+      },
+      "timestamp": "2026-07-24T20:20:47.813Z"
+    }
+  ],
+  "networkRequests": [],
+  "networkFailures": [],
+  "pageState": {
+    "shellExists": true,
+    "shellHTMLLength": 54610,
+    "topPanelExists": true,
+    "topPanelInnerHTML": "<div class=\"lm-Widget theia-icon\" id=\"theia:icon\"></div><div class=\"lm-Widget lm-MenuBar\" id=\"theia:menubar\"><ul class=\"lm-MenuBar-content\" role=\"menubar\"><li tabindex=\"0\" role=\"menuitem\" aria-haspopup=\"true\" aria-disabled=\"false\" class=\"lm-MenuBar-item\"><div class=\"lm-MenuBar-itemIcon\"></div><div class=\"lm-MenuBar-itemLabel\">File</div></li><li tabindex=\"-1\" role=\"menuitem\" aria-haspopup=\"true\" aria-disabled=\"false\" class=\"lm-MenuBar-item\"><div class=\"lm-MenuBar-itemIcon\"></div><div class=\"lm-MenuBar-itemLabel\">Edit</div></li><li tabindex=\"-1\" role=\"menuitem\" aria-haspopup=\"true\" aria-disabled=\"false\" class=\"lm-MenuBar-item\"><div class=\"lm-MenuBar-itemIcon\"></div><div class=\"lm-MenuBar-itemLabel\">Selection</div></li><li tabindex=\"-1\" role=\"menuitem\" aria-haspopup=\"true\" aria-disabled=\"false\" class=\"lm-MenuBar-item\"><div class=\"lm-MenuBar-itemIcon\"></div><div class=\"lm-MenuBar-itemLabel\">View</div></li><li tabindex=\"-1\" role=\"menuitem\" aria-haspopup=\"true\" aria-disabled=\"false\" class=\"lm-MenuBar-item\"><div class=\"lm-MenuBar-itemIcon\"></div><div class=\"lm-MenuBar-itemLabel\">Go</div></li><li tabindex=\"-1\" role=\"menuitem\" aria-haspopup=\"true\" aria-disabled=\"false\" class=\"lm-MenuBar-item\"><div class=\"lm-MenuBar-itemIcon\"></div><div class=\"lm-MenuBar-itemLabel\">Run</div></li><li tabindex=\"-1\" role=\"menuitem\" aria-haspopup=\"true\" aria-disabled=\"false\" class=\"lm-MenuBar-item\"><div class=\"lm-MenuBar-itemIcon\"></div><div class=\"lm-MenuBar-itemLabel\">Terminal</div></li><li tabindex=\"-1\" role=\"menuitem\" aria-haspopup=\"true\" aria-disabled=\"false\" class=\"lm-MenuBar-item\"><div class=\"lm-MenuBar-itemIcon\"></div><div class=\"lm-MenuBar-itemLabel\">Help</div></li></ul></div>",
+    "topPanelChildren": [
+      {
+        "tag": "DIV",
+        "id": "theia:icon",
+        "classes": "lm-Widget theia-icon",
+        "innerHTMLLen": 0
+      },
+      {
+        "tag": "DIV",
+        "id": "theia:menubar",
+        "classes": "lm-Widget lm-MenuBar",
+        "innerHTMLLen": 1568
+      }
+    ],
+    "menuSelectors": {
+      ".lm-MenuBar": 1,
+      ".lm-MenuBar-item": 8,
+      ".lm-MenuBar-itemLabel": 8,
+      "#theia\\:menubar": 1,
+      "[class*=\"MenuBar\"]": 26,
+      "[class*=\"menubar\"]": 0,
+      ".theia-menu-bar": 0,
+      "nav": 0
+    },
+    "containsKairo": false,
+    "kairoOccurrences": 0,
+    "first2KChars": "File\nEdit\nSelection\nView\nGo\nRun\nTerminal\nHelp\n0\n0\nDo you trust the authors of the files in this folder?\nIf you trust the authors, code in this folder may be executed, including tasks, debug configurations, extensions, and AI features.\nIf you don't trust the authors, the workspace will open in Restricted Mode, which disables these features to protect against potentially harmful code.\nLearn more about Theia's Workspace Trust\n/tmp/kairo-workspace\nNo, I don't trust the authors\nYes, I trust the authors",
+    "statusBarExists": true,
+    "statusBarText": "0\n0",
+    "leftPanelExists": true,
+    "leftPanelChildren": [
+      {
+        "tag": "DIV",
+        "id": "theia-left-content-panel",
+        "classes": "lm-Widget lm-Panel lm-BoxPanel theia-mod-collapsed lm-SplitPanel-child"
+      },
+      {
+        "tag": "DIV",
+        "id": "",
+        "classes": "lm-SplitPanel-handle sash-hidden"
+      },
+      {
+        "tag": "DIV",
+        "id": "theia-bottom-split-panel",
+        "classes": "lm-Widget lm-Panel lm-SplitPanel lm-SplitPanel-child"
+      },
+      {
+        "tag": "DIV",
+        "id": "",
+        "classes": "lm-SplitPanel-handle sash-hidden"
+      },
+      {
+        "tag": "DIV",
+        "id": "theia-right-content-panel",
+        "classes": "lm-Widget lm-Panel lm-BoxPanel theia-mod-collapsed lm-SplitPanel-child"
+      },
+      {
+        "tag": "DIV",
+        "id": "",
+        "classes": "lm-SplitPanel-handle lm-mod-hidden"
+      }
+    ],
+    "leftPanelInnerHTMLLen": 51513,
+    "allTheiaClasses": [
+      "theia-dark",
+      "theia-ApplicationShell",
+      "theia-icon",
+      "theia-mod-collapsed",
+      "theia-app-sidebar-container",
+      "theia-sidebar-menu",
+      "theia-app-left",
+      "theia-app-sides",
+      "theia-tabBar-tab-row",
+      "theia-tab-icon-label",
+      "theia-tabBar-open-tabs",
+      "theia-TabBar-hidden-content",
+      "theia-additional-views-menu",
+      "theia-sidebar-menu-item",
+      "theia-sidepanel-toolbar",
+      "theia-left-side-panel",
+      "theia-sidepanel-title",
+      "theia-side-panel",
+      "theia-tabBar-active",
+      "theia-view-container",
+      "theia-progress-bar-container",
+      "theia-progress-bar",
+      "theia-header",
+      "theia-view-container-part-header",
+      "theia-ExpansionToggle",
+      "theia-view-container-part-title",
+      "theia-Tree",
+      "theia-FileTree",
+      "theia-open-editors-widget",
+      "theia-Files",
+      "theia-search-box-widget",
+      "theia-test-view",
+      "theia-test-run-view",
+      "theia-debug-container",
+      "theia-select-component",
+      "theia-select-component-label",
+      "theia-select-component-chevron",
+      "theia-session-container",
+      "theia-mod-disabled",
+      "theia-source-tree",
+      "theia-scm-repositories-container",
+      "theia-scm",
+      "theia-scm-main-container",
+      "theia-scm-panel",
+      "theia-scm-commit",
+      "theia-input",
+      "theia-TreeContainer",
+      "theia-app-centers",
+      "theia-app-bottom",
+      "theia-tabBar-breadcrumb-row"
+    ],
+    "hasTheia": true,
+    "hasMonaco": false,
+    "hasRequire": false,
+    "totalNodes": 843,
+    "bodyHTML": "<body class=\"monaco-enable-motion underline-links mac vs-dark kairo-dark theia-dark\">\n    <div class=\"lm-Widget theia-ApplicationShell monaco-workbench\" id=\"theia-app-shell\" data-direction=\"top-to-bottom\" data-alignment=\"start\" style=\"min-width: 98px; min-height: 89px;\" inert=\"\"><div class=\"lm-Widget lm-Panel\" id=\"theia-top-panel\" style=\"position: absolute; contain: strict; top: 0px; left: 0px; width: 1440px; height: 32px;\"><div class=\"lm-Widget theia-icon\" id=\"theia:icon\"></div><div class=\"lm-Widget lm-MenuBar\" id=\"theia:menubar\"><ul class=\"lm-MenuBar-content\" role=\"menubar\"><li tabindex=\"0\" role=\"menuitem\" aria-haspopup=\"true\" aria-disabled=\"false\" class=\"lm-MenuBar-item\"><div class=\"lm-MenuBar-itemIcon\"></div><div class=\"lm-MenuBar-itemLabel\">File</div></li><li tabindex=\"-1\" role=\"menuitem\" aria-haspopup=\"true\" aria-disabled=\"false\" class=\"lm-MenuBar-item\"><div class=\"lm-MenuBar-itemIcon\"></div><div class=\"lm-MenuBar-itemLabel\">Edit</div></li><li tabindex=\"-1\" role=\"menuitem\" aria-haspopup=\"true\" aria-disabled=\"false\" class=\"lm-MenuBar-item\"><div class=\"lm-MenuBar-itemIcon\"></div><div class=\"lm-MenuBar-itemLabel\">Selection</div></li><li tabindex=\"-1\" role=\"menuitem\" aria-haspopup=\"true\" aria-disabled=\"false\" class=\"lm-MenuBar-item\"><div class=\"lm-MenuBar-itemIcon\"></div><div class=\"lm-MenuBar-itemLabel\">View</div></li><li tabindex=\"-1\" role=\"menuitem\" aria-haspopup=\"true\" aria-disabled=\"false\" class=\"lm-MenuBar-item\"><div class=\"lm-MenuBar-itemIcon\"></div><div class=\"lm-MenuBar-itemLabel\">Go</div></li><li tabindex=\"-1\" role=\"menuitem\" aria-haspopup=\"true\" aria-disabled=\"false\" class=\"lm-MenuBar-item\"><div class=\"lm-MenuBar-itemIcon\"></div><div class=\"lm-MenuBar-itemLabel\">Run</div></li><li tabindex=\"-1\" role=\"menuitem\" aria-haspopup=\"true\" aria-disabled=\"false\" class=\"lm-MenuBar-item\"><div class=\"lm-MenuBar-itemIcon\"></div><div class=\"lm-MenuBar-itemLabel\">Terminal</div></li><li tabindex=\"-1\" role=\"menuitem\" aria-haspopup=\"true\" aria-disabled=\"false\" class=\"lm-Me"
+  },
+  "navigation": {
+    "url": "http://127.0.0.1:3050",
+    "success": true
+  },
+  "pageStateAfter20s": {
+    "hasMenubar": true,
+    "menuItems": [
+      "File",
+      "Edit",
+      "Selection",
+      "View",
+      "Go",
+      "Run",
+      "Terminal",
+      "Help"
+    ],
+    "containsKairo": false,
+    "allButtons": 5,
+    "totalNodes": 843
+  },
+  "f1State": {
+    "dialogCount": 0,
+    "dialogTexts": [],
+    "quickInputCount": 1,
+    "hasMonacoEditor": false
+  }
+}

@@ -208,6 +208,19 @@ function buildContainer() {
   container.bind(MessageService).toConstantValue(createMockMessageService());
   container.bind(BuildStore).toConstantValue(createMockBuildStore());
   container.bind(KairoJavaDebugService).toConstantValue(createMockJavaDebugService());
+  // KairoViewsContribution injects InversifyJS's `Container` so the
+  // safeContribution-fallback no-op (KairoNoopContribution) and the
+  // production code can resolve child services lazily. In the test
+  // environment, the contribution class itself is constructed directly,
+  // so we must bind Container to a proxy that returns the actual bound
+  // services (not a constant `undefined`).
+  container.bind(Container).toDynamicValue(ctx => {
+    const proxy = {
+      get: (id) => ctx.container.get(id),
+      getAsync: async (id) => ctx.container.get(id),
+    };
+    return proxy;
+  });
 
   container.bind(KairoViewsContribution).toSelf().inSingletonScope();
 
@@ -302,14 +315,14 @@ test('KairoViewsContribution.registerCommands registers every command in a real 
   }
 });
 
-test('KairoViewsContribution.registerCommands registers exactly 35 commands', () => {
+test('KairoViewsContribution.registerCommands registers exactly 36 commands', () => {
   const container = buildContainer();
   const contribution = container.get(KairoViewsContribution);
   const registry = new CommandRegistry();
   contribution.registerCommands(registry);
 
-  assert.strictEqual(registry.commandIds.length, 35,
-    `Expected 35 commands, got ${registry.commandIds.length}: ${registry.commandIds.join(', ')}`);
+  assert.strictEqual(registry.commandIds.length, 36,
+    `Expected 36 commands, got ${registry.commandIds.length}: ${registry.commandIds.join(', ')}`);
 });
 
 // --------------- execution verification ---------------

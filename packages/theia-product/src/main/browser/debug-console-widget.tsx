@@ -12,7 +12,6 @@ import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import { Emitter, Event } from '@theia/core/lib/common/event';
 import { DebugSessionManager } from '@theia/debug/lib/browser/debug-session-manager';
 import type { DebugSession } from '@theia/debug/lib/browser/debug-session';
-import { KairoJavaDebugService } from './kairo-java-debug-service';
 
 export const KAIRO_DEBUG_CONSOLE_FACTORY_ID = 'kairo-debug-console';
 
@@ -431,7 +430,7 @@ export class KairoDebugConsoleWidget extends ReactWidget {
     }
 }
 
-function entryColor(kind: ConsoleMessageKind, hasError?: boolean): string {
+function entryColor(kind: ConsoleMessageKind, _hasError?: boolean): string {
     switch (kind) {
         case 'input': return 'var(--theia-input-foreground)';
         case 'output': return 'var(--theia-debugConsole-infoForeground)';

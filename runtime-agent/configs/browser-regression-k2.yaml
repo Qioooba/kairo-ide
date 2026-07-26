@@ -1,0 +1,33 @@
+# Browser Regression test config for K2.7 isolated run.
+# Frontend:  3098 (Theia Browser)
+# Agent:     18183 (Runtime Agent)
+# Tomcat:    8098
+# Debug:     9556
+
+version: 0.1.0
+
+bindAddress: 127.0.0.1
+port: 18183
+
+tlsCert: ""
+tlsKey: ""
+
+dataDir: /Users/qi/Documents/spaces/kairo-ide/.runtime-k2/data
+bundledDir: /Users/qi/Documents/spaces/kairo-ide/.runtime-k2/bundled
+
+logLevel: info
+
+requireAuth: false
+
+tomcatStartTimeout: 60s
+tomcatShutdownTimeout: 15s
+buildFileTimeout: 30s
+
+workspaceScanMaxDepth: 8
+workspaceScanMaxFiles: 50000
+
+logBufferLines: 5000
+
+# Browser test port hints consumed by theia-product / tomcat extension
+tomcatDefaultPort: 8098
+jdwpDefaultPort: 9556

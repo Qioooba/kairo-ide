@@ -556,6 +556,10 @@ func (f *fakeProjectStore) Update(id string, cfg *domain.Project) (domain.Projec
 	f.saved = *cfg
 	return *cfg, nil
 }
+func (f *fakeProjectStore) Delete(id string) error {
+	f.saved = domain.Project{}
+	return nil
+}
 
 // KAIRO-RC-WEB-203: PUT /api/v1/projects/{id} must persist
 // <root>/.kairo/project.yaml — jdtproject.Generate reads it.

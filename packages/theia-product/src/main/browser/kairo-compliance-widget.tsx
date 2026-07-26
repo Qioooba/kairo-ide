@@ -10,7 +10,7 @@ import { injectable, inject, postConstruct } from '@theia/core/shared/inversify'
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import { ILogger } from '@theia/core/lib/common/logger';
 import { KairoComplianceSuite } from './kairo-compliance';
-import { KairoAuditLog, type AuditLogEntry, type AuditLogFilter } from './kairo-audit-log';
+import { KairoAuditLog, type AuditLogEntry } from './kairo-audit-log';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                               */

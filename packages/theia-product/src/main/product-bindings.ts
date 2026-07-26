@@ -23,7 +23,6 @@ import { bindTomcatExtension } from '@kairo/tomcat-extension';
 import {
   bindJavaExtension,
   bindJavaLanguageClientContribution,
-  bindJdtLsService,
 } from '@kairo/java-extension';
 import { KairoEncodingServiceImpl, bindEncodingCommands } from '@kairo/encoding-extension';
 import { bindBuildExtension } from '@kairo/build-extension';
@@ -78,7 +77,6 @@ export function bindKairoProduct(
   bindTestExtension(bind);
   bindJavaExtension(bind);
   bindJavaLanguageClientContribution(bind);
-  bindJdtLsService(bind);
   bind(KairoEncodingServiceImpl).toSelf().inSingletonScope();
   bindEncodingCommands(bind);
 

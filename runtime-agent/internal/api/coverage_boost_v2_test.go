@@ -1133,6 +1133,9 @@ func (f *fakeProjectStoreNoCreator) Get(id string) (domain.Project, error) {
 func (f *fakeProjectStoreNoCreator) Update(id string, cfg *domain.Project) (domain.Project, error) {
 	return domain.Project{}, nil
 }
+func (f *fakeProjectStoreNoCreator) Delete(id string) error {
+	return fmt.Errorf("not found")
+}
 
 func TestHandleProjectImport_NoCreator(t *testing.T) {
 	logger := log.New("test").WithLevel(log.LevelWarn)
@@ -1189,6 +1192,16 @@ func (f *fakeProjectStoreWithCreator) Get(id string) (domain.Project, error) {
 }
 func (f *fakeProjectStoreWithCreator) Update(id string, cfg *domain.Project) (domain.Project, error) {
 	return *cfg, nil
+}
+func (f *fakeProjectStoreWithCreator) Delete(id string) error {
+	filtered := f.projects[:0]
+	for _, p := range f.projects {
+		if string(p.ID) != id {
+			filtered = append(filtered, p)
+		}
+	}
+	f.projects = filtered
+	return nil
 }
 func (f *fakeProjectStoreWithCreator) Create(id string, project *domain.Project) (domain.Project, error) {
 	if f.createErr != nil {

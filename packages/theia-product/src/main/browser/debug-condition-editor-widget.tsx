@@ -8,7 +8,7 @@
  */
 
 import * as React from 'react';
-import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
+import { injectable, postConstruct } from '@theia/core/shared/inversify';
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import { Emitter, Event } from '@theia/core/lib/common/event';
 

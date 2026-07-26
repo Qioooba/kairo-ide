@@ -12,7 +12,6 @@ import { injectable, inject, postConstruct } from '@theia/core/shared/inversify'
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import { Emitter, Event } from '@theia/core/lib/common/event';
 import { DebugSessionManager } from '@theia/debug/lib/browser/debug-session-manager';
-import type { DebugSession } from '@theia/debug/lib/browser/debug-session';
 import { KairoJavaDebugService, type KairoJavaDebugState } from './kairo-java-debug-service';
 import { KairoDebugSessionService } from './kairo-debug-session-service';
 

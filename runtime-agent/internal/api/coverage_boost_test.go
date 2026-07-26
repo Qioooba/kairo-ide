@@ -923,6 +923,9 @@ func (f *fakeProjectCreator) Get(id string) (domain.Project, error) {
 func (f *fakeProjectCreator) Update(id string, cfg *domain.Project) (domain.Project, error) {
 	return domain.Project{}, fmt.Errorf("not implemented")
 }
+func (f *fakeProjectCreator) Delete(id string) error {
+	return fmt.Errorf("not implemented")
+}
 func (f *fakeProjectCreator) Create(id string, cfg *domain.Project) (domain.Project, error) {
 	return *cfg, nil
 }

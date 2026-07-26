@@ -66,6 +66,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/antpath"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/atomicfile"
 	"gopkg.in/yaml.v3"
 )
@@ -139,6 +140,8 @@ type GenerateResult struct {
 	TargetLevel      string   `json:"targetLevel"`
 	GeneratedAt      string   `json:"generatedAt"`
 	FromCache        bool     `json:"fromCache"`
+	ClasspathSource  string   `json:"classpathSource"`  // "ant" | "yaml" | "autodetect" | "manual"
+	UnresolvedPaths  []string `json:"unresolvedPaths"`  // jar/dir paths that could not be found on disk
 }
 
 // Status is the JSON the /api/v1/jdtls/project GET returns.
@@ -199,12 +202,18 @@ func (g *Generator) Generate(payload []byte) (GenerateResult, error) {
 		// location, and ABSOLUTE src entries are not valid
 		// Eclipse — an external model dir therefore always left
 		// the LS in standalone-file mode (KAIRO-RC-WEB-251).
-		IntoProjectRoot bool `json:"intoProjectRoot"`
+		IntoProjectRoot      bool   `json:"intoProjectRoot"`
+		AutoDetectClasspath  *bool  `json:"autoDetectClasspath"`
+		BuildFile            string `json:"buildFile"`
 	}
 	if len(payload) > 0 {
 		if err := jsonUnmarshal(payload, &req); err != nil {
 			return GenerateResult{}, err
 		}
+	}
+	autoDetect := true
+	if req.AutoDetectClasspath != nil {
+		autoDetect = *req.AutoDetectClasspath
 	}
 	if req.WorkspaceID == "" {
 		req.WorkspaceID = "default"
@@ -248,6 +257,61 @@ func (g *Generator) Generate(payload []byte) (GenerateResult, error) {
 	if proj.OutputDir == "" {
 		proj.OutputDir = "build/classes"
 	}
+	// Try to resolve classpath from build.xml (Ant projects)
+	classpathSource := "autodetect"
+	if !autoDetect {
+		classpathSource = "manual"
+	}
+	hasYamlLibraries := len(proj.Libraries) > 0
+	var antResult *antpath.ResolveResult
+	if autoDetect {
+		antResult = g.tryResolveAntClasspath(rootAbs, req.BuildFile)
+	}
+	if antResult != nil && len(antResult.Classpath) > 0 {
+		// Ant resolution succeeded: use its classpath as base
+		classpathSource = "ant"
+		// Convert relative paths to absolute
+		for _, cp := range antResult.Classpath {
+			absCp := cp
+			if !filepath.IsAbs(cp) {
+				absCp = filepath.Join(rootAbs, cp)
+			}
+			// Only add if not already in user-specified libraries
+			found := false
+			for _, lib := range proj.Libraries {
+				if lib == absCp || strings.HasSuffix(lib, filepath.Base(absCp)) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				proj.Libraries = append(proj.Libraries, absCp)
+			}
+		}
+		// Use Ant source roots if not specified in YAML
+		if len(proj.SourceRoots) == 0 && len(antResult.SourceRoots) > 0 {
+			for _, sr := range antResult.SourceRoots {
+				rel, err := filepath.Rel(rootAbs, sr)
+				if err == nil && !strings.HasPrefix(rel, "..") {
+					proj.SourceRoots = append(proj.SourceRoots, rel)
+				}
+			}
+		}
+		// Use Ant output dir if not specified
+		if proj.OutputDir == "build/classes" && antResult.OutputDir != "" {
+			if rel, err := filepath.Rel(rootAbs, antResult.OutputDir); err == nil && !strings.HasPrefix(rel, "..") {
+				proj.OutputDir = rel
+			}
+		}
+		g.logInfo("Ant classpath resolved", map[string]any{
+			"source":   "build.xml",
+			"jars":     len(antResult.Classpath),
+			"warnings": len(antResult.Warnings),
+		})
+	} else if hasYamlLibraries {
+		classpathSource = "yaml"
+	}
+
 	// Legacy layout default: when the config names no libraries,
 	// pick up the conventional jar dirs (lib/, WebRoot/WEB-INF/lib/)
 	// — the .kairo/project.yaml written by the import wizard has
@@ -327,6 +391,15 @@ func (g *Generator) Generate(payload []byte) (GenerateResult, error) {
 	}
 	kairoConfig := renderKairoConfig(proj)
 
+	// Collect classpath entries that do not exist on disk.
+	allClasspathEntries := append(append([]string{}, libs...), refLibs...)
+	unresolvedPaths := make([]string, 0)
+	for _, p := range allClasspathEntries {
+		if _, err := os.Stat(p); err != nil {
+			unresolvedPaths = append(unresolvedPaths, p)
+		}
+	}
+
 	// Decide whether to short-circuit (cache hit).
 	dir := g.projectModelDir(req.WorkspaceID)
 	if req.IntoProjectRoot {
@@ -350,9 +423,11 @@ func (g *Generator) Generate(payload []byte) (GenerateResult, error) {
 			Encoding:         string(proj.Encoding),
 			SourceLevel:      proj.SourceLevel,
 			TargetLevel:      proj.TargetLevel,
-			ClasspathEntries: append(append([]string{}, libs...), refLibs...),
+			ClasspathEntries: allClasspathEntries,
 			GeneratedAt:      readGeneratedStamp(dir),
 			FromCache:        true,
+			ClasspathSource:  classpathSource,
+			UnresolvedPaths:  unresolvedPaths,
 		}, nil
 	}
 	if err := atomicfile.WriteFile(cpPath, classpathBytes, 0o644); err != nil {
@@ -392,9 +467,11 @@ func (g *Generator) Generate(payload []byte) (GenerateResult, error) {
 		Encoding:         string(proj.Encoding),
 		SourceLevel:      proj.SourceLevel,
 		TargetLevel:      proj.TargetLevel,
-		ClasspathEntries: append(append([]string{}, libs...), refLibs...),
+		ClasspathEntries: allClasspathEntries,
 		GeneratedAt:      stamp,
 		FromCache:        false,
+		ClasspathSource:  classpathSource,
+		UnresolvedPaths:  unresolvedPaths,
 	}, nil
 }
 
@@ -625,4 +702,49 @@ func readGeneratedStamp(dir string) string {
 		return ""
 	}
 	return strings.TrimSpace(string(data))
+}
+
+// tryResolveAntClasspath attempts to parse build.xml and extract the compile classpath.
+// If explicitBuildFile is non-empty, it is tried first; otherwise default candidates are searched.
+// Returns nil if no build.xml is found or parsing fails.
+func (g *Generator) tryResolveAntClasspath(rootAbs string, explicitBuildFile string) *antpath.ResolveResult {
+	var candidates []string
+	if explicitBuildFile != "" {
+		if filepath.IsAbs(explicitBuildFile) {
+			candidates = []string{explicitBuildFile}
+		} else {
+			candidates = []string{filepath.Join(rootAbs, explicitBuildFile)}
+		}
+	} else {
+		candidates = []string{
+			filepath.Join(rootAbs, "build.xml"),
+			filepath.Join(rootAbs, "build", "build.xml"),
+		}
+	}
+	for _, buildFile := range candidates {
+		if _, err := os.Stat(buildFile); err == nil {
+			result, err := antpath.Resolve(buildFile)
+			if err != nil {
+				g.logWarn("Failed to resolve Ant classpath", map[string]any{
+					"buildFile": buildFile,
+					"error":     err.Error(),
+				})
+				return nil
+			}
+			return result
+		}
+	}
+	return nil
+}
+
+func (g *Generator) logInfo(msg string, fields map[string]any) {
+	if g.Logger != nil {
+		g.Logger(msg, fields)
+	}
+}
+
+func (g *Generator) logWarn(msg string, fields map[string]any) {
+	if g.Logger != nil {
+		g.Logger("[WARN] "+msg, fields)
+	}
 }

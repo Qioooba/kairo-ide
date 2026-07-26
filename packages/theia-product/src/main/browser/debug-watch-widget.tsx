@@ -68,7 +68,7 @@ interface WatchRowProps {
     onCancelEdit: (expr: WatchExpression) => void;
 }
 
-const WatchRow: React.FC<WatchRowProps> = ({ expr, session, onRemove, onEdit, onSaveEdit, onCancelEdit }) => {
+const WatchRow: React.FC<WatchRowProps> = ({ expr, session: _session, onRemove, onEdit, onSaveEdit, onCancelEdit }) => {
     const [editValue, setEditValue] = React.useState(expr.expression);
 
     const handleKeyDown = (e: React.KeyboardEvent) => {

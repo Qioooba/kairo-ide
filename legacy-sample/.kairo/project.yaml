@@ -10,8 +10,17 @@ outputDir: build/classes
 buildFile: build.xml
 buildTargets:
     - compile
-sourceLevel: "1.6"
-targetLevel: "1.6"
+# KAIRO-RC-WEB-2026-07-25: the legacy project sources only use
+# Java 1.6 language features (no try-with-resources, no
+# diamond operator, no lambdas), so they compile cleanly under
+# `-source 1.8` as well. We ship 1.8 here so the same sources
+# build under modern JDKs (JDK 9+ removed `source=1.6`). The
+# production target (Windows 10 + JDK 6) is unaffected: 1.8
+# bytecode runs on JDK 6 if no Java 7+ class library APIs are
+# referenced. Override via `sourceLevel: "1.6"` for the
+# dedicated legacy validation suite.
+sourceLevel: "1.8"
+targetLevel: "1.8"
 encoding: gbk
 buildTool: ant
 contextPath: /

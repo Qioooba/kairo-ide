@@ -18,17 +18,17 @@
  * javac or Tomcat locally.
  */
 
-import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
+import { injectable, inject, postConstruct, Container } from '@theia/core/shared/inversify';
 import {
   Widget,
   WidgetManager,
   FrontendApplicationContribution,
   ApplicationShell,
 } from '@theia/core/lib/browser';
-import { Command, CommandRegistry, CommandService, MenuContribution, MenuModelRegistry, MessageService } from '@theia/core/lib/common';
+import { Command, CommandRegistry, CommandService, MenuContribution, MenuModelRegistry, MenuPath, MessageService } from '@theia/core/lib/common';
 import { KeybindingContribution, KeybindingRegistry } from '@theia/core/lib/browser/keybinding';
-import { isOSX } from '@theia/core/lib/common/os';
 import { CommonMenus } from '@theia/core/lib/browser/common-menus';
+import { MAIN_MENU_BAR } from '@theia/core/lib/common/menu/menu-types';
 import { RuntimeConnectionService, KairoError } from '@kairo/runtime-extension';
 import {
   KairoServerService,
@@ -43,7 +43,6 @@ import { ServerViewWidget, LogViewerWidget } from '@kairo/tomcat-extension';
 import { ImportWizardWidget, ProjectSelectorWidget } from '@kairo/project-extension';
 import { MavenViewWidget } from './maven-view-widget';
 import { KairoTodoWidget } from './kairo-todo-widget';
-import { KairoRemoteWidget } from './kairo-remote-widget';
 import { KAIRO_WELCOME_FACTORY_ID } from './kairo-welcome-widget';
 import {
   KAIRO_IMPORT_WIZARD_FACTORY_ID,
@@ -51,9 +50,9 @@ import {
   KAIRO_RUN_CONFIGURATIONS_FACTORY_ID,
   KAIRO_KEYMAP_FACTORY_ID,
   KAIRO_MAVEN_FACTORY_ID as _KAIRO_MAVEN_FACTORY_ID,
-  KAIRO_TODO_FACTORY_ID,
+  KAIRO_TODO_FACTORY_ID as _KAIRO_TODO_FACTORY_ID,
   KAIRO_TESTS_FACTORY_ID,
-  KAIRO_REMOTE_FACTORY_ID,
+  KAIRO_REMOTE_FACTORY_ID as _KAIRO_REMOTE_FACTORY_ID,
   KAIRO_SQL_CONSOLE_FACTORY_ID,
   KAIRO_PERF_FACTORY_ID,
   KAIRO_DEBUG_VARIABLES_FACTORY_ID,
@@ -62,6 +61,7 @@ import {
   KAIRO_DEBUG_TOOLBAR_FACTORY_ID,
   KAIRO_DEBUG_CONSOLE_FACTORY_ID,
   KAIRO_DEBUG_WATCH_FACTORY_ID,
+  KAIRO_DEBUG_DIAGNOSTICS_FACTORY_ID,
 } from './kairo-factory-ids';
 import type {
   ServerInstance,
@@ -82,6 +82,7 @@ export namespace KairoCommands {
   export const BUILD: Command = { id: 'kairo.build', label: 'Kairo: Build' };
   export const CLEAN_BUILD: Command = { id: 'kairo.cleanBuild', label: 'Kairo: Clean Build' };
   export const BUILD_AND_DEPLOY: Command = { id: 'kairo.buildAndDeploy', label: 'Kairo: Build and Deploy' };
+  export const PUBLISH: Command = { id: 'kairo.publish', label: 'Kairo: Publish' };
   export const START_SERVER: Command = { id: 'kairo.server.start', label: 'Kairo: Start Server' };
   export const DEBUG_SERVER: Command = { id: 'kairo.server.debug', label: 'Kairo: Start Server (Debug)' };
   export const CHECK_DEBUG_ADAPTER: Command = { id: 'kairo.debug.checkAdapter', label: 'Kairo: Check Java Debug Adapter' };
@@ -111,6 +112,7 @@ export namespace KairoCommands {
   export const REVEAL_KAIRO_DEBUG_TOOLBAR: Command = { id: 'kairo.debug.view.toolbar', label: 'Kairo: Show Debug Toolbar' };
   export const REVEAL_KAIRO_DEBUG_CONSOLE: Command = { id: 'kairo.debug.view.console', label: 'Kairo: Show Debug Console' };
   export const REVEAL_KAIRO_DEBUG_WATCH: Command = { id: 'kairo.debug.view.watch', label: 'Kairo: Show Debug Watch' };
+  export const OPEN_DEBUG_DIAGNOSTICS: Command = { id: 'kairo:open-debug-diagnostics', label: 'Kairo: Open Debug Diagnostics' };
 }
 
 /* ------------------------------------------------------------------ */
@@ -121,6 +123,8 @@ export namespace KairoCommands {
 export class KairoDeploymentsWidget extends Widget {
   static readonly ID = 'kairo-deployments';
   deployments: DeploymentResult[] = [];
+  private _loading = false;
+  private _error: string | null = null;
 
   constructor() {
     super();
@@ -128,20 +132,66 @@ export class KairoDeploymentsWidget extends Widget {
     this.title.label = 'Kairo Deployments';
     this.title.caption = 'Kairo Deployments';
     this.addClass('kairo-widget');
-    this.node.innerHTML = `<div class="kairo-widget-body">
-      <p>No deployments yet.</p>
-    </div>`;
+    this.renderContent();
+  }
+
+  setLoading(loading: boolean): void {
+    this._loading = loading;
+    this.renderContent();
+  }
+
+  setError(error: string | null): void {
+    this._error = error;
+    this._loading = false;
+    this.renderContent();
   }
 
   setDeployments(deployments: DeploymentResult[]): void {
     this.deployments = deployments;
-    if (deployments.length === 0) {
-      this.node.innerHTML = `<div class="kairo-widget-body" role="status">
-        <p>No deployments yet.</p>
+    this._loading = false;
+    this._error = null;
+    this.renderContent();
+  }
+
+  private renderContent(): void {
+    // Loading state
+    if (this._loading) {
+      this.node.innerHTML = `<div class="kairo-widget-body" role="status" aria-label="Loading deployments">
+        <div style="display:flex;flex-direction:column;align-items:center;gap:12px;padding:24px 16px;">
+          <div class="kairo-spinner" style="width:20px;height:20px;border:3px solid var(--theia-dropdown-border);border-top-color:var(--theia-focusBorder);border-radius:50%;animation:kairo-spin 0.8s linear infinite;"></div>
+          <p style="color:var(--theia-descriptionForeground);font-size:13px;margin:0;">Loading deployments...</p>
+          <style>@keyframes kairo-spin{to{transform:rotate(360deg);}}</style>
+        </div>
       </div>`;
       return;
     }
-    const rows = deployments.slice(0, 50).map(d => `
+
+    // Error state
+    if (this._error) {
+      this.node.innerHTML = `<div class="kairo-widget-body" role="alert" aria-live="assertive">
+        <div style="padding:12px;">
+          <div style="padding:10px 12px;background-color:rgba(244,67,54,0.1);border:1px solid rgba(244,67,54,0.3);border-radius:4px;color:var(--theia-errorForeground);font-size:13px;">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+              <span aria-hidden="true">⚠</span>
+              <strong>Error loading deployments</strong>
+            </div>
+            <p style="margin:4px 0 0 0;font-size:12px;">${escapeHtml(this._error)}</p>
+          </div>
+        </div>
+      </div>`;
+      return;
+    }
+
+    // Empty state
+    if (this.deployments.length === 0) {
+      this.node.innerHTML = `<div class="kairo-widget-body" role="status">
+        <p style="text-align:center;color:var(--theia-descriptionForeground);padding:16px;">No deployments yet.</p>
+      </div>`;
+      return;
+    }
+
+    // Normal state — data present
+    const rows = this.deployments.slice(0, 50).map(d => `
       <tr>
         <td>${escapeHtml(d.id)}</td>
         <td>${escapeHtml(d.state)}</td>
@@ -174,10 +224,25 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
   @inject(ActiveProjectService) protected activeProject!: ActiveProjectService;
   @inject(MessageService) protected messages!: MessageService;
   @inject(BuildStore) protected buildStore!: BuildStore;
-  @inject(KairoJavaDebugService) protected javaDebug!: KairoJavaDebugService;
+  @inject(Container) protected readonly container!: Container;
+  protected javaDebug: KairoJavaDebugService | undefined;
 
   protected eventsUnsub: (() => void) | undefined;
   protected statusUnsub: (() => void) | undefined;
+
+  /**
+   * KairoJavaDebugService transitively depends on @theia/debug's
+   * DebugSessionManager, which has an async @postConstruct. We resolve
+   * it lazily so synchronous FrontendApplicationContribution construction
+   * (and command registration) is not blocked.
+   */
+  protected async getJavaDebug(): Promise<KairoJavaDebugService> {
+    if (!this.javaDebug) {
+      this.javaDebug = await this.container.getAsync(KairoJavaDebugService);
+    }
+    return this.javaDebug;
+  }
+
   protected serversView: ServerViewWidget | undefined;
   protected buildsView: BuildViewWidget | undefined;
   protected deploymentsView: KairoDeploymentsWidget | undefined;
@@ -366,6 +431,25 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
       },
     });
 
+    registry.registerCommand(KairoCommands.PUBLISH, {
+      execute: async () => {
+        try {
+          const p = await this.activeProject.requireProject();
+          const deploy = await this.runtime.request('POST /api/v1/deployments', {
+            projectId: p.projectId,
+            buildId: '',
+            scope: 'webapp',
+            intent: 'publish-static-changes',
+          });
+          this.messages.info(`Published ${deploy.filesTouched} file(s), ${deploy.bytes} bytes.`);
+          await this.refreshDeployments();
+        } catch (err) {
+          this.messages.error(kairoErrorMessage(err, 'Publish failed'));
+        }
+        return undefined;
+      },
+    });
+
     registry.registerCommand(KairoCommands.START_SERVER, {
       execute: async () => {
         try {
@@ -384,7 +468,8 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
         let serverId: string | undefined;
         try {
           const p = await this.activeProject.requireProject();
-          const capability = await this.javaDebug.probeAvailability();
+          const javaDebug = await this.getJavaDebug();
+          const capability = await javaDebug.probeAvailability();
           if (capability.state !== 'available') {
             throw new Error(capability.message ?? 'Java Debug Adapter is unavailable');
           }
@@ -392,7 +477,7 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
           serverId = srv.id;
           const port = srv.ports.debug;
           if (!port) throw new Error('Tomcat started without a verified JDWP port');
-          const status = await this.javaDebug.attach({
+          const status = await javaDebug.attach({
             serverId: srv.id,
             projectId: p.projectId,
             projectName: p.name,
@@ -412,7 +497,8 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
 
     registry.registerCommand(KairoCommands.CHECK_DEBUG_ADAPTER, {
       execute: async () => {
-        const status = await this.javaDebug.probeAvailability();
+        const javaDebug = await this.getJavaDebug();
+        const status = await javaDebug.probeAvailability();
         if (status.state === 'available') this.messages.info('Java Debug Adapter is available.');
         else this.messages.warn(status.message ?? `Java Debug Adapter state: ${status.state}`);
         return status;
@@ -433,7 +519,10 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
           // being stopped. Preserve the debug error for the user, but continue
           // with server teardown as the authoritative cleanup boundary.
           let debugStopError: unknown;
-          try { await this.javaDebug.stop(); } catch (error) { debugStopError = error; }
+          try {
+            const javaDebug = await this.getJavaDebug();
+            await javaDebug.stop();
+          } catch (error) { debugStopError = error; }
           const list = (await this.runtime.request('GET /api/v1/servers', undefined)) as ServerInstance[];
           // Only stop servers that are actually up — the agent
           // persists server metadata across sessions, so the list
@@ -532,7 +621,7 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
       execute: () => { void this.revealOrCreateMain(KAIRO_SQL_CONSOLE_FACTORY_ID, () => undefined, () => undefined); },
     });
     registry.registerCommand(KairoCommands.REVEAL_KAIRO_REMOTE, {
-      execute: () => { void this.revealOrCreateMain(KAIRO_REMOTE_FACTORY_ID, () => undefined, () => undefined); },
+      execute: () => { void this.revealOrCreateMain(_KAIRO_REMOTE_FACTORY_ID, () => undefined, () => undefined); },
     });
     // ── Debug View Commands ──────────────────────────────────────
     registry.registerCommand(KairoCommands.REVEAL_KAIRO_DEBUG_VARIABLES, {
@@ -552,6 +641,9 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
     });
     registry.registerCommand(KairoCommands.REVEAL_KAIRO_DEBUG_WATCH, {
       execute: () => { void this.revealOrCreate(KAIRO_DEBUG_WATCH_FACTORY_ID, () => undefined, () => undefined); },
+    });
+    registry.registerCommand(KairoCommands.OPEN_DEBUG_DIAGNOSTICS, {
+      execute: () => { void this.revealOrCreateMain(KAIRO_DEBUG_DIAGNOSTICS_FACTORY_ID, () => undefined, () => undefined); },
     });
     registry.registerCommand(KairoCommands.MANAGE_RUN_CONFIGURATIONS, {
       execute: () => { void this.revealOrCreateMain(KAIRO_RUN_CONFIGURATIONS_FACTORY_ID, () => undefined, () => undefined); },
@@ -605,6 +697,224 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
   }
 
   registerMenus(menus: MenuModelRegistry): void {
+    // KAIRO-RC-WEB-021: register the top-level "Kairo" menu in the
+    // main menu bar so the user has a discoverable entry point
+    // even when the File menu (managed by another extension) is
+    // missing. The menu ID is the LAST element of the menuPath;
+    // using MAIN_MENU_BAR (which resolves to ['menubar']) as the
+    // path would make the Kairo menu's ID 'menubar' — same as the
+    // bar's own group — and the child submenus registered with
+    // path [...KAIRO_MENU] would never find it. So
+    // the Kairo parent uses a dedicated id '5_kairo' and lives at
+    // [...KAIRO_MENU].
+    const KAIRO_MENU: MenuPath = [...MAIN_MENU_BAR, '5_kairo'];
+    menus.registerSubmenu(KAIRO_MENU, 'Kairo', { sortString: '5_kairo' });
+    menus.registerMenuAction(KAIRO_MENU, {
+      commandId: KairoCommands.IMPORT_PROJECT.id,
+      label: 'Import Kairo Project...',
+      order: 'a1',
+    });
+    menus.registerMenuAction(KAIRO_MENU, {
+      commandId: KairoCommands.SELECT_PROJECT.id,
+      label: 'Select Kairo Project...',
+      order: 'a2',
+    });
+    menus.registerMenuAction(KAIRO_MENU, {
+      commandId: KairoCommands.SCAN_PROJECT.id,
+      label: 'Scan Workspace',
+      order: 'a3',
+    });
+    menus.registerMenuAction(KAIRO_MENU, {
+      commandId: KairoCommands.MANAGE_RUN_CONFIGURATIONS.id,
+      label: 'Run Configurations...',
+      order: 'a4',
+    });
+
+    // KAIRO-RC-WEB-022: build / run / debug submenu under "Kairo".
+    // Registering the submenu in the main bar keeps the top-level
+    // bar from getting visually crowded while still surfacing all
+    // the actions the user needs in one menu.
+    menus.registerSubmenu([...KAIRO_MENU, 'b_build'], 'Build && Run', { sortString: 'b_build' });
+    menus.registerMenuAction([...KAIRO_MENU, 'b_build'], {
+      commandId: KairoCommands.BUILD.id,
+      label: 'Build',
+      order: 'b1',
+    });
+    menus.registerMenuAction([...KAIRO_MENU, 'b_build'], {
+      commandId: KairoCommands.CLEAN_BUILD.id,
+      label: 'Clean Build',
+      order: 'b2',
+    });
+    menus.registerMenuAction([...KAIRO_MENU, 'b_build'], {
+      commandId: KairoCommands.BUILD_AND_DEPLOY.id,
+      label: 'Build && Deploy',
+      order: 'b3',
+    });
+    menus.registerMenuAction([...KAIRO_MENU, 'b_build'], {
+      commandId: KairoCommands.PUBLISH.id,
+      label: 'Publish',
+      order: 'b3a',
+    });
+    menus.registerMenuAction([...KAIRO_MENU, 'b_build'], {
+      commandId: KairoCommands.START_SERVER.id,
+      label: 'Start Server',
+      order: 'b4',
+    });
+    menus.registerMenuAction([...KAIRO_MENU, 'b_build'], {
+      commandId: KairoCommands.DEBUG_SERVER.id,
+      label: 'Start Server (Debug)',
+      order: 'b5',
+    });
+    menus.registerMenuAction([...KAIRO_MENU, 'b_build'], {
+      commandId: KairoCommands.STOP_SERVER.id,
+      label: 'Stop Server',
+      order: 'b6',
+    });
+    menus.registerMenuAction([...KAIRO_MENU, 'b_build'], {
+      commandId: KairoCommands.RESTART_SERVER.id,
+      label: 'Restart Server',
+      order: 'b7',
+    });
+    menus.registerMenuAction([...KAIRO_MENU, 'b_build'], {
+      commandId: KairoCommands.OPEN_APPLICATION.id,
+      label: 'Open Application',
+      order: 'b8',
+    });
+    menus.registerMenuAction([...KAIRO_MENU, 'b_build'], {
+      commandId: KairoCommands.CHECK_DEBUG_ADAPTER.id,
+      label: 'Check Java Debug Adapter',
+      order: 'b9',
+    });
+
+    // KAIRO-RC-WEB-023: a "View" submenu that opens the most-used
+    // Kairo panels. Each menu action is idempotent and falls back
+    // to a toast if the widget cannot be created.
+    menus.registerSubmenu([...KAIRO_MENU, 'c_view'], 'View', { sortString: 'c_view' });
+    menus.registerMenuAction([...KAIRO_MENU, 'c_view'], {
+      commandId: KairoCommands.REVEAL_KAIRO_SERVERS.id,
+      label: 'Servers',
+      order: 'c1',
+    });
+    menus.registerMenuAction([...KAIRO_MENU, 'c_view'], {
+      commandId: KairoCommands.REVEAL_KAIRO_BUILDS.id,
+      label: 'Builds',
+      order: 'c2',
+    });
+    menus.registerMenuAction([...KAIRO_MENU, 'c_view'], {
+      commandId: KairoCommands.REVEAL_KAIRO_DEPLOYMENTS.id,
+      label: 'Deployments',
+      order: 'c3',
+    });
+    menus.registerMenuAction([...KAIRO_MENU, 'c_view'], {
+      commandId: KairoCommands.REVEAL_KAIRO_LOGS.id,
+      label: 'Tomcat Logs',
+      order: 'c4',
+    });
+    menus.registerMenuAction([...KAIRO_MENU, 'c_view'], {
+      commandId: KairoCommands.REVEAL_KAIRO_MAVEN.id,
+      label: 'Maven',
+      order: 'c5',
+    });
+    menus.registerMenuAction([...KAIRO_MENU, 'c_view'], {
+      commandId: KairoCommands.REVEAL_KAIRO_TODO.id,
+      label: 'TODO / FIXME',
+      order: 'c6',
+    });
+    menus.registerMenuAction([...KAIRO_MENU, 'c_view'], {
+      commandId: KairoCommands.REVEAL_KAIRO_TESTS.id,
+      label: 'Test Results',
+      order: 'c7',
+    });
+    menus.registerMenuAction([...KAIRO_MENU, 'c_view'], {
+      commandId: KairoCommands.REVEAL_KAIRO_SQL_CONSOLE.id,
+      label: 'SQL Console',
+      order: 'c8',
+    });
+    menus.registerMenuAction([...KAIRO_MENU, 'c_view'], {
+      commandId: KairoCommands.REVEAL_KAIRO_REMOTE.id,
+      label: 'Remote Development',
+      order: 'c9',
+    });
+    menus.registerMenuAction([...KAIRO_MENU, 'c_view'], {
+      commandId: KairoCommands.REVEAL_KAIRO_PERF.id,
+      label: 'Performance Dashboard',
+      order: 'c10',
+    });
+
+    // KAIRO-RC-WEB-024: debug submenu. Lifted from the
+    // REVEAL_KAIRO_DEBUG_* commands so the user has one place
+    // to find every debug-related panel.
+    menus.registerSubmenu([...KAIRO_MENU, 'd_debug'], 'Debug', { sortString: 'd_debug' });
+    menus.registerMenuAction([...KAIRO_MENU, 'd_debug'], {
+      commandId: KairoCommands.OPEN_DEBUG_VIEW.id,
+      label: 'Open Debug View',
+      order: 'd1',
+    });
+    menus.registerMenuAction([...KAIRO_MENU, 'd_debug'], {
+      commandId: KairoCommands.OPEN_DEBUG_CONSOLE.id,
+      label: 'Open Debug Console',
+      order: 'd2',
+    });
+    menus.registerMenuAction([...KAIRO_MENU, 'd_debug'], {
+      commandId: KairoCommands.REVEAL_KAIRO_DEBUG_VARIABLES.id,
+      label: 'Variables',
+      order: 'd3',
+    });
+    menus.registerMenuAction([...KAIRO_MENU, 'd_debug'], {
+      commandId: KairoCommands.REVEAL_KAIRO_DEBUG_CALLSTACK.id,
+      label: 'Call Stack',
+      order: 'd4',
+    });
+    menus.registerMenuAction([...KAIRO_MENU, 'd_debug'], {
+      commandId: KairoCommands.REVEAL_KAIRO_DEBUG_BREAKPOINTS.id,
+      label: 'Breakpoints',
+      order: 'd5',
+    });
+    menus.registerMenuAction([...KAIRO_MENU, 'd_debug'], {
+      commandId: KairoCommands.REVEAL_KAIRO_DEBUG_WATCH.id,
+      label: 'Watch',
+      order: 'd6',
+    });
+    menus.registerMenuAction([...KAIRO_MENU, 'd_debug'], {
+      commandId: KairoCommands.REVEAL_KAIRO_DEBUG_TOOLBAR.id,
+      label: 'Debug Toolbar',
+      order: 'd7',
+    });
+    menus.registerMenuAction([...KAIRO_MENU, 'd_debug'], {
+      commandId: KairoCommands.OPEN_DEBUG_DIAGNOSTICS.id,
+      label: 'Debug Diagnostics',
+      order: 'd8',
+    });
+
+    // KAIRO-RC-WEB-025: window/system submenu. The other items
+    // (terminal, keymap, JDK switch, agent reconnect) belong
+    // together because they all deal with the IDE runtime,
+    // not the project.
+    menus.registerSubmenu([...KAIRO_MENU, 'e_window'], 'Window', { sortString: 'e_window' });
+    menus.registerMenuAction([...KAIRO_MENU, 'e_window'], {
+      commandId: KairoCommands.TOGGLE_TERMINAL.id,
+      label: 'Toggle Terminal',
+      order: 'e1',
+    });
+    menus.registerMenuAction([...KAIRO_MENU, 'e_window'], {
+      commandId: KairoCommands.OPEN_KEYMAP.id,
+      label: 'Keyboard Shortcuts',
+      order: 'e2',
+    });
+    menus.registerMenuAction([...KAIRO_MENU, 'e_window'], {
+      commandId: KairoCommands.SWITCH_JDK.id,
+      label: 'Switch JDK',
+      order: 'e3',
+    });
+    menus.registerMenuAction([...KAIRO_MENU, 'e_window'], {
+      commandId: KairoCommands.RECONNECT_AGENT.id,
+      label: 'Reconnect Runtime Agent',
+      order: 'e4',
+    });
+
+    // KAIRO-RC-WEB-026: keep the existing File menu entries so
+    // File > Import Kairo Project still works when the File
+    // menu is provided by another extension.
     menus.registerMenuAction(CommonMenus.FILE_OPEN, {
       commandId: KairoCommands.IMPORT_PROJECT.id,
       label: 'Import Kairo Project...',
@@ -619,6 +929,11 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
       commandId: KairoCommands.SELECT_PROJECT.id,
       label: 'Select Kairo Project...',
       order: 'a2',
+    });
+    menus.registerMenuAction(CommonMenus.HELP, {
+      commandId: KairoCommands.OPEN_DEBUG_DIAGNOSTICS.id,
+      label: 'Debug Diagnostics',
+      order: 'z1',
     });
   }
 

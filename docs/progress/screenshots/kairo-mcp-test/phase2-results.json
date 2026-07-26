@@ -1,0 +1,158 @@
+{
+  "consoleMessages": [
+    {
+      "type": "debug",
+      "text": "Frontend: loading modules... [0.221 s since frontend page start]"
+    },
+    {
+      "type": "debug",
+      "text": "Frontend: container created [0.630 s since frontend page start]"
+    },
+    {
+      "type": "info",
+      "text": "sending initial connect on SWsLiZ2Z17QATnJ9AAAH"
+    },
+    {
+      "type": "info",
+      "text": "initial connect received on SWsLiZ2Z17QATnJ9AAAH"
+    },
+    {
+      "type": "debug",
+      "text": "Frontend: preloaded [0.752 s since frontend page start]"
+    },
+    {
+      "type": "debug",
+      "text": "Frontend: core modules loaded [1.003 s since frontend page start]"
+    },
+    {
+      "type": "log",
+      "text": "[kairo] DIAG V3: product-frontend.ts module loaded"
+    },
+    {
+      "type": "log",
+      "text": "[kairo] DIAG V3: ContainerModule initializing"
+    },
+    {
+      "type": "log",
+      "text": "[kairo] DIAG V3: bindKairoFrontend called (no-op)"
+    },
+    {
+      "type": "log",
+      "text": "[kairo] DIAG V3: ContainerModule initialized OK"
+    },
+    {
+      "type": "debug",
+      "text": "Frontend: modules loaded [1.175 s since frontend page start]"
+    },
+    {
+      "type": "debug",
+      "text": "Frontend: resolving application [1.175 s since frontend page start]"
+    },
+    {
+      "type": "debug",
+      "text": "Frontend: application resolved [1.175 s since frontend page start]"
+    },
+    {
+      "type": "info",
+      "text": "2026-07-24T20:21:38.440Z root INFO Detected keyboard layout from browser API: US (Mac)"
+    },
+    {
+      "type": "info",
+      "text": "2026-07-24T20:21:38.479Z root INFO [kairo] WidgetManager cache reset; factories: "
+    },
+    {
+      "type": "info",
+      "text": "2026-07-24T20:21:38.490Z root INFO Start frontend contributions: 130.3 ms [1.306 s since frontend page start]"
+    },
+    {
+      "type": "info",
+      "text": "2026-07-24T20:21:38.491Z root INFO Changed application state from 'init' to 'started_contributions'."
+    },
+    {
+      "type": "info",
+      "text": "2026-07-24T20:21:38.494Z root INFO Changed application state from 'started_contributions' to 'attached_shell'."
+    },
+    {
+      "type": "info",
+      "text": "2026-07-24T20:21:38.494Z root INFO >>> Restoring the layout state..."
+    },
+    {
+      "type": "info",
+      "text": "2026-07-24T20:21:38.529Z root INFO <<< Nothing to restore."
+    },
+    {
+      "type": "warning",
+      "text": "2026-07-24T20:21:38.649Z root WARN Linked preference \"workbench.colorCustomizations\" not found."
+    },
+    {
+      "type": "warning",
+      "text": "2026-07-24T20:21:38.649Z root WARN Linked preference \"editor.experimental.preferTreeSitter\" not found."
+    },
+    {
+      "type": "warning",
+      "text": "2026-07-24T20:21:38.677Z root WARN Frontend $f.initializeLayout took longer than the expected maximum 100 milliseconds: 136.6 ms [1.502 s since frontend page start]"
+    },
+    {
+      "type": "info",
+      "text": "2026-07-24T20:21:38.702Z root INFO Initialize the workbench layout: 205.7 ms [1.526 s since frontend page start]"
+    },
+    {
+      "type": "info",
+      "text": "2026-07-24T20:21:38.702Z root INFO Changed application state from 'attached_shell' to 'initialized_layout'."
+    },
+    {
+      "type": "error",
+      "text": "2026-07-24T20:21:38.740Z root ERROR Error: Unable to write file '/user/settings.json' (NoPermissions (FileSystemError): Error: EPERM: operation not permitted, open '/Users/qi/.theia/settings.json')\n    at tR.asFileOperationError (http://127.0.0.1:3050/bundle.js:1661:64614)\n    at tR.rethrowAsFileOperationError (http://127.0.0.1:3050/bundle.js:1661:64548)\n    at tR.writeFile (http://127.0.0.1:3050/bundle.js:1661:62193)\n    at async tR.write (http://127.0.0.1:3050/bundle.js:1661:59412)\n    at async nxt.doWrite (http://127.0.0.1:3050/bundle.js:1664:65941)\n    at async Object.e [as save] (http://127.0.0.1:3050/bundle.js:1153:429058)\n    at async y1i.doSave (http://127.0.0.1:3050/bundle.js:1661:6455)\n    at async http://127.0.0.1:3050/bundle.js:1661:2866\n    at async NM.tearDown (http://127.0.0.1:3050/bundle.js:2073:3850)\n    at async NM.conclude (http://127.0.0.1:3050/bundle.js:2073:1856)\nCaused by: Error: Request 'writeFile' failed\n    at Proxy.<anonymous> (http://127.0.0.1:3050/bundle.js:432:49198)\n    at Rqe.writeFile (http://127.0.0.1:3050/bundle.js:1894:300)\n    at E1i.writeFile (http://127.0.0.1:3050/bundle.js:1661:20401)\n    at tR.doWriteUnbufferedQueued (http://127.0.0.1:3050/bundle.js:1662:13362)\n    at http://127.0.0.1:3050/bundle.js:1662:13037\nCaused by: NoPermissions (FileSystemError): Error: EPERM: operation not permitted, open '/Users/qi/.theia/settings.json'\n    at QGe (/Users/qi/Documents/spaces/kairo-ide/apps/browser/lib/backend/main.js:1622:78475)\n    at eA.toFileSystemProviderError (/Users/qi/Documents/spaces/kairo-ide/apps/browser/lib/backend/main.js:1664:18932)\n    at eA.open (/Users/qi/Documents/spaces/kairo-ide/apps/browser/lib/backend/main.js:1664:12177)\n    at async eA.writeFile (/Users/qi/Documents/spaces/kairo-ide/apps/browser/lib/backend/main.js:1664:11657)\n    at async hse.onRequest (/Users/qi/Documents/spaces/kairo-ide/apps/browser/lib/backend/main.js:526:55143)\n    at async t.handleRequest (/Users/qi/Documents/spaces/kairo-ide/apps/browser/lib/backend/main.js:526:50560)"
+    },
+    {
+      "type": "info",
+      "text": "2026-07-24T20:21:39.515Z root INFO Replace loading indicator with ready workbench UI (animation): 812.6 ms [2.341 s since frontend page start]"
+    },
+    {
+      "type": "info",
+      "text": "2026-07-24T20:21:39.516Z root INFO Changed application state from 'initialized_layout' to 'ready'."
+    },
+    {
+      "type": "info",
+      "text": "2026-07-24T20:21:39.516Z root INFO All frontend contributions settled: 1166.0 ms [2.342 s since frontend page start]"
+    },
+    {
+      "type": "error",
+      "text": "2026-07-24T20:21:40.571Z root ERROR Error: Unable to write file '/user/settings.json' (NoPermissions (FileSystemError): Error: EPERM: operation not permitted, open '/Users/qi/.theia/settings.json')\n    at tR.asFileOperationError (http://127.0.0.1:3050/bundle.js:1661:64614)\n    at tR.rethrowAsFileOperationError (http://127.0.0.1:3050/bundle.js:1661:64548)\n    at tR.writeFile (http://127.0.0.1:3050/bundle.js:1661:62193)\n    at async tR.write (http://127.0.0.1:3050/bundle.js:1661:59412)\n    at async nxt.doWrite (http://127.0.0.1:3050/bundle.js:1664:65941)\n    at async Object.e [as save] (http://127.0.0.1:3050/bundle.js:1153:429058)\n    at async y1i.doSave (http://127.0.0.1:3050/bundle.js:1661:6455)\n    at async http://127.0.0.1:3050/bundle.js:1661:2866\n    at async NM.tearDown (http://127.0.0.1:3050/bundle.js:2073:3850)\n    at async NM.conclude (http://127.0.0.1:3050/bundle.js:2073:1856)\nCaused by: Error: Request 'writeFile' failed\n    at Proxy.<anonymous> (http://127.0.0.1:3050/bundle.js:432:49198)\n    at Rqe.writeFile (http://127.0.0.1:3050/bundle.js:1894:300)\n    at E1i.writeFile (http://127.0.0.1:3050/bundle.js:1661:20401)\n    at tR.doWriteUnbufferedQueued (http://127.0.0.1:3050/bundle.js:1662:13362)\n    at http://127.0.0.1:3050/bundle.js:1662:13037\nCaused by: NoPermissions (FileSystemError): Error: EPERM: operation not permitted, open '/Users/qi/.theia/settings.json'\n    at QGe (/Users/qi/Documents/spaces/kairo-ide/apps/browser/lib/backend/main.js:1622:78475)\n    at eA.toFileSystemProviderError (/Users/qi/Documents/spaces/kairo-ide/apps/browser/lib/backend/main.js:1664:18932)\n    at eA.open (/Users/qi/Documents/spaces/kairo-ide/apps/browser/lib/backend/main.js:1664:12177)\n    at async eA.writeFile (/Users/qi/Documents/spaces/kairo-ide/apps/browser/lib/backend/main.js:1664:11657)\n    at async hse.onRequest (/Users/qi/Documents/spaces/kairo-ide/apps/browser/lib/backend/main.js:526:55143)\n    at async t.handleRequest (/Users/qi/Documents/spaces/kairo-ide/apps/browser/lib/backend/main.js:526:50560)"
+    }
+  ],
+  "networkFailures": [],
+  "trustDialog": {
+    "hasDialog": true,
+    "hasTrustButton": true,
+    "hasNoTrustButton": true,
+    "trustButtonText": "Yes, I trust the authors"
+  },
+  "commandPalette": {
+    "f1": {
+      "hasQuickInput": true,
+      "hasInput": true,
+      "inputPlaceholder": "",
+      "inputValue": ">",
+      "inputAriaLabel": "Type to narrow down results."
+    }
+  },
+  "kairoCommands": [],
+  "menuAfterTrust": {
+    "items": [
+      "File",
+      "Edit",
+      "Selection",
+      "View",
+      "Go",
+      "Run",
+      "Terminal",
+      "Help"
+    ],
+    "count": 8
+  },
+  "submenusContainingKairo": [],
+  "specialMenuSearch": [
+    "Debug: DIV.lm-TabBar-tabLabel"
+  ]
+}

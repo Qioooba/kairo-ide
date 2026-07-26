@@ -44,6 +44,9 @@ type Config struct {
 	LogLevel string `yaml:"logLevel"`
 	// RequireAuth even on loopback. Default false in dev.
 	RequireAuth bool `yaml:"requireAuth"`
+	// RateLimit is the per-IP request limit in requests per minute.
+	// A value <= 0 disables rate limiting. Default 0 (disabled).
+	RateLimit int `yaml:"rateLimit"`
 	// Secret is a local authentication secret for desktop host mode.
 	// When set, the API middleware requires the X-Kairo-Secret header.
 	Secret string `yaml:"secret"`
@@ -72,6 +75,14 @@ type Config struct {
 	// JDTLSURL overrides the JDT LS download URL. Useful for
 	// corporate mirrors.
 	JDTLSURL string `yaml:"jdtlsUrl"`
+
+	// TomcatDefaultPort is the preferred HTTP port for new Tomcat
+	// server instances when the caller does not supply one. A value
+	// <= 0 leaves the port allocator free to choose.
+	TomcatDefaultPort int `yaml:"tomcatDefaultPort"`
+	// JDWPDefaultPort is the preferred JDWP debug port for new
+	// Tomcat server instances when the caller does not supply one.
+	JDWPDefaultPort int `yaml:"jdwpDefaultPort"`
 }
 
 // Default returns the default config.
@@ -157,6 +168,16 @@ func ApplyEnv(cfg *Config) {
 	if v := os.Getenv("KAIRO_REQUIRE_AUTH"); v != "" {
 		if b, err := strconv.ParseBool(v); err == nil {
 			cfg.RequireAuth = b
+		}
+	}
+	if v := os.Getenv("KAIRO_TOMCAT_DEFAULT_PORT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.TomcatDefaultPort = n
+		}
+	}
+	if v := os.Getenv("KAIRO_JDWP_DEFAULT_PORT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.JDWPDefaultPort = n
 		}
 	}
 }

@@ -459,8 +459,14 @@ func TestEvalSymlinksNearestBuildPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("evalSymlinksNearestBuildPath on real dir: %v", err)
 	}
-	if resolved != dir {
-		t.Errorf("resolved = %q, want %q", resolved, dir)
+	// evalSymlinksNearestBuildPath calls filepath.EvalSymlinks which on macOS
+	// resolves /var → /private/var. EvalSymlinks the expected path too.
+	want := dir
+	if evalDir, err := filepath.EvalSymlinks(dir); err == nil {
+		want = evalDir
+	}
+	if resolved != want {
+		t.Errorf("resolved = %q, want %q", resolved, want)
 	}
 
 	// Test with a path that doesn't exist but has a real parent
@@ -469,8 +475,15 @@ func TestEvalSymlinksNearestBuildPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("evalSymlinksNearestBuildPath on nonexistent child: %v", err)
 	}
-	if resolved != filepath.Clean(nonexistent) {
-		t.Errorf("resolved = %q, want %q", resolved, filepath.Clean(nonexistent))
+	// evalSymlinksNearestBuildPath resolves the nearest existing parent (dir),
+	// which on macOS resolves /var → /private/var.
+	want = filepath.Clean(nonexistent)
+	if evalDir, err := filepath.EvalSymlinks(dir); err == nil {
+		rel, _ := filepath.Rel(dir, nonexistent)
+		want = filepath.Join(evalDir, rel)
+	}
+	if resolved != want {
+		t.Errorf("resolved = %q, want %q", resolved, want)
 	}
 }
 
@@ -489,8 +502,14 @@ func TestAuthorizeAbsoluteWithin_EdgeCases(t *testing.T) {
 	if err != nil {
 		t.Fatalf("authorizeAbsoluteWithin valid path: %v", err)
 	}
-	if resolved != valid {
-		t.Errorf("resolved = %q, want %q", resolved, valid)
+	// authorizeAbsoluteWithin calls filepath.EvalSymlinks which on macOS
+	// resolves /var → /private/var. EvalSymlinks the expected path too.
+	want := valid
+	if evalValid, err := filepath.EvalSymlinks(valid); err == nil {
+		want = evalValid
+	}
+	if resolved != want {
+		t.Errorf("resolved = %q, want %q", resolved, want)
 	}
 }
 

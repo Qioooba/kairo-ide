@@ -1,5 +1,4 @@
 import { injectable, inject } from '@theia/core/shared/inversify';
-import { AbstractViewContribution } from '@theia/core/lib/browser/shell/view-contribution';
 import { Command, CommandRegistry } from '@theia/core/lib/common';
 import { MenuModelRegistry } from '@theia/core/lib/common/menu';
 import { GitCherryPickService } from './git-cherrypick-service';

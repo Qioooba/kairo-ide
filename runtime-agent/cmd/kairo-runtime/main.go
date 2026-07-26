@@ -110,13 +110,15 @@ func main() {
 	}
 
 	container, err := bootstrap.NewContainer(bootstrap.Config{
-		DataDir:       cfg.DataDir,
-		BundledDir:    cfg.Bundled(),
-		Logger:        logger,
-		Tomcat6Home:   tomcat6Home,
-		Secret:        cfg.Secret,
-		SkipSHAVerify: cfg.SkipSHAVerify,
-		JDTLSURL:      cfg.JDTLSURL,
+		DataDir:           cfg.DataDir,
+		BundledDir:        cfg.Bundled(),
+		Logger:            logger,
+		Tomcat6Home:       tomcat6Home,
+		Secret:            cfg.Secret,
+		SkipSHAVerify:     cfg.SkipSHAVerify,
+		JDTLSURL:          cfg.JDTLSURL,
+		TomcatDefaultPort: cfg.TomcatDefaultPort,
+		JDWPDefaultPort:   cfg.JDWPDefaultPort,
 	})
 	if err != nil {
 		stdlog.Fatalf("bootstrap: %v", err)
@@ -140,6 +142,10 @@ func main() {
 	}
 
 	srv := api.NewServer(container.Services, logger, auditLog, agentVersion, cfg.Secret)
+	// Configure per-IP rate limiting from config. A value <= 0 disables
+	// limiting, which is what browser E2E runs use to avoid WebSocket
+	// and rapid API polling from being throttled.
+	srv.SetRateLimit(cfg.RateLimit)
 
 	// Wire the restart handler so POST /api/v1/runtime/restart
 	// can respawn this process. Executable is resolved lazily

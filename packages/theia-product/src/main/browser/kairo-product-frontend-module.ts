@@ -24,6 +24,7 @@ import {
   FrontendApplicationContribution,
   WidgetFactory,
 } from '@theia/core/lib/browser';
+import { Container } from '@theia/core/shared/inversify';
 // Activate Theia Git, SCM, and Terminal modules (auto-register on import).
 // Git/SCM are optional — wrapped in try/catch for environments where
 // @theia/git and @theia/scm are not installed (P1-GIT-01: needs real
@@ -51,6 +52,7 @@ import { TabBarDecorator } from '@theia/core/lib/browser/shell/tab-bar-decorator
 import { FileService } from '@theia/filesystem/lib/browser/file-service';
 import { BuildViewWidget } from '@kairo/build-extension';
 import { ServerViewWidget, LogViewerWidget } from '@kairo/tomcat-extension';
+import { bindSvnExtension } from '@kairo/svn-extension/lib/browser';
 import {
   RuntimeConnectionService,
   KairoRuntime,
@@ -58,7 +60,7 @@ import {
   KairoErrorListenerImpl,
   WorkspaceContextService,
 } from '@kairo/runtime-extension';
-import { ImportWizardWidget, ProjectSelectorWidget } from '@kairo/project-extension';
+import { ImportWizardWidget, ProjectSelectorWidget, ProjectStructureContribution } from '@kairo/project-extension';
 import { KairoWelcomeWidget, KAIRO_WELCOME_FACTORY_ID } from './kairo-welcome-widget';
 import { KairoWindowTitleContribution } from './kairo-window-title-contribution';
 import { WindowTitleContribution } from '@theia/core/lib/browser/window/window-title-service';
@@ -122,6 +124,9 @@ import {
   KAIRO_DEBUG_MODULE_SELECTOR_FACTORY_ID,
   KAIRO_DEBUG_CONDITION_EDITOR_FACTORY_ID,
   KAIRO_DEBUG_HOTSWAP_STATUS_FACTORY_ID,
+  KAIRO_DEBUG_DIAGNOSTICS_FACTORY_ID,
+  KAIRO_BOOKMARKS_FACTORY_ID,
+  KAIRO_SHORTCUT_CHEATSHEET_FACTORY_ID as _KAIRO_SHORTCUT_CHEATSHEET_FACTORY_ID,
 } from './kairo-factory-ids';
 import { KairoRemoteAgentService } from './kairo-remote-agent-service';
 import { KairoRemoteFileSystemProvider } from './kairo-remote-fs-provider';
@@ -144,6 +149,11 @@ import { KairoDebugConfigService } from './debug-config-service';
 import { KairoDebugModuleSelectorWidget } from './debug-module-selector-widget';
 import { KairoDebugConditionEditorWidget } from './debug-condition-editor-widget';
 import { KairoDebugHotSwapStatusWidget } from './debug-hotswap-status-widget';
+import { DebugDiagnosticsWidget } from './debug-diagnostics-widget';
+import { BookmarkService } from './kairo-bookmark-service';
+import { KairoBookmarksWidget } from './kairo-bookmark-widget';
+import { KairoBookmarkContribution } from './kairo-bookmark-contribution';
+import { KairoShortcutCheatsheetContribution } from './kairo-shortcut-cheatsheet';
 
 // Re-export so existing consumers can keep importing the IDs from
 // this module; the definitions live in kairo-factory-ids.ts.
@@ -170,9 +180,104 @@ export {
   KAIRO_DEBUG_MODULE_SELECTOR_FACTORY_ID,
   KAIRO_DEBUG_CONDITION_EDITOR_FACTORY_ID,
   KAIRO_DEBUG_HOTSWAP_STATUS_FACTORY_ID,
+  KAIRO_DEBUG_DIAGNOSTICS_FACTORY_ID,
+  KAIRO_BOOKMARKS_FACTORY_ID,
+  KAIRO_SHORTCUT_CHEATSHEET_FACTORY_ID,
 } from './kairo-factory-ids';
 
 export function bindKairoFrontend(bind: interfaces.Bind, unbind?: interfaces.Unbind, isBound?: interfaces.IsBound, rebind?: interfaces.Rebind): void {
+  // ── DI safety net ────────────────────────────────────────────
+  // KAIRO-RC-WEB-2026-07-25-01: Theia 1.73.1 + InversifyJS 6.2.2
+  // performs `getAll(FrontendApplicationContribution)` synchronously
+  // during ApplicationShell.startContributions. Inversify's `toService`
+  // helper falls back from `container.get(X)` to `container.getAsync(X)`
+  // when the service is missing, returning a Promise instead of an
+  // instance. Once any binding in the multi-binding returns a Promise,
+  // the *whole* `getAll` returns a Promise, Theia calls
+  // `for (const c of this.contributions.getContributions())`, iterates
+  // the Promise as a one-element array, and the menu bar / status bar
+  // / editor manager / command registry never finish wiring.
+  //
+  // The fix: replace `toService` with a `toDynamicValue` that catches
+  // construction errors and returns a no-op contribution. This keeps
+  // `getAll` synchronous even when a transitive dependency is broken
+  // (missing binding, async @postConstruct, async @inject, etc.) and
+  // logs the specific failure to the console for follow-up.
+  //
+  // The failure is memoized so that subsequent multi-bindings of the
+  // same service (CommandContribution, MenuContribution,
+  // KeybindingContribution) all observe the same no-op rather than
+  // each attempting to re-construct and re-fail.
+  const noopFailureCache = new Map<interfaces.ServiceIdentifier<unknown> | interfaces.Newable<unknown>, unknown>();
+  // A no-op class that implements every method Theia may invoke on a
+  // contribution. The class-based shape (rather than a plain object or
+  // a Proxy) is required because:
+  //   * InversifyJS internally does `instanceof` checks when wiring
+  //     services.
+  //   * Theia iterates `getAll(...)` results and calls
+  //     `initialize`, `onStart`, `onStop`, `registerCommands`,
+  //     `registerMenus`, `registerKeybindings` — a plain object that
+  //     only has `onStart` throws `registerCommands is not a function`.
+  //   * A Proxy that returns a function for any property access still
+  //     trips Theia's class-instance check (e.g. `obj instanceof X`)
+  //     and results in `Cannot read properties of undefined (reading
+  //     'initialize')` at `startContributions`.
+  //
+  // The class below exposes the union of all known Theia contribution
+  // methods as no-ops, so the app can start even when a Kairo
+  // contribution fails to construct.
+  class KairoNoopContribution {
+    public initialize(_app: any): void { /* no-op */ }
+    public onStart(_app: any): void { /* no-op */ }
+    public onStop(_app: any): void { /* no-op */ }
+    public registerCommands(..._args: any[]): void { /* no-op */ }
+    public registerMenus(..._args: any[]): void { /* no-op */ }
+    public registerKeybindings(..._args: any[]): void { /* no-op */ }
+    public registerToolbarItems(..._args: any[]): void { /* no-op */ }
+  }
+  const safeContribution = <T extends object>(
+    id: interfaces.ServiceIdentifier<T>,
+    service: interfaces.Newable<T> | interfaces.ServiceIdentifier<T>,
+    name: string,
+  ): void => {
+    const cacheKey = service as interfaces.ServiceIdentifier<unknown> | interfaces.Newable<unknown>;
+    bind(id).toDynamicValue(ctx => {
+      // Reuse a previously-constructed instance or a no-op fallback so
+      // that every multi-binding (FrontendApplicationContribution /
+      // CommandContribution / MenuContribution / KeybindingContribution)
+      // for the same Kairo class sees the same value.
+      const cached = noopFailureCache.get(cacheKey);
+      if (cached !== undefined) {
+        return cached as T;
+      }
+      try {
+        // NOTE: `toDynamicValue` MUST be synchronous. If a service has
+        // an async @postConstruct, `container.get` returns a Promise,
+        // Theia iterates the array of FrontendApplicationContributions
+        // synchronously, and a Promise entry is treated as a
+        // contribution object → `Promise.initialize` is undefined →
+        // "Cannot read properties of undefined (reading 'initialize')"
+        // at startContributions. So we catch both thrown errors and
+        // Promise returns, and fall back to a no-op.
+        const resolved = typeof service === 'function' && service.prototype
+          ? ctx.container.get<T>(service as interfaces.Newable<T>)
+          : ctx.container.get<T>(service as interfaces.ServiceIdentifier<T>);
+        if (resolved && typeof (resolved as { then?: unknown }).then === 'function') {
+          console.error(`[kairo] ${name} resolved as Promise; installing synchronous no-op to keep getAll() synchronous.`);
+          const noop = new KairoNoopContribution() as unknown as T;
+          noopFailureCache.set(cacheKey, noop);
+          return noop;
+        }
+        return resolved;
+      } catch (e) {
+        console.error(`[kairo] ${name} failed to construct; installing no-op:`, e);
+        const noop = new KairoNoopContribution() as unknown as T;
+        noopFailureCache.set(cacheKey, noop);
+        return noop;
+      }
+    });
+  };
+
   // ── Kairo runtime client + workspace context ────────────────
   // Mirrors KairoRuntimeModule in
   // packages/runtime-extension/src/browser/index.ts. We have
@@ -207,25 +312,47 @@ export function bindKairoFrontend(bind: interfaces.Bind, unbind?: interfaces.Unb
   }
   // N-026: ensure WorkspaceContextService is created early so it
   // can re-sync when the runtime (re)connects.
-  bind(FrontendApplicationContribution).toService(WorkspaceContextService);
+  safeContribution(FrontendApplicationContribution, WorkspaceContextService, 'WorkspaceContextService');
 
   // ── Kairo contributions ──────────────────────────────────────
+  // KAIRO-RC-WEB-2026-07-25-02: KairoViewsContribution and
+  // KairoStatusBarContribution both @inject(Container) so they can
+  // resolve child services lazily (KairoJavaDebugService depends on
+  // the async-resolved @theia/debug DebugSessionManager). InversifyJS
+  // does not auto-bind the Container class itself; without this
+  // binding every `ctx.container.get(KairoViewsContribution)` fails
+  // with "No matching bindings found for serviceIdentifier: _Container"
+  // and the safeContribution helper installs a no-op — meaning
+  // NO Kairo commands are registered, NO status bar items appear,
+  // and the import wizard / build / deploy commands are inaccessible
+  // from the command palette. Bind Container to a proxy that
+  // delegates to the real container.
+  bind(Container).toDynamicValue(ctx => {
+    const c = ctx.container;
+    return {
+      get: (id: unknown) => c.get(id as never),
+      getAsync: async (id: unknown) => c.get(id as never),
+      getAll: (id: unknown) => c.getAll(id as never),
+      isBound: (id: unknown) => c.isBound(id as never),
+    } as unknown as Container;
+  });
+
   bind(KairoStatusBarContribution).toSelf().inSingletonScope();
-  bind(FrontendApplicationContribution).toService(KairoStatusBarContribution);
+  safeContribution(FrontendApplicationContribution, KairoStatusBarContribution, 'KairoStatusBarContribution');
   bind(KairoViewsContribution).toSelf().inSingletonScope();
-  bind(FrontendApplicationContribution).toService(KairoViewsContribution);
+  safeContribution(FrontendApplicationContribution, KairoViewsContribution, 'KairoViewsContribution');
   // The Kairo views contribution also registers commands
   // (Build / Build & Deploy / Start / Stop / etc.). Bind
   // it as a CommandContribution so Theia's command registry
   // picks up the methods.
-  bind(CommandContribution).toService(KairoViewsContribution);
-  bind(KeybindingContribution).toService(KairoViewsContribution);
-  bind(MenuContribution).toService(KairoViewsContribution);
+  safeContribution(CommandContribution, KairoViewsContribution, 'KairoViewsContribution:cmd');
+  safeContribution(KeybindingContribution, KairoViewsContribution, 'KairoViewsContribution:key');
+  safeContribution(MenuContribution, KairoViewsContribution, 'KairoViewsContribution:menu');
   bind(KairoJavaDebugService).toSelf().inSingletonScope();
   bind(KairoDebugSessionManager).toService(DebugSessionManager);
   bind(KairoRunConfigurationService).toSelf().inSingletonScope();
   bind(KairoSqlService).toSelf().inSingletonScope();
-  bind(CommandContribution).toService(KairoEncodingCommandsContribution);
+  safeContribution(CommandContribution, KairoEncodingCommandsContribution, 'KairoEncodingCommandsContribution:cmd');
 
   // KAIRO-RC-WEB-229: replace Theia's lossy encoder (iconv silently
   // rewrites unrepresentable chars to '?') with the validating one.
@@ -254,20 +381,20 @@ export function bindKairoFrontend(bind: interfaces.Bind, unbind?: interfaces.Unb
   // handler or a friendly fallback message). See
   // kairo-file-commands.ts for the long version of this rationale.
   bind(KairoFileCommandsContribution).toSelf().inSingletonScope();
-  bind(CommandContribution).toService(KairoFileCommandsContribution);
+  safeContribution(CommandContribution, KairoFileCommandsContribution, 'KairoFileCommandsContribution:cmd');
 
   // KairoLargeFileContribution: adaptive large-file performance
   // mode (see kairo-large-file-contribution.ts).
   bind(KairoLargeFileContribution).toSelf().inSingletonScope();
-  bind(FrontendApplicationContribution).toService(KairoLargeFileContribution);
-  bind(CommandContribution).toService(KairoLargeFileContribution);
+  safeContribution(FrontendApplicationContribution, KairoLargeFileContribution, 'KairoLargeFileContribution');
+  safeContribution(CommandContribution, KairoLargeFileContribution, 'KairoLargeFileContribution:cmd');
   bind(PreferenceContribution).toConstantValue(KairoLargeFilePreferenceContribution);
 
   // KairoEditorPreferenceContribution: registers editor.autoSave and
   // editor.autoSaveDelay preferences (B3.1 auto-save strategy).
   bind(PreferenceContribution).toConstantValue(KairoEditorPreferenceContribution);
   bind(KairoEditorAutoSaveSync).toSelf().inSingletonScope();
-  bind(FrontendApplicationContribution).toService(KairoEditorAutoSaveSync);
+  safeContribution(FrontendApplicationContribution, KairoEditorAutoSaveSync, 'KairoEditorAutoSaveSync');
 
   // KairoSettingsPreferenceContribution: registers Kairo-specific
   // preference categories (general, appearance, build, server, etc.)
@@ -281,10 +408,10 @@ export function bindKairoFrontend(bind: interfaces.Bind, unbind?: interfaces.Unb
   // KairoEditorContribution: external modification conflict handling,
   // breadcrumbs enablement, and read-only file handling (B3.2–B3.4).
   bind(KairoEditorContribution).toSelf().inSingletonScope();
-  bind(FrontendApplicationContribution).toService(KairoEditorContribution);
-  bind(CommandContribution).toService(KairoEditorContribution);
-  bind(KeybindingContribution).toService(KairoEditorContribution);
-  bind(MenuContribution).toService(KairoEditorContribution);
+  safeContribution(FrontendApplicationContribution, KairoEditorContribution, 'KairoEditorContribution');
+  safeContribution(CommandContribution, KairoEditorContribution, 'KairoEditorContribution:cmd');
+  safeContribution(KeybindingContribution, KairoEditorContribution, 'KairoEditorContribution:key');
+  safeContribution(MenuContribution, KairoEditorContribution, 'KairoEditorContribution:menu');
 
   // P2-UX-03: Notification Center — aggregated notifications,
   // bell icon in status bar with unread count badge, expandable
@@ -292,8 +419,8 @@ export function bindKairoFrontend(bind: interfaces.Bind, unbind?: interfaces.Unb
   bind(KairoNotificationServiceImpl).toSelf().inSingletonScope();
   bind(KairoNotificationService).toService(KairoNotificationServiceImpl);
   bind(KairoNotificationCenterContribution).toSelf().inSingletonScope();
-  bind(FrontendApplicationContribution).toService(KairoNotificationCenterContribution);
-  bind(CommandContribution).toService(KairoNotificationCenterContribution);
+  safeContribution(FrontendApplicationContribution, KairoNotificationCenterContribution, 'KairoNotificationCenterContribution');
+  safeContribution(CommandContribution, KairoNotificationCenterContribution, 'KairoNotificationCenterContribution:cmd');
   bind(KairoNotificationCenterWidget).toSelf();
   bind(WidgetFactory).toDynamicValue(ctx => ({
     id: KAIRO_NOTIFICATION_CENTER_FACTORY_ID,
@@ -304,8 +431,8 @@ export function bindKairoFrontend(bind: interfaces.Bind, unbind?: interfaces.Unb
   bind(LocalHistoryService).toSelf().inSingletonScope();
   bind(LocalHistoryWidget).toSelf();
   bind(LocalHistoryContribution).toSelf().inSingletonScope();
-  bind(FrontendApplicationContribution).toService(LocalHistoryContribution);
-  bind(CommandContribution).toService(LocalHistoryContribution);
+  safeContribution(FrontendApplicationContribution, LocalHistoryContribution, 'LocalHistoryContribution');
+  safeContribution(CommandContribution, LocalHistoryContribution, 'LocalHistoryContribution:cmd');
 
   bind(KairoDeploymentsWidget).toSelf();
   bind(KairoRunConfigurationsWidget).toSelf();
@@ -315,6 +442,7 @@ export function bindKairoFrontend(bind: interfaces.Bind, unbind?: interfaces.Unb
   bind(KairoTestResultsWidget).toSelf();
   bind(MavenViewWidget).toSelf();
   bind(KairoTodoWidget).toSelf();
+  bind(KairoKeymapWidget).toSelf();
 
   // Register widget factories so the WidgetManager can lazily
   // construct each view the first time the user opens it.
@@ -397,7 +525,7 @@ export function bindKairoFrontend(bind: interfaces.Bind, unbind?: interfaces.Unb
 
   // Runtime ARIA patch for stock Theia/Lumino chrome (WEB-019).
   bind(KairoA11yPatchContribution).toSelf().inSingletonScope();
-  bind(FrontendApplicationContribution).toService(KairoA11yPatchContribution);
+  safeContribution(FrontendApplicationContribution, KairoA11yPatchContribution, 'KairoA11yPatchContribution');
 
   // MonacoEditorModel.run() swallows save errors with a bare
   // console.error — encoding refusals would never reach the user.
@@ -422,11 +550,11 @@ export function bindKairoFrontend(bind: interfaces.Bind, unbind?: interfaces.Unb
 
   // ── Performance instrumentation ─────────────────────────────
   bind(KairoColdStartTimer).toSelf().inSingletonScope();
-  bind(FrontendApplicationContribution).toService(KairoColdStartTimer);
+  safeContribution(FrontendApplicationContribution, KairoColdStartTimer, 'KairoColdStartTimer');
   bind(KairoCompletionTimer).toSelf().inSingletonScope();
   bind(KairoSearchTimer).toSelf().inSingletonScope();
   bind(KairoMemoryTracker).toSelf().inSingletonScope();
-  bind(FrontendApplicationContribution).toService(KairoMemoryTracker);
+  safeContribution(FrontendApplicationContribution, KairoMemoryTracker, 'KairoMemoryTracker');
   bind(KairoPerfDashboardWidget).toSelf();
   bind(WidgetFactory).toDynamicValue(ctx => ({
     id: KAIRO_PERF_FACTORY_ID,
@@ -444,15 +572,15 @@ export function bindKairoFrontend(bind: interfaces.Bind, unbind?: interfaces.Unb
 
   // ── Kairo Navigation Enhancement ──────────────────────────────
   bind(KairoNavigationContribution).toSelf().inSingletonScope();
-  bind(CommandContribution).toService(KairoNavigationContribution);
-  bind(KeybindingContribution).toService(KairoNavigationContribution);
+  safeContribution(CommandContribution, KairoNavigationContribution, 'KairoNavigationContribution:cmd');
+  safeContribution(KeybindingContribution, KairoNavigationContribution, 'KairoNavigationContribution:key');
 
   // ── Kairo Accessibility ───────────────────────────────────────
   bind(KairoScreenReaderService).toSelf().inSingletonScope();
   bind(KairoFocusManagement).toSelf().inSingletonScope();
-  bind(FrontendApplicationContribution).toService(KairoFocusManagement);
-  bind(CommandContribution).toService(KairoFocusManagement);
-  bind(KeybindingContribution).toService(KairoFocusManagement);
+  safeContribution(FrontendApplicationContribution, KairoFocusManagement, 'KairoFocusManagement');
+  safeContribution(CommandContribution, KairoFocusManagement, 'KairoFocusManagement:cmd');
+  safeContribution(KeybindingContribution, KairoFocusManagement, 'KairoFocusManagement:key');
 
   // ── Kairo Keyboard Shortcuts Widget ──────────────────────────
   bind(KairoShortcutsWidget).toSelf();
@@ -509,6 +637,41 @@ export function bindKairoFrontend(bind: interfaces.Bind, unbind?: interfaces.Unb
     id: KAIRO_DEBUG_HOTSWAP_STATUS_FACTORY_ID,
     createWidget: () => ctx.container.get(KairoDebugHotSwapStatusWidget),
   })).inSingletonScope();
+  // Debug Diagnostics Widget
+  bind(DebugDiagnosticsWidget).toSelf().inSingletonScope();
+  bind(WidgetFactory).toDynamicValue(ctx => ({
+    id: KAIRO_DEBUG_DIAGNOSTICS_FACTORY_ID,
+    createWidget: () => ctx.container.get(DebugDiagnosticsWidget),
+  })).inSingletonScope();
+
+  // ── Kairo Bookmarks ──────────────────────────────────────────
+  bind(BookmarkService).toSelf().inSingletonScope();
+  bind(KairoBookmarkContribution).toSelf().inSingletonScope();
+  safeContribution(FrontendApplicationContribution, KairoBookmarkContribution, 'KairoBookmarkContribution');
+  safeContribution(CommandContribution, KairoBookmarkContribution, 'KairoBookmarkContribution:cmd');
+  safeContribution(KeybindingContribution, KairoBookmarkContribution, 'KairoBookmarkContribution:key');
+  bind(KairoBookmarksWidget).toSelf();
+  bind(WidgetFactory).toDynamicValue(ctx => ({
+    id: KAIRO_BOOKMARKS_FACTORY_ID,
+    createWidget: () => ctx.container.get(KairoBookmarksWidget),
+  })).inSingletonScope();
+
+  // ── Kairo Shortcut Cheat Sheet ──────────────────────────────
+  bind(KairoShortcutCheatsheetContribution).toSelf().inSingletonScope();
+  safeContribution(CommandContribution, KairoShortcutCheatsheetContribution, 'KairoShortcutCheatsheetContribution:cmd');
+  safeContribution(KeybindingContribution, KairoShortcutCheatsheetContribution, 'KairoShortcutCheatsheetContribution:key');
+
+  // ── Project Structure Dialog ───────────────────────────────
+  bind(ProjectStructureContribution).toSelf().inSingletonScope();
+  safeContribution(CommandContribution, ProjectStructureContribution, 'ProjectStructureContribution:cmd');
+  safeContribution(KeybindingContribution, ProjectStructureContribution, 'ProjectStructureContribution:key');
+
+  // ── SVN Integration ──────────────────────────────────────────
+  try {
+    bindSvnExtension(bind);
+  } catch (e) {
+    console.error('[kairo] bindSvnExtension FAILED', e);
+  }
 }
 
 export default new ContainerModule((bind, unbind, isBound, rebind) => {

@@ -1004,7 +1004,7 @@ func TestServerMeta_toResponse_NoPorts(t *testing.T) {
 // =========================================================================
 
 func TestRealServerRunner_CatalinaHome(t *testing.T) {
-	r := newRealServerRunner(t.TempDir(), "", "/path/to/tomcat6", nil)
+	r := newRealServerRunner(t.TempDir(), "", "/path/to/tomcat6", nil, 0, 0)
 	home := r.CatalinaHome()
 	if home != "/path/to/tomcat6" {
 		t.Errorf("CatalinaHome = %q, want /path/to/tomcat6", home)
@@ -1016,7 +1016,7 @@ func TestRealServerRunner_CatalinaHome(t *testing.T) {
 // =========================================================================
 
 func TestRealServerRunner_GetNotFound(t *testing.T) {
-	r := newRealServerRunner(t.TempDir(), "", "", nil)
+	r := newRealServerRunner(t.TempDir(), "", "", nil, 0, 0)
 	_, err := r.Get("nonexistent")
 	if err == nil {
 		t.Fatal("expected error for nonexistent server")
@@ -1024,7 +1024,7 @@ func TestRealServerRunner_GetNotFound(t *testing.T) {
 }
 
 func TestRealServerRunner_ListEmpty(t *testing.T) {
-	r := newRealServerRunner(t.TempDir(), "", "", nil)
+	r := newRealServerRunner(t.TempDir(), "", "", nil, 0, 0)
 	items := r.List()
 	if len(items) != 0 {
 		t.Errorf("List() = %d, want 0", len(items))
@@ -1032,7 +1032,7 @@ func TestRealServerRunner_ListEmpty(t *testing.T) {
 }
 
 func TestRealServerRunner_DeploymentTargetNotFound(t *testing.T) {
-	r := newRealServerRunner(t.TempDir(), "", "", nil)
+	r := newRealServerRunner(t.TempDir(), "", "", nil, 0, 0)
 	_, err := r.DeploymentTarget("nonexistent-project")
 	if err == nil {
 		t.Fatal("expected error for nonexistent project")
@@ -1040,7 +1040,7 @@ func TestRealServerRunner_DeploymentTargetNotFound(t *testing.T) {
 }
 
 func TestRealServerRunner_StopNotFound(t *testing.T) {
-	r := newRealServerRunner(t.TempDir(), "", "", nil)
+	r := newRealServerRunner(t.TempDir(), "", "", nil, 0, 0)
 	_, err := r.Stop("nonexistent", false)
 	if err == nil {
 		t.Fatal("expected error for nonexistent server")
@@ -1048,7 +1048,7 @@ func TestRealServerRunner_StopNotFound(t *testing.T) {
 }
 
 func TestRealServerRunner_RecoverableEmpty(t *testing.T) {
-	r := newRealServerRunner(t.TempDir(), "", "", nil)
+	r := newRealServerRunner(t.TempDir(), "", "", nil, 0, 0)
 	items := r.Recoverable()
 	if len(items) != 0 {
 		t.Errorf("Recoverable() = %d, want 0", len(items))
@@ -1056,7 +1056,7 @@ func TestRealServerRunner_RecoverableEmpty(t *testing.T) {
 }
 
 func TestRealServerRunner_RecoverNotFound(t *testing.T) {
-	r := newRealServerRunner(t.TempDir(), "", "", nil)
+	r := newRealServerRunner(t.TempDir(), "", "", nil, 0, 0)
 	_, err := r.Recover("nonexistent")
 	if err == nil {
 		t.Fatal("expected error for nonexistent server recovery")
@@ -1069,7 +1069,7 @@ func TestRealServerRunner_RecoverNotCrashed(t *testing.T) {
 		ID:    "srv_1",
 		State: "stopped",
 	})
-	r := newRealServerRunner(dataDir, "", "", nil)
+	r := newRealServerRunner(dataDir, "", "", nil, 0, 0)
 	_, err := r.Recover("srv_1")
 	if err == nil {
 		t.Fatal("expected error for non-crashed server recovery")
@@ -1077,7 +1077,7 @@ func TestRealServerRunner_RecoverNotCrashed(t *testing.T) {
 }
 
 func TestRealServerRunner_DebugNotFound(t *testing.T) {
-	r := newRealServerRunner(t.TempDir(), "", "", nil)
+	r := newRealServerRunner(t.TempDir(), "", "", nil, 0, 0)
 	_, err := r.Debug("nonexistent")
 	if err == nil {
 		t.Fatal("expected error for nonexistent server debug")
@@ -1090,7 +1090,7 @@ func TestRealServerRunner_DebugMissingMetadata(t *testing.T) {
 		ID:    "srv_1",
 		State: "stopped",
 	})
-	r := newRealServerRunner(dataDir, "", "", nil)
+	r := newRealServerRunner(dataDir, "", "", nil, 0, 0)
 	_, err := r.Debug("srv_1")
 	if err == nil {
 		t.Fatal("expected error for missing debug metadata")
@@ -1105,7 +1105,7 @@ func TestRealServerRunner_DebugMissingPorts(t *testing.T) {
 		JavaHome:     "/jdk",
 		CatalinaBase: "/base",
 	})
-	r := newRealServerRunner(dataDir, "", "", nil)
+	r := newRealServerRunner(dataDir, "", "", nil, 0, 0)
 	_, err := r.Debug("srv_1")
 	if err == nil {
 		t.Fatal("expected error for missing ports metadata")
@@ -1121,7 +1121,7 @@ func TestRealServerRunner_RecoverMissingPorts(t *testing.T) {
 		JavaHome:     "/jdk",
 		CatalinaBase: "/base",
 	})
-	r := newRealServerRunner(dataDir, "", "", nil)
+	r := newRealServerRunner(dataDir, "", "", nil, 0, 0)
 	_, err := r.Recover("srv_1")
 	if err == nil {
 		t.Fatal("expected error for missing ports during recovery")
@@ -1134,7 +1134,7 @@ func TestRealServerRunner_RecoverMissingMetadata(t *testing.T) {
 		ID:    "srv_1",
 		State: "crashed",
 	})
-	r := newRealServerRunner(dataDir, "", "", nil)
+	r := newRealServerRunner(dataDir, "", "", nil, 0, 0)
 	_, err := r.Recover("srv_1")
 	if err == nil {
 		t.Fatal("expected error for missing recovery metadata")
@@ -1147,7 +1147,7 @@ func TestRealServerRunner_RestartMissingMetadata(t *testing.T) {
 		ID:    "srv_1",
 		State: "stopped",
 	})
-	r := newRealServerRunner(dataDir, "", "", nil)
+	r := newRealServerRunner(dataDir, "", "", nil, 0, 0)
 	_, err := r.Restart("srv_1")
 	if err == nil {
 		t.Fatal("expected error for missing restart metadata")

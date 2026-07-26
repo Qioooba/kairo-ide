@@ -2,7 +2,7 @@ import { inject, injectable, postConstruct } from '@theia/core/shared/inversify'
 import { Emitter, Event } from '@theia/core/lib/common/event';
 import URI from '@theia/core/lib/common/uri';
 import { DebugService } from '@theia/debug/lib/common/debug-service';
-import type { DebugSessionManager } from '@theia/debug/lib/browser/debug-session-manager';
+import { DebugSessionManager } from '@theia/debug/lib/browser/debug-session-manager';
 import {
   createKairoJavaAttachConfiguration,
   KAIRO_JAVA_DEBUG_ADAPTER_COMMAND_ENV,

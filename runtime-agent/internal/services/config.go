@@ -24,12 +24,14 @@ const (
 // Config bundles the data directory, bundled directory, and a
 // logger for the service factory.
 type Config struct {
-	DataDir       string
-	BundledDir    string
-	Logger        *log.Logger
-	Tomcat6Home   string
-	SkipSHAVerify bool
-	JDTLSURL      string
+	DataDir           string
+	BundledDir        string
+	Logger            *log.Logger
+	Tomcat6Home       string
+	SkipSHAVerify     bool
+	JDTLSURL          string
+	TomcatDefaultPort int
+	JDWPDefaultPort   int
 }
 
 // NewMemoryServices returns a fully-wired Services struct with
@@ -58,7 +60,7 @@ func NewMemoryServices(cfg Config, sandbox *security.WorkspaceRoots) *api.Servic
 	projectStore := newDiskProjectStore(cfg.DataDir)
 	buildEngine := newAsyncBuildEngine(cfg.DataDir, registry, cfg.Logger)
 	deployer := newDiskDeployer(cfg.DataDir, cfg.Logger)
-	serverRunner := newRealServerRunner(cfg.DataDir, cfg.BundledDir, tomcat6Home, cfg.Logger)
+	serverRunner := newRealServerRunner(cfg.DataDir, cfg.BundledDir, tomcat6Home, cfg.Logger, cfg.TomcatDefaultPort, cfg.JDWPDefaultPort)
 	return &api.Services{
 		WorkspaceStore:        wsStore,
 		ProjectStore:          projectStore,

@@ -1,0 +1,130 @@
+.kairo-debug-diagnostics {
+    padding: 16px;
+    font-family: var(--theia-ui-font-family);
+    color: var(--theia-foreground);
+    background: var(--theia-editor-background);
+    height: 100%;
+    overflow-y: auto;
+}
+
+.kairo-debug-diag-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+    border-bottom: 1px solid var(--theia-activityBar-border);
+    padding-bottom: 8px;
+}
+
+.kairo-debug-diag-header h3 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.kairo-diag-refresh {
+    font-size: 12px;
+    padding: 4px 12px;
+}
+
+.kairo-diag-loading {
+    text-align: center;
+    padding: 24px;
+    color: var(--theia-descriptionForeground);
+}
+
+.kairo-diag-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.kairo-diag-item {
+    padding: 10px 12px;
+    border-radius: 4px;
+    border: 1px solid var(--theia-panel-border);
+}
+
+.kairo-diag-item.kairo-diag-ok {
+    border-left: 3px solid var(--theia-terminal-ansiGreen);
+}
+
+.kairo-diag-item.kairo-diag-warning {
+    border-left: 3px solid var(--theia-terminal-ansiYellow);
+}
+
+.kairo-diag-item.kairo-diag-error {
+    border-left: 3px solid var(--theia-terminal-ansiRed);
+}
+
+.kairo-diag-item.kairo-diag-unknown {
+    border-left: 3px solid var(--theia-descriptionForeground);
+}
+
+.kairo-diag-item-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+
+.kairo-diag-icon {
+    font-size: 14px;
+    flex-shrink: 0;
+}
+
+.kairo-diag-label {
+    font-weight: 600;
+    font-size: 13px;
+}
+
+.kairo-diag-detail {
+    font-size: 12px;
+    color: var(--theia-descriptionForeground);
+    margin-left: 22px;
+    margin-bottom: 6px;
+    line-height: 1.4;
+}
+
+.kairo-diag-action {
+    margin-left: 22px;
+    margin-top: 4px;
+    font-size: 11px;
+    padding: 2px 8px;
+}
+
+.kairo-diag-footer {
+    margin-top: 24px;
+    padding-top: 16px;
+    border-top: 1px solid var(--theia-activityBar-border);
+}
+
+.kairo-diag-footer h4 {
+    margin: 0 0 8px 0;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.kairo-diag-footer p {
+    margin: 4px 0;
+    font-size: 12px;
+    color: var(--theia-descriptionForeground);
+    line-height: 1.4;
+}
+
+.kairo-diag-footer ul {
+    margin: 4px 0;
+    padding-left: 20px;
+    font-size: 12px;
+    color: var(--theia-descriptionForeground);
+}
+
+.kairo-diag-footer ul li {
+    margin: 2px 0;
+}
+
+.kairo-diag-hint {
+    font-style: italic;
+    color: var(--theia-terminal-ansiCyan);
+    margin-top: 8px;
+}

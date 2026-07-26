@@ -107,12 +107,28 @@ func BuildCommand(cfg Config) (executable string, args []string, env []string, e
 	cp := BootstrapClasspath(cfg.CatalinaHome)
 	classpathStr := strings.Join(cp, string(filepath.ListSeparator))
 
+	// KAIRO-RC-WEB-2026-07-26: Tomcat 6's WebappClassLoader reflects
+	// into java.base to clear ThreadLocals on undeploy. Java 9+
+	// blocks that by default and the webapp reload crashes with
+	// InaccessibleObjectException, leaving the HTTP listener up but
+	// every request hanging on a half-loaded context. Auto-add the
+	// --add-opens flags so the bundled tomcat6 still works on the
+	// modern JDK that ships with our test environment. These are
+	// no-op on Java 8, so always applying them is safe.
+	addOpens := []string{
+		"--add-opens=java.base/java.lang=ALL-UNNAMED",
+		"--add-opens=java.base/java.util=ALL-UNNAMED",
+		"--add-opens=java.base/java.lang.reflect=ALL-UNNAMED",
+		"--add-opens=java.base/sun.security.x509=ALL-UNNAMED",
+	}
+
 	args = []string{
 		"-classpath", classpathStr,
 		"-Dcatalina.home=" + cfg.CatalinaHome,
 		"-Dcatalina.base=" + cfg.CatalinaBase,
 		"-Djava.util.logging.config.file=" + filepath.Join(cfg.CatalinaBase, "conf", "logging.properties"),
 	}
+	args = append(args, addOpens...)
 	if cfg.DebugPort > 0 {
 		suspend := "n"
 		if cfg.DebugSuspend {
@@ -363,7 +379,12 @@ func writeServerXML(cfg Config) error {
 				{
 					Path:       contextPath,
 					DocBase:    cfg.WebappDir,
-					Reloadable: true,
+					// KAIRO-RC-WEB-2026-07-26: disable auto-reload. Tomcat 6's
+					// WebappClassLoader reflects into java.base internals on
+					// reload, which crashes on Java 9+ and leaves the context
+					// half-loaded so every request hangs. The IDE uses the
+					// Kairo: Publish command to push changes explicitly.
+					Reloadable: false,
 				},
 			}
 		}

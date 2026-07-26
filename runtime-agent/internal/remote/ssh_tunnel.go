@@ -223,11 +223,22 @@ func (t *SSHTunnel) Connect(ctx context.Context) error {
 		Timeout:         30 * time.Second,
 	}
 
-	client, err := ssh.Dial("tcp", addr, clientConfig)
+	// Use a context-aware dialer so that callers can cancel the connection
+	// attempt (e.g. via a short deadline in tests) without waiting for the
+	// OS-level TCP connect timeout (~75s on macOS).
+	dialer := &net.Dialer{Timeout: clientConfig.Timeout}
+	conn, err := dialer.DialContext(ctx, "tcp", addr)
 	if err != nil {
 		t.setError(fmt.Errorf("ssh_tunnel: dial: %w", err))
 		return err
 	}
+	sshConn, chans, reqs, err := ssh.NewClientConn(conn, addr, clientConfig)
+	if err != nil {
+		conn.Close()
+		t.setError(fmt.Errorf("ssh_tunnel: handshake: %w", err))
+		return err
+	}
+	client := ssh.NewClient(sshConn, chans, reqs)
 	t.client = client
 
 	// Start port forwarding

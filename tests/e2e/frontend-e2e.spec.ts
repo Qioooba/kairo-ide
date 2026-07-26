@@ -141,13 +141,36 @@ test.describe('FE-02: Project Import Wizard', () => {
     });
 
     await test.step('Verify workspace registered', async () => {
-      const wsResp = await agentApi.get(
-        `/api/v1/workspaces/${encodeURIComponent(workspace.rootPath)}`,
+      const wsResp = await agentApi.get('/api/v1/workspaces');
+      expect(wsResp.status).toBe(200);
+      const workspaces = (wsResp.json?.payload ?? []) as Array<{
+        id: string;
+        rootPath: string;
+      }>;
+      const registered = workspaces.some(
+        (w) => w.rootPath === workspace.rootPath,
       );
-      console.log(`  Workspace registered: status=${wsResp.status}`);
+      console.log(
+        `  Workspace registered: ${registered} (count=${workspaces.length})`,
+      );
+      expect(registered).toBeTruthy();
     });
 
     await test.step('Verify file tree contains project files', async () => {
+      // Open Explorer view if not already visible
+      const explorerIcon = page.locator(
+        '.theia-activity-bar .theia-Explorer, [id="theia:explorer"], .p-TabBar-tab[title="Explorer"]',
+      ).first();
+      if (await explorerIcon.isVisible().catch(() => false)) {
+        await explorerIcon.click();
+        await page.waitForTimeout(1_000);
+      }
+      // Wait for the file tree to populate
+      await page.waitForSelector('.theia-Explorer .theia-TreeNode', {
+        timeout: 10_000,
+      }).catch(() => {
+        // Tree may still be loading
+      });
       const fileTree = await page.evaluate(() => {
         const explorer = document.querySelector(
           '.theia-Explorer, #explorer-view-container',
@@ -158,6 +181,7 @@ test.describe('FE-02: Project Import Wizard', () => {
       });
       console.log(`  File tree items: ${fileTree.length}`);
       console.log(`  First items: ${fileTree.slice(0, 10).join(', ')}`);
+      expect(fileTree.length).toBeGreaterThan(0);
     });
   });
 });

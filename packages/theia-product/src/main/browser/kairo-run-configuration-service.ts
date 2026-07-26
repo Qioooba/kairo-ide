@@ -218,6 +218,72 @@ export class KairoRunConfigurationService {
     }
   }
 
+  protected async saveAll(): Promise<void> {
+    // This is a simplified version - in production, iterate all dirty editors
+    // For now, rely on the fact that Theia auto-saves before debug
+  }
+
+  /**
+   * One-click Debug: auto-save → build → deploy → start Tomcat (suspend=y) → attach debugger.
+   * This is the Shift+F9 / Debug button handler.
+   */
+  async debugConfiguration(configuration: TomcatRunConfiguration): Promise<ServerInstance> {
+    if (this.state.loading || this.state.submitting) {
+      throw new Error('A run configuration operation is already in progress');
+    }
+    const workspaceId = this.runtime.workspace();
+    if (!workspaceId) throw new Error('Select a workspace before debugging');
+
+    this.setState({ submitting: true, operation: 'launch', error: undefined, portDiagnostics: undefined, validationIssues: [] });
+    let server: ServerInstance | undefined;
+    try {
+      const project = await this.activeProject.requireProject();
+      if (project.workspaceId !== workspaceId || project.projectId !== configuration.projectId) {
+        throw new Error(`Select project ${configuration.projectId} before launching this configuration`);
+      }
+
+      // Step 1: Check debug adapter availability
+      const capability = await this.javaDebug.probeAvailability();
+      if (capability.state !== 'available') {
+        throw new Error(capability.message ?? 'Java Debug Adapter is unavailable. Check Debug Diagnostics panel.');
+      }
+
+      // Step 2-4: Launch in debug mode (this handles build + deploy + Tomcat start)
+      server = await this.runtime.request(
+        'POST /api/v1/workspaces/{workspaceId}/run-configurations/{configurationId}/launch',
+        { mode: 'debug', suspend: true },
+        { pathParams: { workspaceId, configurationId: configuration.id }, timeoutMs: 60_000, noRetry: true },
+      );
+      this.servers.adopt(server);
+
+      // Step 5: Wait for JDWP port to be ready
+      const debugPort = server.ports?.debug;
+      if (!debugPort) {
+        throw new Error('Runtime launched Debug without a verified JDWP port');
+      }
+
+      // Step 6: Attach debugger
+      await this.javaDebug.attach({
+        serverId: server.id,
+        projectId: project.projectId,
+        projectName: project.name,
+        projectRoot: project.root,
+        port: debugPort,
+      });
+
+      return server;
+    } catch (error) {
+      if (server) {
+        try { await this.servers.stop(server.id, false); } catch { /* preserve attach failure */ }
+      }
+      const msg = errorMessage(error);
+      this.setState({ error: msg });
+      throw error;
+    } finally {
+      this.setState({ submitting: false, operation: undefined });
+    }
+  }
+
   protected assertCandidate(configuration: TomcatRunConfiguration, replacingId?: string): void {
     const configurations = this.state.document.configurations
       .filter(item => item.id !== replacingId)

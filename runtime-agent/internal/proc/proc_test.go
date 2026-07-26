@@ -1662,6 +1662,9 @@ func TestFakeProcessNoExitTime(t *testing.T) {
 }
 
 func TestRealProcessStartOnWindows(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("uses cmd.exe")
+	}
 	p := New()
 	ctx := context.Background()
 
@@ -1690,6 +1693,9 @@ func TestRealProcessStartOnWindows(t *testing.T) {
 }
 
 func TestRealProcessExitCode(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("uses cmd.exe")
+	}
 	p := New()
 	ctx := context.Background()
 	obs, err := p.Start(ctx, ProcessSpec{
@@ -1714,6 +1720,9 @@ func TestRealProcessExitCode(t *testing.T) {
 }
 
 func TestRealProcessForceStop(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("uses cmd.exe")
+	}
 	p := New()
 	ctx := context.Background()
 	obs, err := p.Start(ctx, ProcessSpec{
@@ -1741,6 +1750,9 @@ func TestRealProcessForceStop(t *testing.T) {
 }
 
 func TestRealProcessSubscribeLogs(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("uses cmd.exe")
+	}
 	p := New()
 	var logs []domain.LogLine
 	_ = p.SubscribeLogs(func(line domain.LogLine) {
@@ -1771,6 +1783,9 @@ func TestRealProcessSubscribeLogs(t *testing.T) {
 }
 
 func TestRealProcessChildProcesses(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("uses cmd.exe")
+	}
 	p := New()
 	ctx := context.Background()
 	obs, err := p.Start(ctx, ProcessSpec{
@@ -1795,6 +1810,9 @@ func TestRealProcessChildProcesses(t *testing.T) {
 }
 
 func TestRealProcessGracefulStopWindows(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("uses cmd.exe")
+	}
 	p := New()
 	ctx := context.Background()
 	obs, err := p.Start(ctx, ProcessSpec{

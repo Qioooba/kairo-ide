@@ -411,6 +411,11 @@ func TestDetect_BuildOutputDir(t *testing.T) {
 }
 
 func TestFindMaven_NoMaven(t *testing.T) {
+	origPath := os.Getenv("PATH")
+	emptyDir := t.TempDir()
+	t.Setenv("PATH", emptyDir)
+	defer os.Setenv("PATH", origPath)
+
 	dir := t.TempDir()
 	exec, isWrapper := findMaven(dir)
 	if exec != "" {

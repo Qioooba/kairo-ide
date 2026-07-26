@@ -1,0 +1,276 @@
+.kairo-project-structure-dialog {
+  min-width: 780px;
+  max-width: 900px;
+}
+
+.kairo-project-structure-dialog .dialogContent {
+  padding: 0;
+  overflow: hidden;
+}
+
+.kairo-ps-body {
+  display: flex;
+  height: 520px;
+  font-size: 13px;
+}
+
+.kairo-ps-tabs {
+  width: 160px;
+  flex-shrink: 0;
+  background: var(--theia-sideBar-background);
+  border-right: 1px solid var(--theia-sideBar-border, var(--theia-editorIndentGuide-background));
+  padding: 8px 0;
+  overflow-y: auto;
+}
+
+.kairo-ps-tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  cursor: pointer;
+  color: var(--theia-sideBar-foreground);
+  user-select: none;
+  border-left: 3px solid transparent;
+  font-size: 13px;
+}
+
+.kairo-ps-tab:hover {
+  background: var(--theia-list-hoverBackground);
+}
+
+.kairo-ps-tab.active {
+  background: var(--theia-list-activeSelectionBackground);
+  color: var(--theia-list-activeSelectionForeground);
+  border-left-color: var(--theia-button-background);
+}
+
+.kairo-ps-tab-icon {
+  font-size: 16px;
+  width: 20px;
+  text-align: center;
+  opacity: 0.8;
+}
+
+.kairo-ps-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px;
+}
+
+.kairo-ps-section-title {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0 0 16px 0;
+  color: var(--theia-foreground);
+}
+
+.kairo-ps-field {
+  display: flex;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.kairo-ps-field-label {
+  width: 160px;
+  flex-shrink: 0;
+  text-align: right;
+  padding-right: 12px;
+  color: var(--theia-foreground);
+}
+
+.kairo-ps-field .theia-input,
+.kairo-ps-field .theia-select {
+  flex: 1;
+  max-width: 320px;
+}
+
+.kairo-ps-field input[readonly] {
+  background: var(--theia-input-background);
+  opacity: 0.7;
+  cursor: default;
+}
+
+.kairo-ps-hint {
+  font-size: 12px;
+  color: var(--theia-descriptionForeground);
+  margin: -4px 0 12px 160px;
+}
+
+.kairo-ps-section-sep {
+  height: 1px;
+  background: var(--theia-editorIndentGuide-background);
+  margin: 16px 0;
+}
+
+.kairo-ps-subtitle {
+  font-weight: 600;
+  margin: 12px 0 8px 0;
+}
+
+.kairo-ps-list {
+  border: 1px solid var(--theia-dropdown-border);
+  border-radius: 2px;
+  background: var(--theia-input-background);
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.kairo-ps-list-item {
+  display: flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--theia-editorIndentGuide-background);
+  gap: 8px;
+  cursor: pointer;
+}
+
+.kairo-ps-list-item:last-child {
+  border-bottom: none;
+}
+
+.kairo-ps-list-item:hover {
+  background: var(--theia-list-hoverBackground);
+}
+
+.kairo-ps-list-item.selected {
+  background: var(--theia-list-activeSelectionBackground);
+  color: var(--theia-list-activeSelectionForeground);
+}
+
+.kairo-ps-list-item-path {
+  flex: 1;
+  font-family: var(--theia-monospace-font-family, monospace);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kairo-ps-badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  background: var(--theia-badge-background);
+  color: var(--theia-badge-foreground);
+  margin-left: 6px;
+}
+
+.kairo-ps-badge.manual {
+  background: var(--theia-button-background);
+  color: var(--theia-button-foreground);
+}
+
+.kairo-ps-badge.ant {
+  background: #b8742e;
+  color: #fff;
+}
+
+.kairo-ps-badge.autodetect {
+  background: #2e7db8;
+  color: #fff;
+}
+
+.kairo-ps-badge.yaml {
+  background: #6b2eb8;
+  color: #fff;
+}
+
+.kairo-ps-list-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.kairo-ps-jdk-item {
+  display: flex;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid var(--theia-dropdown-border);
+  border-radius: 3px;
+  margin-bottom: 6px;
+  cursor: pointer;
+  gap: 10px;
+  background: var(--theia-input-background);
+}
+
+.kairo-ps-jdk-item:hover {
+  border-color: var(--theia-focusBorder);
+}
+
+.kairo-ps-jdk-item.selected {
+  border-color: var(--theia-button-background);
+  background: var(--theia-list-activeSelectionBackground);
+  color: var(--theia-list-activeSelectionForeground);
+}
+
+.kairo-ps-jdk-radio {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.kairo-ps-jdk-info {
+  flex: 1;
+  overflow: hidden;
+}
+
+.kairo-ps-jdk-name {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.kairo-ps-jdk-path {
+  font-family: var(--theia-monospace-font-family, monospace);
+  font-size: 11px;
+  opacity: 0.75;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kairo-ps-jdk-version {
+  font-size: 12px;
+  opacity: 0.85;
+  flex-shrink: 0;
+}
+
+.kairo-ps-checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  margin-left: 4px;
+}
+
+.kairo-ps-dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--theia-editorIndentGuide-background);
+  background: var(--theia-sideBar-background);
+}
+
+.kairo-ps-error {
+  color: var(--theia-errorForeground);
+  background: var(--theia-errorBackground, rgba(255, 0, 0, 0.1));
+  padding: 6px 10px;
+  border-radius: 3px;
+  margin-bottom: 10px;
+  font-size: 12px;
+}
+
+.kairo-ps-empty {
+  padding: 20px;
+  text-align: center;
+  color: var(--theia-descriptionForeground);
+  font-style: italic;
+}
+
+.kairo-ps-two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}

@@ -23,13 +23,17 @@ export default defineConfig({
     'boundary-e2e.spec.ts',
     'windows-e2e.spec.ts',
     'standalone-smoke.spec.ts',
+    'diagnose.spec.ts',
+    'regression/shard-*.spec.ts',
   ],
 
   // Timeout for each test: 5 minutes (300s)
   timeout: 300_000,
 
   // Global timeout for the entire suite
-  globalTimeout: 30 * 60_000,
+  // KAIRO-RC-WEB-2026-07-26: SHARD-03/05/06 each import a project and wait
+  // for JDT LS per test, so a full shard of ~15 tests needs >30 minutes.
+  globalTimeout: 120 * 60_000,
 
   // Retry once on CI
   retries: process.env.CI ? 1 : 0,
@@ -43,7 +47,7 @@ export default defineConfig({
 
   use: {
     // Base URL of the Theia Browser IDE
-    baseURL: process.env.THEIA_URL || 'http://127.0.0.1:3000',
+    baseURL: process.env.THEIA_URL || `http://127.0.0.1:${process.env.THEIA_PORT || '18301'}`,
 
     // Agent API base URL
     // accessible via process.env in tests

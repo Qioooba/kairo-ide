@@ -278,7 +278,7 @@ export class KairoDebugCallStackWidget extends ReactWidget {
     }
 }
 
-function mapStackTraceFrame(f: DebugProtocol.StackFrame, index: number): StackFrameInfo {
+function _mapStackTraceFrame(f: DebugProtocol.StackFrame, index: number): StackFrameInfo {
     return {
         id: f.id,
         name: f.name,

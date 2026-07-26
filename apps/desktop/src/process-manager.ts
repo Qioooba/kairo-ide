@@ -184,7 +184,7 @@ export class ProcessManager {
   isZombie(label: string): boolean {
     const info = this.processes.get(label);
     if (!info) return false;
-    return info.shutdownRequested && info.process !== null && !info.process.killed && info.exitCode === null;
+    return info.shutdownRequested && info.process !== null && info.exitCode === null && info.exitSignal === null;
   }
 
   /** Get all zombie processes. */
@@ -215,7 +215,7 @@ export class ProcessManager {
     info.shutdownRequested = true;
 
     // Already exited — nothing to do.
-    if (info.exitCode !== null || !info.process || info.process.killed) {
+    if (info.exitCode !== null || info.exitSignal !== null || info.process === null) {
       return {
         label,
         success: true,
@@ -341,7 +341,7 @@ export class ProcessManager {
     return new Promise((resolve) => {
       const check = () => {
         const info = this.processes.get(label);
-        if (!info || info.exitCode !== null) {
+        if (!info || info.exitCode !== null || info.exitSignal !== null || info.process === null) {
           resolve(true);
           return;
         }
@@ -349,7 +349,7 @@ export class ProcessManager {
           resolve(false);
           return;
         }
-        setTimeout(check, 200);
+        setTimeout(check, 50);
       };
       check();
     });

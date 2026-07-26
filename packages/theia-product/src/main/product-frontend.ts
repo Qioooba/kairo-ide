@@ -1,71 +1,12 @@
-/**
- * KairoProductFrontend — the browser-side module that the
- * Theia browser app loads via the `theiaExtensions[].frontend`
- * field. Theia server / Electron app hosts do NOT load this
- * module.
- *
- * Apps that want to compose the Kairo frontend with their own
- * InversifyJS container can `container.load(KairoProductFrontend)`.
- *
- * The module binds:
- *   * KairoStatusBarContribution — status bar entries
- *   * KairoViewsContribution      — commands, view containers, event wiring
- *   * Widget factories for the four Kairo views
- *   * All Kairo service-layer bindings (RuntimeConnectionService,
- *     KairoServerService, KairoJavaService, etc.) via bindKairoProduct
- *     so that the DI container is fully populated — previously these
- *     were only available when configureKairoRuntime() was called.
- *
- * Set KAIRO_NO_KAIRO_FRONTEND=1 in the environment to load an
- * empty module instead. Useful for confirming that the Theia
- * default shell renders on its own when Kairo's frontend
- * extensions are the source of a problem.
- */
-
 import { ContainerModule } from '@theia/core/shared/inversify';
 import { bindKairoFrontend } from './browser/kairo-product-frontend-module';
 import { bindKairoProduct } from './product-bindings';
 
 export { bindKairoFrontend };
 
-// Read the feature flag from the preload-injected window
-// config. `process` is not available inside the browser bundle,
-// so we cannot check process.env at module-load time on the
-// renderer side. The preload script copies the value from the
-// main process env to `window.kairoConfig.noKairoFrontend`.
-declare const window: Window & {
-  kairoConfig?: { noKairoFrontend?: boolean };
-};
-
-export const KairoProductFrontend: ContainerModule = (() => {
-  // The decision is made at module load time, before the
-  // frontend container is wired. `window.kairoConfig` is set
-  // synchronously by the Electron preload script before the
-  // page begins evaluating, so it is safe to read here.
-  if (typeof window !== 'undefined' && window.kairoConfig?.noKairoFrontend) {
-    console.log('[kairo] noKairoFrontend=true; loading empty frontend module');
-    return new ContainerModule(() => { /* no-op */ });
-  }
-  return new ContainerModule((bind, _unbind, isBound, rebind, _onActivation) => {
-    // Frontend-layer bindings (widgets, views, commands, status bar)
-    try {
-      bindKairoFrontend(bind, undefined, isBound, rebind);
-      console.log('[kairo] bindKairoFrontend OK');
-    } catch (e) {
-      console.error('[kairo] bindKairoFrontend FAILED', e);
-      throw e;
-    }
-
-    // Service-layer bindings (RuntimeConnectionService, KairoServerService,
-    // KairoJavaService, KairoProjectService, etc.)
-    try {
-      bindKairoProduct(bind, isBound, rebind);
-      console.log('[kairo] bindKairoProduct OK');
-    } catch (e) {
-      console.error('[kairo] bindKairoProduct FAILED', e);
-      throw e;
-    }
-  });
-})();
+export const KairoProductFrontend: ContainerModule = new ContainerModule((bind, _unbind, isBound, rebind) => {
+  bindKairoFrontend(bind, undefined, isBound, rebind);
+  bindKairoProduct(bind, isBound, rebind);
+});
 
 export default KairoProductFrontend;

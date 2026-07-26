@@ -565,7 +565,7 @@ export class JavaIntelliSenseProvider {
   /**
    * Provide fallback diagnostics for Java source code.
    */
-  provideDiagnostics(source: string, uri: string): JavaIntelliSenseDiagnostic[] {
+  provideDiagnostics(source: string, _uri: string): JavaIntelliSenseDiagnostic[] {
     const diagnostics: JavaIntelliSenseDiagnostic[] = [];
     const lines = source.split('\n');
 
@@ -575,9 +575,7 @@ export class JavaIntelliSenseProvider {
     const usedVariables = new Set<string>();
 
     let braceDepth = 0;
-    let inClass = false;
     let className = '';
-    let inMethod = false;
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
@@ -597,14 +595,12 @@ export class JavaIntelliSenseProvider {
       // Detect class declaration
       const classMatch = trimmed.match(/^(?:public\s+)?(?:abstract\s+)?(?:final\s+)?class\s+(\w+)/);
       if (classMatch) {
-        inClass = true;
         className = classMatch[1];
         continue;
       }
 
       // Detect method declaration
-      if (trimmed.match(/^\s*(?:public|protected|private|static|abstract|final|synchronized|native)\s.*\(.*\)\s*(?:\{|throws)/)) {
-        inMethod = true;
+      if (trimmed.match(/^\s*(?:public|protected|private|static|abstract|final|synchronized|native)\s.*\(.*\)\s*(?:throws|\{)/)) {
         continue;
       }
 

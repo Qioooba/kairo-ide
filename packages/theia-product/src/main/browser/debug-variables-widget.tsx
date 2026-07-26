@@ -278,7 +278,7 @@ export class KairoDebugVariablesWidget extends ReactWidget {
             variable.children = children;
             variable.childrenLoaded = true;
             this.update();
-        } catch (error) {
+        } catch (_error) {
             // Silently ignore — children just won't load
         }
     }

@@ -11,7 +11,7 @@
  * supports reconnect on click.
  */
 
-import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
+import { injectable, inject, postConstruct, Container } from '@theia/core/shared/inversify';
 import {
   StatusBar,
   StatusBarAlignment,
@@ -41,7 +41,8 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
   @inject(EditorManager) protected editorManager!: EditorManager;
   @inject(ServerStore) protected serverStore!: ServerStore;
   @inject(ActiveProjectService) protected activeProject!: ActiveProjectService;
-  @inject(KairoJavaDebugService) protected javaDebug!: KairoJavaDebugService;
+  @inject(Container) protected readonly container!: Container;
+  protected javaDebug: KairoJavaDebugService | undefined;
   @inject(BuildStore) protected buildStore!: BuildStore;
 
   protected unsubscribeStatus: (() => void) | undefined;
@@ -98,8 +99,11 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
       priority: 97,
       command: 'kairo.view.servers',
     });
-    // ── Debug: Debug session status ───────────────────────────
-    this.renderDebugStatus(this.javaDebug.currentStatus);
+    // ── Debug: Debug session status (resolved lazily in onStart)
+    // because KairoJavaDebugService transitively depends on
+    // @theia/debug's DebugSessionManager, which has an async
+    // @postConstruct and cannot be resolved during synchronous
+    // FrontendApplicationContribution construction.
     // ── Agent: Runtime Agent connection status ────────────────
     this.statusBar.setElement('kairo.agent', {
       text: '$(pulse) Agent: 连接中…',
@@ -149,7 +153,17 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
     this.renderServerStatus();
     this.unsubscribeProject = this.activeProject.onDidChangeProject(p => this.renderProjectStatus(p));
     this.renderProjectStatus(this.activeProject.project);
-    this.unsubscribeDebug = this.javaDebug.onDidChangeStatus(status => this.renderDebugStatus(status));
+    // Resolve KairoJavaDebugService asynchronously so its transitive
+    // async dependency (DebugSessionManager) does not break synchronous
+    // FrontendApplicationContribution construction.
+    try {
+      this.javaDebug = await this.container.getAsync(KairoJavaDebugService);
+      this.renderDebugStatus(this.javaDebug.currentStatus);
+      this.unsubscribeDebug = this.javaDebug.onDidChangeStatus(status => this.renderDebugStatus(status));
+    } catch (e) {
+      console.error(`[kairo] Failed to initialize Java debug service in status bar: ${e instanceof Error ? e.message : String(e)}`);
+      this.renderDebugStatus({ state: 'unavailable', message: 'Java Debug service unavailable' });
+    }
     // Subscribe to BuildStore for build status updates
     this.unsubscribeBuild = this.buildStore.onDidChange(() => this.renderBuildStatus());
     this.renderBuildStatus();

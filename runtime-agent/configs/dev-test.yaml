@@ -1,0 +1,36 @@
+# Test config for Kairo Runtime Agent with new port.
+# Used for regression testing to avoid conflicts with existing services.
+
+version: 0.1.0
+
+# Bind to loopback only.
+bindAddress: 127.0.0.1
+port: 18081
+
+# TLS. Leave empty in dev.
+tlsCert: ""
+tlsKey: ""
+
+# Where the agent stores state.
+dataDir: ./.runtime/data-test
+
+# Where Tomcat 6 and JDT LS live after first use.
+bundledDir: ./.runtime/bundled
+
+# Log level.
+logLevel: info
+
+# Auth: not required on loopback in dev.
+requireAuth: false
+
+# Performance and timeout knobs.
+tomcatStartTimeout: 60s
+tomcatShutdownTimeout: 15s
+buildFileTimeout: 30s
+
+# Workspace scan limits.
+workspaceScanMaxDepth: 8
+workspaceScanMaxFiles: 50000
+
+# Diagnostic center ring buffer.
+logBufferLines: 5000

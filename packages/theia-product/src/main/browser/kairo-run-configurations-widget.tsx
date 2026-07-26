@@ -94,7 +94,7 @@ const ConfigurationEditor: React.FC<EditorProps> = ({ initial, idReadOnly, busy,
           </select>
         </label>
         {draft.build.type === 'ant' && field('Ant target', draft.build.target, value => setDraft({ ...draft, build: { ...draft.build, type: 'ant', target: value } }))}
-        {draft.build.type === 'custom' && <div className="kairo-runconfig-field">{field('Custom command', draft.build.command, value => setDraft({ ...draft, build: { ...draft.build, type: 'custom', command: value } }))}<small className="kairo-runconfig-hint">Stored only; this version never executes custom commands. Execution wiring is deferred to P1-RUN-04.</small></div>}
+        {draft.build.type === 'custom' && <div className="kairo-runconfig-field">{field('Custom command', draft.build.command, value => setDraft({ ...draft, build: { ...draft.build, type: 'custom', command: value } }))}<small className="kairo-runconfig-hint">Enter the full command to execute (e.g., "ant war" or "mvn clean package -DskipTests"). The command will be executed in the project root directory.</small></div>}
         <label className="kairo-runconfig-field kairo-runconfig-checkbox">
           <input type="checkbox" checked={draft.build.clean} disabled={busy} onChange={event => setDraft({ ...draft, build: { ...draft.build, clean: event.target.checked } })} />
           <span>Clean before build</span>
@@ -194,7 +194,7 @@ const RunConfigurationsView: React.FC<{ service: KairoRunConfigurationService }>
       <button className="theia-button main" disabled={busy} onClick={newConfiguration} aria-label="Create new run configuration">New</button>
       <button className="theia-button" disabled={busy} onClick={() => void service.load().catch(() => undefined)} aria-label="Refresh run configurations">Refresh</button>
       <button className="theia-button" disabled={busy || !selected} aria-label="Run selected configuration" onClick={() => selected && void service.launch(selected).catch(() => undefined)}>Run</button>
-      <button className="theia-button" disabled={busy || !selected} aria-label="Debug selected configuration" onClick={() => selected && void service.launch({ ...selected, mode: 'debug' }).catch(() => undefined)}>Debug</button>
+      <button className="theia-button" disabled={busy || !selected} aria-label="Debug selected configuration" onClick={() => selected && void service.debugConfiguration(selected).catch(() => undefined)}>Debug</button>
     </div>
     {state.error && !state.portDiagnostics && <div role="alert" style={{ padding: 8 }}>{state.error}</div>}
     {state.portDiagnostics && <PortOccupationError diagnostics={state.portDiagnostics} onModifyPort={() => {
@@ -243,7 +243,7 @@ const RunConfigurationsView: React.FC<{ service: KairoRunConfigurationService }>
           <button className="theia-button" disabled={busy} onClick={() => void service.copy(configuration).catch(() => undefined)} aria-label={`Copy configuration ${configuration.name}`}>Copy</button>
           <button className="theia-button" disabled={busy || configuration.id === state.document.selectedConfigurationId} onClick={() => void service.selectDefault(configuration.id).catch(() => undefined)} aria-label={`Set ${configuration.name} as default`}>Set Default</button>
           <button className="theia-button" disabled={busy} aria-label={`Run ${configuration.name}`} onClick={() => void service.launch(configuration).catch(() => undefined)}>Run</button>
-          <button className="theia-button" disabled={busy} aria-label={`Debug ${configuration.name}`} onClick={() => void service.launch({ ...configuration, mode: 'debug' }).catch(() => undefined)}>Debug</button>
+          <button className="theia-button" disabled={busy} aria-label={`Debug ${configuration.name}`} onClick={() => void service.debugConfiguration(configuration).catch(() => undefined)}>Debug</button>
           <button className="theia-button secondary" disabled={busy} onClick={() => { if (window.confirm(`Delete run configuration "${configuration.name}"?`)) void service.delete(configuration.id).catch(() => undefined); }} aria-label={`Delete configuration ${configuration.name}`}>Delete</button>
         </div>
       </li>)}

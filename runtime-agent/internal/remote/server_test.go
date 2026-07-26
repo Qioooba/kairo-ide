@@ -145,6 +145,26 @@ func TestBuildTLSConfig_WithCACert(t *testing.T) {
 	}
 }
 
+// TestBuildTLSConfig_CACertReadError tests CA cert file read error.
+func TestBuildTLSConfig_CACertReadError(t *testing.T) {
+	dir := t.TempDir()
+	certFile, keyFile, err := generateTestCert(dir)
+	if err != nil {
+		t.Fatalf("generateTestCert: %v", err)
+	}
+
+	rs, _ := NewRemoteServer(RemoteConfig{
+		BindAddr:   ":0",
+		CertFile:   certFile,
+		KeyFile:    keyFile,
+		CACertFile: "/nonexistent/ca-cert.pem",
+	})
+	_, err = rs.buildTLSConfig()
+	if err == nil {
+		t.Fatal("expected error for nonexistent CA cert file")
+	}
+}
+
 // TestBuildTLSConfig_InvalidCA tests invalid CA cert handling.
 func TestBuildTLSConfig_InvalidCA(t *testing.T) {
 	dir := t.TempDir()

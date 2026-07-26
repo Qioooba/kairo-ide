@@ -1446,12 +1446,12 @@ func TestContainerIsolationManager_ListContainers_WithContainers(t *testing.T) {
 
 func TestSSHTunnel_HandleDisconnect_WithListener(t *testing.T) {
 	tunnel, _ := NewSSHTunnel(SSHConfig{
-		Host:     "example.com",
-		User:     "testuser",
-		Password: "secret",
-		Logger:   log.New("test"),
+		Host:                "example.com",
+		User:                "testuser",
+		Password:            "secret",
+		Logger:              log.New("test"),
+		MaxReconnectRetries: -1,
 	})
-	// Set up context and listener
 	ctx, cancel := context.WithCancel(context.Background())
 	tunnel.ctx = ctx
 	tunnel.cancel = cancel
@@ -1459,15 +1459,19 @@ func TestSSHTunnel_HandleDisconnect_WithListener(t *testing.T) {
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	ln.Close() // Immediately close so handleDisconnect works on closed listener
 
 	tunnel.listener = ln
 	tunnel.setState(SSHStateConnected)
 
 	tunnel.handleDisconnect()
-	if tunnel.Status().State != SSHStateError {
-		t.Errorf("state = %v, want error (reconnect attempt will fail)", tunnel.Status().State)
+	if tunnel.Status().State != SSHStateDisconnected {
+		t.Errorf("state = %v, want disconnected", tunnel.Status().State)
 	}
+	tunnel.mu.Lock()
+	if tunnel.listener != nil {
+		t.Errorf("listener should be nil after handleDisconnect")
+	}
+	tunnel.mu.Unlock()
 	cancel()
 }
 

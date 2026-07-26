@@ -12,7 +12,6 @@
 import * as React from 'react';
 import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
-import { Widget } from '@theia/core/lib/browser/widgets';
 import { ILogger } from '@theia/core/lib/common/logger';
 import { MessageService } from '@theia/core/lib/common/message-service';
 import { Emitter, Event } from '@theia/core/lib/common/event';

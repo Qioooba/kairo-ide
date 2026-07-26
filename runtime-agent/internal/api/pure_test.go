@@ -1376,8 +1376,14 @@ func TestResolveProjectImportRoot(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if root != dir {
-			t.Errorf("root = %q, want %q", root, dir)
+		// resolveProjectImportRoot calls filepath.EvalSymlinks which on macOS
+		// resolves /var → /private/var. EvalSymlinks the expected path too.
+		want := dir
+		if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+			want = resolved
+		}
+		if root != want {
+			t.Errorf("root = %q, want %q", root, want)
 		}
 	})
 
@@ -1397,8 +1403,14 @@ func TestResolveProjectImportRoot(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if root != subDir {
-			t.Errorf("root = %q, want %q", root, subDir)
+		// resolveProjectImportRoot calls filepath.EvalSymlinks on the workspace
+		// root, which on macOS resolves /var → /private/var.
+		want := subDir
+		if resolved, err := filepath.EvalSymlinks(subDir); err == nil {
+			want = resolved
+		}
+		if root != want {
+			t.Errorf("root = %q, want %q", root, want)
 		}
 	})
 }

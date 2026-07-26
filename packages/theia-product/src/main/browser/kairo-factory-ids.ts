@@ -30,3 +30,6 @@ export const KAIRO_DEBUG_WATCH_FACTORY_ID = 'kairo-debug-watch';
 export const KAIRO_DEBUG_MODULE_SELECTOR_FACTORY_ID = 'kairo-debug-module-selector';
 export const KAIRO_DEBUG_CONDITION_EDITOR_FACTORY_ID = 'kairo-debug-condition-editor';
 export const KAIRO_DEBUG_HOTSWAP_STATUS_FACTORY_ID = 'kairo-debug-hotswap-status';
+export const KAIRO_DEBUG_DIAGNOSTICS_FACTORY_ID = 'kairo-debug-diagnostics';
+export const KAIRO_BOOKMARKS_FACTORY_ID = 'kairo-bookmarks';
+export const KAIRO_SHORTCUT_CHEATSHEET_FACTORY_ID = 'kairo-shortcut-cheatsheet';

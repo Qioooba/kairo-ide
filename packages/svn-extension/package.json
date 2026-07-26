@@ -1,0 +1,29 @@
+{
+  "name": "@kairo/svn-extension",
+  "version": "0.1.0",
+  "description": "Kairo SVN integration — out-of-box Subversion support with IDEA-like experience. All child_process/fs work lives in the Node backend (src/node) and is exposed to the browser via JSON-RPC at SvnBackendPath.",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "files": ["lib", "src"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "clean": "rm -rf lib",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test src/browser/svn-parser.test.cjs src/browser/svn-detector.test.cjs"
+  },
+  "peerDependencies": {
+    "@theia/core": "1.73.1",
+    "@theia/editor": "1.73.1",
+    "@theia/filesystem": "1.73.1",
+    "@theia/navigator": "1.73.1",
+    "@theia/workspace": "1.73.1"
+  },
+  "devDependencies": {
+    "typescript": "5.5.4"
+  },
+  "theiaExtensions": [
+    {
+      "backend": "lib/node/svn-backend-module"
+    }
+  ]
+}

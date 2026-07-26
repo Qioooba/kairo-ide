@@ -764,6 +764,11 @@ func safeJoin(dest, entry string) (string, error) {
 // the test path honest.
 var jdtlsArchiveSHA256ForTest = ""
 
+// downloadBaseBackoff is the base exponential backoff duration for
+// download retries. Production uses 1s; tests override to a much
+// shorter value to keep suite runtime predictable.
+var downloadBaseBackoff = 1 * time.Second
+
 // hasParentTraversal reports whether the given archive entry
 // has a ".." path segment, i.e. it tries to climb out of the
 // install root via a literal "..". We split on both forward
@@ -810,7 +815,7 @@ func verifySHA256(path, expected string) (bool, string, error) {
 // exponential backoff (1s, 2s, 4s).
 func downloadTo(ctx context.Context, url, dest string, logger func(string, map[string]any)) error {
 	const maxRetries = 3
-	const baseBackoff = 1 * time.Second
+	baseBackoff := downloadBaseBackoff
 	var lastErr error
 
 	for attempt := 0; attempt <= maxRetries; attempt++ {

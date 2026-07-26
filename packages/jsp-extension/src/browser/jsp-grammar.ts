@@ -26,6 +26,7 @@ import { registerJspScriptletProviders } from './jsp-scriptlet-provider';
 import { registerJspScriptletJavaCompletion } from './jsp-scriptlet-java-completion';
 import { registerJspScriptletDiagnostics } from './jsp-scriptlet-diagnostics';
 import { TldCompletionProvider, registerJspTldCompletion } from './jsp-tld-completion';
+import { TldParser } from './tld-parser';
 import { WebXmlCompletionProvider } from './webxml-completion';
 import { registerXmlLanguage } from './xml-language';
 import { registerJsonLanguage } from './json-language';
@@ -98,5 +99,6 @@ export function bindJspExtension(bind: interfaces.Bind): void {
   bind(XmlDtdValidator).toSelf().inSingletonScope();
   bind(FrontendApplicationContribution).toService(XmlDtdValidator);
   bind(TldCompletionProvider).toSelf().inSingletonScope();
+  bind(TldParser).toSelf().inSingletonScope();
   bind(WebXmlCompletionProvider).toSelf().inSingletonScope();
 }

@@ -500,6 +500,65 @@ func TestAuditOperation(t *testing.T) {
 	}
 }
 
+// TestAuthenticatePassword_WithAuditLog_TriggersAuditEvent tests that
+// AuthenticatePassword writes to the audit log when configured.
+func TestAuthenticatePassword_WithAuditLog_TriggersAuditEvent(t *testing.T) {
+	dir := t.TempDir()
+	auditPath := filepath.Join(dir, "audit.log")
+
+	auth, _ := NewAuthenticator(AuthConfig{
+		Logger:      log.New("test"),
+		TokenSecret: "test-secret",
+		AuditLog:    auditPath,
+	})
+	defer auth.Close()
+
+	// Successful login should trigger auditEvent
+	_, err := auth.AuthenticatePassword("admin", "test-secret", "127.0.0.1", "")
+	if err != nil {
+		t.Fatalf("AuthenticatePassword: %v", err)
+	}
+
+	// Verify audit log has content
+	data, err := os.ReadFile(auditPath)
+	if err != nil {
+		t.Fatalf("read audit log: %v", err)
+	}
+	if len(data) == 0 {
+		t.Error("audit log should not be empty after login")
+	}
+}
+
+// TestCleanupExpiredSessions_WithAuditLog tests CleanupExpiredSessions with audit log.
+func TestCleanupExpiredSessions_WithAuditLog(t *testing.T) {
+	dir := t.TempDir()
+	auditPath := filepath.Join(dir, "audit.log")
+
+	auth, _ := NewAuthenticator(AuthConfig{
+		Logger:      log.New("test"),
+		TokenSecret: "secret",
+		TokenTTL:    1 * time.Millisecond,
+		AuditLog:    auditPath,
+	})
+	defer auth.Close()
+
+	// Create a session that will expire
+	session, _ := auth.AuthenticatePassword("user", "secret", "127.0.0.1", "")
+	time.Sleep(5 * time.Millisecond)
+
+	// Invalidate the session, which triggers auditEvent
+	auth.InvalidateSession(session.Token)
+
+	// Verify audit log has content
+	data, err := os.ReadFile(auditPath)
+	if err != nil {
+		t.Fatalf("read audit log: %v", err)
+	}
+	if len(data) == 0 {
+		t.Error("audit log should not be empty after invalidation")
+	}
+}
+
 // TestDefaultAuthConfig tests default configuration.
 func TestDefaultAuthConfig(t *testing.T) {
 	cfg := DefaultAuthConfig()
