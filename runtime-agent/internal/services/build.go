@@ -213,6 +213,7 @@ func (b *asyncBuildEngine) Start(req api.BuildRequest) (*api.BuildResult, error)
 		Classpath:   req.Classpath,
 		Encoding:    req.Encoding,
 		OutputDir:   req.OutputDir,
+		WebappDir:   req.WebappDir,
 	})
 
 	b.mu.Lock()
@@ -276,6 +277,18 @@ func (b *asyncBuildEngine) run(ctx context.Context, id string, bs *api.BuildResu
 	bs.ExitCode = res.ExitCode
 	if res.Success {
 		bs.State = "success"
+		// KAIRO-RC-WEB-2026-07-26-15: for webapp projects, mirror the
+		// freshly compiled classes into WEB-INF/classes so the embedded
+		// Tomcat serves them without requiring a separate package step.
+		// This keeps direct-javac builds consistent with the Ant
+		// build.xml compile target that copies build/classes.
+		if req.WebappDir != "" {
+			webappClasses := filepath.Join(req.WebappDir, "WEB-INF", "classes")
+			if _, _, _, _, copyErr := syncDir(req.OutputDir, webappClasses, false); copyErr != nil {
+				bs.State = "failure"
+				bs.Error = sanitizeBuildText(fmt.Sprintf("compiled but failed to copy classes to webapp: %v", copyErr), req.ProjectRoot, req.Toolchain, maxBuildErrorBytes)
+			}
+		}
 	} else {
 		bs.State = "failure"
 	}

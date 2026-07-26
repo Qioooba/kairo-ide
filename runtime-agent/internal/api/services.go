@@ -88,6 +88,7 @@ type BuildRequest struct {
 	TargetLevel string   `json:"-"`
 	ProjectRoot string   `json:"-"`
 	OutputDir   string   `json:"-"`
+	WebappDir   string   `json:"-"`
 	Classpath   []string `json:"-"`
 	Encoding    string   `json:"-"`
 	TraceID     string   `json:"-"`

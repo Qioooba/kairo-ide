@@ -107,6 +107,21 @@ func (d *diskDeployer) Publish(req api.DeployRequest) (*api.DeployResult, error)
 	var err error
 	if req.What == "static" {
 		filesAdded, filesModified, bytes, err = syncStaticWebFiles(req.Source, req.Target)
+		// KAIRO-RC-WEB-2026-07-26-18: Kairo: Publish must also push freshly
+		// compiled classes to the running deployment so Java changes are
+		// visible after Build + Publish + Restart. Static-web-file sync
+		// intentionally skips .class files; merge WEB-INF/classes separately.
+		if err == nil {
+			webappClasses := filepath.Join(req.Source, "WEB-INF", "classes")
+			if _, statErr := os.Stat(webappClasses); statErr == nil {
+				a, m, _, b, copyErr := syncDir(webappClasses, filepath.Join(req.Target, "WEB-INF", "classes"), false)
+				if copyErr == nil {
+					filesAdded += a
+					filesModified += m
+					bytes += b
+				}
+			}
+		}
 	} else {
 		filesAdded, filesModified, filesDeleted, bytes, err = syncDir(req.Source, req.Target, req.Mode == "mirror")
 	}
