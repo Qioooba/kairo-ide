@@ -95,7 +95,7 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
     const [importing, setImporting] = React.useState(false);
     const [scanError, setScanError] = React.useState('');
     const [importError, setImportError] = React.useState('');
-    const [importedSummary, setImportedSummary] = React.useState<{ name: string; root: string; encoding: string } | null>(null);
+    const [importedSummary, setImportedSummary] = React.useState<{ name: string; root: string; encoding: string; projectId: string } | null>(null);
 
     // Editable fields for step 2
     const [projectName, setProjectName] = React.useState('');
@@ -268,6 +268,7 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
                 name: saved.name || trimmedName,
                 root: finalRootPath,
                 encoding: normalizeEncodingId(defaultEncoding),
+                projectId: saved.id,
             });
             setStep(3);
         } catch (err) {
@@ -619,12 +620,14 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
                                 className="theia-button main"
                                 data-testid="open-project-btn"
                                 onClick={async () => {
-                                    console.log('[kairo] Open Project Folder clicked', { projectId: result.projectId, root: result.rootPath });
-                                    try {
-                                        await workspaceService.open(new URI(result.rootPath));
-                                    } catch (err) {
-                                        console.error('[kairo] Failed to open workspace:', err);
-                                        onClose();
+                                    if (importedSummary) {
+                                        console.log('[kairo] Open Project Folder clicked', { projectId: importedSummary.projectId, root: importedSummary.root });
+                                        try {
+                                            await workspaceService.open(new URI(importedSummary.root));
+                                        } catch (err) {
+                                            console.error('[kairo] Failed to open workspace:', err);
+                                            onClose();
+                                        }
                                     }
                                 }}
                             >

@@ -184,12 +184,17 @@ export class JavaLanguageServerLifecycle {
     private async onProjectChanged(project: { workspaceId: string; projectId: string }, token: number): Promise<void> {
         const MAX_RETRIES = 12;
         const RETRY_DELAY_MS = 2000;
-        const INITIAL_DELAY_MS = 2000;
+        const INITIAL_DELAY_MS = 5000;
         let lastError: unknown;
         let forcedWorkspaceId: string | null = project.workspaceId || null;
 
         for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
             if (!this.isCurrentActivation(project, token)) return;
+            if (this.restartTimer) {
+                clearTimeout(this.restartTimer);
+                this.restartTimer = undefined;
+            }
+            this.restartAttempts = 0;
             try {
                 if (attempt === 0) {
                     await delay(INITIAL_DELAY_MS);
@@ -230,12 +235,18 @@ export class JavaLanguageServerLifecycle {
                     forcedWorkspaceId = belongsMatch[1];
                     this.logger.info(`JDT LS: project belongs to workspace ${forcedWorkspaceId}, will retry with correct workspace ID`);
                 }
-                const isRetryable = errMsg.includes('not found') || errMsg.includes('404') || errMsg.includes('belongs to workspace');
+                const isRetryable = errMsg.includes('not found')
+                    || errMsg.includes('404')
+                    || errMsg.includes('belongs to workspace')
+                    || errMsg.includes('connection got disposed')
+                    || errMsg.includes('Pending response rejected')
+                    || errMsg.includes('connection is disposed')
+                    || errMsg.includes('Backend service not available');
                 if (!isRetryable || attempt >= MAX_RETRIES) {
                     this.logger.error(`Failed to prepare JDT LS for project ${project.projectId}: ${errMsg}`);
                     return;
                 }
-                this.logger.warn(`JDT LS prepare attempt ${attempt + 1} failed for ${project.projectId} (project not ready yet), retrying...`);
+                this.logger.warn(`JDT LS prepare attempt ${attempt + 1} failed for ${project.projectId} (${errMsg.slice(0, 100)}), retrying...`);
             }
         }
         if (lastError) {
@@ -277,10 +288,6 @@ export class JavaLanguageServerLifecycle {
                     this.logger.info(`JDT LS already ${state} for ${rootUri}, not restarting`);
                     return;
                 }
-                // The backend owns one JDT LS process. A different
-                // root/data key must stop the old process first;
-                // calling start while it is ready is otherwise a
-                // silent no-op in JdtLsService.
                 await this.javaClient.stop();
                 if (!this.desiredProject || token !== this.activationToken || this.disposed) return;
             }
@@ -290,11 +297,30 @@ export class JavaLanguageServerLifecycle {
                 this.lastStartKey = startKey;
                 this.logger.info(`JDT LS start requested for ${rootUri}`);
             } else {
+                const errMsg = String(result.reason);
+                const isTransient = errMsg.includes('connection got disposed')
+                    || errMsg.includes('Pending response rejected')
+                    || errMsg.includes('Backend service not available')
+                    || errMsg.includes('WebSocket is not open');
+                if (isTransient) {
+                    this.logger.warn(`JDT LS connection transient error for ${projectId}, will retry: ${errMsg.slice(0, 200)}`);
+                    throw new Error(errMsg);
+                }
                 this.logger.error(`JDT LS failed to start for project ${projectId}: ${result.reason}`);
                 this.scheduleRestart();
             }
         } catch (err) {
-            this.logger.error(`Failed to start JDT LS for project ${projectId}: ${String(err)}`);
+            const errMsg = String(err);
+            const isTransient = errMsg.includes('connection got disposed')
+                || errMsg.includes('Pending response rejected')
+                || errMsg.includes('connection is disposed')
+                || errMsg.includes('Backend service not available')
+                || errMsg.includes('WebSocket is not open');
+            if (isTransient) {
+                this.logger.warn(`JDT LS connection transient error for ${projectId}, will retry: ${errMsg.slice(0, 200)}`);
+                throw err;
+            }
+            this.logger.error(`Failed to start JDT LS for project ${projectId}: ${errMsg}`);
             this.scheduleRestart();
         }
     }
@@ -327,7 +353,7 @@ export class JavaLanguageServerLifecycle {
             this.restartTimer = undefined;
             if (!this.isCurrentActivation(project, token)) return;
             this.restartInFlight = true;
-            void this.startLanguageClient(descriptor, project.projectId, token).finally(async () => {
+            void this.startLanguageClient(descriptor, project.projectId, token).catch(() => {}).finally(async () => {
                 this.restartInFlight = false;
                 if (!this.isCurrentActivation(project, token)) return;
                 try {

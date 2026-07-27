@@ -3,23 +3,12 @@
 // Real Eclipse JDT Language Server is shipped as a tar.gz or zip
 // containing a "config_linux / config_win / config_mac" folder
 // tree, a "plugins" folder, and (newer releases) a
-// "bin/jdtls" launcher. The Manager downloads a FIXED version
-// from a FIXED URL, verifies the SHA-256, then unpacks into the
-// Kairo data directory. There is no "latest" / snapshot
-// fallback: a moving target is exactly the failure mode the
-// previous round's release notes captured.
-//
-// The exact URL is recorded in JDTLSArchiveURL. If that URL
-// ever moves, the user can override it (and the SHA-256) with:
-//
-//	KAIRO_JDTLS_ARCHIVE   — a local file path (.tar.gz / .zip)
-//	                       already on disk; download is skipped,
-//	                       checksum is still verified.
-//	KAIRO_JDTLS_ARCHIVE_URL — override the download URL.
-//	KAIRO_JDTLS_HOME      — point at an existing unpacked
-//	                       install; both download and unpack
-//	                       are skipped. The installer only
-//	                       validates that the layout is sane.
+// "bin/jdtls" launcher. The Manager resolves a FIXED version from
+// a pre-bundled location or operator-provided override, verifies
+// the SHA-256, then unpacks into the Kairo data directory. There
+// is no public-internet fallback: a moving target is exactly the
+// failure mode the previous round's release notes captured, and
+// Kairo IDE is designed for offline / air-gapped deployment.
 //
 // Path-traversal (zip-slip / tar-slip) is rejected at extract
 // time. The launcher JAR is selected by reading the
@@ -27,6 +16,15 @@
 // plugins/ folder, NOT by globbing for a known version, so a
 // version bump in the JDT LS release does not break the
 // installer.
+//
+// Resolution order (see ensureInstalled):
+//   1. KAIRO_JDTLS_HOME       — existing installation
+//   2. KAIRO_JDTLS_ARCHIVE    — pre-staged local file
+//   3. <DataDir>/bundled/jdtls/<archive>  — pre-bundled at build time
+//   4. KAIRO_JDTLS_ARCHIVE_URL — intranet mirror URL or file:// path
+//
+// If none of the above yield an archive, the installer returns
+// ErrNotInstalled and refuses to fall back to a public URL.
 package jdtls
 
 import (
@@ -86,18 +84,18 @@ const (
 	//   - KAIRO_JDTLS_ARCHIVE_URL environment variable (intranet mirror)
 	//   - KAIRO_JDTLS_HOME environment variable (existing installation)
 	JDTLSArchiveFile = "jdt-language-server-1.55.0-202601131729.tar.gz"
-	// JDTLSArchiveURL is documented for reference only and is NOT used
-	// as a default download target in offline/air-gapped mode. It shows
-	// where the pinned version was originally sourced from for pre-bundling
-	// purposes. In production, configure KAIRO_JDTLS_ARCHIVE_URL to your
-	// intranet mirror.
-	JDTLSArchiveURL = "https://download.eclipse.org/jdtls/milestones/1.55.0/jdt-language-server-1.55.0-202601131729.tar.gz"
-	// JDTLSExpectedSHA256 is the expected SHA-256 of the archive.
-	// When KAIRO_SKIP_SHA_VERIFY=true (development only), verification
-	// is skipped with a warning.
-	//
-	// SHA-256 of the pinned archive (verified 2026-07-20):
-	//   90627c9f03704dbb404f37651625d0751c078ab7534246023d53adcea1411b91
+	// JDTLSArchiveURL is the public Eclipse URL the archive was originally
+	// sourced from during development. It is intentionally NOT exposed as a
+	// Go constant that code can fall back to at runtime, because Kairo IDE
+	// is designed for offline / air-gapped deployments. Production
+	// resolution order (see ensureInstalled below):
+	//   1. KAIRO_JDTLS_HOME       — existing installation
+	//   2. KAIRO_JDTLS_ARCHIVE    — pre-staged local file
+	//   3. <DataDir>/bundled/jdtls/<archive>  — pre-bundled
+	//   4. KAIRO_JDTLS_ARCHIVE_URL — intranet mirror (HTTP/HTTPS or file://)
+	// If none of the above yield an archive, the installer returns
+	// ErrNotInstalled and refuses to contact the public internet.
+	// JDTLSArchiveURL string = "https://download.eclipse.org/jdtls/milestones/1.55.0/jdt-language-server-1.55.0-202601131729.tar.gz" // OFFLINE: not used at runtime
 	JDTLSExpectedSHA256 = "90627c9f03704dbb404f37651625d0751c078ab7534246023d53adcea1411b91"
 	// JDTLSLaunchMinVersion is the minimum Equinox launcher version.
 	JDTLSLaunchMinVersion = "1.6.400"
@@ -184,9 +182,9 @@ var (
 //  3. <DataDir>/bundled/jdtls/<archive>
 //     if it exists and matches the
 //     pinned SHA-256, use it.
-//  4. Download from JDTLSArchiveURL (or customURL if set,
-//     or KAIRO_JDTLS_ARCHIVE_URL if
-//     set), verify SHA-256, unpack.
+//  4. Download from customURL if set, or
+//     KAIRO_JDTLS_ARCHIVE_URL (intranet mirror). The public
+//     internet is NEVER contacted as a fallback.
 //
 // The function is idempotent: a second call with everything
 // already on disk is a near-no-op (only the install-report is
@@ -194,8 +192,9 @@ var (
 //
 // skipSHAVerify: when true, SHA-256 verification is skipped.
 // Intended for development only; a warning is logged.
-// customURL: when non-empty, overrides both JDTLSArchiveURL
-// and KAIRO_JDTLS_ARCHIVE_URL. Useful for corporate mirrors.
+// customURL: when non-empty, overrides both the constant default
+// (offline: there is no default) and KAIRO_JDTLS_ARCHIVE_URL.
+// Useful for corporate mirrors and for tests.
 func ensureInstalled(ctx context.Context, dataDir, bundledDir, jrePath string, skipSHAVerify bool, customURL string, logger func(string, map[string]any)) (InstallReport, error) {
 	home := filepath.Join(bundledDir, "jdtls")
 	_ = os.MkdirAll(home, 0o755)

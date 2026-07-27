@@ -17,16 +17,23 @@ TARGET="$DEST/$TARBALL"
 # the verified value via KAIRO_TOMCAT6_SHA256 (verified against
 # the Apache KEYS file out-of-band).
 #
+# The supply-chain-lock.json declares KAIRO_TOMCAT6_LINUX_SHA256
+# as the canonical env var for the linux lock id. We accept
+# either KAIRO_TOMCAT6_SHA256 (legacy, platform-agnostic) or
+# KAIRO_TOMCAT6_LINUX_SHA256 (lock-file canonical) and export
+# both so downstream fetch-verified-archive.cjs can read either.
+#
 # The previous hard-coded value was 65 hex chars — invalid as a
 # SHA-256 (must be exactly 64) and clearly a placeholder.
 # Refuse to run until a real hash is supplied.
-EXPECTED_SHA256="${KAIRO_TOMCAT6_SHA256:-}"
+EXPECTED_SHA256="${KAIRO_TOMCAT6_LINUX_SHA256:-${KAIRO_TOMCAT6_SHA256:-}}"
 
 if [ -z "$EXPECTED_SHA256" ]; then
-  echo "ERROR: KAIRO_TOMCAT6_SHA256 is not set." >&2
+  echo "ERROR: KAIRO_TOMCAT6_SHA256 (or KAIRO_TOMCAT6_LINUX_SHA256) is not set." >&2
   echo "Apache Tomcat 6.0.53 was released before .sha256 files" >&2
   echo "were published alongside binaries. Verify the archive" >&2
   echo "against the Apache KEYS file and set KAIRO_TOMCAT6_SHA256" >&2
+  echo "(or KAIRO_TOMCAT6_LINUX_SHA256 for platform-specific config)" >&2
   echo "in your environment (or scripts/.env) before running this script." >&2
   echo "  Example: KAIRO_TOMCAT6_SHA256=<64-hex-chars> $0" >&2
   exit 1
@@ -39,7 +46,11 @@ if ! echo "$EXPECTED_SHA256" | grep -qE '^[0-9a-fA-F]{64}$'; then
   exit 1
 fi
 
+# Export both names so fetch-verified-archive.cjs (which reads
+# KAIRO_TOMCAT6_LINUX_SHA256 per supply-chain-lock.json) and any
+# legacy tooling that reads KAIRO_TOMCAT6_SHA256 both see the value.
 export KAIRO_TOMCAT6_SHA256="$EXPECTED_SHA256"
+export KAIRO_TOMCAT6_LINUX_SHA256="$EXPECTED_SHA256"
 if [ ! -f "$TARGET" ]; then
   # The shared fetcher enforces HTTPS, a 10s connection timeout,
   # a 30s total network timeout and atomic publication after hash match.

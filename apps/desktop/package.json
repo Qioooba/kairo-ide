@@ -6,7 +6,7 @@
   "main": "lib/main.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "prebuild": "pnpm --workspace-root bundled:prepare ; node scripts/build-agent.js && node scripts/copy-browser-artifacts.js && node scripts/copy-bundled.js",
+    "prebuild": "node scripts/build-agent.js && node scripts/copy-browser-artifacts.js && node scripts/copy-bundled.js",
     "build:mac": "tsc -p tsconfig.json && electron-builder --mac",
     "build:win": "pnpm --filter @kairo/browser build && pwsh -ExecutionPolicy Bypass -File ../../scripts/prepare-bundled.ps1 -Strict -BundledRoot apps/desktop/bundled && node scripts/build-agent.js && node scripts/copy-browser-artifacts.js --strict && tsc -p tsconfig.json && electron-builder --win",
     "build:linux": "tsc -p tsconfig.json && electron-builder --linux",
@@ -33,7 +33,8 @@
   },
   "build": {
     "appId": "com.kairo.ide",
-    "productName": "Kairo IDE",
+    "productName": "Kairo",
+    "executableName": "Kairo",
     "directories": {
       "output": "dist"
     },
@@ -87,6 +88,7 @@
     "win": {
       "target": ["nsis", "zip"]
     },
+    "publish": null,
     "linux": {
       "target": ["AppImage", "zip"],
       "extraResources": [

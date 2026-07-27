@@ -43,7 +43,7 @@ func NewMemoryServices(cfg Config, sandbox *security.WorkspaceRoots) *api.Servic
 	registry, _ := toolchain.NewRegistry(filepath.Join(cfg.DataDir, "toolchains"))
 	tomcat6Home := cfg.Tomcat6Home
 	if tomcat6Home == "" {
-		home, err := tomcat6.FetchCatalinaHomeOrDownload(cfg.BundledDir)
+		home, err := tomcat6.ResolveCatalinaHome(cfg.BundledDir)
 		if err == nil {
 			tomcat6Home = home
 		} else {

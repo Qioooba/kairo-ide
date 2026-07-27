@@ -1,7 +1,12 @@
 !define PRODUCT_NAME "Kairo IDE"
 !define PRODUCT_VERSION "1.0.0"
 !define PRODUCT_PUBLISHER "Kairo Team"
-!define PRODUCT_WEB_SITE "https://kairo-ide.dev"
+; OFFLINE / AIR-GAPPED: Kairo IDE is designed for fully intranet deployment.
+; Do not register a public website URL in the Windows uninstall entry;
+; instead point URLInfoAbout at the offline help / local docs shipped
+; inside the install root, so the "Support link" button in Programs &
+; Features opens something that does not require internet access.
+!define PRODUCT_WEB_SITE "file:///$INSTDIR/docs/index.html"
 !define PRODUCT_DIR_REGKEY "Software\Microsoft\Windows\CurrentVersion\App Paths\KairoIDE.exe"
 !define PRODUCT_UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_NAME}"
 

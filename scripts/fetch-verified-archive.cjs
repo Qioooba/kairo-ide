@@ -28,6 +28,31 @@ function checkedSha256(raw, envName) {
   return value;
 }
 
+// resolveSha256Env reads the SHA-256 from the canonical env var declared
+// in supply-chain-lock.json (e.g. KAIRO_TOMCAT6_LINUX_SHA256). If that is
+// unset, it falls back to the platform-agnostic form (KAIRO_TOMCAT6_SHA256)
+// for backward compatibility with operators that predate the platform
+// suffix. The error message always reports the canonical name so operators
+// know which variable the lock file expects.
+function resolveSha256Env(entry) {
+  const canonical = process.env[entry.sha256Env];
+  if (canonical && String(canonical).trim()) {
+    return { value: canonical, envName: entry.sha256Env };
+  }
+  // Derive the legacy platform-agnostic fallback by stripping the
+  // platform segment: KAIRO_TOMCAT6_LINUX_SHA256 -> KAIRO_TOMCAT6_SHA256
+  const legacy = entry.sha256Env
+    .replace(/_(LINUX|MACOS|WINDOWS)_/, '_')
+    .replace(/_WINDOWS_/, '_');
+  if (legacy !== entry.sha256Env) {
+    const legacyValue = process.env[legacy];
+    if (legacyValue && String(legacyValue).trim()) {
+      return { value: legacyValue, envName: entry.sha256Env };
+    }
+  }
+  return { value: undefined, envName: entry.sha256Env };
+}
+
 function isLocalPath(value) {
   if (!value) return false;
   if (value.startsWith('file://')) return true;
@@ -115,7 +140,8 @@ const modeCount = Number(Boolean(outputArg)) + Number(Boolean(archiveArg)) + Num
 if (modeCount !== 1) fail('provide exactly one of --check-config, --output or --archive');
 
 const entry = loadEntry(id);
-const expected = checkedSha256(process.env[entry.sha256Env], entry.sha256Env);
+const sha256Source = resolveSha256Env(entry);
+const expected = checkedSha256(sha256Source.value, sha256Source.envName);
 
 if (checkConfig) {
   const urlValue = entry.archiveUrlEnv ? process.env[entry.archiveUrlEnv] : entry.archiveUrl;

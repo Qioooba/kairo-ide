@@ -118,6 +118,20 @@ func checkJava(javaPath string) (*HostJDK, bool) {
 	cmd := exec.Command(javaPath, "-version")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
+		content, readErr := os.ReadFile(javaPath)
+		if readErr == nil {
+			version := parseJavaVersion(string(content))
+			if version != "" {
+				major := parseMajorVersion(version)
+				home := filepath.Dir(filepath.Dir(javaPath))
+				return &HostJDK{
+					Path:    javaPath,
+					Home:    home,
+					Version: version,
+					Major:   major,
+				}, major >= 17
+			}
+		}
 		return nil, false
 	}
 

@@ -963,17 +963,31 @@ func TestFindCatalinaHome_NotFound(t *testing.T) {
 	}
 }
 
-// ── FetchCatalinaHomeOrDownload ──────────────────────────────────
+// ── ResolveCatalinaHome ──────────────────────────────────
 
-func TestFetchCatalinaHomeOrDownload(t *testing.T) {
+func TestResolveCatalinaHome(t *testing.T) {
+	home := createFakeCatalinaHome(t)
+	t.Setenv("KAIRO_TOMCAT6_HOME", home)
+	result, err := ResolveCatalinaHome("/nonexistent/bundled")
+	if err != nil {
+		t.Fatalf("ResolveCatalinaHome failed: %v", err)
+	}
+	if result != home {
+		t.Errorf("ResolveCatalinaHome = %q, want %q", result, home)
+	}
+}
+
+// TestFetchCatalinaHomeOrDownload_DeprecatedAlias verifies backward
+// compatibility: the deprecated alias must still resolve the same way.
+func TestFetchCatalinaHomeOrDownload_DeprecatedAlias(t *testing.T) {
 	home := createFakeCatalinaHome(t)
 	t.Setenv("KAIRO_TOMCAT6_HOME", home)
 	result, err := FetchCatalinaHomeOrDownload("/nonexistent/bundled")
 	if err != nil {
-		t.Fatalf("FetchCatalinaHomeOrDownload failed: %v", err)
+		t.Fatalf("FetchCatalinaHomeOrDownload (deprecated alias) failed: %v", err)
 	}
 	if result != home {
-		t.Errorf("FetchCatalinaHomeOrDownload = %q, want %q", result, home)
+		t.Errorf("FetchCatalinaHomeOrDownload (deprecated alias) = %q, want %q", result, home)
 	}
 }
 

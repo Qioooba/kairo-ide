@@ -1,11 +1,14 @@
 {
-  "name": "@kairo/desktop",
-  "productName": "@kairo/desktop",
+  "name": "kairo-ide",
   "version": "0.1.0",
   "description": "Kairo IDE — desktop entry. Electron shell + Theia frontend + in-process Go Runtime Agent.",
+  "private": true,
   "main": "apps/desktop/lib/main.js",
   "author": "Kairo IDE",
   "license": "Apache-2.0",
+  "scripts": {
+    "bundled:prepare": "pwsh -ExecutionPolicy Bypass -File scripts/prepare-bundled.ps1"
+  },
   "dependencies": {
     "@kairo/protocol": "workspace:*",
     "@kairo/theia-product": "workspace:*",

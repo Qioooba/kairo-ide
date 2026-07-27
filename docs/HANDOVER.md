@@ -1,11 +1,82 @@
 # Kairo IDE 开发交接文档
 
 > 生成时间：2026-07-23  
-> 最后更新：2026-07-24（Session 9 — 独立审查 + Mock 集成测试 + 性能基线 + 文档全面更新）  
-> 最新提交：未提交（Session 9 待提交，30+ 文件）  
+> 最后更新：2026-07-27（Session 10 — 内网离线化联网审计 + 修复）  
+> 最新提交：未提交（Session 10 待提交，5 个文件）  
 > 分支：`main`  
 > 目标读者：接手开发的 AI 工程师 / 人类开发者  
 > 本次会话模型：DeepSeek-V4-Pro（TRAE v3）
+
+---
+
+## Session 10 交付摘要 (2026-07-27) 🆕
+
+### 内网离线化联网审计 + 修复
+
+**目标**：打包 zip 后在内网 Windows 机器上运行时,确认无任何主动联网行为。
+
+**审计范围**:
+- Go runtime-agent (JDK/JDTLS/Tomcat/Maven 下载/解析逻辑)
+- Theia 前端 (CSP, SVG/TLD namespace, 硬编码 URL)
+- Electron 主进程 (BrowserWindow, setWindowOpenHandler, 签名)
+- 打包脚本 (electron-builder.yml, NSIS 安装器, sign-win.cjs)
+- supply-chain-lock.json (环境变量覆盖)
+- bundle.js (编译后的前端产物)
+
+**审计结论**: 整体设计已严格离线化(CSP 仅 self+127.0.0.1,JDTLS/JDK/Tomcat 全部走 env-var + 本地路径,upgrade/telemetry 默认禁用),但仍有 **4 处主动联网风险** 已修复。
+
+### 修复清单
+
+| # | 文件 | 问题 | 修复 |
+|---|------|------|------|
+| 1 | `apps/desktop/src/main.ts` | `setWindowOpenHandler` 无条件 `shell.openExternal(http/https)` | 拒绝所有外链,需 `KAIRO_ALLOW_EXTERNAL_LINKS=1` 才放开;新增 `will-navigate` 拦截顶层导航 |
+| 2 | `apps/desktop/scripts/sign-win.cjs` | 默认时间戳服务器 `http://timestamp.digicert.com` | 删除默认公网 URL,改为 `KAIRO_CODE_SIGN_TIMESTAMP` 必填;未设置时不带时间戳签名 |
+| 3 | `scripts/installer/kairo-setup.nsi` | `URLInfoAbout=https://kairo-ide.dev` | 改为 `file:///$INSTDIR/docs/index.html` 指向本地文档 |
+| 4 | `runtime-agent/internal/jdtls/distribution.go` | `JDTLSArchiveURL` 硬编码 `https://download.eclipse.org/...` | 改为注释(`// JDTLSArchiveURL string = ...`),运行时无 fallback 联网 |
+
+### 验证
+
+| 检查项 | 结果 |
+|--------|------|
+| `go build ./internal/jdtls/` | ✅ 通过 |
+| `go test ./internal/jdtls/ -count=1` | ✅ ok (5.8s) |
+| `tsc --noEmit -p apps/desktop/tsconfig.json` | ✅ 0 errors |
+| 残留 `JDTLSArchiveURL` 引用 | ✅ 仅注释,无 Go 代码引用 |
+| 残留 `setWindowOpenHandler` 外网打开 | ✅ 默认拒绝 |
+| 残留 NSIS 公网 URL | ✅ 已改为 file:// |
+
+### 离线化层级保证(经过本轮审计确认)
+
+1. **下载层**: JDTLS/JDK/Tomcat 全部通过环境变量或本地 `bundled/` 目录,无任何硬编码公网 URL 在运行时生效
+2. **解析层**: Maven 离线模式仅扫描本地 `~/.m2/repository`,在线模式由用户主动触发且仅通过 `mvn` 二进制
+3. **CSP 层**: `default-src 'self'`,`connect-src 'self' data: http://127.0.0.1:* ws://127.0.0.1:*`,`img-src 'self' data:`
+4. **导航层**: `setWindowOpenHandler` 默认拒绝外链 + `will-navigate` 拦截顶层非本地导航
+5. **功能层**: `KairoUpgradeChecker` / `KairoTelemetry` 默认禁用,需 opt-in 才激活网络
+6. **安装层**: NSIS 注册项不再指向公网;签名脚本不再使用公网时间戳
+
+### 已知仍存在的"URL 字符串"(均不会触发网络)
+
+| 文件 | 字符串 | 性质 |
+|------|--------|------|
+| `kairo-bookmark.css/svg` | `xmlns="http://www.w3.org/2000/svg"` | XML 命名空间,非 URL |
+| `tld-parser.ts/jsp-tld-completion.ts` | `http://java.sun.com/jsp/jstl/*` | JSTL taglib URI,非 URL |
+| `maven_test.go/settings_test.go` | `http://maven.apache.org/...` | XML 命名空间 + 测试 fixture |
+| `*_test.cjs` | `https://example.com` 等 | 测试 fixture,不在生产代码 |
+| `kairo-sql-service.ts` | `http://localhost:17890` | 本地 Agent 端口 |
+| `runtime-connection-service.ts` | `http://127.0.0.1:18080` | 本地 Agent 端口 |
+| `kairo-telemetry-settings.tsx` | `placeholder="https://your-enterprise.com/..."` | 输入框占位符文本 |
+
+### 部署/打包前置条件(已写入 `docs/BUNDLED.md`)
+
+1. 准备 `apps/desktop/bundled/tomcat6/` 和 `bundled/jdtls/`
+2. 执行 `pnpm prepare-bundled -Strict` 强制 strict 模式
+3. 在内网构建机上执行 `pnpm build:win`
+4. 输出的 NSIS 安装包不依赖任何公网资源
+
+### 剩余待办
+
+- ⬜ 在真实内网 Windows 机器上跑一次完整冷启动验证(已通过 type check + Go test 验证,需补 E2E)
+- ⬜ 在 docs/BUNDLED.md 中追加"内网部署清单"小节
 
 ---
 

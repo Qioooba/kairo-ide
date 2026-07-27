@@ -203,13 +203,24 @@ try {
       ], { cwd: REPO_ROOT });
 
       if (result.status !== 0 && result.status !== null) {
-        log('warn', `prepare-bundled exited with ${result.status} — continuing without bundled deps`);
+        // -Strict mode is fail-closed: a non-zero exit means required
+        // bundled dependencies (JDT LS / Tomcat 6) could not be materialized
+        // from the supply chain. Shipping a zip without them would leave
+        // offline / air-gapped users unable to start the Java language server
+        // or Tomcat runtime on first launch. Fail the pipeline instead.
+        log('err', `prepare-bundled -Strict exited with ${result.status} — bundled dependencies are required for offline install (set KAIRO_TOMCAT6_WINDOWS_ARCHIVE_URL / KAIRO_JDTLS_WINDOWS_ARCHIVE_URL or pre-populate bundled/)`);
+        exitCode = 1;
       } else {
         log('ok', 'Bundled dependencies prepared');
       }
     } else {
-      log('warn', 'prepare-bundled.ps1 not found — skipping bundled deps');
+      log('err', 'prepare-bundled.ps1 not found — cannot materialize bundled dependencies for offline install');
+      exitCode = 1;
     }
+  }
+
+  if (exitCode !== 0) {
+    throw new Error('Bundled dependency preparation failed');
   }
 
   // ── Step 3: Copy Browser Artifacts ──────────────────────────

@@ -1157,9 +1157,9 @@ func TestHandleProjectByID_Delete_NoStore(t *testing.T) {
 	w := httptest.NewRecorder()
 	s.handleProjectByID(w, req)
 
-	// DELETE not handled by handler — returns 400
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("expected 400, got %d", w.Code)
+	// ProjectStore not configured — returns 500
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500, got %d", w.Code)
 	}
 }
 
@@ -1425,5 +1425,133 @@ func TestHandleToolchainImport_NoRegistry_Extended(t *testing.T) {
 
 	if w.Code != http.StatusInternalServerError {
 		t.Errorf("expected 500, got %d", w.Code)
+	}
+}
+
+// =============================================================================
+// handleWorkspacesJava deeper tests
+// =============================================================================
+
+func TestHandleWorkspacesJava_NoProject(t *testing.T) {
+	s := newTestServer(t, nil)
+	s.Services.JDTLS = nil
+
+	body := mustEnvelope(t, map[string]any{"projectId": "nonexistent"})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workspaces/ws1/java/prepare", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.SetPathValue("ws", "ws1")
+	w := httptest.NewRecorder()
+	s.handleWorkspacesJava(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500, got %d", w.Code)
+	}
+}
+
+func TestHandleWorkspacesJava_InvalidPath(t *testing.T) {
+	s := newTestServer(t, nil)
+	s.Services.JDTLS = nil
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workspaces/ws1/java/invalid-path", nil)
+	req.SetPathValue("ws", "ws1")
+	w := httptest.NewRecorder()
+	s.handleWorkspacesJava(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d", w.Code)
+	}
+}
+
+// =============================================================================
+// SQL handlers deeper tests
+// =============================================================================
+
+func TestHandleSQLExecute_NoSQLService(t *testing.T) {
+	s := newTestServer(t, nil)
+
+	body := mustEnvelope(t, map[string]any{"connectionId": "c1", "sql": "SELECT 1"})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sql/execute", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.handleSQLExecute(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+}
+
+func TestHandleSQLTestConnection_NoSQLService(t *testing.T) {
+	s := newTestServer(t, nil)
+
+	body := mustEnvelope(t, map[string]any{"url": "jdbc:h2:mem:test", "driver": "org.h2.Driver"})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sql/test-connection", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.handleSQLTestConnection(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", w.Code)
+	}
+}
+
+// =============================================================================
+// handleDebugAdapterStatus / handleJDKDownload deeper tests
+// =============================================================================
+
+func TestHandleDebugAdapterStatus_NoDebugger(t *testing.T) {
+	s := newTestServer(t, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/debug/adapter/status", nil)
+	w := httptest.NewRecorder()
+	s.handleDebugAdapterStatus(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500, got %d", w.Code)
+	}
+}
+
+func TestHandleJDKDownload_NoToolchain(t *testing.T) {
+	s := newTestServer(t, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/debug/jdk/download", nil)
+	w := httptest.NewRecorder()
+	s.handleJDKDownload(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500, got %d", w.Code)
+	}
+}
+
+// =============================================================================
+// handleAntClasspathAnalyze deeper tests
+// =============================================================================
+
+func TestHandleAntClasspathAnalyze_NoBuildScanner(t *testing.T) {
+	s := newTestServer(t, nil)
+
+	body := mustEnvelope(t, map[string]any{"path": "/test"})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/ant/classpath/analyze", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.handleAntClasspathAnalyze(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+}
+
+// =============================================================================
+// handlePortDiagnostics deeper tests
+// =============================================================================
+
+func TestHandlePortDiagnostics_GET(t *testing.T) {
+	s := newTestServer(t, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/diagnostics/port?port=8080", nil)
+	w := httptest.NewRecorder()
+	s.handlePortDiagnostics(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
 	}
 }

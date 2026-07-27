@@ -11,10 +11,36 @@ const test = require('node:test');
 
 const SCRIPT = path.join(__dirname, 'fetch-verified-archive.cjs');
 
+// invoke sets the canonical (platform-suffixed) env var declared in
+// supply-chain-lock.json. The legacy platform-agnostic form
+// (KAIRO_TOMCAT6_SHA256) is also cleared to ensure no test pollution.
 function invoke(archive, value) {
   const env = { ...process.env };
-  if (value === undefined) delete env.KAIRO_TOMCAT6_SHA256;
-  else env.KAIRO_TOMCAT6_SHA256 = value;
+  delete env.KAIRO_TOMCAT6_SHA256;
+  delete env.KAIRO_TOMCAT6_LINUX_SHA256;
+  delete env.KAIRO_TOMCAT6_MACOS_SHA256;
+  delete env.KAIRO_TOMCAT6_WINDOWS_SHA256;
+  if (value !== undefined) {
+    env.KAIRO_TOMCAT6_LINUX_SHA256 = value;
+  }
+  return spawnSync(process.execPath, [SCRIPT, '--id', 'tomcat6-linux', '--archive', archive], {
+    env,
+    encoding: 'utf8',
+    timeout: 5_000
+  });
+}
+
+// invokeLegacy sets only the legacy platform-agnostic env var to verify
+// the backward-compatibility fallback path in fetch-verified-archive.cjs.
+function invokeLegacy(archive, value) {
+  const env = { ...process.env };
+  delete env.KAIRO_TOMCAT6_SHA256;
+  delete env.KAIRO_TOMCAT6_LINUX_SHA256;
+  delete env.KAIRO_TOMCAT6_MACOS_SHA256;
+  delete env.KAIRO_TOMCAT6_WINDOWS_SHA256;
+  if (value !== undefined) {
+    env.KAIRO_TOMCAT6_SHA256 = value;
+  }
   return spawnSync(process.execPath, [SCRIPT, '--id', 'tomcat6-linux', '--archive', archive], {
     env,
     encoding: 'utf8',
@@ -32,10 +58,22 @@ test('accepts a local archive only when its configured SHA-256 matches', () => {
   assert.match(result.stdout, /verified tomcat6-linux 6\.0\.53/);
 });
 
+test('accepts the legacy KAIRO_TOMCAT6_SHA256 env var via fallback', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kairo-supply-legacy-'));
+  const archive = path.join(dir, 'archive.tar.gz');
+  fs.writeFileSync(archive, 'fixture: legacy env var fallback path');
+  const expected = crypto.createHash('sha256').update(fs.readFileSync(archive)).digest('hex');
+  const result = invokeLegacy(archive, expected);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /verified tomcat6-linux 6\.0\.53/);
+});
+
 test('fails closed when checksum configuration is missing', () => {
   const result = invoke(__filename, undefined);
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /KAIRO_TOMCAT6_SHA256 is required/);
+  // Error message uses the canonical (platform-suffixed) env var name
+  // declared in supply-chain-lock.json.
+  assert.match(result.stderr, /KAIRO_TOMCAT6_LINUX_SHA256 is required/);
 });
 
 test('rejects placeholders and malformed checksum values', () => {

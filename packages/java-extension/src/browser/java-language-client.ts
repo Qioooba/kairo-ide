@@ -129,15 +129,24 @@ export class JavaLanguageClient implements JdtLsFrontendClient, Disposable {
    * caller uses the in-process service.
    */
   protected proxy(): JdtLsBackendService | undefined {
-    if (this.rpcFailed || !this.connectionProvider) {
+    if (!this.connectionProvider) {
+      return undefined;
+    }
+    if (this.rpcFailed) {
       return undefined;
     }
     if (!this.rpcProxy) {
       try {
         this.rpcProxy = this.connectionProvider.createProxy<JdtLsBackendService>(JdtLsBackendPath, this);
       } catch (err) {
-        this.logger.warn(`[JavaLanguageClient] backend proxy unavailable, using in-process service: ${String(err)}`);
-        this.rpcFailed = true;
+        this.rpcProxy = undefined;
+        const msg = String(err);
+        if (msg.includes('connection') || msg.includes('WebSocket') || msg.includes('disposed')) {
+          this.logger.warn(`[JavaLanguageClient] backend proxy not ready yet: ${msg.slice(0, 150)}`);
+        } else {
+          this.logger.warn(`[JavaLanguageClient] backend proxy unavailable: ${msg.slice(0, 150)}`);
+          this.rpcFailed = true;
+        }
         return undefined;
       }
     }
@@ -184,9 +193,16 @@ export class JavaLanguageClient implements JdtLsFrontendClient, Disposable {
     let lastErr: unknown;
     for (let attempt = 0; attempt <= retries; attempt++) {
       try {
+        this.rpcFailed = false;
         this.rpcProxy = undefined;
         const proxy = this.proxy();
-        if (!proxy) break;
+        if (!proxy) {
+          if (attempt >= retries) break;
+          const delay = baseDelay * (attempt + 1);
+          this.logger.info(`[JavaLanguageClient] RPC proxy not available, retrying in ${delay}ms (attempt ${attempt + 1}/${retries})`);
+          await new Promise(r => setTimeout(r, delay));
+          continue;
+        }
         return await operation();
       } catch (err) {
         lastErr = err;
@@ -229,6 +245,8 @@ export class JavaLanguageClient implements JdtLsFrontendClient, Disposable {
           return { ok: false, reason: String(err) };
         }
       },
+      2,
+      1000,
     );
   }
 
@@ -260,6 +278,8 @@ export class JavaLanguageClient implements JdtLsFrontendClient, Disposable {
         }
         return this.lastKnownState;
       },
+      2,
+      1000,
     );
   }
 

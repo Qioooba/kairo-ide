@@ -23,6 +23,7 @@ import * as fs from 'fs';
 import * as http from 'http';
 import { findFreePort } from '@kairo/protocol';
 import { randomBytes } from 'crypto';
+import { detectJDK17Plus, showJDKSetupDialog } from './jdk-check';
 
 let agentProcess: ChildProcess | null = null;
 let agentPort: number = 0;
@@ -511,7 +512,7 @@ ipcMain.on('renderer-ready', () => {
 // Toggle DevTools from renderer command (Help > Toggle Developer Tools).
 ipcMain.on('toggle-devtools', () => {
   if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.toggleDevTools({ mode: 'detach' });
+    mainWindow.webContents.toggleDevTools();
   }
 });
 
@@ -585,18 +586,48 @@ async function createWindow(): Promise<void> {
     flog(`[renderer] preload-error: path=${preloadPath} err=${err.message}`);
   });
 
+  // OFFLINE / AIR-GAPPED POLICY: Kairo IDE is designed for fully
+  // intranet deployment. By default we REFUSE to open any external
+  // http/https URL with the system shell. Operators can opt in to
+  // allow external links (for documentation, bug trackers, etc.) by
+  // setting KAIRO_ALLOW_EXTERNAL_LINKS=1; even then, we still block
+  // non-http(s) schemes (file://, intent://, etc.) to prevent the
+  // renderer from launching arbitrary local applications.
+  const allowExternalLinks = process.env.KAIRO_ALLOW_EXTERNAL_LINKS === '1';
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     try {
       const u = new URL(url);
-      if (u.protocol === 'http:' || u.protocol === 'https:') {
-        shell.openExternal(url);
-      } else {
-        console.warn('[kairo] refusing to open URL with scheme:', u.protocol);
+      if (u.protocol !== 'http:' && u.protocol !== 'https:') {
+        console.warn('[kairo] refusing to open URL with non-http(s) scheme:', u.protocol);
+        return { action: 'deny' };
       }
+      if (!allowExternalLinks) {
+        console.warn(`[kairo] refusing to open external URL (set KAIRO_ALLOW_EXTERNAL_LINKS=1 to allow): ${url}`);
+        return { action: 'deny' };
+      }
+      shell.openExternal(url);
     } catch {
       console.warn('[kairo] refusing to open malformed URL:', url);
     }
     return { action: 'deny' };
+  });
+
+  // Also intercept navigation: if a link inside the app tries to
+  // navigate the main frame to an external URL, block it. This is
+  // a defense-in-depth measure — the CSP already restricts
+  // connect-src, but navigating the top frame to http://evil.com
+  // would replace the IDE entirely.
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    try {
+      const u = new URL(url);
+      if (u.hostname !== '127.0.0.1' && u.hostname !== 'localhost') {
+        event.preventDefault();
+        console.warn(`[kairo] blocked top-frame navigation to non-local URL: ${url}`);
+      }
+    } catch {
+      event.preventDefault();
+      console.warn('[kairo] blocked top-frame navigation to malformed URL:', url);
+    }
   });
 
   // Config is injected BEFORE the page loads via the preload script.
@@ -639,6 +670,36 @@ if (!gotLock) {
       console.warn(`[kairo] startup warning: ${w}`);
     }
 
+    // ── JDK 17+ pre-check ─────────────────────────────────────
+    // In packaged builds, bundled resources (tomcat6, jdtls) live
+    // under process.resourcesPath/bundled/. The Go agent also
+    // checks bundled/jdk17/ for a pre-extracted JDK.
+    const bundledDir = app.isPackaged
+      ? path.join(process.resourcesPath, 'bundled')
+      : undefined;
+
+    const jdkResult = detectJDK17Plus(bundledDir);
+    if (jdkResult.found) {
+      console.log(`[kairo] JDK ${jdkResult.version} detected at ${jdkResult.javaPath}`);
+      if (!process.env.KAIRO_JDK_HOME && jdkResult.javaHome) {
+        process.env.KAIRO_JDK_HOME = jdkResult.javaHome;
+      }
+    } else {
+      console.warn('[kairo] No JDK 17+ detected, showing setup dialog');
+      const userChoice = await showJDKSetupDialog(jdkResult);
+      if (userChoice === 'quit') {
+        app.quit();
+        return;
+      }
+      // Re-detect after user may have set KAIRO_JDK_HOME.
+      const retry = detectJDK17Plus(bundledDir);
+      if (retry.found) {
+        console.log(`[kairo] JDK ${retry.version} configured at ${retry.javaPath}`);
+      } else {
+        console.warn('[kairo] Proceeding without JDK 17+ — Java language features will be limited');
+      }
+    }
+
     // Set CSP before creating any windows.
     app.on('session-created', (session) => {
       session.webRequest.onHeadersReceived((details, callback) => {
@@ -672,13 +733,6 @@ if (!gotLock) {
     try {
       const dataDir = path.join(app.getPath('userData'), 'kairo-data');
       fs.mkdirSync(dataDir, { recursive: true });
-
-      // In packaged builds, bundled resources (tomcat6, jdtls) live
-      // under process.resourcesPath/bundled/. In dev, rely on the
-      // repo-local bundled/ directory or KAIRO_BUNDLED_DIR env.
-      const bundledDir = app.isPackaged
-        ? path.join(process.resourcesPath, 'bundled')
-        : undefined;
 
       // Start Go Agent
       const { port, secret } = await startAgent(dataDir, bundledDir);

@@ -9,10 +9,15 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"math"
+	"net"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/atomicfile"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/log"
@@ -126,13 +131,237 @@ func (m *Manager) resolveJDKArchive(ctx context.Context, progress func(percent i
 		}
 	}
 
+	// 4. KAIRO_JDK_ARCHIVE_URL — intranet mirror URL (HTTP/HTTPS or file://)
+	//    This is the JDK-side equivalent of KAIRO_JDTLS_ARCHIVE_URL. It allows
+	//    enterprise air-gapped deployments to fetch the JDK from a corporate
+	//    mirror instead of being forced to manually stage a local archive.
+	//    The public internet is NEVER contacted implicitly: this branch only
+	//    activates when an operator has explicitly set the env var.
+	if archiveURL := strings.TrimSpace(os.Getenv("KAIRO_JDK_ARCHIVE_URL")); archiveURL != "" {
+		resolved, ext, err := m.downloadFromURL(ctx, progress, archiveURL)
+		if err != nil {
+			return "", "", fmt.Errorf("KAIRO_JDK_ARCHIVE_URL download failed: %w", err)
+		}
+		return resolved, ext, nil
+	}
+
 	progress(10, "JDK 17 not available offline")
 	return "", "", fmt.Errorf("no JDK 17 found and no local archive available; Kairo IDE is designed for offline/air-gapped environments and will not download from the internet. Please either:\n" +
 		"  1. Install JDK 17+ on the system and set JAVA_HOME,\n" +
 		"  2. Set KAIRO_JDK_HOME to point to an existing JDK 17+ installation,\n" +
 		"  3. Place a JDK 17 archive (.tar.gz or .zip) at bundled/jdk17.tar.gz or bundled/jdk17.zip,\n" +
 		"  4. Set KAIRO_JDK_ARCHIVE to the path of a local JDK 17 archive,\n" +
-		"  5. Run pnpm bundled:prepare to pre-package dependencies during build")
+		"  5. Set KAIRO_JDK_ARCHIVE_URL to an intranet mirror URL (HTTPS or file://) for corporate deployments,\n" +
+		"  6. Run pnpm bundled:prepare to pre-package dependencies during build")
+}
+
+// downloadFromURL resolves a JDK archive from KAIRO_JDK_ARCHIVE_URL.
+// Supports:
+//   - file:// URLs and plain local paths (treated as local files)
+//   - http:// and https:// URLs (downloaded with retry + atomic publish)
+//
+// SHA-256 verification is enforced when KAIRO_JDK_SHA256 is set. The
+// downloaded archive is cached at <BundledDir>/jdk17.<ext> for reuse.
+func (m *Manager) downloadFromURL(ctx context.Context, progress func(percent int, message string), archiveURL string) (string, string, error) {
+	if progress == nil {
+		progress = func(int, string) {}
+	}
+
+	// Resolve file:// / plain path URLs locally without network.
+	if strings.HasPrefix(archiveURL, "file://") || !strings.HasPrefix(archiveURL, "http://") && !strings.HasPrefix(archiveURL, "https://") {
+		localPath := strings.TrimPrefix(archiveURL, "file://")
+		// Convert file:// localhost form
+		if u, err := url.Parse(archiveURL); err == nil && u.Scheme == "file" && u.Path != "" {
+			localPath = u.Path
+		}
+		if _, err := os.Stat(localPath); err != nil {
+			return "", "", fmt.Errorf("KAIRO_JDK_ARCHIVE_URL (file://) not found at %s: %w", localPath, err)
+		}
+		ext := archiveTypeFromPath(localPath)
+		if ext == "" {
+			return "", "", fmt.Errorf("KAIRO_JDK_ARCHIVE_URL (file://) has unsupported extension (expected .tar.gz, .tgz, or .zip): %s", localPath)
+		}
+		progress(20, "Using local JDK archive from KAIRO_JDK_ARCHIVE_URL (file://)...")
+		if expectedHash := os.Getenv("KAIRO_JDK_SHA256"); expectedHash != "" {
+			progress(30, "Verifying JDK archive SHA-256...")
+			if err := verifySHA256(localPath, expectedHash); err != nil {
+				return "", "", fmt.Errorf("KAIRO_JDK_ARCHIVE_URL SHA-256 verification failed: %w", err)
+			}
+		} else {
+			jdkLogger.Warn("JDK archive SHA-256 verification skipped (KAIRO_JDK_SHA256 not set)")
+		}
+		return localPath, ext, nil
+	}
+
+	// HTTP/HTTPS path: download with retry to a temp file, then publish to cache.
+	if err := os.MkdirAll(m.BundledDir, 0755); err != nil {
+		return "", "", fmt.Errorf("create bundled directory for JDK cache: %w", err)
+	}
+
+	ext := guessArchiveExtFromURL(archiveURL)
+	if ext == "" {
+		ext = ".tar.gz" // safe default for JDK distributions
+	}
+	cachePath := filepath.Join(m.BundledDir, "jdk17"+ext)
+	tmpPath := cachePath + ".partial-" + fmt.Sprintf("%d", os.Getpid())
+
+	progress(30, fmt.Sprintf("Downloading JDK archive from %s ...", redactURL(archiveURL)))
+	if err := downloadWithRetry(ctx, archiveURL, tmpPath, 3); err != nil {
+		return "", "", fmt.Errorf("download JDK archive: %w", err)
+	}
+
+	progress(70, "Verifying JDK archive SHA-256...")
+	if expectedHash := os.Getenv("KAIRO_JDK_SHA256"); expectedHash != "" {
+		if err := verifySHA256(tmpPath, expectedHash); err != nil {
+			os.Remove(tmpPath)
+			return "", "", fmt.Errorf("downloaded JDK archive SHA-256 verification failed: %w", err)
+		}
+	} else {
+		jdkLogger.Warn("JDK archive SHA-256 verification skipped (KAIRO_JDK_SHA256 not set); set it to enable integrity check")
+	}
+
+	if err := atomicfile.Rename(tmpPath, cachePath); err != nil {
+		os.Remove(tmpPath)
+		return "", "", fmt.Errorf("publish JDK archive to cache: %w", err)
+	}
+
+	progress(80, "JDK archive downloaded and cached")
+	return cachePath, ext, nil
+}
+
+// downloadWithRetry downloads a URL to dest with exponential backoff.
+// It only retries on transient errors (5xx, DNS, connection, timeout).
+func downloadWithRetry(ctx context.Context, archiveURL, dest string, maxRetries int) error {
+	var lastErr error
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		err := downloadOnce(ctx, archiveURL, dest)
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		if !isTransientError(err) {
+			return err
+		}
+		backoff := time.Duration(math.Pow(2, float64(attempt))) * time.Second
+		jdkLogger.Warn("download attempt failed (transient); retrying", log.Fields{
+			"attempt": attempt + 1,
+			"error":   err.Error(),
+			"backoff": backoff.String(),
+		})
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(backoff):
+		}
+	}
+	return lastErr
+}
+
+func downloadOnce(ctx context.Context, archiveURL, dest string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, archiveURL, nil)
+	if err != nil {
+		return fmt.Errorf("build request: %w", err)
+	}
+	req.Header.Set("Accept", "application/octet-stream, application/gzip, application/zip, */*")
+
+	client := &http.Client{
+		Timeout: 10 * time.Minute,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return fmt.Errorf("stopped after 10 redirects")
+			}
+			return nil
+		},
+		Transport: &http.Transport{
+			DialContext: (&net.Dialer{
+				Timeout:   30 * time.Second,
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
+			TLSHandshakeTimeout:   30 * time.Second,
+			ResponseHeaderTimeout: 30 * time.Second,
+			ExpectContinueTimeout: 5 * time.Second,
+		},
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("HTTP %d %s", resp.StatusCode, resp.Status)
+	}
+
+	out, err := os.Create(dest)
+	if err != nil {
+		return fmt.Errorf("create temp file: %w", err)
+	}
+	defer out.Close()
+
+	pr := &progressReader{reader: resp.Body, every: 10 * 1024 * 1024, logger: jdkLogger}
+	if _, err := io.Copy(out, pr); err != nil {
+		return fmt.Errorf("copy response body: %w", err)
+	}
+	return nil
+}
+
+type progressReader struct {
+	reader io.Reader
+	read   int64
+	every  int64
+	logger *log.Logger
+}
+
+func (p *progressReader) Read(buf []byte) (int, error) {
+	n, err := p.reader.Read(buf)
+	p.read += int64(n)
+	if p.logger != nil && p.every > 0 && p.read/p.every != (p.read-int64(n))/p.every {
+		p.logger.Info("download progress", log.Fields{"mb": p.read / 1024 / 1024})
+	}
+	return n, err
+}
+
+func isTransientError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "connection refused") ||
+		strings.Contains(msg, "connection reset") ||
+		strings.Contains(msg, "no such host") ||
+		strings.Contains(msg, "dial tcp") ||
+		strings.Contains(msg, "i/o timeout") ||
+		strings.Contains(msg, "TLS handshake timeout") ||
+		strings.Contains(msg, "EOF") ||
+		strings.Contains(msg, "broken pipe") ||
+		strings.Contains(msg, "HTTP 5") {
+		return true
+	}
+	return false
+}
+
+func guessArchiveExtFromURL(u string) string {
+	lower := strings.ToLower(u)
+	switch {
+	case strings.Contains(lower, ".tar.gz"), strings.Contains(lower, ".tgz"):
+		return ".tar.gz"
+	case strings.Contains(lower, ".zip"):
+		return ".zip"
+	}
+	return ""
+}
+
+// redactURL removes user:pass@ from URLs for safe logging.
+func redactURL(s string) string {
+	if u, err := url.Parse(s); err == nil && u.User != nil {
+		u.User = url.User(u.User.Username())
+		return u.String()
+	}
+	return s
 }
 
 func archiveTypeFromPath(path string) string {

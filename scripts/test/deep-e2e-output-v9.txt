@@ -1,0 +1,224 @@
+[07:10:29.100] ========================================
+[07:10:29.101] Kairo IDE Deep E2E Test v8d (cached EM + AMD require + content verification)
+[07:10:29.101] ========================================
+[07:10:29.101] Test project: C:\Users\Qi\AppData\Local\Temp\kairo-deep8d-20260727T071028970Z\legacy-sample
+[07:10:29.101] Output: G:\spaces\kairo-ide\artifacts\test-results\deep8d-2026-07-27T07-10-28-970Z
+[07:10:29.101] 
+[07:10:29.102] Launching: G:\spaces\kairo-ide\dist\win-unpacked\Kairo IDE.exe
+[07:10:31.623] Waiting for application shell...
+[07:10:37.952] Shell visible after 5s
+[07:10:41.708]   📸 00-launch.png
+[07:10:41.708] Waiting for Runtime Agent...
+[07:10:44.352]   Agent healthy at http://127.0.0.1:57998 after 1s
+[07:10:45.393]   Workspace register: 200
+[07:10:46.535]   📸 01-ready.png
+[07:10:46.536] ▶ [0.1] §0 P0: Application shell and primary UI present
+[07:10:46.541]   Title: "Kairo IDE - Import Project - Kairo IDE"
+[07:10:46.541]   Menu:true Activity:true Status:true
+[07:10:46.541]   __kairo:true Agent:http://127.0.0.1:57998
+[07:10:46.541]   ✓ PASS (5ms)
+[07:10:46.541] ▶ [0.2] §0 P0: Command registry with Kairo extensions loaded
+[07:10:46.552]   Commands: 931 total, 104 Kairo-specific
+[07:10:46.552]   ✓ PASS (11ms)
+[07:10:46.552] ▶ [4.1] §4 P0: Import wizard 3-step flow + Open Project
+[07:10:46.553] Importing: C:\Users\Qi\AppData\Local\Temp\kairo-deep8d-20260727T071028970Z\legacy-sample
+[07:10:48.166]   Import wizard active
+[07:10:48.297]   📸 import-wizard.png
+[07:10:48.354]   Filling project path...
+[07:10:52.552]   📸 import-path-filled.png
+[07:10:52.572]   Clicking Scan...
+[07:10:52.633]   Waiting for Step 2...
+[07:10:53.643]   Step 2 ready after 1.01s
+[07:10:53.761]   📸 import-step2.png
+[07:10:53.762]   Configuring Source/Target version to 1.8...
+[07:10:53.766]   Version selectors set: source=true, target=true
+[07:10:54.411]   📸 import-step2-configured.png
+[07:10:54.417]   Clicking Import Project...
+[07:10:54.980]   Waiting for Step 3...
+[07:10:55.466] WARN CONSOLE: 2026-07-27T07:10:55.463Z filesystem:FileService ERROR ENOPRO
+    at checkProvider (http://127.0.0.1:52321/bundle.js:1661:55652)
+    at http://127.0.0.
+[07:10:55.998]   Step 3 ready after 1.018s
+[07:10:56.114]   📸 import-step3.png
+[07:10:56.637]   Clicking Open Project (with improved helper)...
+[07:10:58.902]   Waiting for workspace to open...
+[07:10:59.378] WARN CONSOLE: Failed to load resource: the server responded with a status of 403 (Forbidden)
+[07:10:59.379] WARN CONSOLE: Failed to load resource: the server responded with a status of 403 (Forbidden)
+[07:11:00.310] WARN CONSOLE: 2026-07-27T07:11:00.308Z filesystem:FileService ERROR ENOPRO
+    at checkProvider (http://127.0.0.1:52321/bundle.js:1661:55652)
+    at http://127.0.0.
+[07:11:02.814] WARN CONSOLE: Failed to load resource: the server responded with a status of 404 (Not Found)
+[07:11:22.782] WARN CONSOLE: 2026-07-27T07:11:22.780Z root ERROR JDT LS failed to start for project project-legacy-sample: Error: Pending response rejected since connection got di
+[07:11:26.099] WARN CONSOLE: 2026-07-27T07:11:26.097Z root ERROR JDT LS failed to start for project project-legacy-sample: Error: Pending response rejected since connection got di
+[07:11:30.326] WARN CONSOLE: 2026-07-27T07:11:30.324Z root ERROR JDT LS failed to start for project project-legacy-sample: Error: Pending response rejected since connection got di
+[07:11:36.635] WARN CONSOLE: 2026-07-27T07:11:36.634Z root ERROR JDT LS failed to start for project project-legacy-sample: Error: Pending response rejected since connection got di
+[07:11:36.637] WARN CONSOLE: 2026-07-27T07:11:36.636Z root ERROR JDT LS automatic restart limit reached (3); manual restart required
+[07:12:07.009]   Re-injecting Kairo helpers after workspace open...
+[07:12:07.633]   📸 import-complete.png
+[07:12:07.635]   Status bar:  Project: legacy-sample JDK: 17 SVN: not found Encoding: - Build: 无记录 Server: 已停止 Debug: unknown Agent: 已连接 0  0  1
+[07:12:07.637]   Tree nodes: 0
+[07:12:07.638]   ⚠ Workspace tree not confirmed, continuing...
+[07:12:07.638]   ✓ PASS (81086ms)
+[07:12:07.638] ▶ [5.1] §5 P0: Explorer shows project file tree
+[07:12:12.154]   Tree nodes: 16
+[07:12:12.284]   📸 03-explorer.png
+[07:12:12.285]   ✓ PASS (4647ms)
+[07:12:12.285]   Waiting for Theia services to initialize (file index etc.)...
+[07:12:22.290] ▶ [6.9] §6 P0: GBK-encoded Chinese comments display without garbled text
+[07:12:22.291]   Opening GbkChineseServlet.java (expecting: "中文注释测试类")...
+[07:12:22.662] WARN PAGE ERROR: Event
+[07:12:22.663] WARN PAGE ERROR: Event
+[07:12:22.663] WARN PAGE ERROR: Event
+[07:12:25.639]   Opened via API (attempt 1): 1115 chars, contains "中文注释测试类"
+[07:12:25.640]   GBK content (1115 chars): package com.example.gbk;import java.io.IOException;import java.io.PrintWriter;import java.util.Date;import javax.servlet.ServletException;import javax.servlet.http.HttpServlet;import javax.servlet.htt
+[07:12:25.820]   📸 06-gbk-editor.png
+[07:12:25.820]   Chinese phrases found: 5/5
+[07:12:25.821]   ✓ PASS (3531ms)
+[07:12:25.821] ▶ [6.1] §6 P0: Open Java file in editor (HelloServlet.java)
+[07:12:25.821]   Opening HelloServlet.java (expecting: "HelloServlet")...
+[07:12:28.990]   Opened via API (attempt 1): 1220 chars, contains "HelloServlet"
+[07:12:28.990]   HelloServlet content (1220 chars): package com.example.legacy;import java.io.IOException;import java.util.Date;import javax.servlet.ServletException;import javax.servlet.http.HttpServle
+[07:12:29.157]   📸 05-editor-java.png
+[07:12:29.157]   ✓ PASS (3336ms)
+[07:12:29.157] ▶ [6.2] §6 P0: Java syntax highlighting is active
+[07:12:30.170]   Syntax tokens: 127
+[07:12:30.343]   📸 05b-highlight.png
+[07:12:30.343]   ✓ PASS (1186ms)
+[07:12:30.343] ▶ [6.3] §6 P0: Status bar shows file encoding
+[07:12:30.346]   Status bar:  Project: legacy-sample JDK: 17 SVN: not found Encoding: gbk * Build: 无记录 Server: 已停止 Debug: unknown Agent: 已连接 0  0  1 Format on SaveLn 1, Col 1CRLFGBKSpaces: 4Java
+[07:12:30.503]   📸 06c-statusbar-encoding.png
+[07:12:30.504]   Encoding indicator found
+[07:12:30.504]   ✓ PASS (161ms)
+[07:12:30.504] ▶ [6.4] §6 P1: Open JSP file in editor
+[07:12:30.504]   Opening utf8.jsp (expecting: "UTF-8")...
+[07:12:33.638]   Opened via API (attempt 1): 230 chars, contains "UTF-8"
+[07:12:33.639]   JSP content (230 chars): <%@ page contentType="text/html;charset=UTF-8" language="java" %><!DOCTYPE html><html><head><title>U
+[07:12:33.792]   📸 06d-jsp-editor.png
+[07:12:33.792]   ✓ PASS (3288ms)
+[07:12:33.792] ▶ [6.5] §6 P0: Type Chinese characters in editor
+[07:12:33.794]   Clicking in editor and typing Chinese...
+[07:12:35.580]   Content after typing: 239 chars
+[07:12:35.725]   📸 06e-chinese-input.png
+[07:12:35.725]   ✓ Chinese input verified
+[07:12:35.725]   ✓ PASS (1933ms)
+[07:12:35.725] ▶ [7.1] §7 P0: Close editor tab with unsaved changes shows Save dialog
+[07:12:35.725]   Pressing Ctrl+W to close editor...
+[07:12:37.404]   📸 07-unsaved-dialog.png
+[07:12:37.406]   Save dialog visible: false
+[07:12:37.406]   No save dialog detected (file may not be dirty, or auto-save is on)
+[07:12:39.032]   ✓ PASS (3307ms)
+[07:12:39.032] ▶ [10.1] §10 P0: Trigger Ant build via kairo.build command
+[07:12:42.448]   📸 07-build-triggered.png
+[07:12:42.451]   Status bar after build:  Project: legacy-sample JDK: 17 SVN: not found Encoding: gbk * Build: running Server: 已停止 Debug: unknown Agent: 已连接 0  0  1Ln 2, Col 31CRLFGBKSpaces: 
+[07:12:42.451]   ✓ PASS (3419ms)
+[07:12:42.451] ▶ [10.2] §10 P0: Build completes with success status
+[07:12:43.465]   BUILD SUCCESS via API after 1s
+[07:12:43.613]   📸 08-build-result.png
+[07:12:43.613]   ✓ PASS (1162ms)
+[07:12:43.613] ▶ [10.3] §10 P1: Build output channel shows compilation results
+[07:12:43.616]   Output panel found: false, text length: 0
+[07:12:43.774]   📸 08b-output-panel.png
+[07:12:43.774]   ✓ PASS (161ms)
+[07:12:43.774] ▶ [11.1] §11 P0: Start Tomcat server via kairo.server.start
+[07:12:51.894]   📸 09-server-start.png
+[07:12:51.894]   ✓ PASS (8120ms)
+[07:12:51.895] ▶ [11.2] §11 P0: Server reaches running state
+[07:12:52.915]   SERVER RUNNING (port: 18081) after 1s
+[07:12:53.064]   📸 10-server-running.png
+[07:12:53.064]   ✓ PASS (1169ms)
+[07:12:53.064] ▶ [11.3] §11 P0: Server responds to HTTP request
+[07:12:53.073]   HTTP GET /: status=200, bodyLen=178
+[07:12:53.075]   ✓ Server returned page at /
+[07:12:53.227]   📸 10b-http-response.png
+[07:12:53.227]   ✓ PASS (163ms)
+[07:12:53.227] ▶ [11.4] §11 P0: Stop Tomcat server via kairo.server.stop
+[07:13:15.798]   📸 11-server-stop.png
+[07:13:16.826]   Server stopped after 5s
+[07:13:16.975]   📸 12-server-stopped.png
+[07:13:16.975]   ✓ PASS (23748ms)
+[07:13:16.975] ▶ [12.1] §12 P0: Set breakpoint by clicking in editor gutter
+[07:13:16.975]   Opening HelloServlet.java (expecting: "HelloServlet")...
+[07:13:20.044]   Opened via API (attempt 1): 1220 chars, contains "HelloServlet"
+[07:13:20.559]   Editor info: {"found":true,"hasGlyphMargin":true,"lineCount":35,"glyphMarginClass":"glyph-margin","editorRect":{"x":241.421875,"y":57,"width":974,"height":661.59375,"top":57,"right":1215.421875,"bottom":718.59375,
+[07:13:20.730]   📸 12a-debug-editor.png
+[07:13:20.779]   Clicking gutter at (251, 117) to set breakpoint...
+[07:13:21.966]   📸 12b-breakpoint-set.png
+[07:13:21.969]   Breakpoint indicators found: 2
+[07:13:21.969]   ✓ PASS (4994ms)
+[07:13:21.969] ▶ [8.1] §8 P1: Problems panel is accessible
+[07:13:24.036]   Problems panel visible: true
+[07:13:24.219]   📸 13-problems-panel.png
+[07:13:24.219]   ✓ PASS (2250ms)
+[07:13:24.219] ▶ [9.1] §9 P1: Terminal can be opened
+[07:13:26.244]   Ctrl+backtick didn't show terminal, trying command palette...
+[07:13:26.249]   Terminal error: page.evaluate: Error: The command 'terminal:create-new' cannot be executed. Ther
+[07:13:26.250]   ✓ PASS (2031ms)
+[07:13:26.250] ▶ [14.1] §14 P1: Find in file (Ctrl+F) opens search widget
+[07:13:27.316]   Find widget visible: true
+[07:13:28.012]   📸 15-find-widget.png
+[07:13:28.012]   ✓ PASS (1762ms)
+[07:13:28.012] ▶ [15.1] §15 P1: Global search (Ctrl+Shift+F) available
+[07:13:30.097]   Global search view visible: true
+[07:13:30.769]   📸 16-global-search.png
+[07:13:30.769]   ✓ PASS (2757ms)
+[07:13:30.770] ▶ [2.1] §2 P0: Command palette opens via Ctrl+Shift+P
+[07:13:31.923]   Command palette visible: true
+[07:13:32.588]   📸 17-command-palette.png
+[07:13:32.588]   ✓ PASS (1818ms)
+[07:13:32.588] ▶ [3.1] §3 P1: Welcome page can be opened
+[07:13:34.616]   Welcome page visible: true
+[07:13:34.763]   📸 18-welcome-page.png
+[07:13:34.763]   ✓ PASS (2175ms)
+[07:13:34.763] ▶ [0.3] §0 P1: Status bar shows project and JDK info
+[07:13:34.766]   Status bar:  Project: legacy-sample JDK: 17 SVN: not found Encoding: gbk * Build: running Server: stopped :18081 Debug: unknown Agent: 已连接 0  0  1 Format on SaveLn 1, Col 1CRLFGBKSpaces: 4Java 3
+[07:13:34.766]   Status indicators: project=true, jdk=true, encoding=true, agent=true
+[07:13:34.913]   📸 19-status-bar-detail.png
+[07:13:34.913]   ✓ PASS (150ms)
+[07:13:34.913] ▶ [6.6] §6 P0: Quick Open (Ctrl+P) searches and opens files
+[07:13:34.913]   Testing Quick Open file search...
+[07:13:35.961]   Quick Open widget visible: true
+[07:13:41.678]   Quick Open result contains I18nServlet: false (content: ...)
+[07:13:41.818]   📸 20-quick-open.png
+[07:13:42.343]   ✓ PASS (7430ms)
+[07:13:42.344] ▶ [6.7] §6 P0: File save with Ctrl+S works without errors
+[07:13:43.867]   Save dialog shown: false (should be false for already-saved file)
+[07:13:44.008]   📸 21-file-save.png
+[07:13:44.008]   ✓ PASS (1664ms)
+[07:13:44.008] ▶ [5.2] §5 P1: Activity bar switches between views
+[07:13:44.013]   ✓ PASS (5ms)
+[07:13:44.013] ▶ [13.1] §13 P1: Notification center/toasts appear
+[07:13:44.015]   Notification elements found: 0
+[07:13:44.156]   📸 23-notifications.png
+[07:13:44.157]   ✓ PASS (144ms)
+[07:13:44.157] ▶ [99.1] §99 P0: No critical uncaught console errors
+[07:13:44.157]   Total console errors: 13
+[07:13:44.157]     1. [error] 2026-07-27T07:10:55.463Z filesystem:FileService ERROR ENOPRO
+    at checkProvider (http://127.0.0.1:52321/bundle.js:1661:55652)
+    at http://127.0.0.1:52321/bundle.js:1661:55606
+[07:13:44.157]     2. [error] Failed to load resource: the server responded with a status of 403 (Forbidden)
+[07:13:44.157]     3. [error] Failed to load resource: the server responded with a status of 403 (Forbidden)
+[07:13:44.157]     4. [error] 2026-07-27T07:11:00.308Z filesystem:FileService ERROR ENOPRO
+    at checkProvider (http://127.0.0.1:52321/bundle.js:1661:55652)
+    at http://127.0.0.1:52321/bundle.js:1661:55606
+[07:13:44.157]     5. [error] Failed to load resource: the server responded with a status of 404 (Not Found)
+[07:13:44.157]     6. [error] 2026-07-27T07:11:22.780Z root ERROR JDT LS failed to start for project project-legacy-sample: Error: Pending response rejected since connection got disposed
+[07:13:44.157]     7. [error] 2026-07-27T07:11:26.097Z root ERROR JDT LS failed to start for project project-legacy-sample: Error: Pending response rejected since connection got disposed
+[07:13:44.157]     8. [error] 2026-07-27T07:11:30.324Z root ERROR JDT LS failed to start for project project-legacy-sample: Error: Pending response rejected since connection got disposed
+[07:13:44.157]     9. [error] 2026-07-27T07:11:36.634Z root ERROR JDT LS failed to start for project project-legacy-sample: Error: Pending response rejected since connection got disposed
+[07:13:44.157]     10. [error] 2026-07-27T07:11:36.636Z root ERROR JDT LS automatic restart limit reached (3); manual restart required
+[07:13:44.157]     11. [pageerror] Event
+[07:13:44.157]     12. [pageerror] Event
+[07:13:44.157]     13. [pageerror] Event
+[07:13:44.295]   📸 99-final.png
+[07:13:44.295]   ✓ PASS (138ms)
+[07:13:44.295] Closing application...
+[07:13:46.623] WARN CONSOLE: WebSocket connection to 'ws://127.0.0.1:57998/api/v1/events?workspaceId=local-L2M6L1VzZXJzL1Fp' failed: 
+[07:13:49.142] WARN CONSOLE: WebSocket connection to 'ws://127.0.0.1:57998/api/v1/events?workspaceId=local-L2M6L1VzZXJzL1Fp' failed: 
+[07:13:58.084]   kairo-runtime.exe cleaned up
+[07:13:58.085] 
+[07:13:58.085] ========================================
+[07:13:58.085] Report: G:\spaces\kairo-ide\artifacts\test-results\deep8d-2026-07-27T07-10-28-970Z
+[07:13:58.085] Pass: 31/31 (100.0%)
+[07:13:58.085] P0: 21/21, Bugs: 0, Log errors: 0, Leftover procs: 0, Duration: 209.0s
+[07:13:58.085] ========================================
+[07:13:58.087] Report: G:\spaces\kairo-ide\artifacts\test-results\deep8d-2026-07-27T07-10-28-970Z\deep-test-report.md

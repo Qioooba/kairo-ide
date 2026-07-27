@@ -529,8 +529,24 @@ func FindCatalinaHome(bundledDir string) (string, error) {
 	return "", errors.New("Tomcat 6 not found: set KAIRO_TOMCAT6_HOME")
 }
 
-func FetchCatalinaHomeOrDownload(bundledDir string) (string, error) {
+// ResolveCatalinaHome resolves the Tomcat 6 catalina.home directory.
+//
+// The historical name was FetchCatalinaHomeOrDownload, which implied a
+// network fallback. Kairo IDE is offline-by-design and never downloads
+// Tomcat from the public internet at runtime; this function is a thin
+// alias over FindCatalinaHome that resolves a local installation only.
+// Renamed to avoid misleading readers; the previous name is kept as a
+// deprecated alias for callers that have not been migrated yet.
+func ResolveCatalinaHome(bundledDir string) (string, error) {
 	return FindCatalinaHome(bundledDir)
+}
+
+// FetchCatalinaHomeOrDownload is a deprecated alias for ResolveCatalinaHome.
+//
+// Deprecated: use ResolveCatalinaHome instead. The original name implied
+// a network download fallback that does not exist in the offline runtime.
+func FetchCatalinaHomeOrDownload(bundledDir string) (string, error) {
+	return ResolveCatalinaHome(bundledDir)
 }
 
 type Spec struct {

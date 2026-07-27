@@ -2833,8 +2833,8 @@ func TestHandleProjectByID_Delete(t *testing.T) {
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/projects/proj-1", nil)
 	srv.Handler().ServeHTTP(rr, req)
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400, body=%s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500, body=%s", rr.Code, rr.Body.String())
 	}
 }
 
