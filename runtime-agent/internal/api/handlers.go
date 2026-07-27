@@ -874,6 +874,13 @@ func hydrateBuildRequest(req *BuildRequest, p domain.Project) error {
 	req.Intent = intent
 	req.ProjectRoot = root
 	req.OutputDir = outputDir
+	if p.WebappDir != "" {
+		webappDir, err := policy.ResolveWithin(root, filepath.ToSlash(p.WebappDir))
+		if err != nil {
+			return fmt.Errorf("invalid project webappDir: %w", err)
+		}
+		req.WebappDir = webappDir
+	}
 	req.Files = files
 	req.Toolchain = p.ToolchainID
 	req.SourceLevel = p.SourceLevel

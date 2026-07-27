@@ -28,6 +28,7 @@ type Request struct {
 	Sources     []string
 	Classpath   []string
 	OutputDir   string
+	WebappDir   string
 	Encoding    string
 	Args        []string
 	Timeout     time.Duration

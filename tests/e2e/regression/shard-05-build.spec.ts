@@ -2,7 +2,7 @@
  * SHARD-05: 构建 + 部署 + Tomcat服务器管理
  * 测试用例: TEST-0501 ~ TEST-0511
  */
-import { test, expect } from '@playwright/test';
+import { test, expect, Page } from '@playwright/test';
 import {
   navigateToTheia,
   waitForTheiaShell,
@@ -11,10 +11,13 @@ import {
   openFileViaQuickOpen,
   waitForBuildState,
   waitForServerState,
+  waitForServerStateForProject,
   getBuildViewState,
   getServerViewState,
   runKairoImportWizard,
+  selectActiveProject,
   getTomcatBaseUrl,
+  getTomcatBaseUrlForProject,
   stopAllRunningServers,
 } from '../fixtures';
 import * as path from 'node:path';
@@ -62,6 +65,30 @@ async function removeProjectFromCatalog(request: { delete: (url: string) => Prom
     }
   } catch {
     /* 404 is fine */
+  }
+}
+
+// KAIRO-RC-WEB-2026-07-26-16: other SHARD workspaces (e.g. shard06)
+// can linger in the agent catalog as the most-recent project. Theia
+// auto-opens the most recent project on startup, which causes shard05
+// tests to drive the wrong project. Purge every project record in
+// beforeAll so each test starts from a clean catalog.
+async function removeAllProjectsFromCatalog(request: { get: (url: string) => Promise<unknown>; delete: (url: string) => Promise<unknown> } | null) {
+  if (!request) return;
+  try {
+    const agentBase = `http://127.0.0.1:${process.env.AGENT_PORT || '18300'}`;
+    const res = await request.get(`${agentBase}/api/v1/projects`);
+    const listJson = await res.json().catch(() => null) as { payload?: Array<{ id: string }> } | null;
+    const ids = listJson?.payload?.map((p) => p.id).filter((id): id is string => !!id) || [];
+    for (const id of ids) {
+      try {
+        await request.delete(`${agentBase}/api/v1/projects/${id}`);
+      } catch {
+        /* ignore */
+      }
+    }
+  } catch {
+    /* ignore */
   }
 }
 
@@ -113,7 +140,7 @@ test.describe('SHARD-05: 构建 + 部署 + Tomcat服务器管理', () => {
     if (fs.existsSync(conflictingJar)) {
       fs.rmSync(conflictingJar);
     }
-    await removeProjectFromCatalog(request as any);
+    await removeAllProjectsFromCatalog(request as any);
   });
 
   test.afterAll(() => {
@@ -121,7 +148,10 @@ test.describe('SHARD-05: 构建 + 部署 + Tomcat服务器管理', () => {
   });
 
   test.beforeEach(async ({ page, baseURL, request }) => {
-    await removeProjectFromCatalog(request as any);
+    // KAIRO-RC-WEB-2026-07-26-20: purge every project record, not just
+    // this SHARD's project. Sibling SHARD records can survive in the
+    // agent catalog and confuse the active-project selection.
+    await removeAllProjectsFromCatalog(request as any);
     await navigateToTheia(page, baseURL);
     await waitForTheiaShell(page);
     // KAIRO-RC-WEB-2026-07-26-03: ensure no leftover Tomcat from a
@@ -136,6 +166,12 @@ test.describe('SHARD-05: 构建 + 部署 + Tomcat服务器管理', () => {
     await dismissSettingsOverwriteDialog(page);
     const result = await runKairoImportWizard(page, TEST_WORKSPACE, { openProject: true });
     expect(result.opened, `import-wizard-reason: ${result.reason}`).toBe(true);
+    // KAIRO-RC-WEB-2026-07-26-21: the import wizard does not always
+    // switch the active project (the workspace may already be the
+    // project parent). Explicitly select this SHARD's project so UI
+    // commands operate on the right catalog entry.
+    const selected = await selectActiveProject(page, PROJECT_ID);
+    expect(selected, `failed to select active project ${PROJECT_ID}`).toBe(true);
     // KAIRO-RC-WEB-2026-07-25: the agent's project detector defaults
     // to JDK 1.6 source/target for legacy projects, but the K4
     // test environment ships a modern JDK that removed `source=1.6`
@@ -410,15 +446,77 @@ public class HelloServlet extends HttpServlet {
     });
   });
 
-  test('TEST-0507: JSP热重载', async ({ page }) => {
-    // Start server and deploy
-    await runCommandViaPalette(page, 'Kairo: Build & Deploy');
-    await waitForBuildState(page, 'succeeded', 120000);
-    await runCommandViaPalette(page, 'Kairo: Start Server');
-    await waitForServerState(page, 'running', 120000);
+  test('TEST-0507: JSP热重载', async ({ page, request }) => {
+    // KAIRO-RC-WEB-2026-07-26-13: drive the server lifecycle through
+    // the agent API rather than the "Kairo: Start Server" command.
+    // The command-palette path can lose focus after a long Build &
+    // Deploy and the second invocation silently no-ops; the API
+    // path is more deterministic and lets us also wait for the
+    // port to actually be listening before continuing.
+    async function ensureServerRunningViaApi(): Promise<{ url: string; id: string }> {
+      const agentBase = `http://127.0.0.1:${process.env.AGENT_PORT || '18300'}`;
+      // Build & Deploy via command palette (this is the step that
+      // produces the WAR/webapp artifacts).
+      await runCommandViaPalette(page, 'Kairo: Build & Deploy');
+      await waitForBuildState(page, 'succeeded', 120000);
+      // Start via API and wait for state=running.
+      let info: { id: string; state: string; url: string } | null = null;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const list = await request.get(`${agentBase}/api/v1/servers`);
+        const listJson = await list.json() as { payload?: Array<Record<string, unknown>> };
+        const candidate = (listJson.payload || []).find((s) => s.projectId === PROJECT_ID && s.state === 'running');
+        if (candidate) {
+          info = { id: String(candidate.id), state: String(candidate.state), url: String(candidate.url) };
+          break;
+        }
+        // Try POST to start a new server.
+        const start = await request.post(`${agentBase}/api/v1/servers`, {
+          data: { projectId: PROJECT_ID, type: 'tomcat6', port: Number(FALLBACK_TOMCAT_PORT) },
+        });
+        if (!start.ok()) {
+          // Maybe one is already starting; poll briefly.
+          await page.waitForTimeout(2000);
+          continue;
+        }
+        const startJson = await start.json() as { payload?: { id: string; state: string; url: string } };
+        info = { id: startJson.payload!.id, state: startJson.payload!.state, url: startJson.payload!.url };
+        break;
+      }
+      if (!info) throw new Error('TEST-0507: failed to start server via API');
+      // Wait for state=running.
+      const start = Date.now();
+      while (Date.now() - start < 120_000) {
+        const r = await request.get(`${agentBase}/api/v1/servers/${info.id}`);
+        const j = await r.json() as { payload?: { state: string; url?: string; ports?: { http?: number } } };
+        if (j.payload?.state === 'running') {
+          // Verify the port is actually listening (handles the
+          // "state=running but process dead" race that the UI
+          // helper has trouble with). Probe the port from the
+          // server record, not the fallback, so a sibling SHARD
+          // server on the fallback port cannot impersonate ours.
+          const url = j.payload.url || info.url;
+          let port = j.payload.ports?.http ?? 0;
+          if (!port && url) {
+            try { port = Number(new URL(url).port); } catch { /* ignore */ }
+          }
+          if (!port) port = Number(FALLBACK_TOMCAT_PORT);
+          try {
+            const probe = await request.get(`http://127.0.0.1:${port}/`, { timeout: 5_000 });
+            if (probe.ok()) return { id: info.id, url };
+          } catch {
+            /* port not ready yet */
+          }
+        }
+        await page.waitForTimeout(1_000);
+      }
+      throw new Error('TEST-0507: server state did not become running');
+    }
+
+    const serverInfo = await ensureServerRunningViaApi();
+    const tomcatBaseUrl = serverInfo.url.replace(/\/$/, '');
 
     await test.step('1. 访问hello.jsp', async () => {
-      await page.goto(`${await getTomcatBaseUrl(page, FALLBACK_TOMCAT_PORT)}${APP_CONTEXT}/hello.jsp`);
+      await page.goto(`${tomcatBaseUrl}${APP_CONTEXT}/hello.jsp`);
       await page.waitForTimeout(1000);
       await page.screenshot({ path: `${SCREENSHOT_DIR}/TEST-0507/01-initial-page.png` });
     });
@@ -446,7 +544,13 @@ public class HelloServlet extends HttpServlet {
       }
       const updated = Buffer.concat([original.subarray(0, idx), marker, original.subarray(idx)]);
       fs.writeFileSync(jspFile, updated);
-      await page.goto(`http://127.0.0.1:18301/`);
+      // KAIRO-RC-WEB-2026-07-26-14: navigate back to the Theia frontend
+      // to refresh the editor model. Use the baseURL-derived URL so the
+      // test is not tied to a specific port.
+      const theiaUrl = (page as unknown as { context?: () => { _options?: { baseURL?: string } } }).context?.()?._options?.baseURL
+        || process.env.THEIA_URL
+        || `http://127.0.0.1:${process.env.THEIA_PORT || '18301'}`;
+      await page.goto(`${theiaUrl}/`);
       await waitForTheiaShell(page);
       await openFileViaQuickOpen(page, 'hello.jsp');
       await page.waitForTimeout(1000);
@@ -467,8 +571,11 @@ public class HelloServlet extends HttpServlet {
     });
 
     await test.step('5. 刷新浏览器页面', async () => {
-      await page.goto(`${await getTomcatBaseUrl(page, FALLBACK_TOMCAT_PORT)}${APP_CONTEXT}/hello.jsp`);
-      await page.waitForTimeout(1000);
+      // KAIRO-RC-WEB-2026-07-26-22: add a cache-busting query parameter so
+      // Tomcat's Jasper engine recompiles the modified JSP instead of serving
+      // the previously compiled servlet from its work directory.
+      await page.goto(`${tomcatBaseUrl}${APP_CONTEXT}/hello.jsp?t=${Date.now()}`);
+      await page.waitForTimeout(1500);
       const content = await page.textContent('body');
       expect(content).toContain('hot reload test');
       await page.screenshot({ path: `${SCREENSHOT_DIR}/TEST-0507/05-reloaded-page.png` });
@@ -480,7 +587,9 @@ public class HelloServlet extends HttpServlet {
     await runCommandViaPalette(page, 'Kairo: Build & Deploy');
     await waitForBuildState(page, 'succeeded', 120000);
     await runCommandViaPalette(page, 'Kairo: Start Server');
-    await waitForServerState(page, 'running', 120000);
+    // KAIRO-RC-WEB-2026-07-26-19: use the project-specific waiter so a
+    // stale Servers view or sibling SHARD server cannot satisfy the check.
+    await waitForServerStateForProject(page, PROJECT_ID, 'running', 120000);
 
     await test.step('1. 修改HelloServlet.java响应文本', async () => {
       // KAIRO-RC-WEB-2026-07-26-05: drive the edit through the filesystem
@@ -516,12 +625,18 @@ public class HelloServlet extends HttpServlet {
       // disabled to avoid Java 9+ crashes, so Java class changes need
       // a server restart before the new bytecode is served.
       await runCommandViaPalette(page, 'Kairo: Restart Server');
-      await waitForServerState(page, 'running', 120000);
+      await waitForServerStateForProject(page, PROJECT_ID, 'running', 120000);
       await page.screenshot({ path: `${SCREENSHOT_DIR}/TEST-0508/04-server-restarted.png` });
     });
 
     await test.step('5. 刷新访问servlet', async () => {
-      await page.goto(`${await getTomcatBaseUrl(page, FALLBACK_TOMCAT_PORT)}${APP_CONTEXT}/hello`);
+      // KAIRO-RC-WEB-2026-07-26-17: after Restart Server the port may
+      // change (port allocator can pick a different free port). Resolve
+      // the URL from the server record that belongs to this project
+      // instead of relying on the preferred fallback port, which may
+      // belong to a leftover sibling SHARD server.
+      const tomcatBaseUrl = await getTomcatBaseUrlForProject(page, PROJECT_ID, FALLBACK_TOMCAT_PORT);
+      await page.goto(`${tomcatBaseUrl}${APP_CONTEXT}/hello`);
       await page.waitForTimeout(1000);
       const content = await page.textContent('body');
       expect(content).toContain('updated by publish test');
@@ -557,7 +672,10 @@ public class HelloServlet extends HttpServlet {
   test('TEST-0510: 服务器重启', async ({ page }) => {
     // Start server
     await runCommandViaPalette(page, 'Kairo: Start Server');
-    await waitForServerState(page, 'running', 120000);
+    // KAIRO-RC-WEB-2026-07-26-24: use project-specific waiters so a sibling
+    // SHARD server (or a stale record from an earlier run) cannot satisfy
+    // the state check or be selected as the access URL.
+    await waitForServerStateForProject(page, PROJECT_ID, 'running', 120000);
 
     await test.step('1. 执行Kairo: Restart Server', async () => {
       await runCommandViaPalette(page, 'Kairo: Restart Server');
@@ -566,14 +684,14 @@ public class HelloServlet extends HttpServlet {
     });
 
     await test.step('2. 等待回到running状态', async () => {
-      const result = await waitForServerState(page, 'running', 120000);
+      const result = await waitForServerStateForProject(page, PROJECT_ID, 'running', 120000);
       expect(result).toBeTruthy();
       await page.screenshot({ path: `${SCREENSHOT_DIR}/TEST-0510/02-restart-done.png` });
     });
 
     await test.step('3. 再次访问应用', async () => {
-      await page.goto(`${await getTomcatBaseUrl(page, FALLBACK_TOMCAT_PORT)}${APP_CONTEXT}/hello.jsp`);
-      await page.waitForTimeout(1000);
+      await page.goto(`${await getTomcatBaseUrlForProject(page, PROJECT_ID, FALLBACK_TOMCAT_PORT)}${APP_CONTEXT}/hello.jsp?t=${Date.now()}`);
+      await page.waitForTimeout(1500);
       await page.screenshot({ path: `${SCREENSHOT_DIR}/TEST-0510/03-app-accessible.png` });
     });
   });

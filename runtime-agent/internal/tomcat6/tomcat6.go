@@ -342,10 +342,16 @@ func defaultServerXML() ServerConfig {
 						},
 						Hosts: []Host{
 							{
-								Name:       "localhost",
-								AppBase:    "webapps",
-								UnpackWARs: true,
-								AutoDeploy: true,
+								Name:    "localhost",
+								AppBase: "webapps",
+								// KAIRO-RC-WEB-2026-07-26-23: disable auto-deploy so the
+								// explicit Context below (with the project's webappDir as
+								// docBase) is the only root context. Without this, Tomcat
+								// auto-deploys webapps/ROOT and shadows the explicit
+								// context, causing ClassNotFoundException because the
+								// auto-deployed directory lacks compiled classes.
+								UnpackWARs: false,
+								AutoDeploy: false,
 								Valves: []Valve{{
 									ClassName: "org.apache.catalina.valves.AccessLogValve",
 									Directory: "logs", Prefix: "kairo-access.", Suffix: ".log",

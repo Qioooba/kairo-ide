@@ -225,15 +225,31 @@ export async function runCommandViaPalette(
   page: Page,
   commandLabel: string,
 ): Promise<void> {
+  // Close any already-open quick input so the previous command text
+  // does not leak into this invocation (KAIRO-RC-WEB-2026-07-26-22).
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(200);
   await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Shift+P' : 'Control+Shift+P');
-  await page.waitForSelector('.quick-input-widget', { timeout: 5_000 });
+  const input = page.locator('.quick-input-widget .quick-input-box input');
+  await input.waitFor({ state: 'visible', timeout: 5_000 });
   await page.waitForTimeout(300);
-  // Move to the end of the ">" prefix and type the command label after it
-  // (do NOT clear the ">" — clearing drops out of command-palette mode)
-  await page.keyboard.press('End');
-  await page.keyboard.type(commandLabel, { delay: 30 });
+  // Theia auto-fills the input with ">" when the palette opens.
+  // Programmatically set the value so the command-mode prefix is
+  // preserved and stale text is fully replaced.
+  await input.fill('>' + commandLabel);
   await page.waitForTimeout(500);
-  await page.keyboard.press('Enter');
+  // Ensure the first matching command is focused before confirming.
+  const firstRow = page.locator('.quick-input-widget .monaco-list-row').first();
+  if (await firstRow.count() > 0) {
+    try {
+      await firstRow.waitFor({ state: 'visible', timeout: 2_000 });
+      await firstRow.click();
+    } catch {
+      await page.keyboard.press('Enter');
+    }
+  } else {
+    await page.keyboard.press('Enter');
+  }
   await page.waitForTimeout(1_000);
 }
 
@@ -596,6 +612,29 @@ export async function runKairoImportWizard(
 }
 
 /**
+ * Helper: ensure the given project is the active Kairo project in Theia.
+ *
+ * The ActiveProjectService auto-selects based on workspace context and
+ * persisted storage; in isolated tests this can end up driving the wrong
+ * project (e.g. a sibling SHARD workspace left in storage). Opening the
+ * Project Selector and clicking the desired project makes every
+ * subsequent "Kairo: Build / Start Server / ..." command deterministic.
+ */
+export async function selectActiveProject(page: Page, projectId: string, timeoutMs = 15_000): Promise<boolean> {
+  await runCommandViaPalette(page, 'Kairo: Select Project');
+  const selector = `[data-testid="project-item-${projectId}"]`;
+  try {
+    const item = page.locator(selector).first();
+    await item.waitFor({ state: 'visible', timeout: timeoutMs });
+    await item.click();
+    await page.waitForTimeout(500);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Helper: right-click a DOM element and select a context-menu item.
  *
  * Theia renders context menus in a `.monaco-menu` / `.theia-Menu` / `.context-view`
@@ -876,6 +915,39 @@ export async function waitForServerState(
   return null;
 }
 
+/**
+ * Helper: wait for the server that belongs to a specific project to reach
+ * the target state. Unlike waitForServerState, this queries the agent API
+ * directly and filters by projectId, so a stale Servers view or sibling
+ * SHARD servers cannot confuse the check.
+ */
+export async function waitForServerStateForProject(
+  page: Page,
+  projectId: string,
+  targetState: string,
+  timeoutMs = 120_000,
+): Promise<unknown | null> {
+  const agentBase = process.env.AGENT_PORT ? `http://127.0.0.1:${process.env.AGENT_PORT}` : 'http://127.0.0.1:18300';
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    try {
+      const match = await page.evaluate(async (args) => {
+        const { base, pid, target } = args;
+        const r = await fetch(`${base}/api/v1/servers`, { signal: AbortSignal.timeout(5_000) });
+        if (!r.ok) return null;
+        const body = await r.json();
+        const list = body?.payload || [];
+        return list.find((s: Record<string, unknown>) => s.projectId === pid && s.state === target) || null;
+      }, { base: agentBase, pid: projectId, target: targetState });
+      if (match) return match;
+    } catch {
+      /* ignore polling errors */
+    }
+    await page.waitForTimeout(1_000);
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
@@ -1113,6 +1185,34 @@ export async function getTomcatBaseUrl(page: Page, fallbackPort = '18302'): Prom
 }
 
 /**
+ * Helper: return the base URL of the running Tomcat server that belongs to a
+ * specific project. This avoids the ambiguity of getTomcatBaseUrl when more
+ * than one server is running (e.g. leftover instances from sibling SHARDs).
+ */
+export async function getTomcatBaseUrlForProject(page: Page, projectId: string, fallbackPort = '18302'): Promise<string> {
+  const agentBase = process.env.AGENT_PORT ? `http://127.0.0.1:${process.env.AGENT_PORT}` : 'http://127.0.0.1:18300';
+  try {
+    const res = await page.evaluate(async (args) => {
+      const { base, pid } = args;
+      const r = await fetch(`${base}/api/v1/servers`, { signal: AbortSignal.timeout(5000) });
+      if (!r.ok) return null;
+      const body = await r.json();
+      const list = body?.payload || [];
+      const match = list.find((s: Record<string, unknown>) => s.projectId === pid && (s.state === 'running' || s.state === 'starting'));
+      if (!match) return null;
+      const ports = (match.ports as Record<string, number>) || {};
+      return ports.http || 0;
+    }, { base: agentBase, pid: projectId });
+    if (typeof res === 'number' && res > 0) {
+      return `http://127.0.0.1:${res}`;
+    }
+  } catch {
+    /* fall through */
+  }
+  return `http://127.0.0.1:${fallbackPort}`;
+}
+
+/**
  * Helper: stop every running Tomcat server for the current project.
  *
  * Tests that start servers must begin from a clean state; otherwise
@@ -1120,23 +1220,36 @@ export async function getTomcatBaseUrl(page: Page, fallbackPort = '18302'): Prom
  * detection and may serve stale webapps.
  */
 export async function stopAllRunningServers(page: Page): Promise<void> {
-  const servers = await getServerViewState(page);
-  for (const srv of servers) {
-    const rec = srv as Record<string, unknown>;
-    const id = rec.id as string;
-    const state = rec.state as string;
-    if (!id || state !== 'running') continue;
-    try {
-      await page.evaluate(async (args) => {
-        const { agentBase, serverId } = args;
-        await fetch(`${agentBase}/api/v1/servers/${serverId}`, {
-          method: 'DELETE',
-          signal: AbortSignal.timeout(10_000),
-        });
-      }, { agentBase: AGENT_BASE_URL, serverId: id });
-    } catch {
-      /* ignore cleanup errors */
+  try {
+    const agentBase = process.env.AGENT_PORT ? `http://127.0.0.1:${process.env.AGENT_PORT}` : 'http://127.0.0.1:18300';
+    const ids = await page.evaluate(async (base) => {
+      try {
+        const r = await fetch(`${base}/api/v1/servers`, { signal: AbortSignal.timeout(5000) });
+        if (!r.ok) return [] as string[];
+        const body = await r.json();
+        const list = body?.payload || [];
+        return list
+          .filter((s: Record<string, unknown>) => (s.state === 'running' || s.state === 'starting') && s.id)
+          .map((s: Record<string, unknown>) => String(s.id));
+      } catch {
+        return [] as string[];
+      }
+    }, agentBase);
+    for (const id of ids) {
+      try {
+        await page.evaluate(async (args) => {
+          const { base, serverId } = args;
+          await fetch(`${base}/api/v1/servers/${serverId}`, {
+            method: 'DELETE',
+            signal: AbortSignal.timeout(15_000),
+          });
+        }, { base: agentBase, serverId: id });
+      } catch {
+        /* ignore cleanup errors */
+      }
     }
+  } catch {
+    /* ignore cleanup errors */
   }
 }
 
