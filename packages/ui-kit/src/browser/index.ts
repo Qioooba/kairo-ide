@@ -15,6 +15,7 @@ import './kairo-theme.css';
 
 export * from './kairo-ui-contribution';
 export * from './kairo-theme';
+export * from './kairo-theme-idea';
 export * from './kairo-theme-contribution';
 export * from './virtual-list';
 export { default as KairoUiContribution } from './kairo-ui-contribution';

@@ -12,20 +12,25 @@
 
 import * as monaco from '@theia/monaco-editor-core';
 import { FrontendApplicationContribution } from '@theia/core/lib/browser';
-import { injectable, inject } from '@theia/core/shared/inversify';
+import { injectable, inject, optional } from '@theia/core/shared/inversify';
 import { Disposable } from '@theia/core/lib/common/disposable';
 import { FileService } from '@theia/filesystem/lib/browser/file-service';
+import { CommandService } from '@theia/core/lib/common/command';
+import { WorkspaceService } from '@theia/workspace/lib/browser';
 import { JAVA_LANGUAGE_ID } from '../common/java-common';
 import { JAVA_MONARCH } from './java-monarch';
 import { JavaLanguageClient } from './java-language-client';
 import { JdtClassFileFsProvider } from './jdt-fs-provider';
 import { JavaCompletionProvider, JavaCompletionResponseItem, JavaDefinitionResponse } from './java-completion-provider';
 import { registerJavaLiveTemplates } from './java-live-templates';
+import { JavaRunService } from './java-run-service';
+import { JAVA_RUN_COMMANDS } from './java-run-protocol';
 import type {
   LSPDocumentSymbol,
   LSPDocumentSymbolResult,
   LSPHover,
   LSPLocation,
+  LSPLocationLink,
   LSPSignatureHelp,
   LSPSymbolInformation,
   LSPTextEdit,
@@ -35,6 +40,7 @@ import type {
   LSPCodeLens,
   LSPInlayHint,
   LSPRange,
+  LSPDocumentHighlight,
 } from '../common/lsp-protocol';
 
 @injectable()
@@ -47,6 +53,12 @@ export class JavaMonacoRegistrationContribution implements FrontendApplicationCo
   protected readonly jdtFs!: JdtClassFileFsProvider;
   @inject(FileService)
   protected readonly fileService!: FileService;
+  @inject(JavaRunService) @optional()
+  protected readonly javaRunService?: JavaRunService;
+  @inject(CommandService) @optional()
+  protected readonly commandService?: CommandService;
+  @inject(WorkspaceService) @optional()
+  protected readonly workspaceService?: WorkspaceService;
 
   protected subs: Disposable[] = [];
 
@@ -154,6 +166,25 @@ export class JavaMonacoRegistrationContribution implements FrontendApplicationCo
           return token.isCancellationRequested ? [] : result.map(adaptLocation);
         },
       }),
+      monaco.languages.registerTypeDefinitionProvider(JAVA_LANGUAGE_ID, {
+        provideTypeDefinition: async (model, position, token) => {
+          if (token.isCancellationRequested) return [];
+          const result = await this.provider.provideTypeDefinition(
+            model.uri.toString(), position.lineNumber - 1, position.column - 1,
+          );
+          if (token.isCancellationRequested) return [];
+          return result.map(loc => isLocationLink(loc) ? adaptLocationLink(loc) : adaptLocation(loc));
+        },
+      }),
+      monaco.languages.registerDocumentHighlightProvider(JAVA_LANGUAGE_ID, {
+        provideDocumentHighlights: async (model, position, token) => {
+          if (token.isCancellationRequested) return [];
+          const result = await this.provider.provideDocumentHighlights(
+            model.uri.toString(), position.lineNumber - 1, position.column - 1,
+          );
+          return token.isCancellationRequested ? [] : result.map(adaptDocumentHighlight);
+        },
+      }),
       monaco.languages.registerSignatureHelpProvider(JAVA_LANGUAGE_ID, {
         signatureHelpTriggerCharacters: ['(', ','],
         signatureHelpRetriggerCharacters: [','],
@@ -211,9 +242,24 @@ export class JavaMonacoRegistrationContribution implements FrontendApplicationCo
       monaco.languages.registerCodeLensProvider(JAVA_LANGUAGE_ID, {
         provideCodeLenses: async (model, token) => {
           if (token.isCancellationRequested) return { lenses: [], dispose: () => undefined };
-          const lenses = await this.provider.provideCodeLens(model.uri.toString());
-          if (token.isCancellationRequested) return { lenses: [], dispose: () => undefined };
-          return { lenses: lenses.map(adaptCodeLens), dispose: () => undefined };
+          const allLenses: monaco.languages.CodeLens[] = [];
+          try {
+            const lenses = await this.provider.provideCodeLens(model.uri.toString());
+            if (!token.isCancellationRequested) {
+              allLenses.push(...lenses.map(adaptCodeLens));
+            }
+          } catch (e) {
+            console.warn('[kairo-java] JDT LS codeLens failed', e);
+          }
+          if (this.javaRunService && !token.isCancellationRequested) {
+            try {
+              const runLenses = await this.provideRunDebugCodeLenses(model);
+              allLenses.push(...runLenses);
+            } catch (e) {
+              console.warn('[kairo-java] run codelens failed', e);
+            }
+          }
+          return { lenses: allLenses, dispose: () => undefined };
         },
       }),
       monaco.languages.registerDocumentFormattingEditProvider(JAVA_LANGUAGE_ID, {
@@ -253,6 +299,90 @@ export class JavaMonacoRegistrationContribution implements FrontendApplicationCo
         },
       }),
     );
+    this.registerRunCommands();
+  }
+
+  protected registerRunCommands(): void {
+    const self = this;
+    this.subs.push(
+      monaco.editor.registerCommand(JAVA_RUN_COMMANDS.RUN_MAIN, (_accessor: any, arg?: any) => {
+        self.executeRun(arg, false);
+      }),
+      monaco.editor.registerCommand(JAVA_RUN_COMMANDS.DEBUG_MAIN, (_accessor: any, arg?: any) => {
+        self.executeRun(arg, true);
+      }),
+      monaco.editor.registerCommand(JAVA_RUN_COMMANDS.RUN_TEST, (_accessor: any, arg?: any) => {
+        self.executeRun(arg, false);
+      }),
+      monaco.editor.registerCommand(JAVA_RUN_COMMANDS.DEBUG_TEST, (_accessor: any, arg?: any) => {
+        self.executeRun(arg, true);
+      }),
+    );
+  }
+
+  protected async executeRun(arg: { uri?: string; line?: number; method?: any; debug?: boolean } | undefined, debug: boolean): Promise<void> {
+    if (!this.javaRunService) return;
+    let uri: string | undefined;
+    let line: number | undefined;
+    if (arg && arg.uri) {
+      uri = arg.uri;
+      line = arg.line;
+    } else {
+      const editor = monaco.editor.getEditors()[0];
+      if (editor) {
+        uri = editor.getModel()?.uri.toString();
+        line = editor.getPosition()?.lineNumber;
+      }
+    }
+    if (!uri || !line) return;
+    await this.javaRunService.runFromUri(uri, line, arg?.debug ?? debug);
+  }
+
+  protected async provideRunDebugCodeLenses(model: monaco.editor.ITextModel): Promise<monaco.languages.CodeLens[]> {
+    if (!this.javaRunService) return [];
+    const uri = model.uri.toString();
+    const info = await this.javaRunService.detectJavaMethods(uri);
+    if (!info || !info.methods || info.methods.length === 0) return [];
+    const lenses: monaco.languages.CodeLens[] = [];
+    for (const method of info.methods) {
+      const lineNumber = method.startLine;
+      if (method.isMain) {
+        lenses.push({
+          range: new monaco.Range(lineNumber, 1, lineNumber, 1),
+          command: {
+            id: JAVA_RUN_COMMANDS.RUN_MAIN,
+            title: `▶▶ Run '${info.className}.main()'`,
+            arguments: [{ uri, line: lineNumber, method }],
+          },
+        });
+        lenses.push({
+          range: new monaco.Range(lineNumber, 1, lineNumber, 1),
+          command: {
+            id: JAVA_RUN_COMMANDS.DEBUG_MAIN,
+            title: `| Debug '${info.className}.main()'`,
+            arguments: [{ uri, line: lineNumber, method, debug: true }],
+          },
+        });
+      } else if (method.isTest) {
+        lenses.push({
+          range: new monaco.Range(lineNumber, 1, lineNumber, 1),
+          command: {
+            id: JAVA_RUN_COMMANDS.RUN_TEST,
+            title: `▶ Run '${method.name}()'`,
+            arguments: [{ uri, line: lineNumber, method }],
+          },
+        });
+        lenses.push({
+          range: new monaco.Range(lineNumber, 1, lineNumber, 1),
+          command: {
+            id: JAVA_RUN_COMMANDS.DEBUG_TEST,
+            title: `| Debug '${method.name}()'`,
+            arguments: [{ uri, line: lineNumber, method, debug: true }],
+          },
+        });
+      }
+    }
+    return lenses;
   }
 
   dispose(): void {
@@ -508,5 +638,31 @@ function adaptInlayHint(hint: LSPInlayHint): monaco.languages.InlayHint {
     paddingLeft: hint.paddingLeft,
     paddingRight: hint.paddingRight,
     tooltip: hint.tooltip,
+  };
+}
+
+function isLocationLink(loc: LSPLocation | LSPLocationLink): loc is LSPLocationLink {
+  return 'targetUri' in loc;
+}
+
+function adaptLocationLink(link: LSPLocationLink): monaco.languages.LocationLink {
+  return {
+    uri: monaco.Uri.parse(link.targetUri),
+    range: adaptRange(link.targetRange),
+    originSelectionRange: link.originSelectionRange ? adaptRange(link.originSelectionRange) : undefined,
+    targetSelectionRange: adaptRange(link.targetSelectionRange),
+  };
+}
+
+function adaptDocumentHighlight(highlight: LSPDocumentHighlight): monaco.languages.DocumentHighlight {
+  return {
+    range: adaptRange(highlight.range),
+    kind: highlight.kind !== undefined
+      ? highlight.kind === 1
+        ? monaco.languages.DocumentHighlightKind.Text
+        : highlight.kind === 2
+          ? monaco.languages.DocumentHighlightKind.Read
+          : monaco.languages.DocumentHighlightKind.Write
+      : monaco.languages.DocumentHighlightKind.Text,
   };
 }

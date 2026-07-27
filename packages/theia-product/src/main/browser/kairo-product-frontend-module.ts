@@ -53,6 +53,7 @@ import { FileService } from '@theia/filesystem/lib/browser/file-service';
 import { BuildViewWidget } from '@kairo/build-extension';
 import { ServerViewWidget, LogViewerWidget } from '@kairo/tomcat-extension';
 import { bindSvnExtension } from '@kairo/svn-extension';
+import { bindKairoI18n } from '@kairo/i18n';
 import {
   RuntimeConnectionService,
   KairoRuntime,
@@ -150,10 +151,20 @@ import { KairoDebugModuleSelectorWidget } from './debug-module-selector-widget';
 import { KairoDebugConditionEditorWidget } from './debug-condition-editor-widget';
 import { KairoDebugHotSwapStatusWidget } from './debug-hotswap-status-widget';
 import { DebugDiagnosticsWidget } from './debug-diagnostics-widget';
+import { KairoDebugToolWindowWidget } from './debug-tool-window-widget';
+import { KairoDebugHoverProvider } from './debug-hover-provider';
+import { KairoDebugInlineValuesService } from './debug-inline-values';
+import {
+  KAIRO_DEBUG_TOOL_WINDOW_FACTORY_ID,
+} from './kairo-factory-ids';
 import { BookmarkService } from './kairo-bookmark-service';
 import { KairoBookmarksWidget } from './kairo-bookmark-widget';
 import { KairoBookmarkContribution } from './kairo-bookmark-contribution';
 import { KairoShortcutCheatsheetContribution } from './kairo-shortcut-cheatsheet';
+import { KairoIDEAWindowsKeymapContribution } from './kairo-idea-windows-keymap';
+import { KairoIDEAMacKeymapContribution } from './kairo-idea-mac-keymap';
+import { KairoIDEAMonacoKeymapContribution } from './kairo-idea-monaco-keymap';
+import { KairoIDEAMacMonacoKeymapContribution } from './kairo-idea-mac-monaco-keymap';
 
 // Re-export so existing consumers can keep importing the IDs from
 // this module; the definitions live in kairo-factory-ids.ts.
@@ -283,6 +294,11 @@ export function bindKairoFrontend(bind: interfaces.Bind, unbind?: interfaces.Unb
       }
     });
   };
+
+  // ── Kairo i18n (internationalization) ───────────────────────
+  // Must be bound early so all subsequent contributions can inject
+  // KairoI18nService for translated labels/tooltips.
+  bindKairoI18n(bind, unbind, isBound, rebind);
 
   // ── Kairo runtime client + workspace context ────────────────
   // Mirrors KairoRuntimeModule in
@@ -653,6 +669,19 @@ export function bindKairoFrontend(bind: interfaces.Bind, unbind?: interfaces.Unb
     createWidget: () => ctx.container.get(DebugDiagnosticsWidget),
   })).inSingletonScope();
 
+  // ── IDEA-style Debug Tool Window ─────────────────────────────
+  bind(KairoDebugToolWindowWidget).toSelf();
+  bind(WidgetFactory).toDynamicValue(ctx => ({
+    id: KAIRO_DEBUG_TOOL_WINDOW_FACTORY_ID,
+    createWidget: () => ctx.container.get(KairoDebugToolWindowWidget),
+  })).inSingletonScope();
+
+  bind(KairoDebugHoverProvider).toSelf().inSingletonScope();
+  safeContribution(FrontendApplicationContribution, KairoDebugHoverProvider, 'KairoDebugHoverProvider');
+
+  bind(KairoDebugInlineValuesService).toSelf().inSingletonScope();
+  safeContribution(FrontendApplicationContribution, KairoDebugInlineValuesService, 'KairoDebugInlineValuesService');
+
   // ── Kairo Bookmarks ──────────────────────────────────────────
   bind(BookmarkService).toSelf().inSingletonScope();
   bind(KairoBookmarkContribution).toSelf().inSingletonScope();
@@ -669,6 +698,26 @@ export function bindKairoFrontend(bind: interfaces.Bind, unbind?: interfaces.Unb
   bind(KairoShortcutCheatsheetContribution).toSelf().inSingletonScope();
   safeContribution(CommandContribution, KairoShortcutCheatsheetContribution, 'KairoShortcutCheatsheetContribution:cmd');
   safeContribution(KeybindingContribution, KairoShortcutCheatsheetContribution, 'KairoShortcutCheatsheetContribution:key');
+
+  // ── IntelliJ IDEA Keymap ─────────────────────────────────────
+  // Registers platform-specific IDEA keymaps:
+  //   - Windows/Linux: Ctrl-based shortcuts (KairoIDEAWindowsKeymapContribution)
+  //   - macOS: Cmd-based shortcuts (KairoIDEAMacKeymapContribution)
+  // Each contribution internally guards via isOSX so only the correct
+  // platform bindings are applied at runtime.
+  bind(KairoIDEAWindowsKeymapContribution).toSelf().inSingletonScope();
+  safeContribution(CommandContribution, KairoIDEAWindowsKeymapContribution, 'KairoIDEAWindowsKeymapContribution:cmd');
+  safeContribution(KeybindingContribution, KairoIDEAWindowsKeymapContribution, 'KairoIDEAWindowsKeymapContribution:key');
+
+  bind(KairoIDEAMacKeymapContribution).toSelf().inSingletonScope();
+  safeContribution(CommandContribution, KairoIDEAMacKeymapContribution, 'KairoIDEAMacKeymapContribution:cmd');
+  safeContribution(KeybindingContribution, KairoIDEAMacKeymapContribution, 'KairoIDEAMacKeymapContribution:key');
+
+  // Monaco editor-level IDEA keybindings (all platforms; internally guards per-OS)
+  bind(KairoIDEAMonacoKeymapContribution).toSelf().inSingletonScope();
+  safeContribution(FrontendApplicationContribution, KairoIDEAMonacoKeymapContribution, 'KairoIDEAMonacoKeymapContribution');
+  bind(KairoIDEAMacMonacoKeymapContribution).toSelf().inSingletonScope();
+  safeContribution(FrontendApplicationContribution, KairoIDEAMacMonacoKeymapContribution, 'KairoIDEAMacMonacoKeymapContribution');
 
   // ── Project Structure Dialog ───────────────────────────────
   bind(ProjectStructureContribution).toSelf().inSingletonScope();

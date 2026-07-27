@@ -78,6 +78,15 @@ export class SvnService implements SvnFrontendClient {
   protected readonly onSvnAvailabilityChangeEmitter = new Emitter<boolean>();
   readonly onSvnAvailabilityChange: Event<boolean> = this.onSvnAvailabilityChangeEmitter.event;
 
+  protected readonly onDidChangeWcRootEmitter = new Emitter<string | undefined>();
+  readonly onDidChangeWcRoot: Event<string | undefined> = this.onDidChangeWcRootEmitter.event;
+
+  protected readonly onDiffRequestEmitter = new Emitter<{ filePath: string; baseRevision?: string | number; targetRevision?: string | number; }>();
+  readonly onDiffRequest: Event<{ filePath: string; baseRevision?: string | number; targetRevision?: string | number; }> = this.onDiffRequestEmitter.event;
+
+  protected readonly onHistoryRequestEmitter = new Emitter<{ filePath: string }>();
+  readonly onHistoryRequest: Event<{ filePath: string }> = this.onHistoryRequestEmitter.event;
+
   /** Backend → browser notification (SvnFrontendClient). */
   onCommandEvent(event: { id: string; kind: 'start' | 'end' | 'error'; args: string[]; cwd: string }): void {
     this.logger.debug('[svn] command event', event);
@@ -106,6 +115,9 @@ export class SvnService implements SvnFrontendClient {
     this.onDidCommitSuccessEmitter.dispose();
     this.onDidUpdateCompleteEmitter.dispose();
     this.onSvnAvailabilityChangeEmitter.dispose();
+    this.onDidChangeWcRootEmitter.dispose();
+    this.onDiffRequestEmitter.dispose();
+    this.onHistoryRequestEmitter.dispose();
   }
 
   // ---------------------------------------------------------------------------
@@ -211,6 +223,7 @@ export class SvnService implements SvnFrontendClient {
   }
 
   setActiveWcRoot(root: string | undefined): void {
+    const previous = this.activeWcRoot;
     this.activeWcRoot = root;
     if (root) {
       this.refreshStatus().catch(() => {});
@@ -219,6 +232,9 @@ export class SvnService implements SvnFrontendClient {
       this.stopStatusPolling();
       this.cachedStatus = [];
       this.wcInfo = undefined;
+    }
+    if (previous !== root) {
+      this.onDidChangeWcRootEmitter.fire(root);
     }
   }
 
@@ -704,5 +720,66 @@ export class SvnService implements SvnFrontendClient {
     if (!this.activeWcRoot) throw new Error('No active SVN working copy');
     await this.requireProxy().$ignore(this.activeWcRoot, patterns);
     await this.refreshStatus();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Revision-targeted file operations (used by History / Diff UI)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Cat a file at a specific revision from the working copy.
+   * Returns the raw file content as string (decoded by the backend based on locale).
+   */
+  async getFileAtRevision(relPath: string, revision: string | number): Promise<string> {
+    if (!this.activeWcRoot) return '';
+    try {
+      const r = await this.requireProxy().$getFileAtRevision(this.activeWcRoot, relPath, revision);
+      return r.stdout || '';
+    } catch { return ''; }
+  }
+
+  /**
+   * Export a file at a specific revision to a local output path.
+   * The caller is responsible for ensuring outPath is writable.
+   */
+  async exportAtRevision(relPath: string, revision: string | number, outPath: string): Promise<void> {
+    if (!this.activeWcRoot) throw new Error('No active SVN working copy');
+    await this.requireProxy().$exportAtRevision(this.activeWcRoot, relPath, revision, outPath);
+  }
+
+  /**
+   * Revert a file in the working copy to a specific historical revision.
+   * Uses `svn merge -r HEAD:revision` to bring file content back to that state.
+   */
+  async revertToRevision(relPath: string, revision: string | number): Promise<void> {
+    if (!this.activeWcRoot) throw new Error('No active SVN working copy');
+    await this.requireProxy().$revertToRevision(this.activeWcRoot, relPath, revision);
+    await this.refreshStatus({ ignoreCache: true });
+  }
+
+  // ---------------------------------------------------------------------------
+  // UI request events
+  //
+  // Components that need to open the diff / history view (e.g. the
+  // "SVN Diff" / "SVN History" context-menu actions in the file
+  // explorer) fire these events. SvnContribution listens and routes
+  // them to the right widget, decoupling the caller from the widget
+  // implementation — same pattern used by Theia for git operations.
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Request the SVN Diff widget to be opened for a specific file.
+   * If baseRevision / targetRevision are omitted, defaults to
+   * local-vs-BASE.
+   */
+  requestDiff(filePath: string, baseRevision?: string | number, targetRevision?: string | number): void {
+    this.onDiffRequestEmitter.fire({ filePath, baseRevision, targetRevision });
+  }
+
+  /**
+   * Request the SVN History widget to be opened for a specific file.
+   */
+  requestHistory(filePath: string): void {
+    this.onHistoryRequestEmitter.fire({ filePath });
   }
 }

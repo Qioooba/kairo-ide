@@ -32,6 +32,7 @@ import {
   LSPPublishDiagnosticsParams,
   LSPCompletionList,
   LSPLocation,
+  LSPLocationLink,
   LSPHover,
   LSPSignatureHelp,
   LSPDocumentSymbolResult,
@@ -48,6 +49,7 @@ import {
   LSPTypeHierarchyItem,
   LSPTextEdit,
   LSPInlayHint,
+  LSPDocumentHighlight,
 } from '../common/lsp-protocol';
 
 /** Connection status for the language client. */
@@ -346,6 +348,14 @@ export class JavaLanguageClient implements JdtLsFrontendClient, Disposable {
     return this.callBackend('$references', p, () => this.backend?.references(p) ?? []);
   }
 
+  async typeDefinition(p: { uri: string; line: number; character: number }): Promise<LSPLocation | LSPLocation[] | LSPLocationLink[] | null> {
+    return this.callBackend('$typeDefinition', p, () => this.backend?.typeDefinition(p) ?? null);
+  }
+
+  async documentHighlight(p: { uri: string; line: number; character: number }): Promise<LSPDocumentHighlight[]> {
+    return this.callBackend('$documentHighlight', p, () => this.backend?.documentHighlight(p) ?? []);
+  }
+
   async signatureHelp(p: { uri: string; line: number; character: number; triggerKind?: 1 | 2 | 3; triggerCharacter?: string; isRetrigger?: boolean }): Promise<LSPSignatureHelp | null> {
     return this.callBackend('$signatureHelp', p, () => this.backend?.signatureHelp(p) ?? null);
   }
@@ -445,7 +455,7 @@ export class JavaLanguageClient implements JdtLsFrontendClient, Disposable {
 
   /** Invoke one typed backend method through RPC, with the same
    *  durable in-process fallback used by the lifecycle calls. */
-  protected async callBackend<K extends '$implementation' | '$hover' | '$references' | '$signatureHelp' | '$documentSymbols' | '$workspaceSymbols' | '$codeActions' | '$rename' | '$prepareCallHierarchy' | '$incomingCalls' | '$outgoingCalls' | '$prepareTypeHierarchy' | '$supertypes' | '$subtypes' | '$codeLens' | '$formatting' | '$rangeFormatting' | '$inlayHint'>(
+  protected async callBackend<K extends '$implementation' | '$hover' | '$references' | '$typeDefinition' | '$documentHighlight' | '$signatureHelp' | '$documentSymbols' | '$workspaceSymbols' | '$codeActions' | '$rename' | '$prepareCallHierarchy' | '$incomingCalls' | '$outgoingCalls' | '$prepareTypeHierarchy' | '$supertypes' | '$subtypes' | '$codeLens' | '$formatting' | '$rangeFormatting' | '$inlayHint'>(
     method: K,
     arg: Parameters<JdtLsBackendService[K]>[0],
     fallback: () => ReturnType<JdtLsBackendService[K]>,

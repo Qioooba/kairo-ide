@@ -26,6 +26,7 @@
     "@kairo/build-extension": "workspace:*",
     "@kairo/config-schema": "workspace:*",
     "@kairo/encoding-extension": "workspace:*",
+    "@kairo/i18n": "workspace:*",
     "@kairo/java-extension": "workspace:*",
     "@kairo/jsp-extension": "workspace:*",
     "@kairo/project-extension": "workspace:*",

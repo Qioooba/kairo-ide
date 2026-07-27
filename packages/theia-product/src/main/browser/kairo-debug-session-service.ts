@@ -21,6 +21,11 @@ import { KairoJavaDebugService, type KairoJavaDebugState } from './kairo-java-de
 /*  Types                                                               */
 /* ------------------------------------------------------------------ */
 
+export interface KairoDebugThreadInfo {
+  id: number;
+  name: string;
+}
+
 export interface KairoDebugSessionState {
   /** Current debug state */
   debugState: KairoJavaDebugState;
@@ -36,8 +41,14 @@ export interface KairoDebugSessionState {
   threadId: number | undefined;
   /** Current thread name */
   threadName: string | undefined;
+  /** All threads */
+  threads: KairoDebugThreadInfo[];
   /** Session label for display */
   sessionLabel: string;
+  /** Whether breakpoints are muted */
+  breakpointsMuted: boolean;
+  /** Current frame ID (for evaluation context) */
+  currentFrameId: number | undefined;
 }
 
 export interface BatchVariableRequest {
@@ -66,7 +77,7 @@ export class KairoDebugSessionService {
   protected readonly javaDebug!: KairoJavaDebugService;
 
   protected readonly onStateChangeEmitter = new Emitter<KairoDebugSessionState>();
-  readonly onDidStateChange: Event<KairoDebugSessionState> = this.onStateChangeEmitter.event;
+  readonly onDidChangeState: Event<KairoDebugSessionState> = this.onStateChangeEmitter.event;
 
   protected state: KairoDebugSessionState = {
     debugState: 'unknown',
@@ -76,23 +87,48 @@ export class KairoDebugSessionService {
     hasSession: false,
     threadId: undefined,
     threadName: undefined,
+    threads: [],
     sessionLabel: '',
+    breakpointsMuted: false,
+    currentFrameId: undefined,
   };
 
   get currentState(): Readonly<KairoDebugSessionState> {
     return this.state;
   }
 
+  get isSuspended(): boolean {
+    return this.state.isSuspended;
+  }
+
+  get isRunning(): boolean {
+    return this.state.isRunning;
+  }
+
+  get hasSession(): boolean {
+    return this.state.hasSession;
+  }
+
   get currentSession(): DebugSession | undefined {
     return this.sessionManager.currentSession;
   }
+
+  get currentFrameId(): number | undefined {
+    return this.currentSession?.currentFrame?.raw?.id;
+  }
+
+  protected _breakpointsMuted = false;
+  protected _temporaryRunToLine: { line: number; source: DebugProtocol.Source } | null = null;
 
   @postConstruct()
   protected init(): void {
     this.sessionManager.onDidChange(() => this.refreshState());
     this.sessionManager.onDidStartDebugSession(() => this.refreshState());
     this.sessionManager.onDidStopDebugSession(() => this.refreshState());
-    this.sessionManager.onDidDestroyDebugSession(() => this.refreshState());
+    this.sessionManager.onDidDestroyDebugSession(() => {
+      this._temporaryRunToLine = null;
+      this.refreshState();
+    });
     this.javaDebug.onDidChangeStatus(() => this.refreshState());
   }
 
@@ -107,20 +143,47 @@ export class KairoDebugSessionService {
     const isRunning = debugState === 'connected';
     const hasSession = isSuspended || isRunning;
 
+    const threads: KairoDebugThreadInfo[] = [];
+    const threadId = session?.currentThread?.threadId;
+    const threadName = session?.currentThread?.raw?.name;
+
     this.state = {
       debugState,
       sessionId: session?.id,
       isSuspended,
       isRunning,
       hasSession,
-      threadId: session?.currentThread?.threadId,
-      threadName: session?.currentThread?.raw?.name,
+      threadId,
+      threadName,
+      threads,
       sessionLabel: session
         ? `${session.configuration.name} • ${session.id}`
         : '',
+      breakpointsMuted: this._breakpointsMuted,
+      currentFrameId: session?.currentFrame?.raw?.id,
     };
 
     this.onStateChangeEmitter.fire(this.state);
+
+    if (hasSession) {
+      this.fetchThreads();
+    }
+  }
+
+  protected async fetchThreads(): Promise<void> {
+    const session = this.currentSession;
+    if (!session) return;
+    try {
+      const response = await session.sendRequest('threads', {});
+      const threadList = response.body?.threads ?? [];
+      this.state = {
+        ...this.state,
+        threads: threadList.map(t => ({ id: t.id, name: t.name })),
+      };
+      this.onStateChangeEmitter.fire(this.state);
+    } catch {
+      // ignore
+    }
   }
 
   /**
@@ -202,21 +265,62 @@ export class KairoDebugSessionService {
   }
 
   /**
+   * Fetch just scope descriptors (without variables) for the current frame.
+   */
+  async fetchScopes(): Promise<DebugProtocol.Scope[]> {
+    const session = this.currentSession;
+    if (!session) return [];
+
+    const frameId = session.currentFrame?.raw?.id;
+    if (!frameId) return [];
+
+    try {
+      const response = await session.sendRequest('scopes', { frameId });
+      return response.body?.scopes ?? [];
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Fetch stack frames for the current thread.
+   */
+  async fetchStackFrames(): Promise<{ frames: DebugProtocol.StackFrame[]; totalFrames?: number }> {
+    const session = this.currentSession;
+    if (!session) return { frames: [] };
+
+    const threadId = session.currentThread?.threadId;
+    if (!threadId) return { frames: [] };
+
+    try {
+      const response = await session.sendRequest('stackTrace', { threadId });
+      return {
+        frames: response.body?.stackFrames ?? [],
+        totalFrames: response.body?.totalFrames,
+      };
+    } catch {
+      return { frames: [] };
+    }
+  }
+
+  /**
    * Evaluate an expression in the current debug session.
    */
-  async evaluate(expression: string, frameId?: number): Promise<{ result: string; type?: string; error?: string }> {
+  async evaluate(expression: string, frameId?: number, context: 'repl' | 'hover' | 'watch' = 'repl'): Promise<{ result: string; type?: string; variablesReference?: number; error?: string }> {
     const session = this.currentSession;
     if (!session) return { result: '', error: 'No active session' };
 
     try {
+      const effectiveFrameId = frameId ?? session.currentFrame?.raw?.id;
       const reply = await session.sendRequest('evaluate', {
         expression,
-        frameId: frameId ?? session.currentThread?.threadId ?? 0,
-        context: 'repl',
+        frameId: effectiveFrameId,
+        context,
       });
       return {
         result: reply.body?.result ?? 'undefined',
         type: reply.body?.type,
+        variablesReference: reply.body?.variablesReference,
       };
     } catch (error) {
       return {
@@ -270,6 +374,80 @@ export class KairoDebugSessionService {
    * Stop the debug session.
    */
   async stop(): Promise<void> {
+    this._temporaryRunToLine = null;
     await this.javaDebug.stop();
+  }
+
+  /**
+   * Pause the running debug session.
+   */
+  async pause(): Promise<void> {
+    const session = this.currentSession;
+    if (session) {
+      await session.sendRequest('pause', { threadId: session.currentThread?.threadId ?? 0 });
+    }
+  }
+
+  /**
+   * Restart the debug session (stop and re-attach if possible).
+   */
+  async restart(): Promise<void> {
+    const session = this.currentSession;
+    if (session) {
+      try {
+        await session.sendRequest('restart', { arguments: session.configuration });
+      } catch {
+        // Fallback: just stop
+        await this.stop();
+      }
+    }
+  }
+
+  /**
+   * Run to cursor (set temporary breakpoint at line and continue).
+   */
+  async runToCursor(line: number, source: DebugProtocol.Source): Promise<void> {
+    const session = this.currentSession;
+    if (!session) return;
+
+    const threadId = session.currentThread?.threadId ?? 0;
+    const currentBreakpoints = (session as any).breakpoints || [];
+
+    this._temporaryRunToLine = { line, source };
+    await session.sendRequest('setBreakpoints', {
+      source,
+      lines: [line],
+      breakpoints: [{ line }],
+    });
+    await this.continue();
+  }
+
+  /**
+   * Toggle breakpoint muting state.
+   */
+  toggleMuteBreakpoints(): boolean {
+    this._breakpointsMuted = !this._breakpointsMuted;
+    this.state = { ...this.state, breakpointsMuted: this._breakpointsMuted };
+    this.onStateChangeEmitter.fire(this.state);
+    return this._breakpointsMuted;
+  }
+
+  /**
+   * Set variable value.
+   */
+  async setVariable(variablesReference: number, name: string, value: string): Promise<{ success: boolean; error?: string }> {
+    const session = this.currentSession;
+    if (!session) return { success: false, error: 'No active session' };
+
+    try {
+      const reply = await session.sendRequest('setVariable', {
+        variablesReference,
+        name,
+        value,
+      });
+      return { success: reply.success ?? true };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
   }
 }

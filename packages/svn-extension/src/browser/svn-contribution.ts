@@ -7,6 +7,7 @@ import {
   WidgetManager,
   ApplicationShell,
 } from '@theia/core/lib/browser';
+import { DisposableCollection } from '@theia/core/lib/common/disposable';
 import { EditorManager } from '@theia/editor/lib/browser';
 import { Command, CommandRegistry, CommandContribution } from '@theia/core/lib/common/command';
 import { MenuModelRegistry, MenuPath, MenuContribution } from '@theia/core/lib/common/menu';
@@ -161,13 +162,92 @@ export class SvnContribution
   @inject(QuickInputService) protected readonly quickInputService!: QuickInputService;
   @inject(MessageService) protected readonly messageService!: MessageService;
 
+  protected readonly toDispose = new DisposableCollection();
+
+  dispose(): void {
+    this.toDispose.dispose();
+  }
+
   async initializeLayout(): Promise<void> {
     await this.openChangesView({ activate: false });
   }
 
   onStart(): void {
-    this.detectInitialWorkspace();
     this.setupContextKeys();
+    this.setupWorkspaceWatching();
+    this.setupWcRootWatching();
+    this.setupRequestRouting();
+  }
+
+  /**
+   * Route SvnService's UI request events (requestDiff, requestHistory)
+   * to the corresponding widgets. Decouples callers (file explorer,
+   * editor context menu, history list) from the widget implementation.
+   */
+  protected setupRequestRouting(): void {
+    this.toDispose.push(
+      this.svnService.onDiffRequest(async req => {
+        const widget = await this.openDiffView({ activate: true });
+        widget.setDiffTarget(req.filePath, req.baseRevision, req.targetRevision);
+      }),
+    );
+    this.toDispose.push(
+      this.svnService.onHistoryRequest(async req => {
+        const widget = await this.openHistoryView();
+        widget.setTargetPath(req.filePath);
+      }),
+    );
+  }
+
+  /**
+   * Subscribe to workspace change events so that when the user opens a
+   * different project, we automatically detect its SVN working copy and
+   * re-activate. This mirrors IntelliJ IDEA's behaviour: opening a project
+   * that is under SVN control immediately enables all SVN actions.
+   */
+  protected setupWorkspaceWatching(): void {
+    // Re-detect when the active workspace root is changed
+    // (open folder / open file / switch project).
+    this.toDispose.push(
+      this.workspaceService.onWorkspaceLocationChanged(async () => {
+        await this.detectAndActivateWc();
+      }),
+    );
+    // Re-detect on any structural change inside the workspace
+    // (e.g. user adds a new folder via "Add Folder to Workspace...").
+    this.toDispose.push(
+      this.workspaceService.onWorkspaceChanged(async () => {
+        await this.detectAndActivateWc();
+      }),
+    );
+    // Run once at startup.
+    void this.detectAndActivateWc();
+  }
+
+  /**
+   * Listen for active working-copy changes. When the WC root switches
+   * (e.g. user opened a different SVN project), reset the diff / history
+   * widgets so they don't show stale content from the previous project.
+   */
+  protected setupWcRootWatching(): void {
+    this.toDispose.push(
+      this.svnService.onDidChangeWcRoot(() => {
+        this.resetWcBoundWidgets();
+      }),
+    );
+  }
+
+  protected resetWcBoundWidgets(): void {
+    // Drop any active diff target so the next "Show Diff" call uses
+    // the new project's files.
+    const diffWidget = this.widgetManager.tryGetWidget(SvnDiffWidget.ID) as SvnDiffWidget | undefined;
+    if (diffWidget && typeof (diffWidget as any).reset === 'function') {
+      (diffWidget as any).reset();
+    }
+    const historyWidget = this.widgetManager.tryGetWidget(SvnHistoryWidget.ID) as SvnHistoryWidget | undefined;
+    if (historyWidget && typeof (historyWidget as any).reset === 'function') {
+      (historyWidget as any).reset();
+    }
   }
 
   protected setupContextKeys(): void {
@@ -180,17 +260,29 @@ export class SvnContribution
     });
   }
 
-  protected async detectInitialWorkspace(): Promise<void> {
+  /**
+   * Walk all workspace roots, locate a Subversion working copy, and activate it.
+   * If none is found, deactivate (clear the active WC root, which stops polling
+   * and clears the cached status). This is a no-op if the active WC root has
+   * not changed.
+   */
+  protected async detectAndActivateWc(): Promise<void> {
     const roots = this.workspaceService.tryGetRoots();
+    let foundRoot: string | undefined;
     for (const root of roots) {
       if (root.resource) {
         const fsPath = root.resource.path.toString();
         const wcRoot = await this.svnService.findWcRoot(fsPath);
         if (wcRoot) {
-          this.svnService.setActiveWcRoot(wcRoot);
+          foundRoot = wcRoot;
           break;
         }
       }
+    }
+    if (foundRoot && foundRoot !== this.svnService.getActiveWcRoot()) {
+      this.svnService.setActiveWcRoot(foundRoot);
+    } else if (!foundRoot && this.svnService.getActiveWcRoot()) {
+      this.svnService.setActiveWcRoot(undefined);
     }
   }
 
@@ -501,6 +593,27 @@ export class SvnContribution
     registry.registerKeybinding({
       command: SvnCommands.SHOW_CHANGES.id,
       keybinding: 'alt+9',
+    });
+    // IDEA-style keybindings for the current file.
+    // Only active when the editor has focus AND a SVN working copy is
+    // active, so the browser default Ctrl+D (bookmark) / Ctrl+H
+    // (history) is unaffected in other contexts.
+    registry.registerKeybinding({
+      command: SvnCommands.DIFF_SHOW.id,
+      keybinding: 'ctrlcmd+d',
+      when: 'svnActive && editorTextFocus',
+    });
+    registry.registerKeybinding({
+      command: SvnCommands.SHOW_HISTORY.id,
+      keybinding: 'ctrlcmd+h',
+      when: 'svnActive && editorTextFocus',
+    });
+    // Alternate bindings (no editor focus) for use from the file
+    // explorer / project tree context.
+    registry.registerKeybinding({
+      command: SvnCommands.SHOW_HISTORY.id,
+      keybinding: 'ctrlcmd+alt+h',
+      when: 'svnActive',
     });
   }
 

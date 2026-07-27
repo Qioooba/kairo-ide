@@ -29,9 +29,34 @@
 /* Kairo component styles - only for Kairo-specific widgets, not Theia core */
 .kairo-import-wizard {
     padding: 24px;
-    max-width: 600px;
+    max-width: 900px;
     margin: 0 auto;
     color: var(--kairo-text);
+}
+
+.kairo-path-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin: 12px 0;
+    width: 100%;
+}
+
+.kairo-path-input {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 8px 12px;
+    background: var(--kairo-bg);
+    color: var(--kairo-text);
+    border: 1px solid var(--kairo-border);
+    border-radius: 4px;
+    font-size: 13px;
+    font-family: monospace;
+}
+
+.kairo-path-input:focus {
+    outline: none;
+    border-color: var(--kairo-primary);
 }
 
 .kairo-wizard-header h1 {
@@ -317,6 +342,42 @@
 #theia-statusBar .element[role="button"],
 .theia-statusbar .element.hasCommand {
     cursor: pointer !important;
+}
+
+/* Status bar: comfortable spacing for left/right items.
+ * KAIRO-STATUSBAR-OVERLAP-01: the default Theia style for
+ * .theia-status-bar > .area > .element has zero padding on
+ * the element itself, so the icon (codicon) sits flush against
+ * the text inside the same element and the next element's icon
+ * sits flush against the previous element's text. With Kairo's
+ * 8 left-aligned items the bar ends up looking like one long
+ * mashed-together string ("Project: (no workspace)JDK: stopped
+ * SVN: not foundEncoding: -..."). Add horizontal padding inside
+ * each element and a small gap between elements so the bar
+ * reads cleanly without changing the Theia layout. */
+#theia-statusBar .element {
+    padding: 0 6px !important;
+    line-height: 22px !important;
+    height: 22px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    box-sizing: border-box !important;
+}
+
+#theia-statusBar .area.left > .element + .element,
+#theia-statusBar .area > .element + .element {
+    margin-left: 2px !important;
+}
+
+/* Status bar: ensure icon-vs-text gap inside each element */
+#theia-statusBar .element > span + span {
+    margin-left: 4px !important;
+}
+
+/* Right-side icon-only elements (bell, notifications, panel
+ * toggle) should stay tight — no double padding. */
+#theia-statusBar .area.right .element {
+    padding: 0 4px !important;
 }
 
 /* Status bar hover background should be visible */
@@ -1112,9 +1173,17 @@
  * toggle) off-screen with no way to reach them. Let each area
  * shrink (min-width: 0) and scroll horizontally instead of
  * clipping; the scrollbar stays hidden to keep the 22px bar clean. */
+#theia-statusBar {
+    height: 22px !important;
+    min-height: 22px !important;
+    max-height: 22px !important;
+    overflow: hidden !important;
+}
+
 #theia-statusBar .area {
     min-width: 0;
     overflow-x: auto;
+    overflow-y: hidden;
     scrollbar-width: none;
 }
 
@@ -1335,3 +1404,223 @@
     background: var(--kairo-surface);
     color: var(--kairo-info);
 }
+
+/* IDEA-style Java Run CodeLens - green play button */
+.monaco-editor .codelens-decoration a[title*="Run"],
+.monaco-editor .codelens-decoration a[aria-label*="Run"] {
+    color: #59A869 !important;
+    font-weight: 500;
+}
+
+.monaco-editor .codelens-decoration a[title*="Run"]:hover,
+.monaco-editor .codelens-decoration a[aria-label*="Run"]:hover {
+    color: #6BC47F !important;
+    text-decoration: underline !important;
+}
+
+/* Glyph margin run icon (IDEA-style green triangle in gutter) */
+.kairo-java-run-gutter {
+    background-color: #59A869;
+    cursor: pointer;
+}
+
+.kairo-java-run-gutter:hover {
+    background-color: #6BC47F;
+}
+
+/* ================================================================ */
+/*  IDEA-style Debug Tool Window                                      */
+/* ================================================================ */
+
+/* Debug token expression colors - IntelliJ Darkula-style */
+:root {
+    --theia-debugTokenExpression-name: #b5b6e3;
+    --theia-debugTokenExpression-type: #808080;
+    --theia-debugTokenExpression-value: #a9b7c6;
+    --theia-debugTokenExpression-string: #6a8759;
+    --theia-debugTokenExpression-number: #6897bb;
+    --theia-debugTokenExpression-boolean: #cc7832;
+    --theia-debugTokenExpression-error: #bc3f3c;
+}
+
+/* Inline values shown at end of line (IDEA-style grey annotations) */
+.monaco-editor .kairo-debug-inline-value {
+    color: #747a80;
+    font-style: italic;
+    font-size: 0.9em;
+    font-family: var(--theia-ui-font-family, 'JetBrains Mono', 'Menlo', monospace);
+    margin-left: 24px;
+    opacity: 0.85;
+    pointer-events: none;
+    white-space: pre;
+}
+
+/* Debug toolbar buttons */
+.kairo-debug-toolbar-btn:hover:not(:disabled) {
+    background: var(--theia-toolbar-hoverBackground, rgba(255,255,255,0.08)) !important;
+}
+
+.kairo-debug-toolbar-btn:active:not(:disabled) {
+    background: rgba(255,255,255,0.15) !important;
+}
+
+.kairo-debug-toolbar-btn:focus {
+    outline: none;
+}
+
+/* Debug sections */
+.kairo-debug-section-header:hover {
+    background: var(--theia-list-hoverBackground, rgba(255,255,255,0.04)) !important;
+}
+
+/* Variable rows */
+.kairo-debug-var-row-idea:hover {
+    background: var(--theia-list-hoverBackground) !important;
+}
+
+/* Value colors */
+.kairo-debug-var-value-idea.null {
+    color: #c0c0c0 !important;
+}
+.kairo-debug-var-value-idea.string {
+    color: var(--theia-debugTokenExpression-string, #6a8759) !important;
+}
+.kairo-debug-var-value-idea.number {
+    color: var(--theia-debugTokenExpression-number, #6897bb) !important;
+}
+.kairo-debug-var-value-idea.error {
+    color: var(--theia-errorForeground, #bc3f3c) !important;
+}
+
+/* Watch value colors */
+.kairo-debug-watch-value.null { color: #c0c0c0; }
+.kairo-debug-watch-value.string { color: #6a8759; }
+.kairo-debug-watch-value.number { color: #6897bb; }
+.kairo-debug-watch-value.error { color: var(--theia-errorForeground, #bc3f3c); }
+
+/* Hover widget (Quick Evaluate popup) */
+.kairo-debug-hover-widget {
+    font-family: var(--theia-monaco-font-family, 'JetBrains Mono', 'Menlo', monospace) !important;
+}
+
+.kairo-debug-hover-widget .kairo-debug-hover-value.null { color: #c0c0c0; }
+.kairo-debug-hover-widget .kairo-debug-hover-value.string { color: #6a8759; }
+.kairo-debug-hover-widget .kairo-debug-hover-value.number { color: #6897bb; }
+.kairo-debug-hover-widget .kairo-debug-hover-value.error { color: var(--theia-errorForeground); }
+
+/* Thread selector */
+.kairo-debug-thread-selector:focus {
+    outline: 1px solid var(--theia-focusBorder);
+    outline-offset: -1px;
+}
+
+.kairo-debug-thread-selector:hover {
+    border-color: var(--theia-focusBorder);
+}
+
+/* Debug tab bar */
+.kairo-debug-tab-bar button:hover {
+    background: var(--theia-list-hoverBackground, rgba(255,255,255,0.04));
+}
+
+/* Current line highlight (paused-at line) - IDEA uses blue */
+.monaco-editor .debug-top-stack-frame-line,
+.monaco-editor .debug-focused-stack-frame-line {
+    background: rgba(60, 130, 246, 0.15) !important;
+}
+
+.monaco-editor .debug-top-stack-frame-glyph-margin,
+.monaco-editor .debug-focused-stack-frame-glyph-margin {
+    background-color: #3c82f6 !important;
+}
+
+/* Breakpoint - IDEA uses red filled circle */
+.monaco-editor .debug-breakpoint-glyph-margin {
+    background-color: #db5c61 !important;
+    border-radius: 50% !important;
+}
+
+/* Line breakpoint active */
+.monaco-editor .debug-breakpoint-column::before,
+.monaco-editor .codicon-debug-breakpoint {
+    color: #db5c61 !important;
+}
+
+/* Debug current line indicator (IDEA arrow) */
+.kairo-debug-current-line-arrow {
+    color: #3c82f6;
+}
+
+/* Tool window tab active state */
+.kairo-debug-tool-window .kairo-debug-tab-bar button[style*="font-weight: 600"] {
+    border-bottom: 2px solid var(--theia-focusBorder) !important;
+}
+
+/* Splitter hover effect */
+.kairo-debug-tool-window div[style*="ns-resize"]:hover,
+.kairo-debug-tool-window div[style*="ew-resize"]:hover {
+    background: var(--theia-focusBorder, #007acc) !important;
+}
+
+/* Disabled state for debug icons */
+.kairo-debug-toolbar-btn:disabled {
+    opacity: 0.4;
+}
+
+/* IDEA-style muted breakpoint icon override */
+.kairo-debug-toolbar-btn .codicon-debug-breakpoint-muted {
+    color: var(--theia-disabledForeground) !important;
+}
+
+/* Scope header in variables panel (Locals, Static, etc) */
+.kairo-debug-var-row-idea > span:first-child {
+    font-size: 9px;
+}
+
+/* Watches toolbar button hover */
+.kairo-debug-watches-idea button:hover {
+    background: var(--theia-toolbar-hoverBackground, rgba(255,255,255,0.08)) !important;
+    border-radius: 2px;
+}
+
+/* Collapsible section header uppercase style - IDEA uses uppercase */
+.kairo-debug-section-header {
+    letter-spacing: 0.3px;
+}
+
+/* Debug status bar */
+.kairo-debug-tool-window div[style*="#ffc66d"] .codicon {
+    color: #ffc66d;
+}
+
+/* Console tab - input area */
+.kairo-debug-console-input {
+    background: var(--theia-input-background);
+    border-top: 1px solid var(--theia-panel-border);
+    color: var(--theia-input-foreground);
+    font-family: var(--theia-monaco-font-family, monospace);
+}
+
+/* Smooth scrollbar for debug panels */
+.kairo-debug-variables-idea::-webkit-scrollbar,
+.kairo-debug-frames-idea::-webkit-scrollbar,
+.kairo-debug-watches-idea::-webkit-scrollbar,
+.kairo-debug-hover-widget::-webkit-scrollbar {
+    width: 8px;
+}
+
+.kairo-debug-variables-idea::-webkit-scrollbar-thumb,
+.kairo-debug-frames-idea::-webkit-scrollbar-thumb,
+.kairo-debug-watches-idea::-webkit-scrollbar-thumb,
+.kairo-debug-hover-widget::-webkit-scrollbar-thumb {
+    background: var(--theia-scrollbarSlider-background);
+    border-radius: 4px;
+}
+
+.kairo-debug-variables-idea::-webkit-scrollbar-thumb:hover,
+.kairo-debug-frames-idea::-webkit-scrollbar-thumb:hover,
+.kairo-debug-watches-idea::-webkit-scrollbar-thumb:hover,
+.kairo-debug-hover-widget::-webkit-scrollbar-thumb:hover {
+    background: var(--theia-scrollbarSlider-hoverBackground);
+}
+

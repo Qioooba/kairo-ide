@@ -241,7 +241,7 @@ export class KairoDebugToolbarWidget extends ReactWidget {
         this.addClass('kairo-widget');
         this.update();
 
-        this.debugSessionService.onDidStateChange(() => this.update());
+        this.debugSessionService.onDidChangeState(() => this.update());
     }
 
     protected onAfterShow(): void {

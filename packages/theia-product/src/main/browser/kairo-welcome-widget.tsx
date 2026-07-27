@@ -20,81 +20,18 @@ import { MessageService } from '@theia/core/lib/common/message-service';
 import { WorkspaceService } from '@theia/workspace/lib/browser';
 import URI from '@theia/core/lib/common/uri';
 import { KairoProjectService } from '@kairo/project-extension';
+import { KairoI18nService, I18nContext } from '@kairo/i18n';
 import type { RecentProject } from '@kairo/protocol';
 
 export const KAIRO_WELCOME_FACTORY_ID = 'kairo-welcome';
 
 interface WelcomeAction {
   testId: string;
-  label: string;
+  labelKey: string;
   command: string;
-  failMessage: string;
+  failMessageKey: string;
   primary?: boolean;
 }
-
-const WELCOME_ACTIONS: WelcomeAction[] = [
-  {
-    testId: 'welcome-import',
-    label: 'New Project…',
-    command: 'kairo.project.import',
-    failMessage: 'Open Import Wizard failed',
-    primary: true,
-  },
-  {
-    testId: 'welcome-select',
-    label: 'Open Project…',
-    command: 'kairo.project.select',
-    failMessage: 'Open Project Selector failed',
-  },
-  {
-    testId: 'welcome-open-workspace',
-    label: 'Open Workspace Folder…',
-    command: 'workspace:open',
-    failMessage: 'Open Workspace failed',
-  },
-];
-
-interface QuickStartStep {
-  testId: string;
-  icon: string;
-  title: string;
-  description: string;
-  action: WelcomeAction;
-}
-
-const QUICK_START_STEPS: QuickStartStep[] = [
-  {
-    testId: 'quickstart-import',
-    icon: '📂',
-    title: '1. Import Your Project',
-    description: 'Select your legacy Java Web project folder. Kairo auto-detects the structure.',
-    action: WELCOME_ACTIONS[0],
-  },
-  {
-    testId: 'quickstart-config',
-    icon: '⚙',
-    title: '2. Configure Run Settings',
-    description: 'Set up Tomcat ports, JDK, and build options in the Run Configurations panel.',
-    action: {
-      testId: 'welcome-run-config',
-      label: 'Open Run Configurations',
-      command: 'kairo.runConfigurations.manage',
-      failMessage: 'Open Run Configurations failed',
-    },
-  },
-  {
-    testId: 'quickstart-run',
-    icon: '▶',
-    title: '3. Build & Run',
-    description: 'Use the toolbar to build, deploy, and run your application on Tomcat 6.',
-    action: {
-      testId: 'welcome-build',
-      label: 'Build & Run',
-      command: 'kairo.buildAndDeploy',
-      failMessage: 'Build and deploy failed',
-    },
-  },
-];
 
 @injectable()
 export class KairoWelcomeWidget extends ReactWidget {
@@ -104,33 +41,45 @@ export class KairoWelcomeWidget extends ReactWidget {
   @inject(MessageService) protected readonly messages!: MessageService;
   @inject(KairoProjectService) protected readonly projectService!: KairoProjectService;
   @inject(WorkspaceService) protected readonly workspaceService!: WorkspaceService;
+  @inject(KairoI18nService) protected readonly i18n!: KairoI18nService;
 
   constructor() {
     super();
     this.id = KAIRO_WELCOME_FACTORY_ID;
-    this.title.label = 'Welcome';
-    this.title.caption = 'Kairo IDE Welcome';
+    this.addClass('kairo-welcome');
+    this.updateTitle();
     this.title.iconClass = 'codicon codicon-home';
     this.title.closable = true;
-    this.addClass('kairo-welcome');
+    this.toDispose.push(this.i18n.onDidChangeLanguage(() => this.updateTitle()));
+  }
+
+  protected updateTitle(): void {
+    this.title.label = this.i18n.t('widget.welcome.title');
+    this.title.caption = this.i18n.t('widget.welcome.caption');
   }
 
   protected async run(action: WelcomeAction): Promise<void> {
     try {
       await this.commandService.executeCommand(action.command);
     } catch (err) {
-      this.messages.error(`${action.failMessage}: ${err instanceof Error ? err.message : String(err)}`);
+      const msg = this.i18n.t(action.failMessageKey as any);
+      this.messages.error(`${msg}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
   render(): React.ReactNode {
-    return React.createElement(KairoWelcome, {
-      projectService: this.projectService,
-      workspaceService: this.workspaceService,
-      commandService: this.commandService,
-      messages: this.messages,
-      run: (a: WelcomeAction) => void this.run(a),
-    });
+    return React.createElement(
+      I18nContext.Provider,
+      { value: this.i18n },
+      React.createElement(KairoWelcome, {
+        projectService: this.projectService,
+        workspaceService: this.workspaceService,
+        commandService: this.commandService,
+        messages: this.messages,
+        i18n: this.i18n,
+        run: (a: WelcomeAction) => void this.run(a),
+      })
+    );
   }
 }
 
@@ -139,15 +88,24 @@ interface KairoWelcomeProps {
   workspaceService: WorkspaceService;
   commandService: CommandService;
   messages: MessageService;
+  i18n: KairoI18nService;
   run: (action: WelcomeAction) => void;
 }
 
 const KairoWelcome: React.FC<KairoWelcomeProps> = ({
-  projectService, workspaceService, run,
+  projectService, workspaceService, i18n, run,
 }) => {
+  const t = React.useCallback((key: string) => i18n.t(key as any), [i18n]);
+
   const [recentProjects, setRecentProjects] = React.useState<RecentProject[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
+  const [, forceUpdate] = React.useReducer(x => x + 1, 0);
+
+  React.useEffect(() => {
+    const disposable = i18n.onDidChangeLanguage(() => forceUpdate());
+    return () => disposable.dispose();
+  }, [i18n]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -171,15 +129,71 @@ const KairoWelcome: React.FC<KairoWelcomeProps> = ({
     void workspaceService.open(new URI(project.rootPath));
   };
 
+  const welcomeActions: WelcomeAction[] = [
+    {
+      testId: 'welcome-import',
+      labelKey: 'widget.welcome.newProject',
+      command: 'kairo.project.import',
+      failMessageKey: 'widget.welcome.importFailed',
+      primary: true,
+    },
+    {
+      testId: 'welcome-select',
+      labelKey: 'widget.welcome.openProject',
+      command: 'kairo.project.select',
+      failMessageKey: 'widget.welcome.selectFailed',
+    },
+    {
+      testId: 'welcome-open-workspace',
+      labelKey: 'widget.welcome.openWorkspace',
+      command: 'workspace:open',
+      failMessageKey: 'widget.welcome.openWorkspaceFailed',
+    },
+  ];
+
+  const quickStartSteps = [
+    {
+      testId: 'quickstart-import',
+      icon: '📂',
+      titleKey: 'widget.welcome.step1Title',
+      descKey: 'widget.welcome.step1Desc',
+      action: welcomeActions[0],
+    },
+    {
+      testId: 'quickstart-config',
+      icon: '⚙',
+      titleKey: 'widget.welcome.step2Title',
+      descKey: 'widget.welcome.step2Desc',
+      action: {
+        testId: 'welcome-run-config',
+        labelKey: 'widget.welcome.openRunConfig',
+        command: 'kairo.runConfigurations.manage',
+        failMessageKey: 'widget.welcome.runConfigFailed',
+      } as WelcomeAction,
+    },
+    {
+      testId: 'quickstart-run',
+      icon: '▶',
+      titleKey: 'widget.welcome.step3Title',
+      descKey: 'widget.welcome.step3Desc',
+      action: {
+        testId: 'welcome-build',
+        labelKey: 'widget.welcome.buildRun',
+        command: 'kairo.buildAndDeploy',
+        failMessageKey: 'widget.welcome.buildFailed',
+      } as WelcomeAction,
+    },
+  ];
+
   return (
     <div className="kairo-welcome-body">
       <h1 className="kairo-welcome-title">Kairo IDE</h1>
       <p className="kairo-welcome-tagline">
-        Import, build, deploy and run legacy Java Web projects on Tomcat 6 — entirely offline.
+        {t('widget.welcome.caption')}
       </p>
-      <div className="kairo-welcome-actions" role="group" aria-label="Getting started actions">
-        <h2 className="kairo-welcome-section-title">Get Started</h2>
-        {WELCOME_ACTIONS.map(a => (
+      <div className="kairo-welcome-actions" role="group" aria-label={t('widget.welcome.quickStart')}>
+        <h2 className="kairo-welcome-section-title">{t('widget.welcome.quickStart')}</h2>
+        {welcomeActions.map(a => (
           <button
             key={a.testId}
             type="button"
@@ -187,14 +201,14 @@ const KairoWelcome: React.FC<KairoWelcomeProps> = ({
             data-testid={a.testId}
             onClick={() => run(a)}
           >
-            {a.label}
+            {t(a.labelKey as any)}
           </button>
         ))}
       </div>
       {!loading && recentProjects.length > 0 && (
         <div className="kairo-welcome-recent" data-testid="welcome-recent">
-          <h2 className="kairo-welcome-recent-title">Recent Projects</h2>
-          <ul className="kairo-welcome-recent-list" role="list" aria-label="Recent projects">
+          <h2 className="kairo-welcome-recent-title">{t('widget.welcome.recentProjects')}</h2>
+          <ul className="kairo-welcome-recent-list" role="list" aria-label={t('widget.welcome.recentProjects')}>
             {recentProjects.map(p => (
               <li key={p.id} className="kairo-welcome-recent-item">
                 <button
@@ -212,6 +226,11 @@ const KairoWelcome: React.FC<KairoWelcomeProps> = ({
           </ul>
         </div>
       )}
+      {!loading && recentProjects.length === 0 && !error && (
+        <p className="kairo-welcome-empty" style={{ textAlign: 'center', color: 'var(--theia-descriptionForeground)', padding: '16px' }}>
+          {t('widget.welcome.noRecentProjects')}
+        </p>
+      )}
       {!loading && error && (
         <div className="kairo-welcome-error" role="alert" data-testid="welcome-error" style={{ padding: '12px', margin: '8px 0' }}>
           <div style={{
@@ -222,19 +241,19 @@ const KairoWelcome: React.FC<KairoWelcomeProps> = ({
             color: 'var(--theia-errorForeground)',
             fontSize: '13px',
           }}>
-            <span aria-hidden="true">⚠</span> Failed to load recent projects: {error}
+            <span aria-hidden="true">⚠</span> {error}
           </div>
         </div>
       )}
       <div className="kairo-welcome-quickstart" data-testid="welcome-quickstart">
-        <h2 className="kairo-welcome-section-title">Quick Start Guide</h2>
-        <ol className="kairo-quickstart-steps" role="list" aria-label="Quick start steps">
-          {QUICK_START_STEPS.map(step => (
+        <h2 className="kairo-welcome-section-title">{t('widget.welcome.quickStart')}</h2>
+        <ol className="kairo-quickstart-steps" role="list" aria-label={t('widget.welcome.quickStart')}>
+          {quickStartSteps.map(step => (
             <li key={step.testId} className="kairo-quickstart-step" data-testid={step.testId}>
               <span className="kairo-quickstart-icon">{step.icon}</span>
               <div className="kairo-quickstart-content">
-                <strong>{step.title}</strong>
-                <p>{step.description}</p>
+                <strong>{t(step.titleKey as any)}</strong>
+                <p>{t(step.descKey as any)}</p>
               </div>
               <button
                 type="button"
@@ -242,15 +261,12 @@ const KairoWelcome: React.FC<KairoWelcomeProps> = ({
                 data-testid={`${step.testId}-action`}
                 onClick={() => run(step.action)}
               >
-                {step.action.label}
+                {t(step.action.labelKey as any)}
               </button>
             </li>
           ))}
         </ol>
       </div>
-      <p className="kairo-welcome-hint">
-        All actions are also available in the command palette (Cmd+Shift+P, prefix &quot;Kairo:&quot;).
-      </p>
     </div>
   );
 };

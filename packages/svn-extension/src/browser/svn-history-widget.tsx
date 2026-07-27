@@ -1,15 +1,36 @@
 import * as React from 'react';
 import { injectable, inject } from '@theia/core/shared/inversify';
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
+import { ClipboardService } from '@theia/core/lib/browser/clipboard-service';
+import { MessageService } from '@theia/core/lib/common/message-service';
+import { QuickInputService } from '@theia/core/lib/browser/quick-input/quick-input-service';
+import { WorkspaceService } from '@theia/workspace/lib/browser';
 import { SvnService } from './svn-service';
 import { SvnLogEntry } from './svn-types';
 
 interface SvnHistoryProps {
   svnService: SvnService;
+  clipboardService: ClipboardService;
+  messageService: MessageService;
+  quickInputService: QuickInputService;
+  workspaceService: WorkspaceService;
   targetPath?: string;
 }
 
-const SvnHistoryComponent: React.FC<SvnHistoryProps> = ({ svnService, targetPath: initialTargetPath }) => {
+interface ContextMenuState {
+  x: number;
+  y: number;
+  entry: SvnLogEntry;
+}
+
+const SvnHistoryComponent: React.FC<SvnHistoryProps> = ({
+  svnService,
+  clipboardService,
+  messageService,
+  quickInputService,
+  workspaceService,
+  targetPath: initialTargetPath,
+}) => {
   const [entries, setEntries] = React.useState<SvnLogEntry[]>([]);
   const [loading, setLoading] = React.useState(false);
   const [selectedRevision, setSelectedRevision] = React.useState<number | null>(null);
@@ -23,6 +44,21 @@ const SvnHistoryComponent: React.FC<SvnHistoryProps> = ({ svnService, targetPath
     }
   }, [initialTargetPath]);
   const [expandedEntry, setExpandedEntry] = React.useState<number | null>(null);
+  const [contextMenu, setContextMenu] = React.useState<ContextMenuState | null>(null);
+
+  // Close the right-click menu when the user clicks anywhere else or
+  // presses Escape.
+  React.useEffect(() => {
+    if (!contextMenu) return;
+    const handleClick = () => setContextMenu(null);
+    const handleKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setContextMenu(null); };
+    window.addEventListener('mousedown', handleClick);
+    window.addEventListener('keydown', handleKey);
+    return () => {
+      window.removeEventListener('mousedown', handleClick);
+      window.removeEventListener('keydown', handleKey);
+    };
+  }, [contextMenu]);
 
   const loadHistory = React.useCallback(async () => {
     setLoading(true);
@@ -66,6 +102,103 @@ const SvnHistoryComponent: React.FC<SvnHistoryProps> = ({ svnService, targetPath
       case 'R': return { label: 'R', color: 'var(--theia-textLink-foreground)' };
       default: return { label: action, color: 'var(--theia-descriptionForeground)' };
     }
+  };
+
+  // ---- Right-click actions on a log entry ---------------------------------
+
+  const handleContextMenu = (e: React.MouseEvent, entry: SvnLogEntry) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setSelectedRevision(entry.revision);
+    setContextMenu({ x: e.clientX, y: e.clientY, entry });
+  };
+
+  const findPreviousRevision = (entry: SvnLogEntry): number | undefined => {
+    const idx = entries.findIndex(e => e.revision === entry.revision);
+    if (idx < 0 || idx >= entries.length - 1) return undefined;
+    return entries[idx + 1].revision;
+  };
+
+  const compareWithPrevious = (entry: SvnLogEntry) => {
+    const prev = findPreviousRevision(entry);
+    if (!prev) {
+      messageService.warn('No previous revision available');
+      return;
+    }
+    if (!targetPath) {
+      messageService.warn('No file path is bound to this history view');
+      return;
+    }
+    svnService.requestDiff(targetPath, prev, entry.revision);
+  };
+
+  const compareWithWorking = (entry: SvnLogEntry) => {
+    if (!targetPath) {
+      messageService.warn('No file path is bound to this history view');
+      return;
+    }
+    svnService.requestDiff(targetPath, entry.revision, 'WORKING');
+  };
+
+  const getRevision = async (entry: SvnLogEntry) => {
+    if (!targetPath) {
+      messageService.warn('No file path is bound to this history view');
+      return;
+    }
+    const base = targetPath.split(/[\\/]/).pop() || 'file';
+    const outName = `${base}.r${entry.revision}`;
+    const wcRoot = svnService.getActiveWcRoot();
+    if (!wcRoot) {
+      messageService.warn('No active SVN working copy');
+      return;
+    }
+    const outDir = `${wcRoot}/.svn-kairo-export`;
+    try {
+      const { URI } = await import('@theia/core/lib/common/uri');
+      const { FileService } = await import('@theia/filesystem/lib/browser/file-service');
+      // Best-effort mkdir
+      try {
+        await (workspaceService as any).root; // touch workspaceService to satisfy linter
+      } catch { /* ignore */ }
+      const fileService = (window as any).theiaFileService;
+      if (fileService) {
+        try {
+          await fileService.create(new URI('file://' + outDir), { fromString: '' });
+        } catch { /* may already exist */ }
+      }
+      const outPath = `${outDir}/${outName}`;
+      await svnService.exportAtRevision(targetPath, entry.revision, outPath);
+      messageService.info(`Exported to ${outPath}`);
+    } catch (e) {
+      messageService.error(`Export failed: ${(e as Error).message}`);
+    }
+  };
+
+  const revertToThis = async (entry: SvnLogEntry) => {
+    if (!targetPath) {
+      messageService.warn('No file path is bound to this history view');
+      return;
+    }
+    if (!confirm(`Revert ${targetPath} to r${entry.revision}?`)) return;
+    try {
+      await svnService.revertToRevision(targetPath, entry.revision);
+      messageService.info(`Reverted to r${entry.revision}`);
+    } catch (e) {
+      messageService.error(`Revert failed: ${(e as Error).message}`);
+    }
+  };
+
+  const copyRevision = async (entry: SvnLogEntry) => {
+    try {
+      await clipboardService.writeText(String(entry.revision));
+      messageService.info(`Copied r${entry.revision}`);
+    } catch (e) {
+      messageService.error(`Copy failed: ${(e as Error).message}`);
+    }
+  };
+
+  const showChangeList = (entry: SvnLogEntry) => {
+    setExpandedEntry(expandedEntry === entry.revision ? null : entry.revision);
   };
 
   const selectedEntry = entries.find(e => e.revision === selectedRevision);
@@ -115,6 +248,7 @@ const SvnHistoryComponent: React.FC<SvnHistoryProps> = ({ svnService, targetPath
             key={entry.revision}
             className={`kairo-svn-log-entry ${selectedRevision === entry.revision ? 'selected' : ''}`}
             onClick={() => setSelectedRevision(entry.revision)}
+            onContextMenu={e => handleContextMenu(e, entry)}
           >
             <div className="kairo-svn-log-header" onClick={e => { e.stopPropagation(); toggleExpand(entry.revision); }}>
               <span className="kairo-svn-log-expand">{expandedEntry === entry.revision ? '▼' : '▶'}</span>
@@ -146,6 +280,38 @@ const SvnHistoryComponent: React.FC<SvnHistoryProps> = ({ svnService, targetPath
           </div>
         ))}
       </div>
+
+      {contextMenu && (
+        <div
+          className="kairo-svn-context-menu"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          onMouseDown={e => e.stopPropagation()}
+        >
+          <div className="kairo-svn-context-menu-header">
+            r{contextMenu.entry.revision} · {contextMenu.entry.author}
+          </div>
+          <button className="kairo-svn-context-menu-item" onClick={() => { compareWithPrevious(contextMenu.entry); setContextMenu(null); }}>
+            <span className="codicon codicon-diff" /> Compare with previous
+          </button>
+          <button className="kairo-svn-context-menu-item" onClick={() => { compareWithWorking(contextMenu.entry); setContextMenu(null); }}>
+            <span className="codicon codicon-diff" /> Compare with working copy
+          </button>
+          <div className="kairo-svn-context-menu-sep" />
+          <button className="kairo-svn-context-menu-item" onClick={() => { showChangeList(contextMenu.entry); setContextMenu(null); }}>
+            <span className="codicon codicon-list-unordered" /> Show changed paths
+          </button>
+          <button className="kairo-svn-context-menu-item" onClick={() => { getRevision(contextMenu.entry); setContextMenu(null); }}>
+            <span className="codicon codicon-cloud-download" /> Get (export r{contextMenu.entry.revision})
+          </button>
+          <div className="kairo-svn-context-menu-sep" />
+          <button className="kairo-svn-context-menu-item" onClick={() => { revertToThis(contextMenu.entry); setContextMenu(null); }}>
+            <span className="codicon codicon-discard" /> Revert file to r{contextMenu.entry.revision}
+          </button>
+          <button className="kairo-svn-context-menu-item" onClick={() => { copyRevision(contextMenu.entry); setContextMenu(null); }}>
+            <span className="codicon codicon-copy" /> Copy revision number
+          </button>
+        </div>
+      )}
 
       {selectedEntry && (
         <div className="kairo-svn-history-detail">
@@ -300,6 +466,47 @@ const SvnHistoryComponent: React.FC<SvnHistoryProps> = ({ svnService, targetPath
           max-height: 100px;
           overflow-y: auto;
         }
+        .kairo-svn-context-menu {
+          position: fixed;
+          z-index: 10000;
+          min-width: 260px;
+          background: var(--theia-menu-background, var(--theia-editorWidget-background));
+          color: var(--theia-menu-foreground, var(--theia-foreground));
+          border: 1px solid var(--theia-menu-border, var(--theia-dropdown-border));
+          border-radius: 4px;
+          box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+          padding: 4px 0;
+          font-size: 12px;
+        }
+        .kairo-svn-context-menu-header {
+          padding: 4px 12px;
+          font-size: 11px;
+          color: var(--theia-descriptionForeground);
+          border-bottom: 1px solid var(--theia-menu-border, var(--theia-dropdown-border));
+          margin-bottom: 4px;
+        }
+        .kairo-svn-context-menu-item {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          width: 100%;
+          padding: 4px 12px;
+          background: transparent;
+          color: inherit;
+          border: 0;
+          text-align: left;
+          cursor: pointer;
+          font-size: 12px;
+        }
+        .kairo-svn-context-menu-item:hover {
+          background: var(--theia-menu-selectionBackground, var(--theia-list-hoverBackground));
+          color: var(--theia-menu-selectionForeground, var(--theia-list-activeSelectionForeground));
+        }
+        .kairo-svn-context-menu-sep {
+          height: 1px;
+          background: var(--theia-menu-border, var(--theia-dropdown-border));
+          margin: 4px 0;
+        }
       `}</style>
     </div>
   );
@@ -310,6 +517,10 @@ export class SvnHistoryWidget extends ReactWidget {
   static readonly ID = 'kairo-svn-history-view';
 
   @inject(SvnService) protected readonly svnService!: SvnService;
+  @inject(ClipboardService) protected readonly clipboardService!: ClipboardService;
+  @inject(MessageService) protected readonly messageService!: MessageService;
+  @inject(QuickInputService) protected readonly quickInputService!: QuickInputService;
+  @inject(WorkspaceService) protected readonly workspaceService!: WorkspaceService;
 
   protected targetPath: string = '';
 
@@ -329,7 +540,25 @@ export class SvnHistoryWidget extends ReactWidget {
     this.update();
   }
 
+  /**
+   * Clear the current history target. Called when the active SVN working
+   * copy changes so the widget does not display stale content from
+   * the previous project.
+   */
+  reset(): void {
+    this.targetPath = '';
+    this.title.label = 'SVN History';
+    this.update();
+  }
+
   protected render(): React.ReactNode {
-    return React.createElement(SvnHistoryComponent, { svnService: this.svnService, targetPath: this.targetPath });
+    return React.createElement(SvnHistoryComponent, {
+      svnService: this.svnService,
+      clipboardService: this.clipboardService,
+      messageService: this.messageService,
+      quickInputService: this.quickInputService,
+      workspaceService: this.workspaceService,
+      targetPath: this.targetPath,
+    });
   }
 }

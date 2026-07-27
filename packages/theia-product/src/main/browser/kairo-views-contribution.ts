@@ -27,6 +27,7 @@ import {
 } from '@theia/core/lib/browser';
 import { Command, CommandRegistry, CommandService, MenuContribution, MenuModelRegistry, MenuPath, MessageService } from '@theia/core/lib/common';
 import { KeybindingContribution, KeybindingRegistry } from '@theia/core/lib/browser/keybinding';
+import { isOSX } from '@theia/core/lib/common/os';
 import { CommonMenus } from '@theia/core/lib/browser/common-menus';
 import { MAIN_MENU_BAR } from '@theia/core/lib/common/menu/menu-types';
 import { RuntimeConnectionService, KairoError } from '@kairo/runtime-extension';
@@ -62,6 +63,7 @@ import {
   KAIRO_DEBUG_CONSOLE_FACTORY_ID,
   KAIRO_DEBUG_WATCH_FACTORY_ID,
   KAIRO_DEBUG_DIAGNOSTICS_FACTORY_ID,
+  KAIRO_DEBUG_TOOL_WINDOW_FACTORY_ID,
 } from './kairo-factory-ids';
 import type {
   ServerInstance,
@@ -70,6 +72,7 @@ import type {
   WsEvent,
 } from '@kairo/protocol';
 import { KairoJavaDebugService } from './kairo-java-debug-service';
+import { KairoDebugSessionService } from './kairo-debug-session-service';
 
 /* ------------------------------------------------------------------ */
 /*  Commands                                                            */
@@ -113,6 +116,13 @@ export namespace KairoCommands {
   export const REVEAL_KAIRO_DEBUG_CONSOLE: Command = { id: 'kairo.debug.view.console', label: 'Kairo: Show Debug Console' };
   export const REVEAL_KAIRO_DEBUG_WATCH: Command = { id: 'kairo.debug.view.watch', label: 'Kairo: Show Debug Watch' };
   export const OPEN_DEBUG_DIAGNOSTICS: Command = { id: 'kairo:open-debug-diagnostics', label: 'Kairo: Open Debug Diagnostics' };
+  export const OPEN_IDEA_DEBUG_TOOL_WINDOW: Command = { id: 'kairo.debug.openToolWindow', label: 'Debug: Open Debug Tool Window (IDEA-style)' };
+  export const DEBUG_RESTART: Command = { id: 'kairo.debug.restart', label: 'Debug: Rerun' };
+  export const DEBUG_DROP_FRAME: Command = { id: 'kairo.debug.dropFrame', label: 'Debug: Drop Frame' };
+  export const DEBUG_SHOW_INLINE_VALUES: Command = { id: 'kairo.debug.toggleInlineValues', label: 'Debug: Toggle Inline Values' };
+  export const DEBUG_MUTE_BREAKPOINTS: Command = { id: 'kairo.debug.muteBreakpoints', label: 'Debug: Mute Breakpoints' };
+  export const DEBUG_EVALUATE_EXPRESSION: Command = { id: 'kairo.debug.evaluateExpression', label: 'Debug: Evaluate Expression' };
+  export const DEBUG_CONSOLE_FOCUS: Command = { id: 'kairo.debug.console.focus', label: 'Debug: Focus Console' };
   export const SHOW_WELCOME: Command = { id: 'kairo.welcome.show', label: 'Help: Welcome', category: 'Help' };
   export const TOGGLE_DEVTOOLS: Command = { id: 'kairo.devtools.toggle', label: 'Help: Toggle Developer Tools', category: 'Help' };
 }
@@ -228,6 +238,7 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
   @inject(BuildStore) protected buildStore!: BuildStore;
   @inject(Container) protected readonly container!: Container;
   protected javaDebug: KairoJavaDebugService | undefined;
+  protected debugSessionService: KairoDebugSessionService | undefined;
 
   protected eventsUnsub: (() => void) | undefined;
   protected statusUnsub: (() => void) | undefined;
@@ -243,6 +254,13 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
       this.javaDebug = await this.container.getAsync(KairoJavaDebugService);
     }
     return this.javaDebug;
+  }
+
+  protected async getDebugSessionService(): Promise<KairoDebugSessionService> {
+    if (!this.debugSessionService) {
+      this.debugSessionService = await this.container.getAsync(KairoDebugSessionService);
+    }
+    return this.debugSessionService;
   }
 
   protected serversView: ServerViewWidget | undefined;
@@ -647,6 +665,64 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
     registry.registerCommand(KairoCommands.OPEN_DEBUG_DIAGNOSTICS, {
       execute: () => { void this.revealOrCreateMain(KAIRO_DEBUG_DIAGNOSTICS_FACTORY_ID, () => undefined, () => undefined); },
     });
+
+    // IDEA-style debug tool window (bottom panel)
+    registry.registerCommand(KairoCommands.OPEN_IDEA_DEBUG_TOOL_WINDOW, {
+      execute: async () => {
+        try {
+          return await this.revealOrCreateBottom(KAIRO_DEBUG_TOOL_WINDOW_FACTORY_ID);
+        } catch (err) {
+          this.messages.error(kairoErrorMessage(err, 'Failed to open Debug tool window'));
+          return undefined;
+        }
+      },
+    });
+
+    registry.registerCommand(KairoCommands.DEBUG_RESTART, {
+      execute: async () => {
+        const svc = await this.getDebugSessionService();
+        try { await svc.restart(); } catch {
+          await svc.stop();
+        }
+      },
+      isEnabled: () => !!this.debugSessionService?.currentState.hasSession,
+    });
+
+    registry.registerCommand(KairoCommands.DEBUG_DROP_FRAME, {
+      execute: async () => {
+        try {
+          const svc = await this.getDebugSessionService();
+          const session = (svc as any).sessionManager?.currentSession;
+          if (session) {
+            await session.sendRequest('stepBack', { threadId: session.currentThread?.threadId ?? 0 });
+          }
+        } catch {
+          // not supported
+        }
+      },
+      isEnabled: () => !!this.debugSessionService?.currentState.isSuspended,
+    });
+
+    registry.registerCommand(KairoCommands.DEBUG_MUTE_BREAKPOINTS, {
+      execute: async () => {
+        const svc = await this.getDebugSessionService();
+        svc.toggleMuteBreakpoints();
+      },
+    });
+
+    registry.registerCommand(KairoCommands.DEBUG_EVALUATE_EXPRESSION, {
+      execute: async () => {
+        this.commands.executeCommand('kairo.debug.view.console');
+      },
+      isEnabled: () => !!this.debugSessionService?.currentState.isSuspended,
+    });
+
+    registry.registerCommand(KairoCommands.DEBUG_CONSOLE_FOCUS, {
+      execute: () => {
+        return this.commands.executeCommand('kairo.debug.view.console');
+      },
+    });
+
     registry.registerCommand(KairoCommands.MANAGE_RUN_CONFIGURATIONS, {
       execute: () => { void this.revealOrCreateMain(KAIRO_RUN_CONFIGURATIONS_FACTORY_ID, () => undefined, () => undefined); },
     });
@@ -979,6 +1055,51 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
       command: KairoCommands.TOGGLE_TERMINAL.id,
       keybinding: 'alt+f12',
     });
+
+    // IDEA-style Debug keybindings (platform-specific)
+    // Note: stepOver/stepInto/stepOut/continue/runToCursor are registered
+    // in the platform keymap files (kairo-idea-*-keymap.ts) to avoid duplication.
+    if (isOSX) {
+      keybindings.registerKeybinding({
+        command: KairoCommands.DEBUG_RESTART.id,
+        keybinding: 'cmd+r',
+        when: 'inDebugMode',
+      });
+      keybindings.registerKeybinding({
+        command: 'workbench.action.debug.stop',
+        keybinding: 'cmd+f2',
+        when: 'inDebugMode',
+      });
+      keybindings.registerKeybinding({
+        command: KairoCommands.DEBUG_EVALUATE_EXPRESSION.id,
+        keybinding: 'alt+f8',
+        when: 'inDebugMode',
+      });
+      keybindings.registerKeybinding({
+        command: 'workbench.view.debug',
+        keybinding: 'cmd+5',
+      });
+    } else {
+      keybindings.registerKeybinding({
+        command: KairoCommands.DEBUG_RESTART.id,
+        keybinding: 'ctrl+f5',
+        when: 'inDebugMode',
+      });
+      keybindings.registerKeybinding({
+        command: 'workbench.action.debug.stop',
+        keybinding: 'shift+f5',
+        when: 'inDebugMode',
+      });
+      keybindings.registerKeybinding({
+        command: KairoCommands.DEBUG_EVALUATE_EXPRESSION.id,
+        keybinding: 'alt+f8',
+        when: 'inDebugMode',
+      });
+      keybindings.registerKeybinding({
+        command: 'workbench.view.debug',
+        keybinding: 'alt+5',
+      });
+    }
   }
 
   protected async revealOrCreateMain<T extends Widget>(
@@ -996,6 +1117,20 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
     w.update();
     // Focus the first focusable element in the target panel (D4.1)
     this.focusFirstFocusable(w.node);
+  }
+
+  protected async revealOrCreateBottom<T extends Widget>(
+    id: string,
+  ): Promise<void> {
+    const w = await this.widgetManager.getOrCreateWidget(id) as T;
+    try {
+      this.shell.addWidget(w, { area: 'bottom' });
+    } catch (_e) {
+      // Already attached
+    }
+    this.shell.activateWidget(w.id);
+    this.shell.revealWidget(w.id);
+    w.update();
   }
 
   protected async revealOrCreate<T extends Widget>(

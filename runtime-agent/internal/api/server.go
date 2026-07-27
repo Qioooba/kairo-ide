@@ -440,6 +440,9 @@ func (s *Server) routes() {
 	s.router.HandleFunc("/api/v1/debug/adapter/status", s.handleDebugAdapterStatus)
 	// JDK download
 	s.router.HandleFunc("/api/v1/debug/jdk/download", s.handleJDKDownload)
+	// Java run/detect main/test methods (IDEA-style one-click run)
+	s.router.HandleFunc("/api/v1/java/run", s.handleRunJava)
+	s.router.HandleFunc("/api/v1/java/detect", s.handleDetectJava)
 }
 
 // doRestart performs the actual restart sequence after

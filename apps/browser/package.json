@@ -37,7 +37,6 @@
     "@theia/navigator": "1.73.1",
     "@theia/outline-view": "1.73.1",
     "@theia/preferences": "1.73.1",
-    "@theia/search-in-workspace": "1.73.1",
     "@theia/terminal": "1.73.1",
     "@theia/workspace": "1.73.1"
   },

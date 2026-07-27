@@ -73,6 +73,12 @@ export interface SvnBackendService {
   $setCredentials(creds: SvnCredential | undefined): Promise<void>;
   /** Checkout a repository into a target directory. */
   $checkout(url: string, target: string, revision?: string): Promise<CommandResult>;
+  /** Cat a file at a specific revision (svn cat -r REV path). Used by Diff to load historical content. */
+  $getFileAtRevision(cwd: string, relPath: string, revision: string | number): Promise<CommandResult>;
+  /** Export a single file at a specific revision to a local path. */
+  $exportAtRevision(cwd: string, relPath: string, revision: string | number, outPath: string): Promise<CommandResult>;
+  /** Revert a file to a specific revision (svn merge -r HEAD:REV path). */
+  $revertToRevision(cwd: string, relPath: string, revision: string | number): Promise<CommandResult>;
 }
 
 /** Backend → browser: notifications. Browser side can optionally implement this. */

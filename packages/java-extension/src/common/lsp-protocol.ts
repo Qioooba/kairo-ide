@@ -264,6 +264,9 @@ export interface LSPInitializeParams {
       rangeFormatting?: { dynamicRegistration?: boolean };
       typeDefinition?: { dynamicRegistration?: boolean; linkSupport?: boolean };
       implementation?: { dynamicRegistration?: boolean; linkSupport?: boolean };
+      callHierarchy?: { dynamicRegistration?: boolean };
+      typeHierarchy?: { dynamicRegistration?: boolean };
+      inlayHint?: { dynamicRegistration?: boolean };
       publishDiagnostics?: { relatedInformation?: boolean; versionSupport?: boolean; codeDescriptionSupport?: boolean; dataSupport?: boolean };
     };
     window?: { showMessage?: { dynamicRegistration?: boolean } };
@@ -281,6 +284,24 @@ export interface LSPInitializeResult {
 export interface LSPLocation {
   uri: string;
   range: LSPRange;
+}
+
+export interface LSPLocationLink {
+  originSelectionRange?: LSPRange;
+  targetUri: string;
+  targetRange: LSPRange;
+  targetSelectionRange: LSPRange;
+}
+
+export enum LSPDocumentHighlightKind {
+  Text = 1,
+  Read = 2,
+  Write = 3,
+}
+
+export interface LSPDocumentHighlight {
+  range: LSPRange;
+  kind?: LSPDocumentHighlightKind;
 }
 
 /* ------------------------------------------------------------------ */

@@ -15,6 +15,7 @@ import {
   LSPPublishDiagnosticsParams,
   LSPCompletionList,
   LSPLocation,
+  LSPLocationLink,
   LSPHover,
   LSPSignatureHelp,
   LSPDocumentSymbolResult,
@@ -31,6 +32,7 @@ import {
   LSPProgressParams,
   LSPTextEdit,
   LSPInlayHint,
+  LSPDocumentHighlight,
 } from '../common/lsp-protocol';
 import { JdtLsBackendService, JdtLsFrontendClient } from '../common/java-ls-protocol';
 
@@ -141,6 +143,16 @@ export class JdtLsService implements JdtLsBackendService {
   async references(p: { uri: string; line: number; character: number; includeDeclaration: boolean }): Promise<LSPLocation[]> {
     if (!this.manager) return [];
     return this.manager.references(p);
+  }
+
+  async typeDefinition(p: { uri: string; line: number; character: number }): Promise<LSPLocation | LSPLocation[] | LSPLocationLink[] | null> {
+    if (!this.manager) return null;
+    return this.manager.typeDefinition(p);
+  }
+
+  async documentHighlight(p: { uri: string; line: number; character: number }): Promise<LSPDocumentHighlight[]> {
+    if (!this.manager) return [];
+    return this.manager.documentHighlight(p);
   }
 
   async signatureHelp(p: { uri: string; line: number; character: number; triggerKind?: 1 | 2 | 3; triggerCharacter?: string; isRetrigger?: boolean }): Promise<LSPSignatureHelp | null> {
@@ -322,6 +334,14 @@ export class JdtLsService implements JdtLsBackendService {
 
   async $references(p: { uri: string; line: number; character: number; includeDeclaration: boolean }): Promise<LSPLocation[]> {
     return this.references(p);
+  }
+
+  async $typeDefinition(p: { uri: string; line: number; character: number }): Promise<LSPLocation | LSPLocation[] | LSPLocationLink[] | null> {
+    return this.typeDefinition(p);
+  }
+
+  async $documentHighlight(p: { uri: string; line: number; character: number }): Promise<LSPDocumentHighlight[]> {
+    return this.documentHighlight(p);
   }
 
   async $signatureHelp(p: { uri: string; line: number; character: number; triggerKind?: 1 | 2 | 3; triggerCharacter?: string; isRetrigger?: boolean }): Promise<LSPSignatureHelp | null> {

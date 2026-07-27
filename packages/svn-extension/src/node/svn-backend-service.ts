@@ -580,4 +580,18 @@ export class SvnBackendServiceImpl implements SvnBackendService {
     if (revision) args.push('-r', revision);
     return this.$exec(args, target, 'write');
   }
+
+  async $getFileAtRevision(cwd: string, relPath: string, revision: string | number): Promise<CommandResult> {
+    return this.$exec(['cat', '-r', String(revision), relPath], cwd, 'read');
+  }
+
+  async $exportAtRevision(cwd: string, relPath: string, revision: string | number, outPath: string): Promise<CommandResult> {
+    const args = ['export', '-r', String(revision), '--force', relPath, outPath];
+    return this.$exec(args, cwd, 'read');
+  }
+
+  async $revertToRevision(cwd: string, relPath: string, revision: string | number): Promise<CommandResult> {
+    // svn merge -r HEAD:revision path  → bring file back to that revision
+    return this.$exec(['merge', '-r', `HEAD:${revision}`, relPath], cwd, 'write');
+  }
 }

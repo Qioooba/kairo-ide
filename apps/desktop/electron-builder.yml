@@ -25,8 +25,10 @@ files:
   - lib/process-manager.js.map
   - lib/frontend/**/*
   - lib/backend/**/*
-  - bundled/**/*
   - package.json
+asar: true
+asarUnpack:
+  - lib/backend/native/**/*
 
 # Platform-specific agent binary. The desktop prebuild script
 # produces the binary under runtime-agent/bin/. electron-builder
@@ -63,9 +65,15 @@ win:
   extraResources:
     - from: ../../runtime-agent/bin/kairo-runtime.exe
       to: bin/kairo-runtime.exe
-  # Sign the executable if a certificate is available.
+    - from: bundled/tomcat6
+      to: bundled/tomcat6
+      filter: ["**/*"]
+    - from: bundled/jdtls
+      to: bundled/jdtls
+      filter: ["**/*"]
+    - from: bundled/kairo-jdi-bridge.jar
+      to: bundled/kairo-jdi-bridge.jar
   sign: scripts/sign-win.cjs
-  # Ask for admin rights for the installer (needed for Program Files).
   requestedExecutionLevel: asInvoker
 
 nsis:

@@ -46,6 +46,7 @@ import {
   LSPInitializeResult,
   LSPPublishDiagnosticsParams,
   LSPLocation,
+  LSPLocationLink,
   LSPCompletionList,
   LSPHover,
   LSPSignatureHelp,
@@ -63,6 +64,7 @@ import {
   LSPTypeHierarchyItem,
   LSPInlayHint,
   LSPTextEdit,
+  LSPDocumentHighlight,
 } from '../common/lsp-protocol';
 
 /** What the manager knows about the install of JDT LS. */
@@ -401,9 +403,18 @@ export class JdtLsManager implements Disposable {
             hover: { dynamicRegistration: true, contentFormat: ['markdown', 'plaintext'] },
             signatureHelp: { dynamicRegistration: true },
             definition: { dynamicRegistration: true, linkSupport: true },
+            typeDefinition: { dynamicRegistration: true, linkSupport: true },
+            implementation: { dynamicRegistration: true, linkSupport: true },
             references: { dynamicRegistration: true },
+            documentHighlight: { dynamicRegistration: true },
             documentSymbol: { dynamicRegistration: true, symbolKind: { valueSet: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26] } },
+            codeAction: { dynamicRegistration: true },
             rename: { dynamicRegistration: true, prepareSupport: false },
+            formatting: { dynamicRegistration: true },
+            rangeFormatting: { dynamicRegistration: true },
+            callHierarchy: { dynamicRegistration: true },
+            typeHierarchy: { dynamicRegistration: true },
+            inlayHint: { dynamicRegistration: true },
             publishDiagnostics: { relatedInformation: true, versionSupport: false, codeDescriptionSupport: true },
           },
           window: { showMessage: { dynamicRegistration: true } },
@@ -544,6 +555,17 @@ export class JdtLsManager implements Disposable {
     const result = await this.sendTextDocumentPositionRequest<LSPLocation[]>('textDocument/references', params, {
       context: { includeDeclaration: params.includeDeclaration },
     });
+    return result ?? [];
+  }
+
+  async typeDefinition(params: { uri: string; line: number; character: number }): Promise<LSPLocation | LSPLocation[] | LSPLocationLink[] | null> {
+    return this.sendTextDocumentPositionRequest<LSPLocation | LSPLocation[] | LSPLocationLink[] | null>(
+      'textDocument/typeDefinition', params,
+    );
+  }
+
+  async documentHighlight(params: { uri: string; line: number; character: number }): Promise<LSPDocumentHighlight[]> {
+    const result = await this.sendTextDocumentPositionRequest<LSPDocumentHighlight[]>('textDocument/documentHighlight', params);
     return result ?? [];
   }
 

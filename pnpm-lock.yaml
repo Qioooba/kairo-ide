@@ -14,6 +14,22 @@ overrides:
 importers:
 
   .:
+    dependencies:
+      '@kairo/protocol':
+        specifier: workspace:*
+        version: link:packages/protocol
+      '@kairo/runtime-extension':
+        specifier: workspace:*
+        version: link:packages/runtime-extension
+      '@kairo/theia-product':
+        specifier: workspace:*
+        version: link:packages/theia-product
+      '@theia/core':
+        specifier: 1.73.1
+        version: 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@theia/electron':
+        specifier: 1.73.1
+        version: 1.73.1(electron@39.8.7)
     devDependencies:
       '@axe-core/playwright':
         specifier: ^4.12.1
@@ -23,16 +39,16 @@ importers:
         version: 20.17.0
       '@typescript-eslint/eslint-plugin':
         specifier: ^8.65.0
-        version: 8.65.0(@typescript-eslint/parser@8.65.0(eslint@10.7.0)(typescript@5.5.4))(eslint@10.7.0)(typescript@5.5.4)
+        version: 8.65.0(@typescript-eslint/parser@8.65.0(eslint@10.8.0)(typescript@5.5.4))(eslint@10.8.0)(typescript@5.5.4)
       '@typescript-eslint/parser':
         specifier: ^8.65.0
-        version: 8.65.0(eslint@10.7.0)(typescript@5.5.4)
+        version: 8.65.0(eslint@10.8.0)(typescript@5.5.4)
       axe-core:
         specifier: ^4.12.1
         version: 4.12.1
       eslint:
         specifier: ^10.7.0
-        version: 10.7.0
+        version: 10.8.0
       playwright:
         specifier: ^1.61.1
         version: 1.61.1
@@ -62,44 +78,41 @@ importers:
         version: 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       '@theia/debug':
         specifier: 1.73.1
-        version: 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.5.4)
+        version: 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)
       '@theia/editor':
         specifier: 1.73.1
         version: 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       '@theia/filesystem':
         specifier: 1.73.1
-        version: 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.5.4)
+        version: 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)
       '@theia/markers':
         specifier: 1.73.1
-        version: 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.5.4)
+        version: 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)
       '@theia/messages':
         specifier: 1.73.1
         version: 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       '@theia/monaco':
         specifier: 1.73.1
-        version: 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.5.4)
+        version: 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)
       '@theia/navigator':
         specifier: 1.73.1
-        version: 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.5.4)
+        version: 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)
       '@theia/outline-view':
         specifier: 1.73.1
         version: 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       '@theia/preferences':
         specifier: 1.73.1
-        version: 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.5.4)
-      '@theia/search-in-workspace':
-        specifier: 1.73.1
-        version: 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.5.4)
+        version: 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)
       '@theia/terminal':
         specifier: 1.73.1
-        version: 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.5.4)
+        version: 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)
       '@theia/workspace':
         specifier: 1.73.1
-        version: 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.5.4)
+        version: 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)
     devDependencies:
       '@theia/cli':
         specifier: 1.73.1
-        version: 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(encoding@0.1.13)(postcss@8.5.19)(typescript@5.5.4)
+        version: 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(encoding@0.1.13)(postcss@8.5.19)(typescript@5.9.3)
       esbuild:
         specifier: 0.24.2
         version: 0.24.2
@@ -224,6 +237,22 @@ importers:
         specifier: 1.73.1
         version: 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.5.4)
     devDependencies:
+      typescript:
+        specifier: 5.5.4
+        version: 5.5.4
+
+  packages/i18n:
+    dependencies:
+      '@theia/core':
+        specifier: 1.73.1
+        version: 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      react:
+        specifier: 18.3.1
+        version: 18.3.1
+    devDependencies:
+      '@types/react':
+        specifier: 18.3.1
+        version: 18.3.1
       typescript:
         specifier: 5.5.4
         version: 5.5.4
@@ -423,6 +452,12 @@ importers:
       '@theia/filesystem':
         specifier: 1.73.1
         version: 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.5.4)
+      '@theia/monaco':
+        specifier: 1.73.1
+        version: 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.5.4)
+      '@theia/monaco-editor-core':
+        specifier: 1.108.201
+        version: 1.108.201
       '@theia/navigator':
         specifier: 1.73.1
         version: 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.5.4)
@@ -467,6 +502,9 @@ importers:
       '@kairo/encoding-extension':
         specifier: workspace:*
         version: link:../encoding-extension
+      '@kairo/i18n':
+        specifier: workspace:*
+        version: link:../i18n
       '@kairo/java-extension':
         specifier: workspace:*
         version: link:../java-extension
@@ -1397,8 +1435,8 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@eslint-community/eslint-utils@4.9.1':
-    resolution: {integrity: sha512-phrYmNiYppR7znFEdqgfWHXR6NCkZEK7hwWDHZUjit/2/U0r6XvkDl0SYnoM51Hq7FhCGdLDT6zxCCOY1hexsQ==}
+  '@eslint-community/eslint-utils@4.10.1':
+    resolution: {integrity: sha512-cuadcxVFE8sDK6iWJbs8Sn0av2Nrh2QSGQhVlBW9AaAHqHwjWsZHT8LJ4hFGPh7ASBV2deFdM7H/DPjulmh8rg==}
     engines: {node: ^12.22.0 || ^14.17.0 || >=16.0.0}
     peerDependencies:
       eslint: ^6.0.0 || ^7.0.0 || >=8.0.0
@@ -1411,8 +1449,8 @@ packages:
     resolution: {integrity: sha512-Y3kKLvC1dvTOT+oGlqNQ1XLqK6D1HU2YXPc52NmAlJZbMMWDzGYXMiPRJ8TYD39muD/OTjlZmNJ4ib7dvSrMBA==}
     engines: {node: ^20.19.0 || ^22.13.0 || >=24}
 
-  '@eslint/config-helpers@0.6.0':
-    resolution: {integrity: sha512-ii6Bw9jJ2zi2cWA2Z+9/QZ/+3DX6kwaV5Q986D/CdP3Lap3w/pgQZ373FV7byY/i7L4IRH/G43I5dz1ClsCbpA==}
+  '@eslint/config-helpers@0.7.0':
+    resolution: {integrity: sha512-DObd/KKUsU+FaFv4PLxSRenpXfQWmPXXP3pPZ6/K1PCrMu2vQpMDMuQe/BqYeoLcz8ro0bVDF1RxOJgfVEdhUw==}
     engines: {node: ^20.19.0 || ^22.13.0 || >=24}
 
   '@eslint/core@1.2.1':
@@ -3356,8 +3394,8 @@ packages:
     resolution: {integrity: sha512-tD40eHxA35h0PEIZNeIjkHoDR4YjjJp34biM0mDvplBe//mB+IHCqHDGV7pxF+7MklTvighcCPPZC7ynWyjdTA==}
     engines: {node: ^20.19.0 || ^22.13.0 || >=24}
 
-  eslint@10.7.0:
-    resolution: {integrity: sha512-GVTD7s1vdIl6UYvAfriOPeY1Df8LIZjfofLvHwde+erDHGGuHyuM6xoxRxmHiebhYuD2p1vN4wWh0XzPARSGDQ==}
+  eslint@10.8.0:
+    resolution: {integrity: sha512-nuKKvN+oIBO0koN7Tm7dlkmnkc21mtt0QJLwAKzjLq14y6lRTdVG36MZHJ8eQHwdJMwZbQNMlPOYedMq/oVJvQ==}
     engines: {node: ^20.19.0 || ^22.13.0 || >=24}
     hasBin: true
     peerDependencies:
@@ -3554,8 +3592,8 @@ packages:
     resolution: {integrity: sha512-b6suED+5/3rTpUBdG1gupIl8MPFCAMA0QXwmljLhvCUKcUvdE4gWky9zpuGCcXHOsz4J9wPGNWq6OKpmIzz3hQ==}
     hasBin: true
 
-  flatted@3.4.2:
-    resolution: {integrity: sha512-PjDse7RzhcPkIJwy5t7KPWQSZ9cAbzQXcafsetQoD7sOJRQlGikNbx7yZp2OotDnJyrDcbyRq3Ttb18iYOqkxA==}
+  flatted@3.4.3:
+    resolution: {integrity: sha512-/zipXxyO6rGvuNGDiULY9MvEGSkb2gaG4GGH4ygMi0ZZzyMHdUZBmntJmx5x1G2VuPytCwGN4xsJP6cw+sK+vQ==}
 
   follow-redirects@1.16.0:
     resolution: {integrity: sha512-y5rN/uOsadFT/JfYwhxRS5R7Qce+g3zG97+JrtFZlC9klX/W5hD7iiLzScI4nZqUS7DNUdhPgw4xI8W2LuXlUw==}
@@ -5771,6 +5809,11 @@ packages:
     engines: {node: '>=14.17'}
     hasBin: true
 
+  typescript@5.9.3:
+    resolution: {integrity: sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==}
+    engines: {node: '>=14.17'}
+    hasBin: true
+
   uc.micro@2.1.0:
     resolution: {integrity: sha512-ARDJmphmdvUk6Glw7y9DQ2bFkKBHwQHLi2lsaH6PPmz/Ka9sFOBsBluozhDltWmnv9u/cF6Rt87znRTPV+yp/A==}
 
@@ -7181,9 +7224,9 @@ snapshots:
   '@esbuild/win32-x64@0.24.2':
     optional: true
 
-  '@eslint-community/eslint-utils@4.9.1(eslint@10.7.0)':
+  '@eslint-community/eslint-utils@4.10.1(eslint@10.8.0)':
     dependencies:
-      eslint: 10.7.0
+      eslint: 10.8.0
       eslint-visitor-keys: 3.4.3
 
   '@eslint-community/regexpp@4.12.2': {}
@@ -7196,7 +7239,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@eslint/config-helpers@0.6.0':
+  '@eslint/config-helpers@0.7.0':
     dependencies:
       '@eslint/core': 1.2.1
 
@@ -7602,7 +7645,7 @@ snapshots:
       - uglify-js
       - webpack-cli
 
-  '@theia/cli@1.73.1(@theia/electron@1.73.1(electron@39.8.7))(encoding@0.1.13)(postcss@8.5.19)(typescript@5.5.4)':
+  '@theia/cli@1.73.1(@theia/electron@1.73.1(electron@39.8.7))(encoding@0.1.13)(postcss@8.5.19)(typescript@5.9.3)':
     dependencies:
       '@theia/application-manager': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(postcss@8.5.19)
       '@theia/application-package': 1.73.1
@@ -7623,7 +7666,7 @@ snapshots:
       log-update: 4.0.0
       mocha: 10.8.2
       patch-package: 8.0.1
-      puppeteer: 21.11.0(encoding@0.1.13)(typescript@5.5.4)
+      puppeteer: 21.11.0(encoding@0.1.13)(typescript@5.9.3)
       puppeteer-core: 21.11.0(encoding@0.1.13)
       puppeteer-to-istanbul: 1.4.0
       temp: 0.9.4
@@ -7662,6 +7705,29 @@ snapshots:
       '@theia/core': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       '@theia/editor': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       '@theia/monaco': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.5.4)
+      '@theia/monaco-editor-core': 1.108.201
+      anser: 2.3.5
+      tslib: 2.8.1
+    transitivePeerDependencies:
+      - '@theia/electron'
+      - '@types/react'
+      - '@types/react-dom'
+      - bare-abort-controller
+      - bare-buffer
+      - bufferutil
+      - debug
+      - react
+      - react-dom
+      - react-native-b4a
+      - supports-color
+      - typescript
+      - utf-8-validate
+
+  '@theia/console@1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)':
+    dependencies:
+      '@theia/core': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@theia/editor': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@theia/monaco': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)
       '@theia/monaco-editor-core': 1.108.201
       anser: 2.3.5
       tslib: 2.8.1
@@ -7794,6 +7860,42 @@ snapshots:
       - typescript
       - utf-8-validate
 
+  '@theia/debug@1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)':
+    dependencies:
+      '@theia/console': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)
+      '@theia/core': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@theia/editor': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@theia/filesystem': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)
+      '@theia/markers': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)
+      '@theia/monaco': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)
+      '@theia/monaco-editor-core': 1.108.201
+      '@theia/output': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)
+      '@theia/process': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@theia/task': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)
+      '@theia/terminal': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)
+      '@theia/test': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)
+      '@theia/variable-resolver': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@theia/workspace': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)
+      '@vscode/debugprotocol': 1.68.0
+      fast-deep-equal: 3.1.3
+      jsonc-parser: 3.3.1
+      p-debounce: 2.1.0
+      tslib: 2.8.1
+    transitivePeerDependencies:
+      - '@theia/electron'
+      - '@types/react'
+      - '@types/react-dom'
+      - bare-abort-controller
+      - bare-buffer
+      - bufferutil
+      - debug
+      - react
+      - react-dom
+      - react-native-b4a
+      - supports-color
+      - typescript
+      - utf-8-validate
+
   '@theia/editor@1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)':
     dependencies:
       '@theia/core': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
@@ -7849,6 +7951,30 @@ snapshots:
       - typescript
       - utf-8-validate
 
+  '@theia/file-search@1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)':
+    dependencies:
+      '@theia/core': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@theia/editor': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@theia/filesystem': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)
+      '@theia/process': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@theia/workspace': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)
+      '@vscode/ripgrep': 1.18.0
+      tslib: 2.8.1
+    transitivePeerDependencies:
+      - '@theia/electron'
+      - '@types/react'
+      - '@types/react-dom'
+      - bare-abort-controller
+      - bare-buffer
+      - bufferutil
+      - debug
+      - react
+      - react-dom
+      - react-native-b4a
+      - supports-color
+      - typescript
+      - utf-8-validate
+
   '@theia/filesystem@1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.5.4)':
     dependencies:
       '@theia/core': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
@@ -7863,6 +7989,42 @@ snapshots:
       minimatch: 10.2.5
       multer: 2.2.0
       opfs-worker: 1.3.1(typescript@5.5.4)
+      rimraf: 5.0.10
+      stat-mode: 1.0.0
+      tar-fs: 3.1.3
+      tar-stream: 3.2.0
+      trash: 7.2.0
+      tslib: 2.8.1
+      vscode-languageserver-textdocument: 1.0.12
+    transitivePeerDependencies:
+      - '@theia/electron'
+      - '@types/react'
+      - '@types/react-dom'
+      - bare-abort-controller
+      - bare-buffer
+      - bufferutil
+      - debug
+      - react
+      - react-dom
+      - react-native-b4a
+      - supports-color
+      - typescript
+      - utf-8-validate
+
+  '@theia/filesystem@1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)':
+    dependencies:
+      '@theia/core': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@types/body-parser': 1.19.6
+      '@types/multer': 1.4.13
+      '@types/tar-fs': 1.16.3
+      '@types/tar-stream': 3.1.4
+      async-mutex: 0.3.2
+      body-parser: 1.20.6
+      http-status-codes: 1.4.0
+      ignore: 6.0.2
+      minimatch: 10.2.5
+      multer: 2.2.0
+      opfs-worker: 1.3.1(typescript@5.9.3)
       rimraf: 5.0.10
       stat-mode: 1.0.0
       tar-fs: 3.1.3
@@ -7903,6 +8065,27 @@ snapshots:
       '@theia/core': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       '@theia/filesystem': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.5.4)
       '@theia/workspace': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.5.4)
+      tslib: 2.8.1
+    transitivePeerDependencies:
+      - '@theia/electron'
+      - '@types/react'
+      - '@types/react-dom'
+      - bare-abort-controller
+      - bare-buffer
+      - bufferutil
+      - debug
+      - react
+      - react-dom
+      - react-native-b4a
+      - supports-color
+      - typescript
+      - utf-8-validate
+
+  '@theia/markers@1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)':
+    dependencies:
+      '@theia/core': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@theia/filesystem': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)
+      '@theia/workspace': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)
       tslib: 2.8.1
     transitivePeerDependencies:
       - '@theia/electron'
@@ -7971,11 +8154,63 @@ snapshots:
       - typescript
       - utf-8-validate
 
+  '@theia/monaco@1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)':
+    dependencies:
+      '@theia/core': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@theia/editor': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@theia/filesystem': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)
+      '@theia/markers': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)
+      '@theia/monaco-editor-core': 1.108.201
+      '@theia/outline-view': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@theia/workspace': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)
+      fast-plist: 0.1.3
+      idb: 4.0.5
+      jsonc-parser: 3.3.1
+      tslib: 2.8.1
+      vscode-oniguruma: 2.0.1
+      vscode-textmate: 9.3.2
+    transitivePeerDependencies:
+      - '@theia/electron'
+      - '@types/react'
+      - '@types/react-dom'
+      - bare-abort-controller
+      - bare-buffer
+      - bufferutil
+      - debug
+      - react
+      - react-dom
+      - react-native-b4a
+      - supports-color
+      - typescript
+      - utf-8-validate
+
   '@theia/navigator@1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.5.4)':
     dependencies:
       '@theia/core': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       '@theia/filesystem': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.5.4)
       '@theia/workspace': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.5.4)
+      minimatch: 10.2.5
+      tslib: 2.8.1
+    transitivePeerDependencies:
+      - '@theia/electron'
+      - '@types/react'
+      - '@types/react-dom'
+      - bare-abort-controller
+      - bare-buffer
+      - bufferutil
+      - debug
+      - react
+      - react-dom
+      - react-native-b4a
+      - supports-color
+      - typescript
+      - utf-8-validate
+
+  '@theia/navigator@1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)':
+    dependencies:
+      '@theia/core': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@theia/filesystem': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)
+      '@theia/workspace': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)
       minimatch: 10.2.5
       tslib: 2.8.1
     transitivePeerDependencies:
@@ -8031,6 +8266,29 @@ snapshots:
       - typescript
       - utf-8-validate
 
+  '@theia/output@1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)':
+    dependencies:
+      '@theia/core': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@theia/editor': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@theia/monaco': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)
+      '@theia/monaco-editor-core': 1.108.201
+      p-queue: 8.1.1
+      tslib: 2.8.1
+    transitivePeerDependencies:
+      - '@theia/electron'
+      - '@types/react'
+      - '@types/react-dom'
+      - bare-abort-controller
+      - bare-buffer
+      - bufferutil
+      - debug
+      - react
+      - react-dom
+      - react-native-b4a
+      - supports-color
+      - typescript
+      - utf-8-validate
+
   '@theia/ovsx-client@1.73.1':
     dependencies:
       '@theia/request': 1.73.1
@@ -8047,6 +8305,35 @@ snapshots:
       '@theia/monaco-editor-core': 1.108.201
       '@theia/userstorage': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.5.4)
       '@theia/workspace': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.5.4)
+      async-mutex: 0.3.2
+      fast-deep-equal: 3.1.3
+      jsonc-parser: 3.3.1
+      p-debounce: 2.1.0
+      tslib: 2.8.1
+    transitivePeerDependencies:
+      - '@theia/electron'
+      - '@types/react'
+      - '@types/react-dom'
+      - bare-abort-controller
+      - bare-buffer
+      - bufferutil
+      - debug
+      - react
+      - react-dom
+      - react-native-b4a
+      - supports-color
+      - typescript
+      - utf-8-validate
+
+  '@theia/preferences@1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)':
+    dependencies:
+      '@theia/core': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@theia/editor': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@theia/filesystem': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)
+      '@theia/monaco': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)
+      '@theia/monaco-editor-core': 1.108.201
+      '@theia/userstorage': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)
+      '@theia/workspace': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)
       async-mutex: 0.3.2
       fast-deep-equal: 3.1.3
       jsonc-parser: 3.3.1
@@ -8176,6 +8463,38 @@ snapshots:
       - typescript
       - utf-8-validate
 
+  '@theia/task@1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)':
+    dependencies:
+      '@theia/core': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@theia/editor': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@theia/filesystem': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)
+      '@theia/markers': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)
+      '@theia/monaco': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)
+      '@theia/monaco-editor-core': 1.108.201
+      '@theia/process': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@theia/terminal': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)
+      '@theia/userstorage': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)
+      '@theia/variable-resolver': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@theia/workspace': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)
+      async-mutex: 0.3.2
+      jsonc-parser: 3.3.1
+      p-debounce: 2.1.0
+      tslib: 2.8.1
+    transitivePeerDependencies:
+      - '@theia/electron'
+      - '@types/react'
+      - '@types/react-dom'
+      - bare-abort-controller
+      - bare-buffer
+      - bufferutil
+      - debug
+      - react
+      - react-dom
+      - react-native-b4a
+      - supports-color
+      - typescript
+      - utf-8-validate
+
   '@theia/terminal@1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.5.4)':
     dependencies:
       '@theia/core': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
@@ -8185,6 +8504,35 @@ snapshots:
       '@theia/process': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       '@theia/variable-resolver': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       '@theia/workspace': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.5.4)
+      tslib: 2.8.1
+      xterm: 5.3.0
+      xterm-addon-fit: 0.8.0(xterm@5.3.0)
+      xterm-addon-search: 0.13.0(xterm@5.3.0)
+      xterm-addon-webgl: 0.16.0(xterm@5.3.0)
+    transitivePeerDependencies:
+      - '@theia/electron'
+      - '@types/react'
+      - '@types/react-dom'
+      - bare-abort-controller
+      - bare-buffer
+      - bufferutil
+      - debug
+      - react
+      - react-dom
+      - react-native-b4a
+      - supports-color
+      - typescript
+      - utf-8-validate
+
+  '@theia/terminal@1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)':
+    dependencies:
+      '@theia/core': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@theia/editor': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@theia/file-search': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)
+      '@theia/filesystem': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)
+      '@theia/process': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@theia/variable-resolver': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@theia/workspace': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)
       tslib: 2.8.1
       xterm: 5.3.0
       xterm-addon-fit: 0.8.0(xterm@5.3.0)
@@ -8229,10 +8577,54 @@ snapshots:
       - typescript
       - utf-8-validate
 
+  '@theia/test@1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)':
+    dependencies:
+      '@theia/core': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@theia/editor': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@theia/filesystem': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)
+      '@theia/navigator': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)
+      '@theia/terminal': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)
+      xterm: 5.3.0
+      xterm-addon-fit: 0.8.0(xterm@5.3.0)
+    transitivePeerDependencies:
+      - '@theia/electron'
+      - '@types/react'
+      - '@types/react-dom'
+      - bare-abort-controller
+      - bare-buffer
+      - bufferutil
+      - debug
+      - react
+      - react-dom
+      - react-native-b4a
+      - supports-color
+      - typescript
+      - utf-8-validate
+
   '@theia/userstorage@1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.5.4)':
     dependencies:
       '@theia/core': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       '@theia/filesystem': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.5.4)
+      tslib: 2.8.1
+    transitivePeerDependencies:
+      - '@theia/electron'
+      - '@types/react'
+      - '@types/react-dom'
+      - bare-abort-controller
+      - bare-buffer
+      - bufferutil
+      - debug
+      - react
+      - react-dom
+      - react-native-b4a
+      - supports-color
+      - typescript
+      - utf-8-validate
+
+  '@theia/userstorage@1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)':
+    dependencies:
+      '@theia/core': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@theia/filesystem': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)
       tslib: 2.8.1
     transitivePeerDependencies:
       - '@theia/electron'
@@ -8268,6 +8660,29 @@ snapshots:
     dependencies:
       '@theia/core': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       '@theia/filesystem': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.5.4)
+      '@theia/variable-resolver': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      jsonc-parser: 3.3.1
+      tslib: 2.8.1
+      valid-filename: 2.0.1
+    transitivePeerDependencies:
+      - '@theia/electron'
+      - '@types/react'
+      - '@types/react-dom'
+      - bare-abort-controller
+      - bare-buffer
+      - bufferutil
+      - debug
+      - react
+      - react-dom
+      - react-native-b4a
+      - supports-color
+      - typescript
+      - utf-8-validate
+
+  '@theia/workspace@1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)':
+    dependencies:
+      '@theia/core': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@theia/filesystem': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)
       '@theia/variable-resolver': 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       jsonc-parser: 3.3.1
       tslib: 2.8.1
@@ -8511,15 +8926,15 @@ snapshots:
       '@types/node': 20.17.0
     optional: true
 
-  '@typescript-eslint/eslint-plugin@8.65.0(@typescript-eslint/parser@8.65.0(eslint@10.7.0)(typescript@5.5.4))(eslint@10.7.0)(typescript@5.5.4)':
+  '@typescript-eslint/eslint-plugin@8.65.0(@typescript-eslint/parser@8.65.0(eslint@10.8.0)(typescript@5.5.4))(eslint@10.8.0)(typescript@5.5.4)':
     dependencies:
       '@eslint-community/regexpp': 4.12.2
-      '@typescript-eslint/parser': 8.65.0(eslint@10.7.0)(typescript@5.5.4)
+      '@typescript-eslint/parser': 8.65.0(eslint@10.8.0)(typescript@5.5.4)
       '@typescript-eslint/scope-manager': 8.65.0
-      '@typescript-eslint/type-utils': 8.65.0(eslint@10.7.0)(typescript@5.5.4)
-      '@typescript-eslint/utils': 8.65.0(eslint@10.7.0)(typescript@5.5.4)
+      '@typescript-eslint/type-utils': 8.65.0(eslint@10.8.0)(typescript@5.5.4)
+      '@typescript-eslint/utils': 8.65.0(eslint@10.8.0)(typescript@5.5.4)
       '@typescript-eslint/visitor-keys': 8.65.0
-      eslint: 10.7.0
+      eslint: 10.8.0
       ignore: 7.0.6
       natural-compare: 1.4.0
       ts-api-utils: 2.5.0(typescript@5.5.4)
@@ -8527,14 +8942,14 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@typescript-eslint/parser@8.65.0(eslint@10.7.0)(typescript@5.5.4)':
+  '@typescript-eslint/parser@8.65.0(eslint@10.8.0)(typescript@5.5.4)':
     dependencies:
       '@typescript-eslint/scope-manager': 8.65.0
       '@typescript-eslint/types': 8.65.0
       '@typescript-eslint/typescript-estree': 8.65.0(typescript@5.5.4)
       '@typescript-eslint/visitor-keys': 8.65.0
       debug: 4.4.3(supports-color@8.1.1)
-      eslint: 10.7.0
+      eslint: 10.8.0
       typescript: 5.5.4
     transitivePeerDependencies:
       - supports-color
@@ -8557,13 +8972,13 @@ snapshots:
     dependencies:
       typescript: 5.5.4
 
-  '@typescript-eslint/type-utils@8.65.0(eslint@10.7.0)(typescript@5.5.4)':
+  '@typescript-eslint/type-utils@8.65.0(eslint@10.8.0)(typescript@5.5.4)':
     dependencies:
       '@typescript-eslint/types': 8.65.0
       '@typescript-eslint/typescript-estree': 8.65.0(typescript@5.5.4)
-      '@typescript-eslint/utils': 8.65.0(eslint@10.7.0)(typescript@5.5.4)
+      '@typescript-eslint/utils': 8.65.0(eslint@10.8.0)(typescript@5.5.4)
       debug: 4.4.3(supports-color@8.1.1)
-      eslint: 10.7.0
+      eslint: 10.8.0
       ts-api-utils: 2.5.0(typescript@5.5.4)
       typescript: 5.5.4
     transitivePeerDependencies:
@@ -8586,13 +9001,13 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@typescript-eslint/utils@8.65.0(eslint@10.7.0)(typescript@5.5.4)':
+  '@typescript-eslint/utils@8.65.0(eslint@10.8.0)(typescript@5.5.4)':
     dependencies:
-      '@eslint-community/eslint-utils': 4.9.1(eslint@10.7.0)
+      '@eslint-community/eslint-utils': 4.10.1(eslint@10.8.0)
       '@typescript-eslint/scope-manager': 8.65.0
       '@typescript-eslint/types': 8.65.0
       '@typescript-eslint/typescript-estree': 8.65.0(typescript@5.5.4)
-      eslint: 10.7.0
+      eslint: 10.8.0
       typescript: 5.5.4
     transitivePeerDependencies:
       - supports-color
@@ -9529,14 +9944,14 @@ snapshots:
 
   corser@2.0.1: {}
 
-  cosmiconfig@9.0.0(typescript@5.5.4):
+  cosmiconfig@9.0.0(typescript@5.9.3):
     dependencies:
       env-paths: 2.2.1
       import-fresh: 3.3.1
       js-yaml: 4.3.0
       parse-json: 5.2.0
     optionalDependencies:
-      typescript: 5.5.4
+      typescript: 5.9.3
 
   crc-32@1.2.2: {}
 
@@ -10027,12 +10442,12 @@ snapshots:
 
   eslint-visitor-keys@5.0.1: {}
 
-  eslint@10.7.0:
+  eslint@10.8.0:
     dependencies:
-      '@eslint-community/eslint-utils': 4.9.1(eslint@10.7.0)
+      '@eslint-community/eslint-utils': 4.10.1(eslint@10.8.0)
       '@eslint-community/regexpp': 4.12.2
       '@eslint/config-array': 0.23.5
-      '@eslint/config-helpers': 0.6.0
+      '@eslint/config-helpers': 0.7.0
       '@eslint/core': 1.2.1
       '@eslint/plugin-kit': 0.7.2
       '@humanfs/node': 0.16.8
@@ -10277,12 +10692,12 @@ snapshots:
 
   flat-cache@4.0.1:
     dependencies:
-      flatted: 3.4.2
+      flatted: 3.4.3
       keyv: 4.5.4
 
   flat@5.0.2: {}
 
-  flatted@3.4.2: {}
+  flatted@3.4.3: {}
 
   follow-redirects@1.16.0: {}
 
@@ -11465,6 +11880,12 @@ snapshots:
       minimatch: 10.2.5
       typescript: 5.5.4
 
+  opfs-worker@1.3.1(typescript@5.9.3):
+    dependencies:
+      comlink: 4.4.2
+      minimatch: 10.2.5
+      typescript: 5.9.3
+
   optionator@0.9.4:
     dependencies:
       deep-is: 0.1.4
@@ -11826,10 +12247,10 @@ snapshots:
       v8-to-istanbul: 1.2.1
       yargs: 15.4.1
 
-  puppeteer@21.11.0(encoding@0.1.13)(typescript@5.5.4):
+  puppeteer@21.11.0(encoding@0.1.13)(typescript@5.9.3):
     dependencies:
       '@puppeteer/browsers': 1.9.1
-      cosmiconfig: 9.0.0(typescript@5.5.4)
+      cosmiconfig: 9.0.0(typescript@5.9.3)
       puppeteer-core: 21.11.0(encoding@0.1.13)
     transitivePeerDependencies:
       - bare-abort-controller
@@ -12671,6 +13092,8 @@ snapshots:
   typedarray@0.0.6: {}
 
   typescript@5.5.4: {}
+
+  typescript@5.9.3: {}
 
   uc.micro@2.1.0: {}
 

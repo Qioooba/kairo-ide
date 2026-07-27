@@ -53,6 +53,10 @@ export { JavaHierarchyWidget } from './java-hierarchy-widget';
 export { JavaHierarchyContribution, JavaHierarchyCommands } from './java-hierarchy-contribution';
 export type { HierarchyMode } from './java-hierarchy-widget';
 
+// ── IDEA-style Navigation ────────────────────────────────────────
+export { JavaNavigationContribution, JavaNavigationCommands } from './java-navigation-contribution';
+export { JavaReferencesWidget } from './java-references-widget';
+
 // ── Debug services (P2-DBG-02) ───────────────────────────────────
 export { JavaExceptionBreakpointService, JAVA_EXCEPTION_FILTERS } from './java-debug-exception-breakpoints';
 export type { ExceptionBreakpointState } from './java-debug-exception-breakpoints';
@@ -91,9 +95,15 @@ export type { HotSwapHistoryEntry } from './java-hotswap-service';
 export { JavaJUnitRunner } from './java-junit-runner';
 export type { JUnitTestItem, JUnitTestResult, JUnitTestRun } from './java-junit-runner';
 
+// ── One-click Java Run/Debug (IDEA-style) ───────────────────────────
+export { JavaRunService } from './java-run-service';
+export { JavaRunCommandContribution, JavaRunMenuContribution, JavaRunCommands } from './java-run-commands';
+export type { RunJavaParams, RunJavaResult, JavaClassInfo, JavaMethodInfo } from './java-run-protocol';
+
 import { interfaces } from '@theia/core/shared/inversify';
 import { FrontendApplicationContribution } from '@theia/core/lib/browser';
 import { CommandContribution, MenuContribution } from '@theia/core/lib/common';
+import { KeybindingContribution } from '@theia/core/lib/browser/keybinding';
 import { PreferenceContribution } from '@theia/core/lib/common/preferences';
 import { DebugContribution } from '@theia/debug/lib/browser/debug-contribution';
 import { DebugAdapterContribution } from '@theia/debug/lib/common/debug-model';
@@ -118,6 +128,8 @@ import { JavaBreakpointManager } from './java-debug-breakpoint-manager';
 import { JavaThreadSwitchHelper } from './java-debug-thread-helper';
 import { JavaHierarchyContribution } from './java-hierarchy-contribution';
 import { JavaHierarchyWidget } from './java-hierarchy-widget';
+import { JavaNavigationContribution } from './java-navigation-contribution';
+import { JavaReferencesWidget } from './java-references-widget';
 import { DebugAcceptanceRunner } from './java-debug-acceptance';
 import { JavaSourceMismatchDetector } from './java-debug-source-mismatch';
 import { JavaDebugCompatCheck } from './java-debug-compat-check';
@@ -132,6 +144,8 @@ import { KairoMavenService } from './maven-service';
 import { MavenViewWidget } from './maven-view-widget';
 import { AntClasspathService } from './ant-classpath-service';
 import { AntClasspathContribution } from './ant-classpath-contribution';
+import { JavaRunService } from './java-run-service';
+import { JavaRunCommandContribution, JavaRunMenuContribution } from './java-run-commands';
 
 export function bindJavaLanguageClientContribution(bind: interfaces.Bind): void {
     bind(KairoJavaLanguageClientContribution).toSelf().inSingletonScope();
@@ -189,6 +203,15 @@ export function bindJavaLanguageClientContribution(bind: interfaces.Bind): void 
     bind(MenuContribution).toService(JavaHierarchyContribution);
     bind(JavaHierarchyWidget).toSelf();
 
+    // ── Find Usages / References Panel ────────────────────────────
+    bind(JavaReferencesWidget).toSelf();
+
+    // ── IDEA-style Navigation ─────────────────────────────────────
+    bind(JavaNavigationContribution).toSelf().inSingletonScope();
+    bind(CommandContribution).toService(JavaNavigationContribution);
+    bind(MenuContribution).toService(JavaNavigationContribution);
+    bind(KeybindingContribution).toService(JavaNavigationContribution);
+
     // ── Debug acceptance & source mismatch (P1-DBG-03) ──────────────
     bind(DebugAcceptanceRunner).toSelf().inSingletonScope();
     bind(JavaSourceMismatchDetector).toSelf().inSingletonScope();
@@ -229,4 +252,11 @@ export function bindJavaLanguageClientContribution(bind: interfaces.Bind): void 
     bind(AntClasspathService).toSelf().inSingletonScope();
     bind(AntClasspathContribution).toSelf().inSingletonScope();
     bind(FrontendApplicationContribution).toService(AntClasspathContribution);
+
+    // ── One-click Java Run/Debug (IDEA-style) ────────────────────────
+    bind(JavaRunService).toSelf().inSingletonScope();
+    bind(JavaRunCommandContribution).toSelf().inSingletonScope();
+    bind(CommandContribution).toService(JavaRunCommandContribution);
+    bind(JavaRunMenuContribution).toSelf().inSingletonScope();
+    bind(MenuContribution).toService(JavaRunMenuContribution);
 }
