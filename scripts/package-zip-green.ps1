@@ -290,10 +290,30 @@ New-Item -ItemType Directory -Force -Path $tmpOut | Out-Null
 # (electron-builder 对 scoped npm 包 (@xxx/yyy) 会自动用 @xxxyyy 作 exe 名,
 #  即使 build.executableName 已设置; --config 完全覆盖 build 段时尤其明显,
 #  所以把 executableName 显式传进 --config)
+#
+# 注意:必须把 extraResources 显式写进 --config,
+#  --config 完全覆盖 build 段时不会合并 package.json/yml 里的 extraResources
+#  用绝对路径(以 $RepoRoot 为基准)避免 electron-builder 相对路径 base 不确定
+$agentExe = Join-Path $RepoRoot "runtime-agent/bin/kairo-runtime.exe"
+$tomcatSrc = Join-Path $RepoRoot "bundled/tomcat6"
+$jdtlsSrc  = Join-Path $RepoRoot "bundled/jdtls"
+$jdtlsReady = $jdtlsReady  # 由前面的自检阶段设置:$true 表示 jdtls 已就绪
+
+$winExtra = @(
+    @{ from = $agentExe; to = "bin/kairo-runtime.exe" }
+    @{ from = $tomcatSrc; to = "bundled/tomcat6"; filter = @("**/*") }
+)
+if ($jdtlsReady -and (Test-Path (Join-Path $jdtlsSrc "config_win/config.ini"))) {
+    $winExtra += @{ from = $jdtlsSrc; to = "bundled/jdtls"; filter = @("**/*") }
+}
+
 $tmpCfg = Join-Path $tmpOut "eb-cfg.json"
 $cfg = @{
     directories     = @{ output = $tmpOut }
-    win             = @{ target = @("zip") }
+    win             = @{
+        target         = @("zip")
+        extraResources = $winExtra
+    }
     publish         = $null
     npmRebuild      = $false
     executableName  = "Kairo"
