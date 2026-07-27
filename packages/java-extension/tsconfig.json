@@ -6,7 +6,8 @@
     "declaration": true,
     "composite": true,
     "skipLibCheck": true,
-    "jsx": "react"
+    "jsx": "react",
+    "noEmit": false
   },
   "include": ["src/**/*.ts", "src/**/*.tsx"],
   "exclude": ["node_modules", "lib", "**/*.test.ts"],

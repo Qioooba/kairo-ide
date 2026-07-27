@@ -18,6 +18,7 @@ import {
   LSPCompletionItem,
   LSPPublishDiagnosticsParams,
   LSPLocation,
+  LSPLocationLink,
   LSPHover,
   LSPSignatureHelp,
   LSPDocumentSymbolResult,
@@ -29,6 +30,7 @@ import {
   LSPCodeLens,
   LSPTextEdit,
   LSPInlayHint,
+  LSPDocumentHighlight,
 } from '../common/lsp-protocol';
 
 export interface JavaCompletionRequest {
@@ -195,6 +197,16 @@ export class JavaCompletionProvider {
 
   async provideReferences(uri: string, line: number, character: number, includeDeclaration: boolean): Promise<LSPLocation[]> {
     return this.whenReady('references', [], () => this.client.references({ uri, line, character, includeDeclaration }));
+  }
+
+  async provideTypeDefinition(uri: string, line: number, character: number): Promise<(LSPLocation | LSPLocationLink)[]> {
+    const result = await this.whenReady('type definition', null, () => this.client.typeDefinition({ uri, line, character }));
+    if (!result) return [];
+    return Array.isArray(result) ? result : [result];
+  }
+
+  async provideDocumentHighlights(uri: string, line: number, character: number): Promise<LSPDocumentHighlight[]> {
+    return this.whenReady('document highlight', [], () => this.client.documentHighlight({ uri, line, character }));
   }
 
   async provideSignatureHelp(p: {

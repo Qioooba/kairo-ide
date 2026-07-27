@@ -15,6 +15,7 @@ import type {
   LSPPublishDiagnosticsParams,
   LSPCompletionList,
   LSPLocation,
+  LSPLocationLink,
   LSPHover,
   LSPSignatureHelp,
   LSPDocumentSymbolResult,
@@ -31,6 +32,7 @@ import type {
   LSPTypeHierarchyItem,
   LSPTextEdit,
   LSPInlayHint,
+  LSPDocumentHighlight,
 } from './lsp-protocol';
 
 export const JdtLsBackendPath = '/services/jdt-ls-backend';
@@ -51,6 +53,8 @@ export interface JdtLsBackendService {
   $implementation(p: { uri: string; line: number; character: number }): Promise<LSPLocation | LSPLocation[] | null>;
   $hover(p: { uri: string; line: number; character: number }): Promise<LSPHover | null>;
   $references(p: { uri: string; line: number; character: number; includeDeclaration: boolean }): Promise<LSPLocation[]>;
+  $typeDefinition(p: { uri: string; line: number; character: number }): Promise<LSPLocation | LSPLocation[] | LSPLocationLink[] | null>;
+  $documentHighlight(p: { uri: string; line: number; character: number }): Promise<LSPDocumentHighlight[]>;
   $signatureHelp(p: { uri: string; line: number; character: number; triggerKind?: 1 | 2 | 3; triggerCharacter?: string; isRetrigger?: boolean }): Promise<LSPSignatureHelp | null>;
   $documentSymbols(uri: string): Promise<LSPDocumentSymbolResult>;
   $workspaceSymbols(query: string): Promise<LSPWorkspaceSymbolResult>;

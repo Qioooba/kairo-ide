@@ -1,6 +1,7 @@
 import { injectable } from '@theia/core/shared/inversify';
 import { AbstractViewContribution } from '@theia/core/lib/browser/shell/view-contribution';
 import { KeybindingRegistry } from '@theia/core/lib/browser/keybinding';
+import { isOSX } from '@theia/core/lib/common/os';
 import { FindSymbolWidget } from './find-symbol-widget';
 
 @injectable()
@@ -18,7 +19,7 @@ export class FindSymbolContribution extends AbstractViewContribution<FindSymbolW
     super.registerKeybindings(keybindings);
     keybindings.registerKeybinding({
       command: 'kairo.find.symbol',
-      keybinding: 'ctrlcmd+alt+shift+n',
+      keybinding: isOSX ? 'cmd+alt+o' : 'ctrl+alt+shift+n',
     });
   }
 }

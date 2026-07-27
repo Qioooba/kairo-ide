@@ -5,6 +5,7 @@ import { ColorRegistry } from '@theia/core/lib/browser/color-registry';
 import { ColorContribution } from '@theia/core/lib/browser/color-application-contribution';
 import { WidgetManager } from '@theia/core/lib/browser/widget-manager';
 import { KairoDarkTheme } from './kairo-theme';
+import { KairoIDEATheme } from './kairo-theme-idea';
 import * as monaco from '@theia/monaco-editor-core';
 
 // N-034: Derive Monaco theme and ColorRegistry overrides from the single
@@ -58,6 +59,112 @@ export const KAIRO_MONACO_THEME: monaco.editor.IStandaloneThemeData = {
     },
 };
 
+/** Monaco editor theme for IntelliJ IDEA-style syntax highlighting.
+ * Syntax token colors mirror IntelliJ IDEA Darcula:
+ *   - Keywords: orange (#CC7832) — the most recognizable IDEA trait
+ *   - Strings: green (#6A8759)
+ *   - Numbers: blue (#6897BB)
+ *   - Comments: gray (#808080), not italic
+ *   - Annotations: yellow-green (#BBB529)
+ *   - Tags: gold (#E8BF6A)
+ *   - Types: default text color (#A9B7C6)
+ * Editor chrome colors are shared with KairoDarkTheme for visual consistency. */
+export const KAIRO_IDEA_MONACO_THEME: monaco.editor.IStandaloneThemeData = {
+    base: 'vs-dark',
+    inherit: true,
+    rules: [
+        // --- Comments: gray (IDEA does not italicize comments) ---
+        { token: 'comment', foreground: '808080' },
+        { token: 'comment.doc', foreground: '629755' },
+
+        // --- Keywords: orange — the most recognizable IDEA trait ---
+        { token: 'keyword', foreground: 'CC7832' },
+
+        // --- Strings: green ---
+        { token: 'string', foreground: '6A8759' },
+        { token: 'string.quote', foreground: '6A8759' },
+        { token: 'string.escape', foreground: 'CC7832' },
+
+        // --- Numbers: blue ---
+        { token: 'number', foreground: '6897BB' },
+        { token: 'number.float', foreground: '6897BB' },
+        { token: 'number.hex', foreground: '6897BB' },
+
+        // --- Types & identifiers: default light-gray (IDEA basic syntax
+        //     does not color type names; semantic highlighting is a
+        //     separate language-server feature) ---
+        { token: 'type', foreground: 'A9B7C6' },
+        { token: 'type.identifier', foreground: 'A9B7C6' },
+        { token: 'identifier', foreground: 'A9B7C6' },
+
+        // --- Constants (true/false/null/undefined in JS/TS/etc.):
+        //     orange, matching keywords (IDEA colors literals as keywords) ---
+        { token: 'constant', foreground: 'CC7832' },
+        { token: 'constant.language', foreground: 'CC7832' },
+        { token: 'constant.character', foreground: '6A8759' },
+
+        // --- Annotations: yellow-olive (IDEA Darcula signature) ---
+        { token: 'annotation', foreground: 'BBB529' },
+
+        // --- Operators & delimiters: default light-gray ---
+        { token: 'delimiter', foreground: 'A9B7C6' },
+        { token: 'delimiter.angle', foreground: 'E8BF6A' },
+        { token: 'delimiter.bracket', foreground: 'A9B7C6' },
+        { token: 'delimiter.square', foreground: 'A9B7C6' },
+        { token: 'delimiter.parenthesis', foreground: 'A9B7C6' },
+        { token: 'delimiter.curly', foreground: 'A9B7C6' },
+        { token: 'delimiter.html', foreground: 'E8BF6A' },
+        { token: 'operator', foreground: 'A9B7C6' },
+
+        // --- Override VSCode-inherited support/predefined colors to
+        //     match IDEA's "everything-else-is-default" philosophy ---
+        { token: 'support', foreground: 'A9B7C6' },
+        { token: 'support.class', foreground: 'A9B7C6' },
+        { token: 'support.type', foreground: 'A9B7C6' },
+        { token: 'support.function', foreground: 'A9B7C6' },
+        { token: 'predefined', foreground: 'A9B7C6' },
+
+        // --- HTML / JSP tags: gold ---
+        { token: 'tag', foreground: 'E8BF6A' },
+        { token: 'tag.jsp-directive', foreground: 'E8BF6A' },
+        { token: 'tag.jsp-decl', foreground: 'E8BF6A' },
+        { token: 'tag.jsp-expr', foreground: 'E8BF6A' },
+        { token: 'tag.jsp-scriptlet', foreground: 'E8BF6A' },
+        { token: 'tag.jsp-jstl', foreground: 'E8BF6A' },
+        { token: 'tag.jsp-taglib', foreground: 'E8BF6A' },
+
+        // --- Metatags: gray for DOCTYPE/XML declarations, gold for delimiters ---
+        { token: 'metatag', foreground: '808080' },
+        { token: 'metatag.delimiter', foreground: 'E8BF6A' },
+        { token: 'metatag.el', foreground: '6897BB' },
+
+        // --- HTML attributes ---
+        { token: 'attribute.name', foreground: 'BABABA' },
+        { token: 'attribute.value', foreground: '6A8759' },
+    ],
+    colors: {
+        // Editor chrome — shared with KairoDarkTheme for visual consistency
+        'editor.background': '#1e1f22',
+        'editor.foreground': '#A9B7C6',
+        'editor.lineHighlightBackground': '#252629',
+        'editorLineNumber.foreground': '#5d6166',
+        'editorLineNumber.activeForeground': '#c5c8cc',
+        'editorCursor.foreground': '#c8a8ff',
+        'editor.selectionBackground': '#7C3AED55',
+        'editor.inactiveSelectionBackground': '#7C3AED33',
+        'editorWidget.background': '#252629',
+        'editorWidget.border': '#3d4148',
+        'editorBracketMatch.border': '#7C3AED',
+        'editorBracketMatch.background': '#7C3AED22',
+        'editorIndentGuide.background1': '#2c2e33',
+        'editorIndentGuide.activeBackground1': '#4a4d54',
+        'editorWhitespace.foreground': '#3a3d42',
+        'scrollbarSlider.background': '#4a4d5480',
+        'scrollbarSlider.hoverBackground': '#5a5d63a0',
+        'scrollbarSlider.activeBackground': '#7C3AEDa0',
+    },
+};
+
 /** CSS variable overrides for the Kairo dark theme. These win
  * over the Theia defaults because ColorRegistry writes them as
  * inline `style` on `:root` and `ColorApplicationContribution.updateWindow`
@@ -99,10 +206,12 @@ export class KairoThemeContribution implements FrontendApplicationContribution, 
     }
 
     onStart(): void {
-        // Define the Monaco editor theme BEFORE editors can be
+        // Define the Monaco editor themes BEFORE editors can be
         // created; KairoDarkTheme.editorTheme references this id.
         monaco.editor.defineTheme('kairo-dark', KAIRO_MONACO_THEME);
+        monaco.editor.defineTheme('kairo-idea-dark', KAIRO_IDEA_MONACO_THEME);
         this.themeService.register(KairoDarkTheme);
+        this.themeService.register(KairoIDEATheme);
         this.themeService.setCurrentTheme(KairoDarkTheme.id);
 
         // Theia 1.73 caches `WidgetManager.factories` lazily on the

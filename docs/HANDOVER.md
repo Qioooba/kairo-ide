@@ -1137,4 +1137,76 @@ pnpm -r --filter './packages/*' test
 
 ---
 
+## 10. 2026-07-27/28 一键绿色版 zip 打包（Windows 内网分发）
+
+### 10.1 背景与目标
+
+用户是内网 Windows 机器，无法下载任何依赖。要求打一个**纯绿色版 zip**（解压后双击 `Kairo.exe` 启动，前后端自洽），不要让用户做"先装 JDK/先装 Node"这种前置配置。
+
+### 10.2 关键问题与解法
+
+| # | 问题 | 根因 | 解法 |
+|---|------|------|------|
+| 1 | electron-builder 报 `app.asar is being used by another process` 挂死 | TRAE IDE 锁住 `apps/desktop/dist/win-unpacked/`，electron-builder 的 `EnsureEmptyDir` 死锁 | 用 `--config` 把 `directories.output` 重定向到 `%TEMP%\kairo-out-$PID`，绕开项目内目录 |
+| 2 | electron-builder 拉起 `@electron/rebuild` 失败 `Could not find any Visual Studio installation` | `--config` 完全覆盖 build 段，`npmRebuild: false` 没继承，触发 node-gyp 编译 `@parcel/watcher` | 在临时 config 里显式 `npmRebuild: false` |
+| 3 | exe 名是 `@kairodesktop.exe` | electron-builder 对 scoped npm 包 (`@kairo/desktop`) 自动用 `@scope+name` 作 exe 名 | 在临时 config 里显式 `executableName: "Kairo"` + `productName: "Kairo"` |
+| 4 | `resources/bin/kairo-runtime.exe` 没被打进 zip | `--config` 完全覆盖 win 段时，`extraResources` 不会从 yml/package.json 合并 | 在临时 config 里用**绝对路径**显式写 `win.extraResources` |
+
+### 10.3 产物
+
+- 路径：`apps/desktop/dist/Kairo-0.1.0-win.zip`
+- 大小：1526 MB（含 Go Agent 14MB + Tomcat6 + JDTLS 缺失+ Electron 运行时 + Theia bundles）
+- 内部结构：
+  - `Kairo.exe` (201 MB) — 入口
+  - `resources/app.asar` — 主进程 + Theia backend/frontend bundle
+  - `resources/bin/kairo-runtime.exe` — Go Runtime Agent
+  - `resources/bundled/tomcat6/` — Tomcat 6 运行时
+  - `resources/bundled/jdtls/` — (可选) Eclipse JDT Language Server
+
+### 10.4 一键命令
+
+```powershell
+# 完整 jdtls(推荐,内网先准备 jdtls-1.21.0-*.tar.gz 归档)
+$env:KAIRO_JDTLS_ARCHIVE = 'D:\mirror\jdtls-1.21.0.tar.gz'
+pwsh -ExecutionPolicy Bypass -File scripts\package-zip-green.ps1
+
+# 或:已解压的 jdtls 目录
+$env:KAIRO_JDTLS_HOME = 'E:\Apps\eclipse-jdt-ls'
+pwsh -ExecutionPolicy Bypass -File scripts\package-zip-green.ps1
+
+# 或:不带 jdtls 也能打(Java 编辑器为纯文本,其它功能正常)
+pwsh -ExecutionPolicy Bypass -File scripts\package-zip-green.ps1 -AllowNoJdtls
+```
+
+### 10.5 冒烟测试结果
+
+解压到 `C:\Users\Qi\AppData\Local\Temp\kairo-smoke2\`,启动 `Kairo.exe`：
+
+| 检查项 | 期望 | 实际 | 结果 |
+|--------|------|------|------|
+| Kairo.exe 启动 | 不闪退 | 5 个子进程稳定运行 25s+ | ✅ |
+| JDK 探测 | 17.0.19 detected | `E:\Tools\jdk17\bin\java.exe` | ✅ |
+| Go Agent 拉起 | `127.0.0.1:随机端口` 监听 | `127.0.0.1:65487` 监听 + health check 200 | ✅ |
+| Theia Backend 拉起 | 监听随机端口 | `127.0.0.1:50683` listening | ✅ |
+| Agent binary 验证 | `process.resourcesPath/bin/kairo-runtime.exe` 存在 | 通过 | ✅ |
+| bundled 加载 | tomcat6 + (jdtls) 资源就位 | `resources/bundled/tomcat6/` 已嵌入 | ✅ |
+
+### 10.6 关键文件变更
+
+- `scripts/package-zip-green.ps1`（新增/重写）— 一键打包主入口，含 4 项自检 + electron-builder 包装
+- `apps/desktop/package.json` — `productName: "Kairo"` + `executableName: "Kairo"`
+- `apps/desktop/scripts/build-agent.js` — 编译 Go Agent 为 `runtime-agent/bin/kairo-runtime.exe`
+- `apps/desktop/scripts/copy-bundled.js` — 把 `bundled/{tomcat6,jdtls}` 同步到 `apps/desktop/bundled/`
+- `apps/desktop/scripts/copy-browser-artifacts.js` — 同步 browser 编译产物
+
+### 10.7 内网用户使用流程
+
+1. 拷贝 `Kairo-0.1.0-win.zip` (1.5GB) 到目标机器
+2. 解压到任意目录（**支持中文路径和空格**）
+3. 双击 `Kairo.exe`
+4. 等 3-5 秒，Kairo 窗口 + 内嵌 IDE 界面自动打开
+5. 浏览器/编辑器无需额外配置；JDK 17 路径通过 `JAVA_HOME` 或 `PATH` 自动发现
+
+---
+
 *文档结束 — 祝开发顺利！*

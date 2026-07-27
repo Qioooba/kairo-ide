@@ -200,6 +200,38 @@ func ensureInstalled(ctx context.Context, dataDir, bundledDir, jrePath string, s
 	_ = os.MkdirAll(home, 0o755)
 	logger("jdtls distribution: resolving", map[string]any{"home": home, "version": JDTLSVersion})
 
+	// 0) Pre-extracted bundled directory (highest priority for offline/air-gapped mode).
+	// If the bundled/jdtls directory already contains a complete JDT LS layout
+	// (plugins/ + OS-specific config/), use it directly without requiring an archive
+	// or attempting any download. This is the production path for packaged EXE builds.
+	if l, err := discoverLayout(home); err == nil && l.layoutVersion() >= LayoutMinSupp {
+		rep := InstallReport{
+			Version:       JDTLSVersion,
+			BuildTag:      JDTLSBuildTag,
+			ArchiveName:   "(pre-bundled)",
+			ArchiveSHA256: "(pre-bundled)",
+			InstalledAt:   time.Now().UTC().Format(time.RFC3339Nano),
+			Home:          home,
+			LauncherJAR:   l.launcherJAR,
+			PluginsDir:    l.pluginsDir,
+			ConfigLinux:   l.configLinux,
+			ConfigWin:     l.configWin,
+			ConfigMac:     l.configMac,
+			LayoutVersion: l.layoutVersion(),
+		}
+		if len(l.warnings) > 0 {
+			rep.LayoutWarnings = l.warnings
+		}
+		if err := writeInstallReport(dataDir, &rep); err != nil {
+			logger("jdtls distribution: install report write failed", map[string]any{"err": err.Error()})
+		}
+		logger("jdtls distribution: using pre-bundled installation", map[string]any{
+			"home":        home,
+			"launcherJAR": l.launcherJAR,
+		})
+		return rep, nil
+	}
+
 	// 1) KAIRO_JDTLS_HOME override.
 	if pre := os.Getenv("KAIRO_JDTLS_HOME"); pre != "" {
 		rep, err := adoptExistingLayout(pre, dataDir, logger)
