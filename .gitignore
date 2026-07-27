@@ -239,9 +239,11 @@ runtime-agent/coverage_runtimeplan
 runtime-agent/coverage_tomcat6
 runtime-agent/deploy
 runtime-agent/internal/atomicfile/coverage
+runtime-agent/internal/atomicfile/coverage.out
 runtime-agent/jdtls_cov2
 runtime-agent/pathpolicy
 runtime-agent/repository
+runtime-agent/coverage_report.txt
 scripts/test/
 test-exe-launch.js
 test-workspace/

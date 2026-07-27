@@ -173,45 +173,73 @@ export class JavaLanguageServerLifecycle {
     /**
      * Handle a project change: prepare JDT LS and fetch the
      * launch descriptor from the Go Runtime Agent.
+     *
+     * After import, there are race conditions:
+     * 1. The project may not yet be associated with the workspace (404/not found).
+     * 2. The workspaceId in the event may differ from the actual workspace
+     *    that owns the project ("belongs to workspace ws_xxx" error).
+     * We retry up to 12 times with 2s delays (~26s total window) and
+     * extract the correct workspace ID from error messages.
      */
     private async onProjectChanged(project: { workspaceId: string; projectId: string }, token: number): Promise<void> {
-        try {
-            const ctx = this.workspaceContext.requireContext();
-            // The project knows the workspace it was imported into —
-            // use it. The workspace CONTEXT can point at a different
-            // workspace (e.g. right after the import wizard, when the
-            // UI opens the project root as a fresh Theia workspace);
-            // sending project A's id to workspace B's URL made the
-            // agent answer 404 "project not found" and JDT LS never
-            // started (flow-03 live evidence).
-            const workspaceId = project.workspaceId || ctx.workspaceId;
+        const MAX_RETRIES = 12;
+        const RETRY_DELAY_MS = 2000;
+        const INITIAL_DELAY_MS = 2000;
+        let lastError: unknown;
+        let forcedWorkspaceId: string | null = project.workspaceId || null;
 
-            this.logger.info(`Project changed: ${project.projectId}, ensuring JDT LS is prepared`);
-
-            // First, ensure JDT LS is prepared on the agent side
-            await this.runtime.request(
-                `POST /api/v1/workspaces/${workspaceId}/java/prepare` as Endpoint,
-                { projectId: project.projectId },
-            );
+        for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
             if (!this.isCurrentActivation(project, token)) return;
+            try {
+                if (attempt === 0) {
+                    await delay(INITIAL_DELAY_MS);
+                } else {
+                    this.logger.info(`JDT LS prepare retry ${attempt}/${MAX_RETRIES} for project ${project.projectId}${forcedWorkspaceId ? ` (ws=${forcedWorkspaceId})` : ''}`);
+                    await delay(RETRY_DELAY_MS);
+                }
+                if (!this.isCurrentActivation(project, token)) return;
 
-            // Then get the launch descriptor
-            const descriptor = await this.runtime.request(
-                `GET /api/v1/workspaces/${workspaceId}/java/launch-descriptor` as Endpoint,
-                undefined,
-                { query: { projectId: project.projectId } },
-            ) as JdtLsLaunchDescriptor;
-            if (!this.isCurrentActivation(project, token)) return;
-            this.launchDescriptor = descriptor;
+                const ctx = this.workspaceContext.requireContext();
+                const workspaceId = forcedWorkspaceId || project.workspaceId || ctx.workspaceId;
 
-            this.logger.info(`Launch descriptor received for project ${project.projectId}`);
+                this.logger.info(`Project changed: ${project.projectId}, ensuring JDT LS is prepared (workspace=${workspaceId})`);
 
-            // Finally, start the backend JDT LS process through the
-            // language client using the descriptor's workingDir and
-            // workspace data dir.
-            await this.startLanguageClient(descriptor, project.projectId, token);
-        } catch (err) {
-            this.logger.error(`Failed to prepare JDT LS for project ${project.projectId}: ${String(err)}`);
+                await this.runtime.request(
+                    `POST /api/v1/workspaces/${workspaceId}/java/prepare` as Endpoint,
+                    { projectId: project.projectId },
+                );
+                if (!this.isCurrentActivation(project, token)) return;
+
+                const descriptor = await this.runtime.request(
+                    `GET /api/v1/workspaces/${workspaceId}/java/launch-descriptor` as Endpoint,
+                    undefined,
+                    { query: { projectId: project.projectId } },
+                ) as JdtLsLaunchDescriptor;
+                if (!this.isCurrentActivation(project, token)) return;
+                this.launchDescriptor = descriptor;
+
+                this.logger.info(`Launch descriptor received for project ${project.projectId}`);
+
+                await this.startLanguageClient(descriptor, project.projectId, token);
+                return;
+            } catch (err) {
+                lastError = err;
+                const errMsg = String(err);
+                const belongsMatch = /belongs to workspace (ws_[a-z0-9]+)/.exec(errMsg);
+                if (belongsMatch && belongsMatch[1]) {
+                    forcedWorkspaceId = belongsMatch[1];
+                    this.logger.info(`JDT LS: project belongs to workspace ${forcedWorkspaceId}, will retry with correct workspace ID`);
+                }
+                const isRetryable = errMsg.includes('not found') || errMsg.includes('404') || errMsg.includes('belongs to workspace');
+                if (!isRetryable || attempt >= MAX_RETRIES) {
+                    this.logger.error(`Failed to prepare JDT LS for project ${project.projectId}: ${errMsg}`);
+                    return;
+                }
+                this.logger.warn(`JDT LS prepare attempt ${attempt + 1} failed for ${project.projectId} (project not ready yet), retrying...`);
+            }
+        }
+        if (lastError) {
+            this.logger.warn(`JDT LS prepare exhausted retries for project ${project.projectId}, waiting for workspace context change to retry: ${String(lastError).slice(0, 200)}`);
         }
     }
 
@@ -394,4 +422,8 @@ export function extractJdtLsHome(descriptor: JdtLsLaunchDescriptor): string | un
         }
     }
     return undefined;
+}
+
+function delay(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
 }
