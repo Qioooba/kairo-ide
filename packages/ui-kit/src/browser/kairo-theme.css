@@ -356,17 +356,43 @@
  * each element and a small gap between elements so the bar
  * reads cleanly without changing the Theia layout. */
 #theia-statusBar .element {
-    padding: 0 6px !important;
+    padding: 0 8px !important;
     line-height: 22px !important;
     height: 22px !important;
     display: inline-flex !important;
     align-items: center !important;
     box-sizing: border-box !important;
+    white-space: nowrap !important;
+    flex-shrink: 0 !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+}
+
+/* Area containers must be flex to lay out inline-flex children properly */
+#theia-statusBar .area {
+    display: flex !important;
+    align-items: stretch !important;
+    height: 22px !important;
+}
+
+#theia-statusBar .area.left {
+    flex: 1 1 auto !important;
+    justify-content: flex-start !important;
+    min-width: 0 !important;
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+    scrollbar-width: none !important;
+}
+
+#theia-statusBar .area.right {
+    flex-shrink: 0 !important;
+    justify-content: flex-end !important;
+    margin-left: auto !important;
 }
 
 #theia-statusBar .area.left > .element + .element,
 #theia-statusBar .area > .element + .element {
-    margin-left: 2px !important;
+    margin-left: 0 !important;
 }
 
 /* Status bar: ensure icon-vs-text gap inside each element */
@@ -377,7 +403,7 @@
 /* Right-side icon-only elements (bell, notifications, panel
  * toggle) should stay tight — no double padding. */
 #theia-statusBar .area.right .element {
-    padding: 0 4px !important;
+    padding: 0 5px !important;
 }
 
 /* Status bar hover background should be visible */
@@ -1170,21 +1196,15 @@
 
 /* KAIRO-RC-WEB-101: at narrow widths / 200% zoom the status bar
  * clipped right-side items (Runtime, notification bell, panel
- * toggle) off-screen with no way to reach them. Let each area
- * shrink (min-width: 0) and scroll horizontally instead of
- * clipping; the scrollbar stays hidden to keep the 22px bar clean. */
+ * toggle) off-screen with no way to reach them. The left area
+ * can scroll horizontally; the scrollbar stays hidden. */
 #theia-statusBar {
     height: 22px !important;
     min-height: 22px !important;
     max-height: 22px !important;
     overflow: hidden !important;
-}
-
-#theia-statusBar .area {
-    min-width: 0;
-    overflow-x: auto;
-    overflow-y: hidden;
-    scrollbar-width: none;
+    display: flex !important;
+    align-items: stretch !important;
 }
 
 #theia-statusBar .area::-webkit-scrollbar {
