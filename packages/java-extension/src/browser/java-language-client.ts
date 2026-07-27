@@ -144,11 +144,60 @@ export class JavaLanguageClient implements JdtLsFrontendClient, Disposable {
     return this.rpcProxy;
   }
 
+  /** Check if an error is a transient connection/disposal error. */
+  protected isTransientConnectionError(err: unknown): boolean {
+    const msg = String(err);
+    return msg.includes('connection got disposed')
+      || msg.includes('connection is disposed')
+      || msg.includes('WebSocket is not open')
+      || msg.includes('connection closing')
+      || msg.includes('Pending response rejected');
+  }
+
+  /** Check if an error indicates the backend method is not available. */
+  protected isPermanentRpcFailure(err: unknown): boolean {
+    const msg = String(err);
+    return msg.includes('method not found')
+      || msg.includes('Method not found')
+      || msg.includes('Internal error') && msg.includes('no handler');
+  }
+
   /** Mark the RPC path broken (backend has no handler) and fall back. */
   protected markRpcFailed(err: unknown): void {
+    if (this.isTransientConnectionError(err)) {
+      this.rpcProxy = undefined;
+      this.logger.warn(`[JavaLanguageClient] backend RPC connection transient error (will retry on next call): ${String(err).slice(0, 200)}`);
+      return;
+    }
     this.rpcFailed = true;
     this.rpcProxy = undefined;
-    this.logger.warn(`[JavaLanguageClient] backend RPC failed, falling back to in-process service: ${String(err)}`);
+    this.logger.warn(`[JavaLanguageClient] backend RPC failed, falling back to in-process service: ${String(err).slice(0, 200)}`);
+  }
+
+  /** Retry an RPC operation with exponential backoff for transient errors. */
+  protected async withRetry<T>(
+    operation: () => Promise<T>,
+    fallback: () => Promise<T>,
+    retries = 5,
+    baseDelay = 1000,
+  ): Promise<T> {
+    let lastErr: unknown;
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        this.rpcProxy = undefined;
+        const proxy = this.proxy();
+        if (!proxy) break;
+        return await operation();
+      } catch (err) {
+        lastErr = err;
+        if (this.isPermanentRpcFailure(err)) break;
+        if (!this.isTransientConnectionError(err) || attempt >= retries) break;
+        const delay = Math.min(baseDelay * (2 ** attempt), 5000);
+        this.logger.info(`[JavaLanguageClient] RPC transient error, retrying in ${delay}ms (attempt ${attempt + 1}/${retries})`);
+        await new Promise(r => setTimeout(r, delay));
+      }
+    }
+    return fallback();
   }
 
   /**
@@ -161,43 +210,37 @@ export class JavaLanguageClient implements JdtLsFrontendClient, Disposable {
    * the KAIRO_JDT_LS_HOME env fallback in the backend.
    */
   async start(opts: { rootUri: string; workspaceDataDir: string; sourceLevel?: string; home?: string }): Promise<{ ok: true } | { ok: false; reason: string }> {
-    const proxy = this.proxy();
-    if (proxy) {
-      try {
-        return await proxy.$start(opts);
-      } catch (err) {
-        this.markRpcFailed(err);
-      }
-    }
-    if (!this.backend) {
-      return { ok: false, reason: 'Backend service not available' };
-    }
-    const inspect = this.backend.inspect(opts.home);
-    if (!inspect.ok) {
-      this.logger.warn(`[JavaLanguageClient] cannot start: ${inspect.reason}`);
-      return { ok: false, reason: inspect.reason };
-    }
-    try {
-      await this.backend.start(opts);
-      return { ok: true };
-    } catch (err) {
-      this.logger.error(`[JavaLanguageClient] start failed: ${String(err)}`);
-      return { ok: false, reason: String(err) };
-    }
+    return this.withRetry(
+      () => this.proxy()!.$start(opts),
+      async () => {
+        if (!this.backend) {
+          return { ok: false, reason: 'Backend service not available' };
+        }
+        const inspect = this.backend.inspect(opts.home);
+        if (!inspect.ok) {
+          this.logger.warn(`[JavaLanguageClient] cannot start: ${inspect.reason}`);
+          return { ok: false, reason: inspect.reason };
+        }
+        try {
+          await this.backend.start(opts);
+          return { ok: true };
+        } catch (err) {
+          this.logger.error(`[JavaLanguageClient] start failed: ${String(err)}`);
+          return { ok: false, reason: String(err) };
+        }
+      },
+    );
   }
 
   async stop(): Promise<void> {
-    const proxy = this.proxy();
-    if (proxy) {
-      try {
-        return await proxy.$stop();
-      } catch (err) {
-        this.markRpcFailed(err);
-      }
-    }
-    if (this.backend) {
-      await this.backend.stop();
-    }
+    return this.withRetry(
+      () => this.proxy()!.$stop(),
+      async () => {
+        if (this.backend) {
+          await this.backend.stop();
+        }
+      },
+    );
   }
 
   state(): JdtLsState {
@@ -205,20 +248,19 @@ export class JavaLanguageClient implements JdtLsFrontendClient, Disposable {
   }
 
   async fetchState(): Promise<JdtLsState> {
-    const proxy = this.proxy();
-    if (proxy) {
-      try {
-        const s = await proxy.$state();
+    return this.withRetry(
+      async () => {
+        const s = await this.proxy()!.$state();
         this.lastKnownState = s;
         return s;
-      } catch (err) {
-        this.markRpcFailed(err);
-      }
-    }
-    if (this.backend) {
-      return this.backend.state();
-    }
-    return this.lastKnownState;
+      },
+      async () => {
+        if (this.backend) {
+          return this.backend.state();
+        }
+        return this.lastKnownState;
+      },
+    );
   }
 
   didOpen(p: { uri: string; languageId: string; version: number; text: string }): void {
