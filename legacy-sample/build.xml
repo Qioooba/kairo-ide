@@ -28,7 +28,10 @@
       bump the level to 1.8 by setting KAIRO_JAVA_TARGET=1.8
       in the test harness.
     -->
-    <property name="kairo.java.target" value="1.6"/>
+    <property environment="env"/>
+    <condition property="kairo.java.target" value="${env.KAIRO_JAVA_TARGET}" else="1.6">
+      <isset property="env.KAIRO_JAVA_TARGET"/>
+    </condition>
     <javac srcdir="${src.dir}"
            destdir="${build.dir}"
            includeantruntime="false"

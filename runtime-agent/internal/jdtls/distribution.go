@@ -68,48 +68,38 @@ import (
 //   - override the URL via KAIRO_JDTLS_ARCHIVE_URL
 const (
 	// JDTLSVersion is the JDT LS release the agent supports.
-	// Bump together with JDTLSReleaseDate + JDTLSArchiveURL + JDTLSExpectedSHA256.
+	// Bump together with JDTLSReleaseDate + JDTLSArchiveFile + JDTLSExpectedSHA256.
 	//
 	// History:
 	//   1.35.0 (2024-06-27) — original pin, removed by Eclipse 2025
-	//                          (HTTP 404 from download.eclipse.org)
 	//   1.55.0 (2026-01-13) — current pin; verified 2026-07-20
 	JDTLSVersion = "1.55.0"
 	// JDTLSReleaseDate is the date tag of the pinned artefact.
-	// Eclipse milestones use a date-tagged name internally.
 	JDTLSReleaseDate = "2026-01-13"
-	// JDTLSBuildTag is kept for backward compatibility with
-	// install reports. It is the same as the release date.
+	// JDTLSBuildTag is kept for backward compatibility with install reports.
 	JDTLSBuildTag = "20260113"
-	// JDTLSArchiveFile is the canonical archive name we
-	// write to disk when caching.
+	// JDTLSArchiveFile is the canonical archive name for caching.
+	// OFFLINE MODE: Kairo IDE will NOT automatically download from the
+	// public internet. The JDT LS archive must be provided via:
+	//   - Pre-bundling during build (pnpm bundled:prepare)
+	//   - KAIRO_JDTLS_ARCHIVE environment variable (local file)
+	//   - KAIRO_JDTLS_ARCHIVE_URL environment variable (intranet mirror)
+	//   - KAIRO_JDTLS_HOME environment variable (existing installation)
 	JDTLSArchiveFile = "jdt-language-server-1.55.0-202601131729.tar.gz"
-	// JDTLSArchiveURL is the pinned download URL. We use a
-	// fixed dated milestone, NOT the "latest" symlink, so
-	// the SHA-256 check is stable across builds.
+	// JDTLSArchiveURL is documented for reference only and is NOT used
+	// as a default download target in offline/air-gapped mode. It shows
+	// where the pinned version was originally sourced from for pre-bundling
+	// purposes. In production, configure KAIRO_JDTLS_ARCHIVE_URL to your
+	// intranet mirror.
 	JDTLSArchiveURL = "https://download.eclipse.org/jdtls/milestones/1.55.0/jdt-language-server-1.55.0-202601131729.tar.gz"
-	// JDTLSExpectedSHA256 is the expected SHA-256 of the
-	// archive. The installer refuses to run on a
-	// mismatching build.
-	//
-	// When KAIRO_SKIP_SHA_VERIFY=true is set (development
-	// only), the SHA-256 check is skipped and a warning is
-	// printed.
-	//
-	// To obtain the real hash:
-	//   curl -L "https://download.eclipse.org/jdtls/milestones/1.55.0/jdt-language-server-1.55.0-202601131729.tar.gz" | shasum -a 256
-	//
-	// Update the four constants above together; never one
-	// without the other three.
+	// JDTLSExpectedSHA256 is the expected SHA-256 of the archive.
+	// When KAIRO_SKIP_SHA_VERIFY=true (development only), verification
+	// is skipped with a warning.
 	//
 	// SHA-256 of the pinned archive (verified 2026-07-20):
 	//   90627c9f03704dbb404f37651625d0751c078ab7534246023d53adcea1411b91
 	JDTLSExpectedSHA256 = "90627c9f03704dbb404f37651625d0751c078ab7534246023d53adcea1411b91"
-	// JDTLSLaunchMinVersion is the minimum Equinox
-	// launcher version we expect to find in the plugins/
-	// folder. Older builds than this have known bugs
-	// we do not want to inherit. We allow newer; we
-	// do not allow older.
+	// JDTLSLaunchMinVersion is the minimum Equinox launcher version.
 	JDTLSLaunchMinVersion = "1.6.400"
 )
 
@@ -269,20 +259,56 @@ func ensureInstalled(ctx context.Context, dataDir, bundledDir, jrePath string, s
 		_ = os.Remove(cached)
 	}
 
-	// 4) Download.
+	// 4) Download from configured URL (offline mode: no hardcoded public URL fallback).
+	// Kairo IDE is designed for offline/air-gapped environments. If no archive is
+	// available locally and no intranet URL is configured, return a clear error
+	// rather than attempting to reach the public internet.
 	url := customURL
 	if url == "" {
 		url = os.Getenv("KAIRO_JDTLS_ARCHIVE_URL")
 	}
 	if url == "" {
-		url = JDTLSArchiveURL
+		// Check if a pre-bundled archive exists from prepare-bundled (build-time packaging)
+		bundledSearchPatterns := []string{
+			filepath.Join(bundledDir, "jdtls", JDTLSArchiveFile),
+			filepath.Join(bundledDir, JDTLSArchiveFile),
+		}
+		for _, candidate := range bundledSearchPatterns {
+			if st, err := os.Stat(candidate); err == nil && st.Size() > 0 {
+				logger("jdtls distribution: using pre-bundled archive", map[string]any{"path": candidate})
+				return installFromFile(ctx, candidate, home, dataDir, skipSHAVerify, logger)
+			}
+		}
+		return InstallReport{}, fmt.Errorf("jdt-language-server archive not available; Kairo IDE runs in offline/air-gapped mode and will not download from the public internet. Please either:\n"+
+			"  1. Set KAIRO_JDTLS_HOME to an existing JDT LS installation directory,\n"+
+			"  2. Set KAIRO_JDTLS_ARCHIVE to a local .tar.gz/.zip archive,\n"+
+			"  3. Set KAIRO_JDTLS_ARCHIVE_URL to an intranet mirror URL,\n"+
+			"  4. Run pnpm bundled:prepare to pre-package JDT LS during build")
 	}
-	logger("jdtls distribution: downloading", map[string]any{"url": url})
+
+	// If URL is a local file path, use it directly
+	if strings.HasPrefix(url, "file://") || !strings.Contains(url, "://") {
+		localPath := url
+		if strings.HasPrefix(url, "file://") {
+			u, err := filepath.Abs(url[7:])
+			if err == nil {
+				localPath = u
+			}
+		} else if !filepath.IsAbs(localPath) {
+			localPath = filepath.Join(bundledDir, localPath)
+		}
+		if _, err := os.Stat(localPath); err == nil {
+			logger("jdtls distribution: using local archive", map[string]any{"path": localPath})
+			return installFromFile(ctx, localPath, home, dataDir, skipSHAVerify, logger)
+		}
+	}
+
+	logger("jdtls distribution: downloading from configured URL", map[string]any{"url": url})
 	if skipSHAVerify {
 		logger("jdtls distribution: SHA-256 verification will be skipped (KAIRO_SKIP_SHA_VERIFY=true)", map[string]any{"warning": "development only"})
 	}
 	if err := downloadTo(ctx, url, cached, logger); err != nil {
-		return InstallReport{}, fmt.Errorf("download jdt-language-server: %w (set KAIRO_JDTLS_ARCHIVE to use a pre-staged archive, or --jdtls-url / KAIRO_JDTLS_ARCHIVE_URL to override the URL)", err)
+		return InstallReport{}, fmt.Errorf("download jdt-language-server: %w (set KAIRO_JDTLS_ARCHIVE to use a pre-staged local archive, or configure KAIRO_JDTLS_ARCHIVE_URL to your intranet mirror)", err)
 	}
 	return installFromFile(ctx, cached, home, dataDir, skipSHAVerify, logger)
 }

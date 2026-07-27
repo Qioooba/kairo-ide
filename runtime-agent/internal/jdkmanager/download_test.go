@@ -6,13 +6,10 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
-	"fmt"
-	"io"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -21,9 +18,15 @@ func envCleanup(t *testing.T) {
 	origPath := os.Getenv("PATH")
 	origHome := os.Getenv("JAVA_HOME")
 	origJre := os.Getenv("KAIRO_JDT_LS_JRE")
+	origJdkHome := os.Getenv("KAIRO_JDK_HOME")
+	origJdkArchive := os.Getenv("KAIRO_JDK_ARCHIVE")
+	origJdkHash := os.Getenv("KAIRO_JDK_SHA256")
 	origCommonPaths := commonJDKPaths
 	os.Unsetenv("JAVA_HOME")
 	os.Unsetenv("KAIRO_JDT_LS_JRE")
+	os.Unsetenv("KAIRO_JDK_HOME")
+	os.Unsetenv("KAIRO_JDK_ARCHIVE")
+	os.Unsetenv("KAIRO_JDK_SHA256")
 	emptyDir := t.TempDir()
 	t.Setenv("PATH", emptyDir)
 	commonJDKPaths = func() []string { return nil }
@@ -31,6 +34,9 @@ func envCleanup(t *testing.T) {
 		os.Setenv("PATH", origPath)
 		os.Setenv("JAVA_HOME", origHome)
 		os.Setenv("KAIRO_JDT_LS_JRE", origJre)
+		os.Setenv("KAIRO_JDK_HOME", origJdkHome)
+		os.Setenv("KAIRO_JDK_ARCHIVE", origJdkArchive)
+		os.Setenv("KAIRO_JDK_SHA256", origJdkHash)
 		commonJDKPaths = origCommonPaths
 	})
 }
@@ -135,36 +141,33 @@ func createFakeZip(t *testing.T) []byte {
 	return buf.Bytes()
 }
 
-func TestDownload_TarGz(t *testing.T) {
+func writeArchiveFile(t *testing.T, dir, name string, data []byte) string {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestEnsureJDK17_FromBundledArchive_TarGz(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("tar.gz test on non-Windows platforms")
 	}
 
 	envCleanup(t)
 
-	origBase := adoptiumBase
-	origClient := httpClient
-	defer func() {
-		adoptiumBase = origBase
-		httpClient = origClient
-	}()
-
 	archiveData := createFakeTarGz(t, false)
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(archiveData)))
-		w.WriteHeader(http.StatusOK)
-		w.Write(archiveData)
-	}))
-	defer ts.Close()
-
-	adoptiumBase = ts.URL
-	httpClient = ts.Client()
-
 	tmpDir := t.TempDir()
+	writeArchiveFile(t, tmpDir, "jdk17.tar.gz", archiveData)
+
 	m := NewManager(tmpDir)
 
 	if !m.NeedsDownload() {
-		t.Fatal("expected NeedsDownload to be true before download")
+		t.Fatal("expected NeedsDownload to be true before extraction")
 	}
 
 	progressCalls := 0
@@ -203,36 +206,115 @@ func TestDownload_TarGz(t *testing.T) {
 	}
 
 	if m.NeedsDownload() {
-		t.Error("expected NeedsDownload to be false after successful download")
+		t.Error("expected NeedsDownload to be false after successful extraction")
 	}
 }
 
-func TestDownload_MacLayout(t *testing.T) {
+func TestEnsureJDK17_FromKAIROJDKArchive(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("tar.gz test on non-Windows platforms")
+	}
+
+	envCleanup(t)
+
+	archiveData := createFakeTarGz(t, false)
+	archiveDir := t.TempDir()
+	archivePath := writeArchiveFile(t, archiveDir, "custom-jdk.tar.gz", archiveData)
+	t.Setenv("KAIRO_JDK_ARCHIVE", archivePath)
+
+	installDir := t.TempDir()
+	m := NewManager(installDir)
+
+	if !m.NeedsDownload() {
+		t.Fatal("expected NeedsDownload to be true before extraction")
+	}
+
+	jdk, err := m.EnsureJDK17(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("EnsureJDK17 failed: %v", err)
+	}
+
+	if jdk.Major != 17 {
+		t.Errorf("expected major version 17, got %d", jdk.Major)
+	}
+
+	javaPath := filepath.Join(installDir, "jdk17", "bin", "java")
+	if _, err := os.Stat(javaPath); err != nil {
+		t.Errorf("java binary not found at %s: %v", javaPath, err)
+	}
+}
+
+func TestEnsureJDK17_FromKAIROJDKHome(t *testing.T) {
+	envCleanup(t)
+
+	javaExe := "java"
+	if runtime.GOOS == "windows" {
+		javaExe = "java.exe"
+	}
+	jdkHomeDir := t.TempDir()
+	binDir := filepath.Join(jdkHomeDir, "bin")
+	os.MkdirAll(binDir, 0755)
+	javaPath := filepath.Join(binDir, javaExe)
+	os.WriteFile(javaPath, []byte(createFakeJavaContent()), 0755)
+
+	t.Setenv("KAIRO_JDK_HOME", jdkHomeDir)
+
+	installDir := t.TempDir()
+	m := NewManager(installDir)
+
+	if !m.Detect().Available {
+		t.Fatal("expected JDK to be detected via KAIRO_JDK_HOME")
+	}
+
+	jdk, err := m.EnsureJDK17(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("EnsureJDK17 failed: %v", err)
+	}
+
+	if jdk.Major != 17 {
+		t.Errorf("expected major version 17, got %d", jdk.Major)
+	}
+}
+
+func TestEnsureJDK17_FromZip_Bundled(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("zip test on Windows platforms")
+	}
+
+	envCleanup(t)
+
+	archiveData := createFakeZip(t)
+	tmpDir := t.TempDir()
+	writeArchiveFile(t, tmpDir, "jdk17.zip", archiveData)
+
+	m := NewManager(tmpDir)
+
+	jdk, err := m.EnsureJDK17(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("EnsureJDK17 failed: %v", err)
+	}
+
+	if jdk.Major != 17 {
+		t.Errorf("expected major version 17, got %d", jdk.Major)
+	}
+
+	javaPath := filepath.Join(tmpDir, "jdk17", "bin", "java.exe")
+	if _, err := os.Stat(javaPath); err != nil {
+		t.Errorf("java.exe not found at %s: %v", javaPath, err)
+	}
+}
+
+func TestEnsureJDK17_MacLayout(t *testing.T) {
 	if runtime.GOOS != "darwin" {
 		t.Skip("mac layout test only on darwin")
 	}
 
 	envCleanup(t)
 
-	origBase := adoptiumBase
-	origClient := httpClient
-	defer func() {
-		adoptiumBase = origBase
-		httpClient = origClient
-	}()
-
 	archiveData := createFakeTarGz(t, true)
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(archiveData)))
-		w.WriteHeader(http.StatusOK)
-		w.Write(archiveData)
-	}))
-	defer ts.Close()
-
-	adoptiumBase = ts.URL
-	httpClient = ts.Client()
-
 	tmpDir := t.TempDir()
+	writeArchiveFile(t, tmpDir, "jdk17.tar.gz", archiveData)
+
 	m := NewManager(tmpDir)
 
 	jdk, err := m.EnsureJDK17(context.Background(), nil)
@@ -250,7 +332,7 @@ func TestDownload_MacLayout(t *testing.T) {
 	}
 }
 
-func TestDownload_AlreadyAvailable(t *testing.T) {
+func TestEnsureJDK17_AlreadyAvailable(t *testing.T) {
 	tmpDir := t.TempDir()
 	jdk17Dir := filepath.Join(tmpDir, "jdk17", "bin")
 	if err := os.MkdirAll(jdk17Dir, 0755); err != nil {
@@ -268,24 +350,9 @@ func TestDownload_AlreadyAvailable(t *testing.T) {
 
 	m := NewManager(tmpDir)
 
-	downloadCalled := false
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		downloadCalled = true
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer ts.Close()
-
-	origBase := adoptiumBase
-	adoptiumBase = ts.URL
-	defer func() { adoptiumBase = origBase }()
-
 	jdk, err := m.EnsureJDK17(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("EnsureJDK17 failed: %v", err)
-	}
-
-	if downloadCalled {
-		t.Error("should not have called download server when JDK already available")
 	}
 
 	if jdk.Major != 17 {
@@ -293,62 +360,35 @@ func TestDownload_AlreadyAvailable(t *testing.T) {
 	}
 }
 
-func TestDownload_Cancellation(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("cancellation test")
-	}
-
+func TestEnsureJDK17_NoArchive_ReturnsError(t *testing.T) {
 	envCleanup(t)
-
-	origBase := adoptiumBase
-	origClient := httpClient
-	defer func() {
-		adoptiumBase = origBase
-		httpClient = origClient
-	}()
-
-	started := make(chan struct{})
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Length", "100000")
-		w.WriteHeader(http.StatusOK)
-		flusher, ok := w.(http.Flusher)
-		if !ok {
-			return
-		}
-		close(started)
-		for i := 0; i < 1000; i++ {
-			select {
-			case <-r.Context().Done():
-				return
-			default:
-			}
-			w.Write([]byte("dummy data\n"))
-			flusher.Flush()
-		}
-	}))
-	defer ts.Close()
-
-	adoptiumBase = ts.URL
-	httpClient = ts.Client()
 
 	tmpDir := t.TempDir()
 	m := NewManager(tmpDir)
 
-	ctx, cancel := context.WithCancel(context.Background())
-
-	errCh := make(chan error, 1)
-	go func() {
-		_, err := m.EnsureJDK17(ctx, func(pct int, msg string) {})
-		errCh <- err
-	}()
-
-	<-started
-	cancel()
-
-	err := <-errCh
+	_, err := m.EnsureJDK17(context.Background(), nil)
 	if err == nil {
-		t.Error("expected error due to cancelled context")
+		t.Fatal("expected error when no JDK available and no archive")
 	}
+	errStr := err.Error()
+	if !strings.Contains(errStr, "no JDK 17 found") && !strings.Contains(errStr, "KAIRO_JDK_HOME") {
+		t.Errorf("expected helpful offline error message, got: %s", errStr)
+	}
+}
+
+func TestEnsureJDK17_InvalidArchive_ReturnsError(t *testing.T) {
+	envCleanup(t)
+
+	tmpDir := t.TempDir()
+	badArchive := writeArchiveFile(t, tmpDir, "jdk17.tar.gz", []byte("this is not a tar.gz"))
+
+	m := NewManager(tmpDir)
+
+	_, err := m.EnsureJDK17(context.Background(), nil)
+	if err == nil {
+		t.Fatal("expected error with invalid archive")
+	}
+	_ = badArchive
 }
 
 func TestNeedsDownload(t *testing.T) {
@@ -374,40 +414,40 @@ func TestNeedsDownload(t *testing.T) {
 	}
 }
 
-func TestDownloadURL(t *testing.T) {
-	m := NewManager("/tmp")
-	url, ext := m.downloadURL()
-
-	if url == "" {
-		t.Error("expected non-empty URL")
+func TestArchiveTypeFromPath(t *testing.T) {
+	cases := []struct {
+		path string
+		want string
+	}{
+		{"jdk.tar.gz", ".tar.gz"},
+		{"jdk.tgz", ".tar.gz"},
+		{"jdk.zip", ".zip"},
+		{"jdk.txt", ""},
+		{"/path/to/JDK17.TAR.GZ", ".tar.gz"},
+		{"C:\\path\\jdk17.ZIP", ".zip"},
 	}
-
-	switch runtime.GOOS {
-	case "darwin", "linux":
-		if ext != ".tar.gz" {
-			t.Errorf("expected .tar.gz extension on %s, got %s", runtime.GOOS, ext)
+	for _, c := range cases {
+		got := archiveTypeFromPath(c.path)
+		if got != c.want {
+			t.Errorf("archiveTypeFromPath(%q) = %q, want %q", c.path, got, c.want)
 		}
-	case "windows":
-		if ext != ".zip" {
-			t.Errorf("expected .zip extension on windows, got %s", ext)
-		}
+	}
+}
+
+func TestVerifySHA256(t *testing.T) {
+	tmpDir := t.TempDir()
+	testFile := filepath.Join(tmpDir, "test.bin")
+	testData := []byte("hello world")
+	if err := os.WriteFile(testFile, testData, 0644); err != nil {
+		t.Fatal(err)
 	}
 
-	expectedOS := map[string]string{
-		"darwin":  "mac",
-		"linux":   "linux",
-		"windows": "windows",
+	if err := verifySHA256(testFile, "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"); err != nil {
+		t.Errorf("expected valid sha256 to pass, got: %v", err)
 	}
-	expectedArch := map[string]string{
-		"amd64": "x64",
-		"arm64": "aarch64",
-	}
-	if eos, ok := expectedOS[runtime.GOOS]; ok {
-		expected := fmt.Sprintf("%s/%s/%s", adoptiumBase, eos, expectedArch[runtime.GOARCH])
-		expected += "/jdk/hotspot/normal/eclipse"
-		if url != expected {
-			t.Errorf("URL mismatch:\n  got:  %s\n  want: %s", url, expected)
-		}
+
+	if err := verifySHA256(testFile, "0000000000000000000000000000000000000000000000000000000000000000"); err == nil {
+		t.Error("expected invalid sha256 to fail")
 	}
 }
 
@@ -444,27 +484,40 @@ func TestExtractZip_Basic(t *testing.T) {
 	}
 }
 
-func TestProgressReader(t *testing.T) {
-	data := bytes.Repeat([]byte("x"), 1000)
-	var lastPct int
-
-	ctx := context.Background()
-	pr := &progressReader{
-		reader: bytes.NewReader(data),
-		total:  1000,
-		progress: func(pct int, msg string) {
-			lastPct = pct
-		},
-		ctx: ctx,
+func TestExtractTarGz_Basic(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("tar.gz test on non-Windows platforms")
 	}
 
-	_, err := io.Copy(io.Discard, pr)
+	tgzData := createFakeTarGz(t, false)
+	tmpGz, err := os.CreateTemp("", "test-*.tar.gz")
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer os.Remove(tmpGz.Name())
+	if _, err := tmpGz.Write(tgzData); err != nil {
+		t.Fatal(err)
+	}
+	tmpGz.Close()
 
-	if lastPct < 50 {
-		t.Errorf("expected progress > 50%%, got %d", lastPct)
+	tmpDir := t.TempDir()
+	if err := extractTarGz(tmpGz.Name(), tmpDir); err != nil {
+		t.Fatalf("extractTarGz failed: %v", err)
+	}
+
+	entries, err := os.ReadDir(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, e := range entries {
+		if e.IsDir() && e.Name() == "jdk-17.0.9+9" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected jdk-17.0.9+9 directory in extraction, got entries: %v", entries)
 	}
 }
 
@@ -500,3 +553,5 @@ func TestFindJDKContentDir_Plain(t *testing.T) {
 		t.Errorf("findJDKContentDir returned %s, want %s", dir, top)
 	}
 }
+
+

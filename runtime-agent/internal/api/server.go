@@ -244,15 +244,8 @@ func (s *Server) Shutdown(ctx context.Context) error {
 // middleware applies request ID, logging, audit, CORS, rate
 // limiting, secret auth check, and recovery in that order.
 func (s *Server) middleware(next http.Handler) http.Handler {
-	// Wrap with CORS first (outermost) so OPTIONS preflight
-	// doesn't need auth or request ID.
-	next = s.corsMiddleware(next)
-	// Rate limiting after CORS but before auth so preflight
-	// requests are not counted against the limit.
-	if s.rateLimiter != nil {
-		next = s.rateLimiter.RateLimitMiddleware(next)
-	}
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// Inner handler: request ID, secret auth, logging, recovery.
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rid := r.Header.Get("X-Kairo-Request-Id")
 		if rid == "" {
 			rid = newRequestID()
@@ -267,7 +260,9 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 		// runtime client. /api/v1/events does its own auth via the
 		// WebSocket Sec-WebSocket-Protocol subprotocol (browsers
 		// cannot set custom headers on a WebSocket upgrade).
-		if s.secret != "" {
+		// OPTIONS requests are also exempt (CORS preflight has no
+		// X-Kairo-Secret header by design).
+		if s.secret != "" && r.Method != http.MethodOptions {
 			switch r.URL.Path {
 			case "/api/v1/health", "/api/v1/endpoints":
 				// Public, by contract.
@@ -308,6 +303,17 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+
+	// Rate limiting after CORS but before auth so preflight
+	// requests are not counted against the limit.
+	var handler http.Handler = inner
+	if s.rateLimiter != nil {
+		handler = s.rateLimiter.RateLimitMiddleware(handler)
+	}
+
+	// CORS outermost so OPTIONS preflight gets proper CORS headers
+	// before any auth or rate-limiting logic runs.
+	return s.corsMiddleware(handler)
 }
 
 func (s *Server) corsMiddleware(next http.Handler) http.Handler {

@@ -1,15 +1,17 @@
 /**
  * Kairo 遥测框架 — P3-OBS-02
  *
- * KairoTelemetry service (default: disabled, opt-in only).
- * Events: startup, project open, build start/end, search, debug session, errors.
+ * OFFLINE / AIR-GAPPED MODE: Kairo IDE is designed for fully intranet
+ * deployment with zero internet connectivity. Telemetry network
+ * transmission is DISABLED by default. Events are stored locally only.
+ *
+ * To enable enterprise telemetry collection on your intranet:
+ * 1. Set KAIRO_ALLOW_TELEMETRY=1 (explicit opt-in)
+ * 2. Configure KAIRO_TELEMETRY_ENDPOINT to your internal telemetry server
+ * 3. User must accept the privacy disclosure in settings
  *
  * All events include: timestamp, event type, anonymized session ID.
  * No personal data, no file contents, no source code.
- * Local storage only by default (no network transmission).
- * Admin can configure endpoint for enterprise telemetry collection.
- * Export to JSON for local analysis.
- * Privacy: clear disclosure of what's collected on first run.
  */
 
 import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
@@ -18,7 +20,6 @@ import { ILogger } from '@theia/core/lib/common/logger';
 import { StorageService } from '@theia/core/lib/browser';
 import { MessageService } from '@theia/core/lib/common/message-service';
 
-/** Telemetry event types. */
 export type TelemetryEventType =
   | 'startup'
   | 'project.open'
@@ -31,31 +32,20 @@ export type TelemetryEventType =
   | 'error.occurred'
   | 'ui.interaction';
 
-/** A single telemetry event. */
 export interface TelemetryEvent {
-  /** ISO 8601 timestamp. */
   timestamp: string;
-  /** Event type. */
   eventType: TelemetryEventType;
-  /** Anonymized session ID. */
   sessionId: string;
-  /** Event-specific data (no personal info, no file contents). */
   data?: Record<string, string | number | boolean>;
 }
 
-/** Telemetry configuration. */
 export interface TelemetryConfig {
-  /** Whether telemetry is enabled. */
   enabled: boolean;
-  /** Whether the user has seen the privacy disclosure. */
   privacyAccepted: boolean;
-  /** Enterprise endpoint URL (optional). */
   endpoint?: string;
-  /** Maximum number of events to keep locally. */
   maxLocalEvents: number;
 }
 
-/** Telemetry statistics. */
 export interface TelemetryStats {
   totalEvents: number;
   enabled: boolean;
@@ -67,6 +57,17 @@ export interface TelemetryStats {
 const TELEMETRY_CONFIG_KEY = 'kairo.telemetry.config';
 const TELEMETRY_EVENTS_KEY = 'kairo.telemetry.events';
 const MAX_EVENTS_DEFAULT = 10_000;
+
+function isTelemetryNetworkAllowed(): boolean {
+  return typeof process !== 'undefined' && process.env?.KAIRO_ALLOW_TELEMETRY === '1';
+}
+
+function getConfiguredTelemetryEndpoint(): string | undefined {
+  if (typeof process !== 'undefined') {
+    return process.env?.KAIRO_TELEMETRY_ENDPOINT;
+  }
+  return undefined;
+}
 
 @injectable()
 export class KairoTelemetry {
@@ -97,6 +98,10 @@ export class KairoTelemetry {
     return this.config.enabled && this.config.privacyAccepted;
   }
 
+  get isNetworkTransmissionEnabled(): boolean {
+    return this.isEnabled && isTelemetryNetworkAllowed() && !!(this.config.endpoint || getConfiguredTelemetryEndpoint());
+  }
+
   get eventCount(): number {
     return this.events.length;
   }
@@ -107,19 +112,25 @@ export class KairoTelemetry {
 
   @postConstruct()
   protected async init(): Promise<void> {
-    this.logger.info('Kairo 遥测框架已初始化（默认禁用）');
     await this.loadConfig();
     await this.loadEvents();
 
-    // Show privacy disclosure on first run if not yet accepted
+    const envEndpoint = getConfiguredTelemetryEndpoint();
+    if (envEndpoint) {
+      this.config.endpoint = envEndpoint;
+    }
+
+    if (!isTelemetryNetworkAllowed() && this.config.endpoint) {
+      this.logger.info('Kairo telemetry: endpoint configured but KAIRO_ALLOW_TELEMETRY is not set. Events will be stored locally only, no network transmission.');
+    }
+
+    this.logger.info('Kairo telemetry framework initialized (default: disabled, local-only)');
+
     if (this.config.enabled && !this.config.privacyAccepted) {
       this.showPrivacyDisclosure();
     }
   }
 
-  /**
-   * Enable or disable telemetry.
-   */
   async setEnabled(enabled: boolean): Promise<void> {
     if (enabled && !this.config.privacyAccepted) {
       this.showPrivacyDisclosure();
@@ -129,30 +140,21 @@ export class KairoTelemetry {
     this.config.enabled = enabled;
     await this.persistConfig();
     this.onDidChangeConfigEmitter.fire({ ...this.config });
-    this.logger.info(`遥测已${enabled ? '启用' : '禁用'}`);
+    this.logger.info(`Telemetry ${enabled ? 'enabled' : 'disabled'}`);
   }
 
-  /**
-   * Accept the privacy disclosure.
-   */
   async acceptPrivacy(): Promise<void> {
     this.config.privacyAccepted = true;
     await this.persistConfig();
     this.onDidChangeConfigEmitter.fire({ ...this.config });
   }
 
-  /**
-   * Set the enterprise telemetry endpoint.
-   */
   async setEndpoint(endpoint: string | undefined): Promise<void> {
     this.config.endpoint = endpoint;
     await this.persistConfig();
     this.onDidChangeConfigEmitter.fire({ ...this.config });
   }
 
-  /**
-   * Record a telemetry event.
-   */
   async recordEvent(
     eventType: TelemetryEventType,
     data?: Record<string, string | number | boolean>,
@@ -170,7 +172,6 @@ export class KairoTelemetry {
 
     this.events.push(event);
 
-    // Trim if exceeding max
     if (this.events.length > this.config.maxLocalEvents) {
       this.events = this.events.slice(
         this.events.length - this.config.maxLocalEvents,
@@ -179,29 +180,24 @@ export class KairoTelemetry {
 
     this.onDidRecordEventEmitter.fire(event);
 
-    // Persist periodically (every 50 events)
     if (this.events.length % 50 === 0) {
       await this.persistEvents();
     }
 
-    // Send to enterprise endpoint if configured
-    if (this.config.endpoint) {
-      this.sendToEndpoint(event).catch(err => {
-        this.logger.warn(`遥测端点发送失败: ${err}`);
-      });
+    if (this.isNetworkTransmissionEnabled) {
+      const targetEndpoint = this.config.endpoint || getConfiguredTelemetryEndpoint();
+      if (targetEndpoint) {
+        this.sendToEndpoint(event, targetEndpoint).catch(err => {
+          this.logger.warn(`Telemetry endpoint send failed: ${err}`);
+        });
+      }
     }
   }
 
-  /**
-   * Get all recorded events.
-   */
   getEvents(): TelemetryEvent[] {
     return [...this.events];
   }
 
-  /**
-   * Get telemetry statistics.
-   */
   getStats(): TelemetryStats {
     const eventsByType: Record<string, number> = {};
     for (const event of this.events) {
@@ -217,15 +213,16 @@ export class KairoTelemetry {
     };
   }
 
-  /**
-   * Export all events as JSON.
-   */
   exportToJSON(): string {
     return JSON.stringify(
       {
         exportTime: new Date().toISOString(),
         sessionId: this.sessionId,
-        config: { enabled: this.config.enabled, endpoint: this.config.endpoint },
+        config: {
+          enabled: this.config.enabled,
+          networkTransmissionEnabled: this.isNetworkTransmissionEnabled,
+          endpointConfigured: !!this.config.endpoint,
+        },
         totalEvents: this.events.length,
         events: this.events,
       },
@@ -234,44 +231,38 @@ export class KairoTelemetry {
     );
   }
 
-  /**
-   * Clear all collected events.
-   */
   async clearEvents(): Promise<void> {
     this.events = [];
     await this.persistEvents();
-    this.logger.info('遥测数据已清除');
+    this.logger.info('Telemetry data cleared');
   }
 
-  /**
-   * Show the privacy disclosure to the user.
-   */
   showPrivacyDisclosure(): void {
+    const offlineNote = !isTelemetryNetworkAllowed()
+      ? '\n\nNote: Kairo IDE runs in offline/air-gapped mode. Network telemetry transmission is disabled. Events are stored locally only. To enable intranet telemetry, set KAIRO_ALLOW_TELEMETRY=1 and configure KAIRO_TELEMETRY_ENDPOINT.'
+      : '';
+
     this.messages.warn(
-      'Kairo IDE 遥测数据收集 (默认禁用)\n\n' +
-      '遥测收集以下信息：\n' +
-      '• IDE 启动时间\n' +
-      '• 项目打开/关闭事件\n' +
-      '• 构建开始/结束事件\n' +
-      '• 搜索操作\n' +
-      '• 调试会话事件\n' +
-      '• 错误事件\n\n' +
-      '不收集以下信息：\n' +
-      '• 个人身份信息\n' +
-      '• 文件内容\n' +
-      '• 源代码\n' +
-      '• 项目路径\n' +
-      '• 环境变量\n\n' +
-      '数据默认仅存储在本地，不会发送到任何服务器。\n' +
-      '管理员可以配置企业遥测端点进行数据收集。\n\n' +
-      '此功能默认关闭，需要手动启用。',
+      'Kairo IDE Telemetry (disabled by default)\n\n' +
+      'Collected data:\n' +
+      '• IDE startup time\n' +
+      '• Project open/close events\n' +
+      '• Build start/end events\n' +
+      '• Search operations\n' +
+      '• Debug session events\n' +
+      '• Error events\n\n' +
+      'NOT collected:\n' +
+      '• Personal information\n' +
+      '• File contents\n' +
+      '• Source code\n' +
+      '• Project paths\n' +
+      '• Environment variables\n\n' +
+      'Data is stored locally by default and never transmitted unless an enterprise endpoint is explicitly configured.' +
+      offlineNote,
     );
   }
 
-  // ── Internal ──────────────────────────────────────────────────
-
   protected generateSessionId(): string {
-    // Anonymized session ID — not derived from any personal data
     const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
     let id = 's_';
     const timestamp = Date.now().toString(36);
@@ -282,18 +273,18 @@ export class KairoTelemetry {
     return id;
   }
 
-  protected async sendToEndpoint(event: TelemetryEvent): Promise<void> {
-    if (!this.config.endpoint) return;
+  protected async sendToEndpoint(event: TelemetryEvent, endpoint: string): Promise<void> {
+    if (!endpoint || !isTelemetryNetworkAllowed()) return;
 
     try {
-      await fetch(this.config.endpoint, {
+      await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(event),
       });
     } catch (error) {
       this.logger.warn(
-        `遥测发送失败: ${error instanceof Error ? error.message : String(error)}`,
+        `Telemetry send failed: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
   }

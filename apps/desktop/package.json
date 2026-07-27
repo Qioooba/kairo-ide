@@ -46,13 +46,22 @@
       "../browser/lib/frontend/**/*",
       "../browser/lib/backend/**/*",
       "assets/**/*",
-      "bundled/**/*",
       "package.json"
     ],
     "extraResources": [
       {
         "from": "../../runtime-agent/bin/kairo-runtime.exe",
         "to": "bin/kairo-runtime.exe"
+      },
+      {
+        "from": "bundled/tomcat6",
+        "to": "bundled/tomcat6",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "bundled/jdtls",
+        "to": "bundled/jdtls",
+        "filter": ["**/*"]
       }
     ],
     "mac": {
@@ -62,6 +71,16 @@
         {
           "from": "../../runtime-agent/bin/kairo-runtime",
           "to": "bin/kairo-runtime"
+        },
+        {
+          "from": "bundled/tomcat6",
+          "to": "bundled/tomcat6",
+          "filter": ["**/*"]
+        },
+        {
+          "from": "bundled/jdtls",
+          "to": "bundled/jdtls",
+          "filter": ["**/*"]
         }
       ]
     },
@@ -74,6 +93,16 @@
         {
           "from": "../../runtime-agent/bin/kairo-runtime",
           "to": "bin/kairo-runtime"
+        },
+        {
+          "from": "bundled/tomcat6",
+          "to": "bundled/tomcat6",
+          "filter": ["**/*"]
+        },
+        {
+          "from": "bundled/jdtls",
+          "to": "bundled/jdtls",
+          "filter": ["**/*"]
         }
       ]
     }

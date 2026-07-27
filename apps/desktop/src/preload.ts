@@ -65,4 +65,7 @@ contextBridge.exposeInMainWorld('kairoIPC', {
     sendReady: () => {
         ipcRenderer.send('renderer-ready');
     },
+    toggleDevTools: () => {
+        ipcRenderer.send('toggle-devtools');
+    },
 });

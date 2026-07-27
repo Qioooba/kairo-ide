@@ -6,6 +6,7 @@
     "declaration": true,
     "composite": true,
     "skipLibCheck": true,
+    "noEmitOnError": false,
     "jsx": "react"
   },
   "include": ["src/main/**/*.ts", "src/main/**/*.tsx"],

@@ -28,19 +28,45 @@ function checkedSha256(raw, envName) {
   return value;
 }
 
+function isLocalPath(value) {
+  if (!value) return false;
+  if (value.startsWith('file://')) return true;
+  if (path.isAbsolute(value)) return true;
+  return false;
+}
+
+function resolveLocalPath(value) {
+  if (value.startsWith('file://')) {
+    const parsed = new URL(value);
+    return process.platform === 'win32'
+      ? path.resolve(parsed.pathname.replace(/^\//, ''))
+      : parsed.pathname;
+  }
+  return path.resolve(value);
+}
+
 function checkedUrl(raw, source) {
   const value = String(raw || '').trim();
   if (!value) fail(`${source} is required; dependency download fails closed`);
   if (PLACEHOLDER.test(value)) fail(`${source} contains a placeholder`);
+
+  if (isLocalPath(value)) {
+    const localPath = resolveLocalPath(value);
+    if (!fs.existsSync(localPath)) fail(`${source} points to a local file that does not exist: ${localPath}`);
+    return { isLocal: true, url: value, localPath };
+  }
+
   let parsed;
   try {
     parsed = new URL(value);
   } catch {
-    fail(`${source} is not a valid URL`);
+    fail(`${source} is not a valid URL or local file path`);
   }
-  if (parsed.protocol !== 'https:') fail(`${source} must use HTTPS`);
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+    fail(`${source} must use HTTP, HTTPS, or point to a local file (file:// or absolute path)`);
+  }
   if (parsed.username || parsed.password) fail(`${source} must not contain credentials`);
-  return parsed.toString();
+  return { isLocal: false, url: parsed.toString(), localPath: null };
 }
 
 function sha256(file) {
@@ -92,8 +118,10 @@ const entry = loadEntry(id);
 const expected = checkedSha256(process.env[entry.sha256Env], entry.sha256Env);
 
 if (checkConfig) {
-  checkedUrl(entry.archiveUrlEnv ? process.env[entry.archiveUrlEnv] : entry.archiveUrl, entry.archiveUrlEnv || `${id}.archiveUrl`);
-  console.log(`[supply-chain] configuration valid for ${id} ${entry.version}`);
+  const urlValue = entry.archiveUrlEnv ? process.env[entry.archiveUrlEnv] : entry.archiveUrl;
+  const result = checkedUrl(urlValue, entry.archiveUrlEnv || `${id}.archiveUrl`);
+  const mode = result.isLocal ? 'local file' : (new URL(result.url).protocol === 'https:' ? 'HTTPS' : 'HTTP');
+  console.log(`[supply-chain] configuration valid for ${id} ${entry.version} (${mode})`);
   process.exit(0);
 }
 
@@ -107,23 +135,34 @@ if (archiveArg) {
 }
 
 const urlSource = entry.archiveUrlEnv || `${id}.archiveUrl`;
-const url = checkedUrl(entry.archiveUrlEnv ? process.env[entry.archiveUrlEnv] : entry.archiveUrl, urlSource);
+const urlValue = entry.archiveUrlEnv ? process.env[entry.archiveUrlEnv] : entry.archiveUrl;
+const urlResult = checkedUrl(urlValue, urlSource);
 const output = path.resolve(outputArg);
 const parent = path.dirname(output);
 fs.mkdirSync(parent, { recursive: true });
 const temporary = `${output}.partial-${process.pid}`;
 try {
-  const result = spawnSync('curl', [
-    '--proto', '=https', '--tlsv1.2', '--fail', '--location', '--silent', '--show-error',
-    '--connect-timeout', '10', '--max-time', '30', '--output', temporary, url
-  ], { stdio: 'inherit', timeout: 35_000, killSignal: 'SIGKILL' });
-  if (result.error) {
-    fs.rmSync(temporary, { force: true });
-    fail(`curl failed: ${result.error.message}`);
-  }
-  if (result.status !== 0) {
-    fs.rmSync(temporary, { force: true });
-    fail(`curl exited with status ${result.status}`);
+  if (urlResult.isLocal) {
+    fs.copyFileSync(urlResult.localPath, temporary);
+    console.log(`[supply-chain] copied local archive for ${id} ${entry.version}`);
+  } else {
+    const curlArgs = [
+      '--fail', '--location', '--silent', '--show-error',
+      '--connect-timeout', '10', '--max-time', '30', '--output', temporary, urlResult.url
+    ];
+    if (urlResult.url.startsWith('https:')) {
+      curlArgs.unshift('--proto', '=https', '--tlsv1.2');
+    }
+    const result = spawnSync('curl', curlArgs, { stdio: 'inherit', timeout: 35_000, killSignal: 'SIGKILL' });
+    if (result.error) {
+      fs.rmSync(temporary, { force: true });
+      fail(`curl failed: ${result.error.message}`);
+    }
+    if (result.status !== 0) {
+      fs.rmSync(temporary, { force: true });
+      fail(`curl exited with status ${result.status}`);
+    }
+    console.log(`[supply-chain] downloaded ${id} ${entry.version}`);
   }
   const actual = sha256(temporary);
   if (actual !== expected) {
@@ -131,7 +170,7 @@ try {
     fail(`${id} SHA-256 mismatch (expected ${expected}, actual ${actual})`);
   }
   fs.renameSync(temporary, output);
-  console.log(`[supply-chain] downloaded and verified ${id} ${entry.version}: ${output}`);
+  console.log(`[supply-chain] verified ${id} ${entry.version}: ${output}`);
 } finally {
   fs.rmSync(temporary, { force: true });
 }

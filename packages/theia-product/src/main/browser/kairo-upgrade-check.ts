@@ -1,15 +1,18 @@
 /**
  * 升级检查器 — P3-OBS-03
  *
- * KairoUpgradeChecker service:
- * Check for updates on startup (can be disabled).
- * Compare version with a configured update endpoint.
- * Show notification when new version available.
- * Download update package (offline .zip).
- * Verify SHA-256 before applying.
- * Backup current installation before upgrade.
- * Rollback capability: restore previous version.
- * Mark as "Experimental" for Phase 3.
+ * OFFLINE / AIR-GAPPED MODE: Kairo IDE is designed for fully intranet
+ * deployment with zero internet connectivity. Automatic update checks
+ * are DISABLED by default and the upgrade endpoint is never contacted.
+ *
+ * This service exists as a no-op stub for:
+ * - Future on-premise update server support (configured via KAIRO_UPGRADE_ENDPOINT
+ *   pointing to an internal intranet server)
+ * - Type compatibility for widgets that may reference the service
+ *
+ * To enable in a controlled intranet environment:
+ * 1. Set KAIRO_UPGRADE_ENDPOINT to your internal update server URL
+ * 2. Set KAIRO_ALLOW_UPGRADE_CHECK=1 (opt-in flag)
  */
 
 import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
@@ -19,25 +22,16 @@ import { MessageService } from '@theia/core/lib/common/message-service';
 import { StorageService } from '@theia/core/lib/browser';
 import { CommandService } from '@theia/core/lib/common/command';
 
-/** Version information from the update endpoint. */
 export interface VersionInfo {
-  /** Current installed version. */
   currentVersion: string;
-  /** Latest available version. */
   latestVersion: string;
-  /** Whether an update is available. */
   updateAvailable: boolean;
-  /** Download URL for the update package. */
   downloadUrl?: string;
-  /** SHA-256 checksum of the update package. */
   sha256?: string;
-  /** Release notes for the new version. */
   releaseNotes?: string;
-  /** Minimum required version for the update. */
   minVersion?: string;
 }
 
-/** Upgrade state. */
 export type UpgradeState =
   | 'idle'
   | 'checking'
@@ -49,9 +43,9 @@ export type UpgradeState =
   | 'installing'
   | 'complete'
   | 'error'
-  | 'rolling-back';
+  | 'rolling-back'
+  | 'disabled';
 
-/** Upgrade progress. */
 export interface UpgradeProgress {
   state: UpgradeState;
   message?: string;
@@ -59,22 +53,26 @@ export interface UpgradeProgress {
   error?: string;
 }
 
-/** Upgrade checker configuration. */
 export interface UpgradeCheckerConfig {
-  /** Whether to check for updates on startup. */
   checkOnStartup: boolean;
-  /** Update endpoint URL. */
   endpoint?: string;
-  /** Current IDE version. */
   currentVersion: string;
-  /** Whether the user has been notified about the current update. */
   updateNotified: boolean;
-  /** Path to the backup of the previous installation. */
   backupPath?: string;
 }
 
 const UPGRADE_CONFIG_KEY = 'kairo.upgrade.config';
-const _UPGRADE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+function isUpgradeCheckEnabled(): boolean {
+  return typeof process !== 'undefined' && process.env?.KAIRO_ALLOW_UPGRADE_CHECK === '1';
+}
+
+function getConfiguredEndpoint(): string | undefined {
+  if (typeof process !== 'undefined') {
+    return process.env?.KAIRO_UPGRADE_ENDPOINT;
+  }
+  return undefined;
+}
 
 @injectable()
 export class KairoUpgradeChecker {
@@ -90,7 +88,7 @@ export class KairoUpgradeChecker {
   readonly onUpdateAvailable: Event<VersionInfo> = this.onUpdateAvailableEmitter.event;
 
   protected config: UpgradeCheckerConfig = {
-    checkOnStartup: true,
+    checkOnStartup: false,
     currentVersion: '0.0.0',
     updateNotified: false,
   };
@@ -110,48 +108,58 @@ export class KairoUpgradeChecker {
     return this.versionInfo?.updateAvailable === true;
   }
 
+  get isNetworkCheckAllowed(): boolean {
+    return isUpgradeCheckEnabled() && !!this.config.endpoint;
+  }
+
   @postConstruct()
   protected async init(): Promise<void> {
-    this.logger.info('Kairo 升级检查器已初始化（实验性功能）');
     await this.loadConfig();
 
-    if (this.config.checkOnStartup) {
-      // Delay the check slightly to let the IDE finish starting
+    if (!isUpgradeCheckEnabled()) {
+      this.progress = { state: 'disabled', message: 'Kairo IDE runs in offline/air-gapped mode. Automatic update checks are disabled.' };
+      this.onDidChangeProgressEmitter.fire(this.progress);
+      this.logger.info('Kairo upgrade checker: offline/air-gapped mode — network checks disabled.');
+      return;
+    }
+
+    this.logger.info('Kairo upgrade checker initialized (intranet mode)');
+    if (this.config.checkOnStartup && this.config.endpoint) {
       setTimeout(() => this.checkForUpdates(), 5000);
     }
   }
 
-  /**
-   * Set the current IDE version.
-   */
   setVersion(version: string): void {
     this.config.currentVersion = version;
   }
 
-  /**
-   * Enable or disable startup update checks.
-   */
   async setCheckOnStartup(enabled: boolean): Promise<void> {
     this.config.checkOnStartup = enabled;
     await this.persistConfig();
   }
 
-  /**
-   * Set the update endpoint URL.
-   */
   async setEndpoint(endpoint: string | undefined): Promise<void> {
     this.config.endpoint = endpoint;
     await this.persistConfig();
   }
 
-  /**
-   * Check for updates from the configured endpoint.
-   */
   async checkForUpdates(): Promise<VersionInfo | undefined> {
-    this.updateProgress({ state: 'checking', message: '正在检查更新...' });
+    if (!isUpgradeCheckEnabled()) {
+      this.updateProgress({ state: 'disabled', message: 'Update checks are disabled in offline/air-gapped mode.' });
+      this.logger.info('Update check skipped: offline/air-gapped mode (set KAIRO_ALLOW_UPGRADE_CHECK=1 and KAIRO_UPGRADE_ENDPOINT to enable intranet updates).');
+      return undefined;
+    }
+
+    const endpoint = this.config.endpoint || getConfiguredEndpoint();
+    if (!endpoint) {
+      this.updateProgress({ state: 'error', error: 'No update endpoint configured.' });
+      this.logger.warn('Update check requested but no endpoint configured. Set KAIRO_UPGRADE_ENDPOINT to your intranet update server.');
+      return undefined;
+    }
+
+    this.updateProgress({ state: 'checking', message: 'Checking for updates (intranet)...' });
 
     try {
-      const endpoint = this.config.endpoint || 'https://kairo-ide.example.com/api/version/latest';
       const response = await fetch(endpoint, {
         method: 'GET',
         headers: { 'Accept': 'application/json' },
@@ -185,44 +193,38 @@ export class KairoUpgradeChecker {
       if (updateAvailable && !this.config.updateNotified) {
         this.updateProgress({
           state: 'available',
-          message: `新版本可用: ${latestVersion} (当前: ${this.config.currentVersion})`,
+          message: `New version available: ${latestVersion} (current: ${this.config.currentVersion})`,
         });
-
         this.onUpdateAvailableEmitter.fire(this.versionInfo);
-
-        // Show notification
         this.messages.info(
-          `Kairo IDE 新版本可用!\n\n` +
-          `当前版本: ${this.config.currentVersion}\n` +
-          `最新版本: ${latestVersion}\n\n` +
-          (data.releaseNotes ? `更新内容:\n${data.releaseNotes}\n\n` : '') +
-          `使用 "Kairo: 检查更新" 命令下载和安装更新。`,
+          `Kairo IDE - New version available!\n\n` +
+          `Current: ${this.config.currentVersion}\n` +
+          `Latest: ${latestVersion}\n\n` +
+          (data.releaseNotes ? `Release notes:\n${data.releaseNotes}\n\n` : '') +
+          `Use "Kairo: Check for Updates" to install.`,
         );
-
         this.config.updateNotified = true;
         await this.persistConfig();
       } else if (!updateAvailable) {
-        this.updateProgress({
-          state: 'idle',
-          message: '已是最新版本',
-        });
+        this.updateProgress({ state: 'idle', message: 'Already up to date.' });
       }
 
       return this.versionInfo;
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       this.updateProgress({ state: 'error', error: msg });
-      this.logger.error(`升级检查失败: ${msg}`);
+      this.logger.error(`Update check failed: ${msg}`);
       return undefined;
     }
   }
 
-  /**
-   * Download the update package.
-   */
   async downloadUpdate(): Promise<void> {
+    if (!isUpgradeCheckEnabled()) {
+      this.updateProgress({ state: 'disabled', message: 'Downloads disabled in offline mode.' });
+      return;
+    }
     if (!this.versionInfo?.downloadUrl) {
-      this.updateProgress({ state: 'error', error: '下载 URL 不可用' });
+      this.updateProgress({ state: 'error', error: 'Download URL not available' });
       return;
     }
 
@@ -231,7 +233,7 @@ export class KairoUpgradeChecker {
     try {
       const response = await fetch(this.versionInfo.downloadUrl);
       if (!response.ok) {
-        throw new Error(`下载失败: HTTP ${response.status}`);
+        throw new Error(`Download failed: HTTP ${response.status}`);
       }
 
       const contentLength = response.headers.get('content-length');
@@ -240,7 +242,7 @@ export class KairoUpgradeChecker {
 
       const reader = response.body?.getReader();
       if (!reader) {
-        throw new Error('无法读取下载流');
+        throw new Error('Cannot read download stream');
       }
 
       const chunks: Uint8Array[] = [];
@@ -259,11 +261,10 @@ export class KairoUpgradeChecker {
         }
       }
 
-      this.updateProgress({ state: 'downloaded', message: '下载完成' });
+      this.updateProgress({ state: 'downloaded', message: 'Download complete' });
 
-      // Verify SHA-256 if provided
       if (this.versionInfo.sha256) {
-        this.updateProgress({ state: 'verifying', message: '正在验证 SHA-256...' });
+        this.updateProgress({ state: 'verifying', message: 'Verifying SHA-256...' });
         const fullData = new Uint8Array(
           chunks.reduce((acc, chunk) => acc + chunk.length, 0),
         );
@@ -272,15 +273,13 @@ export class KairoUpgradeChecker {
           fullData.set(chunk, offset);
           offset += chunk.length;
         }
-
         const hash = await this.computeSHA256(fullData);
         if (hash !== this.versionInfo.sha256) {
           throw new Error(
-            `SHA-256 校验失败。预期: ${this.versionInfo.sha256.slice(0, 16)}..., 实际: ${hash.slice(0, 16)}...`,
+            `SHA-256 mismatch. Expected: ${this.versionInfo.sha256.slice(0, 16)}..., Got: ${hash.slice(0, 16)}...`,
           );
         }
-
-        this.updateProgress({ state: 'verified', message: 'SHA-256 验证通过' });
+        this.updateProgress({ state: 'verified', message: 'SHA-256 verified' });
       }
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
@@ -289,33 +288,21 @@ export class KairoUpgradeChecker {
     }
   }
 
-  /**
-   * Install the update.
-   * Backs up the current installation first.
-   */
   async installUpdate(): Promise<void> {
-    this.updateProgress({ state: 'installing', message: '正在安装更新...' });
-
+    if (!isUpgradeCheckEnabled()) {
+      return;
+    }
+    this.updateProgress({ state: 'installing', message: 'Installing update...' });
     try {
-      // Backup current installation
-      this.updateProgress({ state: 'installing', message: '正在备份当前版本...' });
+      this.updateProgress({ state: 'installing', message: 'Backing up current version...' });
       this.config.backupPath = await this.createBackup();
-
-      // Installation is handled by the runtime agent
-      this.updateProgress({ state: 'installing', message: '正在应用更新...' });
-
+      this.updateProgress({ state: 'installing', message: 'Applying update...' });
       this.config.currentVersion = this.versionInfo?.latestVersion || this.config.currentVersion;
       this.config.updateNotified = false;
       await this.persistConfig();
-
-      this.updateProgress({
-        state: 'complete',
-        message: '更新安装完成。请重启 IDE 以应用更新。',
-      });
-
+      this.updateProgress({ state: 'complete', message: 'Update installed. Please restart IDE.' });
       this.messages.info(
-        `Kairo IDE 已更新到版本 ${this.config.currentVersion}。\n` +
-        '请重启 IDE 以应用更新。',
+        `Kairo IDE updated to ${this.config.currentVersion}.\nPlease restart IDE.`,
       );
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
@@ -324,25 +311,18 @@ export class KairoUpgradeChecker {
     }
   }
 
-  /**
-   * Rollback to the previous version.
-   */
   async rollback(): Promise<void> {
-    if (!this.config.backupPath) {
-      this.messages.error('没有可用的备份。无法回滚。');
+    if (!isUpgradeCheckEnabled()) {
       return;
     }
-
-    this.updateProgress({ state: 'rolling-back', message: '正在回滚到上一个版本...' });
-
+    if (!this.config.backupPath) {
+      this.messages.error('No backup available for rollback.');
+      return;
+    }
+    this.updateProgress({ state: 'rolling-back', message: 'Rolling back...' });
     try {
-      // Rollback is handled by the runtime agent
-      this.updateProgress({
-        state: 'complete',
-        message: '回滚完成。请重启 IDE。',
-      });
-
-      this.messages.info('Kairo IDE 已回滚到上一个版本。请重启 IDE。');
+      this.updateProgress({ state: 'complete', message: 'Rollback complete. Please restart IDE.' });
+      this.messages.info('Rollback complete. Please restart IDE.');
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       this.updateProgress({ state: 'error', error: msg });
@@ -350,36 +330,35 @@ export class KairoUpgradeChecker {
     }
   }
 
-  /**
-   * Show the experimental feature warning.
-   */
   showExperimentalWarning(): void {
+    if (!isUpgradeCheckEnabled()) {
+      this.messages.info(
+        'Kairo IDE runs in offline/air-gapped mode.\n\n' +
+        'Automatic update checks are disabled because Kairo IDE is designed\n' +
+        'for fully intranet deployment with zero internet connectivity.\n\n' +
+        'To enable intranet updates, set KAIRO_ALLOW_UPGRADE_CHECK=1 and\n' +
+        'configure KAIRO_UPGRADE_ENDPOINT to your internal update server.',
+      );
+      return;
+    }
     this.messages.warn(
-      'Kairo IDE 升级检查是实验性功能。\n\n' +
-      '使用说明：\n' +
-      '• 升级前会自动备份当前版本\n' +
-      '• 支持 SHA-256 校验确保下载完整性\n' +
-      '• 升级失败可回滚到上一个版本\n' +
-      '• 建议在升级前关闭所有项目\n\n' +
-      '此功能在 Phase 3 中标记为实验性。',
+      'Kairo IDE upgrade checker is experimental.\n\n' +
+      'Notes:\n' +
+      '• Backs up current version before upgrading\n' +
+      '• SHA-256 verification for download integrity\n' +
+      '• Rollback supported on failure\n' +
+      '• Close all projects before upgrading\n',
     );
   }
-
-  // ── Internal ──────────────────────────────────────────────────
 
   protected updateProgress(progress: Partial<UpgradeProgress>): void {
     this.progress = { ...this.progress, ...progress };
     this.onDidChangeProgressEmitter.fire(this.progress);
   }
 
-  /**
-   * Compare two semver-like version strings.
-   * Returns positive if a > b, negative if a < b, 0 if equal.
-   */
   protected compareVersions(a: string, b: string): number {
     const aParts = a.split(/[.-]/).map(p => parseInt(p, 10) || 0);
     const bParts = b.split(/[.-]/).map(p => parseInt(p, 10) || 0);
-
     for (let i = 0; i < Math.max(aParts.length, bParts.length); i++) {
       const aVal = aParts[i] || 0;
       const bVal = bParts[i] || 0;
@@ -397,10 +376,9 @@ export class KairoUpgradeChecker {
         const hashArray = Array.from(new Uint8Array(hashBuffer));
         return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
       } catch {
-        // Fall through to simple hash
+        // fall through
       }
     }
-    // Fallback: simple hash (not cryptographically secure, but functional)
     return this.simpleHash(data);
   }
 
@@ -409,13 +387,12 @@ export class KairoUpgradeChecker {
     for (let i = 0; i < data.length; i++) {
       const char = data[i];
       hash = ((hash << 5) - hash) + char;
-      hash = hash & hash; // Convert to 32-bit integer
+      hash = hash & hash;
     }
     return Math.abs(hash).toString(16).padStart(8, '0').repeat(8);
   }
 
   protected async createBackup(): Promise<string> {
-    // Backup is handled by the runtime agent
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     return `kairo-backup-${timestamp}`;
   }
@@ -424,7 +401,7 @@ export class KairoUpgradeChecker {
     try {
       await this.storage.setData(UPGRADE_CONFIG_KEY, this.config);
     } catch {
-      // Storage not available
+      // storage not available
     }
   }
 
@@ -434,13 +411,13 @@ export class KairoUpgradeChecker {
       if (data) {
         this.config = {
           ...data,
-          checkOnStartup: data.checkOnStartup ?? true,
+          checkOnStartup: data.checkOnStartup ?? false,
           currentVersion: data.currentVersion ?? '0.0.0',
           updateNotified: data.updateNotified ?? false,
         };
       }
     } catch {
-      // Use defaults
+      // use defaults
     }
   }
 }

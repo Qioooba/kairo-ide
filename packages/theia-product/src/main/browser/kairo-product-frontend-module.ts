@@ -52,7 +52,7 @@ import { TabBarDecorator } from '@theia/core/lib/browser/shell/tab-bar-decorator
 import { FileService } from '@theia/filesystem/lib/browser/file-service';
 import { BuildViewWidget } from '@kairo/build-extension';
 import { ServerViewWidget, LogViewerWidget } from '@kairo/tomcat-extension';
-import { bindSvnExtension } from '@kairo/svn-extension/lib/browser';
+import { bindSvnExtension } from '@kairo/svn-extension';
 import {
   RuntimeConnectionService,
   KairoRuntime,
@@ -234,6 +234,12 @@ export function bindKairoFrontend(bind: interfaces.Bind, unbind?: interfaces.Unb
     public registerMenus(..._args: any[]): void { /* no-op */ }
     public registerKeybindings(..._args: any[]): void { /* no-op */ }
     public registerToolbarItems(..._args: any[]): void { /* no-op */ }
+    public registerOpenHandlers?(..._args: any[]): void { /* no-op */ }
+    public configure?(_app: any): void { /* no-op */ }
+    public onWillStop?(): boolean | undefined { return undefined; }
+    public canHandle?(..._args: any[]): number { return 0; }
+    public open?(..._args: any[]): any { return undefined; }
+    public getWidgets?(): any[] { return []; }
   }
   const safeContribution = <T extends object>(
     id: interfaces.ServiceIdentifier<T>,
@@ -329,12 +335,15 @@ export function bindKairoFrontend(bind: interfaces.Bind, unbind?: interfaces.Unb
   // delegates to the real container.
   bind(Container).toDynamicValue(ctx => {
     const c = ctx.container;
-    return {
-      get: (id: unknown) => c.get(id as never),
-      getAsync: async (id: unknown) => c.get(id as never),
-      getAll: (id: unknown) => c.getAll(id as never),
-      isBound: (id: unknown) => c.isBound(id as never),
-    } as unknown as Container;
+    return new Proxy(c, {
+      get(target, prop, receiver) {
+        const value = Reflect.get(target, prop, receiver);
+        if (typeof value === 'function') {
+          return value.bind(target);
+        }
+        return value;
+      },
+    }) as unknown as Container;
   });
 
   bind(KairoStatusBarContribution).toSelf().inSingletonScope();

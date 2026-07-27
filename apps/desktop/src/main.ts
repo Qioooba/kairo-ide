@@ -209,7 +209,7 @@ function verifyAgentBinary(agentPath: string): void {
   }
 }
 
-async function startAgent(dataDir: string): Promise<{ port: number; secret: string }> {
+async function startAgent(dataDir: string, bundledDir?: string): Promise<{ port: number; secret: string }> {
   const port = await findFreePort();
   const secret = generateSecret();
   const agentPath = resolveAgentPath();
@@ -217,19 +217,24 @@ async function startAgent(dataDir: string): Promise<{ port: number; secret: stri
   // Verify the binary before spawning.
   verifyAgentBinary(agentPath);
 
-  console.log(`[kairo] Starting agent: ${agentPath} --port ${port}`);
-
-  // Collect stdout/stderr for health-check failure diagnostics.
-  const stdoutChunks: string[] = [];
-  const stderrChunks: string[] = [];
-
-  agentProcess = spawn(agentPath, [
+  const args = [
     '--bind', '127.0.0.1',
     '--port', String(port),
     '--secret', secret,
     '--data-dir', dataDir,
     '--log-level', 'info',
-  ], {
+  ];
+  if (bundledDir) {
+    args.push('--bundled-dir', bundledDir);
+  }
+
+  console.log(`[kairo] Starting agent: ${agentPath} ${args.join(' ')}`);
+
+  // Collect stdout/stderr for health-check failure diagnostics.
+  const stdoutChunks: string[] = [];
+  const stderrChunks: string[] = [];
+
+  agentProcess = spawn(agentPath, args, {
     stdio: ['ignore', 'pipe', 'pipe'],
     env: {
       ...process.env,
@@ -503,6 +508,13 @@ ipcMain.on('renderer-ready', () => {
   console.log('[kairo] renderer process is ready');
 });
 
+// Toggle DevTools from renderer command (Help > Toggle Developer Tools).
+ipcMain.on('toggle-devtools', () => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.toggleDevTools({ mode: 'detach' });
+  }
+});
+
 // Send menu actions to the renderer process.
 function sendMenuAction(action: string): void {
   if (mainWindow) {
@@ -649,7 +661,7 @@ if (!gotLock) {
               `script-src 'self' 'unsafe-inline'${scriptSrcExtra}`,
               "style-src 'self' 'unsafe-inline'",
               "connect-src 'self' data: http://127.0.0.1:* ws://127.0.0.1:*",
-              "img-src 'self' data: https:",
+              "img-src 'self' data:",
               "font-src 'self' data:",
             ].join('; '),
           },
@@ -661,8 +673,15 @@ if (!gotLock) {
       const dataDir = path.join(app.getPath('userData'), 'kairo-data');
       fs.mkdirSync(dataDir, { recursive: true });
 
+      // In packaged builds, bundled resources (tomcat6, jdtls) live
+      // under process.resourcesPath/bundled/. In dev, rely on the
+      // repo-local bundled/ directory or KAIRO_BUNDLED_DIR env.
+      const bundledDir = app.isPackaged
+        ? path.join(process.resourcesPath, 'bundled')
+        : undefined;
+
       // Start Go Agent
-      const { port, secret } = await startAgent(dataDir);
+      const { port, secret } = await startAgent(dataDir, bundledDir);
 
       // Start Theia Backend
       await startTheiaBackend();

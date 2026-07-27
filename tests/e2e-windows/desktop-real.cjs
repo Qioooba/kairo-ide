@@ -64,7 +64,12 @@ function resolveExecutable() {
     const electronBin = require(path.join(repoRoot, 'apps', 'desktop', 'node_modules', 'electron'));
     return { executablePath: electronBin, args: [devMain], mode: 'dev' };
   }
-  const packaged = path.join(repoRoot, 'apps', 'desktop', 'dist', 'win-unpacked', 'Kairo IDE.exe');
+  // Primary: dist/win-unpacked (current layout).
+  let packaged = path.join(repoRoot, 'dist', 'win-unpacked', 'Kairo IDE.exe');
+  if (!fs.existsSync(packaged)) {
+    // Fallback: apps/desktop/dist/win-unpacked (older layout).
+    packaged = path.join(repoRoot, 'apps', 'desktop', 'dist', 'win-unpacked', 'Kairo IDE.exe');
+  }
   if (fs.existsSync(packaged)) {
     return { executablePath: packaged, args: [], mode: 'packaged' };
   }
@@ -412,21 +417,24 @@ if (wantList) {
   // deterministic workspace + storage state on re-runs.
   const userDataDir = path.join(recordDir, 'userdata');
   fs.mkdirSync(userDataDir, { recursive: true });
+  // For packaged .exe, we need to pass --user-data-dir as a Chromium
+  // switch (otherwise Electron picks %APPDATA%\<productName>, which
+  // can be on a read-only volume in some environments).
+  const launchArgs = exec.args.length === 0
+    ? [...exec.args, `--user-data-dir=${userDataDir}`]
+    : exec.args;
   const app = await electron.launch({
     executablePath: exec.executablePath,
-    args: exec.args,
+    args: launchArgs,
     env: {
       ...env,
       // Electron's --user-data-dir is a chromium switch; it lands
       // on argv before app.whenReady and survives `process.argv`.
       // We can't pass Chromium switches via env, so we put it on args.
+      KAIRO_USER_DATA_DIR: userDataDir,
     },
     timeout: 90_000,
   });
-  if (exec.args.length === 0) {
-    // Packaged .exe — set userDataDir by appending a Chromium switch
-    // to a second launch. Simpler: use the default user-data dir.
-  }
 
   log('electron launched, pid=' + app.process().pid);
   // Grab the first window Theia created.

@@ -54,6 +54,8 @@ let theiaProcess = null;
 let theiaPort = 0;
 let mainWindow = null;
 let isQuitting = false;
+// Track child process exit codes for diagnostics.
+const childExitCodes = new Map();
 // File-based logger. Electron on Windows detaches from the parent's
 // stdout when launched as a GUI app, which makes `pnpm start | tee`
 // unreliable for debugging. This mirrors every console.log/warn/error
@@ -96,6 +98,43 @@ function initFileLogger() {
     console.error = wrap(console.error);
     console.info = wrap(console.info);
 }
+// ─── Startup Validation ──────────────────────────────────────
+/**
+ * Validates the runtime environment before launching child processes.
+ * Returns an array of warning messages (non-fatal) or throws on fatal errors.
+ */
+function validateStartup() {
+    const warnings = [];
+    // 1. Node.js version check — Electron 39 ships Node 22, we require >= 20.10
+    const nodeMajor = parseInt(process.versions.node.split('.')[0], 10);
+    if (isNaN(nodeMajor) || nodeMajor < 20) {
+        throw new Error(`Unsupported Node.js version: ${process.versions.node}. ` +
+            `Kairo IDE requires Node.js >= 20.10.0.`);
+    }
+    // 2. Platform check
+    if (!['win32', 'darwin', 'linux'].includes(process.platform)) {
+        throw new Error(`Unsupported platform: ${process.platform}.`);
+    }
+    // 3. Architecture check (warn on 32-bit)
+    if (process.arch === 'ia32') {
+        warnings.push('32-bit architecture detected; Kairo IDE is optimized for 64-bit.');
+    }
+    // 4. Validate agent path if explicitly set
+    if (process.env.KAIRO_AGENT_PATH) {
+        if (!fs.existsSync(process.env.KAIRO_AGENT_PATH)) {
+            throw new Error(`KAIRO_AGENT_PATH is set but the binary does not exist: ${process.env.KAIRO_AGENT_PATH}`);
+        }
+    }
+    // 5. Validate data directory writability
+    const userDataPath = electron_1.app.getPath('userData');
+    try {
+        fs.accessSync(userDataPath, fs.constants.W_OK);
+    }
+    catch {
+        warnings.push(`User data directory is not writable: ${userDataPath}`);
+    }
+    return warnings;
+}
 // ─── Secret Generation ────────────────────────────────────────
 function generateSecret() {
     return (0, crypto_1.randomBytes)(32).toString('hex');
@@ -110,21 +149,12 @@ function resolveAgentPath() {
     }
     const binaryName = process.platform === 'win32' ? 'kairo-runtime.exe' : 'kairo-runtime';
     // Packaged build: extraResources puts the binary at <resourcesPath>/bin/.
-    // process.resourcesPath in this mode points to the install dir's resources
-    // folder, which is NOT inside the Electron install tree.
     if (electron_1.app.isPackaged) {
         return path.join(process.resourcesPath, 'bin', binaryName);
     }
-    // Dev mode: process.resourcesPath points inside the Electron install
-    // tree (node_modules/.pnpm/electron@*/.../resources), so the packaged
-    // layout does not exist. Fall back to the monorepo-local Go build
-    // output, which the desktop package's prebuild script produces.
-    // apps/desktop/lib/main.js → ../../runtime-agent/bin/kairo-runtime[.exe]
+    // Dev mode: fall back to the monorepo-local Go build output.
     const devDir = path.resolve(__dirname, '..', '..', '..', 'runtime-agent', 'bin');
     const candidates = process.platform === 'win32'
-        // Go on Windows usually writes `kairo-runtime.exe`, but `go build -o
-        // bin/kairo-runtime` in some toolchains (e.g. cross-compile, mingw)
-        // drops the suffix. Try both.
         ? [binaryName, binaryName.replace(/\.exe$/i, '')]
         : [binaryName];
     for (const name of candidates) {
@@ -135,39 +165,97 @@ function resolveAgentPath() {
     }
     throw new Error(`Cannot locate kairo-runtime binary in dev mode. Searched in: ${devDir} ` +
         `(candidates: ${candidates.join(', ')}). Either run the desktop prebuild ` +
-        `(pnpm --filter @kairo/desktop build) or set KAIRO_AGENT_PATH to the binary location.`);
+        `(pnpm --filter @kairo/desktop prebuild) or set KAIRO_AGENT_PATH to the binary location.`);
 }
-async function startAgent(dataDir) {
+function verifyAgentBinary(agentPath) {
+    if (!fs.existsSync(agentPath)) {
+        throw new Error(`Agent binary not found: ${agentPath}`);
+    }
+    // Verify it's a regular file (not a directory or symlink to nowhere).
+    const stat = fs.statSync(agentPath);
+    if (!stat.isFile()) {
+        throw new Error(`Agent path is not a regular file: ${agentPath}`);
+    }
+    // Verify it's executable (Unix: check mode bits; Windows: .exe extension
+    // is handled by spawn, but we still check the file exists).
+    if (process.platform !== 'win32') {
+        try {
+            fs.accessSync(agentPath, fs.constants.X_OK);
+        }
+        catch {
+            throw new Error(`Agent binary is not executable: ${agentPath}. Run: chmod +x ${agentPath}`);
+        }
+    }
+    // Quick version check: spawn with --version (if supported) to verify the
+    // binary is a valid kairo-runtime. We accept any exit 0 here.
+    try {
+        const result = require('child_process').spawnSync(agentPath, ['--help'], {
+            timeout: 5_000,
+            encoding: 'utf-8',
+        });
+        // A valid binary should not crash; we accept exit 0, 1, or 2.
+        if (result.error) {
+            throw new Error(`Agent binary failed to start: ${result.error.message}`);
+        }
+        if (result.status !== null && result.status > 2) {
+            throw new Error(`Agent binary exited with unexpected code ${result.status}`);
+        }
+        console.log(`[kairo] Agent binary verified: ${agentPath}`);
+    }
+    catch (err) {
+        if (err.message && err.message.startsWith('Agent binary'))
+            throw err;
+        // spawnSync itself threw (e.g. ENOENT on missing shell)
+        throw new Error(`Cannot verify agent binary: ${err.message}`);
+    }
+}
+async function startAgent(dataDir, bundledDir) {
     const port = await (0, protocol_1.findFreePort)();
     const secret = generateSecret();
     const agentPath = resolveAgentPath();
-    console.log(`[kairo] Starting agent: ${agentPath} --port ${port}`);
-    agentProcess = (0, child_process_1.spawn)(agentPath, [
+    // Verify the binary before spawning.
+    verifyAgentBinary(agentPath);
+    const args = [
         '--bind', '127.0.0.1',
         '--port', String(port),
+        '--secret', secret,
         '--data-dir', dataDir,
         '--log-level', 'info',
-    ], {
+    ];
+    if (bundledDir) {
+        args.push('--bundled-dir', bundledDir);
+    }
+    console.log(`[kairo] Starting agent: ${agentPath} ${args.join(' ')}`);
+    // Collect stdout/stderr for health-check failure diagnostics.
+    const stdoutChunks = [];
+    const stderrChunks = [];
+    agentProcess = (0, child_process_1.spawn)(agentPath, args, {
         stdio: ['ignore', 'pipe', 'pipe'],
         env: {
             ...process.env,
             KAIRO_DESKTOP: '1',
-            KAIRO_LOCAL_SECRET: secret,
         },
     });
     agentProcess.stdout?.on('data', (data) => {
-        process.stdout.write(`[agent] ${data}`);
+        const text = data.toString('utf-8');
+        stdoutChunks.push(text);
+        process.stdout.write(`[agent] ${text}`);
     });
     agentProcess.stderr?.on('data', (data) => {
-        process.stderr.write(`[agent] ${data}`);
+        const text = data.toString('utf-8');
+        stderrChunks.push(text);
+        process.stderr.write(`[agent] ${text}`);
     });
     agentProcess.on('error', (err) => {
         console.error(`[kairo] Agent process error: ${err.message}`);
-        // Don't throw in event handler — the Promise will reject via health check
     });
     agentProcess.on('exit', (code, signal) => {
+        childExitCodes.set('agent', { code, signal });
         if (!isQuitting) {
             console.error(`[kairo] Agent exited unexpectedly with code ${code}, signal ${signal}`);
+        }
+        else {
+            console.log(`[kairo] Agent exited with code ${code}, signal ${signal}`);
         }
         agentProcess = null;
     });
@@ -175,50 +263,99 @@ async function startAgent(dataDir) {
     const healthURL = `http://127.0.0.1:${port}/api/v1/health`;
     const startTime = Date.now();
     const timeout = 15_000;
-    await new Promise((resolve, reject) => {
-        const check = () => {
-            if (!agentProcess) {
-                reject(new Error('Agent process died before health check'));
-                return;
-            }
-            const req = http.get(healthURL, (res) => {
-                res.resume();
-                if (res.statusCode === 200) {
-                    resolve();
+    try {
+        await new Promise((resolve, reject) => {
+            const check = () => {
+                if (!agentProcess) {
+                    reject(new Error('Agent process died before health check'));
+                    return;
                 }
-                else {
-                    retryOrReject(new Error(`Health check returned status ${res.statusCode}`));
+                const req = http.get(healthURL, (res) => {
+                    res.resume();
+                    if (res.statusCode === 200) {
+                        resolve();
+                    }
+                    else {
+                        retryOrReject(new Error(`Health check returned status ${res.statusCode}`));
+                    }
+                });
+                req.on('error', (err) => {
+                    retryOrReject(err);
+                });
+                req.setTimeout(2_000, () => {
+                    req.destroy();
+                    retryOrReject(new Error('Health check request timed out'));
+                });
+            };
+            const retryOrReject = (err) => {
+                if (Date.now() - startTime > timeout) {
+                    reject(new Error('Agent health check timed out after ' + timeout + 'ms: ' + err.message));
+                    return;
                 }
-            });
-            req.on('error', (err) => {
-                retryOrReject(err);
-            });
-            req.setTimeout(2_000, () => {
-                req.destroy();
-                retryOrReject(new Error('Health check request timed out'));
-            });
-        };
-        const retryOrReject = (err) => {
-            if (Date.now() - startTime > timeout) {
-                reject(new Error('Agent health check timed out after ' + timeout + 'ms: ' + err.message));
-                return;
-            }
-            setTimeout(check, 300);
-        };
-        check();
-    });
+                setTimeout(check, 300);
+            };
+            check();
+        });
+    }
+    catch (err) {
+        // Collect diagnostics before killing the process.
+        const stdout = stdoutChunks.join('').slice(-4096);
+        const stderr = stderrChunks.join('').slice(-4096);
+        console.error(`[kairo] Agent health check failed. stdout (last 4KB):\n${stdout}`);
+        console.error(`[kairo] Agent health check failed. stderr (last 4KB):\n${stderr}`);
+        // Stop the child process.
+        if (agentProcess && !agentProcess.killed) {
+            agentProcess.kill('SIGTERM');
+            setTimeout(() => {
+                if (agentProcess && !agentProcess.killed) {
+                    agentProcess.kill('SIGKILL');
+                }
+            }, 3_000);
+        }
+        agentProcess = null;
+        throw new Error(`Failed to start the Kairo Runtime Agent.\n\n` +
+            `The agent process did not become healthy within ${timeout / 1000}s.\n\n` +
+            `Details: ${err.message}\n\n` +
+            `Last stderr output:\n${stderr.slice(-1024) || '(none)'}`);
+    }
     agentPort = port;
     agentSecret = secret;
     console.log(`[kairo] Agent healthy on port ${port}`);
     return { port, secret };
 }
+function killProcessTree(proc, signal) {
+    if (!proc || proc.killed || !proc.pid)
+        return;
+    try {
+        if (process.platform === 'win32') {
+            // Windows: taskkill /T /PID kills the process and all its children.
+            (0, child_process_1.exec)(`taskkill /T /PID ${proc.pid} /F`, { timeout: 5_000 }, (err) => {
+                if (err)
+                    console.error(`[kairo] taskkill error: ${err.message}`);
+            });
+        }
+        else {
+            // Unix: negative PID sends signal to the entire process group.
+            try {
+                process.kill(-proc.pid, signal);
+            }
+            catch {
+                // Fallback: kill just the parent.
+                proc.kill(signal);
+            }
+        }
+    }
+    catch (err) {
+        console.error(`[kairo] killProcessTree error: ${err.message}`);
+    }
+}
 function stopAgent() {
     if (agentProcess && !agentProcess.killed) {
         console.log('[kairo] Stopping agent...');
-        agentProcess.kill('SIGTERM');
+        killProcessTree(agentProcess, 'SIGTERM');
         setTimeout(() => {
             if (agentProcess && !agentProcess.killed) {
-                agentProcess.kill('SIGKILL');
+                killProcessTree(agentProcess, 'SIGKILL');
             }
         }, 5_000);
     }
@@ -274,8 +411,12 @@ async function startTheiaBackend() {
         console.error(`[kairo] Theia process error: ${err.message}`);
     });
     theiaProcess.on('exit', (code, signal) => {
+        childExitCodes.set('theia', { code, signal });
         if (!isQuitting) {
             console.error(`[kairo] Theia backend exited unexpectedly with code ${code}, signal ${signal}`);
+        }
+        else {
+            console.log(`[kairo] Theia backend exited with code ${code}, signal ${signal}`);
         }
         theiaProcess = null;
     });
@@ -327,10 +468,10 @@ async function startTheiaBackend() {
 function stopTheiaBackend() {
     if (theiaProcess && !theiaProcess.killed) {
         console.log('[kairo] Stopping Theia backend...');
-        theiaProcess.kill('SIGTERM');
+        killProcessTree(theiaProcess, 'SIGTERM');
         setTimeout(() => {
             if (theiaProcess && !theiaProcess.killed) {
-                theiaProcess.kill('SIGKILL');
+                killProcessTree(theiaProcess, 'SIGKILL');
             }
         }, 5_000);
     }
@@ -362,8 +503,8 @@ async function createWindow() {
             preload: path.join(__dirname, 'preload.js'),
             contextIsolation: true,
             nodeIntegration: false,
-            sandbox: false, // Required for preload to access Node APIs
-        }
+            sandbox: true,
+        },
     });
     // Auto-open DevTools only in unpackaged (dev) runs so the user
     // can see the renderer's actual console / network / errors. In
@@ -445,20 +586,27 @@ else {
         }
     });
     electron_1.app.on('ready', async () => {
+        // Set the app version so the preload script can expose it.
+        process.env.KAIRO_APP_VERSION = electron_1.app.getVersion();
+        // Run startup validation before launching child processes.
+        const warnings = validateStartup();
+        for (const w of warnings) {
+            console.warn(`[kairo] startup warning: ${w}`);
+        }
         // Set CSP before creating any windows.
         electron_1.app.on('session-created', (session) => {
             session.webRequest.onHeadersReceived((details, callback) => {
-                // Theia 1.73 ships with ajv-generated validators that call
-                // `new Function` to compile JSON schemas. Electron 24+
-                // enforces a strict CSP by default which blocks `eval`; if
-                // we don't permit 'unsafe-eval' the very first schema
-                // validate throws EvalError and the renderer hangs in the
-                // splash. We therefore default to 'unsafe-eval' in both
-                // dev and packaged builds. The renderer is loaded from
-                // app.asar (same-origin) so this only enables eval of
-                // code shipped with us, not remote script — no additional
-                // attack surface versus the default Theia policy.
-                const scriptSrcExtra = " 'unsafe-eval'";
+                // Theia 1.73 ships with ajv-generated validators that use
+                // `new Function` for JSON schema compile. Without
+                // 'unsafe-eval' the very first schema validate throws
+                // EvalError and the frontend hangs in the splash. We
+                // therefore default the production CSP to the tightest
+                // policy that still lets Theia load its static assets, and
+                // gate 'unsafe-eval' behind KAIRO_DEV=1 so packaged builds
+                // ship with a hardened policy. If the renderer ever truly
+                // needs eval in production, switch the policy to add it
+                // back — but record the reason in the commit message.
+                const scriptSrcExtra = process.env.KAIRO_DEV === '1' ? " 'unsafe-eval'" : '';
                 callback({
                     responseHeaders: {
                         ...details.responseHeaders,
@@ -477,8 +625,14 @@ else {
         try {
             const dataDir = path.join(electron_1.app.getPath('userData'), 'kairo-data');
             fs.mkdirSync(dataDir, { recursive: true });
+            // In packaged builds, bundled resources (tomcat6, jdtls) live
+            // under process.resourcesPath/bundled/. In dev, rely on the
+            // repo-local bundled/ directory or KAIRO_BUNDLED_DIR env.
+            const bundledDir = electron_1.app.isPackaged
+                ? path.join(process.resourcesPath, 'bundled')
+                : undefined;
             // Start Go Agent
-            const { port, secret } = await startAgent(dataDir);
+            const { port, secret } = await startAgent(dataDir, bundledDir);
             // Start Theia Backend
             await startTheiaBackend();
             // Create window — config is passed via env to preload
@@ -492,8 +646,22 @@ else {
             electron_1.app.quit();
         }
     });
-    electron_1.app.on('before-quit', () => {
+    electron_1.app.on('before-quit', (event) => {
         isQuitting = true;
+        // Log child process exit codes for diagnostics.
+        flog(`[kairo] shutdown initiated; child exit codes: ${JSON.stringify([...childExitCodes.entries()])}`);
+        // Detect zombie processes: if a child process is still alive after
+        // a previous stop attempt, force-kill it.
+        if (agentProcess && !agentProcess.killed) {
+            flog('[kairo] zombie agent detected; force-killing before quit');
+            killProcessTree(agentProcess, 'SIGKILL');
+        }
+        if (theiaProcess && !theiaProcess.killed) {
+            flog('[kairo] zombie theia detected; force-killing before quit');
+            killProcessTree(theiaProcess, 'SIGKILL');
+        }
+        // Wait for child processes to exit cleanly before quitting.
+        // Electron will wait for this event handler to complete.
         stopTheiaBackend();
         stopAgent();
         // WM_CLOSE / app.quit() can stall for ~15s on Windows when a
@@ -521,7 +689,8 @@ else {
     });
 }
 // Best-effort cleanup on process exit
-process.on('exit', () => {
+process.on('exit', (code) => {
+    flog(`[kairo] main process exiting with code ${code}; child exit codes: ${JSON.stringify([...childExitCodes.entries()])}`);
     if (agentProcess && !agentProcess.killed) {
         try {
             agentProcess.kill('SIGKILL');

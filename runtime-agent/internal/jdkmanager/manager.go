@@ -42,7 +42,7 @@ func NewManager(bundledDir string) *Manager {
 }
 
 // Detect finds the best available JDK 17+ on the system.
-// Priority: bundled/jdk17 > KAIRO_JDT_LS_JRE > JAVA_HOME > PATH
+// Priority: KAIRO_JDK_HOME > bundled/jdk17 > KAIRO_JDT_LS_JRE > JAVA_HOME > PATH
 func (m *Manager) Detect() Status {
 	searchPaths := make([]string, 0)
 	javaExe := "java"
@@ -50,14 +50,23 @@ func (m *Manager) Detect() Status {
 		javaExe = "java.exe"
 	}
 
-	// 1. Bundled JDK 17
+	// 1. KAIRO_JDK_HOME environment variable (explicit override)
+	if jdkHome := os.Getenv("KAIRO_JDK_HOME"); jdkHome != "" {
+		homeJava := filepath.Join(jdkHome, "bin", javaExe)
+		searchPaths = append(searchPaths, homeJava)
+		if jdk, ok := checkJava(homeJava); ok && jdk.Major >= 17 {
+			return Status{Available: true, JDK: jdk, SearchPaths: searchPaths}
+		}
+	}
+
+	// 2. Bundled JDK 17
 	bundledJava := filepath.Join(m.BundledDir, "jdk17", "bin", javaExe)
 	searchPaths = append(searchPaths, bundledJava)
 	if jdk, ok := checkJava(bundledJava); ok && jdk.Major >= 17 {
 		return Status{Available: true, JDK: jdk, SearchPaths: searchPaths}
 	}
 
-	// 2. KAIRO_JDT_LS_JRE environment variable
+	// 3. KAIRO_JDT_LS_JRE environment variable
 	if jre := os.Getenv("KAIRO_JDT_LS_JRE"); jre != "" {
 		jreJava := filepath.Join(jre, "bin", javaExe)
 		searchPaths = append(searchPaths, jreJava)
@@ -66,7 +75,7 @@ func (m *Manager) Detect() Status {
 		}
 	}
 
-	// 3. JAVA_HOME
+	// 4. JAVA_HOME
 	if javaHome := os.Getenv("JAVA_HOME"); javaHome != "" {
 		homeJava := filepath.Join(javaHome, "bin", javaExe)
 		searchPaths = append(searchPaths, homeJava)
@@ -75,7 +84,7 @@ func (m *Manager) Detect() Status {
 		}
 	}
 
-	// 4. Search PATH
+	// 5. Search PATH
 	if pathJava, err := exec.LookPath(javaExe); err == nil {
 		searchPaths = append(searchPaths, pathJava)
 		if jdk, ok := checkJava(pathJava); ok && jdk.Major >= 17 {
@@ -83,7 +92,7 @@ func (m *Manager) Detect() Status {
 		}
 	}
 
-	// 5. Common install locations
+	// 6. Common install locations
 	commonPaths := commonJDKPaths()
 	for _, p := range commonPaths {
 		searchPaths = append(searchPaths, p)

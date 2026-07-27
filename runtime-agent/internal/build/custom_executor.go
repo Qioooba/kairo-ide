@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -85,8 +84,8 @@ func (e *CustomBuildExecutor) Start(ctx context.Context, cfg CustomBuildConfig) 
 		cmd.Env = append(cmd.Env, k+"="+v)
 	}
 
-	// Create process group for cleanup
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	// Set platform-specific process attributes for cleanup
+	cmd.SysProcAttr = sysProcAttrForBuild()
 
 	// Create pipes for stdout/stderr
 	stdout, err := cmd.StdoutPipe()
@@ -244,10 +243,5 @@ func killProcessGroup(cmd *exec.Cmd) error {
 	if cmd.Process == nil {
 		return nil
 	}
-	// Try to kill the process group
-	if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM); err != nil {
-		// Fallback: kill just the process
-		return cmd.Process.Kill()
-	}
-	return nil
+	return killProcessTree(cmd.Process.Pid)
 }

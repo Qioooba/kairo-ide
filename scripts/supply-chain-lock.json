@@ -1,19 +1,20 @@
 {
   "schemaVersion": 1,
+  "_comment": "All dependencies use environment variable-based URL configuration for offline/air-gapped builds. Set the corresponding *_ARCHIVE_URL env var to an intranet mirror or local file path before running prepare-bundled. See scripts/prepare-bundled.ps1 for details.",
   "dependencies": {
     "tomcat6-linux": {
       "name": "Apache Tomcat",
       "version": "6.0.53",
-      "archiveUrl": "https://archive.apache.org/dist/tomcat/tomcat-6/v6.0.53/bin/apache-tomcat-6.0.53.tar.gz",
-      "sha256Env": "KAIRO_TOMCAT6_SHA256",
+      "archiveUrlEnv": "KAIRO_TOMCAT6_LINUX_ARCHIVE_URL",
+      "sha256Env": "KAIRO_TOMCAT6_LINUX_SHA256",
       "license": "Apache-2.0",
       "licenseFiles": ["LICENSE", "NOTICE"]
     },
     "tomcat6-macos": {
       "name": "Apache Tomcat",
       "version": "6.0.53",
-      "archiveUrl": "https://archive.apache.org/dist/tomcat/tomcat-6/v6.0.53/bin/apache-tomcat-6.0.53.tar.gz",
-      "sha256Env": "KAIRO_TOMCAT6_SHA256",
+      "archiveUrlEnv": "KAIRO_TOMCAT6_MACOS_ARCHIVE_URL",
+      "sha256Env": "KAIRO_TOMCAT6_MACOS_SHA256",
       "license": "Apache-2.0",
       "licenseFiles": ["LICENSE", "NOTICE"]
     },
@@ -50,6 +51,33 @@
       "archiveUrlEnv": "KAIRO_JDTLS_WINDOWS_ARCHIVE_URL",
       "sha256Env": "KAIRO_JDTLS_WINDOWS_SHA256",
       "license": "EPL-2.0",
+      "licenseFiles": ["LICENSE"]
+    },
+    "jdk17-linux": {
+      "name": "Eclipse Temurin JDK 17",
+      "version": "17",
+      "_comment": "JDK 17 for the debug bridge. Set KAIRO_JDK17_LINUX_ARCHIVE_URL to a local/intranet archive (.tar.gz) for pre-bundling.",
+      "archiveUrlEnv": "KAIRO_JDK17_LINUX_ARCHIVE_URL",
+      "sha256Env": "KAIRO_JDK17_LINUX_SHA256",
+      "license": "GPL-2.0-with-classpath-exception",
+      "licenseFiles": ["LICENSE"]
+    },
+    "jdk17-macos": {
+      "name": "Eclipse Temurin JDK 17",
+      "version": "17",
+      "_comment": "JDK 17 for the debug bridge on macOS (x64 or aarch64). Set KAIRO_JDK17_MACOS_ARCHIVE_URL.",
+      "archiveUrlEnv": "KAIRO_JDK17_MACOS_ARCHIVE_URL",
+      "sha256Env": "KAIRO_JDK17_MACOS_SHA256",
+      "license": "GPL-2.0-with-classpath-exception",
+      "licenseFiles": ["LICENSE"]
+    },
+    "jdk17-windows": {
+      "name": "Eclipse Temurin JDK 17",
+      "version": "17",
+      "_comment": "JDK 17 for the debug bridge on Windows (x64). Set KAIRO_JDK17_WINDOWS_ARCHIVE_URL to a local/intranet archive (.zip) for pre-bundling.",
+      "archiveUrlEnv": "KAIRO_JDK17_WINDOWS_ARCHIVE_URL",
+      "sha256Env": "KAIRO_JDK17_WINDOWS_SHA256",
+      "license": "GPL-2.0-with-classpath-exception",
       "licenseFiles": ["LICENSE"]
     }
   }

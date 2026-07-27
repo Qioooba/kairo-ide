@@ -113,6 +113,8 @@ export namespace KairoCommands {
   export const REVEAL_KAIRO_DEBUG_CONSOLE: Command = { id: 'kairo.debug.view.console', label: 'Kairo: Show Debug Console' };
   export const REVEAL_KAIRO_DEBUG_WATCH: Command = { id: 'kairo.debug.view.watch', label: 'Kairo: Show Debug Watch' };
   export const OPEN_DEBUG_DIAGNOSTICS: Command = { id: 'kairo:open-debug-diagnostics', label: 'Kairo: Open Debug Diagnostics' };
+  export const SHOW_WELCOME: Command = { id: 'kairo.welcome.show', label: 'Help: Welcome', category: 'Help' };
+  export const TOGGLE_DEVTOOLS: Command = { id: 'kairo.devtools.toggle', label: 'Help: Toggle Developer Tools', category: 'Help' };
 }
 
 /* ------------------------------------------------------------------ */
@@ -685,6 +687,31 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
     registry.registerCommand(KairoCommands.TOGGLE_TERMINAL, {
       execute: () => this.commands.executeCommand('terminal:new'),
     });
+
+    // Welcome: reveal or create the welcome tab (closes automatically
+    // once a project is selected).
+    registry.registerCommand(KairoCommands.SHOW_WELCOME, {
+      execute: () => {
+        void this.revealOrCreateMain(KAIRO_WELCOME_FACTORY_ID, () => undefined, () => undefined);
+      },
+    });
+
+    // Toggle Developer Tools: use IPC to the Electron main process.
+    registry.registerCommand(KairoCommands.TOGGLE_DEVTOOLS, {
+      execute: () => {
+        try {
+          const ipc = (window as any).kairoIPC;
+          if (ipc && typeof ipc.toggleDevTools === 'function') {
+            ipc.toggleDevTools();
+          } else {
+            // Fallback: try webContents from electron remote (not available in sandbox)
+            console.warn('[kairo] kairoIPC.toggleDevTools not available');
+          }
+        } catch (err) {
+          console.warn('[kairo] failed to toggle DevTools:', err);
+        }
+      },
+    });
   }
 
   async registerViewContainers(): Promise<void> {
@@ -929,6 +956,16 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
       commandId: KairoCommands.SELECT_PROJECT.id,
       label: 'Select Kairo Project...',
       order: 'a2',
+    });
+    menus.registerMenuAction(CommonMenus.HELP, {
+      commandId: KairoCommands.SHOW_WELCOME.id,
+      label: 'Welcome',
+      order: 'a1',
+    });
+    menus.registerMenuAction(CommonMenus.HELP, {
+      commandId: KairoCommands.TOGGLE_DEVTOOLS.id,
+      label: 'Toggle Developer Tools',
+      order: 'z0',
     });
     menus.registerMenuAction(CommonMenus.HELP, {
       commandId: KairoCommands.OPEN_DEBUG_DIAGNOSTICS.id,

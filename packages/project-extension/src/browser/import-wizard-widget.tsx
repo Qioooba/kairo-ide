@@ -26,6 +26,10 @@ function normalizeEncodingId(encoding: string): string {
     }
 }
 
+function normalizePathForApi(path: string): string {
+    return path.replace(/\\/g, '/');
+}
+
 @injectable()
 export class ImportWizardWidget extends ReactWidget {
     static readonly ID = 'kairo-import-wizard';
@@ -135,6 +139,7 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
     const scanPath = React.useCallback(async (path: string) => {
         setScanning(true);
         setScanError('');
+        const normalizedPath = normalizePathForApi(path);
         try {
             // KAIRO-RC-WEB-2026-07-25-06: the project being imported lives
             // under a directory that is not necessarily the Theia startup
@@ -143,10 +148,10 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
             // register the selected project path as its own workspace before
             // importing. This also sets the runtime workspaceId so the
             // subsequent import call targets the right backend context.
-            const projectWorkspace = await projectService.openWorkspace(path);
+            const projectWorkspace = await projectService.openWorkspace(normalizedPath);
             setWorkspaceId(projectWorkspace.id);
 
-            const result = await projectService.detectProject(path);
+            const result = await projectService.detectProject(normalizedPath);
             setDetected(result);
 
             const base = path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || 'project';
@@ -194,9 +199,10 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
                 throw new Error('No workspace selected. Open a workspace folder first.');
             }
 
+            const normalizedWorkspacePath = normalizePathForApi(workspacePath);
             const params: ProjectImportConfirmRequest = {
                 workspaceId,
-                rootPath: workspacePath,
+                rootPath: normalizedWorkspacePath,
                 name: trimmedName,
                 sourceDirs: sourceDirs.split(',').map(s => s.trim()).filter(s => s.length > 0),
                 webRoot: webRoot.trim(),
@@ -240,9 +246,10 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
             // which then re-fired onDidChangeContext with the OLD
             // workspaceId and the ActiveProjectService listener
             // cleared the just-selected project.
+            const finalRootPath = saved.rootPath ? normalizePathForApi(saved.rootPath) : normalizedWorkspacePath;
             if (workspaceId) {
                 try {
-                    await workspaceContext.setWorkspace(workspaceId, saved.rootPath || workspacePath);
+                    await workspaceContext.setWorkspace(workspaceId, finalRootPath);
                 } catch (ctxErr) {
                     console.warn('[kairo:import-debug] workspaceContext.setWorkspace failed:',
                         ctxErr instanceof Error ? ctxErr.message : String(ctxErr));
@@ -253,13 +260,13 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
                 workspaceId,
                 projectId: saved.id,
                 name: saved.name,
-                root: saved.rootPath || workspacePath,
+                root: finalRootPath,
                 encoding: normalizeEncodingId(defaultEncoding),
             });
 
             setImportedSummary({
                 name: saved.name || trimmedName,
-                root: saved.rootPath || workspacePath,
+                root: finalRootPath,
                 encoding: normalizeEncodingId(defaultEncoding),
             });
             setStep(3);
@@ -612,28 +619,13 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
                                 className="theia-button main"
                                 data-testid="open-project-btn"
                                 onClick={async () => {
-                                    // KAIRO-RC-WEB-2026-07-25-10: avoid
-                                    // spliceRoots() because the underlying
-                                    // DiskFileSystemProvider can fail with
-                                    // EPERM when writing the new
-                                    // `.theia-workspace` file (we see
-                                    // "NoPermissions (FileSystemError):
-                                    // Error: EPERM" in the log). The EPERM
-                                    // propagates as an exception that
-                                    // discards the `activeProject.setProject`
-                                    // call done above, so the status bar
-                                    // never moves off `(no workspace)`.
-                                    //
-                                    // Instead, just close the wizard. The
-                                    // Theia workspace folder is already
-                                    // set to a parent directory of the
-                                    // imported project (because the test
-                                    // runs the import from inside
-                                    // /tmp/kairo-k4-workspace/), so the
-                                    // file explorer is already able to
-                                    // show the project files.
-                                    console.log('[kairo] Open Project Folder clicked, closing wizard; workspace is already the project parent.');
-                                    onClose();
+                                    console.log('[kairo] Open Project Folder clicked', { projectId: result.projectId, root: result.rootPath });
+                                    try {
+                                        await workspaceService.open(new URI(result.rootPath));
+                                    } catch (err) {
+                                        console.error('[kairo] Failed to open workspace:', err);
+                                        onClose();
+                                    }
                                 }}
                             >
                                 Open Project Folder
