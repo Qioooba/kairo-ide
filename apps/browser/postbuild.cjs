@@ -22,3 +22,44 @@ for (const asset of assets) {
   fs.copyFileSync(src, dst);
   console.log(`[postbuild] ${asset} -> ${path.relative(__dirname, dst)}`);
 }
+
+function patchFile(filePath, patches, label) {
+  if (!fs.existsSync(filePath)) {
+    console.warn(`[postbuild] ${label} target not found: ${filePath}`);
+    return;
+  }
+  let content = fs.readFileSync(filePath, 'utf8');
+  let changed = false;
+  for (const { from, to } of patches) {
+    if (content.includes(from)) {
+      content = content.split(from).join(to);
+      changed = true;
+    }
+  }
+  if (changed) {
+    fs.writeFileSync(filePath, content, 'utf8');
+    console.log(`[postbuild] ${label} patched successfully`);
+  } else {
+    console.log(`[postbuild] ${label} already patched or pattern not found`);
+  }
+}
+
+const frontendBundle = path.join(outDir, 'bundle.js');
+patchFile(frontendBundle, [
+  {
+    from: 'throw new Error(ERRORS_MSGS.DUPLICATED_INJECTABLE_DECORATOR);',
+    to: 'return target2; // patched: allow duplicate @injectable for Theia/Monaco compat'
+  },
+  {
+    from: 'throw new Error(`An application error for \'${code}\' code is already declared`);',
+    to: 'var dummy = Object.assign(function() { return new Impl(code, factory.apply(null, arguments), dummy); }, { code: code, is: function(arg) { return arg instanceof Impl && arg.code === code; } }); return dummy; // patched: allow duplicate ApplicationError codes'
+  }
+], 'frontend bundle runtime patches (inversify + ApplicationError)');
+
+const backendMain = path.join(__dirname, 'lib', 'backend', 'main.js');
+patchFile(backendMain, [
+  {
+    from: 'return require("drivelist/build/Release/drivelist.node");',
+    to: 'return { list: function(cb) { cb(null, []); } };'
+  }
+], 'drivelist native binding in backend bundle');
