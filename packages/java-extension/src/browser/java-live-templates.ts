@@ -717,35 +717,71 @@ const TEMPLATES: TemplateDef[] = [
  * server is not yet ready or returns an empty list.
  */
 export function registerJavaLiveTemplates(languageId: string): Disposable {
+  console.log(`[KAIRO-JAVA-DEBUG] registerJavaLiveTemplates() called for language: ${languageId}`);
   return monaco.languages.registerCompletionItemProvider(languageId, {
-    triggerCharacters: [],
     provideCompletionItems: (model, position, _context, _token) => {
-      const word = model.getWordUntilPosition(position);
-      const prefix = word.word;
+      try {
+        console.log(`[KAIRO-JAVA-DEBUG] Live template provideCompletionItems called! lang=${model.getLanguageId()}, pos=${position.lineNumber}:${position.column}`);
+        const word = model.getWordUntilPosition(position);
+        const prefix = word.word;
+        const startColumn = word.startColumn;
 
-      const suggestions: monaco.languages.CompletionItem[] = [];
-      for (const tpl of TEMPLATES) {
-        if (tpl.prefix === prefix) {
-          const range = new monaco.Range(
-            position.lineNumber,
-            word.startColumn,
-            position.lineNumber,
-            word.endColumn,
-          );
-          suggestions.push({
-            label: tpl.label,
-            kind: monaco.languages.CompletionItemKind.Snippet,
-            detail: tpl.detail,
-            insertText: tpl.insertText,
-            insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-            filterText: tpl.prefix,
-            range,
-            sortText: '0' + tpl.prefix,
-          });
+        console.log(`[KAIRO-JAVA-DEBUG] word="${prefix}", startColumn=${startColumn}, endColumn=${word.endColumn}`);
+
+        const replaceRange = new monaco.Range(
+          position.lineNumber,
+          startColumn,
+          position.lineNumber,
+          position.column,
+        );
+
+        if (!prefix) {
+          console.log('[KAIRO-JAVA-DEBUG] Empty prefix, returning all templates');
+          return {
+            suggestions: TEMPLATES.map(tpl => ({
+              label: tpl.label,
+              kind: monaco.languages.CompletionItemKind.Snippet,
+              detail: tpl.detail,
+              insertText: tpl.insertText,
+              insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+              filterText: tpl.prefix,
+              range: replaceRange,
+              sortText: '1' + tpl.prefix,
+            })),
+          };
         }
-      }
 
-      return { suggestions };
+        const lowerPrefix = prefix.toLowerCase();
+        const matches: { tpl: TemplateDef; score: number }[] = [];
+        for (const tpl of TEMPLATES) {
+          if (tpl.prefix.startsWith(lowerPrefix)) {
+            const score = tpl.prefix === lowerPrefix ? 0 : tpl.prefix.length;
+            matches.push({ tpl, score });
+          }
+        }
+
+        matches.sort((a, b) => a.score - b.score || a.tpl.prefix.localeCompare(b.tpl.prefix));
+
+        console.log(`[KAIRO-JAVA-DEBUG] prefix="${prefix}", matches=${matches.length}`);
+
+        const suggestions = matches.map(({ tpl }) => ({
+          label: tpl.label,
+          kind: monaco.languages.CompletionItemKind.Snippet,
+          detail: tpl.detail,
+          documentation: tpl.category ? `[${tpl.category}] ${tpl.detail}` : tpl.detail,
+          insertText: tpl.insertText,
+          insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+          filterText: tpl.prefix,
+          range: replaceRange,
+          sortText: '0' + tpl.prefix,
+        }));
+
+        console.log(`[KAIRO-JAVA-DEBUG] Returning ${suggestions.length} suggestions`);
+        return { suggestions };
+      } catch (e) {
+        console.error('[KAIRO-JAVA-DEBUG] Error in provideCompletionItems:', e);
+        return { suggestions: [] };
+      }
     },
   });
 }

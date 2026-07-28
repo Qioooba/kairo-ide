@@ -144,6 +144,9 @@ apps/*/src/**/*.js.map
 apps/*/esbuild.mjs
 apps/*/gen-esbuild.*.mjs
 apps/*/src-gen/
+packages/theia-product/esbuild.mjs
+packages/theia-product/gen-esbuild.*.mjs
+packages/theia-product/src-gen/
 
 # Playwright screenshots (not test artifacts, just visual reference)
 codex-ui-review-shots/

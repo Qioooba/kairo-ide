@@ -63,6 +63,7 @@ export class JavaMonacoRegistrationContribution implements FrontendApplicationCo
   protected subs: Disposable[] = [];
 
   onStart(): void {
+    console.log('[KAIRO-JAVA-DEBUG] JavaMonacoRegistrationContribution.onStart() called!');
     // Theia's monaco-editor-core ships no basic-languages, so
     // .java opened as Plain Text: no highlighting, and the
     // completion/definition providers below never fired
@@ -76,6 +77,43 @@ export class JavaMonacoRegistrationContribution implements FrontendApplicationCo
       });
     }
     monaco.languages.setMonarchTokensProvider(JAVA_LANGUAGE_ID, JAVA_MONARCH as monaco.languages.IMonarchLanguage);
+
+    monaco.languages.setLanguageConfiguration(JAVA_LANGUAGE_ID, {
+      comments: {
+        lineComment: '//',
+        blockComment: ['/*', '*/'],
+      },
+      brackets: [
+        ['{', '}'],
+        ['[', ']'],
+        ['(', ')'],
+      ],
+      autoClosingPairs: [
+        { open: '{', close: '}' },
+        { open: '[', close: ']' },
+        { open: '(', close: ')' },
+        { open: '"', close: '"' },
+        { open: "'", close: "'" },
+      ],
+      surroundingPairs: [
+        { open: '{', close: '}' },
+        { open: '[', close: ']' },
+        { open: '(', close: ')' },
+        { open: '"', close: '"' },
+        { open: "'", close: "'" },
+      ],
+      wordPattern: /(-?\d*\.\d\w*)|([^\`\~\!\@\#\%\^\&\*\(\)\-\=\+\[\{\]\}\\\|\;\:\'\"\,\.\<\>\/\?\s]+)/g,
+      indentationRules: {
+        increaseIndentPattern: /^.*\{[^}"']*$/,
+        decreaseIndentPattern: /^(.*\*\/)?\s*\}[;\s]*$/,
+      },
+      folding: {
+        markers: {
+          start: /^\s*\/\/\s*#region\b/,
+          end: /^\s*\/\/\s*#endregion\b/,
+        },
+      },
+    });
 
     // jdt:// content: the LS answers go-to-definition into
     // library jars with jdt:// URIs; without an fs provider for
@@ -300,6 +338,45 @@ export class JavaMonacoRegistrationContribution implements FrontendApplicationCo
       }),
     );
     this.registerRunCommands();
+    this.ensureJavaQuickSuggestions();
+  }
+
+  protected ensureJavaQuickSuggestions(): void {
+    const applyJavaOptions = (editor: monaco.editor.ICodeEditor): void => {
+      const model = editor.getModel();
+      if (!model) return;
+      const langId = model.getLanguageId();
+      if (langId !== JAVA_LANGUAGE_ID) return;
+      console.log('[KAIRO-JAVA-DEBUG] Applying Java editor options for quick suggestions');
+      editor.updateOptions({
+        quickSuggestions: {
+          other: true,
+          comments: false,
+          strings: false,
+        },
+        suggestOnTriggerCharacters: true,
+        quickSuggestionsDelay: 10,
+        suggest: {
+          localityBonus: true,
+          snippetsPreventQuickSuggestions: false,
+          showWords: false,
+        },
+      });
+    };
+
+    this.subs.push(monaco.editor.onDidCreateEditor(editor => {
+      applyJavaOptions(editor);
+      this.subs.push(editor.onDidChangeModel(() => {
+        applyJavaOptions(editor);
+      }));
+      this.subs.push(editor.onDidChangeModelLanguage(() => {
+        applyJavaOptions(editor);
+      }));
+    }));
+
+    for (const editor of monaco.editor.getEditors()) {
+      applyJavaOptions(editor);
+    }
   }
 
   protected registerRunCommands(): void {
