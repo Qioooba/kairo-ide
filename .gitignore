@@ -202,6 +202,7 @@ legacy-sample/.kairo-cache-key
 legacy-sample/.kairo-generated-at
 legacy-sample/.theia/
 legacy-sample/KairoJavaConfig.ini
+legacy-sample/.kairo/project.json
 
 # Runtime agent temp dirs
 runtime-agent/.runtime-*/
