@@ -121,9 +121,9 @@ const KairoToolbarComponent: React.FC<KairoToolbarProps> = ({
   };
 
   return (
-    <div className="kairo-toolbar" role="toolbar" aria-label={t('widget.toolbar.title')}>
+    <div className={`kairo-toolbar${busy ? ' kairo-toolbar-busy' : ''}`} role="toolbar" aria-label={t('widget.toolbar.title')}>
       {/* Project selector */}
-      <div className="kairo-toolbar-group">
+      <div className="kairo-toolbar-group kairo-toolbar-project-group">
         <label className="kairo-toolbar-label" htmlFor="kairo-toolbar-project">{t('widget.toolbar.projectLabel')}</label>
         <select
           id="kairo-toolbar-project"
@@ -142,7 +142,7 @@ const KairoToolbarComponent: React.FC<KairoToolbarProps> = ({
       </div>
 
       {/* Run configuration selector */}
-      <div className="kairo-toolbar-group">
+      <div className="kairo-toolbar-group kairo-toolbar-runconfig-group">
         <label className="kairo-toolbar-label" htmlFor="kairo-toolbar-run-config">{t('widget.toolbar.runConfigLabel')}</label>
         <select
           id="kairo-toolbar-run-config"
@@ -160,10 +160,12 @@ const KairoToolbarComponent: React.FC<KairoToolbarProps> = ({
         </select>
       </div>
 
+      <div className="kairo-toolbar-separator" role="separator" aria-orientation="vertical" />
+
       {/* Action buttons */}
       <div className="kairo-toolbar-group kairo-toolbar-actions">
         <button
-          className="theia-button main"
+          className="theia-button main kairo-toolbar-btn kairo-toolbar-btn-run"
           disabled={busy !== null || !selectedConfig || isLaunching}
           onClick={() => executeCommand('run', 'kairo.server.start')}
           title={t('widget.toolbar.runTooltip')}
@@ -173,7 +175,7 @@ const KairoToolbarComponent: React.FC<KairoToolbarProps> = ({
           {busy === 'run' ? t('widget.toolbar.running') : t('widget.toolbar.run')}
         </button>
         <button
-          className="theia-button"
+          className="theia-button kairo-toolbar-btn kairo-toolbar-btn-debug"
           disabled={busy !== null || !selectedConfig || selectedConfig?.mode !== 'debug' || isLaunching}
           onClick={() => executeCommand('debug', 'kairo.server.debug')}
           title={t('widget.toolbar.debugTooltip')}
@@ -183,7 +185,7 @@ const KairoToolbarComponent: React.FC<KairoToolbarProps> = ({
           {busy === 'debug' ? t('widget.toolbar.debugging') : t('widget.toolbar.debug')}
         </button>
         <button
-          className="theia-button secondary"
+          className="theia-button secondary kairo-toolbar-btn kairo-toolbar-btn-stop"
           disabled={busy !== null || !hasRunningServer}
           onClick={() => executeCommand('stop', 'kairo.server.stop')}
           title={t('widget.toolbar.stopTooltip')}
@@ -193,7 +195,7 @@ const KairoToolbarComponent: React.FC<KairoToolbarProps> = ({
           {busy === 'stop' ? t('widget.toolbar.stopping') : t('widget.toolbar.stop')}
         </button>
         <button
-          className="theia-button"
+          className="theia-button kairo-toolbar-btn kairo-toolbar-btn-build"
           disabled={busy !== null}
           onClick={() => executeCommand('build', 'kairo.build')}
           title={t('widget.toolbar.buildTooltip')}

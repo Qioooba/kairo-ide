@@ -118,13 +118,15 @@ const HotSwapStatusView: React.FC<HotSwapStatusViewProps> = ({
         {/* Body */}
         <div className="kairo-debug-hotswap-body">
             {s.error && (
-                <div className="kairo-debug-hotswap-error" role="alert">
-                    {s.error}
+                <div className="kairo-error-banner" role="alert">
+                    <span className="codicon codicon-error" aria-hidden="true" />
+                    <span>{s.error}</span>
                 </div>
             )}
             {!s.error && s.entries.length === 0 && (
-                <div className="kairo-empty">
-                    {t('widget.hotswap.noOperations')}
+                <div className="kairo-empty-state">
+                    <span className="kairo-empty-state-glyph codicon codicon-sync" aria-hidden="true" />
+                    <div className="kairo-empty-state-title">{t('widget.hotswap.noOperations')}</div>
                 </div>
             )}
             {s.entries.map(entry => {
@@ -156,8 +158,9 @@ const HotSwapStatusView: React.FC<HotSwapStatusViewProps> = ({
                                 )}
                             </div>
                             {entry.errorMessage && (
-                                <div className="kairo-debug-hotswap-error">
-                                    {entry.errorMessage}
+                                <div className="kairo-error-banner">
+                                    <span className="codicon codicon-error" aria-hidden="true" />
+                                    <span>{entry.errorMessage}</span>
                                 </div>
                             )}
                         </div>

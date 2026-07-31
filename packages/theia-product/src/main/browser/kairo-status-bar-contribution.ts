@@ -74,6 +74,35 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
     return `kairo-statusbar-group-${group}${placeholder ? ' kairo-statusbar-placeholder' : ''}`;
   }
 
+  /** Map a runtime/build/server state to a semantic status-bar CSS class. */
+  private itemStateClass(state?: string): string {
+    if (!state) return '';
+    const map: Record<string, string> = {
+      succeeded: 'kairo-statusbar-state-success',
+      available: 'kairo-statusbar-state-success',
+      connected: 'kairo-statusbar-state-success',
+      synced: 'kairo-statusbar-state-success',
+      running: 'kairo-statusbar-state-active',
+      pending: 'kairo-statusbar-state-active',
+      starting: 'kairo-statusbar-state-active',
+      connecting: 'kairo-statusbar-state-active',
+      compiling: 'kairo-statusbar-state-active',
+      paused: 'kairo-statusbar-state-warning',
+      restart_required: 'kairo-statusbar-state-warning',
+      error: 'kairo-statusbar-state-error',
+      failed: 'kairo-statusbar-state-error',
+      crashed: 'kairo-statusbar-state-error',
+      terminated: 'kairo-statusbar-state-error',
+      disconnected: 'kairo-statusbar-state-error',
+      closed: 'kairo-statusbar-state-error',
+      cancelled: 'kairo-statusbar-state-neutral',
+      stopped: 'kairo-statusbar-state-neutral',
+      uninitialized: 'kairo-statusbar-state-neutral',
+      unknown: 'kairo-statusbar-state-neutral',
+    };
+    return map[state] ?? '';
+  }
+
   @postConstruct()
   init(): void {
     const t = this.i18n.t.bind(this.i18n);
@@ -190,7 +219,7 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
       this.unsubscribeDebug = this.javaDebug.onDidChangeStatus(status => this.renderDebugStatus(status));
     } catch (e) {
       console.error(`[kairo] Failed to initialize Java debug service in status bar: ${e instanceof Error ? e.message : String(e)}`);
-      this.renderDebugStatus({ state: 'unavailable', message: 'Java Debug service unavailable' });
+      this.renderDebugStatus({ state: 'unavailable', message: this.i18n.t('statusBar.debugUnavailable') });
     }
     // Subscribe to BuildStore for build status updates
     this.unsubscribeBuild = this.buildStore.onDidChange(() => this.renderBuildStatus());
@@ -222,7 +251,7 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
       alignment: StatusBarAlignment.LEFT,
       priority: 96,
       command: 'kairo.debug.openView',
-      className: this.statusClass(3, this.isPlaceholderText(presentation.text)),
+      className: `${this.statusClass(3, this.isPlaceholderText(presentation.text))} ${this.itemStateClass(status.state)}`.trim(),
     });
   }
 
@@ -306,7 +335,7 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
       alignment: StatusBarAlignment.LEFT,
       priority: 100,
       command: 'kairo.jdk.switch',
-      className: this.statusClass(1, this.isPlaceholderText(text)),
+      className: `${this.statusClass(1, this.isPlaceholderText(text))} ${this.itemStateClass(effective)}`.trim(),
     });
   }
 
@@ -365,7 +394,7 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
       alignment: StatusBarAlignment.LEFT,
       priority: 95,
       command: 'kairo.agent.reconnect',
-      className: this.statusClass(3, this.isPlaceholderText(config.text)),
+      className: `${this.statusClass(3, this.isPlaceholderText(config.text))} ${this.itemStateClass(s === 'open' ? 'connected' : s)}`.trim(),
     });
   }
 
@@ -413,34 +442,34 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
       alignment: StatusBarAlignment.LEFT,
       priority: 98,
       command: 'kairo.view.builds',
-      className: this.statusClass(2),
+      className: `${this.statusClass(2)} ${this.itemStateClass(latest.state)}`.trim(),
     });
   }
 
   protected renderServerStatus(): void {
     const t = this.i18n.t.bind(this.i18n);
-    const setServerElement = (text: string, tooltip: string) => {
+    const setServerElement = (text: string, tooltip: string, state?: string) => {
       this.statusBar.setElement('kairo.server', {
         text,
         tooltip,
         alignment: StatusBarAlignment.LEFT,
         priority: 97,
         command: 'kairo.view.servers',
-        className: this.statusClass(2, this.isPlaceholderText(text)),
+        className: `${this.statusClass(2, this.isPlaceholderText(text))} ${this.itemStateClass(state)}`.trim(),
       });
     };
     if (this.runtimeStatus === 'disconnected' || this.runtimeStatus === 'closed') {
-      setServerElement(`$(error) ${t('statusBar.serverDisconnected')}`, t('statusBar.serverTooltip'));
+      setServerElement(`$(error) ${t('statusBar.serverDisconnected')}`, t('statusBar.serverTooltip'), this.runtimeStatus);
       return;
     }
     if (this.runtimeStatus === 'connecting') {
-      setServerElement(`$(sync~spin) ${t('statusBar.serverConnecting')}`, t('statusBar.serverTooltip'));
+      setServerElement(`$(sync~spin) ${t('statusBar.serverConnecting')}`, t('statusBar.serverTooltip'), this.runtimeStatus);
       return;
     }
     const servers = this.serverStore.getServers();
     const srv = servers[0];
     if (!srv) {
-      setServerElement(`$(server-process) ${t('statusBar.serverStopped')}`, t('statusBar.serverTooltip'));
+      setServerElement(`$(server-process) ${t('statusBar.serverStopped')}`, t('statusBar.serverTooltip'), 'stopped');
       return;
     }
     const port = srv.httpPort ? `:${srv.httpPort}` : '';
@@ -449,7 +478,7 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
     const text = `${t('statusBar.server', { state: srv.state })} ${port}${debugPort}`.trim();
     setServerElement(`${icon} ${text}`, srv.debugPort
       ? t('statusBar.serverTooltipWithPorts', { state: srv.state, id: srv.id, debugPort: srv.debugPort })
-      : t('statusBar.serverTooltipNoDebug', { state: srv.state, id: srv.id }));
+      : t('statusBar.serverTooltipNoDebug', { state: srv.state, id: srv.id }), srv.state);
   }
 
   /**
@@ -471,7 +500,7 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
           alignment: StatusBarAlignment.LEFT,
           priority: 94,
           command: 'kairo.view.servers',
-          className: this.statusClass(4),
+          className: `${this.statusClass(4)} ${this.itemStateClass('synced')}`.trim(),
         });
         break;
       case 'compiling':
@@ -481,7 +510,7 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
           alignment: StatusBarAlignment.LEFT,
           priority: 94,
           command: 'kairo.view.servers',
-          className: this.statusClass(4),
+          className: `${this.statusClass(4)} ${this.itemStateClass('compiling')}`.trim(),
         });
         break;
       case 'restart_required':
@@ -491,7 +520,7 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
           alignment: StatusBarAlignment.LEFT,
           priority: 94,
           command: 'kairo.view.servers',
-          className: this.statusClass(4),
+          className: `${this.statusClass(4)} ${this.itemStateClass('restart_required')}`.trim(),
         });
         break;
     }

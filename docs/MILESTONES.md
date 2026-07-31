@@ -1,6 +1,6 @@
 # Kairo IDE Milestones — Current State Matrix
 
-> Last verified: 2026-08-01 (Session 21 — Phase L：Project Selector / Debug Module Selector / Debug Condition Editor 深度美化)
+> Last verified: 2026-08-01 (Session 23 — Phase N：Toolbar / Status Bar 统一美化)
 > Baseline: Wave 0 (Bleeding Fixes Complete)
 > Status: Each item must be one of: verified, partial, not_started, deferred
 > ADR: 30 records (001-0030)
@@ -147,6 +147,14 @@ All Wave 0 gates pass. See [WAVE0_BASELINE.md](progress/WAVE0_BASELINE.md) for f
 | Debug Condition Editor i18n & styling (Session 21 Phase L) | verified | `debug-condition-editor-widget.tsx`, `kairo-theme.css`, `en.ts`, `zh-CN.ts` | Removed inline styles; tab/header/field/input/textarea/hint/validation classes; localized validation messages |
 | Phase L verification (Session 21) | verified | `tsc --noEmit`, `pnpm -r test`, `go test ./...`, builds for i18n/ui-kit/project-extension/theia-product/browser | 0 TS errors; all frontend tests pass; 33 Go packages pass; Go coverage 76.3%; browser bundle builds with 0 errors |
 | Handover documentation for next session | verified | `docs/HANDOVER.md` | Added detailed next-session handover with remaining widgets, recommended phases, and verification gates |
+| Debug Diagnostics widget i18n & styling (Session 22 Phase M) | verified | `debug-diagnostics-widget.tsx`, `kairo-theme.css`, `en.ts`, `zh-CN.ts` | Injected KairoI18nService; removed all hardcoded English; replaced emoji with codicons; `.kairo-debug-diag-*` classes; Java 6 compatibility notes localized |
+| Hot Swap Status widget standardization (Session 22 Phase M) | verified | `debug-hotswap-status-widget.tsx`, `kairo-theme.css` | Empty state switched to `.kairo-empty-state`; error banners switched to `.kairo-error-banner`; all UI text already localized via `widget.hotswap.*` |
+| General loading component style (Session 22 Phase M) | verified | `kairo-theme.css` | Added reusable `.kairo-loading` / `.kairo-loading-icon` with centered flex + spinning codicon |
+| Phase M verification (Session 22) | verified | `tsc --noEmit`, `pnpm -r test`, `go test ./...`, builds for i18n/ui-kit/theia-product/browser | 0 TS errors; all frontend tests pass (java-extension flaky on first parallel run, passes on rerun); 33 Go packages pass; browser bundle builds with 0 errors |
+| Toolbar semantic classes & busy state (Session 23 Phase N) | verified | `kairo-toolbar-widget.tsx`, `kairo-theme.css` | Added `.kairo-toolbar-project-group`, `.kairo-toolbar-runconfig-group`, `.kairo-toolbar-separator`, `.kairo-toolbar-busy`, `.kairo-toolbar-btn-run/debug/stop/build`; icon colors match run/info/error/neutral semantics |
+| Status bar semantic state classes (Session 23 Phase N) | verified | `kairo-status-bar-contribution.ts`, `kairo-theme.css` | Added `.itemStateClass()` mapping runtime states to `.kairo-statusbar-state-success/active/warning/error/neutral`; applied to JDK/build/server/agent/debug/hot-reload entries |
+| Status bar i18n hardcoded cleanup (Session 23 Phase N) | verified | `kairo-status-bar-contribution.ts`, `en.ts`, `zh-CN.ts` | Replaced hardcoded 'Java Debug service unavailable' with `statusBar.debugUnavailable` key; added zh-CN translation |
+| Phase N verification (Session 23) | verified | `tsc --noEmit`, `pnpm -r test`, `go test ./...`, builds for ui-kit/theia-product/browser | 0 TS errors; all frontend tests pass; 33 Go packages pass; browser bundle builds with 0 errors |
 
 ## Backend API
 

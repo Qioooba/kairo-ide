@@ -634,6 +634,35 @@
     opacity: 0.7 !important;
 }
 
+/* Semantic state colors for status-bar entries. These are intentionally
+   subtle — a tinted icon is enough to convey state without turning the
+   whole status bar into a traffic light. */
+#theia-statusBar .element.kairo-statusbar-state-success .codicon,
+#theia-statusBar .element.kairo-statusbar-state-success .codicon-check,
+#theia-statusBar .element.kairo-statusbar-state-success .codicon-pass,
+#theia-statusBar .element.kairo-statusbar-state-success .codicon-server-process~spin {
+    color: var(--kairo-success, #3dcc91) !important;
+}
+
+#theia-statusBar .element.kairo-statusbar-state-active .codicon,
+#theia-statusBar .element.kairo-statusbar-state-active .codicon-sync~spin {
+    color: var(--kairo-info, #4a9eff) !important;
+}
+
+#theia-statusBar .element.kairo-statusbar-state-warning .codicon,
+#theia-statusBar .element.kairo-statusbar-state-warning .codicon-warning {
+    color: var(--kairo-warning, #fbbc04) !important;
+}
+
+#theia-statusBar .element.kairo-statusbar-state-error .codicon,
+#theia-statusBar .element.kairo-statusbar-state-error .codicon-error {
+    color: var(--kairo-error, #f04757) !important;
+}
+
+#theia-statusBar .element.kairo-statusbar-state-neutral .codicon {
+    color: var(--kairo-text-secondary, #9aa0a6) !important;
+}
+
 /* Generic Kairo widget chrome — shared by Build/Server/Deployments/Logs */
 .kairo-widget {
     display: flex;
@@ -2329,10 +2358,47 @@
     padding: 5px 12px;
     font-size: 12px;
     border-radius: 4px;
+    transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
 }
 
 .kairo-toolbar-actions .theia-button .codicon {
     font-size: 13px;
+}
+
+.kairo-toolbar-separator {
+    width: 1px;
+    align-self: stretch;
+    margin: 4px 2px;
+    background: var(--kairo-border, #3a3b3e);
+    opacity: 0.6;
+}
+
+.kairo-toolbar-busy .kairo-toolbar-select,
+.kairo-toolbar-busy .kairo-toolbar-actions .theia-button:not(:disabled) {
+    cursor: wait;
+}
+
+.kairo-toolbar-btn-run .codicon {
+    color: var(--kairo-success, #3dcc91);
+}
+
+.kairo-toolbar-btn-debug .codicon {
+    color: var(--kairo-info, #4a9eff);
+}
+
+.kairo-toolbar-btn-stop .codicon {
+    color: var(--kairo-error, #f04757);
+}
+
+.kairo-toolbar-btn-build .codicon {
+    color: var(--kairo-text-secondary, #9aa0a6);
+}
+
+.kairo-toolbar-btn-run:not(:disabled):hover .codicon,
+.kairo-toolbar-btn-debug:not(:disabled):hover .codicon,
+.kairo-toolbar-btn-stop:not(:disabled):hover .codicon,
+.kairo-toolbar-btn-build:not(:disabled):hover .codicon {
+    color: inherit;
 }
 
 /* ------------------------------------------------------------------
@@ -3666,35 +3732,6 @@ p.kairo-empty {
 #theia-statusBar .element {
     padding: 0 8px !important;
     gap: 5px !important;
-}
-
-/* Status severity colors */
-#theia-statusBar .element[data-element-id="kairo.agent"] .codicon-error,
-#theia-statusBar .element[data-element-id="kairo.server"] .codicon-error,
-#theia-statusBar .element[data-element-id="kairo.build"] .codicon-error,
-#theia-statusBar .element[data-element-id="kairo.jdk"] .codicon-error {
-    color: var(--kairo-error) !important;
-}
-
-#theia-statusBar .element[data-element-id="kairo.agent"] .codicon-check,
-#theia-statusBar .element[data-element-id="kairo.server"] .codicon-server-process~spin,
-#theia-statusBar .element[data-element-id="kairo.build"] .codicon-check {
-    color: var(--kairo-success) !important;
-}
-
-#theia-statusBar .element[data-element-id="kairo.build"] .codicon-sync~spin {
-    color: var(--kairo-info) !important;
-}
-
-#theia-statusBar .element[data-element-id="kairo.hotReload"] .codicon-warning {
-    color: var(--kairo-warning) !important;
-}
-
-/* Collapse non-critical status items when they show placeholder values.
-   The matching logic lives in kairo-status-bar-contribution.ts which adds
-   the .kairo-statusbar-placeholder class for empty/placeholder text. */
-#theia-statusBar .element.kairo-statusbar-placeholder {
-    opacity: 0.55;
 }
 
 /* ── Menus ──────────────────────────────────────────────────────── */
@@ -5218,6 +5255,178 @@ p.kairo-empty {
     cursor: not-allowed;
     background: var(--kairo-disabled-bg);
     color: var(--kairo-disabled-fg);
+}
+
+/* ------------------------------------------------------------------
+ * Debug diagnostics widget
+ * ------------------------------------------------------------------ */
+
+.kairo-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 32px 24px;
+    flex: 1 1 auto;
+    color: var(--kairo-text-secondary);
+    font-size: 13px;
+}
+
+.kairo-loading-icon {
+    font-size: 16px;
+}
+
+.kairo-debug-diagnostics {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+}
+
+.kairo-debug-diag-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--kairo-border);
+    flex-shrink: 0;
+}
+
+.kairo-debug-diag-title {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--kairo-text);
+}
+
+.kairo-diag-refresh {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 10px;
+    font-size: 12px;
+}
+
+.kairo-diag-list {
+    flex: 1 1 auto;
+    overflow: auto;
+    padding: 8px 0;
+}
+
+.kairo-diag-item {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--kairo-border);
+    border-left: 3px solid transparent;
+    transition: background-color 80ms ease;
+}
+
+.kairo-diag-item:hover {
+    background: var(--kairo-bg-secondary);
+}
+
+.kairo-diag-item.ok {
+    border-left-color: var(--kairo-success);
+}
+
+.kairo-diag-item.warning {
+    border-left-color: var(--kairo-warning);
+    background: color-mix(in srgb, var(--kairo-warning) 4%, transparent);
+}
+
+.kairo-diag-item.error {
+    border-left-color: var(--kairo-error);
+    background: color-mix(in srgb, var(--kairo-error) 4%, transparent);
+}
+
+.kairo-diag-item.unknown {
+    border-left-color: var(--kairo-text-secondary);
+}
+
+.kairo-diag-item-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.kairo-diag-icon {
+    font-size: 14px;
+    flex-shrink: 0;
+}
+
+.kairo-diag-icon.ok {
+    color: var(--kairo-success);
+}
+
+.kairo-diag-icon.warning {
+    color: var(--kairo-warning);
+}
+
+.kairo-diag-icon.error {
+    color: var(--kairo-error);
+}
+
+.kairo-diag-icon.unknown {
+    color: var(--kairo-text-secondary);
+}
+
+.kairo-diag-label {
+    font-weight: 600;
+    font-size: 12px;
+    color: var(--kairo-text);
+}
+
+.kairo-diag-detail {
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--kairo-text-secondary);
+    word-break: break-word;
+}
+
+.kairo-diag-action {
+    align-self: flex-start;
+    padding: 2px 10px;
+    font-size: 11px;
+    margin-top: 2px;
+}
+
+.kairo-diag-footer {
+    flex-shrink: 0;
+    padding: 12px;
+    border-top: 1px solid var(--kairo-border);
+    background: var(--kairo-bg-secondary);
+    font-size: 12px;
+    overflow: auto;
+    max-height: 40%;
+}
+
+.kairo-diag-footer-title {
+    margin: 0 0 6px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--kairo-text);
+}
+
+.kairo-diag-footer-intro {
+    margin: 0 0 8px;
+    color: var(--kairo-text-secondary);
+}
+
+.kairo-diag-compatibility-list {
+    margin: 0 0 10px;
+    padding-left: 18px;
+    color: var(--kairo-text-secondary);
+    line-height: 1.6;
+}
+
+.kairo-diag-hint {
+    margin: 0;
+    color: var(--kairo-text-secondary);
+    font-style: italic;
+    opacity: 0.9;
 }
 
 /* ------------------------------------------------------------------
