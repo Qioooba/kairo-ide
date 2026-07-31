@@ -2,7 +2,7 @@
 
 > 生成时间：2026-07-23  
 > 最后更新：2026-08-01（Session 23 — Phase N：Toolbar / Status Bar 统一美化）  
-> 最新提交：1d81eca（Session 22–23 已提交并推送至 main；HANDOVER 状态同步）  
+> 最新提交：见 `git log`（Session 22–23 已推送至 main）  
 > 分支：`main`  
 > 目标读者：接手开发的 AI 工程师 / 人类开发者  
 > 本次会话模型：Kimi-K2.7-Code（TRAE）
