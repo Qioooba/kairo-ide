@@ -2,7 +2,7 @@
 
 > 生成时间：2026-07-23  
 > 最后更新：2026-08-01（Session 23 — Phase N：Toolbar / Status Bar 统一美化）  
-> 最新提交：0fa31c5（Session 15–21 已提交，未推送；Session 22–23 变更在工作区中）  
+> 最新提交：32d2f51（Session 22–23 已提交并推送至 main）  
 > 分支：`main`  
 > 目标读者：接手开发的 AI 工程师 / 人类开发者  
 > 本次会话模型：Kimi-K2.7-Code（TRAE）
@@ -50,7 +50,7 @@
 
 ### 剩余待办
 
-- ⬜ 提交 Session 15–23 变更并推送（由用户决定是否提交）。
+- ✅ 提交 Session 22–23 变更并推送至 main（commit 32d2f51）。
 - ⬜ 重新捕获回归截图（`docs/screenshots/current-ui/`）。
 - ⬜ 继续 Phase O：按目录批量处理剩余业务扩展 widgets（Build、Search、Git/SVN、Java、Test、SQL、Remote 等）。
 
