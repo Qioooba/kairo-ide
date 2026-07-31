@@ -29,7 +29,7 @@
     "@theia/electron": "1.73.1",
     "@theia/plugin-ext": "1.73.1",
     "@theia/plugin-ext-vscode": "1.73.1",
-    "@types/node": "20.14.10",
+    "@types/node": "26.1.2",
     "electron": "39.8.7",
     "electron-builder": "25.1.8",
     "typescript": "5.5.4"
