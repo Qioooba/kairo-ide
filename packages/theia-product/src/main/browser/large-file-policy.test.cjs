@@ -1,33 +1,6 @@
 'use strict';
 
-const { register } = require('node:module');
-const { pathToFileURL } = require('node:url');
-register('data:text/javascript,' + encodeURIComponent(`
-export function resolve(specifier, context, nextResolve) {
-  if (/\.(css|svg|ttf|woff|woff2|png|jpg|gif)$/.test(specifier)) {
-    return { url: 'data:text/javascript,export default {};', format: 'module', shortCircuit: true };
-  }
-  if (specifier === '@theia/monaco-editor-core' || specifier.includes('monaco-editor-core')) {
-    return { url: 'data:text/javascript,export default {};', format: 'module', shortCircuit: true };
-  }
-  return nextResolve(specifier, context);
-}
-`), pathToFileURL(__filename));
-
-const Module = require('module');
-Module._extensions['.css'] = function (module, filename) {
-  module._compile('module.exports = {};', filename);
-};
-
-// Mock @theia/monaco-editor-core to avoid the ESM import issue in CJS tests.
-const origResolveFilename = Module._resolveFilename;
-Module._resolveFilename = function (request, parent, ...args) {
-  if (request === '@theia/monaco-editor-core' || request.includes('monaco-editor-core')) {
-    const mockPath = require('node:path').join(__dirname, '..', '..', '..', '..', 'search-extension', 'src', 'browser', '__monaco-mock__.js');
-    return origResolveFilename.call(this, mockPath, parent, ...args);
-  }
-  return origResolveFilename.call(this, request, parent, ...args);
-};
+require('../../../test/frontend-setup.cjs');
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');

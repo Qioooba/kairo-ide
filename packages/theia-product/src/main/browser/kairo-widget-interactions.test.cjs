@@ -11,71 +11,7 @@
 
 'use strict';
 
-const { register } = require('node:module');
-const { pathToFileURL } = require('node:url');
-register('data:text/javascript,' + encodeURIComponent(`
-export function resolve(specifier, context, nextResolve) {
-  if (/\\.(css|svg|ttf|woff|woff2|png|jpg|gif)$/.test(specifier)) {
-    return { url: 'data:text/javascript,export default {};', format: 'module', shortCircuit: true };
-  }
-  if (specifier === '@theia/monaco-editor-core' || specifier.includes('monaco-editor-core')) {
-    return { url: 'data:text/javascript,export default {};', format: 'module', shortCircuit: true };
-  }
-  return nextResolve(specifier, context);
-}
-`), pathToFileURL(__filename));
-
-const { enableJSDOM } = require('@theia/core/lib/browser/test/jsdom');
-const disableJSDOM = enableJSDOM();
-
-if (!global.DragEvent) {
-  global.DragEvent = class DragEvent extends global.MouseEvent {
-    constructor(type, init) {
-      super(type, init);
-      this.dataTransfer = (init && init.dataTransfer) || null;
-    }
-  };
-}
-
-if (!global.ResizeObserver) {
-  global.ResizeObserver = class ResizeObserver {
-    observe() {}
-    unobserve() {}
-    disconnect() {}
-  };
-}
-
-const Module = require('module');
-Module._extensions['.css'] = function (module, filename) {
-  module._compile('module.exports = {};', filename);
-};
-
-const origResolveFilename = Module._resolveFilename;
-Module._resolveFilename = function (request, parent, ...args) {
-  if (request === '@theia/monaco-editor-core' || request.includes('monaco-editor-core')) {
-    const mockPath = require('node:path').join(__dirname, '..', '..', '..', '..', 'search-extension', 'src', 'browser', '__monaco-mock__.js');
-    return origResolveFilename.call(this, mockPath, parent, ...args);
-  }
-  if (request === 'p-queue') {
-    const mockPath = require('node:path').join(__dirname, '__p-queue-mock__.js');
-    return origResolveFilename.call(this, mockPath, parent, ...args);
-  }
-  if (request === 'xterm' || request === 'xterm-addon-webgl' || request === 'xterm-addon-fit') {
-    const mockPath = require('node:path').join(__dirname, '__xterm-mock__.js');
-    return origResolveFilename.call(this, mockPath, parent, ...args);
-  }
-  return origResolveFilename.call(this, request, parent, ...args);
-};
-
-const { FrontendApplicationConfigProvider } = require('@theia/core/lib/browser/frontend-application-config-provider');
-FrontendApplicationConfigProvider.set({
-  defaultTheme: 'dark',
-  defaultIconTheme: 'theia-file-icons',
-  applicationName: 'Kairo',
-  validatePreferencesSchema: true,
-});
-
-require('reflect-metadata');
+const { disableJSDOM } = require('../../../test/frontend-setup.cjs');
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -86,6 +22,15 @@ const { Container } = require('inversify');
 // ------------------------------------------------------------------
 
 const { KairoDeploymentsWidget } = require('../../../lib/browser/kairo-views-contribution');
+
+async function flush() {
+  return new Promise(resolve => setTimeout(resolve, 50));
+}
+
+async function renderWidget(widget) {
+  widget.onUpdateRequest({});
+  await flush();
+}
 
 test('KairoDeploymentsWidget is a class with expected ID', () => {
   assert.equal(typeof KairoDeploymentsWidget, 'function');
@@ -106,129 +51,153 @@ test('KairoDeploymentsWidget constructor sets title and ID', () => {
   assert.equal(widget.title.caption, 'Kairo Deployments');
 });
 
-test('KairoDeploymentsWidget renders empty state by default', () => {
+test('KairoDeploymentsWidget renders empty state by default', async () => {
   const widget = new KairoDeploymentsWidget();
+  await renderWidget(widget);
   const html = widget.node.innerHTML;
   assert.ok(html.includes('No deployments yet.'));
   assert.ok(html.includes('kairo-widget-body'));
+  assert.ok(html.includes('kairo-empty-state'));
+  assert.ok(html.includes('codicon-rocket'));
 });
 
-test('KairoDeploymentsWidget renders loading state', () => {
+test('KairoDeploymentsWidget renders loading state', async () => {
   const widget = new KairoDeploymentsWidget();
   widget.setLoading(true);
+  await renderWidget(widget);
   const html = widget.node.innerHTML;
   assert.ok(html.includes('Loading deployments...'));
   assert.ok(html.includes('role="status"'));
-  assert.ok(html.includes('aria-label="Loading deployments"'));
-  assert.ok(html.includes('kairo-spinner'));
-  assert.ok(html.includes('kairo-spin'));
+  assert.ok(html.includes('kairo-empty-state'));
+  assert.ok(html.includes('codicon-loading'));
 });
 
-test('KairoDeploymentsWidget renders error state', () => {
+test('KairoDeploymentsWidget renders error state', async () => {
   const widget = new KairoDeploymentsWidget();
   widget.setError('Connection refused');
+  await renderWidget(widget);
   const html = widget.node.innerHTML;
   assert.ok(html.includes('Error loading deployments'));
   assert.ok(html.includes('Connection refused'));
   assert.ok(html.includes('role="alert"'));
-  assert.ok(html.includes('aria-live="assertive"'));
+  assert.ok(html.includes('kairo-error-banner'));
 });
 
-test('KairoDeploymentsWidget renders normal state with deployments', () => {
+test('KairoDeploymentsWidget renders normal state with deployments', async () => {
   const widget = new KairoDeploymentsWidget();
   const deployments = [
-    { id: 'deploy-1', state: 'success', filesTouched: 5, bytes: 1024, trigger: 'manual', hotReloadMode: 'incremental' },
-    { id: 'deploy-2', state: 'failed', filesTouched: 0, bytes: 0, trigger: 'auto', hotReloadMode: 'full' },
+    { id: 'deploy-1', state: 'success', filesTouched: 5, bytes: 1024, trigger: 'manual', hotReloadMode: 'staticSync' },
+    { id: 'deploy-2', state: 'failure', filesTouched: 0, bytes: 0, trigger: 'auto', hotReloadMode: 'contextReload' },
   ];
   widget.setDeployments(deployments);
+  await renderWidget(widget);
   const html = widget.node.innerHTML;
   assert.ok(html.includes('deploy-1'));
   assert.ok(html.includes('deploy-2'));
-  assert.ok(html.includes('success'));
-  assert.ok(html.includes('failed'));
+  assert.ok(html.includes('Succeeded'));
+  assert.ok(html.includes('Failed'));
   assert.ok(html.includes('5 files / 1024 bytes'));
-  assert.ok(html.includes('manual'));
-  assert.ok(html.includes('incremental'));
+  assert.ok(html.includes('Manual'));
+  assert.ok(html.includes('Auto'));
+  assert.ok(html.includes('Synced'));
+  assert.ok(html.includes('Restart Required'));
   assert.ok(html.includes('kairo-deployments-table'));
   assert.ok(html.includes('aria-label="Deployments list"'));
 });
 
-test('KairoDeploymentsWidget clears loading after setDeployments', () => {
+test('KairoDeploymentsWidget clears loading after setDeployments', async () => {
   const widget = new KairoDeploymentsWidget();
   widget.setLoading(true);
+  await renderWidget(widget);
   assert.ok(widget.node.innerHTML.includes('Loading deployments...'));
-  widget.setDeployments([{ id: 'd1', state: 'ok', filesTouched: 1, bytes: 100, trigger: 'manual', hotReloadMode: 'none' }]);
+  widget.setDeployments([{ id: 'd1', state: 'success', filesTouched: 1, bytes: 100, trigger: 'manual', hotReloadMode: 'staticSync' }]);
+  await renderWidget(widget);
   assert.ok(!widget.node.innerHTML.includes('Loading deployments...'));
   assert.ok(widget.node.innerHTML.includes('d1'));
 });
 
-test('KairoDeploymentsWidget clears error after setDeployments', () => {
+test('KairoDeploymentsWidget clears error after setDeployments', async () => {
   const widget = new KairoDeploymentsWidget();
   widget.setError('Some error');
+  await renderWidget(widget);
   assert.ok(widget.node.innerHTML.includes('Some error'));
-  widget.setDeployments([{ id: 'd1', state: 'ok', filesTouched: 1, bytes: 100, trigger: 'manual', hotReloadMode: 'none' }]);
+  widget.setDeployments([{ id: 'd1', state: 'success', filesTouched: 1, bytes: 100, trigger: 'manual', hotReloadMode: 'staticSync' }]);
+  await renderWidget(widget);
   assert.ok(!widget.node.innerHTML.includes('Some error'));
   assert.ok(widget.node.innerHTML.includes('d1'));
 });
 
-test('KairoDeploymentsWidget empty state re-renders when deployments cleared', () => {
+test('KairoDeploymentsWidget empty state re-renders when deployments cleared', async () => {
   const widget = new KairoDeploymentsWidget();
-  widget.setDeployments([{ id: 'd1', state: 'ok', filesTouched: 1, bytes: 100, trigger: 'manual', hotReloadMode: 'none' }]);
+  widget.setDeployments([{ id: 'd1', state: 'success', filesTouched: 1, bytes: 100, trigger: 'manual', hotReloadMode: 'staticSync' }]);
+  await renderWidget(widget);
   assert.ok(widget.node.innerHTML.includes('d1'));
   widget.setDeployments([]);
+  await renderWidget(widget);
   assert.ok(widget.node.innerHTML.includes('No deployments yet.'));
 });
 
-test('KairoDeploymentsWidget transitions loading -> error -> normal cleanly', () => {
+test('KairoDeploymentsWidget transitions loading -> error -> normal cleanly', async () => {
   const widget = new KairoDeploymentsWidget();
 
   // Loading
   widget.setLoading(true);
+  await renderWidget(widget);
   assert.ok(widget.node.innerHTML.includes('Loading deployments...'));
 
   // Error
   widget.setError('Network timeout');
+  await renderWidget(widget);
   assert.ok(!widget.node.innerHTML.includes('Loading deployments...'));
   assert.ok(widget.node.innerHTML.includes('Network timeout'));
 
   // Normal
-  widget.setDeployments([{ id: 'd1', state: 'ok', filesTouched: 1, bytes: 100, trigger: 'manual', hotReloadMode: 'none' }]);
+  widget.setDeployments([{ id: 'd1', state: 'success', filesTouched: 1, bytes: 100, trigger: 'manual', hotReloadMode: 'staticSync' }]);
+  await renderWidget(widget);
   assert.ok(!widget.node.innerHTML.includes('Network timeout'));
   assert.ok(widget.node.innerHTML.includes('d1'));
 });
 
-test('KairoDeploymentsWidget transitions error -> loading -> normal cleanly', () => {
+test('KairoDeploymentsWidget transitions error -> loading -> normal cleanly', async () => {
   const widget = new KairoDeploymentsWidget();
 
   widget.setError('Error');
+  await renderWidget(widget);
   assert.ok(widget.node.innerHTML.includes('Error'));
 
   widget.setLoading(true);
+  await renderWidget(widget);
   assert.ok(!widget.node.innerHTML.includes('Error'));
   assert.ok(widget.node.innerHTML.includes('Loading deployments...'));
 
-  widget.setDeployments([{ id: 'd1', state: 'ok', filesTouched: 1, bytes: 100, trigger: 'manual', hotReloadMode: 'none' }]);
+  widget.setDeployments([{ id: 'd1', state: 'success', filesTouched: 1, bytes: 100, trigger: 'manual', hotReloadMode: 'staticSync' }]);
+  await renderWidget(widget);
   assert.ok(!widget.node.innerHTML.includes('Loading deployments...'));
   assert.ok(widget.node.innerHTML.includes('d1'));
 });
 
-test('KairoDeploymentsWidget renders empty when error is null', () => {
+test('KairoDeploymentsWidget renders empty when error is null', async () => {
   const widget = new KairoDeploymentsWidget();
   widget.setError('err');
+  await renderWidget(widget);
   widget.setError(null);
+  await renderWidget(widget);
   // Setting error to null should render empty state
   assert.ok(widget.node.innerHTML.includes('No deployments yet.'));
 });
 
-test('KairoDeploymentsWidget HTML escaping prevents XSS', () => {
+test('KairoDeploymentsWidget HTML escaping prevents XSS', async () => {
   const widget = new KairoDeploymentsWidget();
   const deployments = [
-    { id: '<script>alert("xss")</script>', state: 'success', filesTouched: 0, bytes: 0, trigger: 'manual', hotReloadMode: 'none' },
+    { id: '<script>alert("xss")</script>', state: 'success', filesTouched: 0, bytes: 0, trigger: 'manual', hotReloadMode: 'staticSync' },
   ];
   widget.setDeployments(deployments);
-  const html = widget.node.innerHTML;
-  assert.ok(!html.includes('<script>'));
-  assert.ok(html.includes('&lt;script&gt;'));
+  await renderWidget(widget);
+  const cell = widget.node.querySelector('td');
+  assert.ok(cell, 'Expected a table cell');
+  assert.equal(cell.textContent, '<script>alert("xss")</script>');
+  assert.ok(cell.innerHTML.includes('&lt;script&gt;'), 'Expected <script> to be escaped in cell HTML');
+  assert.ok(!cell.innerHTML.includes('<script>'), 'Expected no literal script tag in cell HTML');
 });
 
 // ------------------------------------------------------------------

@@ -11,6 +11,7 @@ import { injectable, inject } from '@theia/core/shared/inversify';
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import { MessageService } from '@theia/core/lib/common';
 import { RuntimeConnectionService } from '@kairo/runtime-extension';
+import { KairoI18nService, type KairoI18nKey } from '@kairo/i18n';
 import type {
   MavenDetectResult,
   MavenDependencyTreeNode,
@@ -18,9 +19,17 @@ import type {
   MavenRunResult,
 } from '@kairo/protocol';
 
+type TFunction = (key: KairoI18nKey, params?: Record<string, string | number>) => string;
+
 // ---- Components ----
 
-const TreeNode: React.FC<{ node: MavenDependencyTreeNode; depth: number }> = ({ node, depth }) => {
+interface TreeNodeProps {
+  node: MavenDependencyTreeNode;
+  depth: number;
+  t: TFunction;
+}
+
+const TreeNode: React.FC<TreeNodeProps> = ({ node, depth, t }) => {
   const [expanded, setExpanded] = React.useState(depth < 2);
   const hasChildren = node.children && node.children.length > 0;
 
@@ -45,13 +54,13 @@ const TreeNode: React.FC<{ node: MavenDependencyTreeNode; depth: number }> = ({ 
           <span className="kairo-maven-dep-scope">{node.scope}</span>
         )}
         {node.optional && (
-          <span className="kairo-maven-dep-optional">optional</span>
+          <span className="kairo-maven-dep-optional">{t('common.optional').toLowerCase()}</span>
         )}
       </div>
       {hasChildren && expanded && (
         <div className="kairo-maven-tree-children" role="group">
           {node.children!.map((child, i) => (
-            <TreeNode key={`${child.groupId}:${child.artifactId}:${i}`} node={child} depth={depth + 1} />
+            <TreeNode key={`${child.groupId}:${child.artifactId}:${i}`} node={child} depth={depth + 1} t={t} />
           ))}
         </div>
       )}
@@ -62,9 +71,10 @@ const TreeNode: React.FC<{ node: MavenDependencyTreeNode; depth: number }> = ({ 
 interface MavenViewComponentProps {
   runtime: RuntimeConnectionService;
   messageService: MessageService;
+  t: TFunction;
 }
 
-const MavenViewComponent: React.FC<MavenViewComponentProps> = ({ runtime, messageService }) => {
+const MavenViewComponent: React.FC<MavenViewComponentProps> = ({ runtime, messageService, t }) => {
   const [result, setResult] = React.useState<MavenDetectResult | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState('');
@@ -74,7 +84,7 @@ const MavenViewComponent: React.FC<MavenViewComponentProps> = ({ runtime, messag
   const detectProject = React.useCallback(async () => {
     const ws = runtime.workspace();
     if (!ws) {
-      setError('No workspace open. Open a folder first.');
+      setError(t('widget.maven.noWorkspace'));
       return;
     }
     setLoading(true);
@@ -84,14 +94,14 @@ const MavenViewComponent: React.FC<MavenViewComponentProps> = ({ runtime, messag
       const r = data as MavenDetectResult;
       setResult(r);
       if (!r.found) {
-        setError('No pom.xml found in workspace root.');
+        setError(t('widget.maven.noPom'));
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
-  }, [runtime]);
+  }, [runtime, t]);
 
   const loadDependencies = React.useCallback(async () => {
     const ws = runtime.workspace();
@@ -124,17 +134,17 @@ const MavenViewComponent: React.FC<MavenViewComponentProps> = ({ runtime, messag
       const r = data as MavenRunResult;
       setTaskOutput(r.output || r.error || '');
       if (r.success) {
-        messageService.info(`Maven ${task.label} completed.`);
+        messageService.info(t('widget.maven.taskCompleted', { task: task.label }));
       } else {
-        messageService.error(`Maven ${task.label} failed (exit ${r.exitCode}).`);
+        messageService.error(t('widget.maven.taskFailed', { task: task.label, exitCode: r.exitCode ?? -1 }));
       }
     } catch (err) {
       setTaskOutput(err instanceof Error ? err.message : String(err));
-      messageService.error(`Maven ${task.label} failed.`);
+      messageService.error(t('widget.maven.taskFailedGeneric', { task: task.label }));
     } finally {
       setRunningTask('');
     }
-  }, [runtime, messageService]);
+  }, [runtime, messageService, t]);
 
   React.useEffect(() => {
     void detectProject();
@@ -143,7 +153,7 @@ const MavenViewComponent: React.FC<MavenViewComponentProps> = ({ runtime, messag
   return (
     <div className="kairo-widget" data-testid="maven-view">
       <div className="kairo-widget-header" data-testid="maven-view-header">
-        <span className="kairo-widget-title">Maven</span>
+        <span className="kairo-widget-title">{t('widget.maven.title')}</span>
         {result?.project && (
           <span className="kairo-maven-coords" data-testid="maven-coords">
             {result.project.groupId}:{result.project.artifactId}:{result.project.version}
@@ -158,7 +168,7 @@ const MavenViewComponent: React.FC<MavenViewComponentProps> = ({ runtime, messag
           onClick={detectProject}
           disabled={loading}
         >
-          Detect
+          {t('widget.maven.detect')}
         </button>
         <button
           className="theia-button secondary"
@@ -166,18 +176,18 @@ const MavenViewComponent: React.FC<MavenViewComponentProps> = ({ runtime, messag
           onClick={loadDependencies}
           disabled={loading || !result?.found}
         >
-          Refresh Dependencies
+          {t('widget.maven.refreshDependencies')}
         </button>
       </div>
 
-      {loading && <p className="kairo-empty" data-testid="maven-loading">Loading...</p>}
+      {loading && <p className="kairo-empty" data-testid="maven-loading">{t('widget.maven.loading')}</p>}
       {error && <div className="theia-error" role="alert" data-testid="maven-error">{error}</div>}
 
       {result?.project && (
         <>
           {/* Lifecycle Tasks */}
           <div className="kairo-widget-section" data-testid="maven-tasks">
-            <div className="kairo-section-title">Lifecycle Tasks</div>
+            <div className="kairo-section-title">{t('widget.maven.lifecycleTasks')}</div>
             <div className="kairo-maven-tasks" data-testid="maven-tasks-list">
               {result.tasks.map(task => (
                 <button
@@ -188,7 +198,7 @@ const MavenViewComponent: React.FC<MavenViewComponentProps> = ({ runtime, messag
                   disabled={runningTask !== ''}
                   title={task.description}
                 >
-                  {runningTask === task.id ? 'Running...' : task.label}
+                  {runningTask === task.id ? t('widget.maven.running') : task.label}
                 </button>
               ))}
             </div>
@@ -197,16 +207,16 @@ const MavenViewComponent: React.FC<MavenViewComponentProps> = ({ runtime, messag
           {/* Dependency Tree */}
           <div className="kairo-widget-section" data-testid="maven-dependencies">
             <div className="kairo-section-title">
-              Dependencies ({result.dependencies.length})
+              {t('widget.maven.dependencies', { count: result.dependencies.length })}
             </div>
             {result.tree && result.tree.length > 0 ? (
               <div className="kairo-maven-tree" role="tree" data-testid="maven-tree">
                 {result.tree.map((node, i) => (
-                  <TreeNode key={`${node.groupId}:${node.artifactId}:${i}`} node={node} depth={0} />
+                  <TreeNode key={`${node.groupId}:${node.artifactId}:${i}`} node={node} depth={0} t={t} />
                 ))}
               </div>
             ) : (
-              <p className="kairo-empty" data-testid="maven-no-deps">No dependencies.</p>
+              <p className="kairo-empty" data-testid="maven-no-deps">{t('widget.maven.noDependencies')}</p>
             )}
           </div>
         </>
@@ -215,7 +225,7 @@ const MavenViewComponent: React.FC<MavenViewComponentProps> = ({ runtime, messag
       {/* Task Output */}
       {taskOutput && (
         <div className="kairo-widget-section" data-testid="maven-output">
-          <div className="kairo-section-title">Output</div>
+          <div className="kairo-section-title">{t('widget.maven.output')}</div>
           <pre className="kairo-maven-output" data-testid="maven-output-text">{taskOutput}</pre>
         </div>
       )}
@@ -229,19 +239,25 @@ export class MavenViewWidget extends ReactWidget {
 
   @inject(RuntimeConnectionService) protected readonly runtime!: RuntimeConnectionService;
   @inject(MessageService) protected readonly messageService!: MessageService;
+  @inject(KairoI18nService) protected readonly i18n!: KairoI18nService;
 
   constructor() {
     super();
     this.id = MavenViewWidget.ID;
-    this.title.label = 'Kairo Maven';
-    this.title.caption = 'Kairo Maven View';
+    const t: TFunction = (this.i18n?.t.bind(this.i18n)) as TFunction | undefined
+      ?? ((key: KairoI18nKey) => String(key));
+    this.title.label = t('widget.maven.title');
+    this.title.caption = t('widget.maven.caption');
     this.addClass('kairo-widget');
   }
 
   protected render(): React.ReactNode {
+    const t: TFunction = (this.i18n?.t.bind(this.i18n)) as TFunction | undefined
+      ?? ((key: KairoI18nKey) => String(key));
     return React.createElement(MavenViewComponent, {
       runtime: this.runtime,
       messageService: this.messageService,
+      t,
     });
   }
 }

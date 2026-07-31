@@ -15,8 +15,11 @@ import { DebugSessionManager } from '@theia/debug/lib/browser/debug-session-mana
 import type { DebugSession } from '@theia/debug/lib/browser/debug-session';
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import { KairoDebugSessionService } from './kairo-debug-session-service';
+import { KairoI18nService, type KairoI18nKey } from '@kairo/i18n';
 
 export const KAIRO_DEBUG_VARIABLES_FACTORY_ID = 'kairo-debug-variables';
+
+type TFunction = (key: KairoI18nKey, params?: Record<string, string | number>) => string;
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                               */
@@ -51,10 +54,11 @@ interface VariableNodeProps {
     variable: DebugVariable;
     depth: number;
     session: DebugSession | undefined;
+    t: TFunction;
     onExpand: (variable: DebugVariable) => void;
 }
 
-const VariableNode: React.FC<VariableNodeProps> = ({ variable, depth, session, onExpand }) => {
+const VariableNode: React.FC<VariableNodeProps> = ({ variable, depth, session, t, onExpand }) => {
     const [expanded, setExpanded] = React.useState(false);
     const hasChildren = (variable.indexedVariables ?? 0) > 0
         || (variable.namedVariables ?? 0) > 0
@@ -112,12 +116,13 @@ const VariableNode: React.FC<VariableNodeProps> = ({ variable, depth, session, o
                     variable={child}
                     depth={depth + 1}
                     session={session}
+                    t={t}
                     onExpand={onExpand}
                 />
             ))}
             {expanded && hasChildren && !variable.children && (
                 <div style={{ paddingLeft: indent + 32, fontSize: '11px', color: 'var(--theia-descriptionForeground)', padding: '2px 0' }}>
-                    Loading...
+                    {t('widget.debug.variables.loading')}
                 </div>
             )}
         </div>
@@ -127,41 +132,41 @@ const VariableNode: React.FC<VariableNodeProps> = ({ variable, depth, session, o
 interface VariablesViewProps {
     state: VariablesState;
     session: DebugSession | undefined;
+    t: TFunction;
     onExpandVariable: (variable: DebugVariable) => void;
     onRefresh: () => void;
 }
 
-const VariablesView: React.FC<VariablesViewProps> = ({ state, session, onExpandVariable, onRefresh }) => {
+const VariablesView: React.FC<VariablesViewProps> = ({ state, session, t, onExpandVariable, onRefresh }) => {
     return (
-        <div className="kairo-debug-variables-widget" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+        <div className="kairo-debug-variables-widget">
             {/* Header */}
-            <div className="kairo-widget-toolbar" style={{ padding: '4px 8px', borderBottom: '1px solid var(--theia-panel-border)', display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ fontWeight: 600, fontSize: '12px' }}>Variables</span>
-                <span style={{ color: 'var(--theia-descriptionForeground)', fontSize: '11px' }}>
-                    {state.variables.length} items
+            <div className="kairo-debug-toolbar">
+                <span className="kairo-debug-variables-title">{t('widget.debug.variables.title')}</span>
+                <span className="kairo-debug-variables-count">
+                    {t('widget.debug.variables.items', { count: state.variables.length })}
                 </span>
-                <div style={{ flex: 1 }} />
+                <div className="kairo-debug-variables-spacer" />
                 <button
-                    className="theia-button secondary"
+                    className="theia-button secondary kairo-debug-variables-toolbar-btn"
                     disabled={state.busy}
                     onClick={onRefresh}
-                    style={{ padding: '1px 8px', fontSize: '11px' }}
-                    title="Refresh variables"
+                    title={t('widget.debug.variables.refreshTooltip')}
                 >
-                    {state.busy ? '...' : '↻'}
+                    {state.busy ? t('widget.debug.variables.loading') : '↻'}
                 </button>
             </div>
 
             {/* Body */}
-            <div style={{ flex: 1, overflow: 'auto' }}>
+            <div className="kairo-debug-variables-body">
                 {state.error && (
-                    <div style={{ padding: '8px 12px', color: 'var(--theia-errorForeground)', fontSize: '12px' }}>
+                    <div className="kairo-debug-variables-error">
                         {state.error}
                     </div>
                 )}
                 {!state.error && !state.busy && state.variables.length === 0 && (
-                    <div style={{ padding: '12px', color: 'var(--theia-descriptionForeground)', fontSize: '12px', textAlign: 'center' }}>
-                        {session ? 'No variables in current scope.' : 'No active debug session.'}
+                    <div className="kairo-debug-variables-empty">
+                        {session ? t('widget.debug.variables.noVariables') : t('widget.debug.variables.noSession')}
                     </div>
                 )}
                 {state.variables.map(v => (
@@ -170,6 +175,7 @@ const VariablesView: React.FC<VariablesViewProps> = ({ state, session, onExpandV
                         variable={v}
                         depth={0}
                         session={session}
+                        t={t}
                         onExpand={onExpandVariable}
                     />
                 ))}
@@ -192,15 +198,20 @@ export class KairoDebugVariablesWidget extends ReactWidget {
     @inject(KairoDebugSessionService)
     protected readonly debugSessionService!: KairoDebugSessionService;
 
+    @inject(KairoI18nService)
+    protected readonly i18n!: KairoI18nService;
+
     protected state: VariablesState = { variables: [], busy: false, error: null, sessionId: undefined };
     protected readonly onStateChangeEmitter = new Emitter<VariablesState>();
     readonly onDidStateChange: Event<VariablesState> = this.onStateChangeEmitter.event;
 
     @postConstruct()
     protected init(): void {
+        const t: TFunction = (this.i18n?.t.bind(this.i18n)) as TFunction | undefined
+            ?? ((key: KairoI18nKey) => String(key));
         this.id = KairoDebugVariablesWidget.ID;
-        this.title.label = 'Variables';
-        this.title.caption = 'Kairo Java Debug Variables';
+        this.title.label = t('widget.debug.variables.title');
+        this.title.caption = t('widget.debug.variables.caption');
         this.title.iconClass = 'codicon codicon-symbol-variable';
         this.title.closable = true;
         this.addClass('kairo-widget');
@@ -216,10 +227,13 @@ export class KairoDebugVariablesWidget extends ReactWidget {
     }
 
     protected render(): React.ReactNode {
+        const t: TFunction = (this.i18n?.t.bind(this.i18n)) as TFunction | undefined
+            ?? ((key: KairoI18nKey) => String(key));
         const session = this.sessionManager.currentSession;
         return React.createElement(VariablesView, {
             state: this.state,
             session: session ?? undefined,
+            t,
             onExpandVariable: (v: DebugVariable) => this.expandVariable(v),
             onRefresh: () => this.refresh(),
         });

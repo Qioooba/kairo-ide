@@ -107,6 +107,13 @@ export class ServerStore {
         this.connectionState = state;
         this.onConnectionStateChangeEmitter.fire(state);
     }
+
+    /** Direct setter for hot reload status. Used by HotDeployService. */
+    setHotReloadStatus(status: HotReloadStatus): void {
+        if (this.hotReloadStatus === status) return;
+        this.hotReloadStatus = status;
+        this.onHotReloadStatusChangeEmitter.fire(status);
+    }
     private eventsUnsubscribe?: () => void;
     private statusUnsubscribe?: () => void;
     private contextUnsubscribe?: { dispose(): void };

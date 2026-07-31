@@ -261,7 +261,7 @@ export class JavaHotSwapService implements FrontendApplicationContribution {
   }> {
     try {
       const result = await this.runtime.request(
-        'POST /api/v1/jvm/compile' as Endpoint,
+        'POST /api/v1/jvm/compile',
         { file: filePath },
         { noRetry: true },
       ) as unknown as {
@@ -287,7 +287,7 @@ export class JavaHotSwapService implements FrontendApplicationContribution {
   protected async redefineClass(sourcePath: string): Promise<void> {
     try {
       const result = await this.runtime.request(
-        'POST /api/v1/jvm/redefine' as Endpoint,
+        'POST /api/v1/jvm/redefine',
         { sourcePath },
         { noRetry: true },
       ) as unknown as {

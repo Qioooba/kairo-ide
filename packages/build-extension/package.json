@@ -18,7 +18,8 @@
     "@kairo/protocol": "workspace:*",
     "@kairo/runtime-extension": "workspace:*",
     "@kairo/project-extension": "workspace:*",
-    "@kairo/ui-kit": "workspace:*"
+    "@kairo/ui-kit": "workspace:*",
+    "@kairo/i18n": "workspace:*"
   },
   "peerDependencies": {
     "@theia/core": "1.73.1"

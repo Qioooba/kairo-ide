@@ -443,6 +443,10 @@ func (s *Server) routes() {
 	// Java run/detect main/test methods (IDEA-style one-click run)
 	s.router.HandleFunc("/api/v1/java/run", s.handleRunJava)
 	s.router.HandleFunc("/api/v1/java/detect", s.handleDetectJava)
+	// Incremental compilation
+	s.router.HandleFunc("/api/v1/jvm/compile-incremental", s.handleCompileIncremental)
+	// Server context reload
+	s.router.HandleFunc("/api/v1/servers/{serverId}/reload", s.handleServerReload)
 }
 
 // doRestart performs the actual restart sequence after

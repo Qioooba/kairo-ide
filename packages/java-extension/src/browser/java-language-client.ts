@@ -195,8 +195,6 @@ export class JavaLanguageClient implements JdtLsFrontendClient, Disposable {
     let lastErr: unknown;
     for (let attempt = 0; attempt <= retries; attempt++) {
       try {
-        this.rpcFailed = false;
-        this.rpcProxy = undefined;
         const proxy = this.proxy();
         if (!proxy) {
           if (attempt >= retries) break;

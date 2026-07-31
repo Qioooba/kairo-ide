@@ -8,9 +8,10 @@
  */
 
 import * as React from 'react';
-import { injectable, postConstruct } from '@theia/core/shared/inversify';
+import { injectable, postConstruct, inject } from '@theia/core/shared/inversify';
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import { Emitter, Event } from '@theia/core/lib/common/event';
+import { KairoI18nService, type KairoI18nKey } from '@kairo/i18n';
 
 export const KAIRO_DEBUG_MODULE_SELECTOR_FACTORY_ID = 'kairo-debug-module-selector';
 
@@ -37,106 +38,94 @@ export interface ModuleSelectorState {
 /*  React Component                                                     */
 /* ------------------------------------------------------------------ */
 
+type TFunction = (key: KairoI18nKey, params?: Record<string, string | number>) => string;
+
 interface ModuleSelectorViewProps {
     state: ModuleSelectorState;
     onToggleModule: (module: ModuleInfo) => void;
     onSelectAll: () => void;
     onDeselectAll: () => void;
     onRefresh: () => void;
+    i18n: KairoI18nService;
 }
 
 const ModuleSelectorView: React.FC<ModuleSelectorViewProps> = ({
-    state: s, onToggleModule, onSelectAll, onDeselectAll, onRefresh,
-}) => (
-    <div className="kairo-debug-module-selector" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-        {/* Header */}
-        <div className="kairo-widget-toolbar" style={{ padding: '4px 8px', borderBottom: '1px solid var(--theia-panel-border)', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <span style={{ fontWeight: 600, fontSize: '12px' }}>Modules</span>
-            <span style={{ color: 'var(--theia-descriptionForeground)', fontSize: '11px' }}>
-                {s.modules.filter(m => m.enabled).length}/{s.modules.length} active
+    state: s, onToggleModule, onSelectAll, onDeselectAll, onRefresh, i18n,
+}) => {
+    const t: TFunction = React.useCallback((key: KairoI18nKey, params?: Record<string, string | number>) => i18n.t(key, params), [i18n]);
+    return (
+    <div className="kairo-debug-module-selector">
+        <div className="kairo-debug-module-header">
+            <span className="kairo-debug-module-title">{t('widget.debug.moduleSelector.modules')}</span>
+            <span className="kairo-debug-module-count">
+                {t('widget.debug.moduleSelector.activeCount', { active: s.modules.filter(m => m.enabled).length, total: s.modules.length })}
             </span>
-            <div style={{ flex: 1 }} />
-            <button
-                className="theia-button secondary"
-                disabled={s.busy || s.modules.length === 0}
-                onClick={s.allEnabled ? onDeselectAll : onSelectAll}
-                style={{ padding: '1px 8px', fontSize: '11px' }}
-                title={s.allEnabled ? 'Deselect all modules' : 'Select all modules'}
-            >
-                {s.allEnabled ? 'Deselect All' : 'Select All'}
-            </button>
-            <button
-                className="theia-button secondary"
-                disabled={s.busy}
-                onClick={onRefresh}
-                style={{ padding: '1px 8px', fontSize: '11px' }}
-                title="Refresh modules"
-            >
-                {s.busy ? '...' : '↻'}
-            </button>
+            <div className="kairo-debug-module-actions">
+                <button
+                    className="theia-button secondary"
+                    disabled={s.busy || s.modules.length === 0}
+                    onClick={s.allEnabled ? onDeselectAll : onSelectAll}
+                    title={s.allEnabled ? t('widget.debug.moduleSelector.deselectAll') : t('widget.debug.moduleSelector.selectAll')}
+                >
+                    {s.allEnabled ? t('widget.debug.moduleSelector.deselectAll') : t('widget.debug.moduleSelector.selectAll')}
+                </button>
+                <button
+                    className="theia-button secondary"
+                    disabled={s.busy}
+                    onClick={onRefresh}
+                    title={t('widget.debug.moduleSelector.refresh')}
+                    aria-label={t('widget.debug.moduleSelector.refresh')}
+                >
+                    <span className={`codicon ${s.busy ? 'codicon-loading codicon-modifier-spin' : 'codicon-refresh'}`} aria-hidden="true" />
+                </button>
+            </div>
         </div>
 
-        {/* Body */}
-        <div style={{ flex: 1, overflow: 'auto' }}>
+        <div className="kairo-debug-module-body">
             {s.error && (
-                <div style={{ padding: '8px 12px', color: 'var(--theia-errorForeground)', fontSize: '12px' }}>
+                <div className="kairo-error-banner" role="alert">
+                    <span className="codicon codicon-error" aria-hidden="true" />
                     {s.error}
                 </div>
             )}
             {!s.error && s.modules.length === 0 && (
-                <div style={{ padding: '12px', color: 'var(--theia-descriptionForeground)', fontSize: '12px', textAlign: 'center' }}>
-                    No modules detected. Open a multi-module project to use this feature.
+                <div className="kairo-empty-state">
+                    <span className="codicon codicon-package" aria-hidden="true" />
+                    <h3 className="kairo-empty-state-title">{t('widget.debug.moduleSelector.noModulesTitle')}</h3>
+                    <p className="kairo-empty-state-reason">{t('widget.debug.moduleSelector.noModulesReason')}</p>
                 </div>
             )}
             {s.modules.map(m => (
                 <div
                     key={m.name}
                     className="kairo-debug-module-row"
-                    style={{
-                        padding: '4px 8px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 6,
-                        fontSize: '12px',
-                        lineHeight: '20px',
-                        opacity: m.enabled ? 1 : 0.5,
-                        borderBottom: '1px solid var(--theia-panel-border)',
-                    }}
-                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'var(--theia-list-hoverBackground)'; }}
-                    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = ''; }}
+                    style={{ '--kairo-module-opacity': m.enabled ? 1 : 0.5 } as React.CSSProperties}
                 >
                     <input
                         type="checkbox"
                         checked={m.enabled}
                         onChange={() => onToggleModule(m)}
-                        style={{ flexShrink: 0, cursor: 'pointer' }}
-                        title={m.enabled ? `Disable module ${m.name}` : `Enable module ${m.name}`}
-                        aria-label={`${m.enabled ? 'Disable' : 'Enable'} module ${m.name}`}
+                        title={m.enabled ? t('widget.debug.moduleSelector.disableModule', { name: m.name }) : t('widget.debug.moduleSelector.enableModule', { name: m.name })}
+                        aria-label={m.enabled ? t('widget.debug.moduleSelector.disableAria', { name: m.name }) : t('widget.debug.moduleSelector.enableAria', { name: m.name })}
                     />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            <span className="codicon codicon-package" style={{ fontSize: '12px', marginRight: 4, opacity: 0.7 }} />
+                    <div className="kairo-debug-module-info">
+                        <div className="kairo-debug-module-name">
+                            <span className="codicon codicon-package" aria-hidden="true" />
                             {m.name}
                         </div>
-                        <div style={{ fontSize: '10px', opacity: 0.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        <div className="kairo-debug-module-path">
                             {m.path}
                         </div>
                     </div>
-                    <span style={{
-                        fontSize: '10px',
-                        padding: '0 4px',
-                        borderRadius: 3,
-                        background: 'var(--theia-badge-background)',
-                        color: 'var(--theia-badge-foreground)',
-                        flexShrink: 0,
-                    }}>
-                        {m.breakpointCount} bp
+                    <span className="kairo-debug-module-bp">
+                        {t('widget.debug.moduleSelector.breakpointCount', { count: m.breakpointCount })}
                     </span>
                 </div>
             ))}
         </div>
     </div>
-);
+    );
+};
 
 /* ------------------------------------------------------------------ */
 /*  Widget                                                              */
@@ -146,6 +135,9 @@ const ModuleSelectorView: React.FC<ModuleSelectorViewProps> = ({
 export class KairoDebugModuleSelectorWidget extends ReactWidget {
     static readonly ID = KAIRO_DEBUG_MODULE_SELECTOR_FACTORY_ID;
 
+    @inject(KairoI18nService)
+    protected readonly i18n!: KairoI18nService;
+
     protected state: ModuleSelectorState = { modules: [], allEnabled: true, busy: false, error: null };
     protected readonly onStateChangeEmitter = new Emitter<ModuleSelectorState>();
     readonly onDidStateChange: Event<ModuleSelectorState> = this.onStateChangeEmitter.event;
@@ -153,11 +145,16 @@ export class KairoDebugModuleSelectorWidget extends ReactWidget {
     @postConstruct()
     protected init(): void {
         this.id = KairoDebugModuleSelectorWidget.ID;
-        this.title.label = 'Modules';
-        this.title.caption = 'Kairo Debug Module Selector';
+        this.title.label = this.i18n.t('widget.debug.moduleSelector.title');
+        this.title.caption = this.i18n.t('widget.debug.moduleSelector.caption');
         this.title.iconClass = 'codicon codicon-package';
         this.title.closable = true;
         this.addClass('kairo-widget');
+        this.toDispose.push(this.i18n.onDidChangeLanguage(() => {
+            this.title.label = this.i18n.t('widget.debug.moduleSelector.title');
+            this.title.caption = this.i18n.t('widget.debug.moduleSelector.caption');
+            this.update();
+        }));
         this.update();
     }
 
@@ -172,6 +169,7 @@ export class KairoDebugModuleSelectorWidget extends ReactWidget {
             onSelectAll: () => this.selectAll(),
             onDeselectAll: () => this.deselectAll(),
             onRefresh: () => this.refresh(),
+            i18n: this.i18n,
         });
     }
 

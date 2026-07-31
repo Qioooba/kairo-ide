@@ -9,6 +9,7 @@ import {
   KAIRO_JAVA_DEBUG_TYPE,
   type KairoJavaAttachTarget,
 } from '../common/kairo-java-debug';
+import { KairoI18nKey, I18nParams } from '@kairo/i18n';
 
 /** Browser-safe token keeps the service testable without loading Monaco DOM code. */
 export const KairoDebugSessionManager = Symbol('KairoDebugSessionManager');
@@ -185,7 +186,23 @@ export class KairoJavaDebugService {
   }
 }
 
-export function debugStatusBarPresentation(status: Readonly<KairoJavaDebugStatus>): { text: string; tooltip: string } {
+export function debugStatusBarPresentation(
+  status: Readonly<KairoJavaDebugStatus>,
+  t?: (key: KairoI18nKey, params?: I18nParams) => string,
+): { text: string; tooltip: string } {
+  const noSessionStates: KairoJavaDebugState[] = ['unknown', 'unavailable', 'terminated'];
+  const isPlaceholder = noSessionStates.includes(status.state);
+  const translate = t ?? ((key: KairoI18nKey, params?: I18nParams) => {
+    switch (key) {
+      case 'statusBar.debug': return `Debug: ${params?.state ?? ''}`;
+      case 'statusBar.noDebug': return 'Debug: none';
+      case 'statusBar.debugAdapter': return `Kairo Java Debug Adapter: ${params?.state ?? ''}`;
+      case 'statusBar.debugServerLabel': return `Server: ${params?.serverId ?? ''}`;
+      case 'statusBar.debugSessionLabel': return `Session: ${params?.sessionId ?? ''}`;
+      case 'statusBar.debugOpenViewTooltip': return 'Click to open Debug view.';
+      default: return key;
+    }
+  });
   const icon = status.state === 'connected' ? '$(debug-alt)'
     : status.state === 'paused' ? '$(debug-pause)'
       : status.state === 'connecting' ? '$(sync~spin)'
@@ -193,14 +210,17 @@ export function debugStatusBarPresentation(status: Readonly<KairoJavaDebugStatus
           : status.state === 'available' ? '$(pass)'
             : '$(debug-alt-small)';
   const session = status.sessionId ? ` · ${status.sessionId}` : '';
+  const text = isPlaceholder
+    ? `${icon} ${translate('statusBar.noDebug')}`
+    : `${icon} ${translate('statusBar.debug', { state: status.state })}${session}`;
   return {
-    text: `${icon} Debug: ${status.state}${session}`,
+    text,
     tooltip: [
-      `Kairo Java Debug Adapter: ${status.state}`,
-      status.serverId ? `服务器: ${status.serverId}` : undefined,
-      status.sessionId ? `会话: ${status.sessionId}` : undefined,
+      translate('statusBar.debugAdapter', { state: status.state }),
+      status.serverId ? translate('statusBar.debugServerLabel', { serverId: status.serverId }) : undefined,
+      status.sessionId ? translate('statusBar.debugSessionLabel', { sessionId: status.sessionId }) : undefined,
       status.message,
-      '点击打开 Debug 视图。',
+      translate('statusBar.debugOpenViewTooltip'),
     ].filter(Boolean).join('\n'),
   };
 }

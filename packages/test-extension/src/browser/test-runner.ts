@@ -169,7 +169,7 @@ export class TestRunner {
         args.push('-target', sourceLevel);
         args.push('-d', outputDir);
         if (classpath.length > 0) {
-            args.push('-cp', classpath.join(process.platform === 'win32' ? ';' : ':'));
+            args.push('-cp', classpath.join(typeof process !== 'undefined' && process.platform === 'win32' ? ';' : ':'));
         }
         args.push(...sourceFiles);
         return args;
@@ -203,7 +203,7 @@ export class TestRunner {
         }
 
         const args: string[] = ['java'];
-        args.push('-cp', fullCp.join(process.platform === 'win32' ? ';' : ':'));
+        args.push('-cp', fullCp.join(typeof process !== 'undefined' && process.platform === 'win32' ? ';' : ':'));
         if (framework === 'junit4') {
             args.push('org.junit.runner.JUnitCore');
         } else {

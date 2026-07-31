@@ -13,8 +13,9 @@
  */
 
 import * as React from 'react';
-import { injectable, inject } from '@theia/core/shared/inversify';
+import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
+import { Message } from '@theia/core/shared/@lumino/messaging';
 import { CommandService } from '@theia/core/lib/common/command';
 import { MessageService } from '@theia/core/lib/common/message-service';
 import { WorkspaceService } from '@theia/workspace/lib/browser';
@@ -30,6 +31,7 @@ interface WelcomeAction {
   labelKey: string;
   command: string;
   failMessageKey: string;
+  iconClass: string;
   primary?: boolean;
 }
 
@@ -47,10 +49,26 @@ export class KairoWelcomeWidget extends ReactWidget {
     super();
     this.id = KAIRO_WELCOME_FACTORY_ID;
     this.addClass('kairo-welcome');
-    this.updateTitle();
     this.title.iconClass = 'codicon codicon-home';
     this.title.closable = true;
+  }
+
+  @postConstruct()
+  protected init(): void {
+    this.updateTitle();
     this.toDispose.push(this.i18n.onDidChangeLanguage(() => this.updateTitle()));
+  }
+
+  protected override onActivateRequest(msg: Message): void {
+    super.onActivateRequest(msg);
+    if (this.node.tabIndex < 0) {
+      this.node.tabIndex = 0;
+    }
+    this.node.focus();
+    setTimeout(() => {
+      const target = this.node.querySelector<HTMLElement>('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])');
+      target?.focus();
+    }, 50);
   }
 
   protected updateTitle(): void {
@@ -100,6 +118,7 @@ const KairoWelcome: React.FC<KairoWelcomeProps> = ({
   const [recentProjects, setRecentProjects] = React.useState<RecentProject[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
+  const [errorDismissed, setErrorDismissed] = React.useState(false);
   const [, forceUpdate] = React.useReducer(x => x + 1, 0);
 
   React.useEffect(() => {
@@ -135,6 +154,7 @@ const KairoWelcome: React.FC<KairoWelcomeProps> = ({
       labelKey: 'widget.welcome.newProject',
       command: 'kairo.project.import',
       failMessageKey: 'widget.welcome.importFailed',
+      iconClass: 'folder-opened',
       primary: true,
     },
     {
@@ -142,26 +162,28 @@ const KairoWelcome: React.FC<KairoWelcomeProps> = ({
       labelKey: 'widget.welcome.openProject',
       command: 'kairo.project.select',
       failMessageKey: 'widget.welcome.selectFailed',
+      iconClass: 'list-unordered',
     },
     {
       testId: 'welcome-open-workspace',
       labelKey: 'widget.welcome.openWorkspace',
       command: 'workspace:open',
       failMessageKey: 'widget.welcome.openWorkspaceFailed',
+      iconClass: 'window',
     },
   ];
 
   const quickStartSteps = [
     {
       testId: 'quickstart-import',
-      icon: '📂',
+      iconClass: 'codicon-folder-opened',
       titleKey: 'widget.welcome.step1Title',
       descKey: 'widget.welcome.step1Desc',
       action: welcomeActions[0],
     },
     {
       testId: 'quickstart-config',
-      icon: '⚙',
+      iconClass: 'codicon-gear',
       titleKey: 'widget.welcome.step2Title',
       descKey: 'widget.welcome.step2Desc',
       action: {
@@ -173,7 +195,7 @@ const KairoWelcome: React.FC<KairoWelcomeProps> = ({
     },
     {
       testId: 'quickstart-run',
-      icon: '▶',
+      iconClass: 'codicon-play',
       titleKey: 'widget.welcome.step3Title',
       descKey: 'widget.welcome.step3Desc',
       action: {
@@ -191,16 +213,17 @@ const KairoWelcome: React.FC<KairoWelcomeProps> = ({
       <p className="kairo-welcome-tagline">
         {t('widget.welcome.caption')}
       </p>
-      <div className="kairo-welcome-actions" role="group" aria-label={t('widget.welcome.quickStart')}>
-        <h2 className="kairo-welcome-section-title">{t('widget.welcome.quickStart')}</h2>
+      <h2 className="kairo-welcome-section-title">{t('widget.welcome.getStarted')}</h2>
+      <div className="kairo-welcome-actions" role="group" aria-label={t('widget.welcome.getStarted')}>
         {welcomeActions.map(a => (
           <button
             key={a.testId}
             type="button"
-            className={a.primary ? 'theia-button' : 'theia-button secondary'}
+            className={a.primary ? 'kairo-button-primary' : 'kairo-button-secondary'}
             data-testid={a.testId}
             onClick={() => run(a)}
           >
+            <span className={`codicon codicon-${a.iconClass}`} aria-hidden="true" />
             {t(a.labelKey as any)}
           </button>
         ))}
@@ -227,37 +250,41 @@ const KairoWelcome: React.FC<KairoWelcomeProps> = ({
         </div>
       )}
       {!loading && recentProjects.length === 0 && !error && (
-        <p className="kairo-welcome-empty" style={{ textAlign: 'center', color: 'var(--theia-descriptionForeground)', padding: '16px' }}>
+        <p className="kairo-welcome-empty">
           {t('widget.welcome.noRecentProjects')}
         </p>
       )}
-      {!loading && error && (
-        <div className="kairo-welcome-error" role="alert" data-testid="welcome-error" style={{ padding: '12px', margin: '8px 0' }}>
-          <div style={{
-            padding: '8px 12px',
-            backgroundColor: 'rgba(244,67,54,0.1)',
-            border: '1px solid rgba(244,67,54,0.3)',
-            borderRadius: '4px',
-            color: 'var(--theia-errorForeground)',
-            fontSize: '13px',
-          }}>
-            <span aria-hidden="true">⚠</span> {error}
+      {!loading && error && !errorDismissed && (
+        <div className="kairo-welcome-error" role="alert" data-testid="welcome-error">
+          <div className="kairo-error-banner">
+            <span className="codicon codicon-warning" aria-hidden="true" />
+            <span><strong>{t('widget.welcome.errorLabel')}</strong> {error}</span>
+            <button
+              type="button"
+              className="theia-button secondary kairo-error-dismiss"
+              onClick={() => setErrorDismissed(true)}
+              aria-label={t('common.close')}
+            >
+              {t('common.close')}
+            </button>
           </div>
         </div>
       )}
       <div className="kairo-welcome-quickstart" data-testid="welcome-quickstart">
-        <h2 className="kairo-welcome-section-title">{t('widget.welcome.quickStart')}</h2>
+        <h2 className="kairo-welcome-section-title">{t('widget.welcome.quickStartGuide')}</h2>
         <ol className="kairo-quickstart-steps" role="list" aria-label={t('widget.welcome.quickStart')}>
           {quickStartSteps.map(step => (
             <li key={step.testId} className="kairo-quickstart-step" data-testid={step.testId}>
-              <span className="kairo-quickstart-icon">{step.icon}</span>
+              <div className="kairo-quickstart-icon-bg">
+                <span className={`kairo-quickstart-icon codicon ${step.iconClass}`} aria-hidden="true" />
+              </div>
               <div className="kairo-quickstart-content">
                 <strong>{t(step.titleKey as any)}</strong>
                 <p>{t(step.descKey as any)}</p>
               </div>
               <button
                 type="button"
-                className="theia-button secondary kairo-quickstart-action"
+                className="kairo-button-secondary kairo-quickstart-action"
                 data-testid={`${step.testId}-action`}
                 onClick={() => run(step.action)}
               >

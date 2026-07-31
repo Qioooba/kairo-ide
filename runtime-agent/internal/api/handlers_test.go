@@ -631,6 +631,7 @@ func (f *fakeServerRunner) Recoverable() []*ServerResponse { return nil }
 func (f *fakeServerRunner) Recover(id string) (*ServerResponse, error) {
 	return &ServerResponse{ID: id, State: "running"}, nil
 }
+func (f *fakeServerRunner) ReloadContext(id string) error { return nil }
 
 // KAIRO-RC-WEB-240: POST /api/v1/servers with only {projectId} must
 // resolve webappDir/contextPath from the stored project.

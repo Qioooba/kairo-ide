@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { KairoI18nService } from '@kairo/i18n';
 import { KairoDebugSessionService } from './kairo-debug-session-service';
 
 /* ------------------------------------------------------------------ */
@@ -29,6 +30,7 @@ interface WatchChild {
 
 interface IDEAWatchesPanelProps {
     sessionService: KairoDebugSessionService;
+    i18n: KairoI18nService;
     onNewWatch?: (expression: string) => void;
 }
 
@@ -49,33 +51,22 @@ const WatchChildNode: React.FC<{
     return (
         <div>
             <div
-                style={{
-                    paddingLeft: indent + 4,
-                    paddingRight: 4,
-                    paddingTop: 1,
-                    paddingBottom: 1,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 3,
-                    cursor: hasChildren ? 'pointer' : 'default',
-                    fontSize: '11px',
-                    lineHeight: '18px',
-                    whiteSpace: 'nowrap',
-                }}
+                className="kairo-debug-watch-child"
+                style={{ paddingLeft: indent + 4 }}
                 onClick={() => hasChildren && onToggle(child)}
             >
-                <span style={{ width: 12, textAlign: 'center', fontSize: '8px', flexShrink: 0, opacity: hasChildren ? 1 : 0 }}>
+                <span className={`kairo-debug-watch-toggle ${hasChildren ? 'opaque' : ''}`}>
                     {child.expanded ? '▾' : '▸'}
                 </span>
-                <span style={{ color: 'var(--theia-debugTokenExpression-name)', flexShrink: 0 }}>
+                <span className="kairo-debug-watch-name">
                     {child.name}
                 </span>
                 {child.type && (
-                    <span style={{ color: 'var(--theia-debugTokenExpression-type)', fontSize: '10px', opacity: 0.7, flexShrink: 0 }}>
+                    <span className="kairo-debug-watch-type">
                         : {child.type}
                     </span>
                 )}
-                <span style={{ color: 'var(--theia-debugTokenExpression-type)', flexShrink: 0 }}>=</span>
+                <span className="kairo-debug-watch-equals">=</span>
                 <span className={`kairo-debug-watch-value ${cls}`}>
                     {child.value}
                 </span>
@@ -107,7 +98,6 @@ const WatchRow: React.FC<{
     onToggleChild: (child: WatchChild) => void;
     sessionService: KairoDebugSessionService;
 }> = ({ entry, isSelected, onSelect, onToggle, onRemove, onEdit, onToggleChild, sessionService }) => {
-    const [hovered, setHovered] = React.useState(false);
     const hasChildren = (entry.variablesReference ?? 0) > 0;
 
     const valueCls = entry.error ? 'error' : classifyValue(entry.result ?? '');
@@ -115,46 +105,30 @@ const WatchRow: React.FC<{
     return (
         <div>
             <div
-                style={{
-                    padding: '2px 8px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 3,
-                    cursor: 'pointer',
-                    background: isSelected
-                        ? 'var(--theia-list-activeSelectionBackground)'
-                        : hovered
-                        ? 'var(--theia-list-hoverBackground)'
-                        : 'transparent',
-                    fontSize: '11px',
-                    lineHeight: '18px',
-                    whiteSpace: 'nowrap',
-                }}
+                className={`kairo-debug-watch-row${isSelected ? ' selected' : ''}`}
                 onClick={onSelect}
-                onMouseEnter={() => setHovered(true)}
-                onMouseLeave={() => setHovered(false)}
                 onDoubleClick={onEdit}
             >
                 <span
-                    style={{ width: 12, textAlign: 'center', fontSize: '8px', flexShrink: 0, opacity: hasChildren ? 1 : 0 }}
+                    className={`kairo-debug-watch-toggle ${hasChildren ? 'opaque' : ''}`}
                     onClick={(e) => { e.stopPropagation(); onToggle(); }}
                 >
                     {entry.loading ? '…' : (entry.expanded ? '▾' : '▸')}
                 </span>
                 <span className="codicon codicon-watch" style={{ fontSize: 11, flexShrink: 0, color: 'var(--theia-debugIcon-watchForeground, #75beff)' }} />
-                <span style={{ color: 'var(--theia-debugTokenExpression-name)', flexShrink: 0, fontWeight: 600 }}>
+                <span className="kairo-debug-watch-name">
                     {entry.expression}
                 </span>
                 {entry.type && !entry.error && (
-                    <span style={{ color: 'var(--theia-debugTokenExpression-type)', fontSize: '10px', opacity: 0.7, flexShrink: 0 }}>
+                    <span className="kairo-debug-watch-type">
                         : {entry.type}
                     </span>
                 )}
-                {!entry.error && <span style={{ color: 'var(--theia-debugTokenExpression-type)', flexShrink: 0 }}>=</span>}
+                {!entry.error && <span className="kairo-debug-watch-equals">=</span>}
                 {entry.loading ? (
-                    <span style={{ color: 'var(--theia-descriptionForeground)', fontStyle: 'italic' }}>...</span>
+                    <span className="kairo-debug-watch-loading">...</span>
                 ) : entry.error ? (
-                    <span style={{ color: 'var(--theia-errorForeground)', opacity: 0.8 }}>
+                    <span className="kairo-debug-watch-error">
                         {entry.error}
                     </span>
                 ) : (
@@ -162,28 +136,13 @@ const WatchRow: React.FC<{
                         {entry.result ?? ''}
                     </span>
                 )}
-                {hovered && (
-                    <button
-                        onClick={(e) => { e.stopPropagation(); onRemove(); }}
-                        style={{
-                            marginLeft: 'auto',
-                            background: 'transparent',
-                            border: 'none',
-                            color: 'var(--theia-descriptionForeground)',
-                            cursor: 'pointer',
-                            fontSize: 12,
-                            padding: 0,
-                            width: 16,
-                            height: 16,
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                        }}
-                        title="Remove"
-                    >
-                        ×
-                    </button>
-                )}
+                <button
+                    className="kairo-debug-watch-remove"
+                    onClick={(e) => { e.stopPropagation(); onRemove(); }}
+                    title="Remove"
+                >
+                    ×
+                </button>
             </div>
             {entry.expanded && entry.children && entry.children.map((c, i) => (
                 <WatchChildNode
@@ -202,7 +161,8 @@ const WatchRow: React.FC<{
 /*  Watches Panel                                                       */
 /* ------------------------------------------------------------------ */
 
-export const IDEAWatchesPanel: React.FC<IDEAWatchesPanelProps> = ({ sessionService }) => {
+export const IDEAWatchesPanel: React.FC<IDEAWatchesPanelProps> = ({ sessionService, i18n, onNewWatch }) => {
+    const t = React.useCallback((key: string) => i18n.t(key as any), [i18n]);
     const [entries, setEntries] = React.useState<WatchEntry[]>([]);
     const [selectedIndex, setSelectedIndex] = React.useState<number>(-1);
     const [adding, setAdding] = React.useState(false);
@@ -350,63 +310,30 @@ export const IDEAWatchesPanel: React.FC<IDEAWatchesPanelProps> = ({ sessionServi
     }, [adding]);
 
     return (
-        <div className="kairo-debug-watches-idea" style={{ overflow: 'auto', flex: 1, display: 'flex', flexDirection: 'column' }}>
+        <div className="kairo-debug-watches-idea">
             {/* Toolbar */}
-            <div style={{
-                display: 'flex',
-                padding: '3px 6px',
-                gap: 4,
-                borderBottom: '1px solid var(--theia-panel-border)',
-                background: 'var(--theia-sideBarSectionHeader-background)',
-                flexShrink: 0,
-            }}>
+            <div className="kairo-debug-watches-toolbar">
                 <button
+                    className="kairo-debug-watches-btn"
                     onClick={() => setAdding(true)}
-                    style={{
-                        width: 20,
-                        height: 20,
-                        border: 'none',
-                        background: 'transparent',
-                        color: 'var(--theia-icon-foreground)',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        borderRadius: 2,
-                    }}
                     title="New Watch (Insert)"
-                    onMouseEnter={e => (e.currentTarget.style.background = 'var(--theia-toolbar-hoverBackground)')}
-                    onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
                 >
                     <span className="codicon codicon-add" style={{ fontSize: 14 }} />
                 </button>
                 <button
+                    className="kairo-debug-watches-btn"
                     onClick={() => { setEntries([]); saveWatches([]); }}
-                    style={{
-                        width: 20,
-                        height: 20,
-                        border: 'none',
-                        background: 'transparent',
-                        color: 'var(--theia-icon-foreground)',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        borderRadius: 2,
-                    }}
                     title="Remove All Watches"
-                    onMouseEnter={e => (e.currentTarget.style.background = 'var(--theia-toolbar-hoverBackground)')}
-                    onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
                 >
                     <span className="codicon codicon-clear-all" style={{ fontSize: 13 }} />
                 </button>
             </div>
 
             {/* Entries */}
-            <div style={{ flex: 1, overflow: 'auto' }}>
+            <div className="kairo-debug-watches-entries">
                 {entries.length === 0 && !adding && (
-                    <div style={{ padding: '8px 12px', color: 'var(--theia-descriptionForeground)', fontSize: '11px', fontStyle: 'italic' }}>
-                        Click + or press Insert to add watch expression
+                    <div className="kairo-debug-empty-text">
+                        {t('debug.toolWindow.addWatchHint')}
                     </div>
                 )}
                 {entries.map((entry, idx) => (
@@ -423,9 +350,10 @@ export const IDEAWatchesPanel: React.FC<IDEAWatchesPanelProps> = ({ sessionServi
                     />
                 ))}
                 {adding && (
-                    <div style={{ padding: '2px 8px', display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <div className="kairo-debug-watch-input-row">
                         <input
                             ref={inputRef}
+                            className="kairo-debug-watch-input"
                             value={newExpression}
                             onChange={e => setNewExpression(e.target.value)}
                             onKeyDown={e => {
@@ -444,16 +372,6 @@ export const IDEAWatchesPanel: React.FC<IDEAWatchesPanelProps> = ({ sessionServi
                                 }
                             }}
                             placeholder="Expression..."
-                            style={{
-                                flex: 1,
-                                background: 'var(--theia-input-background)',
-                                color: 'var(--theia-input-foreground)',
-                                border: '1px solid var(--theia-focusBorder)',
-                                padding: '1px 4px',
-                                fontSize: '11px',
-                                height: 20,
-                                outline: 'none',
-                            }}
                         />
                     </div>
                 )}

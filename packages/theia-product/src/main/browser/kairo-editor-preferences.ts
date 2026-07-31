@@ -27,7 +27,7 @@ export const kairoEditorPreferenceSchema: PreferenceSchema = {
     'editor.autoSave': {
       type: 'string',
       enum: ['off', 'afterDelay', 'onFocusChange'],
-      default: 'off',
+      default: 'onFocusChange',
       description: 'Controls auto-save of editors that have unsaved changes.',
     },
     'editor.autoSaveDelay': {

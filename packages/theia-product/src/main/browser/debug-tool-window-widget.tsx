@@ -3,6 +3,7 @@ import { injectable, inject, postConstruct } from '@theia/core/shared/inversify'
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import { CommandService } from '@theia/core/lib/common/command';
 import { EditorManager } from '@theia/editor/lib/browser';
+import { KairoI18nService } from '@kairo/i18n';
 import { KAIRO_DEBUG_TOOL_WINDOW_FACTORY_ID } from './kairo-factory-ids';
 import { KairoDebugSessionService } from './kairo-debug-session-service';
 import { IDEADebugToolbar } from './debug-toolbar-idea';
@@ -19,21 +20,24 @@ interface DebugToolWindowViewProps {
     sessionService: KairoDebugSessionService;
     commandService: CommandService;
     editorManager: EditorManager;
+    i18n: KairoI18nService;
 }
 
-type TabType = 'debugger' | 'console';
+const DebugToolWindowView: React.FC<DebugToolWindowViewProps> = ({ sessionService, commandService, editorManager, i18n }) => {
+    const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
+    const [, forceUpdate] = React.useReducer(x => x + 1, 0);
 
-const DebugToolWindowView: React.FC<DebugToolWindowViewProps> = ({ sessionService, commandService, editorManager }) => {
     const [state, setState] = React.useState(sessionService.currentState);
-    const [activeTab, setActiveTab] = React.useState<TabType>('debugger');
     const [framesHeight, setFramesHeight] = React.useState(200);
+
+    React.useEffect(() => {
+        const disposable = i18n.onDidChangeLanguage(() => forceUpdate());
+        return () => disposable.dispose();
+    }, [i18n]);
 
     React.useEffect(() => {
         const disposable = sessionService.onDidChangeState(newState => {
             setState(newState);
-            if (newState.isSuspended) {
-                setActiveTab('debugger');
-            }
         });
         return () => disposable.dispose();
     }, [sessionService]);
@@ -51,6 +55,7 @@ const DebugToolWindowView: React.FC<DebugToolWindowViewProps> = ({ sessionServic
     const handleForceStepInto = () => commandService.executeCommand('workbench.action.debug.stepInto');
     const handleDropFrame = () => commandService.executeCommand('kairo.debug.dropFrame');
     const handleEvaluateExpression = () => commandService.executeCommand('kairo.debug.evaluateExpression');
+    const handleStartDebugging = () => commandService.executeCommand('kairo.debug.openView');
 
     const handleNavigate = React.useCallback(async (path: string, line: number) => {
         try {
@@ -96,28 +101,24 @@ const DebugToolWindowView: React.FC<DebugToolWindowViewProps> = ({ sessionServic
     }, []);
 
     const statusText = React.useMemo(() => {
-        if (!state.hasSession) return 'No debug session';
+        if (!state.hasSession) return t('debug.toolWindow.noSession');
         if (state.isSuspended) {
-            if (state.threadName) return `Suspended: ${state.threadName}`;
-            return 'Suspended';
+            if (state.threadName) return t('debug.toolWindow.suspendedThread', { threadName: state.threadName });
+            return t('debug.toolWindow.suspended');
         }
-        if (state.isRunning) return 'Running';
+        if (state.isRunning) return t('debug.toolWindow.running');
         return state.debugState;
-    }, [state]);
+    }, [state, t]);
+
+    const statusIcon = state.isSuspended ? 'codicon-debug-pause' : state.isRunning ? 'codicon-debug-continue' : 'codicon-circle-outline';
+    const statusClass = state.isSuspended ? 'suspended' : state.isRunning ? 'running' : 'inactive';
 
     return (
-        <div className="kairo-debug-tool-window" style={{
-            display: 'flex',
-            flexDirection: 'column',
-            height: '100%',
-            width: '100%',
-            background: 'var(--theia-editor-background)',
-            color: 'var(--theia-foreground)',
-            overflow: 'hidden',
-        }}>
+        <div className="kairo-debug-tool-window">
             {/* IDEA-style Toolbar */}
             <IDEADebugToolbar
                 state={state}
+                i18n={i18n}
                 onRerun={handleRerun}
                 onResume={handleResume}
                 onPause={handlePause}
@@ -134,98 +135,52 @@ const DebugToolWindowView: React.FC<DebugToolWindowViewProps> = ({ sessionServic
                 onSelectThread={(_threadId) => {
                     // Switch thread - future enhancement
                 }}
-                onShowConsole={() => setActiveTab('console')}
-                onShowDebugger={() => setActiveTab('debugger')}
             />
 
             {/* Status bar */}
-            <div style={{
-                padding: '2px 10px',
-                fontSize: '10px',
-                color: state.isSuspended
-                    ? '#ffc66d'
-                    : state.isRunning
-                    ? 'var(--theia-successForeground, #6aab73)'
-                    : 'var(--theia-descriptionForeground)',
-                background: 'var(--theia-statusBar-background, #007acc)',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-                flexShrink: 0,
-                borderBottom: '1px solid var(--theia-panel-border)',
-                minHeight: 20,
-            }}>
-                <span className="codicon" style={{ fontSize: 10 }}>
-                    {state.isSuspended ? 'codicon-debug-pause' : state.isRunning ? 'codicon-debug-continue' : 'codicon-circle-outline'}
-                </span>
+            <div className={`kairo-debug-status-bar ${statusClass}`} role="status" aria-live="polite">
+                <span className={`codicon ${statusIcon}`} aria-hidden="true" />
                 <span>{statusText}</span>
                 {state.breakpointsMuted && (
-                    <span style={{ color: 'var(--theia-warningForeground)', marginLeft: 'auto' }}>
-                        Breakpoints muted
+                    <span className="kairo-debug-status-muted">
+                        {t('debug.toolWindow.breakpointsMuted')}
                     </span>
                 )}
             </div>
 
-            {/* Tab Bar: Debugger / Console */}
-            <div className="kairo-debug-tab-bar" style={{
-                display: 'flex',
-                alignItems: 'center',
-                background: 'var(--theia-editor-background)',
-                borderBottom: '1px solid var(--theia-panel-border)',
-                flexShrink: 0,
-                padding: '0 4px',
-                minHeight: 24,
-            }}>
-                {(['debugger', 'console'] as const).map(tab => (
-                    <button
-                        key={tab}
-                        onClick={() => setActiveTab(tab)}
-                        style={{
-                            padding: '3px 12px',
-                            fontSize: '11px',
-                            border: 'none',
-                            background: 'transparent',
-                            color: activeTab === tab
-                                ? 'var(--theia-foreground)'
-                                : 'var(--theia-descriptionForeground)',
-                            cursor: 'pointer',
-                            borderBottom: activeTab === tab
-                                ? '2px solid var(--theia-focusBorder, #007acc)'
-                                : '2px solid transparent',
-                            fontWeight: activeTab === tab ? 600 : 400,
-                            textTransform: 'capitalize',
-                        }}
-                    >
-                        {tab === 'debugger' ? 'Debugger' : 'Console'}
-                    </button>
-                ))}
-            </div>
-
             {/* Content area */}
-            {activeTab === 'debugger' ? (
-                <div style={{
-                    flex: 1,
-                    display: 'flex',
-                    overflow: 'hidden',
-                    minHeight: 0,
-                }}>
+            {!state.hasSession ? (
+                <div className="kairo-empty-state">
+                    <div className="kairo-empty-state-glyph">
+                        <span className="codicon codicon-debug-alt" aria-hidden="true" />
+                    </div>
+                    <h3 className="kairo-empty-state-title">{t('debug.toolWindow.noSession')}</h3>
+                    <p className="kairo-empty-state-reason">
+                        {t('debug.toolWindow.emptyStateReason')}
+                    </p>
+                    <div className="kairo-empty-state-action">
+                        <button
+                            className="theia-button"
+                            onClick={handleStartDebugging}
+                            data-testid="debug-empty-start"
+                        >
+                            {t('command.openDebugView')}
+                        </button>
+                    </div>
+                </div>
+            ) : (
+                <div className="kairo-debug-panels">
                     {/* Left panel: Frames/Threads + Breakpoints */}
-                    <div style={{
-                        width: 320,
-                        display: 'flex',
-                        flexDirection: 'column',
-                        borderRight: '1px solid var(--theia-panel-border)',
-                        flexShrink: 0,
-                        overflow: 'hidden',
-                    }}>
-                        <div style={{ flex: `0 0 ${framesHeight}px`, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+                    <div className="kairo-debug-left-panel">
+                        <div className="kairo-debug-panel-frames" style={{ '--kairo-debug-frames-height': `${framesHeight}px` } as React.CSSProperties}>
                             <CollapsibleSection
-                                title="Frames"
+                                title={t('debug.toolWindow.frames')}
                                 icon="codicon-callstack"
                                 defaultExpanded={true}
                             >
                                 <IDEAFramesPanel
                                     sessionService={sessionService}
+                                    i18n={i18n}
                                     onNavigate={handleNavigate}
                                 />
                             </CollapsibleSection>
@@ -235,103 +190,45 @@ const DebugToolWindowView: React.FC<DebugToolWindowViewProps> = ({ sessionServic
                         <div
                             ref={splitterRef}
                             onMouseDown={onSplitterMouseDown}
-                            style={{
-                                height: 4,
-                                background: 'var(--theia-panel-border)',
-                                cursor: 'ns-resize',
-                                flexShrink: 0,
-                                position: 'relative',
-                            }}
-                            onMouseEnter={e => (e.currentTarget.style.background = 'var(--theia-focusBorder)')}
-                            onMouseLeave={e => (e.currentTarget.style.background = 'var(--theia-panel-border)')}
+                            className="kairo-debug-splitter"
                         >
-                            <div style={{
-                                position: 'absolute',
-                                top: '50%',
-                                left: '50%',
-                                transform: 'translate(-50%, -50%)',
-                                width: 30,
-                                height: 2,
-                                background: 'var(--theia-descriptionForeground)',
-                                borderRadius: 1,
-                                opacity: 0.5,
-                            }} />
+                            <div className="kairo-debug-splitter-grip" />
                         </div>
 
                         {/* Breakpoints section */}
-                        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+                        <div className="kairo-debug-panel-breakpoints">
                             <CollapsibleSection
-                                title="Breakpoints"
+                                title={t('debug.toolWindow.breakpoints')}
                                 icon="codicon-debug-breakpoint"
                                 defaultExpanded={true}
                             >
-                                <div style={{ padding: '4px 8px', color: 'var(--theia-descriptionForeground)', fontSize: '11px' }}>
-                                    View and manage breakpoints from the Breakpoints panel
+                                <div className="kairo-debug-breakpoints-placeholder">
+                                    {t('debug.toolWindow.breakpointsPlaceholder')}
                                 </div>
                             </CollapsibleSection>
                         </div>
                     </div>
 
                     {/* Right panel: Variables + Watches */}
-                    <div style={{
-                        flex: 1,
-                        display: 'flex',
-                        flexDirection: 'column',
-                        overflow: 'hidden',
-                        minWidth: 0,
-                    }}>
-                        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
+                    <div className="kairo-debug-right-panel">
+                        <div className="kairo-debug-panel-variables">
                             <CollapsibleSection
-                                title="Variables"
+                                title={t('debug.toolWindow.variables')}
                                 icon="codicon-symbol-variable"
                                 defaultExpanded={true}
                             >
-                                <IDEAVariablesTree sessionService={sessionService} />
+                                <IDEAVariablesTree sessionService={sessionService} i18n={i18n} />
                             </CollapsibleSection>
                         </div>
 
-                        <div style={{ height: 200, borderTop: '1px solid var(--theia-panel-border)', display: 'flex', flexDirection: 'column', minHeight: 80, flexShrink: 0 }}>
+                        <div className="kairo-debug-panel-watches">
                             <CollapsibleSection
-                                title="Watches"
+                                title={t('debug.toolWindow.watches')}
                                 icon="codicon-watch"
                                 defaultExpanded={true}
                             >
-                                <IDEAWatchesPanel sessionService={sessionService} />
+                                <IDEAWatchesPanel sessionService={sessionService} i18n={i18n} />
                             </CollapsibleSection>
-                        </div>
-                    </div>
-                </div>
-            ) : (
-                <div style={{
-                    flex: 1,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    overflow: 'hidden',
-                }}>
-                    <div id="kairo-debug-console-slot" style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-                        <div style={{
-                            padding: '20px',
-                            color: 'var(--theia-descriptionForeground)',
-                            fontSize: '11px',
-                            textAlign: 'center',
-                        }}>
-                            Debug Console is available in the bottom panel.
-                            <br />
-                            <button
-                                onClick={() => commandService.executeCommand('kairo.debug.view.console')}
-                                style={{
-                                    marginTop: 8,
-                                    padding: '4px 12px',
-                                    background: 'var(--theia-button-background)',
-                                    color: 'var(--theia-button-foreground)',
-                                    border: 'none',
-                                    borderRadius: 3,
-                                    cursor: 'pointer',
-                                    fontSize: '11px',
-                                }}
-                            >
-                                Open Console
-                            </button>
                         </div>
                     </div>
                 </div>
@@ -358,15 +255,23 @@ export class KairoDebugToolWindowWidget extends ReactWidget {
     @inject(EditorManager)
     protected readonly editorManager!: EditorManager;
 
+    @inject(KairoI18nService)
+    protected readonly i18n!: KairoI18nService;
+
     @postConstruct()
     protected init(): void {
         this.id = KairoDebugToolWindowWidget.ID;
-        this.title.label = KairoDebugToolWindowWidget.LABEL;
+        this.updateTitle();
         this.title.caption = 'Debug';
         this.title.iconClass = 'codicon codicon-debug-alt';
         this.title.closable = true;
         this.addClass('kairo-debug-tool-window-widget');
+        this.toDispose.push(this.i18n.onDidChangeLanguage(() => this.updateTitle()));
         this.update();
+    }
+
+    protected updateTitle(): void {
+        this.title.label = this.i18n.t('widget.debug.toolbar.title');
     }
 
     protected render(): React.ReactNode {
@@ -374,6 +279,7 @@ export class KairoDebugToolWindowWidget extends ReactWidget {
             sessionService={this.sessionService}
             commandService={this.commandService}
             editorManager={this.editorManager}
+            i18n={this.i18n}
         />;
     }
 }

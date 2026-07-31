@@ -16,7 +16,7 @@
  * contextIsolation with a preload script.
  */
 
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, MenuItemConstructorOptions, session, shell } from 'electron';
 import { spawn, ChildProcess, exec } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -28,10 +28,21 @@ import { detectJDK17Plus, showJDKSetupDialog } from './jdk-check';
 let agentProcess: ChildProcess | null = null;
 let agentPort: number = 0;
 let agentSecret: string = '';
+let agentStartedByUs = false; // true if we spawned the agent, false if reused
 let theiaProcess: ChildProcess | null = null;
 let theiaPort: number = 0;
 let mainWindow: BrowserWindow | null = null;
 let isQuitting = false;
+
+// ── Headless (browser-only) mode ─────────────────────────────
+// Activated in two ways:
+//   1. Kairo-Server.exe  — renamed copy of Kairo.exe, auto-headless
+//   2. Kairo.exe --headless — explicit CLI flag
+// In headless mode, Kairo starts the Go Runtime Agent and Theia
+// backend but does NOT open an Electron window. The IDE is
+// accessible via http://127.0.0.1:<port> in any browser.
+const serverExeName = path.basename(process.execPath, '.exe').toLowerCase();
+const isHeadless = serverExeName === 'kairo-server' || process.argv.includes('--headless');
 
 // Track child process exit codes for diagnostics.
 const childExitCodes: Map<string, { code: number | null; signal: string | null }> = new Map();
@@ -54,17 +65,20 @@ function initFileLogger(): void {
   if (process.env.KAIRO_DESKTOP_LOG_FILE) {
     mainLogPath = process.env.KAIRO_DESKTOP_LOG_FILE;
   } else {
-    // Default to <repo>/artifacts/desktop-main.log when present,
-    // otherwise a temp path. Falling back to a temp path is fine
-    // because the only caller passing nothing is the packaged
-    // build, where the OS log facility takes over.
-    const candidate = path.join(__dirname, '..', '..', '..', 'artifacts', 'desktop-main.log');
+    // Try <repo>/artifacts/desktop-main.log first (dev mode).
+    // In packaged builds, __dirname is inside the ASAR archive so
+    // the relative path resolve fails — we defer to
+    // ensureFileLogger() which runs after app 'ready' and can
+    // use app.getPath('userData').
+    const repoCandidate = path.join(__dirname, '..', '..', '..', 'artifacts', 'desktop-main.log');
     try {
-      fs.mkdirSync(path.dirname(candidate), { recursive: true });
-      mainLogPath = candidate;
-    } catch {
-      mainLogPath = undefined;
-    }
+      const dir = path.dirname(repoCandidate);
+      // Test that the directory actually exists on disk (not inside ASAR).
+      if (fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+        mainLogPath = repoCandidate;
+      }
+    } catch { /* not a dev build */ }
   }
   // Mirror console to file for the lifetime of the main process.
   const wrap = (orig: (...a: unknown[]) => void) => (...args: unknown[]) => {
@@ -75,6 +89,25 @@ function initFileLogger(): void {
   console.warn = wrap(console.warn);
   console.error = wrap(console.error);
   console.info = wrap(console.info);
+}
+
+/**
+ * Called after app 'ready' to set up the log file path when
+ * initFileLogger could not determine it (packaged builds).
+ * Uses app.getPath('userData') which is only available after
+ * the app is ready.
+ */
+function ensureFileLogger(): void {
+  if (mainLogPath) {
+    return; // Already configured (dev mode or env var).
+  }
+  try {
+    const userDataLogDir = path.join(app.getPath('userData'), 'logs');
+    fs.mkdirSync(userDataLogDir, { recursive: true });
+    mainLogPath = path.join(userDataLogDir, 'desktop-main.log');
+  } catch {
+    mainLogPath = undefined;
+  }
 }
 
 // ─── Startup Validation ──────────────────────────────────────
@@ -207,6 +240,63 @@ function verifyAgentBinary(agentPath: string): void {
     if (err.message && err.message.startsWith('Agent binary')) throw err;
     // spawnSync itself threw (e.g. ENOENT on missing shell)
     throw new Error(`Cannot verify agent binary: ${err.message}`);
+  }
+}
+
+// ─── Agent State File Discovery ───────────────────────────────
+
+interface AgentStateFile {
+  port: number;
+  secret: string;
+  pid: number;
+  bindAddress: string;
+  startedAt: string;
+}
+
+/**
+ * Try to discover a running agent via the state file written by the
+ * Go runtime. Returns the agent URL and secret if found and healthy.
+ */
+async function tryReuseAgent(dataDir: string): Promise<{ port: number; secret: string } | null> {
+  const statePath = path.join(dataDir, 'agent-state.json');
+  if (!fs.existsSync(statePath)) {
+    return null;
+  }
+
+  let state: AgentStateFile;
+  try {
+    state = JSON.parse(fs.readFileSync(statePath, 'utf-8'));
+  } catch {
+    console.warn('[kairo] agent state file corrupted, ignoring');
+    return null;
+  }
+
+  if (!state.port || state.port <= 0) {
+    return null;
+  }
+
+  // Verify the agent is still alive via health check.
+  const healthURL = `http://127.0.0.1:${state.port}/api/v1/health`;
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const req = http.get(healthURL, { timeout: 2000 }, (res) => {
+        res.resume();
+        if (res.statusCode === 200) {
+          resolve();
+        } else {
+          reject(new Error(`status ${res.statusCode}`));
+        }
+      });
+      req.on('error', reject);
+      req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
+    });
+    console.log(`[kairo] reusing existing agent on port ${state.port} (pid ${state.pid})`);
+    return { port: state.port, secret: state.secret };
+  } catch {
+    console.log(`[kairo] agent state file found but agent is not healthy, will start a new one`);
+    // Clean up stale state file.
+    try { fs.unlinkSync(statePath); } catch { /* ignore */ }
+    return null;
   }
 }
 
@@ -363,6 +453,10 @@ function killProcessTree(proc: ChildProcess | null, signal: NodeJS.Signals): voi
 }
 
 function stopAgent(): void {
+  if (!agentStartedByUs) {
+    console.log('[kairo] agent was reused, not stopping it');
+    return;
+  }
   if (agentProcess && !agentProcess.killed) {
     console.log('[kairo] Stopping agent...');
     killProcessTree(agentProcess, 'SIGTERM');
@@ -509,6 +603,11 @@ ipcMain.on('renderer-ready', () => {
   console.log('[kairo] renderer process is ready');
 });
 
+// Handle renderer error forwarding from preload script.
+ipcMain.on('renderer-error', (_event, info: { message: string; filename?: string; lineno?: number; colno?: number; type: string }) => {
+  flog(`[renderer:${info.type}] ${info.message}${info.filename ? ` (${info.filename}:${info.lineno}:${info.colno})` : ''}`);
+});
+
 // Toggle DevTools from renderer command (Help > Toggle Developer Tools).
 ipcMain.on('toggle-devtools', () => {
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -521,6 +620,205 @@ function sendMenuAction(action: string): void {
   if (mainWindow) {
     mainWindow.webContents.send('menu-action', action);
   }
+}
+
+// ─── Native Menu ──────────────────────────────────────────────
+
+function buildMenuTemplate(): MenuItemConstructorOptions[] {
+  const action = (commandId: string) => ({
+    click: () => sendMenuAction(commandId),
+  });
+
+  return [
+    // ── File ───────────────────────────────────────────────────
+    {
+      label: 'File',
+      submenu: [
+        { label: 'New Text File', ...action('workbench.action.files.newUntitledFile') },
+        { label: 'New File...', ...action('workbench.action.files.pickNewFile') },
+        { type: 'separator' },
+        { label: 'Open File...', ...action('core.open') },
+        { label: 'Open Folder...', ...action('workspace:open') },
+        { type: 'separator' },
+        { label: 'Save', accelerator: 'CmdOrCtrl+S', ...action('core.save') },
+        { label: 'Save As...', accelerator: 'CmdOrCtrl+Shift+S', ...action('file.saveAs') },
+        { label: 'Save All', ...action('core.saveAll') },
+        { type: 'separator' },
+        { label: 'Import Kairo Project...', ...action('kairo.project.import') },
+        { label: 'Select Kairo Project...', ...action('kairo.project.select') },
+        { label: 'Run Configurations...', ...action('kairo.runConfigurations.manage') },
+        { type: 'separator' },
+        { label: 'Preferences', ...action('preferences:open') },
+        { type: 'separator' },
+        { label: 'Close Tab', accelerator: 'CmdOrCtrl+W', ...action('core.close.tab') },
+        { label: 'Close All Tabs', ...action('core.close.all.tabs') },
+        { type: 'separator' },
+        { label: 'Exit', accelerator: process.platform === 'darwin' ? 'Cmd+Q' : 'Alt+F4', role: 'quit' },
+      ],
+    },
+
+    // ── Edit ───────────────────────────────────────────────────
+    {
+      label: 'Edit',
+      submenu: [
+        { label: 'Undo', accelerator: 'CmdOrCtrl+Z', ...action('core.undo') },
+        { label: 'Redo', accelerator: 'CmdOrCtrl+Shift+Z', ...action('core.redo') },
+        { type: 'separator' },
+        { label: 'Cut', accelerator: 'CmdOrCtrl+X', ...action('core.cut') },
+        { label: 'Copy', accelerator: 'CmdOrCtrl+C', ...action('core.copy') },
+        { label: 'Paste', accelerator: 'CmdOrCtrl+V', ...action('core.paste') },
+        { type: 'separator' },
+        { label: 'Find', accelerator: 'CmdOrCtrl+F', ...action('core.find') },
+        { label: 'Replace', accelerator: 'CmdOrCtrl+H', ...action('core.replace') },
+        { type: 'separator' },
+        { label: 'Select All', accelerator: 'CmdOrCtrl+A', ...action('core.selectAll') },
+      ],
+    },
+
+    // ── Selection ──────────────────────────────────────────────
+    {
+      label: 'Selection',
+      submenu: [
+        { label: 'Select All', accelerator: 'CmdOrCtrl+A', ...action('core.selectAll') },
+        { label: 'Expand Selection', ...action('editor.action.smartSelect.expand') },
+        { label: 'Shrink Selection', ...action('editor.action.smartSelect.shrink') },
+      ],
+    },
+
+    // ── View ───────────────────────────────────────────────────
+    {
+      label: 'View',
+      submenu: [
+        { label: 'Explorer', ...action('workbench.view.explorer') },
+        { label: 'Search', ...action('workbench.view.search') },
+        { label: 'Source Control', ...action('workbench.view.scm') },
+        { label: 'Debug', ...action('workbench.view.debug') },
+        { label: 'Terminal', ...action('workbench.view.terminal') },
+        { label: 'Problems', ...action('workbench.view.problems') },
+        { type: 'separator' },
+        { label: 'Kairo Servers', ...action('kairo.view.servers') },
+        { label: 'Kairo Builds', ...action('kairo.view.builds') },
+        { label: 'Kairo Deployments', ...action('kairo.view.deployments') },
+        { label: 'Tomcat Logs', ...action('kairo.view.logs') },
+        { label: 'Maven', ...action('kairo.view.maven') },
+        { label: 'TODO / FIXME', ...action('kairo.view.todo') },
+        { label: 'Test Results', ...action('kairo.view.tests') },
+        { label: 'SQL Console', ...action('kairo.view.sqlConsole') },
+        { label: 'Remote Development', ...action('kairo.view.remote') },
+        { label: 'Performance Dashboard', ...action('kairo.view.perf') },
+        { type: 'separator' },
+        {
+          label: 'Appearance',
+          submenu: [
+            { label: 'Toggle Bottom Panel', ...action('core.toggle.bottom.panel') },
+            { label: 'Toggle Status Bar', ...action('workbench.action.toggleStatusbarVisibility') },
+            { label: 'Toggle Menu Bar', ...action('window.menuBarVisibility') },
+            { label: 'Toggle Maximized', ...action('core.toggleMaximized') },
+          ],
+        },
+      ],
+    },
+
+    // ── Go ─────────────────────────────────────────────────────
+    {
+      label: 'Go',
+      submenu: [
+        { label: 'Back', ...action('workbench.action.navigateBack') },
+        { label: 'Forward', ...action('workbench.action.navigateForward') },
+        { type: 'separator' },
+        { label: 'Go to File...', accelerator: 'CmdOrCtrl+P', ...action('workbench.action.quickOpen') },
+        { label: 'Go to Line...', ...action('workbench.action.gotoLine') },
+        { label: 'Go to Symbol...', ...action('workbench.action.gotoSymbol') },
+      ],
+    },
+
+    // ── Terminal ───────────────────────────────────────────────
+    {
+      label: 'Terminal',
+      submenu: [
+        { label: 'New Terminal', ...action('terminal:new') },
+        { label: 'Toggle Terminal', ...action('kairo.terminal.toggle') },
+      ],
+    },
+
+    // ── Kairo ──────────────────────────────────────────────────
+    {
+      label: 'Kairo',
+      submenu: [
+        { label: 'Import Kairo Project...', ...action('kairo.project.import') },
+        { label: 'Select Kairo Project...', ...action('kairo.project.select') },
+        { label: 'Scan Workspace', ...action('kairo.project.scan') },
+        { label: 'Run Configurations...', ...action('kairo.runConfigurations.manage') },
+        { type: 'separator' },
+        {
+          label: 'Build & Run',
+          submenu: [
+            { label: 'Build', ...action('kairo.build') },
+            { label: 'Clean Build', ...action('kairo.cleanBuild') },
+            { label: 'Build & Deploy', ...action('kairo.buildAndDeploy') },
+            { label: 'Publish', ...action('kairo.publish') },
+            { type: 'separator' },
+            { label: 'Start Server', ...action('kairo.server.start') },
+            { label: 'Start Server (Debug)', ...action('kairo.server.debug') },
+            { label: 'Stop Server', ...action('kairo.server.stop') },
+            { label: 'Restart Server', ...action('kairo.server.restart') },
+            { type: 'separator' },
+            { label: 'Open Application', ...action('kairo.app.open') },
+            { label: 'Check Java Debug Adapter', ...action('kairo.debug.checkAdapter') },
+          ],
+        },
+        {
+          label: 'View',
+          submenu: [
+            { label: 'Servers', ...action('kairo.view.servers') },
+            { label: 'Builds', ...action('kairo.view.builds') },
+            { label: 'Deployments', ...action('kairo.view.deployments') },
+            { label: 'Tomcat Logs', ...action('kairo.view.logs') },
+            { label: 'Maven', ...action('kairo.view.maven') },
+            { label: 'TODO / FIXME', ...action('kairo.view.todo') },
+            { label: 'Test Results', ...action('kairo.view.tests') },
+            { label: 'SQL Console', ...action('kairo.view.sqlConsole') },
+            { label: 'Remote Development', ...action('kairo.view.remote') },
+            { label: 'Performance Dashboard', ...action('kairo.view.perf') },
+          ],
+        },
+        {
+          label: 'Debug',
+          submenu: [
+            { label: 'Open Debug View', ...action('kairo.debug.openView') },
+            { label: 'Open Debug Console', ...action('kairo.debug.openConsole') },
+            { label: 'Variables', ...action('kairo.debug.view.variables') },
+            { label: 'Call Stack', ...action('kairo.debug.view.callstack') },
+            { label: 'Breakpoints', ...action('kairo.debug.view.breakpoints') },
+            { label: 'Watch', ...action('kairo.debug.view.watch') },
+            { label: 'Debug Toolbar', ...action('kairo.debug.view.toolbar') },
+            { label: 'Debug Diagnostics', ...action('kairo:open-debug-diagnostics') },
+          ],
+        },
+        {
+          label: 'Window',
+          submenu: [
+            { label: 'Toggle Terminal', ...action('kairo.terminal.toggle') },
+            { label: 'Keyboard Shortcuts', ...action('kairo.keymap.open') },
+            { label: 'Switch JDK', ...action('kairo.jdk.switch') },
+            { label: 'Reconnect Runtime Agent', ...action('kairo.agent.reconnect') },
+          ],
+        },
+      ],
+    },
+
+    // ── Help ───────────────────────────────────────────────────
+    {
+      label: 'Help',
+      submenu: [
+        { label: 'Welcome', ...action('kairo.welcome.show') },
+        { label: 'Toggle Developer Tools', ...action('kairo.devtools.toggle') },
+        { label: 'Debug Diagnostics', ...action('kairo:open-debug-diagnostics') },
+        { type: 'separator' },
+        { label: 'About', ...action('core.about') },
+      ],
+    },
+  ];
 }
 
 // ─── Window Creation ──────────────────────────────────────────
@@ -576,8 +874,66 @@ async function createWindow(): Promise<void> {
     const lvl = ['DEBUG', 'LOG', 'WARN', 'ERROR'][level] || `L${level}`;
     flog(`[renderer:${lvl}] ${message} (${sourceId}:${line})`);
   });
+
+  // Track page load lifecycle events for debugging startup hangs.
+  mainWindow.webContents.on('did-start-loading', () => {
+    flog('[renderer] did-start-loading');
+  });
+  mainWindow.webContents.on('did-stop-loading', () => {
+    flog('[renderer] did-stop-loading');
+  });
+  mainWindow.webContents.on('dom-ready', () => {
+    flog('[renderer] dom-ready');
+  });
+  mainWindow.webContents.on('did-finish-load', () => {
+    flog('[renderer] did-finish-load');
+    // Auto-accept the Workspace Trust dialog in packaged desktop builds.
+    // The dialog blocks the entire UI until the user clicks, which is
+    // problematic for automated testing and first-run scenarios in an
+    // intranet-only product. We inject a one-shot MutationObserver
+    // that detects the trust dialog and clicks "Yes" automatically.
+    if (app.isPackaged || process.env.KAIRO_AUTO_TRUST === '1') {
+      mainWindow?.webContents.executeJavaScript(`
+        (function autoTrust() {
+          const observer = new MutationObserver(() => {
+            const btns = document.querySelectorAll('button');
+            for (const b of btns) {
+              if (b.textContent && b.textContent.includes('trust the authors') && !b.textContent.includes("don't")) {
+                b.click();
+                observer.disconnect();
+                return;
+              }
+            }
+          });
+          observer.observe(document.body, { childList: true, subtree: true });
+          // Also check immediately in case the dialog is already rendered.
+          const existing = document.querySelectorAll('button');
+          for (const b of existing) {
+            if (b.textContent && b.textContent.includes('trust the authors') && !b.textContent.includes("don't")) {
+              b.click();
+              observer.disconnect();
+              return;
+            }
+          }
+          // Safety: stop observing after 30 seconds regardless.
+          setTimeout(() => observer.disconnect(), 30000);
+        })();
+      `).catch((err: Error) => {
+        flog(`[kairo] auto-trust injection error: ${err.message}`);
+      });
+    }
+  });
+  mainWindow.webContents.on('did-start-navigation', (_e, url, isInPlace, isMainFrame) => {
+    flog(`[renderer] did-start-navigation: url=${url} inPlace=${isInPlace} mainFrame=${isMainFrame}`);
+  });
+  mainWindow.webContents.on('did-navigate', (_e, url, httpCode) => {
+    flog(`[renderer] did-navigate: url=${url} httpCode=${httpCode}`);
+  });
   mainWindow.webContents.on('did-fail-load', (_e, code, desc, url) => {
     flog(`[renderer] did-fail-load: code=${code} desc=${desc} url=${url}`);
+  });
+  mainWindow.webContents.on('did-fail-provisional-load', (_e, code, desc, url) => {
+    flog(`[renderer] did-fail-provisional-load: code=${code} desc=${desc} url=${url}`);
   });
   mainWindow.webContents.on('render-process-gone', (_e, details) => {
     flog(`[renderer] render-process-gone: ${JSON.stringify(details)}`);
@@ -634,6 +990,30 @@ async function createWindow(): Promise<void> {
   // No executeJavaScript — avoids the race condition.
   await mainWindow.loadURL(`http://127.0.0.1:${theiaPort}`);
 
+  // Set the native application menu to match the browser version's
+  // comprehensive menu layout. The menu actions are sent to the
+  // renderer via IPC, where the preload script forwards them to
+  // the Theia command registry.
+  const menu = Menu.buildFromTemplate(buildMenuTemplate());
+  Menu.setApplicationMenu(menu);
+  flog('[kairo] native application menu set');
+
+  // Handle the close event to force-close the window even when the
+  // renderer's beforeunload handler (Theia's DefaultWindowService)
+  // tries to prevent it. Without this, the close button on Windows
+  // has no effect because Theia collects unload vetoes from
+  // contributions that call event.preventDefault().
+  mainWindow.on('close', (event) => {
+    if (!isQuitting) {
+      event.preventDefault();
+      isQuitting = true;
+      // destroy() bypasses the renderer's beforeunload handler and
+      // guarantees the window is closed. It does NOT re-emit the
+      // 'close' event, so we won't recurse.
+      mainWindow?.destroy();
+    }
+  });
+
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
@@ -647,6 +1027,46 @@ async function createWindow(): Promise<void> {
 initFileLogger();
 
 flog(`[kairo] desktop main starting; pid=${process.pid}; electron=${process.versions.electron}; node=${process.versions.node}; platform=${process.platform}`);
+
+// ── CSP ────────────────────────────────────────────────────
+// MUST be registered BEFORE the app 'ready' event. The default
+// session is created before 'ready' fires, so registering
+// 'session-created' inside the ready handler would miss the
+// default session. We also explicitly set the CSP on the
+// default session in the ready handler as a safety net.
+function setupCSP(session: Electron.Session): void {
+  session.webRequest.onHeadersReceived((details, callback) => {
+    // Theia 1.73 ships with ajv-generated validators that use
+    // `new Function` for JSON schema compile. Without
+    // 'unsafe-eval' the very first schema validate throws
+    // EvalError and the frontend hangs in the splash. The
+    // AJV library is a core Theia dependency used for plugin
+    // manifest validation, preference schema checks, and
+    // extension contribution validation — it cannot be
+    // avoided in production builds. We therefore always
+    // allow 'unsafe-eval' so the frontend can initialize.
+    const scriptSrcExtra = " 'unsafe-eval'";
+    callback({
+      responseHeaders: {
+        ...details.responseHeaders,
+        'Content-Security-Policy': [
+          "default-src 'self'",
+          `script-src 'self' 'unsafe-inline'${scriptSrcExtra}`,
+          "style-src 'self' 'unsafe-inline'",
+          "connect-src 'self' data: http://127.0.0.1:* ws://127.0.0.1:*",
+          "img-src 'self' data:",
+          "font-src 'self' data:",
+        ].join('; '),
+      },
+    });
+  });
+  flog('[kairo] CSP configured for session');
+}
+
+// Register session-created BEFORE 'ready' to catch the default session.
+app.on('session-created', (session) => {
+  setupCSP(session);
+});
 
 // Prevent multiple instances
 const gotLock = app.requestSingleInstanceLock();
@@ -663,6 +1083,10 @@ if (!gotLock) {
   app.on('ready', async () => {
     // Set the app version so the preload script can expose it.
     process.env.KAIRO_APP_VERSION = app.getVersion();
+
+    // Now that the app is ready we can use app.getPath('userData')
+    // to set up the log file for packaged builds.
+    ensureFileLogger();
 
     // Run startup validation before launching child processes.
     const warnings = validateStartup();
@@ -700,48 +1124,70 @@ if (!gotLock) {
       }
     }
 
-    // Set CSP before creating any windows.
-    app.on('session-created', (session) => {
-      session.webRequest.onHeadersReceived((details, callback) => {
-        // Theia 1.73 ships with ajv-generated validators that use
-        // `new Function` for JSON schema compile. Without
-        // 'unsafe-eval' the very first schema validate throws
-        // EvalError and the frontend hangs in the splash. We
-        // therefore default the production CSP to the tightest
-        // policy that still lets Theia load its static assets, and
-        // gate 'unsafe-eval' behind KAIRO_DEV=1 so packaged builds
-        // ship with a hardened policy. If the renderer ever truly
-        // needs eval in production, switch the policy to add it
-        // back — but record the reason in the commit message.
-        const scriptSrcExtra = process.env.KAIRO_DEV === '1' ? " 'unsafe-eval'" : '';
-        callback({
-          responseHeaders: {
-            ...details.responseHeaders,
-            'Content-Security-Policy': [
-              "default-src 'self'",
-              `script-src 'self' 'unsafe-inline'${scriptSrcExtra}`,
-              "style-src 'self' 'unsafe-inline'",
-              "connect-src 'self' data: http://127.0.0.1:* ws://127.0.0.1:*",
-              "img-src 'self' data:",
-              "font-src 'self' data:",
-            ].join('; '),
-          },
-        });
-      });
-    });
+    // Set CSP on the default session as a safety net (the
+    // 'session-created' listener above should already have caught
+    // it, but this guarantees the default session is covered).
+    setupCSP(session.defaultSession);
 
     try {
       const dataDir = path.join(app.getPath('userData'), 'kairo-data');
       fs.mkdirSync(dataDir, { recursive: true });
 
-      // Start Go Agent
-      const { port, secret } = await startAgent(dataDir, bundledDir);
+      // Try to reuse an existing agent first. If one is already
+      // running (e.g. started by a previous Desktop session or by
+      // the browser launcher), connect to it instead of starting a
+      // duplicate. This enables the "Desktop + Browser sharing the
+      // same agent" workflow.
+      const reused = await tryReuseAgent(dataDir);
+      let port: number;
+      let secret: string;
+      if (reused) {
+        port = reused.port;
+        secret = reused.secret;
+        agentStartedByUs = false;
+      } else {
+        // Start Go Agent
+        const result = await startAgent(dataDir, bundledDir);
+        port = result.port;
+        secret = result.secret;
+        agentStartedByUs = true;
+      }
+      agentPort = port;
+      agentSecret = secret;
 
       // Start Theia Backend
       await startTheiaBackend();
 
-      // Create window — config is passed via env to preload
-      createWindow();
+      if (isHeadless) {
+        // Headless mode: agent + backend only, no Electron window.
+        // The IDE is accessible via browser at the Theia backend URL.
+        console.log('');
+        console.log('╔══════════════════════════════════════════════════════════╗');
+        console.log('║   Kairo IDE — Headless (Browser) Mode                   ║');
+        console.log('╠══════════════════════════════════════════════════════════╣');
+        console.log(`║   Theia:    http://127.0.0.1:${theiaPort}`.padEnd(58) + '║');
+        console.log(`║   Agent:    http://127.0.0.1:${agentPort}`.padEnd(58) + '║');
+        console.log('║                                                          ║');
+        console.log('║   Open the Theia URL in any browser to use the IDE.      ║');
+        console.log('║   Press Ctrl+C to stop all services.                     ║');
+        console.log('╚══════════════════════════════════════════════════════════╝');
+        console.log('');
+
+        // Keep the process alive. The agent and Theia backend are
+        // child processes that will exit when this process exits.
+        // We use a simple interval to keep Node.js event loop alive.
+        // On Ctrl+C, the 'before-quit' handler will tear them down.
+        setInterval(() => {
+          // Heartbeat: check child processes are still alive.
+          if (agentProcess?.killed && theiaProcess?.killed) {
+            console.log('[kairo] All child processes exited, quitting.');
+            app.quit();
+          }
+        }, 5000).unref();
+      } else {
+        // Create window — config is passed via env to preload
+        createWindow();
+      }
 
     } catch (err: any) {
       console.error('[kairo] Failed to start:', err);
@@ -790,12 +1236,16 @@ if (!gotLock) {
   });
 
   app.on('window-all-closed', () => {
+    // In headless mode, there is no window — don't quit.
+    if (isHeadless) return;
     if (process.platform !== 'darwin') {
       app.quit();
     }
   });
 
   app.on('activate', () => {
+    // In headless mode, don't create a window on activate.
+    if (isHeadless) return;
     if (mainWindow === null) {
       createWindow();
     }

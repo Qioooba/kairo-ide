@@ -157,15 +157,6 @@ const CustomBuildPanel: React.FC<{
         logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [state.logs]);
 
-    const logColor = (type: BuildLogEntry['type']) => {
-        switch (type) {
-            case 'stderr': return 'var(--theia-terminal-ansiRed)';
-            case 'error': return 'var(--theia-terminal-ansiRed)';
-            case 'info': return 'var(--theia-terminal-ansiCyan)';
-            default: return 'var(--theia-foreground)';
-        }
-    };
-
     return (
         <div className="kairo-custom-build">
             <div className="kairo-custom-build-header">
@@ -198,7 +189,7 @@ const CustomBuildPanel: React.FC<{
             )}
             <div className="kairo-custom-build-output">
                 {state.logs.map((entry, i) => (
-                    <div key={i} className="kairo-build-log-line" style={{ color: logColor(entry.type) }}>
+                    <div key={i} className={`kairo-build-log-line ${entry.type}`}>
                         {entry.line}
                     </div>
                 ))}

@@ -28,7 +28,7 @@ export class GitCherryPickService {
   private state: CherryPickState = { status: 'idle', remainingHashes: [] };
 
   private getCwd(): string {
-    return this.gitService.getRepoRoot() || process.cwd();
+    return this.gitService.getRepoRoot() || (typeof process !== 'undefined' ? process.cwd() : '');
   }
 
   private async execGit(args: string[]): Promise<string> {

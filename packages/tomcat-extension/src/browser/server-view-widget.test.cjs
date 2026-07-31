@@ -1,5 +1,59 @@
 'use strict';
 
+const Module = require('module');
+
+// Intercept Monaco ESM imports at load time. Theia browser modules transitively
+// require @theia/monaco-editor-core and its esm/* subpaths; those files are ESM
+// and cannot be loaded by Node's CJS test runner. Provide minimal stubs so
+// Theia modules that extend Monaco classes do not throw.
+function makeMonacoMock(request) {
+  const stub = {};
+  if (request === '@theia/monaco-editor-core' || request.endsWith('/@theia/monaco-editor-core')) {
+    stub.editor = {};
+    return stub;
+  }
+  if (request.includes('/standalone/browser/standaloneCodeEditor')) {
+    stub.StandaloneCodeEditor = class StandaloneCodeEditor {};
+    return stub;
+  }
+  if (request.includes('/standalone/browser/standaloneServices')) {
+    stub.StandaloneServices = { initialize: () => {} };
+    return stub;
+  }
+  if (request.includes('/instantiation/common/serviceCollection')) {
+    stub.ServiceCollection = class ServiceCollection {};
+    return stub;
+  }
+  if (request.includes('/instantiation/common/instantiation')) {
+    stub.InstantiationService = class InstantiationService {};
+    stub.ServiceIdentifier = {};
+    return stub;
+  }
+  // Default: a constructible stub so `class X extends importedClass {}` works.
+  const DefaultStub = class MonacoStub {};
+  stub.default = DefaultStub;
+  return stub;
+}
+
+const origLoad = Module._load;
+Module._load = function (request, parent, isMain) {
+  if (request === '@theia/monaco-editor-core' || request.startsWith('@theia/monaco-editor-core/')) {
+    return makeMonacoMock(request);
+  }
+  if (request === '@theia/monaco' || request.startsWith('@theia/monaco/')) {
+    // Provide named stubs for Theia modules that inject MonacoWorkspace.
+    if (request.includes('/monaco-workspace')) {
+      return { MonacoWorkspace: class MonacoWorkspace {} };
+    }
+    return {};
+  }
+  return origLoad.apply(this, arguments);
+};
+
+Module._extensions['.css'] = function (module, filename) {
+  module._compile('module.exports = {};', filename);
+};
+
 const { enableJSDOM } = require('@theia/core/lib/browser/test/jsdom');
 const disableJSDOM = enableJSDOM();
 
@@ -11,20 +65,6 @@ if (!global.DragEvent) {
     }
   };
 }
-
-const Module = require('module');
-Module._extensions['.css'] = function (module, filename) {
-  module._compile('module.exports = {};', filename);
-};
-
-// Mock @theia/monaco-editor-core to avoid ESM import issues in CJS test runner.
-const origResolveFilename = Module._resolveFilename;
-Module._resolveFilename = function (request, parent, ...args) {
-  if (request === '@theia/monaco-editor-core' || request.endsWith('/@theia/monaco-editor-core')) {
-    return origResolveFilename.call(this, require('node:path').join(__dirname, '..', '..', '..', 'search-extension', 'src', 'browser', '__monaco-mock__.js'), parent, ...args);
-  }
-  return origResolveFilename.call(this, request, parent, ...args);
-};
 
 const { FrontendApplicationConfigProvider } = require('@theia/core/lib/browser/frontend-application-config-provider');
 FrontendApplicationConfigProvider.set({

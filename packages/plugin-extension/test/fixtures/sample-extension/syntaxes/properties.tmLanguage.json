@@ -1,0 +1,63 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Java Properties",
+  "scopeName": "source.properties",
+  "patterns": [
+    {
+      "include": "#comment"
+    },
+    {
+      "include": "#key-value"
+    },
+    {
+      "include": "#escape"
+    }
+  ],
+  "repository": {
+    "comment": {
+      "name": "comment.line.number-sign.properties",
+      "begin": "(^[ \\t]+)?(?=#|!)",
+      "beginCaptures": {
+        "1": { "name": "punctuation.whitespace.comment.leading.properties" }
+      },
+      "end": "(?!\\G)",
+      "patterns": [
+        {
+          "name": "comment.line.number-sign.properties",
+          "begin": "#|!",
+          "beginCaptures": {
+            "0": { "name": "punctuation.definition.comment.properties" }
+          },
+          "end": "$\\n?",
+          "patterns": []
+        }
+      ]
+    },
+    "key-value": {
+      "patterns": [
+        {
+          "name": "meta.key-value.properties",
+          "begin": "^[ \\t]*([^#!\\s:=]+)[ \\t]*(=|:)?[ \\t]*",
+          "beginCaptures": {
+            "1": { "name": "entity.name.key.properties" },
+            "2": { "name": "punctuation.separator.key-value.properties" }
+          },
+          "end": "$\\n?",
+          "patterns": [
+            {
+              "include": "#escape"
+            },
+            {
+              "name": "string.unquoted.value.properties",
+              "match": ".+"
+            }
+          ]
+        }
+      ]
+    },
+    "escape": {
+      "name": "constant.character.escape.properties",
+      "match": "\\\\."
+    }
+  }
+}

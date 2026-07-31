@@ -53,6 +53,8 @@ type RuntimePlan struct {
 	ContextPath  string
 	Port         int
 	ProjectRoot  string
+	SourceRoots  []string
+	OutputDir    string
 }
 
 // PlanResolver resolves domain entities into executable plans.
@@ -198,6 +200,23 @@ func (r *PlanResolver) ResolveRuntime(ctx context.Context, project domain.Projec
 		WebappDir:   filepath.Join(rootPath, webappDir),
 		ContextPath: contextPath,
 	}
+
+	// Resolve source roots and output dir for hot reload
+	outputDir := project.OutputDir
+	if outputDir == "" {
+		outputDir = "target/classes"
+	}
+
+	sourceRoots := project.SourceRoots
+	if len(sourceRoots) == 0 {
+		cfg, err := repository.LoadProjectConfig(rootPath)
+		if err == nil {
+			sourceRoots = cfg.SourceRoots
+		}
+	}
+
+	plan.SourceRoots = resolveAbsPaths(rootPath, sourceRoots)
+	plan.OutputDir = filepath.Join(rootPath, outputDir)
 
 	return plan, nil
 }

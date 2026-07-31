@@ -81,3 +81,9 @@
     word-break: break-all;
     padding: 1px 0;
 }
+
+.kairo-build-log-line.stdout { color: var(--theia-foreground, var(--kairo-text, #dfe1e5)); }
+.kairo-build-log-line.stderr { color: var(--theia-errorForeground, var(--kairo-error, #f04757)); }
+.kairo-build-log-line.info { color: var(--theia-debugTokenExpression-type, var(--kairo-info, #4a9eff)); }
+.kairo-build-log-line.error { color: var(--theia-errorForeground, var(--kairo-error, #f04757)); }
+.kairo-build-log-line.success { color: var(--theia-terminal-ansiGreen, var(--kairo-success, #3dcc91)); }

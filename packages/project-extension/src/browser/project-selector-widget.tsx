@@ -1,9 +1,10 @@
 import * as React from 'react';
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
-import { injectable, inject } from '@theia/core/shared/inversify';
+import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
 import { ActiveProjectService, ProjectInfo } from './active-project-service';
 import { RuntimeConnectionService, WorkspaceContextService } from '@kairo/runtime-extension';
 import type { ProjectConfig } from '@kairo/protocol';
+import { KairoI18nService, type KairoI18nKey } from '@kairo/i18n';
 
 /**
  * Project Selector tab (KAIRO-RC-WEB-010).
@@ -14,6 +15,8 @@ import type { ProjectConfig } from '@kairo/protocol';
  * project in the workspace and switches the active project on
  * click (persisted by ActiveProjectService).
  */
+type TFunction = (key: KairoI18nKey, params?: Record<string, string | number>) => string;
+
 @injectable()
 export class ProjectSelectorWidget extends ReactWidget {
     static readonly ID = 'kairo-project-selector';
@@ -27,6 +30,9 @@ export class ProjectSelectorWidget extends ReactWidget {
     @inject(WorkspaceContextService)
     protected readonly workspaceContext!: WorkspaceContextService;
 
+    @inject(KairoI18nService)
+    protected readonly i18n!: KairoI18nService;
+
     constructor() {
         super();
         this.id = ProjectSelectorWidget.ID;
@@ -36,11 +42,26 @@ export class ProjectSelectorWidget extends ReactWidget {
         this.addClass('kairo-widget');
     }
 
+    @postConstruct()
+    protected init(): void {
+        const t: TFunction = (this.i18n?.t.bind(this.i18n)) as TFunction | undefined
+            ?? ((key: KairoI18nKey) => String(key));
+        this.title.label = t('widget.projectSelector.title');
+        this.title.caption = t('widget.projectSelector.caption');
+        this.toDispose.push(this.i18n.onDidChangeLanguage(() => {
+            this.title.label = t('widget.projectSelector.title');
+            this.title.caption = t('widget.projectSelector.caption');
+            this.update();
+        }));
+        this.update();
+    }
+
     protected render(): React.ReactNode {
         return React.createElement(ProjectSelector, {
             activeProject: this.activeProject,
             runtime: this.runtime,
             workspaceContext: this.workspaceContext,
+            i18n: this.i18n,
         });
     }
 }
@@ -49,9 +70,11 @@ interface ProjectSelectorProps {
     activeProject: ActiveProjectService;
     runtime: RuntimeConnectionService;
     workspaceContext: WorkspaceContextService;
+    i18n: KairoI18nService;
 }
 
-const ProjectSelector: React.FC<ProjectSelectorProps> = ({ activeProject, runtime, workspaceContext }) => {
+const ProjectSelector: React.FC<ProjectSelectorProps> = ({ activeProject, runtime, workspaceContext, i18n }) => {
+    const t: TFunction = React.useCallback((key: KairoI18nKey, params?: Record<string, string | number>) => i18n.t(key, params), [i18n]);
     const [project, setProject] = React.useState<ProjectInfo | undefined>(activeProject.project);
     const [projects, setProjects] = React.useState<ProjectConfig[] | undefined>();
     const [error, setError] = React.useState<string | undefined>();
@@ -95,9 +118,10 @@ const ProjectSelector: React.FC<ProjectSelectorProps> = ({ activeProject, runtim
     if (error) {
         return (
             <div className="kairo-project-selector" data-testid="project-selector">
-                <p className="kairo-error" data-testid="project-selector-error" role="alert">
-                    Failed to load projects: {error}
-                </p>
+                <div className="kairo-error-banner" role="alert">
+                    <span className="codicon codicon-error" aria-hidden="true" />
+                    <span data-testid="project-selector-error">{t('widget.projectSelector.error', { message: error })}</span>
+                </div>
             </div>
         );
     }
@@ -105,7 +129,10 @@ const ProjectSelector: React.FC<ProjectSelectorProps> = ({ activeProject, runtim
     if (projects === undefined) {
         return (
             <div className="kairo-project-selector" data-testid="project-selector">
-                <p className="kairo-empty" data-testid="project-selector-loading">Loading projects…</p>
+                <div className="kairo-loading" data-testid="project-selector-loading">
+                    <span className="kairo-loading-spinner" />
+                    {t('widget.projectSelector.loading')}
+                </div>
             </div>
         );
     }
@@ -113,8 +140,10 @@ const ProjectSelector: React.FC<ProjectSelectorProps> = ({ activeProject, runtim
     if (projects.length === 0) {
         return (
             <div className="kairo-project-selector" data-testid="project-selector">
-                <div className="kairo-no-project" data-testid="no-project">
-                    No projects in this workspace yet. Use <strong>Kairo: Import Project</strong> to import one.
+                <div className="kairo-empty-state" data-testid="no-project">
+                    <span className="codicon codicon-folder" aria-hidden="true" />
+                    <h3 className="kairo-empty-state-title">{t('widget.projectSelector.emptyTitle')}</h3>
+                    <p className="kairo-empty-state-reason">{t('widget.projectSelector.emptyReason')}</p>
                 </div>
             </div>
         );
@@ -122,7 +151,10 @@ const ProjectSelector: React.FC<ProjectSelectorProps> = ({ activeProject, runtim
 
     return (
         <div className="kairo-project-selector" data-testid="project-selector">
-            <h3 className="kairo-project-selector-title">Workspace Projects</h3>
+            <div className="kairo-project-selector-header">
+                <h3 className="kairo-project-selector-title">{t('widget.projectSelector.workspaceProjects')}</h3>
+                <span className="kairo-project-selector-count">{t('widget.projectSelector.projectCount', { count: projects.length })}</span>
+            </div>
             <ul className="kairo-project-list" data-testid="project-list">
                 {projects.map(p => {
                     const isActive = project?.projectId === p.id;
@@ -137,7 +169,7 @@ const ProjectSelector: React.FC<ProjectSelectorProps> = ({ activeProject, runtim
                             >
                                 <span className="kairo-project-item-name">{p.name}</span>
                                 <span className="kairo-project-item-path">{p.rootPath}</span>
-                                {isActive && <span className="kairo-project-item-badge">active</span>}
+                                {isActive && <span className="kairo-project-item-badge">{t('widget.projectSelector.activeBadge')}</span>}
                             </button>
                         </li>
                     );

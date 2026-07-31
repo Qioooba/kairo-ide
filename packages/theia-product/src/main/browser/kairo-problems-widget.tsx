@@ -14,11 +14,12 @@
 
 import * as React from 'react';
 import * as monaco from '@theia/monaco-editor-core';
-import { injectable, inject, postConstruct as _postConstruct } from '@theia/core/shared/inversify';
+import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import { OpenerService, open } from '@theia/core/lib/browser/opener-service';
 import { EditorManager } from '@theia/editor/lib/browser/editor-manager';
 import URI from '@theia/core/lib/common/uri';
+import { KairoI18nService } from '@kairo/i18n';
 
 /** Factory ID for the widget. */
 export const KAIRO_PROBLEMS_FACTORY_ID = 'kairo-problems';
@@ -58,12 +59,12 @@ interface FilterState {
   currentFileOnly: boolean;
 }
 
-function severityLabel(severity: monaco.MarkerSeverity): string {
+function severityLabel(severity: monaco.MarkerSeverity, t: (key: string) => string): string {
   switch (severity) {
-    case monaco.MarkerSeverity.Error: return '错误';
-    case monaco.MarkerSeverity.Warning: return '警告';
-    case monaco.MarkerSeverity.Info: return '信息';
-    default: return '提示';
+    case monaco.MarkerSeverity.Error: return t('widget.problems.severity.error');
+    case monaco.MarkerSeverity.Warning: return t('widget.problems.severity.warning');
+    case monaco.MarkerSeverity.Info: return t('widget.problems.severity.info');
+    default: return t('widget.problems.severity.hint');
   }
 }
 
@@ -92,11 +93,11 @@ function detectType(entry: MarkerEntry): string {
   return 'Java';
 }
 
-function markersToEntries(markers: monaco.editor.IMarker[]): MarkerEntry[] {
+function markersToEntries(markers: monaco.editor.IMarker[], t: (key: string) => string): MarkerEntry[] {
   return markers.map((m, i) => ({
     key: `${m.resource.toString()}:${m.startLineNumber}:${m.startColumn}:${i}`,
     severity: m.severity,
-    severityLabel: severityLabel(m.severity),
+    severityLabel: severityLabel(m.severity, t),
     file: m.resource.path.split('/').pop() ?? m.resource.path,
     filePath: m.resource.path,
     line: m.startLineNumber,
@@ -142,9 +143,12 @@ function saveFilterState(state: FilterState): void {
 interface KairoProblemsProps {
   openerService: OpenerService;
   editorManager: EditorManager;
+  i18n: KairoI18nService;
 }
 
-const KairoProblems: React.FC<KairoProblemsProps> = ({ openerService, editorManager }) => {
+const KairoProblems: React.FC<KairoProblemsProps> = ({ openerService, editorManager, i18n }) => {
+  const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
+  const [, forceUpdate] = React.useReducer(x => x + 1, 0);
   const [entries, setEntries] = React.useState<MarkerEntry[]>([]);
   const [filterState, setFilterState] = React.useState<FilterState>(loadFilterState);
   const [selectedIndex, setSelectedIndex] = React.useState<number>(-1);
@@ -154,12 +158,17 @@ const KairoProblems: React.FC<KairoProblemsProps> = ({ openerService, editorMana
   const [error, setError] = React.useState<string | null>(null);
   const [disabled, setDisabled] = React.useState(false);
 
+  React.useEffect(() => {
+    const disposable = i18n.onDidChangeLanguage(() => forceUpdate());
+    return () => disposable.dispose();
+  }, [i18n]);
+
   const refresh = React.useCallback(() => {
     setLoading(true);
     setError(null);
     try {
       const markers = monaco.editor.getModelMarkers({});
-      const all = markersToEntries(markers);
+      const all = markersToEntries(markers, t);
       setEntries(all);
       setFileSuggestions([...new Set(all.map(e => e.file))].sort());
     } catch (err) {
@@ -167,7 +176,7 @@ const KairoProblems: React.FC<KairoProblemsProps> = ({ openerService, editorMana
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   React.useEffect(() => {
     refresh();
@@ -295,42 +304,27 @@ const KairoProblems: React.FC<KairoProblemsProps> = ({ openerService, editorMana
     <div className={`kairo-widget kairo-problems-widget${disabled ? ' kairo-problems-disabled' : ''}`} aria-busy={loading}>
       {/* Loading State */}
       {loading && (
-        <div className="kairo-loading" role="status" aria-label="Loading problems" style={{ padding: '16px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
-          <div className="kairo-spinner" style={{
-            width: '20px', height: '20px',
-            border: '3px solid var(--theia-dropdown-border)',
-            borderTopColor: 'var(--theia-focusBorder)',
-            borderRadius: '50%',
-            animation: 'kairo-spin 0.8s linear infinite',
-          }} />
-          <span style={{ color: 'var(--theia-descriptionForeground)', fontSize: '13px' }}>Loading problems...</span>
-          <style>{`@keyframes kairo-spin { to { transform: rotate(360deg); } }`}</style>
+        <div className="kairo-loading" role="status" aria-label={t('widget.problems.loading')}>
+          <div className="kairo-spinner" />
+          <span className="kairo-loading-text">{t('widget.problems.loading')}</span>
         </div>
       )}
 
       {/* Error State */}
       {!loading && error && (
-        <div role="alert" aria-live="assertive" style={{ padding: '12px' }}>
-          <div style={{
-            padding: '10px 12px',
-            backgroundColor: 'rgba(244,67,54,0.1)',
-            border: '1px solid rgba(244,67,54,0.3)',
-            borderRadius: '4px',
-            color: 'var(--theia-errorForeground)',
-            fontSize: '13px',
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+        <div role="alert" aria-live="assertive" className="kairo-problems-error">
+          <div className="kairo-problems-error-box">
+            <div className="kairo-problems-error-title">
               <span aria-hidden="true">⚠</span>
-              <strong>Error loading problems</strong>
+              <strong>{t('widget.problems.error')}</strong>
             </div>
-            <p style={{ margin: '4px 0 0 0', fontSize: '12px' }}>{error}</p>
+            <p className="kairo-problems-error-message">{error}</p>
             <button
-              className="theia-button"
+              className="theia-button secondary"
               onClick={refresh}
-              aria-label="Retry loading problems"
-              style={{ marginTop: '8px', fontSize: '11px', padding: '2px 12px' }}
+              aria-label={t('widget.problems.retry')}
             >
-              Retry
+              {t('widget.problems.retry')}
             </button>
           </div>
         </div>
@@ -338,8 +332,8 @@ const KairoProblems: React.FC<KairoProblemsProps> = ({ openerService, editorMana
 
       {/* Disabled State */}
       {!loading && !error && disabled && (
-        <div className="kairo-empty" role="status" aria-label="No editor open" style={{ padding: '16px', textAlign: 'center', color: 'var(--theia-descriptionForeground)', fontSize: '13px', opacity: 0.7 }}>
-          <p style={{ margin: 0 }}>Open a file to see problems.</p>
+        <div className="kairo-empty kairo-problems-disabled" role="status" aria-label={t('widget.problems.noEditor')}>
+          <p>{t('widget.problems.noEditor')}</p>
         </div>
       )}
 
@@ -355,7 +349,7 @@ const KairoProblems: React.FC<KairoProblemsProps> = ({ openerService, editorMana
               checked={filterState.showErrors}
               onChange={e => updateFilter({ showErrors: e.target.checked })}
             />
-            <span className="kairo-problems-count-error">错误 ({counts.errors})</span>
+            <span className="kairo-problems-count-error">{t('widget.problems.errors', { count: counts.errors })}</span>
           </label>
           <label className="kairo-problems-filter-checkbox">
             <input
@@ -363,7 +357,7 @@ const KairoProblems: React.FC<KairoProblemsProps> = ({ openerService, editorMana
               checked={filterState.showWarnings}
               onChange={e => updateFilter({ showWarnings: e.target.checked })}
             />
-            <span className="kairo-problems-count-warning">警告 ({counts.warnings})</span>
+            <span className="kairo-problems-count-warning">{t('widget.problems.warnings', { count: counts.warnings })}</span>
           </label>
           <label className="kairo-problems-filter-checkbox">
             <input
@@ -371,16 +365,16 @@ const KairoProblems: React.FC<KairoProblemsProps> = ({ openerService, editorMana
               checked={filterState.showInfos}
               onChange={e => updateFilter({ showInfos: e.target.checked })}
             />
-            <span className="kairo-problems-count-info">信息 ({counts.infos})</span>
+            <span className="kairo-problems-count-info">{t('widget.problems.infos', { count: counts.infos })}</span>
           </label>
         </div>
 
         {/* File filter with autocomplete */}
-        <div className="kairo-problems-filter-group" style={{ position: 'relative' }}>
+        <div className="kairo-problems-filter-group kairo-problems-filter-group-relative">
           <input
             type="text"
-            className="theia-input"
-            placeholder="按文件名筛选..."
+            className="theia-input kairo-problems-file-input"
+            placeholder={t('widget.problems.filterPlaceholder')}
             value={filterState.fileFilter}
             onChange={e => {
               updateFilter({ fileFilter: e.target.value });
@@ -388,25 +382,20 @@ const KairoProblems: React.FC<KairoProblemsProps> = ({ openerService, editorMana
             }}
             onFocus={() => setShowFileDropdown(true)}
             onBlur={() => setTimeout(() => setShowFileDropdown(false), 200)}
-            style={{ width: '150px' }}
           />
           {showFileDropdown && filterState.fileFilter && (
-            <div style={{
-              position: 'absolute', top: '100%', left: 0, right: 0,
-              background: 'var(--theia-dropdown-background)', border: '1px solid var(--theia-dropdown-border)',
-              maxHeight: '150px', overflowY: 'auto', zIndex: 1000,
-            }}>
+            <div className="kairo-problems-file-dropdown">
               {fileSuggestions
                 .filter(f => f.toLowerCase().includes(filterState.fileFilter.toLowerCase()))
                 .slice(0, 10)
                 .map(f => (
                   <div
                     key={f}
+                    className="kairo-problems-file-dropdown-item"
                     onMouseDown={() => {
                       updateFilter({ fileFilter: f });
                       setShowFileDropdown(false);
                     }}
-                    style={{ padding: '4px 8px', cursor: 'pointer', fontSize: '12px' }}
                   >
                     {f}
                   </div>
@@ -417,14 +406,14 @@ const KairoProblems: React.FC<KairoProblemsProps> = ({ openerService, editorMana
 
         {/* Type filter dropdown */}
         <label className="kairo-problems-filter-label">
-          类型:
+          {t('widget.problems.typeLabel')}
           <select
             value={filterState.typeFilter}
             onChange={e => updateFilter({ typeFilter: e.target.value as TypeFilter })}
             className="theia-select kairo-problems-select"
           >
             {typeFilterOptions.map(o => (
-              <option key={o} value={o}>{o === 'All' ? '全部' : o}</option>
+              <option key={o} value={o}>{o === 'All' ? t('widget.problems.allTypes') : o}</option>
             ))}
           </select>
         </label>
@@ -436,7 +425,7 @@ const KairoProblems: React.FC<KairoProblemsProps> = ({ openerService, editorMana
             checked={filterState.currentFileOnly}
             onChange={e => updateFilter({ currentFileOnly: e.target.checked })}
           />
-          <span>仅当前文件</span>
+          <span>{t('widget.problems.currentFileOnly')}</span>
         </label>
 
         {/* Navigation buttons */}
@@ -444,18 +433,16 @@ const KairoProblems: React.FC<KairoProblemsProps> = ({ openerService, editorMana
           <button
             className="theia-button secondary"
             onClick={() => navigateToProblem('prev')}
-            title="上一个问题 (Shift+F8)"
-            style={{ fontSize: '12px', padding: '2px 8px' }}
+            title={t('widget.problems.previousTooltip')}
           >
-            ↑ 上一个
+            {t('widget.problems.previous')}
           </button>
           <button
             className="theia-button secondary"
             onClick={() => navigateToProblem('next')}
-            title="下一个问题 (F8)"
-            style={{ fontSize: '12px', padding: '2px 8px' }}
+            title={t('widget.problems.nextTooltip')}
           >
-            ↓ 下一个
+            {t('widget.problems.next')}
           </button>
         </div>
       </div>
@@ -464,17 +451,17 @@ const KairoProblems: React.FC<KairoProblemsProps> = ({ openerService, editorMana
       <div className="kairo-widget-body kairo-problems-body">
         {filtered.length === 0 ? (
           <p className="kairo-empty">
-            {entries.length === 0 ? '没有问题。' : '筛选后没有匹配的问题。'}
+            {entries.length === 0 ? t('widget.problems.noProblems') : t('widget.problems.noMatchingProblems')}
           </p>
         ) : (
-          <table className="kairo-problems-table" aria-label="问题列表">
+          <table className="kairo-problems-table" aria-label={t('widget.problems.title')}>
             <thead>
               <tr>
-                <th className="kairo-problems-col-severity">!</th>
-                <th className="kairo-problems-col-file">文件</th>
-                <th className="kairo-problems-col-line">行</th>
-                <th className="kairo-problems-col-message">消息</th>
-                <th className="kairo-problems-col-source">类型</th>
+                <th className="kairo-problems-col-severity">{t('widget.problems.columns.severity')}</th>
+                <th className="kairo-problems-col-file">{t('widget.problems.columns.file')}</th>
+                <th className="kairo-problems-col-line">{t('widget.problems.columns.line')}</th>
+                <th className="kairo-problems-col-message">{t('widget.problems.columns.message')}</th>
+                <th className="kairo-problems-col-source">{t('widget.problems.columns.source')}</th>
               </tr>
             </thead>
             <tbody>
@@ -521,6 +508,9 @@ export class KairoProblemsWidget extends ReactWidget {
   @inject(EditorManager)
   protected readonly editorManager!: EditorManager;
 
+  @inject(KairoI18nService)
+  protected readonly i18n!: KairoI18nService;
+
   constructor() {
     super();
     this.id = KAIRO_PROBLEMS_FACTORY_ID;
@@ -531,10 +521,23 @@ export class KairoProblemsWidget extends ReactWidget {
     this.addClass('kairo-widget');
   }
 
+  @postConstruct()
+  protected init(): void {
+    this.title.label = this.i18n.t('widget.problems.title');
+    this.title.caption = this.i18n.t('widget.problems.caption');
+    this.toDispose.push(this.i18n.onDidChangeLanguage(() => {
+      this.title.label = this.i18n.t('widget.problems.title');
+      this.title.caption = this.i18n.t('widget.problems.caption');
+      this.update();
+    }));
+    this.update();
+  }
+
   render(): React.ReactNode {
     return React.createElement(KairoProblems, {
       openerService: this.openerService,
       editorManager: this.editorManager,
+      i18n: this.i18n,
     });
   }
 }

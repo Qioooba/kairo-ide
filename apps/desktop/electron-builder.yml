@@ -18,14 +18,19 @@ npmRebuild: false
 #   bundled/**/*         — JDT LS + Tomcat 6 (copied from project root)
 files:
   - lib/main.js
-  - lib/main.js.map
   - lib/preload.js
-  - lib/preload.js.map
   - lib/process-manager.js
-  - lib/process-manager.js.map
+  - lib/jdk-check.js
   - lib/frontend/**/*
   - lib/backend/**/*
   - package.json
+  # Exclude source maps — production builds don't need them (~133 MB saved).
+  - "!lib/**/*.map"
+  # Exclude test files from the production package.
+  - "!lib/**/*.test.js"
+  # Node_modules are controlled by the dependencies field in package.json.
+  # Only @kairo/protocol is listed as a runtime dependency; all other packages
+  # are in devDependencies so electron-builder won't include them.
 asar: true
 asarUnpack:
   - lib/backend/native/**/*

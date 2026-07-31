@@ -1,34 +1,39 @@
 import * as React from 'react';
-import { injectable, inject } from '@theia/core/shared/inversify';
+import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import { CommandService } from '@theia/core/lib/common';
+import { KairoI18nService } from '@kairo/i18n';
 import { BuildStore, BuildRun, BuildDiagnostic, ConnectionState } from './build-store';
 
-function stateIcon(state: BuildRun['state'] | 'idle'): string {
+function stateIconClass(state: BuildRun['state'] | 'idle' | 'disconnected'): string {
     switch (state) {
-        case 'pending': return '\u25CB'; // hollow circle
-        case 'running': return '\u25D0'; // half circle (left black)
-        case 'succeeded': return '\u2713'; // check mark
-        case 'failed': return '\u2717'; // ballot x
-        case 'cancelled': return '\u25A1'; // white square
-        case 'idle': return '\u25CB'; // hollow circle
+        case 'pending': return 'codicon-circle-outline';
+        case 'running': return 'codicon-sync codicon-modifier-spin';
+        case 'succeeded': return 'codicon-check';
+        case 'failed': return 'codicon-error';
+        case 'cancelled': return 'codicon-close';
+        case 'idle': return 'codicon-circle-outline';
+        case 'disconnected': return 'codicon-warning';
     }
 }
 
-function severityIcon(severity: BuildDiagnostic['severity']): string {
+function severityIconClass(severity: BuildDiagnostic['severity']): string {
     switch (severity) {
-        case 'error': return '\u274c';
-        case 'warning': return '\u26a0\ufe0f';
-        case 'info': return '\u2139\ufe0f';
+        case 'error': return 'codicon-error';
+        case 'warning': return 'codicon-warning';
+        case 'info': return 'codicon-info';
     }
 }
 
 interface BuildViewProps {
     store: BuildStore;
     commandService: CommandService;
+    i18n: KairoI18nService;
 }
 
-const BuildViewComponent: React.FC<BuildViewProps> = ({ store, commandService }) => {
+const BuildViewComponent: React.FC<BuildViewProps> = ({ store, commandService, i18n }) => {
+    const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
+    const [, forceUpdate] = React.useReducer(x => x + 1, 0);
     const [builds, setBuilds] = React.useState<BuildRun[]>(store.getBuilds());
     const [connectionState, setConnectionState] = React.useState<ConnectionState>(store.getConnectionState());
     const [cancelError, setCancelError] = React.useState('');
@@ -43,6 +48,11 @@ const BuildViewComponent: React.FC<BuildViewProps> = ({ store, commandService })
         const sub = store.onConnectionStateChange(s => setConnectionState(s));
         return () => sub.dispose();
     }, [store]);
+
+    React.useEffect(() => {
+        const disposable = i18n.onDidChangeLanguage(() => forceUpdate());
+        return () => disposable.dispose();
+    }, [i18n]);
 
     const latest = builds.length > 0 ? builds[builds.length - 1] : undefined;
     const isBusy = latest?.state === 'running' || latest?.state === 'pending';
@@ -64,13 +74,30 @@ const BuildViewComponent: React.FC<BuildViewProps> = ({ store, commandService })
         }
     };
 
+    const buildStateLabel = (state: BuildRun['state'] | 'idle' | 'disconnected'): string => {
+        switch (state) {
+            case 'idle': return t('widget.builds.state.idle');
+            case 'pending': return t('widget.builds.state.pending');
+            case 'running': return t('widget.builds.state.running');
+            case 'succeeded': return t('widget.builds.state.succeeded');
+            case 'failed': return t('widget.builds.state.failed');
+            case 'cancelled': return t('widget.builds.state.cancelled');
+            case 'disconnected': return t('common.disconnected');
+        }
+    };
+
     if (connectionState === 'loading') {
         return (
             <div className="kairo-widget" data-testid="build-view">
                 <div className="kairo-widget-header" data-testid="build-view-header">
-                    <span className="kairo-widget-title">Build Status</span>
+                    <span className="kairo-widget-title">{t('widget.builds.title')}</span>
                 </div>
-                <p className="kairo-empty" data-testid="build-loading">Loading...</p>
+                <div className="kairo-widget-body">
+                    <div className="kairo-empty-state" data-testid="build-loading">
+                        <span className="kairo-empty-state-glyph codicon codicon-loading codicon-modifier-spin" aria-hidden="true" />
+                        <h3 className="kairo-empty-state-title">{t('common.loading')}</h3>
+                    </div>
+                </div>
             </div>
         );
     }
@@ -79,14 +106,23 @@ const BuildViewComponent: React.FC<BuildViewProps> = ({ store, commandService })
         return (
             <div className="kairo-widget" data-testid="build-view">
                 <div className="kairo-widget-header" data-testid="build-view-header">
-                    <span className="kairo-widget-title">Build Status</span>
+                    <span className="kairo-widget-title">{t('widget.builds.title')}</span>
                     <span className="kairo-build-state" data-testid="build-state" data-state="disconnected">
-                        Disconnected
+                        <span className={`codicon ${stateIconClass('disconnected')}`} aria-hidden="true" /> {buildStateLabel('disconnected')}
                     </span>
                 </div>
-                <p className="kairo-empty" data-testid="build-disconnected">
-                    Cannot reach the runtime agent. Build commands are unavailable.
-                </p>
+                <div className="kairo-widget-body">
+                    <div className="kairo-empty-state" data-testid="build-disconnected">
+                        <span className="kairo-empty-state-glyph codicon codicon-plug" aria-hidden="true" />
+                        <h3 className="kairo-empty-state-title">{t('widget.builds.disconnectedStateTitle')}</h3>
+                        <p className="kairo-empty-state-reason">{t('widget.builds.disconnectedStateReason')}</p>
+                        <div className="kairo-empty-state-action">
+                            <button className="theia-button main" onClick={() => commandService.executeCommand('kairo.agent.reconnect')}>
+                                {t('widget.builds.disconnectedStateAction')}
+                            </button>
+                        </div>
+                    </div>
+                </div>
             </div>
         );
     }
@@ -94,7 +130,7 @@ const BuildViewComponent: React.FC<BuildViewProps> = ({ store, commandService })
     return (
         <div className="kairo-widget" data-testid="build-view">
             <div className="kairo-widget-header" data-testid="build-view-header">
-                <span className="kairo-widget-title">Build Status</span>
+                <span className="kairo-widget-title">{t('widget.builds.title')}</span>
                 {latest && (
                     <span
                         className="kairo-build-state"
@@ -102,47 +138,56 @@ const BuildViewComponent: React.FC<BuildViewProps> = ({ store, commandService })
                         data-state={latest.state}
                         aria-live="polite"
                     >
-                        {stateIcon(latest.state)} {latest.state}
+                        <span className={`codicon ${stateIconClass(latest.state)}`} aria-hidden="true" /> {buildStateLabel(latest.state)}
                     </span>
                 )}
                 {!latest && (
                     <span className="kairo-build-state" data-testid="build-state" data-state="idle" aria-live="polite">
-                        {stateIcon('idle')} idle
+                        <span className={`codicon ${stateIconClass('idle')}`} aria-hidden="true" /> {buildStateLabel('idle')}
                     </span>
                 )}
             </div>
 
-            <div className="kairo-widget-toolbar" data-testid="build-view-toolbar">
+            <div className="kairo-build-toolbar" data-testid="build-view-toolbar">
                 <button
-                    className="theia-button"
+                    className="theia-button main"
                     data-testid="build-button"
                     onClick={handleBuild}
                     disabled={isBusy || isDisconnected}
-                    aria-label="Build project"
+                    aria-label={t('widget.builds.toolbar.buildAria')}
                 >
-                    Build
-                </button>
-                <button
-                    className="theia-button"
-                    data-testid="clean-build-button"
-                    onClick={handleCleanBuild}
-                    disabled={isBusy || isDisconnected}
-                    aria-label="Clean and build project"
-                >
-                    Clean Build
+                    <span className="codicon codicon-play" aria-hidden="true" />
+                    {t('widget.builds.toolbar.build')}
                 </button>
                 <button
                     className="theia-button secondary"
+                    data-testid="clean-build-button"
+                    onClick={handleCleanBuild}
+                    disabled={isBusy || isDisconnected}
+                    aria-label={t('widget.builds.toolbar.cleanBuildAria')}
+                >
+                    <span className="codicon codicon-trash" aria-hidden="true" />
+                    {t('widget.builds.toolbar.cleanBuild')}
+                </button>
+                <div className="kairo-build-toolbar-separator" />
+                <button
+                    className="theia-button toolbar"
                     data-testid="cancel-build-button"
                     onClick={handleCancel}
                     disabled={!isBusy || isDisconnected || cancelling}
-                    aria-label="Cancel current build"
+                    aria-label={t('widget.builds.toolbar.cancelBuildAria')}
                 >
-                    {cancelling ? 'Cancelling…' : 'Cancel'}
+                    <span className="codicon codicon-primitive-square" aria-hidden="true" />
+                    {cancelling ? t('widget.builds.toolbar.cancelling') : t('widget.builds.toolbar.cancel')}
                 </button>
             </div>
 
-            {cancelError && <div className="theia-error" role="alert" data-testid="cancel-build-error">{cancelError}</div>}
+            {cancelError && (
+                <div className="kairo-error-banner" role="alert" data-testid="cancel-build-error">
+                    <span className="codicon codicon-error" aria-hidden="true" />
+                    <span>{cancelError}</span>
+                </div>
+            )}
 
             {latest && latest.summary && (
                 <div className="kairo-build-summary" data-testid="build-summary">
@@ -152,7 +197,7 @@ const BuildViewComponent: React.FC<BuildViewProps> = ({ store, commandService })
 
             {latest && latest.diagnostics && latest.diagnostics.length > 0 && (
                 <div className="kairo-widget-section" data-testid="build-diagnostics">
-                    <div className="kairo-section-title">Diagnostics</div>
+                    <div className="kairo-section-title">{t('widget.builds.diagnosticsTitle')}</div>
                     <ul className="kairo-diagnostics-list" data-testid="diagnostics-list">
                         {latest.diagnostics.map((d, i) => (
                             <li
@@ -160,7 +205,7 @@ const BuildViewComponent: React.FC<BuildViewProps> = ({ store, commandService })
                                 className={`kairo-diagnostic kairo-diagnostic-${d.severity}`}
                                 data-testid={`diagnostic-${d.severity}`}
                             >
-                                <span className="kairo-diagnostic-icon">{severityIcon(d.severity)}</span>
+                                <span className={`kairo-diagnostic-icon codicon ${severityIconClass(d.severity)}`} aria-hidden="true" />
                                 <span className="kairo-diagnostic-location">
                                     {d.file}:{d.line}:{d.column}
                                 </span>
@@ -172,17 +217,23 @@ const BuildViewComponent: React.FC<BuildViewProps> = ({ store, commandService })
             )}
 
             <div className="kairo-widget-section" data-testid="build-history">
-                <div className="kairo-section-title">Build History</div>
+                <div className="kairo-section-title">{t('widget.builds.historyTitle')}</div>
                 {isEmpty ? (
-                    <p className="kairo-empty" data-testid="build-empty">
-                        No builds yet. Press <strong>Build</strong> to start one.
-                    </p>
+                    <div className="kairo-empty-state" data-testid="build-empty">
+                        <span className="kairo-empty-state-glyph codicon codicon-tools" aria-hidden="true" />
+                        <h3 className="kairo-empty-state-title">{t('widget.builds.emptyStateTitle')}</h3>
+                        <p className="kairo-empty-state-reason">{t('widget.builds.emptyStateReason')}</p>
+                        <div className="kairo-empty-state-action">
+                            <button className="theia-button main" onClick={handleBuild}>{t('widget.builds.emptyStateAction')}</button>
+                        </div>
+                    </div>
                 ) : (
                     <ul className="kairo-build-list" data-testid="build-list">
                         {builds.map(b => (
                             <li key={b.id} className="kairo-build-item" data-testid={`build-${b.id}`}>
-                                <span className="kairo-build-state-icon">{stateIcon(b.state)}</span>
+                                <span className={`kairo-build-state-icon codicon ${stateIconClass(b.state)}`} aria-hidden="true" />
                                 <span className="kairo-build-id">{b.id}</span>
+                                <span className="kairo-build-item-state" data-state={b.state}>{buildStateLabel(b.state)}</span>
                                 <span className="kairo-build-time">{b.startTime}</span>
                                 {b.endTime && (
                                     <span className="kairo-build-end-time">{b.endTime}</span>
@@ -202,6 +253,7 @@ export class BuildViewWidget extends ReactWidget {
 
     @inject(BuildStore) protected readonly buildStore!: BuildStore;
     @inject(CommandService) protected readonly commandService!: CommandService;
+    @inject(KairoI18nService) protected readonly i18n!: KairoI18nService;
 
     constructor() {
         super();
@@ -211,10 +263,22 @@ export class BuildViewWidget extends ReactWidget {
         this.addClass('kairo-widget');
     }
 
+    @postConstruct()
+    protected init(): void {
+        this.updateTitle();
+        this.toDispose.push(this.i18n.onDidChangeLanguage(() => this.updateTitle()));
+    }
+
+    protected updateTitle(): void {
+        this.title.label = this.i18n.t('widget.builds.title');
+        this.title.caption = this.i18n.t('widget.builds.caption');
+    }
+
     protected render(): React.ReactNode {
         return React.createElement(BuildViewComponent, {
             store: this.buildStore,
             commandService: this.commandService,
+            i18n: this.i18n,
         });
     }
 }

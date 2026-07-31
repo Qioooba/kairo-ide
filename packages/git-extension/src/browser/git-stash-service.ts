@@ -32,7 +32,7 @@ export class GitStashService {
   readonly onDidChange: Event<void> = this.onDidChangeEmitter.event;
 
   private getCwd(): string {
-    return this.gitService.getRepoRoot() || process.cwd();
+    return this.gitService.getRepoRoot() || (typeof process !== 'undefined' ? process.cwd() : '');
   }
 
   private async execGit(args: string[]): Promise<string> {

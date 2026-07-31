@@ -23,6 +23,7 @@ import {
 import { Command, CommandContribution, CommandRegistry } from '@theia/core/lib/common';
 import { KeybindingContribution, KeybindingRegistry } from '@theia/core/lib/browser/keybinding';
 import { DisposableCollection } from '@theia/core/lib/common/disposable';
+import { KairoI18nService } from '@kairo/i18n';
 
 export namespace KairoFocusCommands {
   export const FOCUS_EDITOR: Command = {
@@ -64,6 +65,8 @@ const PANEL_ORDER: PanelArea[] = ['editor', 'sidebar', 'bottom', 'statusBar'];
 export class KairoFocusManagement implements FrontendApplicationContribution, CommandContribution, KeybindingContribution {
   @inject(ApplicationShell)
   protected readonly shell!: ApplicationShell;
+  @inject(KairoI18nService)
+  protected readonly i18n!: KairoI18nService;
 
   protected readonly toDispose = new DisposableCollection();
   protected currentPanelIndex = 0;
@@ -240,9 +243,9 @@ export class KairoFocusManagement implements FrontendApplicationContribution, Co
     const skipLink = document.createElement('a');
     skipLink.id = 'kairo-skip-to-content';
     skipLink.href = '#theia-main-content-panel';
-    skipLink.textContent = '跳转到主要内容';
+    skipLink.textContent = this.i18n.t('focus.skipToContent');
     skipLink.setAttribute('role', 'link');
-    skipLink.setAttribute('aria-label', '跳过导航，跳转到编辑器主内容区域');
+    skipLink.setAttribute('aria-label', this.i18n.t('focus.skipToContentAria'));
     skipLink.style.cssText = `
       position: absolute;
       top: -40px;

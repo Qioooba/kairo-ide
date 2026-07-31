@@ -13,6 +13,7 @@
   "references": [
     { "path": "../protocol" },
     { "path": "../runtime-extension" },
-    { "path": "../project-extension" }
+    { "path": "../project-extension" },
+    { "path": "../i18n" }
   ]
 }

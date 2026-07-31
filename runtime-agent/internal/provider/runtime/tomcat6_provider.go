@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
@@ -369,6 +370,34 @@ func (p *Tomcat6Provider) cleanupInstance(inst *runningInstance) {
 			return
 		}
 	}
+}
+
+// ReloadContext triggers a Tomcat context reload for the given server by
+// touching the WEB-INF/web.xml file. This causes Tomcat to reload the web
+// application context without restarting the entire server.
+// Note: On Java 9+, this may be unstable due to reflection restrictions.
+func (p *Tomcat6Provider) ReloadContext(ctx context.Context, serverID domain.ServerID) error {
+	p.mu.RLock()
+	inst, ok := p.instances[serverID]
+	p.mu.RUnlock()
+	if !ok {
+		return domain.ErrServerNotFound
+	}
+
+	webXML := inst.plan.WebappDir + "/WEB-INF/web.xml"
+	now := time.Now()
+	if err := os.Chtimes(webXML, now, now); err != nil {
+		return fmt.Errorf("touch web.xml for context reload: %w", err)
+	}
+
+	p.publishEvent(events.EventHotReloadStatus, string(inst.plan.WorkspaceID),
+		"Context reload triggered",
+		jsonMarshal(map[string]string{
+			"serverId": string(serverID),
+			"status":   string(HotReloadSynced),
+		}))
+
+	return nil
 }
 
 // jsonMarshal marshals a value to json.RawMessage, panicking on error

@@ -43,19 +43,19 @@ export const KAIRO_MONACO_THEME: monaco.editor.IStandaloneThemeData = {
         'editor.lineHighlightBackground': '#252629',
         'editorLineNumber.foreground': '#5d6166',   // --theia-editorLineNumber-foreground
         'editorLineNumber.activeForeground': '#c5c8cc', // --theia-editorLineNumber-activeForeground
-        'editorCursor.foreground': '#c8a8ff',       // --theia-editorCursor-foreground
-        'editor.selectionBackground': '#7C3AED55',
-        'editor.inactiveSelectionBackground': '#7C3AED33',
+        'editorCursor.foreground': '#a8d8ff',       // --theia-editorCursor-foreground
+        'editor.selectionBackground': '#4a9eff55',
+        'editor.inactiveSelectionBackground': '#4a9eff33',
         'editorWidget.background': '#252629',       // --theia-editorWidget-background
         'editorWidget.border': '#3d4148',           // --theia-editorWidget-border
-        'editorBracketMatch.border': '#7C3AED',     // --theia-editorBracketMatch-border
-        'editorBracketMatch.background': '#7C3AED22',
+        'editorBracketMatch.border': '#4a9eff',     // --theia-editorBracketMatch-border
+        'editorBracketMatch.background': '#4a9eff22',
         'editorIndentGuide.background1': '#2c2e33',
         'editorIndentGuide.activeBackground1': '#4a4d54',
         'editorWhitespace.foreground': '#3a3d42',
         'scrollbarSlider.background': '#4a4d5480',
         'scrollbarSlider.hoverBackground': '#5a5d63a0',
-        'scrollbarSlider.activeBackground': '#7C3AEDa0',
+        'scrollbarSlider.activeBackground': '#4a9effa0',
     },
 };
 
@@ -149,19 +149,19 @@ export const KAIRO_IDEA_MONACO_THEME: monaco.editor.IStandaloneThemeData = {
         'editor.lineHighlightBackground': '#252629',
         'editorLineNumber.foreground': '#5d6166',
         'editorLineNumber.activeForeground': '#c5c8cc',
-        'editorCursor.foreground': '#c8a8ff',
-        'editor.selectionBackground': '#7C3AED55',
-        'editor.inactiveSelectionBackground': '#7C3AED33',
+        'editorCursor.foreground': '#a8d8ff',
+        'editor.selectionBackground': '#4a9eff55',
+        'editor.inactiveSelectionBackground': '#4a9eff33',
         'editorWidget.background': '#252629',
         'editorWidget.border': '#3d4148',
-        'editorBracketMatch.border': '#7C3AED',
-        'editorBracketMatch.background': '#7C3AED22',
+        'editorBracketMatch.border': '#4a9eff',
+        'editorBracketMatch.background': '#4a9eff22',
         'editorIndentGuide.background1': '#2c2e33',
         'editorIndentGuide.activeBackground1': '#4a4d54',
         'editorWhitespace.foreground': '#3a3d42',
         'scrollbarSlider.background': '#4a4d5480',
         'scrollbarSlider.hoverBackground': '#5a5d63a0',
-        'scrollbarSlider.activeBackground': '#7C3AEDa0',
+        'scrollbarSlider.activeBackground': '#4a9effa0',
     },
 };
 
@@ -177,7 +177,7 @@ export const KAIRO_THEME_COLOR_OVERRIDES = [
     { id: 'editor.foreground', defaults: { dark: '#dfe1e5', light: '#1f1f1f' }, description: 'Editor foreground' },
     { id: 'editorWidget.background', defaults: { dark: '#252629', light: '#ffffff' }, description: 'Editor widget background' },
     { id: 'input.background', defaults: { dark: '#1a1b1e', light: '#ffffff' }, description: 'Input background' },
-    { id: 'button.background', defaults: { dark: '#7C3AED', light: '#1a73e8' }, description: 'Button background' },
+    { id: 'button.background', defaults: { dark: '#4a9eff', light: '#1a73e8' }, description: 'Button background' },
     { id: 'button.foreground', defaults: { dark: '#ffffff', light: '#ffffff' }, description: 'Button foreground' },
     { id: 'statusBar.background', defaults: { dark: '#1a1b1e', light: '#fafafa' }, description: 'Status bar background' },
     { id: 'statusBar.foreground', defaults: { dark: '#c5c8cc', light: '#1f1f1f' }, description: 'Status bar foreground' },

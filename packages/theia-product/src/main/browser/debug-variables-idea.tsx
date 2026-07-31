@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { KairoI18nService } from '@kairo/i18n';
 import { KairoDebugSessionService } from './kairo-debug-session-service';
 
 /* ------------------------------------------------------------------ */
@@ -19,6 +20,7 @@ interface VariableNode {
 
 interface IDEAVariablesTreeProps {
     sessionService: KairoDebugSessionService;
+    i18n: KairoI18nService;
 }
 
 /* ------------------------------------------------------------------ */
@@ -34,7 +36,6 @@ interface TreeRowProps {
 }
 
 const TreeRow: React.FC<TreeRowProps> = ({ node, depth, sessionService, onToggle, onSetValue }) => {
-    const [hovered, setHovered] = React.useState(false);
     const [editing, setEditing] = React.useState(false);
     const [editValue, setEditValue] = React.useState('');
     const inputRef = React.useRef<HTMLInputElement>(null);
@@ -70,68 +71,39 @@ const TreeRow: React.FC<TreeRowProps> = ({ node, depth, sessionService, onToggle
     return (
         <div>
             <div
-                className="kairo-debug-var-row-idea"
-                style={{
-                    paddingLeft: indent + 4,
-                    paddingRight: 4,
-                    paddingTop: 1,
-                    paddingBottom: 1,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 3,
-                    cursor: hasChildren ? 'pointer' : 'default',
-                    background: hovered ? 'var(--theia-list-hoverBackground)' : 'transparent',
-                    lineHeight: '18px',
-                    fontSize: '11px',
-                    fontFamily: 'var(--theia-ui-font-family)',
-                    whiteSpace: 'nowrap',
-                    userSelect: 'text',
-                    position: 'relative',
-                }}
+                className={`kairo-debug-var-row-idea ${hasChildren ? 'has-children' : ''}`}
+                style={{ paddingLeft: indent + 4 }}
                 onClick={() => hasChildren && onToggle(node)}
-                onMouseEnter={() => setHovered(true)}
-                onMouseLeave={() => setHovered(false)}
                 onDoubleClick={handleDoubleClick}
             >
                 <span
-                    style={{
-                        width: 12,
-                        textAlign: 'center',
-                        fontSize: '8px',
-                        flexShrink: 0,
-                        color: 'var(--theia-disabledForeground)',
-                        opacity: hasChildren ? 1 : 0,
-                    }}
+                    className={`kairo-debug-var-toggle ${hasChildren ? 'opaque' : ''}`}
+                    aria-hidden="true"
                 >
                     {node.loading ? '…' : (node.expanded ? '▾' : '▸')}
                 </span>
                 <span
                     className="codicon"
-                    style={{ fontSize: 10, flexShrink: 0, color: getIconColor(node.type, node.value) }}
+                    style={{ color: getIconColor(node.type, node.value) }}
+                    aria-hidden="true"
                 >
                     {getIcon(node.type, node.value, hasChildren, node.expanded)}
                 </span>
                 <span
-                    className="kairo-debug-var-name-idea"
-                    style={{
-                        color: 'var(--theia-debugTokenExpression-name)',
-                        flexShrink: 0,
-                        fontWeight: depth === 0 ? 600 : 400,
-                    }}
+                    className={`kairo-debug-var-name-idea ${depth === 0 ? 'root' : ''}`}
                 >
                     {node.name}
                 </span>
                 {node.type && (
-                    <>
-                        <span style={{ color: 'var(--theia-debugTokenExpression-type)', opacity: 0.7, fontSize: '10px', flexShrink: 0 }}>
-                            : {node.type}
-                        </span>
-                    </>
+                    <span className="kairo-debug-var-type-idea">
+                        : {node.type}
+                    </span>
                 )}
-                <span style={{ color: 'var(--theia-debugTokenExpression-type)', flexShrink: 0 }}>=</span>
+                <span className="kairo-debug-var-type-idea" aria-hidden="true">=</span>
                 {editing ? (
                     <input
                         ref={inputRef}
+                        className="kairo-debug-var-input"
                         value={editValue}
                         onChange={e => setEditValue(e.target.value)}
                         onBlur={commitEdit}
@@ -139,23 +111,11 @@ const TreeRow: React.FC<TreeRowProps> = ({ node, depth, sessionService, onToggle
                             if (e.key === 'Enter') commitEdit();
                             if (e.key === 'Escape') setEditing(false);
                         }}
-                        style={{
-                            background: 'var(--theia-input-background)',
-                            color: 'var(--theia-input-foreground)',
-                            border: '1px solid var(--theia-focusBorder)',
-                            padding: '0 2px',
-                            fontSize: '11px',
-                            flex: 1,
-                            minWidth: 40,
-                            outline: 'none',
-                            height: 16,
-                        }}
                         onClick={e => e.stopPropagation()}
                     />
                 ) : (
                     <span
                         className={`kairo-debug-var-value-idea ${valueStyle.cls}`}
-                        style={{ ...valueStyle.style, overflow: 'hidden', textOverflow: 'ellipsis' }}
                     >
                         {node.value}
                     </span>
@@ -179,7 +139,8 @@ const TreeRow: React.FC<TreeRowProps> = ({ node, depth, sessionService, onToggle
 /*  Main Variables Tree                                                 */
 /* ------------------------------------------------------------------ */
 
-export const IDEAVariablesTree: React.FC<IDEAVariablesTreeProps> = ({ sessionService }) => {
+export const IDEAVariablesTree: React.FC<IDEAVariablesTreeProps> = ({ sessionService, i18n }) => {
+    const t = React.useCallback((key: string) => i18n.t(key as any), [i18n]);
     const [roots, setRoots] = React.useState<VariableNode[]>([]);
     const [loading, setLoading] = React.useState(false);
     const [error, setError] = React.useState<string>('');
@@ -275,15 +236,15 @@ export const IDEAVariablesTree: React.FC<IDEAVariablesTreeProps> = ({ sessionSer
 
     if (loading && roots.length === 0) {
         return (
-            <div style={{ padding: '8px 12px', color: 'var(--theia-descriptionForeground)', fontSize: '11px' }}>
-                Collecting variables...
+            <div className="kairo-debug-section-empty">
+                {t('debug.toolWindow.loadingVariables')}
             </div>
         );
     }
 
     if (error) {
         return (
-            <div style={{ padding: '8px 12px', color: 'var(--theia-errorForeground)', fontSize: '11px' }}>
+            <div className="kairo-debug-section-empty">
                 {error}
             </div>
         );
@@ -291,14 +252,14 @@ export const IDEAVariablesTree: React.FC<IDEAVariablesTreeProps> = ({ sessionSer
 
     if (roots.length === 0) {
         return (
-            <div style={{ padding: '8px 12px', color: 'var(--theia-descriptionForeground)', fontSize: '11px' }}>
-                {sessionService.isSuspended ? 'No variables' : 'Session not paused'}
+            <div className="kairo-debug-section-empty">
+                {sessionService.isSuspended ? t('debug.toolWindow.noVariables') : t('debug.toolWindow.sessionNotPaused')}
             </div>
         );
     }
 
     return (
-        <div className="kairo-debug-variables-idea" style={{ overflow: 'auto', flex: 1 }}>
+        <div className="kairo-debug-variables-idea">
             {roots.map((node, i) => (
                 <TreeRow
                     key={`root-${i}`}

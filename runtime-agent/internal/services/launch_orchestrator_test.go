@@ -116,6 +116,10 @@ func (m *mockServerRunner) Recover(id string) (*api.ServerResponse, error) {
 	return nil, nil
 }
 
+func (m *mockServerRunner) ReloadContext(id string) error {
+	return nil
+}
+
 // makeValidConfig 创建有效的启动配置
 func makeValidConfig(t *testing.T) api.LaunchOrchestratorConfig {
 	t.Helper()

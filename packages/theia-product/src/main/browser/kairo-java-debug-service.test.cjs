@@ -1,51 +1,6 @@
 'use strict';
 
-const { register } = require('node:module');
-const { pathToFileURL } = require('node:url');
-register('data:text/javascript,' + encodeURIComponent(`
-export function resolve(specifier, context, nextResolve) {
-  if (/\.(css|svg|ttf|woff|woff2|png|jpg|gif)$/.test(specifier)) {
-    return { url: 'data:text/javascript,export default {};', format: 'module', shortCircuit: true };
-  }
-  if (specifier === '@theia/monaco-editor-core' || specifier.includes('monaco-editor-core')) {
-    return { url: 'data:text/javascript,export default {};', format: 'module', shortCircuit: true };
-  }
-  return nextResolve(specifier, context);
-}
-`), pathToFileURL(__filename));
-
-// Stub CommonJS .css requires that the ESM hook above cannot see.
-// @theia/core's CommonJS modules sometimes `require('./foo.css')`,
-// which Node's default CJS loader tries to compile as JavaScript and
-// throws "SyntaxError: Unexpected token ':'". We install a no-op
-// extension so .css requires resolve to an empty module.
-const _Module = require('module');
-_Module._extensions['.css'] = function (mod, filename) {
-  mod._compile('module.exports = {};', filename);
-};
-
-const { enableJSDOM } = require('@theia/core/lib/browser/test/jsdom');
-const disableJSDOM = enableJSDOM();
-
-if (!global.DragEvent) {
-  global.DragEvent = class DragEvent extends global.MouseEvent {
-    constructor(type, init) {
-      super(type, init);
-      this.dataTransfer = (init && init.dataTransfer) || null;
-    }
-  };
-}
-
-// Theia stores a frontend config singleton that throws when
-// `FrontendApplicationConfigProvider.get()` is called before
-// `FrontendApplicationConfigProvider.set(...)` has been called once.
-// The WindowTitleService reads the config at module-load time, so we
-// must set the config before the first `require()` that pulls in
-// the Theia window-title module.
-const { FrontendApplicationConfigProvider } = require('@theia/core/lib/browser/frontend-application-config-provider');
-FrontendApplicationConfigProvider.set({
-  applicationName: 'Kairo IDE',
-});
+require('../../../test/frontend-setup.cjs');
 
 const test = require('node:test');
 const assert = require('node:assert/strict');

@@ -78,7 +78,7 @@ test('KAIRO_THEME_COLOR_OVERRIDES includes statusBar colors (N-034)', () => {
 });
 
 test('KAIRO_THEME_COLOR_OVERRIDES includes button colors (N-034)', () => {
-  assert.match(contributionSource, /id: 'button\.background'.*defaults:.*dark: '#7C3AED'/s);
+  assert.match(contributionSource, /id: 'button\.background'.*defaults:.*dark: '#4a9eff'/s);
   assert.match(contributionSource, /id: 'button\.foreground'.*defaults:.*dark: '#ffffff'/s);
 });
 

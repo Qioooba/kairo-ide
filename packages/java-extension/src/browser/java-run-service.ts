@@ -32,7 +32,7 @@ export class JavaRunService {
 
   getRuntimeUrl(): string {
     return (window as any).__KAIRO_RUNTIME_URL__ ||
-      process.env.KAIRO_RUNTIME_URL ||
+      (typeof process !== 'undefined' && process.env ? process.env.KAIRO_RUNTIME_URL : undefined) ||
       DEFAULT_RUNTIME_URL;
   }
 

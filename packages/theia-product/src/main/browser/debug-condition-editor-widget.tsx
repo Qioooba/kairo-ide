@@ -8,9 +8,10 @@
  */
 
 import * as React from 'react';
-import { injectable, postConstruct } from '@theia/core/shared/inversify';
+import { injectable, postConstruct, inject } from '@theia/core/shared/inversify';
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import { Emitter, Event } from '@theia/core/lib/common/event';
+import { KairoI18nService, type KairoI18nKey } from '@kairo/i18n';
 
 export const KAIRO_DEBUG_CONDITION_EDITOR_FACTORY_ID = 'kairo-debug-condition-editor';
 
@@ -40,6 +41,8 @@ export interface ConditionEditorState {
 /*  React Component                                                     */
 /* ------------------------------------------------------------------ */
 
+type TFunction = (key: KairoI18nKey, params?: Record<string, string | number>) => string;
+
 interface ConditionEditorViewProps {
     state: ConditionEditorState;
     onConditionChange: (value: string) => void;
@@ -50,41 +53,33 @@ interface ConditionEditorViewProps {
     onHitCountChange: (mode: string, target: number) => void;
     onApply: () => void;
     onClear: () => void;
+    i18n: KairoI18nService;
 }
 
 const FilterTypeTabs: React.FC<{
     active: FilterType;
     onChange: (type: FilterType) => void;
-}> = ({ active, onChange }) => {
-    const tabs: { type: FilterType; label: string; icon: string }[] = [
-        { type: 'condition', label: 'Condition', icon: 'codicon-symbol-operator' },
-        { type: 'thread', label: 'Thread', icon: 'codicon-debug-console' },
-        { type: 'instance', label: 'Instance', icon: 'codicon-symbol-class' },
-        { type: 'stackDepth', label: 'Stack', icon: 'codicon-callstack-view' },
-        { type: 'hitCount', label: 'Hit Count', icon: 'codicon-debug-hint' },
+    t: TFunction;
+}> = ({ active, onChange, t }) => {
+    const tabs: { type: FilterType; labelKey: KairoI18nKey; icon: string }[] = [
+        { type: 'condition', labelKey: 'widget.debug.conditionEditor.conditionTab', icon: 'codicon-symbol-operator' },
+        { type: 'thread', labelKey: 'widget.debug.conditionEditor.threadTab', icon: 'codicon-debug-console' },
+        { type: 'instance', labelKey: 'widget.debug.conditionEditor.instanceTab', icon: 'codicon-symbol-class' },
+        { type: 'stackDepth', labelKey: 'widget.debug.conditionEditor.stackTab', icon: 'codicon-callstack-view' },
+        { type: 'hitCount', labelKey: 'widget.debug.conditionEditor.hitCountTab', icon: 'codicon-debug-hint' },
     ];
 
     return (
-        <div style={{ display: 'flex', borderBottom: '1px solid var(--theia-panel-border)', marginBottom: 8 }}>
+        <div className="kairo-debug-condition-tabs">
             {tabs.map(tab => (
                 <button
                     key={tab.type}
-                    className="theia-button secondary"
+                    className={`kairo-debug-condition-tab${active === tab.type ? ' active' : ''}`}
                     onClick={() => onChange(tab.type)}
-                    style={{
-                        padding: '3px 10px',
-                        fontSize: '11px',
-                        border: 'none',
-                        borderBottom: active === tab.type ? '2px solid var(--theia-focusBorder)' : '2px solid transparent',
-                        borderRadius: 0,
-                        background: 'transparent',
-                        opacity: active === tab.type ? 1 : 0.6,
-                        cursor: 'pointer',
-                    }}
-                    title={tab.label}
+                    title={t(tab.labelKey)}
                 >
-                    <span className={`codicon ${tab.icon}`} style={{ fontSize: '12px', marginRight: 4 }} />
-                    {tab.label}
+                    <span className={`codicon ${tab.icon}`} aria-hidden="true" />
+                    {t(tab.labelKey)}
                 </button>
             ))}
         </div>
@@ -94,253 +89,166 @@ const FilterTypeTabs: React.FC<{
 const ConditionEditorView: React.FC<ConditionEditorViewProps> = ({
     state: s, onConditionChange, onFilterTypeChange, onThreadFilterChange,
     onInstanceFilterChange, onStackDepthChange, onHitCountChange,
-    onApply, onClear,
-}) => (
-    <div className="kairo-debug-condition-editor" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-        {/* Header */}
-        <div className="kairo-widget-toolbar" style={{ padding: '4px 8px', borderBottom: '1px solid var(--theia-panel-border)', display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontWeight: 600, fontSize: '12px' }}>Condition Editor</span>
+    onApply, onClear, i18n,
+}) => {
+    const t: TFunction = React.useCallback((key: KairoI18nKey, params?: Record<string, string | number>) => i18n.t(key, params), [i18n]);
+    return (
+    <div className="kairo-debug-condition-editor">
+        <div className="kairo-debug-condition-header">
+            <span className="kairo-debug-condition-title">{t('widget.debug.conditionEditor.title')}</span>
             {s.breakpointId && (
-                <span style={{ color: 'var(--theia-descriptionForeground)', fontSize: '11px' }}>
-                    BP #{s.breakpointId}
+                <span className="kairo-debug-condition-bp">
+                    {t('widget.debug.conditionEditor.bp', { id: s.breakpointId })}
                 </span>
             )}
-            <div style={{ flex: 1 }} />
-            <button
-                className="theia-button secondary"
-                disabled={s.busy}
-                onClick={onClear}
-                style={{ padding: '1px 8px', fontSize: '11px' }}
-                title="Clear all filters"
-            >
-                Clear
-            </button>
-            <button
-                className="theia-button"
-                disabled={s.busy || !s.isValid}
-                onClick={onApply}
-                style={{ padding: '1px 8px', fontSize: '11px' }}
-                title="Apply condition"
-            >
-                {s.busy ? '...' : 'Apply'}
-            </button>
+            <div className="kairo-debug-condition-actions">
+                <button
+                    className="theia-button secondary"
+                    disabled={s.busy}
+                    onClick={onClear}
+                    title={t('widget.debug.conditionEditor.clear')}
+                >
+                    {t('widget.debug.conditionEditor.clear')}
+                </button>
+                <button
+                    className="theia-button main"
+                    disabled={s.busy || !s.isValid}
+                    onClick={onApply}
+                    title={t('widget.debug.conditionEditor.apply')}
+                >
+                    {s.busy ? t('widget.debug.conditionEditor.applying') : t('widget.debug.conditionEditor.apply')}
+                </button>
+            </div>
         </div>
 
-        {/* Filter tabs */}
-        <div style={{ padding: '0 8px' }}>
-            <FilterTypeTabs active={s.filterType} onChange={onFilterTypeChange} />
-        </div>
+        <FilterTypeTabs active={s.filterType} onChange={onFilterTypeChange} t={t} />
 
-        {/* Editor body */}
-        <div style={{ flex: 1, padding: '0 8px', overflow: 'auto' }}>
+        <div className="kairo-debug-condition-body">
             {s.filterType === 'condition' && (
-                <div>
-                    <label style={{ fontSize: '11px', fontWeight: 500, display: 'block', marginBottom: 4 }}>
-                        Expression (supports AND/OR/NOT):
-                    </label>
+                <div className="kairo-debug-condition-field">
+                    <label className="kairo-debug-condition-label">{t('widget.debug.conditionEditor.expressionLabel')}</label>
                     <textarea
+                        className="kairo-debug-condition-textarea"
                         value={s.condition}
                         onChange={e => onConditionChange(e.target.value)}
-                        placeholder="e.g., x > 5 && y < 10"
+                        placeholder={t('widget.debug.conditionEditor.expressionPlaceholder')}
                         rows={4}
-                        style={{
-                            width: '100%',
-                            boxSizing: 'border-box',
-                            fontSize: '12px',
-                            fontFamily: 'var(--theia-editor-font-family)',
-                            padding: '6px 8px',
-                            background: 'var(--theia-input-background)',
-                            color: 'var(--theia-input-foreground)',
-                            border: '1px solid var(--theia-input-border)',
-                            borderRadius: 3,
-                            resize: 'vertical',
-                        }}
-                        aria-label="Condition expression"
+                        aria-label={t('widget.debug.conditionEditor.expressionAria')}
                     />
-                    <div style={{ fontSize: '10px', opacity: 0.6, marginTop: 4 }}>
-                        Use {'&&'} for AND, {'||'} for OR, {'!'} for NOT. Variables are evaluated at breakpoint time.
-                    </div>
+                    <div className="kairo-debug-condition-hint">{t('widget.debug.conditionEditor.expressionHint')}</div>
                 </div>
             )}
 
             {s.filterType === 'thread' && (
-                <div>
-                    <label style={{ fontSize: '11px', fontWeight: 500, display: 'block', marginBottom: 4 }}>
-                        Thread ID or Name Pattern:
-                    </label>
+                <div className="kairo-debug-condition-field">
+                    <label className="kairo-debug-condition-label">{t('widget.debug.conditionEditor.threadLabel')}</label>
                     <input
+                        className="kairo-debug-condition-input"
                         type="text"
                         value={s.threadFilter}
                         onChange={e => onThreadFilterChange(e.target.value)}
-                        placeholder="e.g., main, http-nio-*, 12345"
-                        style={{
-                            width: '100%',
-                            boxSizing: 'border-box',
-                            fontSize: '12px',
-                            fontFamily: 'var(--theia-editor-font-family)',
-                            padding: '4px 8px',
-                            background: 'var(--theia-input-background)',
-                            color: 'var(--theia-input-foreground)',
-                            border: '1px solid var(--theia-input-border)',
-                            borderRadius: 3,
-                        }}
-                        aria-label="Thread filter"
+                        placeholder={t('widget.debug.conditionEditor.threadPlaceholder')}
+                        aria-label={t('widget.debug.conditionEditor.threadAria')}
                     />
-                    <div style={{ fontSize: '10px', opacity: 0.6, marginTop: 4 }}>
-                        Breakpoint will only trigger on the specified thread.
-                    </div>
+                    <div className="kairo-debug-condition-hint">{t('widget.debug.conditionEditor.threadHint')}</div>
                 </div>
             )}
 
             {s.filterType === 'instance' && (
-                <div>
-                    <label style={{ fontSize: '11px', fontWeight: 500, display: 'block', marginBottom: 4 }}>
-                        Instance Filter Expression:
-                    </label>
+                <div className="kairo-debug-condition-field">
+                    <label className="kairo-debug-condition-label">{t('widget.debug.conditionEditor.instanceLabel')}</label>
                     <input
+                        className="kairo-debug-condition-input"
                         type="text"
                         value={s.instanceFilter}
                         onChange={e => onInstanceFilterChange(e.target.value)}
-                        placeholder="e.g., this == threadLocalObject"
-                        style={{
-                            width: '100%',
-                            boxSizing: 'border-box',
-                            fontSize: '12px',
-                            fontFamily: 'var(--theia-editor-font-family)',
-                            padding: '4px 8px',
-                            background: 'var(--theia-input-background)',
-                            color: 'var(--theia-input-foreground)',
-                            border: '1px solid var(--theia-input-border)',
-                            borderRadius: 3,
-                        }}
-                        aria-label="Instance filter"
+                        placeholder={t('widget.debug.conditionEditor.instancePlaceholder')}
+                        aria-label={t('widget.debug.conditionEditor.instanceAria')}
                     />
-                    <div style={{ fontSize: '10px', opacity: 0.6, marginTop: 4 }}>
-                        Breakpoint only triggers when 'this' matches the specified object.
-                    </div>
+                    <div className="kairo-debug-condition-hint">{t('widget.debug.conditionEditor.instanceHint')}</div>
                 </div>
             )}
 
             {s.filterType === 'stackDepth' && (
-                <div>
-                    <label style={{ fontSize: '11px', fontWeight: 500, display: 'block', marginBottom: 4 }}>
-                        Call Stack Depth Range:
-                    </label>
+                <div className="kairo-debug-condition-field">
+                    <label className="kairo-debug-condition-label">{t('widget.debug.conditionEditor.stackDepthLabel')}</label>
                     <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                         <input
+                            className="kairo-debug-condition-input"
                             type="number"
                             value={s.stackDepthMin}
                             onChange={e => onStackDepthChange(parseInt(e.target.value, 10) || 0, s.stackDepthMax)}
                             min={0}
-                            placeholder="Min"
-                            style={{
-                                width: 80,
-                                fontSize: '12px',
-                                padding: '4px 8px',
-                                background: 'var(--theia-input-background)',
-                                color: 'var(--theia-input-foreground)',
-                                border: '1px solid var(--theia-input-border)',
-                                borderRadius: 3,
-                            }}
-                            aria-label="Minimum stack depth"
+                            placeholder={t('widget.debug.conditionEditor.min')}
+                            aria-label={t('widget.debug.conditionEditor.stackDepthMinAria')}
+                            style={{ width: 80 }}
                         />
-                        <span style={{ fontSize: '12px' }}>to</span>
+                        <span style={{ fontSize: '12px' }}>{t('widget.debug.conditionEditor.to')}</span>
                         <input
+                            className="kairo-debug-condition-input"
                             type="number"
                             value={s.stackDepthMax}
                             onChange={e => onStackDepthChange(s.stackDepthMin, parseInt(e.target.value, 10) || 0)}
                             min={0}
-                            placeholder="Max"
-                            style={{
-                                width: 80,
-                                fontSize: '12px',
-                                padding: '4px 8px',
-                                background: 'var(--theia-input-background)',
-                                color: 'var(--theia-input-foreground)',
-                                border: '1px solid var(--theia-input-border)',
-                                borderRadius: 3,
-                            }}
-                            aria-label="Maximum stack depth"
+                            placeholder={t('widget.debug.conditionEditor.max')}
+                            aria-label={t('widget.debug.conditionEditor.stackDepthMaxAria')}
+                            style={{ width: 80 }}
                         />
                     </div>
-                    <div style={{ fontSize: '10px', opacity: 0.6, marginTop: 4 }}>
-                        Only trigger when call stack depth is in this range. 0 = current frame.
-                    </div>
+                    <div className="kairo-debug-condition-hint">{t('widget.debug.conditionEditor.stackDepthHint')}</div>
                 </div>
             )}
 
             {s.filterType === 'hitCount' && (
-                <div>
-                    <label style={{ fontSize: '11px', fontWeight: 500, display: 'block', marginBottom: 4 }}>
-                        Hit Count Condition:
-                    </label>
+                <div className="kairo-debug-condition-field">
+                    <label className="kairo-debug-condition-label">{t('widget.debug.conditionEditor.hitCountLabel')}</label>
                     <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                         <select
+                            className="kairo-debug-condition-input"
                             value={s.hitCountMode}
                             onChange={e => onHitCountChange(e.target.value, s.hitCountTarget)}
-                            style={{
-                                fontSize: '12px',
-                                padding: '4px 8px',
-                                background: 'var(--theia-input-background)',
-                                color: 'var(--theia-input-foreground)',
-                                border: '1px solid var(--theia-input-border)',
-                                borderRadius: 3,
-                            }}
-                            aria-label="Hit count mode"
+                            aria-label={t('widget.debug.conditionEditor.hitCountModeAria')}
                         >
-                            <option value="">Off</option>
-                            <option value="EQ">= (equal)</option>
-                            <option value="GT">{">"} (greater than)</option>
-                            <option value="GE">{">="} (greater or equal)</option>
-                            <option value="LT">{"<"} (less than)</option>
-                            <option value="LE">{"<="} (less or equal)</option>
-                            <option value="MOD">% (modulo)</option>
+                            <option value="">{t('widget.debug.conditionEditor.hitCountOff')}</option>
+                            <option value="EQ">= {t('widget.debug.conditionEditor.hitCountEqual')}</option>
+                            <option value="GT">&gt; {t('widget.debug.conditionEditor.hitCountGreater')}</option>
+                            <option value="GE">&gt;= {t('widget.debug.conditionEditor.hitCountGreaterEqual')}</option>
+                            <option value="LT">&lt; {t('widget.debug.conditionEditor.hitCountLess')}</option>
+                            <option value="LE">&lt;= {t('widget.debug.conditionEditor.hitCountLessEqual')}</option>
+                            <option value="MOD">% {t('widget.debug.conditionEditor.hitCountModulo')}</option>
                         </select>
                         <input
+                            className="kairo-debug-condition-input"
                             type="number"
                             value={s.hitCountTarget}
                             onChange={e => onHitCountChange(s.hitCountMode, parseInt(e.target.value, 10) || 0)}
                             min={1}
-                            placeholder="Target"
-                            style={{
-                                width: 80,
-                                fontSize: '12px',
-                                padding: '4px 8px',
-                                background: 'var(--theia-input-background)',
-                                color: 'var(--theia-input-foreground)',
-                                border: '1px solid var(--theia-input-border)',
-                                borderRadius: 3,
-                            }}
-                            aria-label="Hit count target"
+                            placeholder={t('widget.debug.conditionEditor.hitCountTarget')}
+                            aria-label={t('widget.debug.conditionEditor.hitCountTargetAria')}
+                            style={{ width: 80 }}
                         />
                     </div>
-                    <div style={{ fontSize: '10px', opacity: 0.6, marginTop: 4 }}>
-                        Breakpoint triggers only when the hit count meets this condition.
-                    </div>
+                    <div className="kairo-debug-condition-hint">{t('widget.debug.conditionEditor.hitCountHint')}</div>
                 </div>
             )}
         </div>
 
-        {/* Validation message */}
         {s.validationMessage && (
-            <div style={{
-                padding: '4px 8px',
-                fontSize: '11px',
-                color: s.isValid ? 'var(--theia-terminal-ansiGreen)' : 'var(--theia-errorForeground)',
-                borderTop: '1px solid var(--theia-panel-border)',
-            }}>
-                <span className={`codicon ${s.isValid ? 'codicon-pass' : 'codicon-error'}`} style={{ fontSize: '12px', marginRight: 4 }} />
+            <div className={`kairo-debug-condition-validation ${s.isValid ? 'valid' : 'invalid'}`}>
+                <span className={`codicon ${s.isValid ? 'codicon-pass' : 'codicon-error'}`} aria-hidden="true" />
                 {s.validationMessage}
             </div>
         )}
 
         {s.error && (
-            <div style={{ padding: '8px', color: 'var(--theia-errorForeground)', fontSize: '12px' }}>
+            <div className="kairo-error-banner" role="alert">
+                <span className="codicon codicon-error" aria-hidden="true" />
                 {s.error}
             </div>
         )}
     </div>
-);
+    );
+};
 
 /* ------------------------------------------------------------------ */
 /*  Widget                                                              */
@@ -349,6 +257,9 @@ const ConditionEditorView: React.FC<ConditionEditorViewProps> = ({
 @injectable()
 export class KairoDebugConditionEditorWidget extends ReactWidget {
     static readonly ID = KAIRO_DEBUG_CONDITION_EDITOR_FACTORY_ID;
+
+    @inject(KairoI18nService)
+    protected readonly i18n!: KairoI18nService;
 
     protected state: ConditionEditorState = {
         breakpointId: '',
@@ -374,11 +285,16 @@ export class KairoDebugConditionEditorWidget extends ReactWidget {
     @postConstruct()
     protected init(): void {
         this.id = KairoDebugConditionEditorWidget.ID;
-        this.title.label = 'Condition Editor';
-        this.title.caption = 'Kairo Debug Condition Editor';
+        this.title.label = this.i18n.t('widget.debug.conditionEditor.title');
+        this.title.caption = this.i18n.t('widget.debug.conditionEditor.caption');
         this.title.iconClass = 'codicon codicon-symbol-operator';
         this.title.closable = true;
         this.addClass('kairo-widget');
+        this.toDispose.push(this.i18n.onDidChangeLanguage(() => {
+            this.title.label = this.i18n.t('widget.debug.conditionEditor.title');
+            this.title.caption = this.i18n.t('widget.debug.conditionEditor.caption');
+            this.update();
+        }));
         this.update();
     }
 
@@ -393,6 +309,7 @@ export class KairoDebugConditionEditorWidget extends ReactWidget {
             onHitCountChange: (mode: string, target: number) => this.setState({ hitCountMode: mode, hitCountTarget: target }),
             onApply: () => this.apply(),
             onClear: () => this.clear(),
+            i18n: this.i18n,
         });
     }
 
@@ -405,7 +322,7 @@ export class KairoDebugConditionEditorWidget extends ReactWidget {
         this.setState({
             condition: value,
             isValid,
-            validationMessage: isValid ? 'Expression valid' : 'Invalid expression syntax',
+            validationMessage: isValid ? this.i18n.t('widget.debug.conditionEditor.validExpression') : this.i18n.t('widget.debug.conditionEditor.invalidExpression'),
         });
     }
 

@@ -75,6 +75,23 @@ pnpm prettier --write .
 
 ## Release artifacts
 
+### One-click build + package (Windows)
+
+```powershell
+# 完整构建 + 打包 + 分卷压缩 (每卷 ≤70MB)
+.\scripts\build-and-package.ps1
+
+# 自定义分卷大小
+.\scripts\build-and-package.ps1 -VolumeSize 50
+
+# 跳过构建 (仅重新打包)
+.\scripts\build-and-package.ps1 -SkipBuild
+```
+
+See `docs/DEPLOY-GUIDE.md` for detailed deployment instructions.
+
+### Manual cross-compile
+
 ```bash
 # Go cross-compile
 cd runtime-agent

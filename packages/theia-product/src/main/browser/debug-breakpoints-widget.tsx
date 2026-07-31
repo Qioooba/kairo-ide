@@ -15,8 +15,11 @@ import { OpenerService, open } from '@theia/core/lib/browser/opener-service';
 import URI from '@theia/core/lib/common/uri';
 import { BreakpointManager } from '@theia/debug/lib/browser/breakpoint/breakpoint-manager';
 import { DebugSourceBreakpoint } from '@theia/debug/lib/browser/model/debug-source-breakpoint';
+import { KairoI18nService, type KairoI18nKey } from '@kairo/i18n';
 
 export const KAIRO_DEBUG_BREAKPOINTS_FACTORY_ID = 'kairo-debug-breakpoints';
+
+type TFunction = (key: KairoI18nKey, params?: Record<string, string | number>) => string;
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                               */
@@ -48,6 +51,7 @@ export interface BreakpointsState {
 interface BreakpointsViewProps {
     state: BreakpointsState;
     openerService: OpenerService;
+    t: TFunction;
     onToggle: (bp: BreakpointDisplayInfo) => void;
     onRemove: (bp: BreakpointDisplayInfo) => void;
     onToggleAll: () => void;
@@ -55,7 +59,7 @@ interface BreakpointsViewProps {
 }
 
 const BreakpointsView: React.FC<BreakpointsViewProps> = ({
-    state, openerService, onToggle, onRemove, onToggleAll, onRefresh,
+    state, openerService, t, onToggle, onRemove, onToggleAll, onRefresh,
 }) => {
     const handleClick = (bp: BreakpointDisplayInfo) => {
         try {
@@ -72,133 +76,89 @@ const BreakpointsView: React.FC<BreakpointsViewProps> = ({
     };
 
     return (
-        <div className="kairo-debug-breakpoints-widget" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+        <div className="kairo-debug-breakpoints-widget">
             {/* Header */}
-            <div className="kairo-widget-toolbar" style={{ padding: '4px 8px', borderBottom: '1px solid var(--theia-panel-border)', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                <span style={{ fontWeight: 600, fontSize: '12px' }}>Breakpoints</span>
-                <span style={{ color: 'var(--theia-descriptionForeground)', fontSize: '11px' }}>
-                    {state.breakpoints.length} items
+            <div className="kairo-debug-bp-toolbar">
+                <span className="kairo-debug-bp-title">{t('widget.debug.breakpoints.title')}</span>
+                <span className="kairo-debug-bp-count">
+                    {t('widget.debug.breakpoints.items', { count: state.breakpoints.length })}
                 </span>
-                <div style={{ flex: 1 }} />
+                <div className="kairo-debug-bp-spacer" />
                 <button
-                    className="theia-button secondary"
+                    className="theia-button secondary kairo-debug-bp-toolbar-btn"
                     disabled={state.busy || state.breakpoints.length === 0}
                     onClick={onToggleAll}
-                    style={{ padding: '1px 8px', fontSize: '11px' }}
-                    title={state.allEnabled ? 'Disable all breakpoints' : 'Enable all breakpoints'}
+                    title={state.allEnabled ? t('widget.debug.breakpoints.disableAll') : t('widget.debug.breakpoints.enableAll')}
                 >
-                    {state.allEnabled ? 'Disable All' : 'Enable All'}
+                    {state.allEnabled ? t('widget.debug.breakpoints.disableAll') : t('widget.debug.breakpoints.enableAll')}
                 </button>
                 <button
-                    className="theia-button secondary"
+                    className="theia-button secondary kairo-debug-bp-toolbar-btn"
                     disabled={state.busy}
                     onClick={onRefresh}
-                    style={{ padding: '1px 8px', fontSize: '11px' }}
-                    title="Refresh breakpoints"
+                    title={t('widget.debug.breakpoints.refreshTooltip')}
                 >
                     {state.busy ? '...' : '↻'}
                 </button>
             </div>
 
             {/* Body */}
-            <div style={{ flex: 1, overflow: 'auto' }}>
+            <div className="kairo-debug-bp-body">
                 {state.error && (
-                    <div style={{ padding: '8px 12px', color: 'var(--theia-errorForeground)', fontSize: '12px' }}>
+                    <div className="kairo-debug-bp-error">
                         {state.error}
                     </div>
                 )}
                 {!state.error && !state.busy && state.breakpoints.length === 0 && (
-                    <div style={{ padding: '12px', color: 'var(--theia-descriptionForeground)', fontSize: '12px', textAlign: 'center' }}>
-                        No breakpoints set. Click in the editor gutter to add breakpoints.
+                    <div className="kairo-empty-state kairo-debug-bp-empty">
+                        <span className="kairo-empty-state-glyph codicon codicon-debug-breakpoint" aria-hidden="true" />
+                        <h3 className="kairo-empty-state-title">{t('widget.debug.breakpoints.emptyTitle')}</h3>
+                        <p className="kairo-empty-state-reason">
+                            {t('widget.debug.breakpoints.emptyReason')}
+                        </p>
                     </div>
                 )}
                 {state.breakpoints.map(bp => (
                     <div
                         key={bp.id}
-                        className="kairo-debug-bp-row"
-                        style={{
-                            padding: '4px 8px',
-                            display: 'flex',
-                            alignItems: 'flex-start',
-                            gap: 6,
-                            fontSize: '12px',
-                            lineHeight: '18px',
-                            opacity: bp.enabled ? 1 : 0.5,
-                            borderBottom: '1px solid var(--theia-panel-border)',
-                        }}
-                        onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'var(--theia-list-hoverBackground)'; }}
-                        onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = ''; }}
+                        className={`kairo-debug-bp-row ${bp.enabled ? '' : 'kairo-debug-bp-disabled'}`}
                     >
                         {/* Toggle checkbox */}
                         <input
                             type="checkbox"
+                            className="kairo-debug-bp-checkbox"
                             checked={bp.enabled}
                             onChange={() => onToggle(bp)}
-                            style={{ marginTop: 2, flexShrink: 0, cursor: 'pointer' }}
-                            title={bp.enabled ? 'Disable breakpoint' : 'Enable breakpoint'}
-                            aria-label={`${bp.enabled ? 'Disable' : 'Enable'} breakpoint at ${bp.fileName}:${bp.line}`}
+                            title={bp.enabled ? t('widget.debug.breakpoints.disableTooltip') : t('widget.debug.breakpoints.enableTooltip')}
+                            aria-label={`${bp.enabled ? t('widget.debug.breakpoints.disableTooltip') : t('widget.debug.breakpoints.enableTooltip')} ${bp.fileName}:${bp.line}`}
                         />
 
                         {/* Main content */}
-                        <div style={{ minWidth: 0, flex: 1, cursor: 'pointer' }} onClick={() => handleClick(bp)}>
-                            <div style={{
-                                fontWeight: 500,
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                whiteSpace: 'nowrap',
-                            }}>
-                                <span className="codicon codicon-circle-filled" style={{
-                                    fontSize: '10px',
-                                    color: bp.enabled ? 'var(--theia-debugIcon-breakpointForeground)' : 'var(--theia-descriptionForeground)',
-                                    marginRight: 4,
-                                }} />
+                        <div className="kairo-debug-bp-main" onClick={() => handleClick(bp)}>
+                            <div className="kairo-debug-bp-location">
+                                <span className={`codicon codicon-circle-filled kairo-debug-bp-icon ${bp.enabled ? 'enabled' : 'disabled'}`} />
                                 {bp.fileName}:{bp.line}
                             </div>
                             {bp.condition && (
-                                <div style={{
-                                    fontSize: '11px',
-                                    opacity: 0.7,
-                                    overflow: 'hidden',
-                                    textOverflow: 'ellipsis',
-                                    whiteSpace: 'nowrap',
-                                    paddingLeft: 16,
-                                }}>
-                                    <span className="codicon codicon-symbol-operator" style={{ fontSize: '11px', marginRight: 2 }} />
-                                    Condition: {bp.condition}
+                                <div className="kairo-debug-bp-meta">
+                                    <span className="codicon codicon-symbol-operator kairo-debug-bp-meta-icon" />
+                                    {t('widget.debug.breakpoints.condition', { condition: bp.condition })}
                                 </div>
                             )}
                             {bp.hitCondition && (
-                                <div style={{
-                                    fontSize: '11px',
-                                    opacity: 0.7,
-                                    overflow: 'hidden',
-                                    textOverflow: 'ellipsis',
-                                    whiteSpace: 'nowrap',
-                                    paddingLeft: 16,
-                                }}>
-                                    <span className="codicon codicon-debug-hint" style={{ fontSize: '11px', marginRight: 2 }} />
-                                    Hit count: {bp.hitCondition}
+                                <div className="kairo-debug-bp-meta">
+                                    <span className="codicon codicon-debug-hint kairo-debug-bp-meta-icon" />
+                                    {t('widget.debug.breakpoints.hitCount', { hitCount: bp.hitCondition })}
                                 </div>
                             )}
                             {bp.logMessage && (
-                                <div style={{
-                                    fontSize: '11px',
-                                    opacity: 0.7,
-                                    overflow: 'hidden',
-                                    textOverflow: 'ellipsis',
-                                    whiteSpace: 'nowrap',
-                                    paddingLeft: 16,
-                                }}>
-                                    <span className="codicon codicon-output" style={{ fontSize: '11px', marginRight: 2 }} />
-                                    Log: {bp.logMessage}
+                                <div className="kairo-debug-bp-meta">
+                                    <span className="codicon codicon-output kairo-debug-bp-meta-icon" />
+                                    {t('widget.debug.breakpoints.logMessage', { logMessage: bp.logMessage })}
                                 </div>
                             )}
                             {bp.message && (
-                                <div style={{
-                                    fontSize: '11px',
-                                    color: 'var(--theia-errorForeground)',
-                                    paddingLeft: 16,
-                                }}>
+                                <div className="kairo-debug-bp-message">
                                     {bp.message}
                                 </div>
                             )}
@@ -206,11 +166,10 @@ const BreakpointsView: React.FC<BreakpointsViewProps> = ({
 
                         {/* Remove button */}
                         <button
-                            className="theia-button secondary"
+                            className="theia-button secondary kairo-debug-bp-remove"
                             onClick={(e) => { e.stopPropagation(); onRemove(bp); }}
-                            style={{ padding: '0 6px', fontSize: '14px', lineHeight: '18px', flexShrink: 0 }}
-                            title="Remove breakpoint"
-                            aria-label={`Remove breakpoint at ${bp.fileName}:${bp.line}`}
+                            title={t('widget.debug.breakpoints.removeTooltip')}
+                            aria-label={`${t('widget.debug.breakpoints.removeTooltip')} ${bp.fileName}:${bp.line}`}
                         >
                             ×
                         </button>
@@ -235,15 +194,20 @@ export class KairoDebugBreakpointsWidget extends ReactWidget {
     @inject(OpenerService)
     protected readonly openerService!: OpenerService;
 
+    @inject(KairoI18nService)
+    protected readonly i18n!: KairoI18nService;
+
     protected state: BreakpointsState = { breakpoints: [], busy: false, error: null, allEnabled: true };
     protected readonly onStateChangeEmitter = new Emitter<BreakpointsState>();
     readonly onDidStateChange: Event<BreakpointsState> = this.onStateChangeEmitter.event;
 
     @postConstruct()
     protected init(): void {
+        const t: TFunction = (this.i18n?.t.bind(this.i18n)) as TFunction | undefined
+            ?? ((key: KairoI18nKey) => String(key));
         this.id = KairoDebugBreakpointsWidget.ID;
-        this.title.label = 'Breakpoints';
-        this.title.caption = 'Kairo Java Debug Breakpoints';
+        this.title.label = t('widget.debug.breakpoints.title');
+        this.title.caption = t('widget.debug.breakpoints.caption');
         this.title.iconClass = 'codicon codicon-debug-breakpoint';
         this.title.closable = true;
         this.addClass('kairo-widget');
@@ -258,9 +222,12 @@ export class KairoDebugBreakpointsWidget extends ReactWidget {
     }
 
     protected render(): React.ReactNode {
+        const t: TFunction = (this.i18n?.t.bind(this.i18n)) as TFunction | undefined
+            ?? ((key: KairoI18nKey) => String(key));
         return React.createElement(BreakpointsView, {
             state: this.state,
             openerService: this.openerService,
+            t,
             onToggle: (bp: BreakpointDisplayInfo) => this.toggleBreakpoint(bp),
             onRemove: (bp: BreakpointDisplayInfo) => this.removeBreakpoint(bp),
             onToggleAll: () => this.toggleAll(),

@@ -15,8 +15,11 @@ import URI from '@theia/core/lib/common/uri';
 import { DebugSessionManager } from '@theia/debug/lib/browser/debug-session-manager';
 import type { DebugSession } from '@theia/debug/lib/browser/debug-session';
 import type { DebugProtocol } from '@vscode/debugprotocol';
+import { KairoI18nService, type KairoI18nKey } from '@kairo/i18n';
 
 export const KAIRO_DEBUG_CALLSTACK_FACTORY_ID = 'kairo-debug-callstack';
+
+type TFunction = (key: KairoI18nKey, params?: Record<string, string | number>) => string;
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                               */
@@ -50,11 +53,12 @@ interface CallStackViewProps {
     state: CallStackState;
     session: DebugSession | undefined;
     openerService: OpenerService;
+    t: TFunction;
     onSelectFrame: (frame: StackFrameInfo) => void;
     onRefresh: () => void;
 }
 
-const CallStackView: React.FC<CallStackViewProps> = ({ state, session, openerService, onSelectFrame, onRefresh }) => {
+const CallStackView: React.FC<CallStackViewProps> = ({ state, session, openerService, t, onSelectFrame, onRefresh }) => {
     const handleFrameClick = (frame: StackFrameInfo) => {
         onSelectFrame(frame);
         if (frame.source?.path) {
@@ -69,40 +73,39 @@ const CallStackView: React.FC<CallStackViewProps> = ({ state, session, openerSer
     };
 
     return (
-        <div className="kairo-debug-callstack-widget" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+        <div className="kairo-debug-callstack-widget">
             {/* Header */}
-            <div className="kairo-widget-toolbar" style={{ padding: '4px 8px', borderBottom: '1px solid var(--theia-panel-border)', display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ fontWeight: 600, fontSize: '12px' }}>Call Stack</span>
+            <div className="kairo-debug-toolbar">
+                <span className="kairo-debug-callstack-title">{t('widget.debug.callstack.title')}</span>
                 {state.threadName && (
-                    <span style={{ color: 'var(--theia-descriptionForeground)', fontSize: '11px' }}>
+                    <span className="kairo-debug-callstack-count">
                         {state.threadName}
                     </span>
                 )}
-                <span style={{ color: 'var(--theia-descriptionForeground)', fontSize: '11px' }}>
-                    {state.frames.length} frames
+                <span className="kairo-debug-callstack-count">
+                    {t('widget.debug.callstack.frames', { count: state.frames.length })}
                 </span>
-                <div style={{ flex: 1 }} />
+                <div className="kairo-debug-callstack-spacer" />
                 <button
-                    className="theia-button secondary"
+                    className="theia-button secondary kairo-debug-callstack-toolbar-btn"
                     disabled={state.busy}
                     onClick={onRefresh}
-                    style={{ padding: '1px 8px', fontSize: '11px' }}
-                    title="Refresh call stack"
+                    title={t('widget.debug.callstack.refreshTooltip')}
                 >
-                    {state.busy ? '...' : '↻'}
+                    {state.busy ? t('common.loading') : '↻'}
                 </button>
             </div>
 
             {/* Body */}
-            <div style={{ flex: 1, overflow: 'auto' }}>
+            <div className="kairo-debug-callstack-body">
                 {state.error && (
-                    <div style={{ padding: '8px 12px', color: 'var(--theia-errorForeground)', fontSize: '12px' }}>
+                    <div className="kairo-debug-callstack-error">
                         {state.error}
                     </div>
                 )}
                 {!state.error && !state.busy && state.frames.length === 0 && (
-                    <div style={{ padding: '12px', color: 'var(--theia-descriptionForeground)', fontSize: '12px', textAlign: 'center' }}>
-                        {session ? 'Thread is running. Pause to view call stack.' : 'No active debug session.'}
+                    <div className="kairo-debug-callstack-empty">
+                        {session ? t('widget.debug.callstack.running') : t('widget.debug.callstack.noSession')}
                     </div>
                 )}
                 {state.frames.map(frame => (
@@ -149,7 +152,7 @@ const CallStackView: React.FC<CallStackViewProps> = ({ state, session, openerSer
                                 textOverflow: 'ellipsis',
                                 whiteSpace: 'nowrap',
                             }}>
-                                {frame.source?.name ?? 'Unknown'}:{frame.line}
+                                {frame.source?.name ?? t('widget.debug.callstack.unknownSource')}:{frame.line}
                             </div>
                         </div>
                     </div>
@@ -173,15 +176,20 @@ export class KairoDebugCallStackWidget extends ReactWidget {
     @inject(OpenerService)
     protected readonly openerService!: OpenerService;
 
+    @inject(KairoI18nService)
+    protected readonly i18n!: KairoI18nService;
+
     protected state: CallStackState = { frames: [], threadName: '', busy: false, error: null, sessionId: undefined };
     protected readonly onStateChangeEmitter = new Emitter<CallStackState>();
     readonly onDidStateChange: Event<CallStackState> = this.onStateChangeEmitter.event;
 
     @postConstruct()
     protected init(): void {
+        const t: TFunction = (this.i18n?.t.bind(this.i18n)) as TFunction | undefined
+            ?? ((key: KairoI18nKey) => String(key));
         this.id = KairoDebugCallStackWidget.ID;
-        this.title.label = 'Call Stack';
-        this.title.caption = 'Kairo Java Debug Call Stack';
+        this.title.label = t('widget.debug.callstack.title');
+        this.title.caption = t('widget.debug.callstack.caption');
         this.title.iconClass = 'codicon codicon-debug-stackframe';
         this.title.closable = true;
         this.addClass('kairo-widget');
@@ -197,11 +205,14 @@ export class KairoDebugCallStackWidget extends ReactWidget {
     }
 
     protected render(): React.ReactNode {
+        const t: TFunction = (this.i18n?.t.bind(this.i18n)) as TFunction | undefined
+            ?? ((key: KairoI18nKey) => String(key));
         const session = this.sessionManager.currentSession;
         return React.createElement(CallStackView, {
             state: this.state,
             session: session ?? undefined,
             openerService: this.openerService,
+            t,
             onSelectFrame: (frame: StackFrameInfo) => this.selectFrame(frame),
             onRefresh: () => this.refresh(),
         });

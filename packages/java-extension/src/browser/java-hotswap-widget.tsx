@@ -63,19 +63,11 @@ interface HotSwapHistoryProps {
   onSelect: (entry: HotSwapEntry) => void;
 }
 
-const statusIcon = (status: HotSwapEntry['status']): string => {
+const statusIconClass = (status: HotSwapEntry['status']): string => {
   switch (status) {
-    case 'success': return '✓';
-    case 'failed': return '✗';
-    case 'in-progress': return '⏳';
-  }
-};
-
-const statusColor = (status: HotSwapEntry['status']): string => {
-  switch (status) {
-    case 'success': return '#4caf50';
-    case 'failed': return '#f44336';
-    case 'in-progress': return '#ff9800';
+    case 'success': return 'codicon-check kairo-hotswap-status-success';
+    case 'failed': return 'codicon-error kairo-hotswap-status-failed';
+    case 'in-progress': return 'codicon-sync codicon-modifier-spin kairo-hotswap-status-pending';
   }
 };
 
@@ -127,12 +119,10 @@ const HotSwapHistory: React.FC<HotSwapHistoryProps> = ({
             tabIndex={0}
           >
             <span
-              className="kairo-hotswap-status"
-              style={{ color: statusColor(entry.status) }}
+              className={`kairo-hotswap-status codicon ${statusIconClass(entry.status)}`}
               title={statusLabel(entry.status)}
-            >
-              {statusIcon(entry.status)}
-            </span>
+              aria-hidden="true"
+            />
             <span className="kairo-hotswap-file">{entry.fileName}</span>
             <span className="kairo-hotswap-time">{formatTime(entry.timestamp)}</span>
             {entry.durationMs !== undefined && (
@@ -148,8 +138,9 @@ const HotSwapHistory: React.FC<HotSwapHistoryProps> = ({
             <dt>文件</dt>
             <dd>{selectedEntry.fileName}</dd>
             <dt>状态</dt>
-            <dd style={{ color: statusColor(selectedEntry.status) }}>
-              {statusIcon(selectedEntry.status)} {statusLabel(selectedEntry.status)}
+            <dd>
+              <span className={`codicon ${statusIconClass(selectedEntry.status)}`} aria-hidden="true" />
+              {' '}{statusLabel(selectedEntry.status)}
             </dd>
             <dt>时间</dt>
             <dd>{new Date(selectedEntry.timestamp).toLocaleString('zh-CN')}</dd>

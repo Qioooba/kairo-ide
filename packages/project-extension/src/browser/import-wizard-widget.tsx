@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
-import { injectable, inject } from '@theia/core/shared/inversify';
+import { Message } from '@theia/core/shared/@lumino/messaging';
+import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
 import { FileDialogService } from '@theia/filesystem/lib/browser/file-dialog';
 import { WorkspaceService } from '@theia/workspace/lib/browser';
 import URI from '@theia/core/lib/common/uri';
@@ -8,6 +9,7 @@ import { KairoProjectService } from './project-service';
 import { ActiveProjectService } from './active-project-service';
 import { RuntimeConnectionService } from '@kairo/runtime-extension';
 import { WorkspaceContextService } from '@kairo/runtime-extension';
+import { KairoI18nService, type KairoI18nKey } from '@kairo/i18n';
 import type { ProjectDetection, ProjectImportConfirmRequest } from '@kairo/protocol';
 
 /** Normalize a user-visible encoding label to the wire encoding id. */
@@ -29,6 +31,8 @@ function normalizeEncodingId(encoding: string): string {
 function normalizePathForApi(path: string): string {
     return path.replace(/\\/g, '/');
 }
+
+type TFunction = (key: KairoI18nKey, params?: Record<string, string | number>) => string;
 
 @injectable()
 export class ImportWizardWidget extends ReactWidget {
@@ -52,16 +56,43 @@ export class ImportWizardWidget extends ReactWidget {
     @inject(WorkspaceService)
     protected readonly workspaceService!: WorkspaceService;
 
+    @inject(KairoI18nService)
+    protected readonly i18n!: KairoI18nService;
+
     constructor() {
         super();
         this.id = ImportWizardWidget.ID;
+        // Keep English defaults so unit tests that instantiate the widget
+        // without Inversify still see meaningful labels.
         this.title.label = 'Kairo IDE - Import Project';
         this.title.closable = true;
         this.title.caption = 'Kairo Project Import Wizard';
         this.addClass('kairo-widget');
     }
 
+    @postConstruct()
+    protected init(): void {
+        const t: TFunction = (this.i18n?.t.bind(this.i18n)) as TFunction | undefined
+            ?? ((key: KairoI18nKey) => String(key));
+        this.title.label = t('widget.importWizard.title');
+        this.title.caption = t('widget.importWizard.caption');
+    }
+
+    protected override onActivateRequest(msg: Message): void {
+        super.onActivateRequest(msg);
+        if (this.node.tabIndex < 0) {
+            this.node.tabIndex = 0;
+        }
+        this.node.focus();
+        setTimeout(() => {
+            const target = this.node.querySelector<HTMLElement>('.kairo-path-input:not([disabled]), input:not([disabled]), button:not([disabled]), [tabindex]:not([tabindex="-1"])');
+            target?.focus();
+        }, 50);
+    }
+
     protected render(): React.ReactNode {
+        const t: TFunction = (this.i18n?.t.bind(this.i18n)) as TFunction | undefined
+            ?? ((key: KairoI18nKey) => String(key));
         return React.createElement(ImportWizard, {
             fileDialogService: this.fileDialogService,
             projectService: this.projectService,
@@ -70,6 +101,7 @@ export class ImportWizardWidget extends ReactWidget {
             workspaceContext: this.workspaceContext,
             workspaceService: this.workspaceService,
             onClose: () => this.close(),
+            t,
         });
     }
 }
@@ -82,10 +114,11 @@ interface ImportWizardProps {
     workspaceContext: WorkspaceContextService;
     workspaceService: WorkspaceService;
     onClose: () => void;
+    t: TFunction;
 }
 
 const ImportWizard: React.FC<ImportWizardProps> = ({
-    fileDialogService, projectService, activeProject, runtime, workspaceContext, workspaceService, onClose,
+    fileDialogService, projectService, activeProject, runtime, workspaceContext, workspaceService, onClose, t,
 }) => {
     const [step, setStep] = React.useState(1);
     const [workspacePath, setWorkspacePath] = React.useState('');
@@ -114,7 +147,7 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
     const handleSelectDirectory = React.useCallback(async () => {
         try {
             const dialog = await fileDialogService.showOpenDialog({
-                title: 'Select Project Root Directory',
+                title: t('widget.importWizard.selectDirectory'),
                 canSelectFiles: false,
                 canSelectFolders: true,
                 canSelectMany: false,
@@ -128,7 +161,7 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
         } catch (error) {
             setScanError(error instanceof Error ? error.message : String(error));
         }
-    }, [fileDialogService, projectService, runtime, workspaceContext]);
+    }, [fileDialogService, projectService, runtime, workspaceContext, t]);
 
     // KAIRO-RC-WEB-028: extract the scan-and-populate logic from
     // `handleSelectDirectory` so the visible path input on step 1
@@ -180,11 +213,11 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
     const handleScanTypedPath = React.useCallback(async () => {
         const path = workspacePath.trim();
         if (!path) {
-            setScanError('Please enter a project path or click "Select Project Directory".');
+            setScanError(t('widget.importWizard.enterPathFirst'));
             return;
         }
         await scanPath(path);
-    }, [workspacePath, scanPath]);
+    }, [workspacePath, scanPath, t]);
 
     const handleImport = React.useCallback(async () => {
         setImporting(true);
@@ -193,10 +226,10 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
         try {
             const trimmedName = projectName.trim();
             if (!trimmedName) {
-                throw new Error('Project name cannot be empty.');
+                throw new Error(t('widget.importWizard.nameRequired'));
             }
             if (!workspaceId) {
-                throw new Error('No workspace selected. Open a workspace folder first.');
+                throw new Error(t('widget.importWizard.noWorkspace'));
             }
 
             const normalizedWorkspacePath = normalizePathForApi(workspacePath);
@@ -279,27 +312,27 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
         }
     }, [projectService, activeProject, runtime, workspaceContext, workspaceId, workspacePath, projectName,
         sourceDirs, webRoot, libDirs, buildScript, defaultEncoding,
-        jdkVersion, sourceVersion, targetVersion, outputDir, buildTool, contextPath]);
+        jdkVersion, sourceVersion, targetVersion, outputDir, buildTool, contextPath, t]);
 
     return (
         <div className="kairo-import-wizard" data-testid="import-wizard">
             <header className="kairo-wizard-header">
-                <h1 data-testid="wizard-title">Import Legacy Java Project</h1>
-                <p className="kairo-wizard-subtitle">Auto-detect and configure your project</p>
+                <h1 data-testid="wizard-title">{t('widget.importWizard.headerTitle')}</h1>
+                <p className="kairo-wizard-subtitle">{t('widget.importWizard.headerSubtitle')}</p>
             </header>
 
             <div className="kairo-wizard-steps">
                 <div className={`kairo-wizard-step ${step >= 1 ? 'active' : ''}`} data-testid="step-1" aria-current={step === 1 ? 'step' : undefined}>
                     <span className="step-number">1</span>
-                    <span className="step-label">Select Directory</span>
+                    <span className="step-label">{t('widget.importWizard.stepLabelSelectDirectory')}</span>
                 </div>
                 <div className={`kairo-wizard-step ${step >= 2 ? 'active' : ''}`} data-testid="step-2" aria-current={step === 2 ? 'step' : undefined}>
                     <span className="step-number">2</span>
-                    <span className="step-label">Confirm Settings</span>
+                    <span className="step-label">{t('widget.importWizard.stepLabelConfirmSettings')}</span>
                 </div>
                 <div className={`kairo-wizard-step ${step >= 3 ? 'active' : ''}`} data-testid="step-3" aria-current={step === 3 ? 'step' : undefined}>
                     <span className="step-number">3</span>
-                    <span className="step-label">Complete</span>
+                    <span className="step-label">{t('widget.importWizard.stepLabelComplete')}</span>
                 </div>
             </div>
 
@@ -308,20 +341,18 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
                 {step === 1 && (
                     <div className="kairo-wizard-step-content" data-testid="step-content-1">
                         <div className="kairo-wizard-tips" data-testid="welcome-tips">
-                            <h3>Welcome to Kairo IDE</h3>
-                            <p>Kairo helps you run legacy Java Web projects on Tomcat 6 — entirely offline.</p>
+                            <h3>{t('widget.importWizard.welcomeTitle')}</h3>
+                            <p>{t('widget.importWizard.welcomeDesc')}</p>
                             <ul>
-                                <li>Auto-detects project structure (source dirs, web root, encoding)</li>
-                                <li>Configures Ant/javac builds automatically</li>
-                                <li>No files are modified during detection</li>
-                                <li>All settings saved to <code>.kairo/project.json</code></li>
+                                <li>{t('widget.importWizard.welcomeTip1')}</li>
+                                <li>{t('widget.importWizard.welcomeTip2')}</li>
+                                <li>{t('widget.importWizard.welcomeTip3')}</li>
+                                <li>{t('widget.importWizard.welcomeTip4')}</li>
                             </ul>
                         </div>
-                        <p>Select the root folder of your legacy Java web project.</p>
+                        <p>{t('widget.importWizard.selectRootFolder')}</p>
                         <p className="kairo-hint">
-                            Kairo will auto-detect the project structure — source directories,
-                            web root, encoding, JDK version, and build configuration.
-                            No files will be modified during detection.
+                            {t('widget.importWizard.autoDetectHint')}
                         </p>
                         {/* KAIRO-RC-WEB-028: visible path input as a fallback
                             when the file dialog swallows the typed path. The
@@ -330,36 +361,36 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
                         <div className="kairo-path-row" data-testid="path-row">
                             <input
                                 type="text"
-                                className="kairo-path-input"
+                                className="theia-input kairo-path-input"
                                 data-testid="path-input"
-                                placeholder="/absolute/path/to/project"
+                                placeholder={t('widget.importWizard.pathPlaceholder')}
                                 value={workspacePath}
                                 onChange={e => setWorkspacePath(e.target.value)}
                                 onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void handleScanTypedPath(); } }}
-                                aria-label="Project root path"
+                                aria-label={t('widget.importWizard.projectPath')}
                             />
                             <button
                                 className="theia-button"
                                 onClick={handleSelectDirectory}
                                 disabled={scanning}
                                 data-testid="browse-btn"
-                                aria-label="Browse for project directory"
+                                aria-label={t('widget.importWizard.browseAria')}
                             >
-                                Browse...
+                                {t('common.browse')}
                             </button>
                             <button
                                 className="theia-button main"
                                 onClick={handleScanTypedPath}
                                 disabled={scanning}
                                 data-testid="scan-btn"
-                                aria-label="Scan the entered project path"
+                                aria-label={t('widget.importWizard.scanAria')}
                             >
-                                {scanning ? 'Scanning...' : 'Scan'}
+                                {scanning ? t('widget.importWizard.scanning') : t('widget.importWizard.scan')}
                             </button>
                         </div>
                         {workspacePath && (
                             <p className="kairo-selected-path" data-testid="selected-path">
-                                Selected: {workspacePath}
+                                {t('widget.importWizard.selectedPath', { path: workspacePath })}
                             </p>
                         )}
                         {scanError && (
@@ -373,78 +404,82 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
                 {/* Step 2: Confirm Detected Results */}
                 {step === 2 && (
                     <div className="kairo-wizard-step-content" data-testid="step-content-2">
-                        <p>Review and adjust the detected project settings.</p>
+                        <p>{t('widget.importWizard.reviewSettings')}</p>
                         {detected && (
                             <p className="kairo-confidence">
-                                Detection confidence: {Math.round(detected.confidence * 100)}%
+                                {t('widget.importWizard.detectionConfidence', { confidence: Math.round(detected.confidence * 100) })}
                                 {detected.warnings.length > 0 && (
-                                    <span className="kairo-warning"> ({detected.warnings.length} warnings)</span>
+                                    <span className="kairo-warning"> ({detected.warnings.length} {t('common.warning').toLowerCase()})</span>
                                 )}
                             </p>
                         )}
                         <form className="kairo-config-form" data-testid="project-config-form" onSubmit={e => e.preventDefault()}>
                             <div className="kairo-form-group">
                                 <label htmlFor="input-project-name">
-                                    Project Name:
+                                    {t('widget.importWizard.projectName')}:
                                     <input
                                         id="input-project-name"
                                         type="text"
+                                        className="theia-input"
                                         data-testid="input-project-name"
                                         value={projectName}
                                         onChange={e => setProjectName(e.target.value)}
-                                        aria-label="Project name"
+                                        aria-label={t('widget.importWizard.projectNameAria')}
                                     />
                                 </label>
                             </div>
                             <div className="kairo-form-group">
                                 <label htmlFor="input-source-dirs">
-                                    Source Directories (comma-separated):
+                                    {t('widget.importWizard.sourceDirs')}:
                                     <input
                                         id="input-source-dirs"
                                         type="text"
+                                        className="theia-input"
                                         data-testid="input-source-dirs"
                                         value={sourceDirs}
                                         onChange={e => setSourceDirs(e.target.value)}
-                                        aria-label="Source directories"
+                                        aria-label={t('widget.importWizard.sourceDirsAria')}
                                     />
                                 </label>
                             </div>
                             <div className="kairo-form-group">
                                 <label htmlFor="input-web-root">
-                                    Web Root:
+                                    {t('widget.importWizard.webRoot')}:
                                     <input
                                         id="input-web-root"
                                         type="text"
                                         data-testid="input-web-root"
                                         value={webRoot}
                                         onChange={e => setWebRoot(e.target.value)}
-                                        aria-label="Web root directory"
+                                        aria-label={t('widget.importWizard.webRootAria')}
                                     />
                                 </label>
                             </div>
                             <div className="kairo-form-group">
                                 <label htmlFor="input-lib-dirs">
-                                    Library Directories (comma-separated):
+                                    {t('widget.importWizard.libDirs')}:
                                     <input
                                         id="input-lib-dirs"
                                         type="text"
+                                        className="theia-input"
                                         data-testid="input-lib-dirs"
                                         value={libDirs}
                                         onChange={e => setLibDirs(e.target.value)}
-                                        aria-label="Library directories"
+                                        aria-label={t('widget.importWizard.libDirsAria')}
                                     />
                                 </label>
                             </div>
                             <div className="kairo-form-row">
                                 <div className="kairo-form-group">
                                     <label htmlFor="select-encoding">
-                                        Encoding:
+                                        {t('widget.importWizard.defaultEncoding')}:
                                         <select
                                             id="select-encoding"
+                                            className="theia-select"
                                             data-testid="select-encoding"
                                             value={defaultEncoding}
                                             onChange={e => setDefaultEncoding(e.target.value)}
-                                            aria-label="File encoding"
+                                            aria-label={t('widget.importWizard.encodingAria')}
                                         >
                                             <option value="utf-8">UTF-8</option>
                                             <option value="gbk">GBK</option>
@@ -455,14 +490,15 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
                                 </div>
                                 <div className="kairo-form-group">
                                     <label htmlFor="input-jdk-version">
-                                        JDK Version:
+                                        {t('widget.importWizard.jdkVersion')}:
                                         <input
                                             id="input-jdk-version"
                                             type="text"
+                                            className="theia-input"
                                             data-testid="input-jdk-version"
                                             value={jdkVersion}
                                             onChange={e => setJdkVersion(e.target.value)}
-                                            aria-label="JDK version"
+                                            aria-label={t('widget.importWizard.jdkVersionAria')}
                                         />
                                     </label>
                                 </div>
@@ -470,13 +506,14 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
                             <div className="kairo-form-row">
                                 <div className="kairo-form-group">
                                     <label htmlFor="select-source-version">
-                                        Source Version:
+                                        {t('widget.importWizard.sourceVersion')}:
                                         <select
                                             id="select-source-version"
+                                            className="theia-select"
                                             data-testid="select-source-version"
                                             value={sourceVersion}
                                             onChange={e => setSourceVersion(e.target.value)}
-                                            aria-label="Java source version"
+                                            aria-label={t('widget.importWizard.sourceVersionAria')}
                                         >
                                             <option value="1.5">1.5</option>
                                             <option value="1.6">1.6</option>
@@ -487,13 +524,14 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
                                 </div>
                                 <div className="kairo-form-group">
                                     <label htmlFor="select-target-version">
-                                        Target Version:
+                                        {t('widget.importWizard.targetVersion')}:
                                         <select
                                             id="select-target-version"
+                                            className="theia-select"
                                             data-testid="select-target-version"
                                             value={targetVersion}
                                             onChange={e => setTargetVersion(e.target.value)}
-                                            aria-label="Java target version"
+                                            aria-label={t('widget.importWizard.targetVersionAria')}
                                         >
                                             <option value="1.5">1.5</option>
                                             <option value="1.6">1.6</option>
@@ -506,62 +544,65 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
                             <div className="kairo-form-row">
                                 <div className="kairo-form-group">
                                     <label htmlFor="input-output-dir">
-                                        Output Directory:
+                                        {t('widget.importWizard.outputDir')}:
                                         <input
                                             id="input-output-dir"
                                             type="text"
+                                            className="theia-input"
                                             data-testid="input-output-dir"
                                             value={outputDir}
                                             onChange={e => setOutputDir(e.target.value)}
-                                            aria-label="Output directory"
+                                            aria-label={t('widget.importWizard.outputDirAria')}
                                         />
                                     </label>
                                 </div>
                                 <div className="kairo-form-group">
                                     <label htmlFor="select-build-tool">
-                                        Build Tool:
+                                        {t('widget.importWizard.buildTool')}:
                                         <select
                                             id="select-build-tool"
+                                            className="theia-select"
                                             data-testid="select-build-tool"
                                             value={buildTool}
                                             onChange={e => setBuildTool(e.target.value)}
-                                            aria-label="Build tool"
+                                            aria-label={t('widget.importWizard.buildToolAria')}
                                         >
-                                            <option value="ant">Ant</option>
-                                            <option value="javac">javac (direct)</option>
+                                            <option value="ant">{t('widget.importWizard.ant')}</option>
+                                            <option value="javac">{t('widget.importWizard.javac')}</option>
                                         </select>
                                     </label>
                                 </div>
                             </div>
                             <div className="kairo-form-group">
                                 <label htmlFor="input-build-script">
-                                    Build Script:
+                                    {t('widget.importWizard.buildScript')}:
                                     <input
                                         id="input-build-script"
                                         type="text"
+                                        className="theia-input"
                                         data-testid="input-build-script"
                                         value={buildScript}
                                         onChange={e => setBuildScript(e.target.value)}
-                                        aria-label="Build script"
+                                        aria-label={t('widget.importWizard.buildScriptAria')}
                                     />
                                 </label>
                             </div>
                             <div className="kairo-form-group">
                                 <label htmlFor="input-context-path">
-                                    Context Path:
+                                    {t('widget.importWizard.contextPath')}:
                                     <input
                                         id="input-context-path"
                                         type="text"
                                         data-testid="input-context-path"
                                         value={contextPath}
                                         onChange={e => setContextPath(e.target.value)}
-                                        aria-label="Context path"
+                                        aria-label={t('widget.importWizard.contextPathAria')}
                                     />
                                 </label>
                             </div>
                             {detected && detected.warnings && detected.warnings.length > 0 && (
                                 <div className="kairo-warnings" data-testid="detection-warnings">
-                                    <strong>Warnings:</strong>
+                                    <strong>{t('widget.importWizard.warningsTitle')}</strong>
                                     <ul>
                                         {detected.warnings.map((w, i) => (
                                             <li key={i}>{w}</li>
@@ -576,7 +617,7 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
                                     onClick={() => setStep(1)}
                                     data-testid="back-to-select"
                                 >
-                                    Back
+                                    {t('common.back')}
                                 </button>
                                 <button
                                     type="button"
@@ -584,14 +625,14 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
                                     onClick={handleImport}
                                     disabled={importing}
                                     data-testid="import-project-btn"
-                                    aria-label="Import project"
+                                    aria-label={t('widget.importWizard.import')}
                                 >
-                                    {importing ? 'Importing...' : 'Import Project'}
+                                    {importing ? t('widget.importWizard.importing') : t('widget.importWizard.import')}
                                 </button>
                             </div>
                             {importError && (
                                 <p className="kairo-error" data-testid="import-error" role="alert">
-                                    Error: {importError}
+                                    {t('widget.importWizard.errorPrefix', { message: importError })}
                                 </p>
                             )}
                         </form>
@@ -602,17 +643,16 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
                 {step === 3 && importedSummary && (
                     <div className="kairo-wizard-step-content" data-testid="step-content-3">
                         <p className="kairo-wizard-ready" data-testid="import-ready">
-                            Project <strong>{importedSummary.name}</strong> imported successfully.
+                            {t('widget.importWizard.importReady', { name: importedSummary.name })}
                         </p>
                         <dl className="kairo-info-list">
-                            <dt>Location</dt>
+                            <dt>{t('widget.importWizard.location')}</dt>
                             <dd data-testid="ready-root">{importedSummary.root}</dd>
-                            <dt>Encoding</dt>
+                            <dt>{t('widget.importWizard.importedEncoding')}</dt>
                             <dd data-testid="ready-encoding">{importedSummary.encoding}</dd>
                         </dl>
                         <p className="kairo-hint">
-                            Import does not modify your source code. All configuration is saved
-                            to <code>.kairo/project.json</code> in the project root.
+                            {t('widget.importWizard.importHint')}
                         </p>
                         <div className="kairo-wizard-actions">
                             <button
@@ -631,7 +671,7 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
                                     }
                                 }}
                             >
-                                Open Project Folder
+                                {t('widget.importWizard.openProjectFolder')}
                             </button>
                             <button
                                 type="button"
@@ -639,7 +679,7 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
                                 data-testid="ready-close-btn"
                                 onClick={() => onClose()}
                             >
-                                Close
+                                {t('common.close')}
                             </button>
                         </div>
                     </div>

@@ -25,6 +25,7 @@ import {
   WidgetFactory,
 } from '@theia/core/lib/browser';
 import { Container } from '@theia/core/shared/inversify';
+
 // Activate Theia Git, SCM, and Terminal modules (auto-register on import).
 // Git/SCM are optional — wrapped in try/catch for environments where
 // @theia/git and @theia/scm are not installed (P1-GIT-01: needs real
@@ -51,7 +52,7 @@ import { EncodingRegistry } from '@theia/core/lib/browser/encoding-registry';
 import { TabBarDecorator } from '@theia/core/lib/browser/shell/tab-bar-decorator';
 import { FileService } from '@theia/filesystem/lib/browser/file-service';
 import { BuildViewWidget } from '@kairo/build-extension';
-import { ServerViewWidget, LogViewerWidget } from '@kairo/tomcat-extension';
+import { ServerViewWidget, LogViewerWidget, HotDeployService } from '@kairo/tomcat-extension';
 import { bindSvnExtension } from '@kairo/svn-extension';
 import { bindKairoI18n } from '@kairo/i18n';
 import {
@@ -165,6 +166,8 @@ import { KairoIDEAWindowsKeymapContribution } from './kairo-idea-windows-keymap'
 import { KairoIDEAMacKeymapContribution } from './kairo-idea-mac-keymap';
 import { KairoIDEAMonacoKeymapContribution } from './kairo-idea-monaco-keymap';
 import { KairoIDEAMacMonacoKeymapContribution } from './kairo-idea-mac-monaco-keymap';
+// Import plugin-ext frontend module to initialize the VS Code Extension Host
+import '@theia/plugin-ext/lib/main/browser/plugin-ext-frontend-module';
 
 // Re-export so existing consumers can keep importing the IDs from
 // this module; the definitions live in kairo-factory-ids.ts.
@@ -294,6 +297,63 @@ export function bindKairoFrontend(bind: interfaces.Bind, unbind?: interfaces.Unb
       }
     });
   };
+
+  // ── DI fallback bindings for Theia core services ────────────
+  // KAIRO-RC-DESKTOP-2026-07-29: Theia modules (@theia/filesystem,
+  // @theia/debug, etc.) may be loaded after Kairo modules during
+  // frontend startup. When a Kairo contribution tries to inject a
+  // Theia service that hasn't been bound yet, Inversify throws
+  // "No matching bindings found" and the contribution is replaced
+  // with a no-op. The workbench shell renders but all Kairo views,
+  // commands, menus, and status bar entries are missing.
+  //
+  // We add fallback bindings for services that the Kairo
+  // contributions depend on transitively. The real Theia modules
+  // will rebind these later; the fallbacks are only used during
+  // the initial module-loading window.
+  if (isBound) {
+    try {
+      // FileSystemPreferences — used by encoding, editor, local history
+      const { FileSystemPreferences } = require('@theia/filesystem/lib/common/filesystem-preferences');
+      if (!isBound(FileSystemPreferences)) {
+        bind(FileSystemPreferences).toConstantValue({
+          'files.encoding': 'utf8',
+          'files.autoGuessEncoding': false,
+          'files.eol': 'auto',
+          'files.autoSave': 'off',
+          'files.autoSaveDelay': 1000,
+        } as any);
+      }
+    } catch { /* @theia/filesystem not available */ }
+
+    try {
+      // FileDialogService — used by project structure, telemetry
+      const { FileDialogService } = require('@theia/filesystem/lib/browser');
+      if (!isBound(FileDialogService)) {
+        bind(FileDialogService).toConstantValue({
+          showOpenDialog: () => Promise.resolve(undefined),
+          showSaveDialog: () => Promise.resolve(undefined),
+        } as any);
+      }
+    } catch { /* @theia/filesystem not available */ }
+
+    try {
+      // DebugSessionManager — used by KairoJavaDebugService
+      const { DebugSessionManager } = require('@theia/debug/lib/browser/debug-session-manager');
+      if (!isBound(DebugSessionManager)) {
+        bind(DebugSessionManager).toConstantValue({
+          onDidChange: () => ({ dispose: () => {} }),
+          onDidCreateDebugSession: () => ({ dispose: () => {} }),
+          onDidStopDebugSession: () => ({ dispose: () => {} }),
+          onDidDestroyDebugSession: () => ({ dispose: () => {} }),
+          onDidChangeActiveDebugSession: () => ({ dispose: () => {} }),
+          sessions: [],
+          currentSession: undefined,
+          state: 0,
+        } as any);
+      }
+    } catch { /* @theia/debug not available */ }
+  }
 
   // ── Kairo i18n (internationalization) ───────────────────────
   // Must be bound early so all subsequent contributions can inject
@@ -569,6 +629,11 @@ export function bindKairoFrontend(bind: interfaces.Bind, unbind?: interfaces.Unb
     bind(SaveableService).to(KairoSaveableService).inSingletonScope();
   }
 
+  // HotDeployService: IDEA-style intelligent hot deployment
+  // (auto-sync on save, update application, reload context, frame deactivation)
+  bind(HotDeployService).toSelf().inSingletonScope();
+  safeContribution(FrontendApplicationContribution, HotDeployService, 'HotDeployService');
+
   // Encoding tab decorator — shows encoding suffix on editor tabs.
   bind(KairoEncodingTabDecorator).toSelf().inSingletonScope();
   bind(TabBarDecorator).toService(KairoEncodingTabDecorator);
@@ -730,6 +795,13 @@ export function bindKairoFrontend(bind: interfaces.Bind, unbind?: interfaces.Unb
   } catch (e) {
     console.error('[kairo] bindSvnExtension FAILED', e);
   }
+
+  // ── Plugin Extension (VS Code Extension Support) ──────────────
+  // KairoExtensionsContribution, KairoExtensionService, and the
+  // KairoExtensionsWidget are bound by @kairo/plugin-extension's
+  // theiaExtensions module (kairo-extensions-frontend-module.ts).
+  // No manual binding needed here — it would cause duplicate
+  // channel creation and command registration.
 }
 
 export default new ContainerModule((bind, unbind, isBound, rebind) => {

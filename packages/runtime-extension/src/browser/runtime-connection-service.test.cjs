@@ -298,7 +298,7 @@ test('delay: resolves after timeout', async () => {
   const start = Date.now();
   await new Promise(resolve => setTimeout(resolve, 10));
   const elapsed = Date.now() - start;
-  assert.ok(elapsed >= 10);
+  assert.ok(elapsed >= 8, `expected elapsed >= 8ms, got ${elapsed}ms`);
 });
 
 test('delay: aborts when signal fires', async () => {

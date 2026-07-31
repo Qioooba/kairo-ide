@@ -20,16 +20,19 @@
     "clean": "rm -rf lib dist"
   },
   "dependencies": {
-    "@kairo/protocol": "workspace:*",
+    "@kairo/protocol": "workspace:*"
+  },
+  "devDependencies": {
     "@kairo/theia-product": "workspace:*",
     "@kairo/runtime-extension": "workspace:*",
     "@theia/core": "1.73.1",
-    "@theia/electron": "1.73.1"
-  },
-  "devDependencies": {
+    "@theia/electron": "1.73.1",
+    "@theia/plugin-ext": "1.73.1",
+    "@theia/plugin-ext-vscode": "1.73.1",
     "@types/node": "20.14.10",
     "electron": "39.8.7",
-    "electron-builder": "25.1.8"
+    "electron-builder": "25.1.8",
+    "typescript": "5.5.4"
   },
   "build": {
     "appId": "com.kairo.ide",
@@ -42,12 +45,13 @@
     "files": [
       "lib/main.js",
       "lib/preload.js",
+      "lib/process-manager.js",
+      "lib/jdk-check.js",
       "lib/frontend/**/*",
       "lib/backend/**/*",
-      "../browser/lib/frontend/**/*",
-      "../browser/lib/backend/**/*",
-      "assets/**/*",
-      "package.json"
+      "package.json",
+      "!lib/**/*.map",
+      "!lib/**/*.test.js"
     ],
     "extraResources": [
       {

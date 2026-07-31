@@ -724,6 +724,7 @@ export interface EndpointMap {
   'POST /api/v1/servers/{serverId}/restart': { request: undefined; response: ServerInstance };
   'POST /api/v1/servers/{serverId}/debug': { request: undefined; response: ServerInstance };
   'DELETE /api/v1/servers/{serverId}': { request: { force?: boolean }; response: ServerInstance };
+  'POST /api/v1/servers/{serverId}/reload': { request: undefined; response: { status: string } };
   'GET /api/v1/servers/{serverId}/logs': {
     request: { follow?: boolean; since?: number; tail?: number };
     response: { line: string; ts: string; stream?: 'stdout' | 'stderr' | 'structured'; source?: string; ordinal?: number }[];
@@ -768,6 +769,10 @@ export interface EndpointMap {
   'POST /api/v1/build/custom/{buildId}/cancel': { request: undefined; response: CustomBuildCancelResponse };
   // Ant classpath
   'POST /api/v1/ant/classpath/analyze': { request: AntClasspathAnalyzeRequest; response: AntClasspathAnalyzeResponse };
+  // JVM incremental compilation and hot reload
+  'POST /api/v1/jvm/compile-incremental': { request: { files?: string[]; projectId?: string }; response: { state: string; filesCompiled?: number; error?: string } };
+  'POST /api/v1/jvm/compile': { request: { file: string }; response: { success: boolean; classPath?: string; error?: string } };
+  'POST /api/v1/jvm/redefine': { request: { sourcePath: string }; response: { success: boolean; error?: string } };
 }
 
 export interface DetectedProjectLayout {

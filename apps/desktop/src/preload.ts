@@ -69,3 +69,29 @@ contextBridge.exposeInMainWorld('kairoIPC', {
         ipcRenderer.send('toggle-devtools');
     },
 });
+
+// ─── Error logging ────────────────────────────────────────────
+// Forward unhandled renderer errors to the main process for
+// file logging. These are errors that the console-message event
+// might miss (unhandled rejections, early syntax errors, etc.).
+
+window.addEventListener('error', (event) => {
+  try {
+    ipcRenderer.send('renderer-error', {
+      message: event.message,
+      filename: event.filename,
+      lineno: event.lineno,
+      colno: event.colno,
+      type: 'error',
+    });
+  } catch { /* IPC may not be available yet */ }
+});
+
+window.addEventListener('unhandledrejection', (event) => {
+  try {
+    ipcRenderer.send('renderer-error', {
+      message: String(event.reason),
+      type: 'unhandledrejection',
+    });
+  } catch { /* IPC may not be available yet */ }
+});

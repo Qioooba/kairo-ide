@@ -47,6 +47,7 @@ const fs = __importStar(require("fs"));
 const http = __importStar(require("http"));
 const protocol_1 = require("@kairo/protocol");
 const crypto_1 = require("crypto");
+const jdk_check_1 = require("./jdk-check");
 let agentProcess = null;
 let agentPort = 0;
 let agentSecret = '';
@@ -63,6 +64,7 @@ const childExitCodes = new Map();
 let mainLogPath;
 function flog(...args) {
     const text = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
+    try { process.stderr.write(`[kairo:log] ${text}\n`); } catch {}
     if (mainLogPath) {
         try {
             fs.appendFileSync(mainLogPath, text + '\n');
@@ -71,24 +73,22 @@ function flog(...args) {
     }
 }
 function initFileLogger() {
+    const candidates = [];
     if (process.env.KAIRO_DESKTOP_LOG_FILE) {
-        mainLogPath = process.env.KAIRO_DESKTOP_LOG_FILE;
+        candidates.push(process.env.KAIRO_DESKTOP_LOG_FILE);
     }
-    else {
-        // Default to <repo>/artifacts/desktop-main.log when present,
-        // otherwise a temp path. Falling back to a temp path is fine
-        // because the only caller passing nothing is the packaged
-        // build, where the OS log facility takes over.
-        const candidate = path.join(__dirname, '..', '..', '..', 'artifacts', 'desktop-main.log');
+    candidates.push(path.join(process.env.APPDATA || path.join(require('os').homedir(), 'AppData', 'Roaming'), '@kairo', 'desktop', 'logs', 'desktop-main.log'));
+    candidates.push(path.join(path.dirname(process.execPath), 'logs', 'desktop-main.log'));
+    candidates.push(path.join(require('os').tmpdir(), 'kairo-desktop-main.log'));
+    for (const candidate of candidates) {
         try {
-            fs.mkdirSync(path.dirname(candidate), { recursive: true });
+            require('fs').mkdirSync(path.dirname(candidate), { recursive: true });
+            require('fs').writeFileSync(candidate, '');
             mainLogPath = candidate;
-        }
-        catch {
-            mainLogPath = undefined;
-        }
+            break;
+        } catch (e) {}
     }
-    // Mirror console to file for the lifetime of the main process.
+    if (!mainLogPath) { mainLogPath = undefined; }
     const wrap = (orig) => (...args) => {
         orig.apply(console, args);
         flog(...args);
@@ -97,6 +97,10 @@ function initFileLogger() {
     console.warn = wrap(console.warn);
     console.error = wrap(console.error);
     console.info = wrap(console.info);
+    try { process.stderr.write(`[kairo:log] initFileLogger: mainLogPath=${mainLogPath || 'NONE'}\n`); } catch {}
+    if (mainLogPath) {
+        try { require('fs').appendFileSync(mainLogPath, `[kairo] initFileLogger: mainLogPath=${mainLogPath}\n`); } catch (e) {}
+    }
 }
 // ─── Startup Validation ──────────────────────────────────────
 /**
@@ -481,6 +485,12 @@ function stopTheiaBackend() {
 electron_1.ipcMain.on('renderer-ready', () => {
     console.log('[kairo] renderer process is ready');
 });
+// Toggle DevTools from renderer command (Help > Toggle Developer Tools).
+electron_1.ipcMain.on('toggle-devtools', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.toggleDevTools();
+    }
+});
 // Send menu actions to the renderer process.
 function sendMenuAction(action) {
     if (mainWindow) {
@@ -544,20 +554,49 @@ async function createWindow() {
     mainWindow.webContents.on('preload-error', (_e, preloadPath, err) => {
         flog(`[renderer] preload-error: path=${preloadPath} err=${err.message}`);
     });
+    // OFFLINE / AIR-GAPPED POLICY: Kairo IDE is designed for fully
+    // intranet deployment. By default we REFUSE to open any external
+    // http/https URL with the system shell. Operators can opt in to
+    // allow external links (for documentation, bug trackers, etc.) by
+    // setting KAIRO_ALLOW_EXTERNAL_LINKS=1; even then, we still block
+    // non-http(s) schemes (file://, intent://, etc.) to prevent the
+    // renderer from launching arbitrary local applications.
+    const allowExternalLinks = process.env.KAIRO_ALLOW_EXTERNAL_LINKS === '1';
     mainWindow.webContents.setWindowOpenHandler(({ url }) => {
         try {
             const u = new URL(url);
-            if (u.protocol === 'http:' || u.protocol === 'https:') {
-                electron_1.shell.openExternal(url);
+            if (u.protocol !== 'http:' && u.protocol !== 'https:') {
+                console.warn('[kairo] refusing to open URL with non-http(s) scheme:', u.protocol);
+                return { action: 'deny' };
             }
-            else {
-                console.warn('[kairo] refusing to open URL with scheme:', u.protocol);
+            if (!allowExternalLinks) {
+                console.warn(`[kairo] refusing to open external URL (set KAIRO_ALLOW_EXTERNAL_LINKS=1 to allow): ${url}`);
+                return { action: 'deny' };
             }
+            electron_1.shell.openExternal(url);
         }
         catch {
             console.warn('[kairo] refusing to open malformed URL:', url);
         }
         return { action: 'deny' };
+    });
+    // Also intercept navigation: if a link inside the app tries to
+    // navigate the main frame to an external URL, block it. This is
+    // a defense-in-depth measure — the CSP already restricts
+    // connect-src, but navigating the top frame to http://evil.com
+    // would replace the IDE entirely.
+    mainWindow.webContents.on('will-navigate', (event, url) => {
+        try {
+            const u = new URL(url);
+            if (u.hostname !== '127.0.0.1' && u.hostname !== 'localhost') {
+                event.preventDefault();
+                console.warn(`[kairo] blocked top-frame navigation to non-local URL: ${url}`);
+            }
+        }
+        catch {
+            event.preventDefault();
+            console.warn('[kairo] blocked top-frame navigation to malformed URL:', url);
+        }
     });
     // Config is injected BEFORE the page loads via the preload script.
     // No executeJavaScript — avoids the race condition.
@@ -571,7 +610,38 @@ async function createWindow() {
 // console output is captured even if Electron detaches from
 // the parent's stdout.
 initFileLogger();
+// Enable remote debugging for diagnostics.
+try { electron_1.app.commandLine.appendSwitch('remote-debugging-port', '9222'); } catch (e) {}
 flog(`[kairo] desktop main starting; pid=${process.pid}; electron=${process.versions.electron}; node=${process.versions.node}; platform=${process.platform}`);
+// ── CSP ────────────────────────────────────────────────────
+// MUST be registered BEFORE the app 'ready' event. The default
+// session is created before 'ready' fires, so registering
+// 'session-created' inside the ready handler would miss the
+// default session. We also explicitly set the CSP on the
+// default session in the ready handler as a safety net.
+function setupCSP(session) {
+    session.webRequest.onHeadersReceived((details, callback) => {
+        const scriptSrcExtra = " 'unsafe-eval'";
+        callback({
+            responseHeaders: {
+                ...details.responseHeaders,
+                'Content-Security-Policy': [
+                    "default-src 'self'",
+                    `script-src 'self' 'unsafe-inline'${scriptSrcExtra}`,
+                    "style-src 'self' 'unsafe-inline'",
+                    "connect-src 'self' data: http://127.0.0.1:* ws://127.0.0.1:*",
+                    "img-src 'self' data:",
+                    "font-src 'self' data:",
+                ].join('; '),
+            },
+        });
+    });
+    flog('[kairo] CSP configured for session');
+}
+// Register session-created BEFORE 'ready' to catch the default session.
+electron_1.app.on('session-created', (session) => {
+    setupCSP(session);
+});
 // Prevent multiple instances
 const gotLock = electron_1.app.requestSingleInstanceLock();
 if (!gotLock) {
@@ -593,44 +663,41 @@ else {
         for (const w of warnings) {
             console.warn(`[kairo] startup warning: ${w}`);
         }
-        // Set CSP before creating any windows.
-        electron_1.app.on('session-created', (session) => {
-            session.webRequest.onHeadersReceived((details, callback) => {
-                // Theia 1.73 ships with ajv-generated validators that use
-                // `new Function` for JSON schema compile. Without
-                // 'unsafe-eval' the very first schema validate throws
-                // EvalError and the frontend hangs in the splash. We
-                // therefore default the production CSP to the tightest
-                // policy that still lets Theia load its static assets, and
-                // gate 'unsafe-eval' behind KAIRO_DEV=1 so packaged builds
-                // ship with a hardened policy. If the renderer ever truly
-                // needs eval in production, switch the policy to add it
-                // back — but record the reason in the commit message.
-                const scriptSrcExtra = process.env.KAIRO_DEV === '1' ? " 'unsafe-eval'" : '';
-                callback({
-                    responseHeaders: {
-                        ...details.responseHeaders,
-                        'Content-Security-Policy': [
-                            "default-src 'self'",
-                            `script-src 'self' 'unsafe-inline'${scriptSrcExtra}`,
-                            "style-src 'self' 'unsafe-inline'",
-                            "connect-src 'self' data: http://127.0.0.1:* ws://127.0.0.1:*",
-                            "img-src 'self' data:",
-                            "font-src 'self' data:",
-                        ].join('; '),
-                    },
-                });
-            });
-        });
+        // ── JDK 17+ pre-check ─────────────────────────────────────
+        // In packaged builds, bundled resources (tomcat6, jdtls) live
+        // under process.resourcesPath/bundled/. The Go agent also
+        // checks bundled/jdk17/ for a pre-extracted JDK.
+        const bundledDir = electron_1.app.isPackaged
+            ? path.join(process.resourcesPath, 'bundled')
+            : undefined;
+        const jdkResult = (0, jdk_check_1.detectJDK17Plus)(bundledDir);
+        if (jdkResult.found) {
+            console.log(`[kairo] JDK ${jdkResult.version} detected at ${jdkResult.javaPath}`);
+            if (!process.env.KAIRO_JDK_HOME && jdkResult.javaHome) {
+                process.env.KAIRO_JDK_HOME = jdkResult.javaHome;
+            }
+        }
+        else {
+            console.warn('[kairo] No JDK 17+ detected, showing setup dialog');
+            const userChoice = await (0, jdk_check_1.showJDKSetupDialog)(jdkResult);
+            if (userChoice === 'quit') {
+                electron_1.app.quit();
+                return;
+            }
+            // Re-detect after user may have set KAIRO_JDK_HOME.
+            const retry = (0, jdk_check_1.detectJDK17Plus)(bundledDir);
+            if (retry.found) {
+                console.log(`[kairo] JDK ${retry.version} configured at ${retry.javaPath}`);
+            }
+            else {
+                console.warn('[kairo] Proceeding without JDK 17+ — Java language features will be limited');
+            }
+        }
+        // Set CSP on the default session as a safety net.
+        setupCSP(electron_1.session.defaultSession);
         try {
             const dataDir = path.join(electron_1.app.getPath('userData'), 'kairo-data');
             fs.mkdirSync(dataDir, { recursive: true });
-            // In packaged builds, bundled resources (tomcat6, jdtls) live
-            // under process.resourcesPath/bundled/. In dev, rely on the
-            // repo-local bundled/ directory or KAIRO_BUNDLED_DIR env.
-            const bundledDir = electron_1.app.isPackaged
-                ? path.join(process.resourcesPath, 'bundled')
-                : undefined;
             // Start Go Agent
             const { port, secret } = await startAgent(dataDir, bundledDir);
             // Start Theia Backend

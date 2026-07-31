@@ -24,6 +24,13 @@ import { EncodingService } from '@theia/core/lib/common/encoding-service';
 import { KairoSafeEncodingService } from '@kairo/encoding-extension/lib/browser/safe-encoding-service';
 import { DebugAdapterContribution } from '@theia/debug/lib/common/debug-model';
 import { KairoJavaDebugAdapterContribution } from './kairo-java-debug-adapter-contribution';
+import { BackendApplicationContribution } from '@theia/core/lib/node/backend-application';
+import { KairoAgentConfigContribution } from './kairo-agent-config-contribution';
+// Import plugin-ext backend module to initialize the VS Code Extension Host
+import '@theia/plugin-ext/lib/main/node/plugin-ext-backend-module';
+import '@theia/plugin-ext-vscode/lib/node/plugin-vscode-backend-module';
+import { KairoExtensionService } from '@kairo/plugin-extension/lib/common/kairo-extension-protocol';
+import { KairoExtensionServiceImpl } from '@kairo/plugin-extension/lib/node/kairo-extension-service';
 
 export default new ContainerModule((bind, unbind, isBound, rebind) => {
   if (isBound(EncodingService)) {
@@ -33,4 +40,13 @@ export default new ContainerModule((bind, unbind, isBound, rebind) => {
   }
   bind(KairoJavaDebugAdapterContribution).toSelf().inSingletonScope();
   bind(DebugAdapterContribution).toService(KairoJavaDebugAdapterContribution);
+
+  // Inject agent config (URL + secret) into the frontend HTML so
+  // that regular browsers can also connect to the Go Runtime Agent.
+  bind(KairoAgentConfigContribution).toSelf().inSingletonScope();
+  bind(BackendApplicationContribution).toService(KairoAgentConfigContribution);
+
+  // Bind Kairo extension service for VS Code extension management
+  bind(KairoExtensionServiceImpl).toSelf().inSingletonScope();
+  bind(KairoExtensionService).toService(KairoExtensionServiceImpl);
 });

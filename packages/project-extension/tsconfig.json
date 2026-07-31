@@ -12,6 +12,7 @@
   "exclude": ["node_modules", "lib", "**/*.test.ts"],
   "references": [
     { "path": "../protocol" },
-    { "path": "../runtime-extension" }
+    { "path": "../runtime-extension" },
+    { "path": "../i18n" }
   ]
 }

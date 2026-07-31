@@ -33,7 +33,33 @@ auto-downloads:
 Both are stored under `bundled/` inside the install directory
 and are reused on subsequent runs.
 
-## Form B — Localhost browser (Windows / macOS / Linux)
+## Form B — Browser-only (headless mode)
+
+```bash
+# Windows: double-click Kairo-Server.exe
+# or run the launch script:
+start-browser-mode.cmd
+
+# Or command line
+Kairo.exe --headless
+```
+
+Then open the URL printed in the console (e.g. `http://127.0.0.1:3000`)
+in Chrome, Edge, or Safari.
+
+`Kairo-Server.exe` is a tiny Go launcher (~2 MB) that finds
+`Kairo.exe` in the same directory and starts it with `--headless`.
+This starts the Go Runtime Agent and Theia backend without
+opening an Electron window.
+
+This is useful for:
+- Running Kairo as a shared server
+- Lower resource usage (~200 MB less than desktop mode)
+- CI/CD environments
+
+See `docs/DEPLOY-GUIDE.md` for detailed usage instructions.
+
+## Form C — Localhost browser (development)
 
 ```bash
 kairo-server --bind 127.0.0.1 --port 3000
@@ -46,7 +72,7 @@ same process. There is no auth in the localhost browser form
 by default; pass `--require-auth` to require login even on
 loopback.
 
-## Form C — Remote Linux server
+## Form D — Remote Linux server
 
 ```bash
 # On the server

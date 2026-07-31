@@ -27,7 +27,7 @@ describe('Theia Product — Frontend Module Exports', () => {
 
 describe('Theia Product — Views Contribution', () => {
   it('kairo-views-contribution source imports key services', () => {
-    const source = fs.readFileSync(path.join(srcDir, 'kairo-views-contribution.ts'), 'utf8');
+    const source = fs.readFileSync(path.join(srcDir, 'kairo-views-contribution.tsx'), 'utf8');
     assert.match(source, /KairoServerService/);
     assert.match(source, /KairoProjectService/);
     assert.match(source, /RuntimeConnectionService/);
@@ -35,7 +35,7 @@ describe('Theia Product — Views Contribution', () => {
   });
 
   it('kairo-views-contribution exports KairoDeploymentsWidget', () => {
-    const source = fs.readFileSync(path.join(srcDir, 'kairo-views-contribution.ts'), 'utf8');
+    const source = fs.readFileSync(path.join(srcDir, 'kairo-views-contribution.tsx'), 'utf8');
     assert.match(source, /KairoDeploymentsWidget/);
     assert.match(source, /KairoViewsContribution/);
   });

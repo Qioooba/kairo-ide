@@ -246,6 +246,29 @@ if ($DryRun) {
     Ok "bundled 同步完成"
 }
 
+# ─── 同步 @kairo/protocol 到 apps/desktop/node_modules ─────
+# electron-builder 会跟随 pnpm 的 symlink 解析到 packages/protocol/,
+# 导致路径超出 app 目录而报错。为此需要将实际文件复制到 apps/desktop/node_modules/
+# 中,避免 symlink 解析问题。
+Step "同步 @kairo/protocol -> apps/desktop/node_modules/@kairo/protocol"
+$protoSrc = Join-Path $RepoRoot "packages/protocol"
+$protoDst = Join-Path $DesktopDir "node_modules/@kairo/protocol"
+if ($DryRun) {
+    Info "DRY-RUN: robocopy $protoSrc $protoDst /E"
+} else {
+    # 清理旧目录
+    if (Test-Path $protoDst) {
+        Remove-Item -Path $protoDst -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    New-Item -ItemType Directory -Force -Path $protoDst | Out-Null
+    robocopy $protoSrc $protoDst /E /NFL /NDL /NJH /NJS /NC /NS /NP | Out-Null
+    if ($LASTEXITCODE -ge 8) {
+        Err "robocopy 失败 (exit $LASTEXITCODE)"
+        exit 1
+    }
+    Ok "@kairo/protocol 同步完成"
+}
+
 # ─── 同步 browser 产物 ────────────────────────────────────
 Step "同步 browser artifacts -> apps/desktop/lib/frontend+backend"
 $copyScript = Join-Path $DesktopDir "scripts/copy-browser-artifacts.js"
@@ -318,6 +341,23 @@ $cfg = @{
     npmRebuild      = $false
     executableName  = "Kairo"
     productName     = "Kairo"
+    # asar 打包配置: 与 electron-builder.yml 保持一致
+    # --config 会完全覆盖 electron-builder.yml 的配置,因此必须在此显式声明
+    asar            = $true
+    asarUnpack      = @("lib/backend/native/**/*")
+    files           = @(
+        "lib/main.js",
+        "lib/preload.js",
+        "lib/process-manager.js",
+        "lib/jdk-check.js",
+        "lib/frontend/**/*",
+        "lib/backend/**/*",
+        "package.json",
+        # 排除 source maps — 生产环境不需要
+        "!lib/**/*.map",
+        # 排除测试文件
+        "!lib/**/*.test.js"
+    )
 } | ConvertTo-Json -Depth 8 -Compress
 Set-Content -Path $tmpCfg -Value $cfg -Encoding UTF8
 

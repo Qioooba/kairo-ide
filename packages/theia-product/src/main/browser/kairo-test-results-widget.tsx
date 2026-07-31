@@ -3,6 +3,7 @@ import { inject, injectable, postConstruct } from '@theia/core/shared/inversify'
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import { KAIRO_TESTS_FACTORY_ID } from './kairo-factory-ids';
 import { JavaJUnitRunner, type JUnitTestResult, type JUnitTestRun } from '@kairo/java-extension';
+import { KairoI18nService } from '@kairo/i18n';
 
 /** Filter type for test results. */
 type TestStatusFilter = 'all' | 'passed' | 'failed' | 'skipped' | 'error';
@@ -29,13 +30,13 @@ function formatDuration(ms: number): string {
   return `${(ms / 1000).toFixed(2)}s`;
 }
 
-function statusIcon(status: JUnitTestResult['status']): string {
+function statusIconClass(status: JUnitTestResult['status']): string {
   switch (status) {
-    case 'passed': return '\u2713';   // ✓
-    case 'failed': return '\u2717';   // ✗
-    case 'skipped': return '\u2014';  // —
-    case 'error': return '\u26A0';    // ⚠
-    default: return '?';
+    case 'passed': return 'codicon codicon-pass';
+    case 'failed': return 'codicon codicon-error';
+    case 'skipped': return 'codicon codicon-circle-slash';
+    case 'error': return 'codicon codicon-warning';
+    default: return 'codicon codicon-question';
   }
 }
 
@@ -43,13 +44,28 @@ function statusClass(status: JUnitTestResult['status']): string {
   return `kairo-test-status-${status}`;
 }
 
+function runStateIconClass(state: JUnitTestRun['state']): string {
+  switch (state) {
+    case 'running': return 'codicon codicon-sync codicon-modifier-spin';
+    case 'succeeded': return 'codicon codicon-check';
+    case 'failed': return 'codicon codicon-error';
+    default: return 'codicon codicon-circle-outline';
+  }
+}
+
 /** Count number of failed tests (including errors) in a run. */
 function countFailedAndErrors(run: JUnitTestRun): number {
   return run.failedCount + run.errorCount;
 }
 
+interface TestMethodRowProps {
+  result: JUnitTestResult;
+  i18n: KairoI18nService;
+}
+
 /** Single test method result row. */
-const TestMethodRow: React.FC<{ result: JUnitTestResult }> = ({ result }) => {
+const TestMethodRow: React.FC<TestMethodRowProps> = ({ result, i18n }) => {
+  const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
   const [expanded, setExpanded] = React.useState(result.status === 'failed' || result.status === 'error');
 
   return (
@@ -63,7 +79,7 @@ const TestMethodRow: React.FC<{ result: JUnitTestResult }> = ({ result }) => {
         onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') setExpanded(!expanded); }}
       >
         <span className={`kairo-test-status ${statusClass(result.status)}`}>
-          {statusIcon(result.status)}
+          <span className={statusIconClass(result.status)} aria-hidden="true" />
         </span>
         <span className="kairo-test-method-name">{result.methodName}</span>
         <span className="kairo-test-method-duration">{formatDuration(result.durationMs)}</span>
@@ -72,13 +88,13 @@ const TestMethodRow: React.FC<{ result: JUnitTestResult }> = ({ result }) => {
         <div className="kairo-test-method-detail">
           {result.failureMessage && (
             <div className="kairo-test-failure" role="alert">
-              <div className="kairo-test-failure-label">Failure:</div>
+              <div className="kairo-test-failure-label">{t('widget.tests.failureLabel')}</div>
               <pre className="kairo-test-failure-message">{result.failureMessage}</pre>
             </div>
           )}
           {result.stackTrace && result.stackTrace.length > 0 && (
             <div className="kairo-test-stacktrace">
-              <div className="kairo-test-stacktrace-label">Stack Trace:</div>
+              <div className="kairo-test-stacktrace-label">{t('widget.tests.stackTraceLabel')}</div>
               <pre className="kairo-test-stacktrace-lines">{result.stackTrace.join('\n')}</pre>
             </div>
           )}
@@ -88,8 +104,14 @@ const TestMethodRow: React.FC<{ result: JUnitTestResult }> = ({ result }) => {
   );
 };
 
+interface TestClassGroupProps {
+  group: TestClassGroup;
+  i18n: KairoI18nService;
+}
+
 /** Test class group header with collapsible method list. */
-const TestClassGroup: React.FC<{ group: TestClassGroup }> = ({ group }) => {
+const TestClassGroup: React.FC<TestClassGroupProps> = ({ group, i18n }) => {
+  const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
   const [expanded, setExpanded] = React.useState(true);
   const passedCount = group.results.filter(r => r.status === 'passed').length;
   const failedCount = group.results.filter(r => r.status === 'failed').length;
@@ -106,19 +128,19 @@ const TestClassGroup: React.FC<{ group: TestClassGroup }> = ({ group }) => {
         tabIndex={0}
         onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') setExpanded(!expanded); }}
       >
-        <span className="kairo-test-expand-icon">{expanded ? '\u25BC' : '\u25B6'}</span>
+        <span className="kairo-test-expand-icon"><span className={`codicon ${expanded ? 'codicon-chevron-down' : 'codicon-chevron-right'}`} aria-hidden="true" /></span>
         <span className="kairo-test-class-name">{group.className}</span>
         <span className="kairo-test-class-counts">
-          {passedCount > 0 && <span className="kairo-test-status kairo-test-status-passed">{passedCount} passed</span>}
-          {failedCount > 0 && <span className="kairo-test-status kairo-test-status-failed">{failedCount} failed</span>}
-          {errorCount > 0 && <span className="kairo-test-status kairo-test-status-error">{errorCount} errors</span>}
-          {skippedCount > 0 && <span className="kairo-test-status kairo-test-status-skipped">{skippedCount} skipped</span>}
+          {passedCount > 0 && <span className="kairo-badge kairo-badge-success">{t('widget.tests.summary.passed', { count: passedCount })}</span>}
+          {failedCount > 0 && <span className="kairo-badge kairo-badge-error">{t('widget.tests.summary.failed', { count: failedCount })}</span>}
+          {errorCount > 0 && <span className="kairo-badge kairo-badge-error">{t('widget.tests.summary.error', { count: errorCount })}</span>}
+          {skippedCount > 0 && <span className="kairo-badge kairo-badge-warning">{t('widget.tests.summary.skipped', { count: skippedCount })}</span>}
         </span>
       </div>
       {expanded && (
         <div className="kairo-test-class-methods">
           {group.results.map((result, i) => (
-            <TestMethodRow key={`${result.testId}-${i}`} result={result} />
+            <TestMethodRow key={`${result.testId}-${i}`} result={result} i18n={i18n} />
           ))}
         </div>
       )}
@@ -128,9 +150,12 @@ const TestClassGroup: React.FC<{ group: TestClassGroup }> = ({ group }) => {
 
 interface TestResultsViewProps {
   runner: JavaJUnitRunner;
+  i18n: KairoI18nService;
 }
 
-const TestResultsView: React.FC<TestResultsViewProps> = ({ runner }) => {
+const TestResultsView: React.FC<TestResultsViewProps> = ({ runner, i18n }) => {
+  const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
+  const [, forceUpdate] = React.useReducer(x => x + 1, 0);
   const [latestRun, setLatestRun] = React.useState<JUnitTestRun | null>(null);
   const [pastRuns, setPastRuns] = React.useState<JUnitTestRun[]>([]);
   const [selectedRunId, setSelectedRunId] = React.useState<string | null>(null);
@@ -138,6 +163,11 @@ const TestResultsView: React.FC<TestResultsViewProps> = ({ runner }) => {
   const [rerunningFailed, setRerunningFailed] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    const disposable = i18n.onDidChangeLanguage(() => forceUpdate());
+    return () => disposable.dispose();
+  }, [i18n]);
 
   React.useEffect(() => {
     const sub = runner.onDidCompleteRun((run: JUnitTestRun) => {
@@ -189,7 +219,7 @@ const TestResultsView: React.FC<TestResultsViewProps> = ({ runner }) => {
         }
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Rerun failed tests failed.');
+      setError(err instanceof Error ? err.message : t('widget.tests.errorTitle'));
     }
     setRerunningFailed(false);
     setLoading(false);
@@ -197,22 +227,15 @@ const TestResultsView: React.FC<TestResultsViewProps> = ({ runner }) => {
 
   if (loading) {
     return (
-      <div className="kairo-widget" role="status" aria-label="Running tests" aria-busy="true">
+      <div className="kairo-widget" role="status" aria-busy="true">
         <div className="kairo-widget-header">
-          <span className="kairo-widget-title">Test Results</span>
+          <span className="kairo-widget-title">{t('widget.tests.title')}</span>
         </div>
-        <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
-          <div style={{
-            width: '24px', height: '24px',
-            border: '3px solid var(--theia-dropdown-border)',
-            borderTopColor: 'var(--theia-focusBorder)',
-            borderRadius: '50%',
-            animation: 'kairo-spin 0.8s linear infinite',
-          }} />
-          <span style={{ color: 'var(--theia-descriptionForeground)', fontSize: '13px' }}>
-            {rerunningFailed ? 'Rerunning failed tests...' : 'Running tests...'}
-          </span>
-          <style>{`@keyframes kairo-spin { to { transform: rotate(360deg); } }`}</style>
+        <div className="kairo-widget-body">
+          <div className="kairo-empty-state">
+            <span className="kairo-empty-state-glyph codicon codicon-loading codicon-modifier-spin" aria-hidden="true" />
+            <h3 className="kairo-empty-state-title">{rerunningFailed ? t('widget.tests.rerunningFailed') : t('widget.tests.loading')}</h3>
+          </div>
         </div>
       </div>
     );
@@ -222,30 +245,16 @@ const TestResultsView: React.FC<TestResultsViewProps> = ({ runner }) => {
     return (
       <div className="kairo-widget" role="alert" aria-live="assertive">
         <div className="kairo-widget-header">
-          <span className="kairo-widget-title">Test Results</span>
+          <span className="kairo-widget-title">{t('widget.tests.title')}</span>
         </div>
-        <div style={{ padding: '12px' }}>
-          <div style={{
-            padding: '10px 12px',
-            backgroundColor: 'rgba(244,67,54,0.1)',
-            border: '1px solid rgba(244,67,54,0.3)',
-            borderRadius: '4px',
-            color: 'var(--theia-errorForeground)',
-            fontSize: '13px',
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-              <span aria-hidden="true">⚠</span>
-              <strong>Error running tests</strong>
+        <div className="kairo-widget-body">
+          <div className="kairo-error-banner" role="alert">
+            <span className="codicon codicon-warning" aria-hidden="true" />
+            <div>
+              <strong>{t('widget.tests.errorTitle')}</strong>
+              <p className="kairo-error-banner-detail">{error}</p>
             </div>
-            <p style={{ margin: '4px 0 0 0', fontSize: '12px' }}>{error}</p>
-            <button
-              className="theia-button"
-              onClick={() => setError(null)}
-              aria-label="Dismiss error"
-              style={{ marginTop: '8px', fontSize: '11px', padding: '2px 12px' }}
-            >
-              Dismiss
-            </button>
+            <button className="theia-button secondary" onClick={() => setError(null)}>{t('widget.tests.dismiss')}</button>
           </div>
         </div>
       </div>
@@ -256,9 +265,15 @@ const TestResultsView: React.FC<TestResultsViewProps> = ({ runner }) => {
     return (
       <div className="kairo-widget">
         <div className="kairo-widget-header">
-          <span className="kairo-widget-title">Test Results</span>
+          <span className="kairo-widget-title">{t('widget.tests.title')}</span>
         </div>
-        <p className="kairo-empty">No test results yet. Run JUnit tests to see results here.</p>
+        <div className="kairo-widget-body">
+          <div className="kairo-empty-state">
+            <span className="kairo-empty-state-glyph codicon codicon-beaker" aria-hidden="true" />
+            <h3 className="kairo-empty-state-title">{t('widget.tests.emptyStateTitle')}</h3>
+            <p className="kairo-empty-state-reason">{t('widget.tests.emptyStateReason')}</p>
+          </div>
+        </div>
       </div>
     );
   }
@@ -269,51 +284,32 @@ const TestResultsView: React.FC<TestResultsViewProps> = ({ runner }) => {
   return (
     <div className="kairo-widget">
       <div className="kairo-widget-header">
-        <span className="kairo-widget-title">Test Results</span>
-        <span className="kairo-test-run-state">
-          {selectedRun.state === 'running' ? '\u25D0' : selectedRun.state === 'succeeded' ? '\u2713' : selectedRun.state === 'failed' ? '\u2717' : ''}{' '}
-          {selectedRun.state.toUpperCase()}
+        <span className="kairo-widget-title">{t('widget.tests.title')}</span>
+        <span className={`kairo-test-run-state ${selectedRun.state}`}>
+          <span className={runStateIconClass(selectedRun.state)} aria-hidden="true" />
+          {t(`widget.tests.runState.${selectedRun.state}` as any)}
         </span>
       </div>
 
       {error && (
-        <div role="alert" aria-live="assertive" style={{ padding: '8px 12px' }}>
-          <div style={{
-            padding: '6px 10px',
-            backgroundColor: 'rgba(244,67,54,0.1)',
-            border: '1px solid rgba(244,67,54,0.3)',
-            borderRadius: '4px',
-            color: 'var(--theia-errorForeground)',
-            fontSize: '12px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-          }}>
-            <span aria-hidden="true">⚠</span>
-            <span style={{ flex: 1 }}>{error}</span>
-            <button
-              className="theia-button secondary"
-              onClick={() => setError(null)}
-              aria-label="Dismiss error"
-              style={{ fontSize: '10px', padding: '1px 8px' }}
-            >
-              Dismiss
-            </button>
-          </div>
+        <div className="kairo-error-banner" role="alert" aria-live="assertive">
+          <span className="codicon codicon-warning" aria-hidden="true" />
+          <span>{error}</span>
+          <button className="theia-button secondary" onClick={() => setError(null)}>{t('widget.tests.dismiss')}</button>
         </div>
       )}
 
       {pastRuns.length > 1 && (
         <div className="kairo-widget-toolbar">
           <select
-            className="theia-select"
+            className="theia-select kairo-toolbar-select"
             value={selectedRunId ?? ''}
             onChange={e => setSelectedRunId(e.target.value)}
-            aria-label="Select test run"
+            aria-label={t('widget.tests.selectRun')}
           >
             {pastRuns.map(r => (
               <option key={r.id} value={r.id}>
-                {r.startTime} — {r.passedCount}P / {r.failedCount}F / {r.skippedCount}S / {r.errorCount}E
+                {r.startTime} — {t('widget.tests.summary.passed', { count: r.passedCount })} / {t('widget.tests.summary.failed', { count: r.failedCount })} / {t('widget.tests.summary.skipped', { count: r.skippedCount })} / {t('widget.tests.summary.error', { count: r.errorCount })}
               </option>
             ))}
           </select>
@@ -323,45 +319,45 @@ const TestResultsView: React.FC<TestResultsViewProps> = ({ runner }) => {
       {/* Summary */}
       <div className="kairo-test-run-summary">
         <div className="kairo-test-run-counts">
-          <span className="kairo-test-count kairo-test-count-passed" title="Passed">
-            {selectedRun.passedCount} passed
+          <span className="kairo-badge kairo-badge-success" title={t('widget.tests.runState.passed')}>
+            {t('widget.tests.summary.passed', { count: selectedRun.passedCount })}
           </span>
           {selectedRun.failedCount > 0 && (
-            <span className="kairo-test-count kairo-test-count-failed" title="Failed">
-              {selectedRun.failedCount} failed
+            <span className="kairo-badge kairo-badge-error" title={t('widget.tests.runState.failed')}>
+              {t('widget.tests.summary.failed', { count: selectedRun.failedCount })}
             </span>
           )}
           {selectedRun.skippedCount > 0 && (
-            <span className="kairo-test-count kairo-test-count-skipped" title="Skipped">
-              {selectedRun.skippedCount} skipped
+            <span className="kairo-badge kairo-badge-warning" title={t('widget.tests.runState.skipped')}>
+              {t('widget.tests.summary.skipped', { count: selectedRun.skippedCount })}
             </span>
           )}
           {selectedRun.errorCount > 0 && (
-            <span className="kairo-test-count kairo-test-count-error" title="Errors">
-              {selectedRun.errorCount} errors
+            <span className="kairo-badge kairo-badge-error" title={t('widget.tests.runState.error')}>
+              {t('widget.tests.summary.error', { count: selectedRun.errorCount })}
             </span>
           )}
         </div>
         <div className="kairo-test-run-time">
-          Total: {selectedRun.totalCount} tests
+          {t('widget.tests.summary.total', { count: selectedRun.totalCount })}
         </div>
       </div>
 
       {/* Filter toolbar */}
-      <div className="kairo-widget-toolbar" style={{ gap: '8px', flexWrap: 'wrap' }}>
-        <label className="kairo-sql-field" style={{ flexDirection: 'row', alignItems: 'center', gap: '4px' }}>
-          <span className="kairo-sql-field-label">Filter:</span>
+      <div className="kairo-widget-toolbar">
+        <label className="kairo-toolbar-field">
+          <span className="kairo-toolbar-field-label">{t('widget.tests.filter.label')}:</span>
           <select
-            className="theia-select"
+            className="theia-select kairo-toolbar-select"
             value={statusFilter}
             onChange={e => setStatusFilter(e.target.value as TestStatusFilter)}
-            aria-label="Filter test results by status"
+            aria-label={t('widget.tests.filter.label')}
           >
-            <option value="all">All ({selectedRun.totalCount})</option>
-            <option value="passed">Passed ({selectedRun.passedCount})</option>
-            <option value="failed">Failed ({selectedRun.failedCount})</option>
-            <option value="skipped">Skipped ({selectedRun.skippedCount})</option>
-            <option value="error">Errors ({selectedRun.errorCount})</option>
+            <option value="all">{t('widget.tests.filter.all', { count: selectedRun.totalCount })}</option>
+            <option value="passed">{t('widget.tests.filter.passed', { count: selectedRun.passedCount })}</option>
+            <option value="failed">{t('widget.tests.filter.failed', { count: selectedRun.failedCount })}</option>
+            <option value="skipped">{t('widget.tests.filter.skipped', { count: selectedRun.skippedCount })}</option>
+            <option value="error">{t('widget.tests.filter.error', { count: selectedRun.errorCount })}</option>
           </select>
         </label>
         {countFailedAndErrors(selectedRun) > 0 && (
@@ -369,9 +365,11 @@ const TestResultsView: React.FC<TestResultsViewProps> = ({ runner }) => {
             className="theia-button secondary"
             onClick={handleRerunFailed}
             disabled={rerunningFailed}
-            title="Rerun all failed and error tests"
+            title={t('widget.tests.rerunFailedAria')}
+            aria-label={t('widget.tests.rerunFailedAria')}
           >
-            {rerunningFailed ? '\u25D0 Rerunning...' : `\u21BA Rerun Failed (${countFailedAndErrors(selectedRun)})`}
+            <span className={`codicon ${rerunningFailed ? 'codicon-sync codicon-modifier-spin' : 'codicon-run-below'}`} aria-hidden="true" />
+            {rerunningFailed ? t('widget.tests.rerunning') : t('widget.tests.rerunFailed', { count: countFailedAndErrors(selectedRun) })}
           </button>
         )}
       </div>
@@ -380,17 +378,20 @@ const TestResultsView: React.FC<TestResultsViewProps> = ({ runner }) => {
       <div className="kairo-test-tree">
         {groups.length > 0 ? (
           groups.map(group => (
-            <TestClassGroup key={group.className} group={group} />
+            <TestClassGroup key={group.className} group={group} i18n={i18n} />
           ))
         ) : (
-          <p className="kairo-empty">No test results match the current filter.</p>
+          <div className="kairo-empty-state compact">
+            <span className="kairo-empty-state-glyph codicon codicon-search" aria-hidden="true" />
+            <h3 className="kairo-empty-state-title">{t('widget.tests.noFilterMatch')}</h3>
+          </div>
         )}
       </div>
 
       {/* Raw output */}
       {selectedRun.output && (
         <details className="kairo-test-raw-output">
-          <summary className="kairo-test-raw-output-summary">Raw Output</summary>
+          <summary className="kairo-test-raw-output-summary">{t('widget.tests.rawOutput')}</summary>
           <pre className="kairo-test-output-pre">{selectedRun.output}</pre>
         </details>
       )}
@@ -403,18 +404,19 @@ export class KairoTestResultsWidget extends ReactWidget {
   static readonly ID = KAIRO_TESTS_FACTORY_ID;
 
   @inject(JavaJUnitRunner) protected readonly runner!: JavaJUnitRunner;
+  @inject(KairoI18nService) protected readonly i18n!: KairoI18nService;
 
   @postConstruct()
   protected init(): void {
-    this.id = KairoTestResultsWidget.ID;
-    this.title.label = 'Test Results';
-    this.title.caption = 'Kairo JUnit Test Results';
+    this.id = KAIRO_TESTS_FACTORY_ID;
+    this.title.label = this.i18n.t('widget.tests.title');
+    this.title.caption = this.i18n.t('widget.tests.caption');
     this.title.closable = true;
     this.addClass('kairo-widget');
     this.update();
   }
 
   protected render(): React.ReactNode {
-    return <TestResultsView runner={this.runner} />;
+    return <TestResultsView runner={this.runner} i18n={this.i18n} />;
   }
 }

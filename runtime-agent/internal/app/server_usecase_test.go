@@ -66,6 +66,10 @@ func (f *fakeRuntimeProvider) CleanupBase(ctx context.Context, plan domain.Runti
 	return nil
 }
 
+func (f *fakeRuntimeProvider) ReloadContext(ctx context.Context, serverID domain.ServerID) error {
+	return nil
+}
+
 // =============================================================================
 // Fake PortAllocator
 // =============================================================================

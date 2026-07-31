@@ -12,8 +12,11 @@ import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import { Emitter, Event } from '@theia/core/lib/common/event';
 import { DebugSessionManager } from '@theia/debug/lib/browser/debug-session-manager';
 import type { DebugSession } from '@theia/debug/lib/browser/debug-session';
+import { KairoI18nService, type KairoI18nKey } from '@kairo/i18n';
 
 export const KAIRO_DEBUG_WATCH_FACTORY_ID = 'kairo-debug-watch';
+
+type TFunction = (key: KairoI18nKey, params?: Record<string, string | number>) => string;
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                               */
@@ -49,6 +52,7 @@ export interface WatchState {
 interface WatchViewProps {
     state: WatchState;
     session: DebugSession | undefined;
+    t: TFunction;
     onAdd: () => void;
     onRemove: (expr: WatchExpression) => void;
     onEdit: (expr: WatchExpression) => void;
@@ -62,13 +66,14 @@ interface WatchViewProps {
 interface WatchRowProps {
     expr: WatchExpression;
     session: DebugSession | undefined;
+    t: TFunction;
     onRemove: (expr: WatchExpression) => void;
     onEdit: (expr: WatchExpression) => void;
     onSaveEdit: (expr: WatchExpression, newExpression: string) => void;
     onCancelEdit: (expr: WatchExpression) => void;
 }
 
-const WatchRow: React.FC<WatchRowProps> = ({ expr, session: _session, onRemove, onEdit, onSaveEdit, onCancelEdit }) => {
+const WatchRow: React.FC<WatchRowProps> = ({ expr, session: _session, t, onRemove, onEdit, onSaveEdit, onCancelEdit }) => {
     const [editValue, setEditValue] = React.useState(expr.expression);
 
     const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -109,7 +114,7 @@ const WatchRow: React.FC<WatchRowProps> = ({ expr, session: _session, onRemove, 
                     className="theia-button secondary"
                     onClick={() => onSaveEdit(expr, editValue.trim())}
                     style={{ padding: '1px 6px', fontSize: '11px' }}
-                    title="Save"
+                    title={t('widget.debug.watch.save')}
                 >
                     ✓
                 </button>
@@ -117,7 +122,7 @@ const WatchRow: React.FC<WatchRowProps> = ({ expr, session: _session, onRemove, 
                     className="theia-button secondary"
                     onClick={() => onCancelEdit(expr)}
                     style={{ padding: '1px 6px', fontSize: '11px' }}
-                    title="Cancel"
+                    title={t('widget.debug.watch.cancel')}
                 >
                     ✗
                 </button>
@@ -155,15 +160,15 @@ const WatchRow: React.FC<WatchRowProps> = ({ expr, session: _session, onRemove, 
                     className="theia-button secondary"
                     onClick={(e) => { e.stopPropagation(); onRemove(expr); }}
                     style={{ padding: '0 5px', fontSize: '12px', lineHeight: '16px', flexShrink: 0 }}
-                    title="Remove watch expression"
-                    aria-label={`Remove watch expression: ${expr.expression}`}
+                    title={t('widget.debug.watch.removeTooltip')}
+                    aria-label={`${t('widget.debug.watch.removeTooltip')}: ${expr.expression}`}
                 >
                     ×
                 </button>
             </div>
             {expr.evaluating && (
                 <div style={{ paddingLeft: 18, fontSize: '11px', color: 'var(--theia-descriptionForeground)', fontStyle: 'italic' }}>
-                    Evaluating...
+                    {t('widget.debug.watch.evaluating')}
                 </div>
             )}
             {expr.error && (
@@ -190,7 +195,7 @@ const WatchRow: React.FC<WatchRowProps> = ({ expr, session: _session, onRemove, 
             )}
             {!expr.evaluating && !expr.error && expr.result === undefined && (
                 <div style={{ paddingLeft: 18, fontSize: '11px', color: 'var(--theia-descriptionForeground)' }}>
-                    Not available
+                    {t('widget.debug.watch.notAvailable')}
                 </div>
             )}
         </div>
@@ -198,41 +203,40 @@ const WatchRow: React.FC<WatchRowProps> = ({ expr, session: _session, onRemove, 
 };
 
 const WatchView: React.FC<WatchViewProps> = ({
-    state, session, onAdd, onRemove, onEdit, onSaveEdit, onCancelEdit,
+    state, session, t, onAdd, onRemove, onEdit, onSaveEdit, onCancelEdit,
     onNewExpressionChange, onNewExpressionKeyDown, onRefresh,
 }) => {
     return (
-        <div className="kairo-debug-watch-widget" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+        <div className="kairo-debug-watch-widget">
             {/* Header */}
-            <div className="kairo-widget-toolbar" style={{ padding: '4px 8px', borderBottom: '1px solid var(--theia-panel-border)', display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ fontWeight: 600, fontSize: '12px' }}>Watch</span>
-                <span style={{ color: 'var(--theia-descriptionForeground)', fontSize: '11px' }}>
-                    {state.expressions.length} items
+            <div className="kairo-debug-toolbar">
+                <span className="kairo-debug-watch-title">{t('widget.debug.watch.title')}</span>
+                <span className="kairo-debug-watch-count">
+                    {t('widget.debug.watch.items', { count: state.expressions.length })}
                 </span>
-                <div style={{ flex: 1 }} />
+                <div className="kairo-debug-watch-spacer" />
                 <button
-                    className="theia-button secondary"
+                    className="theia-button secondary kairo-debug-watch-toolbar-btn"
                     disabled={state.busy}
                     onClick={onRefresh}
-                    style={{ padding: '1px 8px', fontSize: '11px' }}
-                    title="Refresh all watch expressions"
+                    title={t('widget.debug.watch.refreshTooltip')}
                 >
-                    {state.busy ? '...' : '↻'}
+                    {state.busy ? t('common.loading') : '↻'}
                 </button>
             </div>
 
             {/* Body */}
-            <div style={{ flex: 1, overflow: 'auto' }}>
+            <div className="kairo-debug-watch-body">
                 {state.error && (
-                    <div style={{ padding: '8px 12px', color: 'var(--theia-errorForeground)', fontSize: '12px' }}>
+                    <div className="kairo-debug-watch-error">
                         {state.error}
                     </div>
                 )}
                 {!state.error && state.expressions.length === 0 && (
-                    <div style={{ padding: '12px', color: 'var(--theia-descriptionForeground)', fontSize: '12px', textAlign: 'center' }}>
+                    <div className="kairo-debug-watch-empty">
                         {session
-                            ? 'No watch expressions. Add an expression below to monitor its value.'
-                            : 'No active debug session.'}
+                            ? t('widget.debug.watch.emptySession')
+                            : t('widget.debug.watch.noSession')}
                     </div>
                 )}
                 {state.expressions.map(expr => (
@@ -240,6 +244,7 @@ const WatchView: React.FC<WatchViewProps> = ({
                         key={expr.id}
                         expr={expr}
                         session={session}
+                        t={t}
                         onRemove={onRemove}
                         onEdit={onEdit}
                         onSaveEdit={onSaveEdit}
@@ -249,41 +254,25 @@ const WatchView: React.FC<WatchViewProps> = ({
             </div>
 
             {/* Add expression input */}
-            <div style={{
-                padding: '4px 8px',
-                borderTop: '1px solid var(--theia-panel-border)',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 4,
-            }}>
-                <span className="codicon codicon-add" style={{ fontSize: '12px', flexShrink: 0 }} />
+            <div className="kairo-debug-watch-input-bar">
+                <span className="codicon codicon-add" />
                 <input
                     type="text"
+                    className="kairo-debug-watch-widget-input"
                     value={state.newExpression}
                     onChange={e => onNewExpressionChange(e.target.value)}
                     onKeyDown={onNewExpressionKeyDown}
                     disabled={!session || state.busy}
-                    placeholder={session ? 'Add watch expression...' : 'No active session'}
-                    style={{
-                        flex: 1,
-                        background: 'var(--theia-input-background)',
-                        color: 'var(--theia-input-foreground)',
-                        border: '1px solid var(--theia-input-border)',
-                        padding: '3px 6px',
-                        fontSize: '12px',
-                        fontFamily: 'var(--theia-monaco-font-family, monospace)',
-                        outline: 'none',
-                    }}
-                    aria-label="Add watch expression"
+                    placeholder={session ? t('widget.debug.watch.addPlaceholder') : t('widget.debug.watch.noSessionPlaceholder')}
+                    aria-label={t('widget.debug.watch.addPlaceholder')}
                 />
                 <button
-                    className="theia-button secondary"
+                    className="theia-button secondary kairo-debug-watch-add-btn"
                     disabled={!session || state.busy || !state.newExpression.trim()}
                     onClick={onAdd}
-                    style={{ padding: '2px 10px', fontSize: '12px' }}
-                    title="Add watch expression"
+                    title={t('widget.debug.watch.addTooltip')}
                 >
-                    Add
+                    {t('widget.debug.watch.add')}
                 </button>
             </div>
         </div>
@@ -301,6 +290,9 @@ export class KairoDebugWatchWidget extends ReactWidget {
     @inject(DebugSessionManager)
     protected readonly sessionManager!: DebugSessionManager;
 
+    @inject(KairoI18nService)
+    protected readonly i18n!: KairoI18nService;
+
     static nextExprId = 0;
 
     protected state: WatchState = {
@@ -315,9 +307,11 @@ export class KairoDebugWatchWidget extends ReactWidget {
 
     @postConstruct()
     protected init(): void {
+        const t: TFunction = (this.i18n?.t.bind(this.i18n)) as TFunction | undefined
+            ?? ((key: KairoI18nKey) => String(key));
         this.id = KairoDebugWatchWidget.ID;
-        this.title.label = 'Watch';
-        this.title.caption = 'Kairo Java Debug Watch Expressions';
+        this.title.label = t('widget.debug.watch.title');
+        this.title.caption = t('widget.debug.watch.caption');
         this.title.iconClass = 'codicon codicon-eye';
         this.title.closable = true;
         this.addClass('kairo-widget');
@@ -332,10 +326,13 @@ export class KairoDebugWatchWidget extends ReactWidget {
     }
 
     protected render(): React.ReactNode {
+        const t: TFunction = (this.i18n?.t.bind(this.i18n)) as TFunction | undefined
+            ?? ((key: KairoI18nKey) => String(key));
         const session = this.sessionManager.currentSession;
         return React.createElement(WatchView, {
             state: this.state,
             session: session ?? undefined,
+            t,
             onAdd: () => this.addExpression(),
             onRemove: (expr: WatchExpression) => this.removeExpression(expr),
             onEdit: (expr: WatchExpression) => this.startEdit(expr),
@@ -489,10 +486,12 @@ export class KairoDebugWatchWidget extends ReactWidget {
         session: DebugSession,
         expr: WatchExpression,
     ): Promise<WatchExpression> {
+        const t: TFunction = (this.i18n?.t.bind(this.i18n)) as TFunction | undefined
+            ?? ((key: KairoI18nKey) => String(key));
         try {
             const thread = session.currentThread;
             if (!thread) {
-                return { ...expr, evaluating: false, error: 'No suspended thread' };
+                return { ...expr, evaluating: false, error: t('widget.debug.watch.noThreadError') };
             }
 
             const frameId = session.currentFrame?.raw?.id;

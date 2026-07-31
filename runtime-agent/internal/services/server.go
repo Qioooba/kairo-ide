@@ -540,6 +540,26 @@ func (r *realServerRunner) Recover(id string) (*api.ServerResponse, error) {
 	return m.toResponse(), nil
 }
 
+// ReloadContext triggers a Tomcat context reload by touching
+// WEB-INF/web.xml. The server must be running.
+func (r *realServerRunner) ReloadContext(id string) error {
+	r.mu.Lock()
+	m, ok := r.meta[id]
+	r.mu.Unlock()
+	if !ok {
+		return fmt.Errorf("server not found: %s", id)
+	}
+	if m.State != "running" {
+		return fmt.Errorf("server %s is not running (current: %s)", id, m.State)
+	}
+	webXML := filepath.Join(m.WebappDir, "WEB-INF", "web.xml")
+	now := time.Now()
+	if err := os.Chtimes(webXML, now, now); err != nil {
+		return fmt.Errorf("touch web.xml for context reload: %w", err)
+	}
+	return nil
+}
+
 // defaultLogTail is the number of lines returned by Logs when the
 // caller does not pass an explicit ?tail=N.
 const (

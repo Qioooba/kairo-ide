@@ -7,7 +7,9 @@
   "author": "Kairo IDE",
   "license": "Apache-2.0",
   "scripts": {
-    "bundled:prepare": "pwsh -ExecutionPolicy Bypass -File scripts/prepare-bundled.ps1"
+    "bundled:prepare": "pwsh -ExecutionPolicy Bypass -File scripts/prepare-bundled.ps1",
+    "package:win": "pwsh -ExecutionPolicy Bypass -File scripts/build-and-package.ps1",
+    "package:win:skip-build": "pwsh -ExecutionPolicy Bypass -File scripts/build-and-package.ps1 -SkipBuild"
   },
   "dependencies": {
     "@kairo/protocol": "workspace:*",

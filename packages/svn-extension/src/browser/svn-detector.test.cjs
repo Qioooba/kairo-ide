@@ -56,8 +56,13 @@ describe('SVN Detector Tests', () => {
 
   describe('Path resolution', () => {
     it('should resolve paths correctly', () => {
-      const resolved = path.resolve('/usr', 'bin', 'svn');
-      assert.strictEqual(resolved, path.join(path.sep, 'usr', 'bin', 'svn'));
+      if (os.platform() === 'win32') {
+        const resolved = path.resolve('C:\\usr', 'bin', 'svn.exe');
+        assert.strictEqual(resolved, 'C:\\usr\\bin\\svn.exe');
+      } else {
+        const resolved = path.resolve('/usr', 'bin', 'svn');
+        assert.strictEqual(resolved, path.join(path.sep, 'usr', 'bin', 'svn'));
+      }
     });
   });
 

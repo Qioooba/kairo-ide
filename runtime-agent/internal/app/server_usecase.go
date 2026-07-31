@@ -135,6 +135,8 @@ func (uc *ServerUseCase) Start(ctx context.Context, cmd StartServerCommand) (*do
 		HTTPPort:       runtimePlan.Port,
 		ShutdownPort:   portLease.ShutdownPort,
 		DebugPort:      portLease.DebugPort,
+		SourceDirs:     runtimePlan.SourceRoots,
+		OutputDir:      runtimePlan.OutputDir,
 		Generation:     1,
 	}
 
@@ -469,6 +471,19 @@ func (uc *ServerUseCase) Reconcile(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// ReloadContext triggers a context reload for a running server.
+// ReloadContext re-uses the existing RuntimeProvider and triggers a
+// context reload without restarting the entire server process.
+func (uc *ServerUseCase) ReloadContext(ctx context.Context, workspaceID domain.WorkspaceID, serverID domain.ServerID) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if uc.runtimeProvider == nil {
+		return fmt.Errorf("no runtime provider configured")
+	}
+	return uc.runtimeProvider.ReloadContext(ctx, serverID)
 }
 
 // Shutdown stops all child processes.

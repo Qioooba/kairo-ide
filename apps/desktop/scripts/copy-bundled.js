@@ -56,6 +56,38 @@ for (const dirent of realDirs) {
   const to = path.join(dst, dirent.name);
   // Recursive copy via cpSync (Node 16.7+).
   fs.cpSync(from, to, { recursive: true, dereference: false });
+
+  // Prune tomcat6: remove docs, examples, and other non-runtime files.
+  // Saves ~3.8 MB from the zip package.
+  if (dirent.name === 'tomcat6') {
+    const tomcatDir = path.join(to, 'apache-tomcat-6.0.53');
+    if (fs.existsSync(tomcatDir)) {
+      const pruneDirs = [
+        'webapps/docs',
+        'webapps/examples',
+        'webapps/host-manager',
+        'webapps/manager',
+      ];
+      for (const prune of pruneDirs) {
+        const prunePath = path.join(tomcatDir, prune);
+        if (fs.existsSync(prunePath)) {
+          fs.rmSync(prunePath, { recursive: true, force: true });
+          console.log(`[copy-bundled] pruned: ${prune}`);
+        }
+      }
+      // Also remove source JARs if present in lib/
+      const libDir = path.join(tomcatDir, 'lib');
+      if (fs.existsSync(libDir)) {
+        for (const f of fs.readdirSync(libDir)) {
+          if (f.endsWith('-sources.jar') || f.endsWith('-javadoc.jar')) {
+            fs.rmSync(path.join(libDir, f), { force: true });
+            console.log(`[copy-bundled] pruned: lib/${f}`);
+          }
+        }
+      }
+    }
+  }
+
   copied += 1;
   console.log(`[copy-bundled] ${from} -> ${to}`);
 }

@@ -234,6 +234,9 @@ type ServerRunner interface {
 	// Recover attempts to re-launch a crashed server by its
 	// ID. The server must be in "crashed" state.
 	Recover(id string) (*ServerResponse, error)
+	// ReloadContext triggers a Tomcat context reload by touching
+	// WEB-INF/web.xml. The server must be running.
+	ReloadContext(id string) error
 }
 
 // Authenticator handles login/logout.

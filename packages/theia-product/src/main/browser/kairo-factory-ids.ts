@@ -36,3 +36,4 @@ export const KAIRO_DEBUG_HOVER_PROVIDER_FACTORY_ID = 'kairo-debug-hover-provider
 export const KAIRO_DEBUG_INLINE_VALUES_FACTORY_ID = 'kairo-debug-inline-values';
 export const KAIRO_BOOKMARKS_FACTORY_ID = 'kairo-bookmarks';
 export const KAIRO_SHORTCUT_CHEATSHEET_FACTORY_ID = 'kairo-shortcut-cheatsheet';
+export const KAIRO_EXTENSIONS_FACTORY_ID = 'kairo-extensions';

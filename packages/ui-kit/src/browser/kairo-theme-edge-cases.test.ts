@@ -78,10 +78,10 @@ import { join } from 'node:path';
 const themeSource = readFileSync(join(__dirname, 'kairo-theme.ts'), 'utf8');
 
 test('KAIRO_DARK_VARS has brand color entries', () => {
-  assert.match(themeSource, /'--theia-brand-color0': '#7C3AED'/);
-  assert.match(themeSource, /'--theia-brand-color1': '#8d6dd0'/);
-  assert.match(themeSource, /'--theia-brand-color2': '#5e42a6'/);
-  assert.match(themeSource, /'--theia-brand-color3': '#4a3385'/);
+  assert.match(themeSource, /'--theia-brand-color0': '#4a9eff'/);
+  assert.match(themeSource, /'--theia-brand-color1': '#6db3ff'/);
+  assert.match(themeSource, /'--theia-brand-color2': '#2e7fd4'/);
+  assert.match(themeSource, /'--theia-brand-color3': '#1f6bc7'/);
 });
 
 test('KAIRO_DARK_VARS has layout surface colors (3-tone gray)', () => {
@@ -100,7 +100,7 @@ test('KAIRO_DARK_VARS has all semantic colors (success, warning, error)', () => 
 test('KAIRO_DARK_VARS has editor colors', () => {
   assert.match(themeSource, /'--theia-editor-background': '#1e1f22'/);
   assert.match(themeSource, /'--theia-editor-foreground': '#dfe1e5'/);
-  assert.match(themeSource, /'--theia-editorCursor-foreground': '#c8a8ff'/);
+  assert.match(themeSource, /'--theia-editorCursor-foreground': '#a8d8ff'/);
 });
 
 test('KAIRO_DARK_VARS has all terminal ANSI colors', () => {
@@ -155,10 +155,9 @@ test('KairoDarkTheme.activate with mock DOM applies CSS vars', () => {
 });
 
 test('KairoDarkTheme.activate does not throw when document has no head', () => {
-  // If document exists but head is missing (extremely rare edge case),
-  // the activate method will throw when trying to appendChild to head.
-  // This is expected — a browser should always have a head element.
-  // The guard only checks for typeof document === 'undefined'.
+  // The activate method writes CSS variables directly to documentElement.style
+  // and no longer appends a <style> tag to <head>, so a missing head is safe.
+  // The only guard needed is for typeof document === 'undefined'.
   const fakeDoc = {
     documentElement: { style: { setProperty: (_k: string, _v: string) => {} } },
     head: undefined,
@@ -174,7 +173,7 @@ test('KairoDarkTheme.activate does not throw when document has no head', () => {
   (globalThis as any).document = fakeDoc;
   (globalThis as any).requestAnimationFrame = (fn: () => void) => { fn(); return 0; };
   try {
-    assert.throws(() => KairoDarkTheme.activate!());
+    assert.doesNotThrow(() => KairoDarkTheme.activate!());
   } finally {
     (globalThis as any).document = savedDoc;
     (globalThis as any).requestAnimationFrame = savedRAF;

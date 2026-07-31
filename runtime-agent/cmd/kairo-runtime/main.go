@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	stdlog "log"
@@ -23,6 +24,38 @@ import (
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/log"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/tomcat6"
 )
+
+// agentState is written to <dataDir>/agent-state.json on startup so
+// other processes (Desktop, Browser launcher) can discover the running
+// agent and reuse it instead of starting a duplicate.
+type agentState struct {
+	Port        int    `json:"port"`
+	Secret      string `json:"secret"`
+	PID         int    `json:"pid"`
+	BindAddress string `json:"bindAddress"`
+	StartedAt   string `json:"startedAt"`
+}
+
+func writeAgentState(dataDir string, st agentState) {
+	statePath := filepath.Join(dataDir, "agent-state.json")
+	data, err := json.MarshalIndent(st, "", "  ")
+	if err != nil {
+		stdlog.Printf("WARN: failed to marshal agent state: %v", err)
+		return
+	}
+	if err := os.WriteFile(statePath, data, 0o644); err != nil {
+		stdlog.Printf("WARN: failed to write agent state file %s: %v", statePath, err)
+		return
+	}
+	stdlog.Printf("agent state written to %s (port=%d, pid=%d)", statePath, st.Port, st.PID)
+}
+
+func removeAgentState(dataDir string) {
+	statePath := filepath.Join(dataDir, "agent-state.json")
+	if err := os.Remove(statePath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		stdlog.Printf("WARN: failed to remove agent state file %s: %v", statePath, err)
+	}
+}
 
 const (
 	agentVersion           = "0.1.0"
@@ -164,6 +197,17 @@ func main() {
 	if ip := net.ParseIP(host); ip == nil || !ip.IsLoopback() {
 		stdlog.Fatalf("remote mode is not available in this release. Please bind to 127.0.0.1 only")
 	}
+
+	// Write agent state file so other processes (Desktop, Browser
+	// launcher) can discover and reuse this agent instance.
+	writeAgentState(cfg.DataDir, agentState{
+		Port:        cfg.Port,
+		Secret:      cfg.Secret,
+		PID:         os.Getpid(),
+		BindAddress: cfg.BindAddress,
+		StartedAt:   time.Now().UTC().Format(time.RFC3339),
+	})
+	defer removeAgentState(cfg.DataDir)
 
 	addr := fmt.Sprintf("%s:%d", cfg.BindAddress, cfg.Port)
 	if err := srv.ListenAndServe(addr, cfg.TLSCert, cfg.TLSKey); err != nil {

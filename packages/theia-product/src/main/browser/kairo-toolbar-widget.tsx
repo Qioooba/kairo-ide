@@ -6,6 +6,7 @@ import { RuntimeConnectionService } from '@kairo/runtime-extension';
 import type { ProjectConfig } from '@kairo/protocol';
 import { ActiveProjectService, type ProjectInfo } from '@kairo/project-extension';
 import { ServerStore, type ServerInstance } from '@kairo/tomcat-extension';
+import { KairoI18nService } from '@kairo/i18n';
 import {
   KairoRunConfigurationService,
   type RunConfigurationViewState,
@@ -24,6 +25,7 @@ interface KairoToolbarProps {
   commandService: CommandService;
   serverStore: ServerStore;
   runtime: RuntimeConnectionService;
+  i18n: KairoI18nService;
 }
 
 const KairoToolbarComponent: React.FC<KairoToolbarProps> = ({
@@ -32,7 +34,15 @@ const KairoToolbarComponent: React.FC<KairoToolbarProps> = ({
   commandService,
   serverStore,
   runtime,
+  i18n,
 }) => {
+  const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
+  const [, forceUpdate] = React.useReducer(x => x + 1, 0);
+
+  React.useEffect(() => {
+    const disposable = i18n.onDidChangeLanguage(() => forceUpdate());
+    return () => disposable.dispose();
+  }, [i18n]);
   const [project, setProject] = React.useState<ProjectInfo | undefined>(activeProject.project);
   const [projects, setProjects] = React.useState<ProjectConfig[]>([]);
   const [runConfigState, setRunConfigState] = React.useState<RunConfigurationViewState>(runConfigService.current as RunConfigurationViewState);
@@ -111,20 +121,20 @@ const KairoToolbarComponent: React.FC<KairoToolbarProps> = ({
   };
 
   return (
-    <div className="kairo-toolbar" role="toolbar" aria-label="Kairo toolbar">
+    <div className="kairo-toolbar" role="toolbar" aria-label={t('widget.toolbar.title')}>
       {/* Project selector */}
       <div className="kairo-toolbar-group">
-        <label className="kairo-toolbar-label" htmlFor="kairo-toolbar-project">Project</label>
+        <label className="kairo-toolbar-label" htmlFor="kairo-toolbar-project">{t('widget.toolbar.projectLabel')}</label>
         <select
           id="kairo-toolbar-project"
           className="theia-select kairo-toolbar-select"
           value={project?.projectId ?? ''}
           disabled={busy !== null}
           onChange={handleProjectChange}
-          title="Select active project"
-          aria-label="Select active project"
+          title={t('widget.toolbar.selectProjectAria')}
+          aria-label={t('widget.toolbar.selectProjectAria')}
         >
-          {projects.length === 0 && <option value="">No projects</option>}
+          {projects.length === 0 && <option value="">{t('widget.toolbar.noProjects')}</option>}
           {projects.map(p => (
             <option key={p.id} value={p.id}>{p.name}</option>
           ))}
@@ -133,17 +143,17 @@ const KairoToolbarComponent: React.FC<KairoToolbarProps> = ({
 
       {/* Run configuration selector */}
       <div className="kairo-toolbar-group">
-        <label className="kairo-toolbar-label" htmlFor="kairo-toolbar-run-config">Run Config</label>
+        <label className="kairo-toolbar-label" htmlFor="kairo-toolbar-run-config">{t('widget.toolbar.runConfigLabel')}</label>
         <select
           id="kairo-toolbar-run-config"
           className="theia-select kairo-toolbar-select"
           value={runConfigState.document.selectedConfigurationId ?? ''}
           disabled={busy !== null || runConfigState.document.configurations.length === 0}
           onChange={handleRunConfigChange}
-          title="Select run configuration"
-          aria-label="Select run configuration"
+          title={t('widget.toolbar.selectRunConfigAria')}
+          aria-label={t('widget.toolbar.selectRunConfigAria')}
         >
-          {runConfigState.document.configurations.length === 0 && <option value="">No configurations</option>}
+          {runConfigState.document.configurations.length === 0 && <option value="">{t('widget.toolbar.noConfigurations')}</option>}
           {runConfigState.document.configurations.map(c => (
             <option key={c.id} value={c.id}>{c.name} ({c.mode.toUpperCase()})</option>
           ))}
@@ -156,37 +166,41 @@ const KairoToolbarComponent: React.FC<KairoToolbarProps> = ({
           className="theia-button main"
           disabled={busy !== null || !selectedConfig || isLaunching}
           onClick={() => executeCommand('run', 'kairo.server.start')}
-          title="Run the selected configuration (Cmd+R)"
-          aria-label="Run"
+          title={t('widget.toolbar.runTooltip')}
+          aria-label={t('widget.toolbar.run')}
         >
-          {busy === 'run' ? '▶ Running…' : '▶ Run'}
+          <span className="codicon codicon-play" aria-hidden="true" />
+          {busy === 'run' ? t('widget.toolbar.running') : t('widget.toolbar.run')}
         </button>
         <button
           className="theia-button"
           disabled={busy !== null || !selectedConfig || selectedConfig?.mode !== 'debug' || isLaunching}
           onClick={() => executeCommand('debug', 'kairo.server.debug')}
-          title="Debug the selected configuration (Cmd+D)"
-          aria-label="Debug"
+          title={t('widget.toolbar.debugTooltip')}
+          aria-label={t('widget.toolbar.debug')}
         >
-          {busy === 'debug' ? '● Debugging…' : '● Debug'}
+          <span className="codicon codicon-debug-alt" aria-hidden="true" />
+          {busy === 'debug' ? t('widget.toolbar.debugging') : t('widget.toolbar.debug')}
         </button>
         <button
           className="theia-button secondary"
           disabled={busy !== null || !hasRunningServer}
           onClick={() => executeCommand('stop', 'kairo.server.stop')}
-          title="Stop all running servers (Cmd+.)"
-          aria-label="Stop"
+          title={t('widget.toolbar.stopTooltip')}
+          aria-label={t('widget.toolbar.stop')}
         >
-          {busy === 'stop' ? '■ Stopping…' : '■ Stop'}
+          <span className="codicon codicon-stop" aria-hidden="true" />
+          {busy === 'stop' ? t('widget.toolbar.stopping') : t('widget.toolbar.stop')}
         </button>
         <button
           className="theia-button"
           disabled={busy !== null}
           onClick={() => executeCommand('build', 'kairo.build')}
-          title="Build the current project (Cmd+B)"
-          aria-label="Build"
+          title={t('widget.toolbar.buildTooltip')}
+          aria-label={t('widget.toolbar.build')}
         >
-          {busy === 'build' ? '⚙ Building…' : '⚙ Build'}
+          <span className="codicon codicon-tools" aria-hidden="true" />
+          {busy === 'build' ? t('widget.toolbar.building') : t('widget.toolbar.build')}
         </button>
       </div>
     </div>
@@ -206,15 +220,21 @@ export class KairoToolbarWidget extends ReactWidget {
   @inject(CommandService) protected readonly commandService!: CommandService;
   @inject(ServerStore) protected readonly serverStore!: ServerStore;
   @inject(RuntimeConnectionService) protected readonly runtime!: RuntimeConnectionService;
+  @inject(KairoI18nService) protected readonly i18n!: KairoI18nService;
 
   @postConstruct()
   protected init(): void {
     this.id = KairoToolbarWidget.ID;
-    this.title.label = 'Kairo Toolbar';
-    this.title.caption = 'Kairo IDE toolbar';
+    this.title.label = this.i18n.t('widget.toolbar.title');
+    this.title.caption = this.i18n.t('widget.toolbar.title');
     this.title.closable = false;
     this.addClass('kairo-widget');
     this.addClass('kairo-toolbar-widget');
+    this.toDispose.push(this.i18n.onDidChangeLanguage(() => {
+      this.title.label = this.i18n.t('widget.toolbar.title');
+      this.title.caption = this.i18n.t('widget.toolbar.title');
+      this.update();
+    }));
     this.update();
   }
 
@@ -226,6 +246,7 @@ export class KairoToolbarWidget extends ReactWidget {
         commandService={this.commandService}
         serverStore={this.serverStore}
         runtime={this.runtime}
+        i18n={this.i18n}
       />
     );
   }

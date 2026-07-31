@@ -8,9 +8,10 @@
  */
 
 import * as React from 'react';
-import { injectable, postConstruct } from '@theia/core/shared/inversify';
+import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import { Emitter, Event } from '@theia/core/lib/common/event';
+import { KairoI18nService } from '@kairo/i18n';
 
 export const KAIRO_DEBUG_HOTSWAP_STATUS_FACTORY_ID = 'kairo-debug-hotswap-status';
 
@@ -48,151 +49,133 @@ interface HotSwapStatusViewProps {
     onRollbackAll: () => void;
     onClear: () => void;
     onRefresh: () => void;
+    i18n: KairoI18nService;
 }
 
-const statusBadge = (status: HotSwapStatusType): { color: string; icon: string; label: string } => {
+const statusBadge = (status: HotSwapStatusType, t: (key: string) => string): { iconClass: string; badgeClass: string; label: string } => {
     switch (status) {
-        case 'completed': return { color: 'var(--theia-terminal-ansiGreen)', icon: 'codicon-pass', label: 'OK' };
-        case 'in_progress': return { color: 'var(--theia-terminal-ansiYellow)', icon: 'codicon-sync~spin', label: 'SWAP' };
-        case 'pending': return { color: 'var(--theia-descriptionForeground)', icon: 'codicon-clock', label: 'PEND' };
-        case 'failed': return { color: 'var(--theia-errorForeground)', icon: 'codicon-error', label: 'FAIL' };
-        case 'rolled_back': return { color: 'var(--theia-terminal-ansiCyan)', icon: 'codicon-discard', label: 'ROLL' };
-        case 'not_supported': return { color: 'var(--theia-disabledForeground)', icon: 'codicon-circle-slash', label: 'N/A' };
-        default: return { color: 'var(--theia-descriptionForeground)', icon: 'codicon-question', label: '?' };
+        case 'completed': return { iconClass: 'codicon-pass', badgeClass: 'kairo-badge-success', label: t('widget.hotswap.status.completed') };
+        case 'in_progress': return { iconClass: 'codicon-sync codicon-modifier-spin', badgeClass: 'kairo-badge-warning', label: t('widget.hotswap.status.in_progress') };
+        case 'pending': return { iconClass: 'codicon-clock', badgeClass: 'kairo-badge-default', label: t('widget.hotswap.status.pending') };
+        case 'failed': return { iconClass: 'codicon-error', badgeClass: 'kairo-badge-error', label: t('widget.hotswap.status.failed') };
+        case 'rolled_back': return { iconClass: 'codicon-discard', badgeClass: 'kairo-badge-info', label: t('widget.hotswap.status.rolled_back') };
+        case 'not_supported': return { iconClass: 'codicon-question', badgeClass: 'kairo-badge-default', label: t('widget.hotswap.status.not_supported') };
+        default: return { iconClass: 'codicon-question', badgeClass: 'kairo-badge-default', label: '?' };
     }
 };
 
 const HotSwapStatusView: React.FC<HotSwapStatusViewProps> = ({
-    state: s, onRollback, onRollbackAll, onClear, onRefresh,
-}) => (
-    <div className="kairo-debug-hotswap-status" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    state: s, onRollback, onRollbackAll, onClear, onRefresh, i18n,
+}) => {
+    const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
+    const [, forceUpdate] = React.useReducer(x => x + 1, 0);
+
+    React.useEffect(() => {
+        const disposable = i18n.onDidChangeLanguage(() => forceUpdate());
+        return () => disposable.dispose();
+    }, [i18n]);
+
+    return (
+    <div className="kairo-debug-hotswap-status">
         {/* Header */}
-        <div className="kairo-widget-toolbar" style={{ padding: '4px 8px', borderBottom: '1px solid var(--theia-panel-border)', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <span style={{ fontWeight: 600, fontSize: '12px' }}>Hot Swap</span>
-            <span style={{
-                fontSize: '10px',
-                padding: '1px 6px',
-                borderRadius: 3,
-                background: s.canRedefine ? 'var(--theia-terminal-ansiGreen)' : 'var(--theia-disabledForeground)',
-                color: 'var(--theia-editor-background)',
-            }}>
-                {s.canRedefine ? 'REDEFINE OK' : 'UNAVAILABLE'}
+        <div className="kairo-widget-toolbar kairo-debug-hotswap-header">
+            <span className="kairo-debug-hotswap-title">{t('widget.hotswap.header')}</span>
+            <span className={`kairo-badge ${s.canRedefine ? 'kairo-badge-success' : 'kairo-badge-default'}`}>
+                {s.canRedefine ? t('widget.hotswap.redefineOk') : t('widget.hotswap.unavailable')}
             </span>
-            <span style={{ color: 'var(--theia-descriptionForeground)', fontSize: '11px' }}>
-                {s.activeCount} active
+            <span className="kairo-debug-hotswap-meta">
+                {t('widget.hotswap.activeCount', { count: s.activeCount })}
             </span>
-            <div style={{ flex: 1 }} />
-            <button
-                className="theia-button secondary"
-                disabled={s.busy || s.activeCount === 0}
-                onClick={onRollbackAll}
-                style={{ padding: '1px 8px', fontSize: '11px' }}
-                title="Rollback all hot swaps"
-            >
-                Rollback All
-            </button>
-            <button
-                className="theia-button secondary"
-                disabled={s.busy || s.entries.length === 0}
-                onClick={onClear}
-                style={{ padding: '1px 8px', fontSize: '11px' }}
-                title="Clear history"
-            >
-                Clear
-            </button>
-            <button
-                className="theia-button secondary"
-                disabled={s.busy}
-                onClick={onRefresh}
-                style={{ padding: '1px 8px', fontSize: '11px' }}
-                title="Refresh"
-            >
-                {s.busy ? '...' : '↻'}
-            </button>
+            <div className="kairo-debug-hotswap-actions">
+                <button
+                    className="theia-button secondary"
+                    disabled={s.busy || s.activeCount === 0}
+                    onClick={onRollbackAll}
+                    title={t('widget.hotswap.rollbackAll')}
+                >
+                    {t('widget.hotswap.rollbackAll')}
+                </button>
+                <button
+                    className="theia-button secondary"
+                    disabled={s.busy || s.entries.length === 0}
+                    onClick={onClear}
+                    title={t('widget.hotswap.clear')}
+                >
+                    {t('widget.hotswap.clear')}
+                </button>
+                <button
+                    className="theia-button secondary"
+                    disabled={s.busy}
+                    onClick={onRefresh}
+                    title={t('widget.hotswap.refresh')}
+                    aria-label={t('widget.hotswap.refresh')}
+                >
+                    <span className={`codicon ${s.busy ? 'codicon-loading codicon-modifier-spin' : 'codicon-refresh'}`} aria-hidden="true" />
+                </button>
+            </div>
         </div>
 
         {/* Body */}
-        <div style={{ flex: 1, overflow: 'auto' }}>
+        <div className="kairo-debug-hotswap-body">
             {s.error && (
-                <div style={{ padding: '8px 12px', color: 'var(--theia-errorForeground)', fontSize: '12px' }}>
+                <div className="kairo-debug-hotswap-error" role="alert">
                     {s.error}
                 </div>
             )}
             {!s.error && s.entries.length === 0 && (
-                <div style={{ padding: '12px', color: 'var(--theia-descriptionForeground)', fontSize: '12px', textAlign: 'center' }}>
-                    No hot swap operations yet. Edit and save a Java file during a debug session to trigger a hot swap.
+                <div className="kairo-empty">
+                    {t('widget.hotswap.noOperations')}
                 </div>
             )}
             {s.entries.map(entry => {
-                const badge = statusBadge(entry.status);
+                const badge = statusBadge(entry.status, t);
                 return (
                     <div
                         key={entry.id}
                         className="kairo-debug-hotswap-row"
-                        style={{
-                            padding: '4px 8px',
-                            display: 'flex',
-                            alignItems: 'flex-start',
-                            gap: 6,
-                            fontSize: '12px',
-                            lineHeight: '18px',
-                            borderBottom: '1px solid var(--theia-panel-border)',
-                        }}
-                        onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'var(--theia-list-hoverBackground)'; }}
-                        onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = ''; }}
+                        title={entry.status}
                     >
                         {/* Status icon */}
                         <span
-                            className={`codicon ${badge.icon}`}
-                            style={{ color: badge.color, fontSize: '14px', marginTop: 1, flexShrink: 0 }}
-                            title={entry.status}
+                            className={`codicon ${badge.iconClass} kairo-debug-hotswap-icon`}
+                            aria-hidden="true"
                         />
 
                         {/* Main content */}
-                        <div style={{ minWidth: 0, flex: 1 }}>
-                            <div style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        <div className="kairo-debug-hotswap-main">
+                            <div className="kairo-debug-hotswap-class">
                                 {entry.className}
                             </div>
-                            <div style={{ fontSize: '10px', opacity: 0.6, display: 'flex', gap: 8 }}>
+                            <div className="kairo-debug-hotswap-detail">
                                 <span>{entry.timestamp}</span>
                                 {entry.methodsChanged > 0 && (
-                                    <span>{entry.methodsChanged} method{entry.methodsChanged !== 1 ? 's' : ''} changed</span>
+                                    <span>{t('widget.hotswap.methodsChanged', { count: entry.methodsChanged })}</span>
                                 )}
                                 {entry.wasRolledBack && (
-                                    <span style={{ color: 'var(--theia-terminal-ansiCyan)' }}>rolled back</span>
+                                    <span className="kairo-debug-hotswap-rolledback">{t('widget.hotswap.rolledBack')}</span>
                                 )}
                             </div>
                             {entry.errorMessage && (
-                                <div style={{ fontSize: '10px', color: 'var(--theia-errorForeground)', marginTop: 2 }}>
+                                <div className="kairo-debug-hotswap-error">
                                     {entry.errorMessage}
                                 </div>
                             )}
                         </div>
 
                         {/* Status badge */}
-                        <span style={{
-                            fontSize: '9px',
-                            padding: '0 4px',
-                            borderRadius: 3,
-                            background: badge.color,
-                            color: 'var(--theia-editor-background)',
-                            fontWeight: 600,
-                            flexShrink: 0,
-                            marginTop: 1,
-                        }}>
+                        <span className={`kairo-badge ${badge.badgeClass} kairo-debug-hotswap-badge`}>
                             {badge.label}
                         </span>
 
                         {/* Rollback button */}
                         {entry.status === 'completed' && (
                             <button
-                                className="theia-button secondary"
+                                className="theia-button secondary kairo-debug-hotswap-rollback-btn"
                                 onClick={() => onRollback(entry)}
-                                style={{ padding: '0 6px', fontSize: '11px', lineHeight: '18px', flexShrink: 0 }}
-                                title="Rollback this hot swap"
-                                aria-label={`Rollback hot swap for ${entry.className}`}
+                                title={t('widget.hotswap.rollback')}
+                                aria-label={t('widget.hotswap.rollbackAria', { className: entry.className })}
                             >
-                                ↺
+                                <span className="codicon codicon-reply" aria-hidden="true" />
                             </button>
                         )}
                     </div>
@@ -200,7 +183,8 @@ const HotSwapStatusView: React.FC<HotSwapStatusViewProps> = ({
             })}
         </div>
     </div>
-);
+    );
+};
 
 /* ------------------------------------------------------------------ */
 /*  Widget                                                              */
@@ -209,6 +193,9 @@ const HotSwapStatusView: React.FC<HotSwapStatusViewProps> = ({
 @injectable()
 export class KairoDebugHotSwapStatusWidget extends ReactWidget {
     static readonly ID = KAIRO_DEBUG_HOTSWAP_STATUS_FACTORY_ID;
+
+    @inject(KairoI18nService)
+    protected readonly i18n!: KairoI18nService;
 
     protected state: HotSwapStatusState = {
         entries: [],
@@ -226,11 +213,16 @@ export class KairoDebugHotSwapStatusWidget extends ReactWidget {
     @postConstruct()
     protected init(): void {
         this.id = KairoDebugHotSwapStatusWidget.ID;
-        this.title.label = 'Hot Swap';
-        this.title.caption = 'Kairo Hot Swap Status';
+        this.title.label = this.i18n.t('widget.hotswap.title');
+        this.title.caption = this.i18n.t('widget.hotswap.caption');
         this.title.iconClass = 'codicon codicon-sync';
         this.title.closable = true;
         this.addClass('kairo-widget');
+        this.toDispose.push(this.i18n.onDidChangeLanguage(() => {
+            this.title.label = this.i18n.t('widget.hotswap.title');
+            this.title.caption = this.i18n.t('widget.hotswap.caption');
+            this.update();
+        }));
         this.update();
     }
 
@@ -241,6 +233,7 @@ export class KairoDebugHotSwapStatusWidget extends ReactWidget {
             onRollbackAll: () => this.rollbackAll(),
             onClear: () => this.clearHistory(),
             onRefresh: () => this.refresh(),
+            i18n: this.i18n,
         });
     }
 

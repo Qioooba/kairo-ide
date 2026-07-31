@@ -14,6 +14,7 @@ import * as React from 'react';
 import { injectable, inject } from '@theia/core/shared/inversify';
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import { MessageService } from '@theia/core/lib/common/message-service';
+import { KairoI18nService } from '@kairo/i18n';
 import {
   KairoRemoteAgentService,
   RemoteAgentConfig,
@@ -45,20 +46,29 @@ export class KairoRemoteWidget extends ReactWidget {
   @inject(MessageService)
   protected readonly messages!: MessageService;
 
+  @inject(KairoI18nService)
+  protected readonly i18n!: KairoI18nService;
+
   constructor() {
     super();
     this.id = KAIRO_REMOTE_FACTORY_ID;
-    this.title.label = 'Remote Development';
-    this.title.caption = 'Kairo Remote Development';
+    this.title.label = this.i18n.t('widget.remote.title');
+    this.title.caption = this.i18n.t('widget.remote.caption');
     this.title.iconClass = 'codicon codicon-remote';
     this.title.closable = true;
     this.addClass('kairo-remote');
+    this.toDispose.push(this.i18n.onDidChangeLanguage(() => {
+      this.title.label = this.i18n.t('widget.remote.title');
+      this.title.caption = this.i18n.t('widget.remote.caption');
+      this.update();
+    }));
   }
 
   render(): React.ReactNode {
     return React.createElement(KairoRemoteView, {
       agent: this.agent,
       messages: this.messages,
+      i18n: this.i18n,
     });
   }
 }
@@ -70,20 +80,16 @@ export class KairoRemoteWidget extends ReactWidget {
 interface KairoRemoteViewProps {
   agent: KairoRemoteAgentService;
   messages: MessageService;
+  i18n: KairoI18nService;
 }
 
-const STATUS_LABELS: Record<RemoteAgentStatus, string> = {
-  disconnected: 'Disconnected',
-  connecting: 'Connecting…',
-  connected: 'Connected',
-  error: 'Error',
-};
-
-const STATUS_DOT: Record<RemoteAgentStatus, string> = {
-  disconnected: '#f44336',
-  connecting: '#ff9800',
-  connected: '#4caf50',
-  error: '#f44336',
+const statusDotClass = (status: RemoteAgentStatus): string => {
+  switch (status) {
+    case 'connected': return 'kairo-status-dot-success';
+    case 'connecting': return 'kairo-status-dot-warning';
+    case 'error': return 'kairo-status-dot-error';
+    default: return 'kairo-status-dot-error';
+  }
 };
 
 function loadRecentConnections(): RecentConnection[] {
@@ -107,7 +113,14 @@ function saveRecentConnections(connections: RecentConnection[]): void {
   }
 }
 
-const KairoRemoteView: React.FC<KairoRemoteViewProps> = ({ agent, messages }) => {
+const KairoRemoteView: React.FC<KairoRemoteViewProps> = ({ agent, messages, i18n }) => {
+  const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
+  const [, forceUpdate] = React.useReducer(x => x + 1, 0);
+
+  React.useEffect(() => {
+    const disposable = i18n.onDidChangeLanguage(() => forceUpdate());
+    return () => disposable.dispose();
+  }, [i18n]);
   const [status, setStatus] = React.useState<RemoteAgentStatus>('disconnected');
   const [host, setHost] = React.useState('127.0.0.1');
   const [port, setPort] = React.useState(9443);
@@ -124,7 +137,7 @@ const KairoRemoteView: React.FC<KairoRemoteViewProps> = ({ agent, messages }) =>
 
   const handleConnect = async () => {
     if (!host.trim() || !token.trim()) {
-      messages.warn('Host and token are required.');
+      messages.warn(t('widget.remote.validation.hostTokenRequired'));
       return;
     }
     setBusy(true);
@@ -138,7 +151,7 @@ const KairoRemoteView: React.FC<KairoRemoteViewProps> = ({ agent, messages }) =>
       };
       const ok = await agent.connect(config);
       if (ok) {
-        messages.info(`Connected to ${host}:${port}`);
+        messages.info(t('widget.remote.toast.connected', { host, port }));
         // Save to recent connections
         const label = `${host}:${port}`;
         const updated = recentConnections.filter(c => c.label !== label);
@@ -146,10 +159,10 @@ const KairoRemoteView: React.FC<KairoRemoteViewProps> = ({ agent, messages }) =>
         setRecentConnections(updated);
         saveRecentConnections(updated);
       } else {
-        messages.error(`Failed to connect to ${host}:${port}`);
+        messages.error(t('widget.remote.toast.failed', { host, port }));
       }
     } catch (err) {
-      messages.error(`Connection error: ${err instanceof Error ? err.message : String(err)}`);
+      messages.error(t('widget.remote.toast.error', { message: err instanceof Error ? err.message : String(err) }));
     } finally {
       setBusy(false);
     }
@@ -157,7 +170,7 @@ const KairoRemoteView: React.FC<KairoRemoteViewProps> = ({ agent, messages }) =>
 
   const handleDisconnect = () => {
     agent.disconnect();
-    messages.info('Disconnected from remote agent.');
+    messages.info(t('widget.remote.toast.disconnected'));
   };
 
   const handleSelectRecent = (conn: RecentConnection) => {
@@ -177,11 +190,8 @@ const KairoRemoteView: React.FC<KairoRemoteViewProps> = ({ agent, messages }) =>
   return (
     <div className="kairo-remote-body">
       <div className="kairo-remote-status-bar">
-        <span
-          className="kairo-remote-status-dot"
-          style={{ backgroundColor: STATUS_DOT[status], width: 10, height: 10, borderRadius: '50%', display: 'inline-block', marginRight: 6 }}
-        />
-        <span className="kairo-remote-status-label">{STATUS_LABELS[status]}</span>
+        <span className={`kairo-remote-status-dot ${statusDotClass(status)}`} />
+        <span className="kairo-remote-status-label">{t(`widget.remote.status.${status}`)}</span>
         {connected && (
           <span className="kairo-remote-status-addr">
             {agent.getConnection()?.config.host}:{agent.getConnection()?.config.port}
@@ -191,19 +201,19 @@ const KairoRemoteView: React.FC<KairoRemoteViewProps> = ({ agent, messages }) =>
 
       <div className="kairo-remote-form">
         <div className="kairo-remote-form-row">
-          <label className="kairo-remote-label">Host</label>
+          <label className="kairo-remote-label">{t('widget.remote.label.host')}</label>
           <input
             type="text"
             className="theia-input"
             value={host}
             onChange={e => setHost(e.target.value)}
-            placeholder="192.168.1.100"
+            placeholder={t('widget.remote.placeholder.host')}
             disabled={connected}
           />
         </div>
 
         <div className="kairo-remote-form-row">
-          <label className="kairo-remote-label">Port</label>
+          <label className="kairo-remote-label">{t('widget.remote.label.port')}</label>
           <input
             type="number"
             className="theia-input"
@@ -214,37 +224,37 @@ const KairoRemoteView: React.FC<KairoRemoteViewProps> = ({ agent, messages }) =>
         </div>
 
         <div className="kairo-remote-form-row">
-          <label className="kairo-remote-label">
+          <label className="kairo-remote-label kairo-remote-checkbox">
             <input
               type="checkbox"
               checked={useTLS}
               onChange={e => setUseTLS(e.target.checked)}
               disabled={connected}
             />
-            {' '}Use TLS
+            {t('widget.remote.label.useTLS')}
           </label>
         </div>
 
         <div className="kairo-remote-form-row">
-          <label className="kairo-remote-label">Workspace Path</label>
+          <label className="kairo-remote-label">{t('widget.remote.label.workspacePath')}</label>
           <input
             type="text"
             className="theia-input"
             value={workspacePath}
             onChange={e => setWorkspacePath(e.target.value)}
-            placeholder="/home/user/project"
+            placeholder={t('widget.remote.placeholder.workspacePath')}
             disabled={connected}
           />
         </div>
 
         <div className="kairo-remote-form-row">
-          <label className="kairo-remote-label">Session Token</label>
+          <label className="kairo-remote-label">{t('widget.remote.label.token')}</label>
           <input
             type="password"
             className="theia-input"
             value={token}
             onChange={e => setToken(e.target.value)}
-            placeholder="Enter session token"
+            placeholder={t('widget.remote.placeholder.token')}
             disabled={connected}
           />
         </div>
@@ -253,19 +263,19 @@ const KairoRemoteView: React.FC<KairoRemoteViewProps> = ({ agent, messages }) =>
           {!connected ? (
             <button
               type="button"
-              className="theia-button"
+              className="theia-button main"
               onClick={handleConnect}
               disabled={busy || status === 'connecting'}
             >
-              {busy ? 'Connecting…' : 'Connect'}
+              {busy ? t('widget.remote.action.connecting') : t('widget.remote.action.connect')}
             </button>
           ) : (
             <button
               type="button"
-              className="theia-button secondary"
+              className="theia-button toolbar"
               onClick={handleDisconnect}
             >
-              Disconnect
+              {t('widget.remote.action.disconnect')}
             </button>
           )}
         </div>
@@ -274,13 +284,13 @@ const KairoRemoteView: React.FC<KairoRemoteViewProps> = ({ agent, messages }) =>
       {recentConnections.length > 0 && (
         <div className="kairo-remote-recent">
           <div className="kairo-remote-recent-header">
-            <h3>Recent Connections</h3>
+            <h3>{t('widget.remote.recent.title')}</h3>
             <button
               type="button"
               className="theia-button secondary small"
               onClick={handleClearRecent}
             >
-              Clear
+              {t('widget.remote.recent.clear')}
             </button>
           </div>
           <ul className="kairo-remote-recent-list">
@@ -304,8 +314,8 @@ const KairoRemoteView: React.FC<KairoRemoteViewProps> = ({ agent, messages }) =>
 
       {connected && (
         <div className="kairo-remote-connected">
-          <p>Connected to {agent.getConnection()?.config.host}:{agent.getConnection()?.config.port}</p>
-          <p>Remote workspace: {agent.getConnection()?.config.workspacePath}</p>
+          <p>{t('widget.remote.connectedInfo.connectedTo', { host: agent.getConnection()?.config.host ?? '', port: agent.getConnection()?.config.port ?? '' })}</p>
+          <p>{t('widget.remote.connectedInfo.remoteWorkspace', { path: agent.getConnection()?.config.workspacePath ?? '' })}</p>
         </div>
       )}
     </div>

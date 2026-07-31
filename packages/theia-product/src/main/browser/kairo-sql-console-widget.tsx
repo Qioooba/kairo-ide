@@ -19,6 +19,7 @@ import {
   type SqlQueryResult,
 } from './kairo-sql-service';
 import { KAIRO_SQL_CONSOLE_FACTORY_ID } from './kairo-factory-ids';
+import { KairoI18nService } from '@kairo/i18n';
 
 /* ------------------------------------------------------------------ */
 /*  SQL Language Registration                                          */
@@ -95,9 +96,17 @@ function saveHistory(history: string[]): void {
 
 interface SqlConsoleProps {
   sqlService: KairoSqlService;
+  i18n: KairoI18nService;
 }
 
-const SqlConsole: React.FC<SqlConsoleProps> = ({ sqlService }) => {
+const SqlConsole: React.FC<SqlConsoleProps> = ({ sqlService, i18n }) => {
+  const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
+  const [, forceUpdate] = React.useReducer(x => x + 1, 0);
+
+  React.useEffect(() => {
+    const disposable = i18n.onDidChangeLanguage(() => forceUpdate());
+    return () => disposable.dispose();
+  }, [i18n]);
   const [host, setHost] = React.useState('localhost');
   const [port, setPort] = React.useState('1521');
   const [sid, setSid] = React.useState('');
@@ -180,7 +189,7 @@ const SqlConsole: React.FC<SqlConsoleProps> = ({ sqlService }) => {
       if (res.success) {
         setConnected(true);
         setConnectionId(`${host}:${port}/${useServiceName ? serviceName : sid}`);
-        setConnStatus('Connected');
+        setConnStatus(t('widget.sqlConsole.status.connected'));
       } else {
         setConnected(false);
         setConnStatus(res.message);
@@ -193,7 +202,7 @@ const SqlConsole: React.FC<SqlConsoleProps> = ({ sqlService }) => {
   const handleDisconnect = () => {
     setConnected(false);
     setConnectionId('');
-    setConnStatus('Disconnected');
+    setConnStatus(t('widget.sqlConsole.status.disconnected'));
     setResult(null);
   };
 
@@ -201,7 +210,7 @@ const SqlConsole: React.FC<SqlConsoleProps> = ({ sqlService }) => {
 
   const handleExecute = async () => {
     if (!connected || !connectionId) {
-      setConnStatus('Not connected');
+      setConnStatus(t('widget.sqlConsole.status.notConnected'));
       return;
     }
     const editor = editorRef.current;
@@ -234,16 +243,16 @@ const SqlConsole: React.FC<SqlConsoleProps> = ({ sqlService }) => {
 
   /* ---- Render ---- */
 
-  const connectionField = (label: string, value: string, onChange: (v: string) => void, type = 'text', placeholder = '') => (
+  const connectionField = (labelKey: string, value: string, onChange: (v: string) => void, type = 'text', placeholderKey = '') => (
     <label className="kairo-sql-field">
-      <span className="kairo-sql-field-label">{label}</span>
+      <span className="kairo-sql-field-label">{t(labelKey)}</span>
       <input
         className="theia-input kairo-sql-input"
         type={type}
         value={value}
-        placeholder={placeholder}
+        placeholder={placeholderKey ? t(placeholderKey) : ''}
         onChange={e => onChange(e.target.value)}
-        aria-label={label}
+        aria-label={t(labelKey)}
       />
     </label>
   );
@@ -251,27 +260,27 @@ const SqlConsole: React.FC<SqlConsoleProps> = ({ sqlService }) => {
   return (
     <div className="kairo-widget kairo-sql-console-widget">
       {/* Connection Panel */}
-      <div className="kairo-widget-toolbar kairo-sql-toolbar">
+      <div className="kairo-sql-toolbar">
         <div className="kairo-sql-connection-fields">
-          {connectionField('Host', host, setHost, 'text', 'localhost')}
-          {connectionField('Port', port, setPort, 'number', '1521')}
+          {connectionField('widget.sqlConsole.label.host', host, setHost, 'text', 'widget.sqlConsole.placeholder.host')}
+          {connectionField('widget.sqlConsole.label.port', port, setPort, 'number', 'widget.sqlConsole.placeholder.port')}
           <label className="kairo-sql-field">
-            <span className="kairo-sql-field-label">Service</span>
+            <span className="kairo-sql-field-label">{t('widget.sqlConsole.label.serviceType')}</span>
             <select
               className="theia-select"
               value={useServiceName ? 'serviceName' : 'sid'}
               onChange={e => setUseServiceName(e.target.value === 'serviceName')}
-              aria-label="Service type"
+              aria-label={t('widget.sqlConsole.label.serviceType')}
             >
-              <option value="sid">SID</option>
-              <option value="serviceName">Service Name</option>
+              <option value="sid">{t('widget.sqlConsole.label.sid')}</option>
+              <option value="serviceName">{t('widget.sqlConsole.label.serviceName')}</option>
             </select>
           </label>
           {useServiceName
-            ? connectionField('Svc Name', serviceName, setServiceName, 'text', 'ORCL')
-            : connectionField('SID', sid, setSid, 'text', 'ORCL')}
-          {connectionField('Username', username, setUsername)}
-          {connectionField('Password', password, setPassword, 'password')}
+            ? connectionField('widget.sqlConsole.label.serviceName', serviceName, setServiceName, 'text', 'widget.sqlConsole.placeholder.serviceName')
+            : connectionField('widget.sqlConsole.label.sid', sid, setSid, 'text', 'widget.sqlConsole.placeholder.sid')}
+          {connectionField('widget.sqlConsole.label.username', username, setUsername)}
+          {connectionField('widget.sqlConsole.label.password', password, setPassword, 'password')}
         </div>
         <div className="kairo-sql-connection-actions">
           <button
@@ -279,14 +288,14 @@ const SqlConsole: React.FC<SqlConsoleProps> = ({ sqlService }) => {
             disabled={connecting}
             onClick={handleTestConnection}
           >
-            {connecting ? 'Testing…' : 'Test Connection'}
+            {connecting ? t('widget.sqlConsole.action.testing') : t('widget.sqlConsole.action.testConnection')}
           </button>
           {connected ? (
             <button
               className="theia-button secondary"
               onClick={handleDisconnect}
             >
-              Disconnect
+              {t('widget.sqlConsole.action.disconnect')}
             </button>
           ) : (
             <button
@@ -294,12 +303,12 @@ const SqlConsole: React.FC<SqlConsoleProps> = ({ sqlService }) => {
               disabled={connecting}
               onClick={handleConnect}
             >
-              {connecting ? 'Connecting…' : 'Connect'}
+              {connecting ? t('widget.sqlConsole.action.connecting') : t('widget.sqlConsole.action.connect')}
             </button>
           )}
           <span className={`kairo-sql-status ${connected ? 'kairo-sql-status-connected' : 'kairo-sql-status-disconnected'}`}>
             <span className="kairo-sql-status-dot" />
-            {connStatus || (connected ? 'Connected' : 'Disconnected')}
+            {connStatus || (connected ? t('widget.sqlConsole.status.connected') : t('widget.sqlConsole.status.disconnected'))}
           </span>
         </div>
       </div>
@@ -309,22 +318,22 @@ const SqlConsole: React.FC<SqlConsoleProps> = ({ sqlService }) => {
         {/* SQL Editor */}
         <div className="kairo-sql-editor-section">
           <div className="kairo-sql-editor-header">
-            <span className="kairo-sql-editor-title">SQL</span>
+            <span className="kairo-sql-editor-title">{t('widget.sqlConsole.editor.title')}</span>
             <div className="kairo-sql-editor-actions">
               <button
-                className="theia-button"
+                className="theia-button main"
                 disabled={!connected || executing}
                 onClick={handleExecute}
               >
-                {executing ? 'Executing…' : 'Execute (Ctrl+Enter)'}
+                {executing ? t('widget.sqlConsole.action.executing') : t('widget.sqlConsole.action.execute')}
               </button>
-              <div className="kairo-sql-history-toggle" style={{ position: 'relative' }}>
+              <div className="kairo-sql-history-toggle">
                 <button
                   className="theia-button secondary"
                   onClick={() => setShowHistory(!showHistory)}
-                  title="Query History"
+                  title={t('widget.sqlConsole.history.tooltip')}
                 >
-                  History
+                  {t('widget.sqlConsole.history.title')}
                 </button>
                 {showHistory && history.length > 0 && (
                   <div className="kairo-sql-history-dropdown">
@@ -346,30 +355,29 @@ const SqlConsole: React.FC<SqlConsoleProps> = ({ sqlService }) => {
           <div
             ref={editorContainerRef}
             className="kairo-sql-editor-container"
-            style={{ height: '200px', border: '1px solid var(--theia-dropdown-border)' }}
           />
         </div>
 
         {/* Results Panel */}
         <div className="kairo-sql-results-section">
           <div className="kairo-sql-results-header">
-            <span className="kairo-sql-results-title">Results</span>
+            <span className="kairo-sql-results-title">{t('widget.sqlConsole.results.title')}</span>
             {result && !result.error && (
               <span className="kairo-sql-results-meta">
-                {result.rowCount} rows returned in {result.executionTime}ms
+                {t('widget.sqlConsole.results.rowsReturned', { count: result.rowCount, time: result.executionTime })}
               </span>
             )}
           </div>
           <div className="kairo-sql-results-body">
             {result === null ? (
-              <p className="kairo-empty">Execute a query to see results.</p>
+              <p className="kairo-empty">{t('widget.sqlConsole.results.executeQuery')}</p>
             ) : result.error ? (
               <div className="kairo-sql-error" role="alert">{result.error}</div>
             ) : result.columns.length === 0 ? (
-              <p className="kairo-empty">Query executed successfully. No results.</p>
+              <p className="kairo-empty">{t('widget.sqlConsole.results.noResults')}</p>
             ) : (
               <div className="kairo-sql-table-wrapper">
-                <table className="kairo-sql-table" aria-label="Query results">
+                <table className="kairo-sql-table" aria-label={t('widget.sqlConsole.results.title')}>
                   <thead>
                     <tr>
                       {result.columns.map((col, i) => (
@@ -407,6 +415,9 @@ export class KairoSqlConsoleWidget extends ReactWidget {
   @inject(KairoSqlService)
   protected readonly sqlService!: KairoSqlService;
 
+  @inject(KairoI18nService)
+  protected readonly i18n!: KairoI18nService;
+
   @postConstruct()
   protected init(): void {
     this.id = KairoSqlConsoleWidget.ID;
@@ -419,6 +430,6 @@ export class KairoSqlConsoleWidget extends ReactWidget {
   }
 
   protected render(): React.ReactNode {
-    return <SqlConsole sqlService={this.sqlService} />;
+    return <SqlConsole sqlService={this.sqlService} i18n={this.i18n} />;
   }
 }

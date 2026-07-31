@@ -13,6 +13,8 @@
   "references": [
     { "path": "../protocol" },
     { "path": "../runtime-extension" },
-    { "path": "../ui-kit" }
+    { "path": "../build-extension" },
+    { "path": "../ui-kit" },
+    { "path": "../i18n" }
   ]
 }

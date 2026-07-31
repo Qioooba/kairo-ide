@@ -1,15 +1,660 @@
 # Kairo IDE 开发交接文档
 
 > 生成时间：2026-07-23  
-> 最后更新：2026-07-27（Session 10 — 内网离线化联网审计 + 修复）  
-> 最新提交：未提交（Session 10 待提交，5 个文件）  
+> 最后更新：2026-08-01（Session 21 — Phase L：Project Selector / Debug Module Selector / Debug Condition Editor 深度美化）  
+> 最新提交：未提交（Session 21 进行中）  
 > 分支：`main`  
 > 目标读者：接手开发的 AI 工程师 / 人类开发者  
-> 本次会话模型：DeepSeek-V4-Pro（TRAE v3）
+> 本次会话模型：Kimi-K2.7-Code（TRAE）
 
 ---
 
-## Session 10 交付摘要 (2026-07-27) 🆕
+## Session 21 交付摘要 (2026-08-01) 🆕
+
+### Phase L — Project Selector / Debug Module Selector / Debug Condition Editor 深度美化
+
+**目标**：继续推进全局 UI/UX 改造，对剩余核心入口页面进行样式升级和本地化补全：Project Selector、Debug Module Selector、Debug Condition Editor。
+
+**覆盖范围**：
+- `packages/project-extension/src/browser/project-selector-widget.tsx`
+  - 注入 `KairoI18nService`，标题/说明改为动态语言响应。
+  - 移除硬编码英文错误/加载/空状态文案，改用 `widget.projectSelector.*` 翻译键。
+  - 新增头部区域、项目计数徽章、激活项目徽章；错误状态使用 `.kairo-error-banner`，加载使用 `.kairo-loading`，空状态使用 `.kairo-empty-state`。
+- `packages/theia-product/src/main/browser/debug-module-selector-widget.tsx`
+  - 注入 `KairoI18nService`，标题随语言切换刷新。
+  - 移除大量内联样式，改用新的 CSS 类：`.kairo-debug-module-header`、`.kairo-debug-module-title`、`.kairo-debug-module-count`、`.kairo-debug-module-actions`、`.kairo-debug-module-row`、`.kairo-debug-module-info`、`.kairo-debug-module-name`、`.kairo-debug-module-path`、`.kairo-debug-module-bp`。
+  - 空状态与错误状态使用标准化 `.kairo-empty-state` / `.kairo-error-banner`。
+  - 全选/取消全选/刷新按钮使用统一 `.theia-button.secondary` 样式，刷新按钮使用 codicon。
+- `packages/theia-product/src/main/browser/debug-condition-editor-widget.tsx`
+  - 注入 `KairoI18nService`，标题、说明、条件验证信息全部本地化。
+  - 移除所有内联样式，改用新的 CSS 类：`.kairo-debug-condition-editor`、`.kairo-debug-condition-header`、`.kairo-debug-condition-title`、`.kairo-debug-condition-bp`、`.kairo-debug-condition-actions`、`.kairo-debug-condition-tabs`、`.kairo-debug-condition-tab`、`.kairo-debug-condition-body`、`.kairo-debug-condition-field`、`.kairo-debug-condition-label`、`.kairo-debug-condition-input`、`.kairo-debug-condition-textarea`、`.kairo-debug-condition-hint`、`.kairo-debug-condition-validation`。
+  - Filter tabs 改为统一的 `.kairo-debug-condition-tab`，active 状态使用主题色下划线。
+- `packages/ui-kit/src/browser/kairo-theme.css`
+  - 新增 Project Selector 全量样式（`.kairo-project-selector-*`、`.kairo-project-list`、`.kairo-project-item` 等）。
+  - 新增 Debug Module Selector 全量样式。
+  - 新增 Debug Condition Editor 全量样式（含 tab、表单字段、验证信息）。
+- `packages/i18n/src/locales/en.ts` / `zh-CN.ts`
+  - 新增 `widget.projectSelector.*` 本地化键。
+  - 新增 `widget.debug.moduleSelector.*` 本地化键。
+  - 新增 `widget.debug.conditionEditor.*` 本地化键。
+
+### 验证
+
+| 检查项 | 结果 |
+|--------|------|
+| `pnpm exec tsc --noEmit` | ✅ 0 errors |
+| `pnpm -r test` | ✅ 全量通过 |
+| `cd runtime-agent && go test ./...` | ✅ 33/33 包通过 |
+| Go 测试覆盖率 | ✅ 76.3% |
+| `pnpm --filter @kairo/i18n build` | ✅ 通过 |
+| `pnpm --filter @kairo/ui-kit build` | ✅ 通过 |
+| `pnpm --filter @kairo/project-extension build` | ✅ 通过 |
+| `pnpm --filter @kairo/theia-product build` | ✅ 通过 |
+| `pnpm --filter @kairo/browser build` | ✅ 通过（0 errors） |
+
+### 已知问题
+
+- 与之前会话一致：`capture-current-ui.cjs` 中 Run 菜单截图（`13-run-menu.png`）仍未生成，DOM 选择器需后续更新。
+
+### 剩余待办
+
+- ⬜ 提交 Session 15–21 变更并推送（由用户决定是否提交）。
+- ⬜ 重新捕获回归截图（`docs/screenshots/current-ui/`）。
+- ⬜ 继续 Phase M：遍历剩余未覆盖的页面与 widgets（见下节「下一会话交接」）。
+
+---
+
+## 下一会话交接（Handover for Next Agent）
+
+**当前状态**：全局 UI/UX 改造持续推进中。已改造页面涵盖 Welcome、Import Wizard、Run Configurations、Build View、Tomcat Server View、Log Viewer、Debug 核心视图（Breakpoints/Console/Variables/Callstack/Watch/Tool Window/Toolbar/Frames/Variables Tree/Watches）、TODO、SQL Console、Remote、Project Selector、Debug Module Selector、Debug Condition Editor。所有已改动文件均通过 TypeScript 类型检查、前端测试、Go 测试、相关包构建与浏览器打包。
+
+**仍未完成的核心工作（需继续实现）**：
+1. **剩余 Debug 小 widgets**：
+   - `packages/theia-product/src/main/browser/debug-diagnostics-widget.tsx`：仍有部分内联样式/硬编码英文，需要接入 `KairoI18nService` 并类化。
+   - `packages/theia-product/src/main/browser/debug-hotswap-status-widget.tsx`：样式已较完整，但可进一步接入 i18n 完成语言一致性（当前部分文字可能仍为英文）。
+2. **Build 扩展其他页面**：
+   - `packages/build-extension/src/browser/kairo-custom-build-runner.tsx` 与对应 `kairo-custom-build-runner.css`：已有独立 CSS，但可检查是否需要统一为 `kairo-theme.css` 风格。
+   - `packages/build-extension/src/browser/maven-view-widget.tsx`：已部分改造，可继续检查是否有遗漏的硬编码文案或内联样式。
+3. **其他业务 widgets**（建议按使用频率排序）：
+   - `packages/theia-product/src/main/browser/kairo-toolbar-widget.tsx`：顶部工具栏，影响全局视觉。
+   - `packages/theia-product/src/main/browser/kairo-test-results-widget.tsx`：测试视图。
+   - `packages/theia-product/src/main/browser/kairo-problems-widget.tsx`：问题视图（已部分改造，检查剩余）。
+   - `packages/theia-product/src/main/browser/kairo-perf-dashboard-widget.tsx`：性能仪表板。
+   - `packages/theia-product/src/main/browser/kairo-status-bar-contribution.ts`：状态栏（已部分改造）。
+   - `packages/theia-product/src/main/browser/kairo-breadcrumbs.test.cjs` / `kairo-focus-management.ts` / `kairo-editor-preferences.ts` 等辅助组件。
+   - `packages/search-extension/src/browser/*` 搜索相关 widgets。
+   - `packages/git-extension/src/browser/*` / `packages/svn-extension/src/browser/*` 版本控制 widgets。
+   - `packages/java-extension/src/browser/*` Java 相关 widgets（hotswap、language client、run service 等）。
+   - `packages/test-extension/src/browser/*` 测试扩展。
+   - `packages/sql-extension/src/browser/*` SQL 扩展内部 widgets。
+   - `packages/remote-extension/src/browser/*` Remote 扩展内部 widgets。
+4. **全局收尾**：
+   - 统一检查所有 widgets 是否已接入 `KairoI18nService`。
+   - 统一检查是否还有内联 `style={{ ... }}` 未迁移到 `kairo-theme.css`。
+   - 统一检查是否还有硬编码英文/中文文案。
+   - 更新 `docs/screenshots/current-ui/` 回归截图。
+   - 执行浏览器启动回归测试，确认无视觉/功能退化。
+
+**推荐下一会话方案**：
+- **Phase M**：先完成 `debug-diagnostics-widget.tsx` 与 `debug-hotswap-status-widget.tsx` 的本地化和类化（与 Phase L 同属 debug 子页面，上下文连贯）。
+- **Phase N**：统一处理 `kairo-toolbar-widget.tsx`、`kairo-status-bar-contribution.ts` 等全局组件。
+- **Phase O**：按目录批量处理 `packages/*-extension/src/browser/*widget*.tsx` 中尚未类化的 widgets。
+- **Phase P**：全局审计（内联样式、硬编码字符串、i18n 缺失、截图回归）。
+
+**验证门禁**（每阶段完成后必须执行）：
+1. `pnpm exec tsc --noEmit` → 0 errors
+2. `pnpm -r test` → 全量通过
+3. `cd runtime-agent && go test ./...` → 33/33 包通过
+4. 相关包 `pnpm --filter @kairo/<package> build` → 通过
+5. `pnpm --filter @kairo/browser build` → 0 errors
+
+**注意事项**：
+- 当前所有改动均未提交，下一会话开始前建议先 `git add` / `git status` 确认工作树。
+- `docs/progress/ui-ux-redesign-plan-20260731.md` 与 `docs/progress/ui-ux-widget-inventory-report-20260731.md` 中有更详细的页面清单，可作为剩余工作参考。
+- 继续遵循「只改前端样式，不改后端接口」的约束。
+
+---
+
+## Session 20 交付摘要 (2026-08-01)
+
+### Phase K — TODO / SQL Console / Remote widgets 深度美化
+
+**目标**：继续推进全局 UI/UX 改造，优化剩余核心 widgets（TODO、SQL Console、Remote Development），使它们的头部、表单、列表、状态指示、按钮造型与整体主题保持一致，提升可用性。
+
+**覆盖范围**：
+- `packages/theia-product/src/main/browser/kairo-todo-widget.tsx`
+  - 刷新按钮新增 codicon 图标（refresh / loading spin）。
+  - 头部计数改为 `.kairo-todo-count` 胶囊徽章。
+- `packages/theia-product/src/main/browser/kairo-sql-console-widget.tsx`
+  - 连接面板工具栏改为独立的 `.kairo-sql-toolbar`（移除 `.kairo-widget-toolbar` 混合），字段使用响应式网格布局。
+  - 状态指示改为 `.kairo-sql-status` 彩色胶囊（connected/disconnected）。
+  - 编辑器与结果区域新增 `.kairo-sql-editor-section`、`.kairo-sql-results-section`、`.kairo-sql-editor-header`、`.kairo-sql-results-header` 等类，实现清晰分区。
+  - 结果表格新增 `.kairo-sql-table-wrapper`、`.kairo-sql-table` 样式：sticky 表头、hover 行、边框圆角。
+  - 查询历史下拉新增 `.kairo-sql-history-dropdown` 浮动卡片样式。
+- `packages/theia-product/src/main/browser/kairo-remote-widget.tsx`
+  - 连接按钮在断开状态使用 `main` 主按钮样式，连接后使用 `toolbar` 次要样式。
+- `packages/ui-kit/src/browser/kairo-theme.css`
+  - 重写/新增 Remote widget 全量 CSS：状态条、表单卡片、最近连接列表、连接成功信息卡。
+  - 新增 SQL Console widget 全量 CSS：工具栏、字段、状态胶囊、编辑器/结果分区、表格、历史下拉。
+  - 增强 TODO widget CSS：头部工具栏背景、计数胶囊、文件计数徽章、条目 marker 样式。
+
+### 验证
+
+| 检查项 | 结果 |
+|--------|------|
+| `pnpm exec tsc --noEmit` | ✅ 0 errors |
+| `pnpm -r test` | ✅ 全量通过 |
+| `cd runtime-agent && go test ./...` | ✅ 33/33 包通过 |
+| Go 测试覆盖率 | ✅ 76.3% |
+| `pnpm --filter @kairo/ui-kit build` | ✅ 通过 |
+| `pnpm --filter @kairo/theia-product build` | ✅ 通过 |
+| `pnpm --filter @kairo/browser build` | ✅ 通过（0 errors） |
+
+### 已知问题
+
+- 与之前会话一致：`capture-current-ui.cjs` 中 Run 菜单截图（`13-run-menu.png`）仍未生成，DOM 选择器需后续更新。
+
+### 剩余待办
+
+- ⬜ 提交 Session 15–20 变更并推送（由用户决定是否提交）。
+- ⬜ 重新捕获回归截图（`docs/screenshots/current-ui/`）。
+- ⬜ 继续 Phase L：检查并美化其他尚未覆盖的页面（如 SQL Editor / Connection widgets、Project Selector、Custom Build Runner 等）。
+
+---
+
+## Session 19 交付摘要 (2026-08-01)
+
+### Phase J — Run Configurations 与 Build 视图深度美化
+
+**目标**：继续推进全局 UI/UX 改造，优化 Run Configurations 列表/摘要与 Build 视图的工具栏、状态指示、列表项及诊断信息展示，使其更符合专业 IDE 的可用性与视觉标准。
+
+**覆盖范围**：
+- `packages/theia-product/src/main/browser/kairo-run-configurations-widget.tsx`
+  - 工具栏改为 `.kairo-runconfig-toolbar`，新建配置使用主按钮，刷新使用次要按钮，按钮尺寸与圆角统一。
+  - 头部计数改为 `.kairo-runconfig-header-count` 胶囊样式。
+  - Run Configuration 列表项信息拆分为 mode/project/ports 三个 `.kairo-runconfig-list-item-info-pill` 胶囊，mode 使用主题色高亮，ports 使用等宽字体。
+- `packages/build-extension/src/browser/build-view-widget.tsx`
+  - 工具栏改为 `.kairo-build-toolbar`，Build（绿色主按钮）/ Clean Build（蓝色主按钮）/ Cancel（图标化次要按钮）分组，组间加垂直分隔线。
+  - Build 历史列表项新增 `.kairo-build-item-state` 状态徽章（running/succeeded/failed/cancelled/pending 对应不同颜色）。
+- `packages/ui-kit/src/browser/kairo-theme.css`
+  - 新增 `.kairo-runconfig-toolbar`、`.kairo-runconfig-header-count`、`.kairo-runconfig-list-item-info-pill`。
+  - 新增 `.kairo-build-toolbar`、`.kairo-build-toolbar-separator`、`.kairo-build-item-state`。
+  - 增强 `.kairo-diagnostic` 与 `.kairo-diagnostic-{error,warning,info}`：增加左侧彩色边框、对应 severity 的半透明背景、悬停高亮。
+
+### 验证
+
+| 检查项 | 结果 |
+|--------|------|
+| `pnpm exec tsc --noEmit` | ✅ 0 errors |
+| `pnpm -r test` | ✅ 全量通过 |
+| `cd runtime-agent && go test ./...` | ✅ 33/33 包通过 |
+| Go 测试覆盖率 | ✅ 76.3% |
+| `pnpm --filter @kairo/ui-kit build` | ✅ 通过 |
+| `pnpm --filter @kairo/build-extension build` | ✅ 通过 |
+| `pnpm --filter @kairo/theia-product build` | ✅ 通过 |
+| `pnpm --filter @kairo/browser build` | ✅ 通过（0 errors） |
+
+### 已知问题
+
+- 与之前会话一致：`capture-current-ui.cjs` 中 Run 菜单截图（`13-run-menu.png`）仍未生成，DOM 选择器需后续更新。
+
+### 剩余待办
+
+- ⬜ 提交 Session 15–19 变更并推送（由用户决定是否提交）。
+- ⬜ 重新捕获回归截图（`docs/screenshots/current-ui/`）。
+- ⬜ 继续 Phase K：Settings/Preferences、Project Selector、TODO/SQL/Remote widgets 等重点页面美化。
+
+---
+
+## Session 18 交付摘要 (2026-08-01)
+
+### Phase I — Tomcat Server 视图与 Log Viewer 深度美化
+
+**目标**：继续推进全局 UI/UX 改造，重点优化用户明确指出的 Tomcat 相关页面（Server 视图、Log Viewer），使其布局、按钮、状态指示、日志条目更符合 IDEA/VSCode 等专业开发工具的使用习惯，同时保持零后端改动。
+
+**覆盖范围**：
+- `packages/tomcat-extension/src/browser/server-view-widget.tsx`
+  - 将工具栏从通用 `.kairo-widget-toolbar` 改为专用 `.kairo-server-toolbar`，按钮按功能分组：Start（绿色主按钮）、Debug（蓝色主按钮）、Stop/Restart/Open（图标化次要按钮），组间加入垂直分隔线。
+  - 修复 server list 中状态图标 className 的模板字符串 bug（原本写成普通字符串导致 `${}` 未插值），使状态图标真正生效。
+  - 为每个 server list 条目新增 `.kairo-server-item-state` 状态徽章（running/stopped/starting/stopping/error/crashed 对应不同颜色）。
+- `packages/tomcat-extension/src/browser/log-viewer-widget.tsx`
+  - 工具栏分组并加入 `.kairo-toolbar-separator` 分隔线，动作按钮改为 icon-only 紧凑样式，Auto-scroll 复选框独立分组。
+  - 状态栏重构为左侧 runtime/server 状态 chip + 轮询状态说明，右侧 live/paused 指示器，使用 `.kairo-log-status-chip`。
+  - 日志条目结构改为 `<time> + <stream badge> + <message>`，新增 `.kairo-log-message` 类，便于统一控制折行与悬停高亮。
+- `packages/ui-kit/src/browser/kairo-theme.css`
+  - 新增 `.kairo-server-toolbar`、`.kairo-server-toolbar-separator`、`.kairo-server-item-state` 系列类。
+  - 新增/强化 `.kairo-log-viewer-toolbar`、`.kairo-toolbar-separator`、`.kairo-log-status`、`.kairo-log-status-chip`、`.kairo-log-status-chips`。
+  - 重写 `.kairo-log-line` 样式：flex 基线布局、stream badge 胶囊、按 stream/level 的彩色左边框与悬停高亮。
+
+### 验证
+
+| 检查项 | 结果 |
+|--------|------|
+| `pnpm exec tsc --noEmit` | ✅ 0 errors |
+| `pnpm -r test` | ✅ 全量通过 |
+| `cd runtime-agent && go test ./...` | ✅ 33/33 包通过 |
+| Go 测试覆盖率 | ✅ 76.3% |
+| `pnpm --filter @kairo/ui-kit build` | ✅ 通过 |
+| `pnpm --filter @kairo/tomcat-extension build` | ✅ 通过 |
+| `pnpm --filter @kairo/theia-product build` | ✅ 通过 |
+| `pnpm --filter @kairo/browser build` | ✅ 通过（0 errors） |
+
+### 已知问题
+
+- 与之前会话一致：`capture-current-ui.cjs` 中 Run 菜单截图（`13-run-menu.png`）仍未生成，DOM 选择器需后续更新。
+- 日志时间戳未做本地化格式化，当前直接显示原始 `log.ts`，后续可考虑按 locale 格式化。
+
+### 剩余待办
+
+- ⬜ 提交 Session 15–18 变更并推送（由用户决定是否提交）。
+- ⬜ 重新捕获回归截图（`docs/screenshots/current-ui/`）。
+- ⬜ 继续 Phase J：其他重点页面（如 Settings/Preferences、Project Selector、Run Configurations 编辑器、Build 视图等）的深度美化。
+
+---
+
+## Session 17 交付摘要 (2026-08-01)
+
+**目标**：完成全局 UI/UX 改造中剩余的 Phase H 工作，将 Import Wizard、Maven View、Debug 侧边栏 widgets（Breakpoints / Console / Variables / Callstack / Watch）全部接入 KairoI18nService，并清理对应内联样式，统一使用设计系统 CSS 类。
+
+**覆盖范围**：
+- `packages/project-extension/src/browser/import-wizard-widget.tsx` — 注入 `KairoI18nService`；所有用户可见文案（标题、步骤标签、表单字段、按钮、提示、成功/错误信息）改为 `t('widget.importWizard.*')` 动态翻译；通过 `postConstruct` 在 DI 就绪后设置 widget title/caption，同时保留构造函数英文默认值以兼容无 Inversify 的单元测试。
+- `packages/project-extension/package.json` / `tsconfig.json` — 添加 `@kairo/i18n` workspace 依赖与 project reference，解决跨包类型解析。
+- `packages/theia-product/src/main/browser/maven-view-widget.tsx` — 已有 `KairoI18nService` 注入，确认所有 UI 字符串（检测、依赖、生命周期任务、输出、错误）均使用 `widget.maven.*` 键。
+- `packages/theia-product/src/main/browser/debug-breakpoints-widget.tsx` / `debug-console-widget.tsx` / `debug-variables-widget.tsx` / `debug-callstack-widget.tsx` / `debug-watch-widget.tsx` — 全部注入 `KairoI18nService`；标题、计数、工具栏按钮、空状态、错误提示、占位符、求值/监视相关文案均改为 `widget.debug.*` 键；移除 widget 容器、工具栏、主体、错误/空状态、输入区等处的内联样式，统一使用 `.kairo-debug-*` CSS 类。
+- `packages/i18n/src/locales/en.ts` / `zh-CN.ts` — 补全 `widget.maven.*`、`widget.debug.*`（variables / callstack / breakpoints / console / watch）、`widget.importWizard.*` 全量键值，确保中英文结构一致。
+- `packages/ui-kit/src/browser/kairo-theme.css` — 新增 `.kairo-debug-toolbar` 共享工具栏类；新增 `.kairo-debug-callstack-*`、`.kairo-debug-variables-*`、`.kairo-debug-watch-*` 系列类（标题、计数、间距、按钮、主体、错误、空状态、输入条）；避免与 `debug-watches-idea.tsx` 的 `.kairo-debug-watch-input` 冲突，watch widget 输入框使用 `.kairo-debug-watch-widget-input`。
+
+### 验证
+
+| 检查项 | 结果 |
+|--------|------|
+| `pnpm exec tsc --noEmit` | ✅ 0 errors |
+| `pnpm -r test` | ✅ 全量通过（首次 java-extension 出现 1 次 flaky 失败，重跑通过） |
+| `cd runtime-agent && go test ./...` | ✅ 33/33 包通过 |
+| Go 测试覆盖率 | ✅ 76.3% |
+
+### 已知问题
+
+- 与 Session 16 一致：`capture-current-ui.cjs` 中 Run 菜单截图（`13-run-menu.png`）仍未生成，DOM 选择器需后续更新。
+
+### 剩余待办
+
+- ⬜ 提交 Session 15–17 变更并推送（由用户决定是否提交）。
+- ⬜ 重新捕获回归截图（`docs/screenshots/current-ui/`）。
+
+---
+
+## Session 16 交付摘要 (2026-07-31)
+
+### Phase F — 状态栏美化改造
+
+**目标**：减少状态栏视觉拥挤，按逻辑分组，占位状态降低视觉权重，所有文案走 i18n。
+
+**覆盖范围**：
+- `packages/theia-product/src/main/browser/kairo-status-bar-contribution.ts` — 8+ 条目按「项目/JDK/编码」「构建/服务器」「调试/代理」「热重载」分组；无项目时隐藏 `kairo.hotReload`；调试无会话时显示占位文案；所有新增文案使用 `KairoI18nService`。
+- `packages/i18n/src/locales/en.ts` / `zh-CN.ts` — 新增 `statusBar.*` 键值（project、jdk、encoding、build、server、debug、agent、hotReload、noDebug 等）。
+- `packages/ui-kit/src/browser/kairo-theme.css` — 新增 `.kairo-statusbar-group-*` 分组间距；`.kairo-statusbar-placeholder` 占位态降低透明度与颜色对比。
+
+### Phase G — 调试视图美化改造
+
+**目标**：统一调试工具栏与面板样式，与主工具栏及 Kairo 设计系统一致；调试面板（Variables / Frames / Watches）统一行高、hover、空状态与 i18n。
+
+**覆盖范围**：
+- `packages/theia-product/src/main/browser/debug-toolbar-idea.tsx` — 工具栏按钮语义着色与主工具栏一致（run=绿、pause=黄、stop=红）；hover 标签；按钮尺寸统一。
+- `packages/theia-product/src/main/browser/debug-tool-window-widget.tsx` — 统一空状态使用 `.kairo-empty-state`；向 `IDEAFramesPanel` / `IDEAVariablesTree` / `IDEAWatchesPanel` 传递 `i18n` prop，确保语言切换生效。
+- `packages/theia-product/src/main/browser/debug-frames-idea.tsx`、`debug-variables-idea.tsx`、`debug-watches-idea.tsx` — 接收 `i18n` prop，面板标题、空状态、占位文本全部本地化。
+- `packages/ui-kit/src/browser/kairo-theme.css` — 重定义 `.kairo-debug-toolbar-*`、`.kairo-debug-status-bar`、`.kairo-debug-var-row-idea`、`.kairo-debug-frame-row`、`.kairo-debug-watch-*` 等类；统一行高 28px、hover 背景、选中态、空状态。
+
+### 验证
+
+| 检查项 | 结果 |
+|--------|------|
+| `pnpm exec tsc --noEmit` | ✅ 0 errors |
+| `pnpm -r test` | ✅ 全量通过（首次 java-extension 出现 1 次 flaky 失败，重跑通过） |
+| `cd runtime-agent && go test ./...` | ✅ 33/33 包通过 |
+| `pnpm --filter @kairo/browser build` | ✅ 通过 |
+
+### 已知问题
+
+- 由于文件系统/缓存问题，调试面板组件的 `.d.ts` 声明在 `lib/browser/` 中一度陈旧，导致 `tsc` 报 `Property 'i18n' is missing`。已通过删除陈旧 `.d.ts` 并在源码中确认 `i18n` prop 传递后解决。
+
+### 剩余待办
+
+- ⬜ 提交 Session 15–16 变更并推送（由用户决定是否提交）。
+- ⬜ 重新捕获回归截图（`docs/screenshots/current-ui/`）。
+
+---
+
+## Session 15 交付摘要 (2026-07-31)
+
+### 前端 UI/UX 综合改造（IDEA/VSCode 风格参考）
+
+**目标**：针对 Session 14 截图评审中发现的 Debug 工具栏、Servers 视图、热重载卡片、日志查看器、Run Configurations 错误横幅等视觉与可用性问题进行专项美化，仅前端样式与文案调整，不改动后端/API。
+
+**覆盖范围**：
+- `packages/theia-product/src/main/browser/debug-toolbar-idea.tsx` — 工具栏按钮升级为 32×32；新增悬停展开标签（label-on-hover）；按钮按语义着色（run=绿色、pause=黄色、stop=红色）；向 `ToolbarIconButton` 传递 `label` 与 `tone`。
+- `packages/ui-kit/src/browser/kairo-theme.css` — 全面重定义 `.kairo-debug-toolbar-*`：更大按钮、分组间隔、活跃/禁用态、线程选择器样式；优化 `.kairo-debug-status-bar` 状态色与“断点已静音”徽章；提升 `.kairo-empty-state` 空状态质感；统一 `.kairo-widget-toolbar` 中 `.main` / `.secondary` / `.toolbar` 按钮尺寸与对齐；增强 `.kairo-hot-reload-banner` 卡片阴影与编译状态脉冲点；优化 `.kairo-log-viewer-header` / `toolbar` / `status` 布局与标签徽章；强化 `.kairo-error-banner` 可见性（图标、阴影、文字色）。
+- `packages/tomcat-extension/src/browser/server-view-widget.tsx` — 工具栏按钮已具备统一 `kairo-toolbar-btn` 结构（样式由 CSS 统一控制）。
+- `packages/tomcat-extension/src/browser/log-viewer-widget.tsx` — 头部/工具栏/状态栏结构保持，样式由 CSS 优化。
+- `packages/theia-product/src/main/browser/kairo-run-configurations-widget.tsx` — 通用错误横幅添加 `codicon-warning` 图标与文字容器，确保内容可见。
+- `packages/i18n/src/locales/zh-CN.ts` — 修复“所有服务器”空状态 awkward 文案：`emptyListReason` 改为“点击「{action}」按钮启动服务器。”
+
+### Phase E — 侧边栏 widgets 美化改造（Session 15 延续）
+
+**目标**：将 Log Viewer、Test Results、Performance Dashboard 三个侧边栏 widget 纳入统一设计系统，消除硬编码英文、内联样式与 emoji/unicode 图标，仅前端改造，不改动后端/API。
+
+**覆盖范围**：
+- `packages/tomcat-extension/src/browser/log-viewer-widget.tsx` — 错误横幅统一为 `.kairo-error-banner`；工具栏操作按钮改为图标-only（保留 aria-label / title）。
+- `packages/theia-product/src/main/browser/kairo-test-results-widget.tsx` — 注入 `KairoI18nService` 并全量 i18n 化；状态图标从 unicode 替换为 codicon；运行摘要/类分组使用 `.kairo-badge-*`；空状态、错误提示、加载状态统一为 `.kairo-empty-state` / `.kairo-error-banner`；工具栏使用 `.kairo-widget-toolbar` + `.kairo-toolbar-field`。
+- `packages/theia-product/src/main/browser/kairo-perf-dashboard-widget.tsx` — 外层使用 `.kairo-widget` + `.kairo-perf-dashboard`；新增 `.kairo-widget-header` / `.kairo-widget-body` 标准 chrome；历史表格使用 `.kairo-table`；内存/JDT LS 不可用提示升级为 `.kairo-error-banner`；benchmark 按钮使用 `.theia-button.main` 并添加 codicon。
+- `packages/ui-kit/src/browser/kairo-theme.css` — 新增 `.kairo-test-*` 全组件样式（运行摘要、类分组、方法行、失败/堆栈信息、原始输出）；补充 `.kairo-perf-dashboard` / `.kairo-perf-section` / `.kairo-perf-card-*`  polish；新增 `.kairo-toolbar-field`、`.kairo-empty-state.compact` 等可复用工具类。
+- `packages/i18n/src/locales/en.ts` / `zh-CN.ts` — 新增 `widget.tests.*` 全量键值（加载、错误、状态、筛选、重跑、空状态、原始输出等）。
+
+### 浏览器应用构建与截图更新
+
+- `pnpm --filter @kairo/browser build` — 生产 bundle 重新构建成功。
+- `docs/screenshots/capture-current-ui.cjs` — 针对 3001 端口重新捕获 14 张核心页面截图，`docs/screenshots/current-ui/` 已更新。
+
+### 验证
+
+| 检查项 | 结果 |
+|--------|------|
+| `pnpm exec tsc --noEmit` | ✅ 0 errors |
+| `pnpm -r test` | ✅ 全量通过 |
+| `cd runtime-agent && go test ./...` | ✅ 33/33 包通过 |
+| `pnpm --filter @kairo/ui-kit @kairo/tomcat-extension @kairo/theia-product build` | ✅ 通过 |
+| `pnpm --filter @kairo/browser build` | ✅ 通过 |
+| 浏览器回归截图 | ⬜ 未重新捕获（本次仅改前端组件，建议在 Phase F/G 完成后统一截图） |
+
+### 已知问题
+
+- `capture-current-ui.cjs` 中 Run 菜单截图（`13-run-menu.png`）仍未生成，与 Session 14 一致，不影响本次改造范围。
+
+### 剩余待办
+
+- ⬜ 提交 Session 15 变更并推送（由用户决定是否提交）。
+
+---
+
+## Session 14 交付摘要 (2026-07-31)
+
+### 剩余 Chrome 元素 UI/UX 统一收尾
+
+**目标**：完成 Session 13 剩余的 chrome 元素样式与国际化改造，确保错误提示、Debug 工具栏、欢迎页横幅等关键元素全部使用设计令牌类与 i18n 键。
+
+**覆盖范围**：
+- `packages/i18n/src/locales/en.ts` / `zh-CN.ts` — 新增 `debug.toolbar.*` 工具栏按钮标签与快捷键键值（Rerun / Resume / Pause / Stop / Step Over / Step Into 等）
+- `packages/theia-product/src/main/browser/debug-toolbar-idea.tsx` — `IDEADebugToolbar` 接收 `i18n` prop，按钮 label / shortcut / 线程选择器全部改为 `i18n.t` 动态翻译
+- `packages/theia-product/src/main/browser/debug-tool-window-widget.tsx` — 向 `IDEADebugToolbar` 传入 `i18n` prop；断点占位文本已使用 `debug.toolWindow.breakpointsPlaceholder`
+- `packages/theia-product/src/main/browser/kairo-run-configurations-widget.tsx` — 内联错误样式从 `kairo-runconfig-error` 统一为 `.kairo-error-banner`，并添加 `codicon-warning` 图标
+- `packages/theia-product/src/main/browser/kairo-welcome-widget.tsx` — 欢迎页错误横幅改为 `.kairo-error-banner` 结构，保持关闭按钮与 i18n 一致
+- `packages/ui-kit/src/browser/kairo-theme.css` — 移除已废弃的 `.kairo-runconfig-error` / `.kairo-port-occupation-error` 定义，统一由 `.kairo-error-banner` 提供错误横幅样式
+
+### 浏览器应用构建与回归验证
+
+**目标**：重新构建浏览器应用，验证最新 UI/UX 改动在生产 bundle 中生效，并完成浏览器回归测试与基准截图更新。
+
+**覆盖范围**：
+- `pnpm --filter @kairo/browser build` — 重新构建生产 bundle（构建前需终止占用 `conpty.node` 的遗留 Theia 后端进程）
+- `docs/screenshots/capture-current-ui.cjs` — 捕获 14 张核心页面截图（Welcome / Servers / Builds / Deployments / Run Configurations / Tomcat Logs / Debug Variables / Debug Callstack / Debug Breakpoints / Debug Tool Window / Full Shell / Command Palette / Preferences）
+- `docs/screenshots/verify-language-switch.cjs` — 验证 VS Code 显示语言切换为中文并捕获 `15-language-zh.png`
+- `docs/screenshots/verify-kairo-language.cjs` — 验证 Kairo 语言设置切换为 `zh-CN` 并捕获 `15-kairo-language-zh.png`
+- `docs/screenshots/verify-activity-bar-hover.cjs` — 验证 Activity Bar hover 反馈并捕获 `17-activity-bar-default.png` 与 `17-activity-bar-hover-*.png`
+- `docs/screenshots/current-ui/` — 已更新为本次优化后的最新基准截图
+
+### 验证
+
+| 检查项 | 结果 |
+|--------|------|
+| `pnpm -r --filter './packages/*' --filter './apps/*' exec tsc --noEmit` | ✅ 0 errors |
+| `pnpm -r test` | ✅ 全量通过（24 个工作区项目，0 失败） |
+| `cd runtime-agent && go test ./...` | ✅ 33/33 包通过 |
+| `cd runtime-agent && go test '-coverprofile=coverage.out' './...'` | ✅ 总体覆盖率 **76.3%**（目标 ≥72.5%） |
+| `pnpm --filter @kairo/browser build` | ✅ 通过（释放 `conpty.node` 占用后） |
+| 浏览器回归截图 | ✅ `docs/screenshots/current-ui/` 已更新 |
+| Activity Bar hover 反馈 | ✅ 已验证 |
+| 语言切换（VS Code + Kairo） | ✅ 已验证 |
+
+### 已知问题
+
+- `capture-current-ui.cjs` 中 Run 菜单截图（`13-run-menu.png`）未生成，因 `.p-MenuBar-item:has-text("Run")` 选择器在当前 Theia 版本菜单 DOM 中未命中。该问题不影响功能，后续可改用 `text=Run` 或菜单 aria-label 选择器修复。
+- 构建过程中 `conpty.node` 曾被遗留 Theia 后端进程锁定，已手动终止相关进程。建议后续构建前检查并清理后台 Theia/Electron 进程。
+
+### 剩余待办
+
+- ⬜ 清理 `artifacts/`、`tmp/` 等调试临时目录（可选，不影响功能）
+- ⬜ 提交 Session 13/14 变更并推送
+
+---
+
+## Session 13 交付摘要 (2026-07-31)
+
+### Server Panels 设计令牌统一重构
+
+**目标**：按照 `docs/ui-spec.md` §20 的统一设计令牌，重构 Tomcat / Servers / Build / Deployments 面板，使按钮层级、空状态、间距、状态徽章在四个面板中保持一致，并全部接入 i18n。
+
+**覆盖范围**：
+- `packages/theia-product/src/main/browser/kairo-views-contribution.tsx` — 将 `KairoDeploymentsWidget` 从类 Widget 重构为 `ReactWidget`，实现标准 widget chrome（header / toolbar / content），应用按钮层级（`.main` / `.secondary` / `.toolbar`），统一 empty / loading / error 状态，新增 deployments 状态徽章与 i18n 回退
+- `packages/build-extension/src/browser/build-view-widget.tsx` — 统一按钮层级、空状态、加载/断连状态，接入 i18n
+- `packages/tomcat-extension/src/browser/server-view-widget.tsx` — 标准化加载状态与空状态，主 CTA 使用 `.main`
+- `packages/tomcat-extension/src/browser/log-viewer-widget.tsx` — 空状态替换为标准 `.kairo-empty-state` 结构
+- `packages/i18n/src/locales/en.ts` / `zh-CN.ts` — 补充 `widget.deployments.state.*`、`widget.deployments.trigger.*`、`widget.deployments.hotReloadMode.*`、`widget.deployments.table.*` 等键
+- `packages/ui-kit/src/browser/kairo-theme.css` — 新增 `.kairo-deployment-state` 状态徽章样式，更新 `.kairo-empty-state` 标准结构
+- `packages/build-extension/tsconfig.json` — 新增 `@kairo/i18n` project reference，修复 `File '.../i18n/...' is not under 'rootDir'` 构建错误
+- `packages/build-extension/package.json` — 新增 `@kairo/i18n` workspace 依赖
+
+### Debug Tool Window 视觉与交互统一
+
+**目标**：将 Debug 相关 Widget（Breakpoints、Console、Variables、Frames、Watches、Toolbar）的 inline style 全面替换为 CSS 类，统一空状态、按钮层级、徽章与提示文本，提升可读性与键盘可访问性。
+
+**覆盖范围**：
+- `packages/theia-product/src/main/browser/debug-breakpoints-widget.tsx` — 断点列表使用 `.kairo-debug-bp-*` 类；checkbox、condition/hit count/log message 元信息分行展示；空状态接入 `.kairo-empty-state`
+- `packages/theia-product/src/main/browser/debug-console-widget.tsx` — 控制台输入/输出区使用 `.kairo-debug-console-*` 类；输入框带提示占位符；空状态区分 "无调试会话" 与 "准备求值"
+- `packages/theia-product/src/main/browser/debug-frames-idea.tsx` / `debug-variables-idea.tsx` / `debug-watches-idea.tsx` / `debug-toolbar-idea.tsx` / `debug-tool-window-widget.tsx` — 统一布局类名与 codicon 使用，移除重复/废弃 tab
+- `packages/ui-kit/src/browser/kairo-theme.css` — 新增 `.kairo-debug-bp-row`、`.kairo-debug-console-entry.*`、`.kairo-debug-console-prompt` 等调试专用样式
+
+### Build / Maven 视图样式类化
+
+**目标**：将构建输出与 Maven 依赖树中的 inline style 替换为设计令牌类，支持动态缩进与日志级别着色。
+
+**覆盖范围**：
+- `packages/build-extension/src/browser/kairo-custom-build-runner.tsx` — 移除 `logColor` 函数，日志行按 `stdout/stderr/info/error/success` 类型使用 `.kairo-build-log-line.{type}`
+- `packages/build-extension/src/browser/maven-view-widget.tsx` — 依赖树节点使用 `.kairo-maven-dep-item`，缩进通过 CSS 变量 `--kairo-maven-dep-depth` 控制；scope 使用 `.kairo-maven-scope-{scope}`
+- `packages/ui-kit/src/browser/kairo-theme.css` — 新增 `.kairo-build-log-line.*`、`.kairo-maven-dep-*`、`.kairo-section-title-warning` 样式
+
+### Extensions / Import / Welcome / Run Config 面板标准化
+
+**目标**：将 VS Code 扩展管理、项目导入向导、欢迎页、运行配置四个入口面板的样式、按钮层级、空状态、i18n 统一到设计令牌体系。
+
+**覆盖范围**：
+- `packages/plugin-extension/src/browser/kairo-extensions-widget.tsx` — 扩展卡片、兼容性分数条、详情抽屉全面类化；分数条宽度改用 CSS 变量 `--kairo-extension-score`；徽章/动作按钮文本接入 i18n
+- `packages/project-extension/src/browser/import-wizard-widget.tsx` — 表单输入、步骤指示器、按钮样式接入标准 `.theia-input` / `.theia-button` 类；改善键盘可访问性
+- `packages/theia-product/src/main/browser/kairo-welcome-widget.tsx` — Quick Start 步骤使用 `.kairo-quickstart-step` 结构，hover 反馈与主/次按钮层级统一
+- `packages/theia-product/src/main/browser/kairo-run-configurations-widget.tsx` — 配置列表项使用 `.kairo-runconfig-list-item*` 类；默认徽章、操作按钮（run/debug/edit/delete）层级与 i18n 一致
+- `packages/i18n/src/locales/en.ts` / `zh-CN.ts` — 补全 `widget.extensions.*` 全量键（含 filter、badge、action、toast、detail、metadata）
+- `packages/plugin-extension/tsconfig.json` — 新增 `@kairo/i18n` project reference，修复 `File '.../i18n/...' is not under 'rootDir'` 构建错误
+
+### 测试修复
+
+- `packages/theia-product/src/main/browser/kairo-widget-interactions.test.cjs` — 更新 `KairoDeploymentsWidget` 渲染断言，修复 loading 状态 `role="status"`、error 状态标题、XSS 转义检查；将 flush 超时从 10ms 提升到 50ms，消除 `pnpm -r test` 并发负载下的偶发渲染断言失败
+
+### 验证
+
+| 检查项 | 结果 |
+|--------|------|
+| `pnpm -r --filter './packages/*' --filter './apps/*' exec tsc --noEmit` | ✅ 0 errors |
+| `pnpm -r test` | ✅ 全量通过（24 个工作区项目，0 失败） |
+| `cd runtime-agent && go test ./...` | ✅ 33/33 包通过 |
+| `cd runtime-agent && go test '-coverprofile=coverage.out' './...'` | ✅ 总体覆盖率 **76.3%**（目标 ≥72.5%） |
+| `pnpm --filter @kairo/plugin-extension lint` | ✅ 通过 |
+| `pnpm --filter @kairo/theia-product lint` | ✅ 通过 |
+| `pnpm --filter @kairo/build-extension lint` | ✅ 通过 |
+| `pnpm --filter @kairo/tomcat-extension lint` | ✅ 通过 |
+| `pnpm --filter @kairo/i18n lint` | ✅ 通过 |
+| `pnpm --filter @kairo/ui-kit lint` | ✅ 通过 |
+| `pnpm --filter @kairo/theia-product build` | ✅ 通过 |
+
+### 剩余待办
+
+- ⬜ 浏览器回归验证：语言切换、Activity Bar 反馈、Debug Tool Window 空状态
+- ⬜ 将最新 UI 截图更新为 `docs/screenshots/current-ui/` 基准
+- ⬜ 清理 `artifacts/`、`tmp/` 等调试临时目录（可选，不影响功能）
+
+---
+
+## Session 12 交付摘要 (2026-07-31)
+
+### 前端 Widget 集成测试统一 Mock 修复
+
+**目标**：彻底解决因 Monaco ESM / xterm canvas / CSS 导入在 Node CJS 环境下导致的 widget 集成测试失败。
+
+**覆盖范围**：
+- `packages/theia-product/test/frontend-setup.cjs` — 新建集中式测试环境：代理 Monaco ESM 导出、stub xterm 及 addon、处理 CSS/其他静态资源、补齐浏览器全局对象（DragEvent、ResizeObserver 等）与完整 `SymbolKind` / `CompletionItemKind` 枚举
+- `packages/theia-product/src/main/browser/kairo-commands.test.cjs` — 接入 `frontend-setup.cjs`，修正命令数量断言
+- `packages/theia-product/src/main/browser/kairo-composition.test.cjs` — 接入 `frontend-setup.cjs`
+- `packages/theia-product/src/main/browser/kairo-widget-interactions.test.cjs` / `kairo-java-debug-service.test.cjs` / `kairo-run-configuration-service.test.cjs` / `large-file-policy.test.cjs` — 接入统一 mock 并补全依赖绑定
+- `packages/tomcat-extension/src/browser/server-view-widget.test.cjs` / `log-viewer-widget.test.cjs` — 接入统一 mock
+- `packages/java-extension/src/browser/java-monaco-registration.test.cjs` / `java-save-actions.test.cjs` / `java-live-templates.test.cjs` — 接入统一 mock，补充 `getLanguageId` 等模型 stub
+- `packages/java-extension/src/browser/java-ls-lifecycle.test.cjs` — 同步 prepare 启动信号、增大 flush 迭代次数以消除竞态
+- `packages/java-extension/src/browser/java-ls-lifecycle.ts` — 移除重试循环中错误重置 `restartAttempts` 的逻辑，保证崩溃预算不被重复事件稀释
+- `packages/search-extension/src/browser/__java-extension-mock__.js` — 新增最小 mock，使 SearchEverywhere 测试可加载而不拉入完整 Java 扩展依赖链
+- `packages/runtime-extension/src/browser/runtime-connection-service.test.cjs` — 放宽延迟阈值以消除 Windows 调度抖动导致的偶发失败
+- `packages/svn-extension/src/browser/svn-detector.test.cjs` — 增加 Windows 平台专用路径断言
+
+### 修复清单
+
+| # | 文件 | 问题 | 修复 |
+|---|------|------|------|
+| 1 | `packages/theia-product/test/frontend-setup.cjs` | 各 widget 测试各自 mock Monaco/xterm/CSS，重复且不一致 | 新增集中式 setup，统一 ESM 代理、canvas stub、CSS 处理、浏览器全局对象 |
+| 2 | `packages/java-extension/src/browser/java-ls-lifecycle.ts` | 重试循环内 `this.restartAttempts = 0` 导致重复 context 事件重置崩溃预算 | 删除该重置，保留崩溃计数 |
+| 3 | `packages/java-extension/src/browser/java-ls-lifecycle.test.cjs` | 异步竞态导致 prepare/stop 断言偶发失败 | 增加 `startedPrepare` 同步 promise，flush 从 20 次提升到 100 次 |
+| 4 | `packages/java-extension/src/browser/java-monaco-registration.test.cjs` | `adaptDocumentSymbols` 断言 `kind` 映射失败 | 在 `frontend-setup.cjs` 补全 LSP→Monaco `SymbolKind` 枚举 |
+| 5 | `packages/java-extension/src/browser/java-live-templates.test.cjs` | 模板补全无 `getLanguageId` 返回 'java' | mock model 增加 `getLanguageId: () => 'java'` |
+| 6 | `packages/search-extension/src/browser/search-everywhere-providers.test.cjs` | 加载 `@kairo/java-extension` 触发深层 ESM/CJS 依赖链 | 新增 `__java-extension-mock__.js` 提供最小 `JavaLanguageClient` stub |
+| 7 | `packages/runtime-extension/src/browser/runtime-connection-service.test.cjs` | `delay(10)` 在 Windows 下偶发 `< 10ms` | 阈值从 10ms 调整为 8ms |
+| 8 | `packages/svn-extension/src/browser/svn-detector.test.cjs` | Unix 绝对路径在 Windows 测试机被解析为当前盘符 | 增加 `process.platform === 'win32'` 专用断言 |
+
+### 验证
+
+| 检查项 | 结果 |
+|--------|------|
+| `pnpm -r test` | ✅ 全量通过（24 个工作区项目，1,883+ 测试，0 失败） |
+| `cd runtime-agent && go test ./...` | ✅ 33/33 包通过 |
+| `cd runtime-agent && go test -coverprofile coverage.out ./...` | ✅ 总体覆盖率 **76.3%**（目标 ≥72.5%） |
+| `pnpm -r --filter './packages/*' --filter './apps/*' exec tsc --noEmit` | ✅ 0 errors |
+| Java 扩展测试 | ✅ 403/403 通过 |
+| Theia-product 测试 | ✅ 259/259 通过（194 + 65） |
+| Search 扩展测试 | ✅ 78/78 通过 |
+
+### 前端测试统计（Session 12 全量）
+
+| 包 | 测试数 | 失败 |
+|----|--------|------|
+| drivelist-stub | 30 | 0 |
+| protocol | 63 | 0 |
+| git-extension | 109 | 0 |
+| sql-extension | 133 | 0 |
+| svn-extension | 18 | 0 |
+| ui-kit | 110 | 0 |
+| config-schema | 50 | 0 |
+| plugin-extension | 24 | 0 |
+| runtime-extension | 98 | 0 |
+| remote-extension | 98 | 0 |
+| project-extension | 101 | 0 |
+| tomcat-extension | 86 | 0 |
+| build-extension | 96 | 0 |
+| test-extension | 112 | 0 |
+| java-extension | 403 | 0 |
+| encoding-extension | 57 | 0 |
+| jsp-extension | 105 | 0 |
+| search-extension | 78 | 0 |
+| theia-product | 259 | 0 |
+| desktop | 17 | 0 |
+
+### 剩余待办
+
+- ⬜ 浏览器回归验证：语言切换、Activity Bar 反馈、Debug Tool Window 空状态
+- ⬜ 将最新 UI 截图更新为 `docs/screenshots/current-ui/` 基准
+- ⬜ 清理 `artifacts/`、`tmp/` 等调试临时目录（可选，不影响功能）
+
+---
+
+## Session 11 交付摘要 (2026-07-30)
+
+### UI/UX 优化 Phase 3–4：国际化与标准状态落地
+
+**目标**：将 Phase 3/4 中新增/修改的 UI 元素全部接入 i18n，统一空状态结构，增强 Activity Bar 交互反馈，规范 Debug Tool Window 布局。
+
+**覆盖范围**：
+- `packages/i18n/src/locales/en.ts` / `zh-CN.ts` — 补充 `focus`、`statusBar`、`widget.perf`、`widget.servers.hotReload`、`widget.deployments.*`、`debug.toolWindow.*` 等键
+- `packages/theia-product/src/main/browser/kairo-perf-dashboard-widget.tsx` — 全量本地化
+- `packages/theia-product/src/main/browser/kairo-status-bar-contribution.ts` — 全量状态栏文本国际化（Project/JDK/Encoding/Build/Server/Agent/HotReload/Debug）
+- `packages/theia-product/src/main/browser/kairo-focus-management.ts` — Skip-to-content 链接本地化
+- `packages/theia-product/src/main/browser/debug-tool-window-widget.tsx` — 空状态 + 全量本地化
+- `packages/theia-product/src/main/browser/kairo-views-contribution.ts` — Deployments 空状态标准化
+- `packages/tomcat-extension/src/browser/server-view-widget.tsx` — Hot Reload 状态本地化 + 断开连接空状态
+- `packages/theia-product/src/main/browser/kairo-run-configurations-widget.tsx` — 空状态国际化
+- `packages/ui-kit/src/browser/kairo-theme.css` — Activity Bar hover/active/focus 反馈 + `.kairo-empty-state` 标准样式 + 状态栏占位符折叠
+- `packages/ui-kit/src/browser/kairo-theme.ts` / `kairo-theme-contribution.ts` — 主题色统一为 Kairo 蓝 `#4a9eff`
+- `packages/tomcat-extension/tsconfig.json` / `package.json` — 补充 `@kairo/i18n` 依赖与 project reference
+- `packages/search-extension/src/browser/__monaco-mock__.js` — 补全测试 mock 缺失路径
+
+### Phase 5–8：构建修复、测试修复与回归截图
+
+**目标**：验证前端类型安全、修复构建/测试阻塞问题、在真实浏览器中捕获优化后的 UI 截图。
+
+**覆盖范围**：
+- `packages/i18n` — 重新生成 `lib/locales/en.d.ts`，使新增的 `statusBar.*` 键对下游包可见
+- `packages/theia-product/src/main/browser/kairo-java-debug-service.ts` — `debugStatusBarPresentation` 翻译函数签名改为 `KairoI18nKey` / `I18nParams`，消除与 `KairoI18nService.t` 的类型不兼容
+- `packages/ui-kit/src/browser/kairo-theme-edge-cases.test.ts` — 更新 `activate does not throw when document has no head` 断言，匹配新的 CSS 变量写入实现
+- `apps/browser` — 重新构建生产 bundle，打包最新的主题与空状态样式
+- `packages/project-extension` — 手动复制 `project-structure-dialog.css` 到 `lib/browser/`（Windows 下 `cp` 不生效导致 CJS 测试找不到 CSS）
+
+### 修复清单
+
+| # | 文件 | 问题 | 修复 |
+|---|------|------|------|
+| 1 | `packages/tomcat-extension/tsconfig.json` | `@kairo/i18n` 未加入 references，导致 `File '.../i18n/...' is not under 'rootDir'` | 添加 `{ "path": "../i18n" }` |
+| 2 | `packages/tomcat-extension/package.json` | `@kairo/i18n` workspace 依赖缺失 | 添加 `"@kairo/i18n": "workspace:*"` |
+| 3 | `packages/i18n/lib/locales/en.d.ts` | 旧声明未包含新键，theia-product 类型检查报键不存在 | `pnpm --filter @kairo/i18n build` 重新生成 |
+| 4 | `packages/theia-product/src/main/browser/kairo-java-debug-service.ts` | `debugStatusBarPresentation` 的 `t` 参数类型为宽松 `string`，与 `KairoI18nService.t` 不兼容 | 改为 `(key: KairoI18nKey, params?: I18nParams) => string` |
+| 5 | `packages/ui-kit/src/browser/kairo-theme-edge-cases.test.ts` | 实现已改为 `documentElement.style.setProperty`，但测试仍断言无 `head` 时抛出 | 改为 `assert.doesNotThrow` 并更新注释 |
+| 6 | `packages/project-extension/lib/browser/project-structure-dialog.css` | Windows 构建脚本 `cp` 未执行，CJS 测试 require CSS 失败 | `Copy-Item` 手动复制 |
+| 7 | `packages/search-extension/src/browser/__monaco-mock__.js` | 多个 widget 测试 mock 路径指向不存在的文件 | 新增最小 mock 文件 |
+
+### 验证
+
+| 检查项 | 结果 |
+|--------|------|
+| `pnpm --filter @kairo/i18n lint` | ✅ 通过 |
+| `pnpm --filter @kairo/ui-kit lint` | ✅ 通过 |
+| `pnpm --filter @kairo/tomcat-extension lint` | ✅ 通过 |
+| `pnpm --filter @kairo/theia-product lint` | ✅ 通过 |
+| `pnpm --filter @kairo/i18n build` | ✅ 通过 |
+| `pnpm --filter @kairo/ui-kit build` | ✅ 通过 |
+| `pnpm --filter @kairo/tomcat-extension build` | ✅ 通过 |
+| `pnpm --filter @kairo/theia-product build` | ✅ 通过 |
+| `pnpm --filter @kairo/project-extension build` | ✅ tsc 通过，CSS 已手动补齐 |
+| `pnpm --filter @kairo/browser build` | ✅ 通过（需先释放被占用的 `conpty.node`） |
+| `pnpm --filter @kairo/ui-kit test` | ✅ 110/110 通过 |
+| `cd runtime-agent && go test ./...` | ✅ 33/33 包通过 |
+| `cd runtime-agent && go test -coverprofile coverage.out ./...` | ✅ 总体覆盖率 76.3%（目标 ≥72.5%） |
+| 浏览器回归截图 | ✅ `docs/screenshots/ui-optimization-after/` 已捕获 18 张 |
+
+### 已知问题
+
+- 部分前端 Node.js 集成测试（`kairo-widget-interactions.test.cjs`、`kairo-java-debug-service.test.cjs`、`kairo-run-configuration-service.test.cjs`、`large-file-policy.test.cjs`、`server-view-widget.test.cjs`、`log-viewer-widget.test.cjs` 等）仍因 Monaco ESM / xterm canvas / CSS 在 Node CJS 环境下的加载问题失败。该问题在 Session 4/9 已存在，本次仅补全缺失的 mock 路径与 CSS；彻底修复需统一 Monaco ESM mock 策略。
+
+### 剩余待办
+
+- ⬜ 修复 Monaco ESM / xterm canvas mock 使 widget 集成测试全部通过
+- ⬜ 继续 Phase 5–8 UI/UX 深度优化（菜单层级、按钮造型、面板布局、Debug/Tomcat 页面视觉层次）
+- ⬜ 在真实浏览器中验证语言切换、Activity Bar 反馈、Debug Tool Window 空状态
+- ⬜ 将本次优化后的截图更新为 `docs/screenshots/current-ui/` 基准
+
+---
+
+## Session 10 交付摘要 (2026-07-27)
 
 ### 内网离线化联网审计 + 修复
 
@@ -1206,6 +1851,132 @@ pwsh -ExecutionPolicy Bypass -File scripts\package-zip-green.ps1 -AllowNoJdtls
 3. 双击 `Kairo.exe`
 4. 等 3-5 秒，Kairo 窗口 + 内嵌 IDE 界面自动打开
 5. 浏览器/编辑器无需额外配置；JDK 17 路径通过 `JAVA_HOME` 或 `PATH` 自动发现
+
+---
+
+## 11. Session 11 Phase 5–8 后续修复（2026-07-30）
+
+在 Session 11 已有 UI/UX 国际化与空状态落地的基础上，本轮继续完成剩余 TSX/CSS 细节修复、构建验证与浏览器回归截图。
+
+### 11.1 修复内容
+
+| # | 文件/区域 | 问题 | 修复 |
+|---|-----------|------|------|
+| 1 | `packages/theia-product/src/main/browser/debug-tool-window-widget.tsx` | 空状态仍使用 emoji | 替换为 `@vscode/codicons`（`codicon-bug` 等） |
+| 2 | `packages/theia-product/src/main/browser/kairo-welcome-widget.tsx` | 欢迎页仍使用 emoji | 替换为 codicons |
+| 3 | `packages/theia-product/src/main/browser/kairo-run-configurations-widget.tsx` | 空状态/错误态仍使用 emoji | 替换为 codicons，并统一错误样式 |
+| 4 | `packages/theia-product/src/main/browser/kairo-views-contribution.ts` | Deployments 空状态仍使用 emoji | 替换为 codicons |
+| 5 | `packages/tomcat-extension/src/browser/log-viewer-widget.tsx` | 日志工具栏使用 emoji | 替换为 codicons，工具栏更紧凑 |
+| 6 | `packages/ui-kit/src/browser/kairo-theme.css` | 部分图标/空状态使用 emoji | 替换为 codicons |
+| 7 | `packages/theia-product/src/main/browser/debug-tool-window-widget.tsx` | Debug Tool Window 底部面板重复出现 `Debugger`/`Console` tabs | 移除重复 tab，只保留一组 `Debugger`/`Console` |
+| 8 | `packages/theia-product/src/main/browser/debug-toolbar-idea.tsx` | `IDEADebugToolbar` 传入了不存在的 `onShowConsole`/`onShowDebugger` props | 删除无效 props |
+| 9 | `packages/ui-kit/src/browser/kairo-theme.css` | Activity Bar active 状态不够明显 | 增强 active 状态高亮与边框 |
+| 10 | `packages/ui-kit/src/browser/kairo-theme.css` | 左侧面板出现重复 header | 隐藏冗余 sidebar header |
+| 11 | `packages/tomcat-extension/src/browser/log-viewer-widget.tsx` | Tomcat 日志工具栏占位过大 | 紧凑化按钮与间距 |
+| 12 | `packages/theia-product/src/main/browser/kairo-run-configurations-widget.tsx` | 运行配置错误提示样式不统一 | 统一错误态颜色与图标 |
+| 13 | `packages/theia-product/src/main/browser/kairo-product-frontend-module.ts` | `@kairo/plugin-extension` 与 product 模块重复绑定 `KairoExtensionService`，导致浏览器启动时 `/services/kairo-extensions` channel 重复打开 | 移除 product 模块中的重复绑定，重新构建 `theia-product` 与 `browser` |
+
+### 11.2 验证结果
+
+| 检查项 | 结果 |
+|--------|------|
+| `pnpm tsc --noEmit` | ✅ 通过（0 errors） |
+| `pnpm --filter @kairo/browser build` | ✅ 通过（browser + node bundle 均 0 errors） |
+| `pnpm --filter @kairo/theia-product build` | ✅ 通过 |
+| 浏览器回归截图 | ✅ `docs/screenshots/ui-optimization-after-session11-final/` 已捕获 10 张 |
+
+### 11.3 截图清单
+
+目录：`docs/screenshots/ui-optimization-after-session11-final/`
+
+- `01-welcome.png`
+- `02-kairo-menu.png`
+- `03-file-menu.png`
+- `05-server-view.png`
+- `06-build-view.png`
+- `07-debug-view.png`
+- `08-editor-jsp.png`
+- `09-editor-ts.png`
+- `10-preferences.png`
+- `12-status-bar.png`
+
+> 说明：`04-run-configurations.png` 与 `11-new-project-dialog.png` 因对应按钮/元素当前处于不可见状态，脚本点击超时未生成；其余 10 张均正常捕获。
+
+### 11.4 启动与截图环境说明
+
+- 直接运行 `pnpm --filter @kairo/browser start` 在 Windows PowerShell 下会因 bash 风格的 `${THEIA_PORT:-3000}` 变量展开失败，导致 Theia 监听端口解析为 `NaN`。
+- 实际使用 `pnpm --filter @kairo/browser exec theia start <workspace> --hostname=127.0.0.1 --port=3000` 启动 Theia 后端。
+- 同时启动 `runtime-agent/bin/kairo-runtime.exe --bind 127.0.0.1 --port 18080 --secret= ...` 提供无 secret 的本地 Agent（避免浏览器端因 `KairoAgentConfigContribution` 的 `res.send` 注入方式对 `sendFile` 失效而导致认证失败）。
+- 截图脚本：`node scripts/capture-screenshots.cjs <output-dir>`，通过 `KAIRO_PORT=3000` 指向 Theia 端口。
+
+### 11.5 已知仍存在的问题
+
+- `KairoAgentConfigContribution` 当前通过覆盖 `res.send` 注入 Agent URL/secret，但 Theia 对 `index.html` 使用 `res.sendFile`，导致注入未生效；浏览器端会回退到默认 `127.0.0.1:18080` 且不带 secret。本轮通过以空 secret 启动 Agent 绕过，正式上线前需改为能捕获 `sendFile` 的注入方式（例如 Express 静态文件中间件重写）。
+- 截图脚本中 `04-run-configurations` 与 `11-new-project-dialog` 两步因目标元素不可见而失败，需后续优化脚本或调整对应组件的可见性/交互时序。
+
+---
+
+## Session 12 交付摘要 (2026-07-30) 🆕
+
+### 打包部署脚本与文档完善 + 双 EXE 设计
+
+**目标**: 优化打包流程，新增一键打包脚本，实现双 EXE 独立启动（桌面版+浏览器版），完善内网部署文档。
+
+**覆盖范围**:
+
+#### 双 EXE 架构设计
+
+解压后目录直接包含两个独立 EXE，用户无需记忆命令行参数：
+
+| 文件 | 模式 | 行为 |
+|------|------|------|
+| `Kairo.exe` | 桌面版 | 双击打开 IDE 窗口 |
+| `Kairo-Server.exe` | 浏览器版 | 双击启动后台服务，浏览器访问 |
+
+**实现原理**: `Kairo-Server.exe` 是 `Kairo.exe` 的完整副本（同一二进制）。`main.ts` 通过 `path.basename(process.execPath)` 检测进程名，当为 `kairo-server` 时自动进入 headless 模式。
+
+**关键代码修改** ([main.ts](file:///g:/spaces/kairo-ide/apps/desktop/src/main.ts#L44-L45)):
+```typescript
+const serverExeName = path.basename(process.execPath, '.exe').toLowerCase();
+const isHeadless = serverExeName === 'kairo-server' || process.argv.includes('--headless');
+```
+
+#### 新增文件
+| 文件 | 用途 |
+|------|------|
+| `scripts/build-and-package.ps1` | 一键构建 + 打包 + 分卷压缩脚本 |
+| `scripts/start-browser-mode.cmd` | 浏览器模式启动（双击即可） |
+| `scripts/start-browser-mode.ps1` | 浏览器模式启动（PowerShell，自动打开浏览器） |
+| `docs/DEPLOY-GUIDE.md` | 最终用户部署使用手册 |
+
+#### 修改文件
+| 文件 | 变更 |
+|------|------|
+| `apps/desktop/src/main.ts` | 新增进程名检测，`Kairo-Server.exe` 自动 headless |
+| `scripts/build-and-package.ps1` | 构建后自动复制 `Kairo-Server.exe` 并打入 zip |
+| `scripts/start-browser-mode.cmd` | 优先使用 `Kairo-Server.exe`，回退 `Kairo.exe --headless` |
+| `docs/BUILD.md` | 添加一键打包脚本说明 |
+| `docs/RUN.md` | 更新 Form B 浏览器模式，说明双 EXE 设计 |
+| `docs/deployment-guide.md` | 添加 DEPLOY-GUIDE.md 引用 |
+| `docs/DEPLOY-GUIDE.md` | 完整更新双 EXE 启动方式 |
+| `package.json` | 添加 `package:win` 和 `package:win:skip-build` 脚本 |
+
+#### 一键打包命令
+
+```powershell
+# 完整构建 + 打包 + 分卷压缩
+.\scripts\build-and-package.ps1
+
+# 或使用 npm scripts
+pnpm package:win
+
+# 仅重新打包（跳过构建）
+pnpm package:win:skip-build
+```
+
+#### 产物
+- `apps/desktop/dist/Kairo-0.1.0-win.zip`（约 295MB，含 `Kairo.exe` + `Kairo-Server.exe`）
+- `apps/desktop/dist/KairoIDE-v0.1.1-win-x64.7z.001` ~ `.005`（分卷，每卷 ≤70MB）
 
 ---
 

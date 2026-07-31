@@ -80,6 +80,7 @@ test('completion provider returns suggestions for matching prefix "sout"', () =>
   assert.strictEqual(typeof provider.provideCompletionItems, 'function');
 
   const mockModel = {
+    getLanguageId: () => 'java',
     getWordUntilPosition: () => ({ word: 'sout', startColumn: 1, endColumn: 5 }),
   };
   const mockPosition = { lineNumber: 10, column: 5 };
@@ -104,6 +105,7 @@ test('completion provider returns suggestions for matching prefix "psvm"', () =>
   const provider = disposable.provider;
 
   const mockModel = {
+    getLanguageId: () => 'java',
     getWordUntilPosition: () => ({ word: 'psvm', startColumn: 1, endColumn: 5 }),
   };
   const mockPosition = { lineNumber: 1, column: 5 };
@@ -124,6 +126,7 @@ test('completion provider returns suggestions for matching prefix "fori"', () =>
   const provider = disposable.provider;
 
   const mockModel = {
+    getLanguageId: () => 'java',
     getWordUntilPosition: () => ({ word: 'fori', startColumn: 1, endColumn: 5 }),
   };
   const mockPosition = { lineNumber: 5, column: 5 };
@@ -144,6 +147,7 @@ test('completion provider returns empty for unknown prefix', () => {
   const provider = disposable.provider;
 
   const mockModel = {
+    getLanguageId: () => 'java',
     getWordUntilPosition: () => ({ word: 'unknown', startColumn: 1, endColumn: 8 }),
   };
   const mockPosition = { lineNumber: 3, column: 8 };
@@ -160,6 +164,7 @@ test('completion provider has correct sortText and filterText', () => {
   const provider = disposable.provider;
 
   const mockModel = {
+    getLanguageId: () => 'java',
     getWordUntilPosition: () => ({ word: 'soutv', startColumn: 1, endColumn: 6 }),
   };
   const mockPosition = { lineNumber: 7, column: 6 };

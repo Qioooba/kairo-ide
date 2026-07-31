@@ -24,6 +24,7 @@
     { "path": "../test-extension" },
     { "path": "../java-extension" },
     { "path": "../encoding-extension" },
+    { "path": "../plugin-extension" },
     { "path": "../svn-extension" },
     { "path": "../i18n" }
   ]

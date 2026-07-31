@@ -140,13 +140,14 @@ function makeLifecycle(mocks) {
   svc.restartInFlight = false;
   svc.disposed = false;
   svc.transitionChain = Promise.resolve();
+  svc.initialDelayMs = () => 0;
   svc.init();
   return svc;
 }
 
 async function flush() {
   // Let the async onProjectChanged chain settle.
-  for (let i = 0; i < 20; i++) {
+  for (let i = 0; i < 100; i++) {
     await new Promise(resolve => setImmediate(resolve));
   }
 }
@@ -258,10 +259,13 @@ test('clearing the active project cancels restart and stops the backend', async 
 test('workspace close cancels an in-flight prepare before it can start JDT LS', async () => {
   const mocks = makeMocks(DESCRIPTOR);
   let releasePrepare;
+  let resolveStarted;
+  const startedPrepare = new Promise(resolve => { resolveStarted = resolve; });
   const prepare = new Promise(resolve => { releasePrepare = resolve; });
   mocks.runtime.request = async (endpoint, body, opts) => {
     mocks.calls.push({ kind: 'http', endpoint: String(endpoint), body, opts });
     if (String(endpoint).startsWith('POST')) {
+      resolveStarted();
       await prepare;
       return {};
     }
@@ -270,6 +274,7 @@ test('workspace close cancels an in-flight prepare before it can start JDT LS', 
   const svc = makeLifecycle(mocks);
 
   mocks.listeners.project({ workspaceId: 'ws1', projectId: 'p1' });
+  await startedPrepare;
   mocks.listeners.context(undefined);
   releasePrepare();
   await flush();

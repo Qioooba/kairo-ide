@@ -122,6 +122,29 @@ export const kairoSettingsPreferenceSchema: PreferenceSchema = {
       default: true,
       description: 'Automatically detect file encoding based on content.',
     },
+    // ── Hot Reload ───────────────────────────────────────────
+    'kairo.hotReload.autoSyncOnSave': {
+      type: 'boolean',
+      default: true,
+      description: 'Automatically compile and sync Java files when saved.',
+    },
+    'kairo.hotReload.onFrameDeactivation': {
+      type: 'boolean',
+      default: true,
+      description: 'Automatically save all files when the IDE window loses focus.',
+    },
+    'kairo.hotReload.autoCompileJava': {
+      type: 'boolean',
+      default: true,
+      description: 'Automatically compile Java files on save (non-debug mode).',
+    },
+    'kairo.hotReload.debounceMs': {
+      type: 'number',
+      default: 500,
+      minimum: 200,
+      maximum: 3000,
+      description: 'Debounce delay in milliseconds before triggering hot deploy after save.',
+    },
     // ── Search ───────────────────────────────────────────────
     'kairo.search.excludePatterns': {
       type: 'array',

@@ -39,7 +39,7 @@ test('debug widgets are registered in the frontend module', () => {
 });
 
 test('debug view commands are registered in views contribution', () => {
-  const viewsContribution = read('packages/theia-product/src/main/browser/kairo-views-contribution.ts');
+  const viewsContribution = read('packages/theia-product/src/main/browser/kairo-views-contribution.tsx');
   assert.match(viewsContribution, /REVEAL_KAIRO_DEBUG_VARIABLES/);
   assert.match(viewsContribution, /REVEAL_KAIRO_DEBUG_CALLSTACK/);
   assert.match(viewsContribution, /REVEAL_KAIRO_DEBUG_BREAKPOINTS/);

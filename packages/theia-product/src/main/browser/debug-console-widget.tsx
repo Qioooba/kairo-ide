@@ -12,8 +12,11 @@ import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import { Emitter, Event } from '@theia/core/lib/common/event';
 import { DebugSessionManager } from '@theia/debug/lib/browser/debug-session-manager';
 import type { DebugSession } from '@theia/debug/lib/browser/debug-session';
+import { KairoI18nService, type KairoI18nKey } from '@kairo/i18n';
 
 export const KAIRO_DEBUG_CONSOLE_FACTORY_ID = 'kairo-debug-console';
+
+type TFunction = (key: KairoI18nKey, params?: Record<string, string | number>) => string;
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                               */
@@ -50,6 +53,7 @@ export interface ConsoleState {
 interface ConsoleViewProps {
     state: ConsoleState;
     session: DebugSession | undefined;
+    t: TFunction;
     onEvaluate: (expression: string) => void;
     onClear: () => void;
     onInputChange: (value: string) => void;
@@ -57,7 +61,7 @@ interface ConsoleViewProps {
 }
 
 const ConsoleView: React.FC<ConsoleViewProps> = ({
-    state, session, onEvaluate, onClear, onInputChange, onInputKeyDown,
+    state, session, t, onEvaluate, onClear, onInputChange, onInputKeyDown,
 }) => {
     const inputRef = React.useRef<HTMLInputElement>(null);
     const outputRef = React.useRef<HTMLDivElement>(null);
@@ -80,60 +84,60 @@ const ConsoleView: React.FC<ConsoleViewProps> = ({
     };
 
     return (
-        <div className="kairo-debug-console-widget" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+        <div className="kairo-debug-console-widget">
             {/* Header */}
-            <div className="kairo-widget-toolbar" style={{ padding: '4px 8px', borderBottom: '1px solid var(--theia-panel-border)', display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ fontWeight: 600, fontSize: '12px' }}>Debug Console</span>
-                <span style={{ color: 'var(--theia-descriptionForeground)', fontSize: '11px' }}>
-                    {state.entries.length} entries
+            <div className="kairo-debug-console-toolbar">
+                <span className="kairo-debug-console-title">{t('widget.debug.console.title')}</span>
+                <span className="kairo-debug-console-count">
+                    {t('widget.debug.console.entries', { count: state.entries.length })}
                 </span>
-                <div style={{ flex: 1 }} />
+                <div className="kairo-debug-console-spacer" />
                 <button
-                    className="theia-button secondary"
+                    className="theia-button secondary kairo-debug-console-clear-btn"
                     disabled={state.entries.length === 0}
                     onClick={onClear}
-                    style={{ padding: '1px 8px', fontSize: '11px' }}
-                    title="Clear console"
+                    title={t('widget.debug.console.clearTooltip')}
                 >
-                    Clear
+                    {t('widget.debug.console.clear')}
                 </button>
             </div>
 
             {/* Output area */}
-            <div ref={outputRef} style={{ flex: 1, overflow: 'auto', padding: '4px 0', fontFamily: 'var(--theia-monaco-font-family, monospace)', fontSize: '12px' }}>
+            <div ref={outputRef} className="kairo-debug-console-output">
                 {!session && state.entries.length === 0 && (
-                    <div style={{ padding: '12px', color: 'var(--theia-descriptionForeground)', fontSize: '12px', textAlign: 'center' }}>
-                        No active debug session. Start debugging to use the console.
+                    <div className="kairo-empty-state kairo-debug-console-empty">
+                        <span className="kairo-empty-state-glyph codicon codicon-debug-console" aria-hidden="true" />
+                        <h3 className="kairo-empty-state-title">{t('widget.debug.console.emptyNoSessionTitle')}</h3>
+                        <p className="kairo-empty-state-reason">
+                            {t('widget.debug.console.emptyNoSessionReason')}
+                        </p>
                     </div>
                 )}
                 {session && state.entries.length === 0 && !state.busy && (
-                    <div style={{ padding: '12px', color: 'var(--theia-descriptionForeground)', fontSize: '12px', textAlign: 'center' }}>
-                        Type an expression and press Enter to evaluate it.
+                    <div className="kairo-empty-state kairo-debug-console-empty">
+                        <span className="kairo-empty-state-glyph codicon codicon-terminal" aria-hidden="true" />
+                        <h3 className="kairo-empty-state-title">{t('widget.debug.console.emptyReadyTitle')}</h3>
+                        <p className="kairo-empty-state-reason">
+                            {t('widget.debug.console.emptyReadyReason')}
+                        </p>
                     </div>
                 )}
                 {state.entries.map(entry => (
                     <div
                         key={entry.id}
-                        style={{
-                            padding: '2px 12px',
-                            whiteSpace: 'pre-wrap',
-                            wordBreak: 'break-all',
-                            color: entryColor(entry.kind, entry.hasError),
-                            borderBottom: entry.kind === 'input' ? '1px solid var(--theia-panel-border)' : undefined,
-                            background: entry.kind === 'input' ? 'var(--theia-input-background)' : undefined,
-                        }}
+                        className={`kairo-debug-console-entry ${entry.kind}`}
                     >
                         {entry.kind === 'input' && (
-                            <span style={{ color: 'var(--theia-terminal-ansiGreen)', marginRight: 4 }}>{'>'}</span>
+                            <span className="kairo-debug-console-prompt">{'>'}</span>
                         )}
                         {entry.kind === 'error' && (
-                            <span className="codicon codicon-error" style={{ fontSize: '12px', marginRight: 4 }} />
+                            <span className="codicon codicon-error" aria-hidden="true" />
                         )}
                         {entry.kind === 'stderr' && (
-                            <span className="codicon codicon-error" style={{ fontSize: '12px', marginRight: 4, color: 'var(--theia-errorForeground)' }} />
+                            <span className="codicon codicon-error" aria-hidden="true" />
                         )}
                         {entry.resultType && (
-                            <span style={{ color: 'var(--theia-debugTokenExpression-type)', marginRight: 4 }}>
+                            <span className="kairo-debug-console-result-type">
                                 [{entry.resultType}]
                             </span>
                         )}
@@ -141,54 +145,38 @@ const ConsoleView: React.FC<ConsoleViewProps> = ({
                     </div>
                 ))}
                 {state.busy && (
-                    <div style={{ padding: '2px 12px', color: 'var(--theia-descriptionForeground)', fontStyle: 'italic' }}>
-                        Evaluating...
+                    <div className="kairo-debug-console-busy">
+                        {t('widget.debug.console.evaluating')}
                     </div>
                 )}
             </div>
 
             {/* Input area */}
-            <div style={{
-                padding: '4px 8px',
-                borderTop: '1px solid var(--theia-panel-border)',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 4,
-            }}>
-                <span style={{ color: 'var(--theia-terminal-ansiGreen)', fontWeight: 600, fontSize: '12px' }}>{'>'}</span>
+            <div className="kairo-debug-console-input-area">
+                <span className="kairo-debug-console-prompt">{'>'}</span>
                 <input
                     ref={inputRef}
                     type="text"
+                    className="kairo-debug-console-input"
                     value={state.inputValue}
                     onChange={e => onInputChange(e.target.value)}
                     onKeyDown={onInputKeyDown}
                     disabled={!session || state.busy}
-                    placeholder={session ? 'Type expression, Enter to evaluate...' : 'No active session'}
-                    style={{
-                        flex: 1,
-                        background: 'var(--theia-input-background)',
-                        color: 'var(--theia-input-foreground)',
-                        border: '1px solid var(--theia-input-border)',
-                        padding: '3px 6px',
-                        fontSize: '12px',
-                        fontFamily: 'var(--theia-monaco-font-family, monospace)',
-                        outline: 'none',
-                    }}
-                    aria-label="Debug console expression input"
+                    placeholder={session ? t('widget.debug.console.inputPlaceholder') : t('widget.debug.console.noSessionPlaceholder')}
+                    aria-label={t('widget.debug.console.inputPlaceholder')}
                 />
                 <button
-                    className="theia-button secondary"
+                    className="theia-button secondary kairo-debug-console-eval-btn"
                     disabled={!session || state.busy || !state.inputValue.trim()}
                     onClick={handleSubmit}
-                    style={{ padding: '2px 10px', fontSize: '12px' }}
-                    title="Evaluate expression"
+                    title={t('widget.debug.console.evalTooltip')}
                 >
-                    Eval
+                    {t('widget.debug.console.eval')}
                 </button>
             </div>
 
             {state.error && (
-                <div style={{ padding: '4px 12px', color: 'var(--theia-errorForeground)', fontSize: '12px', borderTop: '1px solid var(--theia-panel-border)' }}>
+                <div className="kairo-debug-console-error">
                     {state.error}
                 </div>
             )}
@@ -207,6 +195,9 @@ export class KairoDebugConsoleWidget extends ReactWidget {
     @inject(DebugSessionManager)
     protected readonly sessionManager!: DebugSessionManager;
 
+    @inject(KairoI18nService)
+    protected readonly i18n!: KairoI18nService;
+
     static nextEntryId = 0;
 
     protected state: ConsoleState = {
@@ -223,9 +214,11 @@ export class KairoDebugConsoleWidget extends ReactWidget {
 
     @postConstruct()
     protected init(): void {
+        const t: TFunction = (this.i18n?.t.bind(this.i18n)) as TFunction | undefined
+            ?? ((key: KairoI18nKey) => String(key));
         this.id = KairoDebugConsoleWidget.ID;
-        this.title.label = 'Debug Console';
-        this.title.caption = 'Kairo Java Debug Console';
+        this.title.label = t('widget.debug.console.title');
+        this.title.caption = t('widget.debug.console.caption');
         this.title.iconClass = 'codicon codicon-debug-console';
         this.title.closable = true;
         this.addClass('kairo-widget');
@@ -233,7 +226,7 @@ export class KairoDebugConsoleWidget extends ReactWidget {
 
         this.sessionManager.onDidDestroyDebugSession(() => {
             if (this.state.entries.length > 0) {
-                this.addEntry({ kind: 'info', text: 'Debug session ended.' });
+                this.addEntry({ kind: 'info', text: t('widget.debug.console.sessionEnded') });
             }
         });
     }
@@ -243,10 +236,13 @@ export class KairoDebugConsoleWidget extends ReactWidget {
     }
 
     protected render(): React.ReactNode {
+        const t: TFunction = (this.i18n?.t.bind(this.i18n)) as TFunction | undefined
+            ?? ((key: KairoI18nKey) => String(key));
         const session = this.sessionManager.currentSession;
         return React.createElement(ConsoleView, {
             state: this.state,
             session: session ?? undefined,
+            t,
             onEvaluate: (expr: string) => this.evaluate(expr),
             onClear: () => this.clear(),
             onInputChange: (value: string) => this.setInputValue(value),
@@ -256,6 +252,8 @@ export class KairoDebugConsoleWidget extends ReactWidget {
 
     async evaluate(expression: string): Promise<void> {
         const session = this.sessionManager.currentSession;
+        const t: TFunction = (this.i18n?.t.bind(this.i18n)) as TFunction | undefined
+            ?? ((key: KairoI18nKey) => String(key));
         if (!session) {
             this.setState({
                 entries: this.state.entries,
@@ -263,7 +261,7 @@ export class KairoDebugConsoleWidget extends ReactWidget {
                 history: this.state.history,
                 historyIndex: this.state.historyIndex,
                 busy: false,
-                error: 'No active debug session.',
+                error: t('widget.debug.console.noSessionError'),
                 sessionId: undefined,
             });
             return;
@@ -288,7 +286,7 @@ export class KairoDebugConsoleWidget extends ReactWidget {
         try {
             const thread = session.currentThread;
             if (!thread) {
-                this.addEntry({ kind: 'error', text: 'No suspended thread — cannot evaluate expression.', expression, hasError: true });
+                this.addEntry({ kind: 'error', text: t('widget.debug.console.noThreadError'), expression, hasError: true });
                 this.setState({
                     entries: this.state.entries,
                     inputValue: this.state.inputValue,
@@ -427,17 +425,5 @@ export class KairoDebugConsoleWidget extends ReactWidget {
         this.state = { ...this.state, ...partial };
         this.onStateChangeEmitter.fire(this.state);
         this.update();
-    }
-}
-
-function entryColor(kind: ConsoleMessageKind, _hasError?: boolean): string {
-    switch (kind) {
-        case 'input': return 'var(--theia-input-foreground)';
-        case 'output': return 'var(--theia-debugConsole-infoForeground)';
-        case 'error': return 'var(--theia-errorForeground)';
-        case 'info': return 'var(--theia-descriptionForeground)';
-        case 'stdout': return 'var(--theia-debugConsole-infoForeground)';
-        case 'stderr': return 'var(--theia-errorForeground)';
-        default: return 'var(--theia-foreground)';
     }
 }

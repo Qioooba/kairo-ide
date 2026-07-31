@@ -12,66 +12,7 @@
 
 'use strict';
 
-const { register } = require('node:module');
-const { pathToFileURL } = require('node:url');
-register('data:text/javascript,' + encodeURIComponent(`
-export function resolve(specifier, context, nextResolve) {
-  if (/\.(css|svg|ttf|woff|woff2|png|jpg|gif)$/.test(specifier)) {
-    return { url: 'data:text/javascript,export default {};', format: 'module', shortCircuit: true };
-  }
-  if (specifier === '@theia/monaco-editor-core' || specifier.includes('monaco-editor-core')) {
-    return { url: 'data:text/javascript,export default {};', format: 'module', shortCircuit: true };
-  }
-  return nextResolve(specifier, context);
-}
-`), pathToFileURL(__filename));
-
-const { enableJSDOM } = require('@theia/core/lib/browser/test/jsdom');
-const disableJSDOM = enableJSDOM();
-
-if (!global.DragEvent) {
-  global.DragEvent = class DragEvent extends global.MouseEvent {
-    constructor(type, init) {
-      super(type, init);
-      this.dataTransfer = (init && init.dataTransfer) || null;
-    }
-  };
-}
-
-if (!global.ResizeObserver) {
-  global.ResizeObserver = class ResizeObserver {
-    observe() {}
-    unobserve() {}
-    disconnect() {}
-  };
-}
-
-const Module = require('module');
-Module._extensions['.css'] = function (module, filename) {
-  module._compile('module.exports = {};', filename);
-};
-
-// Mock @theia/monaco-editor-core to avoid the ESM import issue in CJS tests.
-const origResolveFilename = Module._resolveFilename;
-Module._resolveFilename = function (request, parent, ...args) {
-  if (request === '@theia/monaco-editor-core' || request.includes('monaco-editor-core')) {
-    const mockPath = require('node:path').join(__dirname, '..', '..', '..', '..', 'search-extension', 'src', 'browser', '__monaco-mock__.js');
-    return origResolveFilename.call(this, mockPath, parent, ...args);
-  }
-  return origResolveFilename.call(this, request, parent, ...args);
-};
-
-// Theia requires FrontendApplicationConfigProvider to be set before
-// any browser module is loaded.
-const { FrontendApplicationConfigProvider } = require('@theia/core/lib/browser/frontend-application-config-provider');
-FrontendApplicationConfigProvider.set({
-  defaultTheme: 'dark',
-  defaultIconTheme: 'theia-file-icons',
-  applicationName: 'Kairo',
-  validatePreferencesSchema: true,
-});
-
-require('reflect-metadata');
+const { disableJSDOM } = require('../../../test/frontend-setup.cjs');
 
 const { test } = require('node:test');
 const assert = require('node:assert');
@@ -83,10 +24,11 @@ const { CommandRegistry, CommandService, MessageService } = require('@theia/core
 
 // Kairo extension symbols
 const { RuntimeConnectionService } = require('@kairo/runtime-extension/lib/browser');
-const { KairoServerService } = require('@kairo/tomcat-extension/lib/browser');
+const { KairoServerService, HotDeployService } = require('@kairo/tomcat-extension/lib/browser');
 const { KairoProjectService, ActiveProjectService } = require('@kairo/project-extension/lib/browser');
 const { BuildStore } = require('@kairo/build-extension/lib/browser');
 const { KairoJavaDebugService } = require('../../../lib/browser/kairo-java-debug-service');
+const { KairoI18nService } = require('@kairo/i18n/lib/browser');
 
 // The production module under test
 const { KairoViewsContribution, KairoCommands } = require('../../../lib/browser/kairo-views-contribution');
@@ -193,6 +135,15 @@ function createMockJavaDebugService() {
   };
 }
 
+function createMockKairoI18nService() {
+  return {
+    t: (key) => key,
+    onDidChangeLanguage: () => ({ dispose: () => {} }),
+    getCurrentLanguage: () => 'en',
+    initialize: async () => {},
+  };
+}
+
 // --------------- helper: build container ---------------
 
 function buildContainer() {
@@ -208,6 +159,11 @@ function buildContainer() {
   container.bind(MessageService).toConstantValue(createMockMessageService());
   container.bind(BuildStore).toConstantValue(createMockBuildStore());
   container.bind(KairoJavaDebugService).toConstantValue(createMockJavaDebugService());
+  container.bind(KairoI18nService).toConstantValue(createMockKairoI18nService());
+  container.bind(HotDeployService).toConstantValue({
+    updateApplication: async () => {},
+    reloadContext: async () => {},
+  });
   // KairoViewsContribution injects InversifyJS's `Container` so the
   // safeContribution-fallback no-op (KairoNoopContribution) and the
   // production code can resolve child services lazily. In the test
@@ -315,14 +271,14 @@ test('KairoViewsContribution.registerCommands registers every command in a real 
   }
 });
 
-test('KairoViewsContribution.registerCommands registers exactly 36 commands', () => {
+test('KairoViewsContribution.registerCommands registers exactly 47 commands', () => {
   const container = buildContainer();
   const contribution = container.get(KairoViewsContribution);
   const registry = new CommandRegistry();
   contribution.registerCommands(registry);
 
-  assert.strictEqual(registry.commandIds.length, 36,
-    `Expected 36 commands, got ${registry.commandIds.length}: ${registry.commandIds.join(', ')}`);
+  assert.strictEqual(registry.commandIds.length, 47,
+    `Expected 47 commands, got ${registry.commandIds.length}: ${registry.commandIds.join(', ')}`);
 });
 
 // --------------- execution verification ---------------

@@ -73,6 +73,10 @@ export class JavaLanguageServerLifecycle {
      *  preparation, preventing two project changes from interleaving
      *  as stop(A) -> stop(B) -> start(A) -> start(B). */
     private transitionChain: Promise<void> = Promise.resolve();
+    /** Duplicate "no project/no context" events can arrive back-to-back
+     *  on a cold start. Share one bounded backend stop instead of opening
+     *  two '/services/jdt-ls-backend' channels concurrently. */
+    private deactivateChain: Promise<void> | undefined;
 
     @postConstruct()
     protected init(): void {
@@ -154,20 +158,27 @@ export class JavaLanguageServerLifecycle {
         void this.onProjectChanged(project, token);
     }
 
-    private async deactivate(): Promise<void> {
+    private deactivate(): Promise<void> {
         this.activationToken += 1;
         this.desiredProject = undefined;
         this.launchDescriptor = undefined;
         this.lastStartKey = undefined;
         this.restartAttempts = 0;
         this.clearRestartTimer();
-        try {
-            // Closing a workspace must interrupt an initialize that
-            // is currently occupying the serialized transition chain.
-            await this.javaClient.stop();
-        } catch (err) {
-            this.logger.error(`Failed to stop JDT LS after workspace/project close: ${String(err)}`);
+        if (!this.deactivateChain) {
+            this.deactivateChain = (async () => {
+                try {
+                    // Closing a workspace must interrupt an initialize that
+                    // is currently occupying the serialized transition chain.
+                    await this.javaClient.stop();
+                } catch (err) {
+                    this.logger.error(`Failed to stop JDT LS after workspace/project close: ${String(err)}`);
+                } finally {
+                    this.deactivateChain = undefined;
+                }
+            })();
         }
+        return this.deactivateChain;
     }
 
     /**
@@ -184,9 +195,16 @@ export class JavaLanguageServerLifecycle {
     private async onProjectChanged(project: { workspaceId: string; projectId: string }, token: number): Promise<void> {
         const MAX_RETRIES = 12;
         const RETRY_DELAY_MS = 2000;
-        const INITIAL_DELAY_MS = 5000;
         let lastError: unknown;
         let forcedWorkspaceId: string | null = project.workspaceId || null;
+
+        // KAIRO-RC-DESKTOP-2026-07-29: skip JDT LS prepare entirely if
+        // KAIRO_SKIP_JDTLS is set. This lets the desktop app render
+        // normally even when the JDT LS archive is not bundled.
+        if (typeof process !== 'undefined' && process.env?.['KAIRO_SKIP_JDTLS'] === '1') {
+            this.logger.info(`JDT LS skipped (KAIRO_SKIP_JDTLS=1) for project ${project.projectId}`);
+            return;
+        }
 
         for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
             if (!this.isCurrentActivation(project, token)) return;
@@ -194,10 +212,9 @@ export class JavaLanguageServerLifecycle {
                 clearTimeout(this.restartTimer);
                 this.restartTimer = undefined;
             }
-            this.restartAttempts = 0;
             try {
                 if (attempt === 0) {
-                    await delay(INITIAL_DELAY_MS);
+                    await delay(this.initialDelayMs());
                 } else {
                     this.logger.info(`JDT LS prepare retry ${attempt}/${MAX_RETRIES} for project ${project.projectId}${forcedWorkspaceId ? ` (ws=${forcedWorkspaceId})` : ''}`);
                     await delay(RETRY_DELAY_MS);
@@ -242,6 +259,16 @@ export class JavaLanguageServerLifecycle {
                     || errMsg.includes('Pending response rejected')
                     || errMsg.includes('connection is disposed')
                     || errMsg.includes('Backend service not available');
+                // KAIRO-RC-DESKTOP-2026-07-29: treat "archive not available" as
+                // non-retryable and non-fatal. The IDE can still function
+                // without JDT LS (build, deploy, tomcat). Log a warning
+                // and return cleanly so the UI does not hang.
+                const isArchiveNotAvailable = errMsg.includes('archive not available')
+                    || errMsg.includes('offline/air-gapped');
+                if (isArchiveNotAvailable) {
+                    this.logger.warn(`JDT LS not available for project ${project.projectId} (offline/air-gapped mode). The IDE will work without Java language features. To enable: set KAIRO_JDTLS_HOME or run pnpm bundled:prepare.`);
+                    return;
+                }
                 if (!isRetryable || attempt >= MAX_RETRIES) {
                     this.logger.error(`Failed to prepare JDT LS for project ${project.projectId}: ${errMsg}`);
                     return;
@@ -369,6 +396,14 @@ export class JavaLanguageServerLifecycle {
 
     protected restartDelayMs(attempt: number): number {
         return Math.min(JDT_LS_RESTART_MAX_DELAY_MS, JDT_LS_RESTART_BASE_DELAY_MS * (2 ** (attempt - 1)));
+    }
+
+    /**
+     * Initial delay before the first JDT LS prepare request.
+     * Exposed as a method so tests can override it to 0.
+     */
+    protected initialDelayMs(): number {
+        return 5000;
     }
 
     private clearRestartTimer(): void {

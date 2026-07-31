@@ -25,6 +25,8 @@
       "@kairo/svn-extension/lib/browser": ["packages/svn-extension/src/browser/index.ts"],
       "@kairo/encoding-extension/lib/browser/safe-encoding-service": ["packages/encoding-extension/src/browser/safe-encoding-service.ts"],
       "@kairo/java-extension/lib/common/lsp-protocol": ["packages/java-extension/src/common/lsp-protocol.ts"],
+      "@kairo/plugin-extension/lib/common/kairo-extension-protocol": ["packages/plugin-extension/src/common/kairo-extension-protocol.ts"],
+      "@kairo/plugin-extension/lib/node/kairo-extension-service": ["packages/plugin-extension/src/node/kairo-extension-service.ts"],
       "@kairo/*": ["packages/*/src", "apps/*/src"]
     }
   },

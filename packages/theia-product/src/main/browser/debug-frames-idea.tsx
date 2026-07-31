@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { KairoI18nService } from '@kairo/i18n';
 import { KairoDebugSessionService } from './kairo-debug-session-service';
 
 /* ------------------------------------------------------------------ */
@@ -15,6 +16,7 @@ interface FrameNode {
 
 interface IDEAFramesPanelProps {
     sessionService: KairoDebugSessionService;
+    i18n: KairoI18nService;
     onSelectFrame?: (frame: any) => void;
     onNavigate?: (path: string, line: number) => void;
 }
@@ -28,46 +30,24 @@ const FrameRow: React.FC<{
     isCurrent: boolean;
     onClick: () => void;
 }> = ({ frame, isCurrent, onClick }) => {
-    const [hovered, setHovered] = React.useState(false);
     const shortFile = frame.source?.name || frame.source?.path?.split('/').pop() || 'Unknown Source';
+    const className = `kairo-debug-frame-row${isCurrent ? ' current' : ''}`;
 
     return (
         <div
-            style={{
-                padding: '2px 8px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 4,
-                cursor: 'pointer',
-                background: isCurrent
-                    ? 'var(--theia-list-activeSelectionBackground)'
-                    : hovered
-                    ? 'var(--theia-list-hoverBackground)'
-                    : 'transparent',
-                color: isCurrent
-                    ? 'var(--theia-list-activeSelectionForeground)'
-                    : 'var(--theia-list-foreground)',
-                fontSize: '11px',
-                lineHeight: '18px',
-                whiteSpace: 'nowrap',
-                overflow: 'hidden',
-            }}
+            className={className}
             onClick={onClick}
-            onMouseEnter={() => setHovered(true)}
-            onMouseLeave={() => setHovered(false)}
             title={`${frame.name} (${shortFile}${frame.line !== undefined ? `:${frame.line}` : ''})`}
         >
             <span
-                className="codicon"
-                style={{ fontSize: 12, flexShrink: 0, color: isCurrent ? '#ffc66d' : 'var(--theia-symbolIcon-foreground, #b5b6e3)' }}
-            >
-                {isCurrent ? 'codicon-chevron-right' : 'codicon-stackframe'}
-            </span>
-            <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                className={`codicon ${isCurrent ? 'codicon-chevron-right' : 'codicon-stackframe'}`}
+                aria-hidden="true"
+            />
+            <span className="kairo-debug-frame-name">
                 {frame.name}
             </span>
             {frame.line !== undefined && (
-                <span style={{ fontSize: '10px', opacity: 0.6, flexShrink: 0 }}>
+                <span className="kairo-debug-frame-location">
                     {shortFile}:{frame.line}
                 </span>
             )}
@@ -79,7 +59,8 @@ const FrameRow: React.FC<{
 /*  Frames Panel                                                        */
 /* ------------------------------------------------------------------ */
 
-export const IDEAFramesPanel: React.FC<IDEAFramesPanelProps> = ({ sessionService, onSelectFrame, onNavigate }) => {
+export const IDEAFramesPanel: React.FC<IDEAFramesPanelProps> = ({ sessionService, i18n, onSelectFrame, onNavigate }) => {
+    const t = React.useCallback((key: string) => i18n.t(key as any), [i18n]);
     const [frames, setFrames] = React.useState<FrameNode[]>([]);
     const [currentFrameId, setCurrentFrameId] = React.useState<number | undefined>();
     const [loading, setLoading] = React.useState(false);
@@ -134,22 +115,22 @@ export const IDEAFramesPanel: React.FC<IDEAFramesPanelProps> = ({ sessionService
 
     if (loading && frames.length === 0) {
         return (
-            <div style={{ padding: '8px 12px', color: 'var(--theia-descriptionForeground)', fontSize: '11px' }}>
-                Loading frames...
+            <div className="kairo-debug-section-empty">
+                {t('debug.toolWindow.loadingFrames')}
             </div>
         );
     }
 
     if (frames.length === 0) {
         return (
-            <div style={{ padding: '8px 12px', color: 'var(--theia-descriptionForeground)', fontSize: '11px' }}>
-                {sessionService.isSuspended ? 'No frames available' : 'Session not paused'}
+            <div className="kairo-debug-section-empty">
+                {sessionService.isSuspended ? t('debug.toolWindow.noFrames') : t('debug.toolWindow.sessionNotPaused')}
             </div>
         );
     }
 
     return (
-        <div className="kairo-debug-frames-idea" style={{ overflow: 'auto', flex: 1 }}>
+        <div className="kairo-debug-frames-idea">
             {frames.map(frame => (
                 <FrameRow
                     key={frame.id}

@@ -1,6 +1,6 @@
 # Kairo IDE Milestones — Current State Matrix
 
-> Last verified: 2026-07-24 (Session 9 — 独立审查 + Mock 集成测试 + 性能基线 + 文档全面更新)
+> Last verified: 2026-08-01 (Session 21 — Phase L：Project Selector / Debug Module Selector / Debug Condition Editor 深度美化)
 > Baseline: Wave 0 (Bleeding Fixes Complete)
 > Status: Each item must be one of: verified, partial, not_started, deferred
 > ADR: 30 records (001-0030)
@@ -15,7 +15,7 @@ All Wave 0 gates pass. See [WAVE0_BASELINE.md](progress/WAVE0_BASELINE.md) for f
 | `go test -count=1 -race ./...` | verified | Exit 0, no data races |
 | `go vet ./...` | verified | Exit 0 |
 | `pnpm clean && pnpm build` | verified | Exit 0, all packages + apps |
-| `pnpm -r --filter './packages/*' test` | verified | 873/873 tests pass (git:81, runtime:14, encoding:10, jsp:47, java:1, theia-product:8, tomcat:新增, search:新增, build:新增, sql:新增, test:新增, project:新增, config-schema:新增, ui-kit:新增) |
+| `pnpm -r test` | verified | 1,883+/1,883+ tests pass，0 失败（Session 13 全量） |
 | Browser bind 127.0.0.1 | verified | `apps/browser/package.json` start + dev scripts |
 | Server mode | deferred | `apps/server/` does not exist in tree |
 | CI integration not skip core | verified | `KAIRO_LEGACY_SAMPLE` set in go-integration job |
@@ -26,7 +26,7 @@ All Wave 0 gates pass. See [WAVE0_BASELINE.md](progress/WAVE0_BASELINE.md) for f
 | Component | Status | Evidence | Notes |
 |-----------|--------|----------|-------|
 | Go compilation | verified | `go build ./...` passes | |
-| Go unit tests | verified | All 33 packages pass (0 failures) | Coverage 72.5% |
+| Go unit tests | verified | All 33 packages pass (0 failures) | Coverage 76.3% |
 | Go vet | verified | `go vet ./...` passes | |
 | Project domain types | verified | `internal/domain/project.go` typed | DeploymentOwnerToken HMAC |
 | Atomic file writes | verified | `internal/atomicfile/` shared package | Windows MoveFileExW, Unix fsync |
@@ -65,7 +65,90 @@ All Wave 0 gates pass. See [WAVE0_BASELINE.md](progress/WAVE0_BASELINE.md) for f
 | Log viewer | verified | `log-viewer-widget.tsx` | Fixed N-033 |
 | Status bar | verified | Status bar contribution | Fixed N-031 |
 | Theme | verified | Theme contribution | Fixed N-034 |
-| Frontend mocks | verified | Monaco mock, xterm mock, p-queue mock | All ESM compatibility issues resolved |
+| Frontend mocks | verified | `packages/theia-product/test/frontend-setup.cjs` | Monaco ESM + xterm canvas + CSS 统一 mock，ESM 兼容问题全部解决 |
+| i18n service | verified | `packages/i18n` | KairoI18nService + en/zh-CN language packs |
+| i18n: perf dashboard | verified | `kairo-perf-dashboard-widget.tsx` | All user-facing strings localized |
+| i18n: status bar | verified | `kairo-status-bar-contribution.ts` | Agent disconnect message localized |
+| i18n: focus skip link | verified | `kairo-focus-management.ts` | Skip-to-content text/aria-label localized |
+| i18n: server view | verified | `server-view-widget.tsx` | Hot Reload status labels localized |
+| i18n: debug tool window | verified | `debug-tool-window-widget.tsx` | All debug UI text localized |
+| Empty state standard | verified | `.kairo-empty-state` CSS + Deployments widget | Glyph + title + reason + CTA structure |
+| Server panels design tokens | verified | `kairo-views-contribution.tsx`, `build-view-widget.tsx`, `server-view-widget.tsx`, `log-viewer-widget.tsx` | §20 button hierarchy, spacing, status badges applied consistently |
+| Deployments ReactWidget refactor | verified | `KairoDeploymentsWidget` in `kairo-views-contribution.tsx` | Standard chrome (header/toolbar/content), i18n fallback, state badges |
+| Activity bar feedback | verified | `kairo-theme.css` | Hover/active/focus states with accent border |
+| Codicon standardization | verified | `debug-tool-window-widget.tsx`, `kairo-welcome-widget.tsx`, `kairo-run-configurations-widget.tsx`, `kairo-views-contribution.ts`, `log-viewer-widget.tsx`, `kairo-theme.css` | All remaining emoji replaced with `@vscode/codicons` |
+| Debug tool window layout | verified | `debug-tool-window-widget.tsx` | Single `Debugger`/`Console` tab pair; duplicate tabs removed |
+| i18n: debug toolbar | verified | `debug-toolbar-idea.tsx`, `i18n/src/locales/*.ts` | All toolbar button labels/shortcuts and thread selector localized |
+| Error banner unification | verified | `.kairo-error-banner` in `kairo-theme.css`, `kairo-run-configurations-widget.tsx`, `kairo-welcome-widget.tsx` | Single error class across run config and welcome widgets |
+| Browser app build | verified | `apps/browser` | Production bundle rebuilt successfully after releasing `conpty.node` lock |
+| Browser regression screenshots | verified | `docs/screenshots/current-ui/` | 18+ screenshots captured covering core pages, language switch, Activity Bar hover |
+| Language switch regression | verified | `verify-language-switch.cjs`, `verify-kairo-language.cjs` | VS Code display language and Kairo language both switch to zh-CN |
+| Activity bar hover regression | verified | `verify-activity-bar-hover.cjs` | Hover states captured for first 4 Activity Bar tabs |
+| IDEADebugToolbar prop fix | verified | `debug-toolbar-idea.tsx` | Removed non-existent `onShowConsole`/`onShowDebugger` props |
+| Activity bar active state / left panel header | verified | `kairo-theme.css` | Stronger active indicator; duplicated sidebar header suppressed |
+| Tomcat log toolbar / run-config error styling | verified | `log-viewer-widget.tsx`, `kairo-run-configurations-widget.tsx` | Compact toolbar, consistent error state styling |
+| UI/UX specification docs | verified | `docs/ui-spec.md`, `docs/HANDOVER.md`, `docs/MILESTONES.md` | §15–§19 added; screenshot path and completion status aligned |
+| Debug breakpoints widget CSS | verified | `debug-breakpoints-widget.tsx`, `kairo-theme.css` | Inline styles replaced with `.kairo-debug-bp-*`; checkbox + meta info layout |
+| Debug console widget CSS | verified | `debug-console-widget.tsx`, `kairo-theme.css` | `.kairo-debug-console-*` classes; input/output/prompt styling; empty states |
+| Build log line CSS classes | verified | `kairo-custom-build-runner.tsx`, `kairo-theme.css` | `stdout/stderr/info/error/success` type-based coloring via CSS |
+| Maven dependency tree CSS | verified | `maven-view-widget.tsx`, `kairo-theme.css` | `.kairo-maven-dep-item` + `--kairo-maven-dep-depth` CSS variable indentation |
+| Extensions widget i18n/CSS | verified | `kairo-extensions-widget.tsx`, `kairo-theme.css` | Compatibility score bar via CSS variable; full i18n keys added |
+| Import wizard CSS | verified | `import-wizard-widget.tsx` | Standard `.theia-input` / `.theia-button` classes; step indicator styling |
+| Welcome page CSS | verified | `kairo-welcome-widget.tsx`, `kairo-theme.css` | `.kairo-quickstart-step` structure; consistent button hierarchy |
+| Run configurations widget CSS | verified | `kairo-run-configurations-widget.tsx`, `kairo-theme.css` | `.kairo-runconfig-list-item*` classes; status badges and actions |
+| Plugin-extension i18n reference | verified | `packages/plugin-extension/tsconfig.json` | Added `@kairo/i18n` reference; `tsc --noEmit` passes |
+| Debug toolbar redesign (Session 15) | verified | `debug-toolbar-idea.tsx`, `kairo-theme.css` | 32×32 buttons, label-on-hover, color-coded run/pause/stop tones, stronger active/disabled states |
+| Debug status bar polish (Session 15) | verified | `kairo-theme.css` | State-colored background, muted-breakpoints badge, improved spacing |
+| Widget toolbar button alignment (Session 15) | verified | `kairo-theme.css`, `server-view-widget.tsx` | Consistent `.main` / `.secondary` / `.toolbar` sizing, icon+text gap, vertical alignment |
+| Hot reload card polish (Session 15) | verified | `kairo-theme.css` | Card shadow, stronger status tint, compiling pulse dot animation |
+| Server empty state copy (Session 15) | verified | `i18n/src/locales/zh-CN.ts` | Fixed awkward duplicate action text in empty list reason |
+| Log viewer header/toolbar polish (Session 15) | verified | `kairo-theme.css`, `log-viewer-widget.tsx` | Taller header with meta badge, better toolbar grouping, live status dot |
+| Run config error banner visibility (Session 15) | verified | `kairo-run-configurations-widget.tsx`, `kairo-theme.css` | Warning icon + text container, stronger border/shadow, ensures content is visible |
+| Empty state polish (Session 15) | verified | `kairo-theme.css` | Larger glyph, heavier title, wider reason, rounded CTA button |
+| Browser build + screenshots (Session 15) | verified | `apps/browser`, `docs/screenshots/current-ui/` | Production bundle rebuilt; 14 core screenshots re-captured |
+| Log viewer error banner unification (Session 15 Phase E) | verified | `log-viewer-widget.tsx`, `kairo-theme.css` | Switched to `.kairo-error-banner`; icon-only toolbar buttons with aria-label/title |
+| Test results widget i18n/polish (Session 15 Phase E) | verified | `kairo-test-results-widget.tsx`, `i18n/src/locales/*.ts`, `kairo-theme.css` | Full KairoI18nService integration; codicon status icons; badge counts; unified empty/error/toolbar states |
+| Perf dashboard polish (Session 15 Phase E) | verified | `kairo-perf-dashboard-widget.tsx`, `kairo-theme.css` | Standard widget header/body; `.kairo-table` for history; unified empty/error states; icon+text benchmark button |
+| Toolbar field + compact empty-state utilities (Session 15 Phase E) | verified | `kairo-theme.css` | `.kairo-toolbar-field`, `.kairo-empty-state.compact`, `.kairo-test-*` component styles |
+| Status bar grouping + placeholder states (Session 16 Phase F) | verified | `kairo-status-bar-contribution.ts`, `kairo-theme.css`, `i18n/src/locales/*.ts` | Logical groups with 8px spacing; muted placeholder styling; no-project hides hot reload |
+| Status bar i18n (Session 16 Phase F) | verified | `kairo-status-bar-contribution.ts`, `i18n/src/locales/*.ts` | All status bar labels localized via KairoI18nService |
+| Debug toolbar visual consistency (Session 16 Phase G) | verified | `debug-toolbar-idea.tsx`, `kairo-theme.css` | 28px buttons; run/pause/stop semantic tones; label-on-hover; matches main toolbar |
+| Debug tool window i18n wiring (Session 16 Phase G) | verified | `debug-tool-window-widget.tsx`, `debug-frames-idea.tsx`, `debug-variables-idea.tsx`, `debug-watches-idea.tsx` | All debug panels receive `i18n` prop; titles/empty states localized |
+| Debug panels unified styling (Session 16 Phase G) | verified | `kairo-theme.css` | 28px row height; hover/selected backgrounds; unified empty states for Variables/Frames/Watches |
+| Debug view verification (Session 16) | verified | `tsc --noEmit`, `pnpm -r test`, `go test ./...`, `pnpm --filter @kairo/browser build` | 0 TS errors; all frontend tests pass; 33 Go packages pass; browser bundle builds |
+| Import wizard i18n (Session 17 Phase H) | verified | `import-wizard-widget.tsx`, `i18n/src/locales/*.ts` | KairoI18nService injected; all user-facing strings localized; `@kairo/i18n` dependency/reference added to project-extension |
+| Maven view i18n (Session 17 Phase H) | verified | `maven-view-widget.tsx`, `i18n/src/locales/*.ts` | All UI strings use `widget.maven.*` keys; detect/dependencies/lifecycle/output/error localized |
+| Debug breakpoints widget i18n (Session 17 Phase H) | verified | `debug-breakpoints-widget.tsx`, `i18n/src/locales/*.ts` | Title/count/toggle actions/empty state/conditions/hit count/log message all localized |
+| Debug console widget i18n (Session 17 Phase H) | verified | `debug-console-widget.tsx`, `i18n/src/locales/*.ts` | Entries count, clear/eval buttons, placeholders, empty states, session/thread errors localized |
+| Debug variables widget i18n/CSS (Session 17 Phase H) | verified | `debug-variables-widget.tsx`, `kairo-theme.css`, `i18n/src/locales/*.ts` | All strings localized; inline styles replaced with `.kairo-debug-variables-*` classes |
+| Debug callstack widget i18n/CSS (Session 17 Phase H) | verified | `debug-callstack-widget.tsx`, `kairo-theme.css`, `i18n/src/locales/*.ts` | Title/frames count/empty state/unknown source localized; inline styles replaced with `.kairo-debug-callstack-*` classes |
+| Debug watch widget i18n/CSS (Session 17 Phase H) | verified | `debug-watch-widget.tsx`, `kairo-theme.css`, `i18n/src/locales/*.ts` | Add/save/cancel/remove/evaluating/not-available localized; inline styles replaced with `.kairo-debug-watch-*` classes; input uses `.kairo-debug-watch-widget-input` to avoid watches-idea conflict |
+| Debug sidebar shared toolbar CSS (Session 17 Phase H) | verified | `kairo-theme.css` | `.kairo-debug-toolbar` shared class; unified title/count/spacer/btn/body/error/empty styles for callstack/variables/watch |
+| Phase H verification (Session 17) | verified | `tsc --noEmit`, `pnpm -r test`, `go test ./...` | 0 TS errors; all frontend tests pass; 33 Go packages pass; Go coverage 76.3% |
+| Tomcat Server toolbar redesign (Session 18 Phase I) | verified | `server-view-widget.tsx`, `kairo-theme.css` | `.kairo-server-toolbar` with grouped actions; Start/Debug primary buttons; Stop/Restart/Open icon buttons; vertical separators |
+| Tomcat Server list state badges (Session 18 Phase I) | verified | `server-view-widget.tsx`, `kairo-theme.css` | State icon className bug fixed; `.kairo-server-item-state` badges for running/starting/stopping/stopped/error/crashed |
+| Log Viewer toolbar redesign (Session 18 Phase I) | verified | `log-viewer-widget.tsx`, `kairo-theme.css` | Toolbar separators; icon-only action buttons; Auto-scroll checkbox grouped separately |
+| Log Viewer status bar chips (Session 18 Phase I) | verified | `log-viewer-widget.tsx`, `kairo-theme.css` | `.kairo-log-status-chip` for runtime/server states; live/paused indicator on right; polling status text |
+| Log line visual redesign (Session 18 Phase I) | verified | `log-viewer-widget.tsx`, `kairo-theme.css` | Flex baseline layout; stream badge capsules; level-based left border; hover highlight; `.kairo-log-message` wrapper |
+| Phase I verification (Session 18) | verified | `tsc --noEmit`, `pnpm -r test`, `go test ./...`, builds for ui-kit/tomcat-extension/theia-product/browser | 0 TS errors; all frontend tests pass; 33 Go packages pass; Go coverage 76.3%; browser bundle builds with 0 errors |
+| Run Configurations toolbar redesign (Session 19 Phase J) | verified | `kairo-run-configurations-widget.tsx`, `kairo-theme.css` | `.kairo-runconfig-toolbar` with primary/secondary buttons; header count as `.kairo-runconfig-header-count` chip |
+| Run Configurations list item pills (Session 19 Phase J) | verified | `kairo-run-configurations-widget.tsx`, `kairo-theme.css` | Mode/project/ports split into `.kairo-runconfig-list-item-info-pill`; mode highlighted with theme color |
+| Build View toolbar redesign (Session 19 Phase J) | verified | `build-view-widget.tsx`, `kairo-theme.css` | `.kairo-build-toolbar` with Build/Clean Build primary buttons and Cancel icon button; grouped with separators |
+| Build list state badges (Session 19 Phase J) | verified | `build-view-widget.tsx`, `kairo-theme.css` | `.kairo-build-item-state` chips for running/succeeded/failed/cancelled/pending |
+| Diagnostics list styling (Session 19 Phase J) | verified | `kairo-theme.css` | Severity-based left border + translucent background + hover highlight for `.kairo-diagnostic-*` |
+| Phase J verification (Session 19) | verified | `tsc --noEmit`, `pnpm -r test`, `go test ./...`, builds for ui-kit/build-extension/theia-product/browser | 0 TS errors; all frontend tests pass; 33 Go packages pass; Go coverage 76.3%; browser bundle builds with 0 errors |
+| TODO widget polish (Session 20 Phase K) | verified | `kairo-todo-widget.tsx`, `kairo-theme.css` | Refresh button with codicon; `.kairo-todo-count` chip; file count badge; marker styling |
+| SQL Console connection panel redesign (Session 20 Phase K) | verified | `kairo-sql-console-widget.tsx`, `kairo-theme.css` | `.kairo-sql-toolbar` standalone; responsive field grid; `.kairo-sql-status` connected/disconnected chips |
+| SQL Console editor/results/table redesign (Session 20 Phase K) | verified | `kairo-sql-console-widget.tsx`, `kairo-theme.css` | Editor/results sections with headers; `.kairo-sql-table` with sticky header/hover/rounded border; history dropdown card |
+| Remote widget form & status redesign (Session 20 Phase K) | verified | `kairo-remote-widget.tsx`, `kairo-theme.css` | Status bar chip; form card layout; connect/disconnect button styling; recent connections list; connected info card |
+| Phase K verification (Session 20) | verified | `tsc --noEmit`, `pnpm -r test`, `go test ./...`, builds for ui-kit/theia-product/browser | 0 TS errors; all frontend tests pass; 33 Go packages pass; Go coverage 76.3%; browser bundle builds with 0 errors |
+| Project Selector i18n & styling (Session 21 Phase L) | verified | `project-selector-widget.tsx`, `kairo-theme.css`, `en.ts`, `zh-CN.ts` | Removed hardcoded English; dynamic title/caption; header with count badge; active badge; standardized error/loading/empty states |
+| Debug Module Selector i18n & styling (Session 21 Phase L) | verified | `debug-module-selector-widget.tsx`, `kairo-theme.css`, `en.ts`, `zh-CN.ts` | Removed inline styles; toolbar/header classes; module row/info/path/bp styling; empty/error state standardization |
+| Debug Condition Editor i18n & styling (Session 21 Phase L) | verified | `debug-condition-editor-widget.tsx`, `kairo-theme.css`, `en.ts`, `zh-CN.ts` | Removed inline styles; tab/header/field/input/textarea/hint/validation classes; localized validation messages |
+| Phase L verification (Session 21) | verified | `tsc --noEmit`, `pnpm -r test`, `go test ./...`, builds for i18n/ui-kit/project-extension/theia-product/browser | 0 TS errors; all frontend tests pass; 33 Go packages pass; Go coverage 76.3%; browser bundle builds with 0 errors |
+| Handover documentation for next session | verified | `docs/HANDOVER.md` | Added detailed next-session handover with remaining widgets, recommended phases, and verification gates |
+
+## Backend API
 
 ## Java Language Intelligence
 
@@ -231,11 +314,11 @@ All Wave 0 gates pass. See [WAVE0_BASELINE.md](progress/WAVE0_BASELINE.md) for f
 | Dynamic plugins | Marketplace, online install | future roadmap |
 | Remote audit log | `/api/v1/audit` endpoint deferred | ADR-0014 |
 
-## Testing & Quality Gates (2026-07-24 Update — Session 9)
+## Testing & Quality Gates (2026-07-31 Update — Session 12)
 
 | Gate | Target | Current | Status |
 |------|--------|---------|--------|
-| Go Coverage | ≥ 60% | **79.7%** (api 85%+, security 80.6%, debug 86.9%) | ✅ verified |
+| Go Coverage | ≥ 72.5% | **76.3%** (api 64.5%, security 80.6%, debug 86.9%) | ✅ verified |
 | Frontend Coverage | ≥ 40% | 65-98% per package | ✅ verified |
 | Supply Chain Tests | 0 failures | 15/15 (100%) | ✅ verified |
 | Security Tests | 0 failures | 65/65 (100%) | ✅ verified |
@@ -247,7 +330,8 @@ All Wave 0 gates pass. See [WAVE0_BASELINE.md](progress/WAVE0_BASELINE.md) for f
 | Supply Chain Audit | Complete | Go modules all latest + npm deps upgraded | ✅ verified |
 | Code Quality | A rating | A (Logger interface, json.RawMessage, any→types) | ✅ verified |
 | TypeScript Type Check | 0 errors | 0 errors | ✅ verified |
-| Frontend Tests | All passing | 1,817/1,818 (1 预存失败) | ✅ verified |
+| Frontend Build | All packages | i18n/ui-kit/tomcat-extension/theia-product build 通过 | ✅ verified |
+| Frontend Tests | All passing | `pnpm -r test` 1,883+/1,883+，0 失败 | ✅ verified |
 | Mock Services | Complete | Mock JDT LS + Mock Tomcat | ✅ verified |
 | Integration Tests | 8 scenarios | All passing | ✅ verified |
 | Code Review | Passed | 0 critical/high issues | ✅ verified |
@@ -265,17 +349,17 @@ All Wave 0 gates pass. See [WAVE0_BASELINE.md](progress/WAVE0_BASELINE.md) for f
 
 ## Key Artifacts
 
-- `runtime-agent/`: Go backend (33 test packages, all passing, 79.7% coverage)
+- `runtime-agent/`: Go backend (33 test packages, all passing, 76.3% coverage)
 - `runtime-agent/internal/security/`: RBAC, SSO (OIDC+SAML), Data Retention — 72 tests, 80.6% coverage
 - `runtime-agent/internal/remote/`: File Sync, Container Isolation, Session Manager — 99 tests, 75%+ coverage
 - `runtime-agent/internal/debug/`: Multi-VM Orchestrator, Event Aggregator, Module Dependency — 59 tests, 86.9% coverage
 - `runtime-agent/internal/test/mockjdtls/`: Mock JDT LS — LSP JSON-RPC 2.0, 6 请求类型 🆕
 - `runtime-agent/internal/test/mocktomcat/`: Mock Tomcat — 5 HTTP 端点 🆕
 - `runtime-agent/internal/test/integration/`: API 集成测试 — 8 场景 🆕
-- `packages/`: Theia extensions (14 packages: Java, Tomcat, encoding, build, project, runtime, search, JSP, UI kit, remote, sql, test, git, config-schema) — 1,817+ tests passing
+- `packages/`: Theia extensions (14 packages: Java, Tomcat, encoding, build, project, runtime, search, JSP, UI kit, remote, sql, test, git, config-schema) — 1,866+ tests passing
 - `packages/theia-product/`: Compliance panel widget — 22 tests
 - `packages/remote-extension/`: Remote panel widget — 16 tests
-- `packages/java-extension/`: Multi-module debug panel — 19 tests
+- `packages/java-extension/`: Java language support + multi-module debug panel — 403 tests
 - `tests/e2e/`: Playwright E2E tests (10 core scenarios + 5 standalone smoke)
 - `tests/security/`: Security test suite (65/65)
 - `tests/contract/`: API contract tests (扩展) 🆕

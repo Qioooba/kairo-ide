@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@kairo/config-schema": "workspace:*",
+    "@kairo/i18n": "workspace:*",
     "@kairo/protocol": "workspace:*",
     "@kairo/runtime-extension": "workspace:*",
     "@kairo/ui-kit": "workspace:*",

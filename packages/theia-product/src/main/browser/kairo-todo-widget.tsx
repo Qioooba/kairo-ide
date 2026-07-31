@@ -17,6 +17,7 @@ import { MessageService } from '@theia/core/lib/common/message-service';
 import { SearchInWorkspaceService } from '@theia/search-in-workspace/lib/browser/search-in-workspace-service';
 import type { SearchInWorkspaceResult } from '@theia/search-in-workspace/lib/common/search-in-workspace-interface';
 import URI from '@theia/core/lib/common/uri';
+import { KairoI18nService } from '@kairo/i18n';
 
 export const KAIRO_TODO_FACTORY_ID = 'kairo-todo-view';
 
@@ -59,7 +60,16 @@ interface TodoViewProps {
   error: string | null;
   onRefresh: () => void;
   openerService: OpenerService;
+  i18n: KairoI18nService;
 }
+
+const markerClass = (marker: TodoMarker): string => {
+  switch (marker) {
+    case 'FIXME': return 'kairo-todo-entry-marker-fixme';
+    case 'XXX': return 'kairo-todo-entry-marker-xxx';
+    default: return 'kairo-todo-entry-marker-todo';
+  }
+};
 
 const TodoView: React.FC<TodoViewProps> = ({
   fileGroups,
@@ -67,6 +77,7 @@ const TodoView: React.FC<TodoViewProps> = ({
   error,
   onRefresh,
   openerService,
+  i18n,
 }) => {
   const [expandedFiles, setExpandedFiles] = React.useState<Set<string>>(new Set());
 
@@ -95,29 +106,32 @@ const TodoView: React.FC<TodoViewProps> = ({
   const totalCount = fileGroups.reduce((sum, g) => sum + g.entries.length, 0);
 
   return (
-    <div className="kairo-todo-widget" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div className="kairo-todo-widget">
       {/* Header */}
-      <div className="kairo-widget-toolbar" style={{ padding: '6px 12px', borderBottom: '1px solid var(--theia-panel-border)', display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span style={{ fontWeight: 600, fontSize: '13px' }}>TODO / FIXME</span>
-        <span style={{ color: 'var(--theia-descriptionForeground)', fontSize: '12px' }}>
-          {totalCount} items
+      <div className="kairo-todo-header">
+        <span className="kairo-todo-title">{i18n.t('widget.todo.header')}</span>
+        <span className="kairo-todo-count">
+          {i18n.t('widget.todo.count', { count: totalCount })}
         </span>
-        <div style={{ flex: 1 }} />
-        <button className="theia-button secondary" disabled={busy} onClick={onRefresh} style={{ padding: '2px 10px', fontSize: '12px' }}>
-          {busy ? 'Scanning...' : 'Refresh'}
-        </button>
+        <div className="kairo-todo-actions">
+          <button className="theia-button secondary" disabled={busy} onClick={onRefresh}>
+            <span className={`codicon ${busy ? 'codicon-loading codicon-modifier-spin' : 'codicon-refresh'}`} aria-hidden="true" />
+            {busy ? i18n.t('widget.todo.scanning') : i18n.t('widget.todo.refresh')}
+          </button>
+        </div>
       </div>
 
       {/* Body */}
-      <div style={{ flex: 1, overflow: 'auto', padding: '4px 0' }}>
+      <div className="kairo-todo-body">
         {error && (
-          <div style={{ padding: '12px', color: 'var(--theia-errorForeground)', fontSize: '13px' }}>
+          <div className="kairo-todo-error">
             {error}
           </div>
         )}
         {!error && !busy && fileGroups.length === 0 && (
-          <div style={{ padding: '16px 12px', color: 'var(--theia-descriptionForeground)', fontSize: '13px', textAlign: 'center' }}>
-            No TODO, FIXME, or XXX comments found in the workspace.
+          <div className="kairo-empty-state">
+            <span className="kairo-empty-state-glyph codicon codicon-checklist" aria-hidden="true" />
+            <h3 className="kairo-empty-state-title">{i18n.t('widget.todo.empty')}</h3>
           </div>
         )}
         {fileGroups.map(group => {
@@ -128,26 +142,15 @@ const TodoView: React.FC<TodoViewProps> = ({
               <div
                 className="kairo-todo-file-header"
                 onClick={() => toggleFile(group.fileUri)}
-                style={{
-                  padding: '4px 12px',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 4,
-                  fontSize: '13px',
-                  userSelect: 'none',
-                }}
-                onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'var(--theia-list-hoverBackground)'; }}
-                onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = ''; }}
               >
-                <span style={{ display: 'inline-block', width: 16, textAlign: 'center', fontSize: '10px' }}>
+                <span className="kairo-todo-file-chevron">
                   {isExpanded ? '▼' : '▶'}
                 </span>
-                <span className="codicon codicon-file" style={{ fontSize: '14px' }} />
-                <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <span className="codicon codicon-file kairo-todo-file-icon" />
+                <span className="kairo-todo-file-name">
                   {group.label}
                 </span>
-                <span style={{ color: 'var(--theia-descriptionForeground)', fontSize: '11px' }}>
+                <span className="kairo-todo-file-count">
                   {group.entries.length}
                 </span>
               </div>
@@ -158,43 +161,14 @@ const TodoView: React.FC<TodoViewProps> = ({
                   key={`${entry.line}-${i}`}
                   className="kairo-todo-entry"
                   onClick={() => handleClick(entry)}
-                  style={{
-                    padding: '3px 12px 3px 40px',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'flex-start',
-                    gap: 6,
-                    fontSize: '12px',
-                    lineHeight: '1.4',
-                  }}
-                  onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'var(--theia-list-hoverBackground)'; }}
-                  onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = ''; }}
                 >
-                  <span style={{
-                    display: 'inline-block',
-                    minWidth: 42,
-                    textAlign: 'right',
-                    color: 'var(--theia-descriptionForeground)',
-                    fontSize: '11px',
-                    fontFamily: 'var(--theia-ui-font-family)',
-                    flexShrink: 0,
-                  }}>
+                  <span className="kairo-todo-entry-line">
                     {entry.line}
                   </span>
-                  <span style={{
-                    display: 'inline-block',
-                    fontWeight: 600,
-                    fontSize: '10px',
-                    padding: '0 4px',
-                    borderRadius: 3,
-                    color: entry.marker === 'FIXME' ? '#fff' : entry.marker === 'XXX' ? '#fff' : '#fff',
-                    background: entry.marker === 'FIXME' ? '#d32f2f' : entry.marker === 'XXX' ? '#e65100' : '#1976d2',
-                    flexShrink: 0,
-                    lineHeight: '16px',
-                  }}>
-                    {entry.marker}
+                  <span className={`kairo-todo-entry-marker ${markerClass(entry.marker)}`}>
+                    {i18n.t(`widget.todo.marker.${entry.marker}`)}
                   </span>
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <span className="kairo-todo-entry-text">
                     {entry.text}
                   </span>
                 </div>
@@ -224,6 +198,9 @@ export class KairoTodoWidget extends ReactWidget {
   @inject(MessageService)
   protected readonly messages!: MessageService;
 
+  @inject(KairoI18nService)
+  protected readonly i18n!: KairoI18nService;
+
   protected fileGroups: FileGroup[] = [];
   protected busy = false;
   protected error: string | null = null;
@@ -231,11 +208,12 @@ export class KairoTodoWidget extends ReactWidget {
   @postConstruct()
   protected init(): void {
     this.id = KairoTodoWidget.ID;
-    this.title.label = 'TODO';
-    this.title.caption = 'Kairo TODO / FIXME Viewer';
+    this.title.label = this.i18n.t('widget.todo.title');
+    this.title.caption = this.i18n.t('widget.todo.caption');
     this.title.iconClass = 'codicon codicon-checklist';
     this.title.closable = true;
     this.addClass('kairo-widget');
+    this.toDispose.push(this.i18n.onDidChangeLanguage(() => this.update()));
     this.update();
   }
 
@@ -250,6 +228,7 @@ export class KairoTodoWidget extends ReactWidget {
       error: this.error,
       onRefresh: () => this.performScan(),
       openerService: this.openerService,
+      i18n: this.i18n,
     });
   }
 
@@ -291,14 +270,14 @@ export class KairoTodoWidget extends ReactWidget {
       setTimeout(() => {
         if (!done) {
           done = true;
-          this.error = 'Search timed out.';
+          this.error = this.i18n.t('widget.todo.timeout');
           this.busy = false;
           this.update();
           this.searchService.cancel(searchId);
         }
       }, 30_000);
     } catch (err) {
-      this.error = (err as Error).message ?? 'Search failed.';
+      this.error = this.i18n.t('widget.todo.error', { message: (err as Error).message ?? 'Search failed.' });
       this.busy = false;
       this.update();
     }

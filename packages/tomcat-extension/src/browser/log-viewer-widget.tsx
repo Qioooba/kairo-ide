@@ -5,6 +5,7 @@ import { ServerStore } from './server-store';
 import { RuntimeConnectionService, WorkspaceContextService } from '@kairo/runtime-extension';
 import { BoundedLogBuffer, filterLogLines, HistoryDeltaTracker, mergeLogHistory, normalizeLogEntry, safeLogFilename, type KairoLogLine, type LogStream } from './log-buffer';
 import { VirtualList } from '@kairo/ui-kit';
+import { KairoI18nService } from '@kairo/i18n';
 
 @injectable()
 export class LogViewerWidget extends ReactWidget {
@@ -12,16 +13,18 @@ export class LogViewerWidget extends ReactWidget {
     @inject(ServerStore) protected readonly serverStore!: ServerStore;
     @inject(RuntimeConnectionService) protected readonly runtime!: RuntimeConnectionService;
     @inject(WorkspaceContextService) protected readonly workspaceContext!: WorkspaceContextService;
+    @inject(KairoI18nService) protected readonly i18n!: KairoI18nService;
     constructor() { super(); this.id = LogViewerWidget.ID; this.title.label = 'Server Logs'; this.title.closable = true; this.title.caption = 'Kairo Server Log Viewer'; this.addClass('kairo-widget'); }
-    protected render(): React.ReactNode { return <LogViewer serverStore={this.serverStore} runtime={this.runtime} workspaceContext={this.workspaceContext} />; }
+    protected render(): React.ReactNode { return <LogViewer serverStore={this.serverStore} runtime={this.runtime} workspaceContext={this.workspaceContext} i18n={this.i18n} />; }
 }
 
-interface Props { serverStore: ServerStore; runtime: RuntimeConnectionService; workspaceContext: WorkspaceContextService; }
+interface Props { serverStore: ServerStore; runtime: RuntimeConnectionService; workspaceContext: WorkspaceContextService; i18n: KairoI18nService; }
 const BATCH_MS = 80;
 const POLL_MS = 2000;
 type ConnectionStatus = 'connecting' | 'open' | 'disconnected' | 'closed';
 
-export const LogViewer: React.FC<Props> = ({ serverStore, runtime, workspaceContext }) => {
+export const LogViewer: React.FC<Props> = ({ serverStore, runtime, workspaceContext, i18n }) => {
+    const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
     const bufferRef = React.useRef(new BoundedLogBuffer());
     const historyTracker = React.useRef(new HistoryDeltaTracker());
     const [lines, setLines] = React.useState<readonly KairoLogLine[]>([]);
@@ -101,7 +104,7 @@ export const LogViewer: React.FC<Props> = ({ serverStore, runtime, workspaceCont
         } catch (error) {
             if (generation !== loadGeneration.current) return;
             setHistoryStatus('error');
-            setHistoryError(error instanceof Error ? error.message : 'Unable to load log history');
+            setHistoryError(error instanceof Error ? error.message : t('widget.logs.historyError'));
         }
     }, [selectedServerId, runtime, publish, flush]);
 
@@ -153,23 +156,63 @@ export const LogViewer: React.FC<Props> = ({ serverStore, runtime, workspaceCont
     };
     const pollingActive = Boolean(selectedServerId && connection === 'open' && documentVisible && viewerVisible);
     return <div className="kairo-log-viewer" data-testid="log-viewer" ref={viewerRef}>
-        <div className="kairo-log-viewer-toolbar" role="toolbar" aria-label="Tomcat log controls">
-            <strong className="kairo-log-viewer-title">Server Logs ({lines.length} lines / {bufferRef.current.byteLength} bytes)</strong>
-            <select className="kairo-log-viewer-server-select" value={selectedServerId} onChange={event => setSelectedServerId(event.target.value)} aria-label="Select server">{servers.map(server => <option key={server.id} value={server.id}>{server.id} ({server.state})</option>)}</select>
-            <button className="theia-button secondary" onClick={() => setPaused(value => !value)} aria-pressed={paused}>{paused ? 'Resume' : 'Pause'}</button>
-            <button className="theia-button secondary" onClick={clearView}>Clear view</button>
-            <button className="theia-button secondary" onClick={saveAs} disabled={!visible.length}>Save As…</button>
-            <label className="kairo-log-checkbox"><input type="checkbox" checked={autoScroll} onChange={event => setAutoScroll(event.target.checked)} /> Auto-scroll</label>
-            <input className="theia-input" value={filter} onChange={event => setFilter(event.target.value)} placeholder="Filter logs" aria-label="Filter logs" />
-            <select className="kairo-log-viewer-server-select" value={stream} onChange={event => setStream(event.target.value as 'all' | LogStream)} aria-label="Filter log stream"><option value="all">All streams</option><option value="stdout">stdout</option><option value="stderr">stderr</option><option value="structured">structured</option></select>
+        <div className="kairo-log-viewer-header">
+            <span className="kairo-log-viewer-header-title">{t('widget.logs.title')}</span>
+            <span className="kairo-log-viewer-header-meta">{t('widget.logs.serverLogsTitle', { lines: lines.length, bytes: bufferRef.current.byteLength })}</span>
+        </div>
+        <div className="kairo-log-viewer-toolbar kairo-log-toolbar" role="toolbar" aria-label={t('widget.logs.toolbarAria')}>
+            <div className="kairo-toolbar-group">
+                <select className="kairo-log-viewer-server-select" value={selectedServerId} onChange={event => setSelectedServerId(event.target.value)} aria-label={t('widget.logs.serverSelectAria')}>
+                    {servers.map(server => <option key={server.id} value={server.id}>{server.id} ({server.state})</option>)}
+                </select>
+            </div>
+            <div className="kairo-toolbar-separator" />
+            <div className="kairo-toolbar-group kairo-log-filter">
+                <input className="theia-input" value={filter} onChange={event => setFilter(event.target.value)} placeholder={t('widget.logs.filterPlaceholder')} aria-label={t('widget.logs.filterPlaceholder')} />
+                <select className="kairo-log-viewer-server-select" value={stream} onChange={event => setStream(event.target.value as 'all' | LogStream)} aria-label={t('widget.logs.streamFilterAria')}>
+                    <option value="all">{t('widget.logs.allStreams')}</option>
+                    <option value="stdout">{t('widget.logs.stdout')}</option>
+                    <option value="stderr">{t('widget.logs.stderr')}</option>
+                    <option value="structured">{t('widget.logs.structured')}</option>
+                </select>
+            </div>
+            <div className="kairo-toolbar-actions">
+                <button className="theia-button toolbar" onClick={() => setPaused(value => !value)} aria-pressed={paused} aria-label={paused ? t('widget.logs.resume') : t('widget.logs.pause')} title={paused ? t('widget.logs.resume') : t('widget.logs.pause')}>
+                    <span className={`codicon ${paused ? 'codicon-play' : 'codicon-debug-pause'}`} aria-hidden="true" />
+                </button>
+                <button className="theia-button toolbar" onClick={clearView} aria-label={t('widget.logs.clearView')} title={t('widget.logs.clearView')}>
+                    <span className="codicon codicon-clear-all" aria-hidden="true" />
+                </button>
+                <button className="theia-button toolbar" onClick={saveAs} disabled={!visible.length} aria-label={t('widget.logs.saveAs')} title={t('widget.logs.saveAs')}>
+                    <span className="codicon codicon-save" aria-hidden="true" />
+                </button>
+                <div className="kairo-toolbar-separator" />
+                <label className="kairo-log-checkbox"><input type="checkbox" checked={autoScroll} onChange={event => setAutoScroll(event.target.checked)} /> {t('widget.logs.autoScroll')}</label>
+            </div>
         </div>
         <div className="kairo-log-status" role="status">
-            Runtime: {connection}; Server: {selectedServer?.state ?? 'none'}; History: {historyStatus}; Refresh: {pollingActive ? '2s bounded polling' : 'idle'}; {paused ? (pausedCount ? `${pausedCount}+ updates buffered while paused` : 'updates buffered while paused') : 'live'}
-            {historyStatus === 'error' && <><span className="kairo-log-error"> — {historyError}</span> <button className="theia-button secondary" onClick={() => void loadHistory()}>Retry history</button></>}
+            <div className="kairo-log-status-chips">
+                <span className="kairo-log-status-chip" data-kind="runtime" data-state={connection}>{t('widget.logs.statusRuntime')}: {connection}</span>
+                <span className="kairo-log-status-chip" data-kind="server" data-state={selectedServer?.state ?? 'none'}>{t('widget.logs.statusServer')}: {selectedServer?.state ?? t('widget.logs.noServer')}</span>
+                <span>{pollingActive ? t('widget.logs.statusPolling', { interval: POLL_MS / 1000 }) : t('widget.logs.statusIdle')}</span>
+            </div>
+            <span className={paused ? 'kairo-log-status-paused' : 'kairo-log-status-live'}>
+                {paused ? (pausedCount ? t('widget.logs.statusBuffered', { count: pausedCount }) : t('widget.logs.statusPaused')) : t('widget.logs.statusLive')}
+            </span>
         </div>
+        {historyStatus === 'error' && (
+            <div className="kairo-error-banner" role="alert">
+                <span className="codicon codicon-error" aria-hidden="true" />
+                <span>{historyError}</span>
+                <button className="theia-button secondary" onClick={() => void loadHistory()}>{t('widget.logs.retryHistory')}</button>
+            </div>
+        )}
         {!visible.length ? (
             <div className="kairo-log-viewer-content">
-                <div className="kairo-log-empty">No matching log output.</div>
+                <div className="kairo-empty-state" data-testid="log-empty">
+                    <span className="kairo-empty-state-glyph codicon codicon-output" aria-hidden="true" />
+                    <h3 className="kairo-empty-state-title">{t('widget.logs.emptyState')}</h3>
+                </div>
             </div>
         ) : (
             <VirtualList
@@ -178,7 +221,7 @@ export const LogViewer: React.FC<Props> = ({ serverStore, runtime, workspaceCont
                 className="kairo-log-viewer-content"
                 role="log"
                 ariaLive={paused ? 'off' : 'polite'}
-                ariaLabel="Server logs"
+                ariaLabel={t('widget.logs.serverLogsAriaLabel')}
                 keyboardNavigation={false}
                 scrollToIndex={autoScroll ? visible.length - 1 : undefined}
                 onScroll={({ scrollTop, scrollHeight, clientHeight }) => {
@@ -189,7 +232,9 @@ export const LogViewer: React.FC<Props> = ({ serverStore, runtime, workspaceCont
                 onScrollToBottom={() => setAutoScroll(true)}
                 renderItem={log => (
                     <div className={`kairo-log-line ${log.level} stream-${log.stream}`}>
-                        <time>{log.ts}</time> <span className="kairo-log-stream">[{log.stream}]</span> {log.line}
+                        <time>{log.ts}</time>
+                        <span className="kairo-log-stream">{log.stream}</span>
+                        <span className="kairo-log-message">{log.line}</span>
                     </div>
                 )}
             />

@@ -233,13 +233,12 @@ const MavenView: React.FC = () => {
     const key = `${node.groupId}:${node.artifactId}:${node.version}`;
     const hasChildren = node.children && node.children.length > 0;
     const isExpanded = state.expandedDeps.has(key);
-    const indent = depth * 16;
 
     return (
       <div key={key + depth}>
         <div
           className="kairo-maven-dep-item"
-          style={{ paddingLeft: indent + 'px' }}
+          style={{ '--kairo-maven-dep-depth': depth } as React.CSSProperties}
           onClick={() => hasChildren && toggleDep(key)}
           role={hasChildren ? 'button' : undefined}
           tabIndex={hasChildren ? 0 : undefined}
@@ -338,7 +337,7 @@ const MavenView: React.FC = () => {
       {/* Dependency Conflicts */}
       {state.showConflictWarning && state.conflicts.length > 0 && (
         <div className="kairo-widget-section">
-          <div className="kairo-section-title" style={{ color: 'var(--theia-editorWarning-foreground)' }}>
+          <div className="kairo-section-title kairo-section-title-warning">
             \u26A0 Dependency Conflicts ({state.conflicts.length})
           </div>
           <div className="kairo-maven-conflicts">
@@ -393,7 +392,7 @@ const MavenView: React.FC = () => {
 
       {state.error && (
         <div className="kairo-widget-section">
-          <div className="kairo-section-title" style={{ color: 'var(--theia-editorError-foreground)' }}>
+          <div className="kairo-section-title kairo-section-title-error">
             Error
           </div>
           <pre className="kairo-maven-error">{state.error}</pre>

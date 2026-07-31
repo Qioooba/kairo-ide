@@ -374,6 +374,8 @@ type RuntimePlan struct {
 	DebugPort      int         `json:"debugPort,omitempty"`
 	JVMOptions     []string    `json:"jvmOptions,omitempty"`
 	Env            []string    `json:"env,omitempty"`
+	SourceDirs     []string    `json:"sourceDirs,omitempty"`
+	OutputDir      string      `json:"outputDir,omitempty"`
 	Generation     uint64      `json:"generation"`
 }
 
@@ -386,6 +388,10 @@ func (p RuntimePlan) DeepCopy() RuntimePlan {
 	if p.Env != nil {
 		cp.Env = make([]string, len(p.Env))
 		copy(cp.Env, p.Env)
+	}
+	if p.SourceDirs != nil {
+		cp.SourceDirs = make([]string, len(p.SourceDirs))
+		copy(cp.SourceDirs, p.SourceDirs)
 	}
 	return cp
 }
@@ -412,6 +418,7 @@ type BuildIntent string
 
 const (
 	BuildIntentFull          BuildIntent = "full"
+	BuildIntentIncremental   BuildIntent = "incremental"
 	BuildIntentSelectedFiles BuildIntent = "selected-files"
 )
 
@@ -630,6 +637,9 @@ type RuntimeProvider interface {
 	IsReady(ctx context.Context, plan RuntimePlan, identity ProcessIdentity, deadline time.Time) error
 	Inspect(ctx context.Context, identity ProcessIdentity) (ProcessObservation, error)
 	CleanupBase(ctx context.Context, plan RuntimePlan) error
+	// ReloadContext triggers a context reload for the given server without
+	// restarting the entire runtime. For Tomcat, this touches WEB-INF/web.xml.
+	ReloadContext(ctx context.Context, serverID ServerID) error
 }
 
 type PlanResolver interface {

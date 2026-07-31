@@ -8,42 +8,7 @@
 
 'use strict';
 
-const { enableJSDOM } = require('@theia/core/lib/browser/test/jsdom');
-const disableJSDOM = enableJSDOM();
-
-if (!global.DragEvent) {
-  global.DragEvent = class DragEvent extends global.MouseEvent {
-    constructor(type, init) {
-      super(type, init);
-      this.dataTransfer = (init && init.dataTransfer) || null;
-    }
-  };
-}
-
-const Module = require('module');
-Module._extensions['.css'] = function (module, filename) {
-  module._compile('module.exports = {};', filename);
-};
-
-// Mock @theia/monaco-editor-core to avoid ESM import issue in CJS tests.
-const origResolveFilename = Module._resolveFilename;
-Module._resolveFilename = function (request, parent, ...args) {
-  if (request === '@theia/monaco-editor-core' || request.includes('monaco-editor-core')) {
-    const mockPath = require('node:path').join(__dirname, '..', '..', '..', 'search-extension', 'src', 'browser', '__monaco-mock__.js');
-    return origResolveFilename.call(this, mockPath, parent, ...args);
-  }
-  return origResolveFilename.call(this, request, parent, ...args);
-};
-
-const { FrontendApplicationConfigProvider } = require('@theia/core/lib/browser/frontend-application-config-provider');
-FrontendApplicationConfigProvider.set({
-  defaultTheme: 'dark',
-  defaultIconTheme: 'theia-file-icons',
-  applicationName: 'Kairo',
-  validatePreferencesSchema: true,
-});
-
-require('reflect-metadata');
+const { disableJSDOM } = require('../../../theia-product/test/frontend-setup.cjs');
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -439,4 +404,8 @@ test('save actions silently catch errors to avoid disrupting save flow', () => {
   }
   assert.equal(caught, true);
   // The key assertion: errors are caught and never re-thrown.
+});
+
+test('teardown', () => {
+  disableJSDOM();
 });

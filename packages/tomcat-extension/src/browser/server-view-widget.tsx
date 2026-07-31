@@ -1,61 +1,140 @@
 import * as React from 'react';
-import { injectable, inject } from '@theia/core/shared/inversify';
+import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import { CommandService } from '@theia/core/lib/common';
 import { RuntimeConnectionService } from '@kairo/runtime-extension';
+import { KairoI18nService } from '@kairo/i18n';
 import { ServerStore, ServerInstance, ConnectionState, HotReloadStatus } from './server-store';
 
-function stateIcon(state: ServerInstance['state']): string {
+function stateIconClass(state: ServerInstance['state'] | 'disconnected'): string {
     switch (state) {
-        case 'stopped': return '\u25A0'; // black square
-        case 'starting': return '\u25B6'; // play
-        case 'running': return '\u25CF'; // black circle
-        case 'stopping': return '\u25D0'; // circle with left half black
-        case 'error': return '\u2716'; // heavy multiplication x
-        case 'crashed': return '\u2716'; // heavy multiplication x
+        case 'stopped': return 'codicon-primitive-square';
+        case 'starting': return 'codicon-play';
+        case 'running': return 'codicon-circle-filled';
+        case 'stopping': return 'codicon-sync codicon-modifier-spin';
+        case 'error': return 'codicon-error';
+        case 'crashed': return 'codicon-error';
+        case 'disconnected': return 'codicon-warning';
     }
 }
 
-function stateLabel(state: ServerInstance['state']): string {
+function stateLabel(state: ServerInstance['state'], t: (key: string, params?: Record<string, string | number>) => string): string {
     switch (state) {
-        case 'stopped': return 'Stopped';
-        case 'starting': return 'Starting...';
-        case 'running': return 'Running';
-        case 'stopping': return 'Stopping...';
-        case 'error': return 'Error';
-        case 'crashed': return 'Crashed';
+        case 'stopped': return t('widget.servers.state.stopped');
+        case 'starting': return t('widget.servers.state.starting');
+        case 'running': return t('widget.servers.state.running');
+        case 'stopping': return t('widget.servers.state.stopping');
+        case 'error': return t('widget.servers.state.error');
+        case 'crashed': return t('widget.servers.state.crashed');
     }
 }
 
-function hotReloadStatusColor(status: HotReloadStatus): string {
+function hotReloadStatusClass(status: HotReloadStatus): string {
     switch (status) {
-        case 'synced': return '#22c55e'; // green
-        case 'compiling': return '#eab308'; // yellow
-        case 'restart_required': return '#ef4444'; // red
+        case 'synced': return 'synced';
+        case 'compiling': return 'compiling';
+        case 'restart_required': return 'restart_required';
     }
 }
 
-function hotReloadStatusLabel(status: HotReloadStatus): string {
+function hotReloadStatusLabel(status: HotReloadStatus, t: (key: string, params?: Record<string, string | number>) => string): string {
     switch (status) {
-        case 'synced': return '已同步';
-        case 'compiling': return '编译中';
-        case 'restart_required': return '需要重启';
+        case 'synced': return t('widget.servers.hotReload.synced');
+        case 'compiling': return t('widget.servers.hotReload.compiling');
+        case 'restart_required': return t('widget.servers.hotReload.restartRequired');
     }
 }
+
+interface HotReloadSectionProps {
+    t: (key: string, params?: Record<string, string | number>) => string;
+    hotReloadStatus: HotReloadStatus;
+    publishState: 'idle' | 'publishing' | 'success' | 'error';
+    publishMessage: string;
+    autoSyncEnabled: boolean;
+    activeServer?: ServerInstance;
+    onUpdate: () => void;
+    onReloadContext: () => void;
+    onToggleAutoSync: () => void;
+}
+
+const HotReloadSection: React.FC<HotReloadSectionProps> = ({
+    t,
+    hotReloadStatus,
+    publishState,
+    publishMessage,
+    autoSyncEnabled,
+    activeServer,
+    onUpdate,
+    onReloadContext,
+    onToggleAutoSync,
+}) => (
+    <div className="kairo-widget-section" data-testid="hot-reload-section">
+        <div className="kairo-section-title">{t('widget.servers.hotReload.title')}</div>
+        <div
+            className={`kairo-hot-reload-banner ${hotReloadStatusClass(hotReloadStatus)}`}
+            data-testid="hot-reload-indicator"
+            title={hotReloadStatusLabel(hotReloadStatus, t)}
+            role="status"
+        >
+            <span className="kairo-hot-reload-dot" />
+            <div className="kairo-hot-reload-info">
+                <div className="kairo-hot-reload-label">{hotReloadStatusLabel(hotReloadStatus, t)}</div>
+                <div className="kairo-hot-reload-help">{t('widget.servers.hotReload.helpText')}</div>
+            </div>
+        </div>
+        <div className="kairo-hot-reload-controls">
+            <button
+                className="theia-button main"
+                onClick={onUpdate}
+                disabled={!activeServer || activeServer.state !== 'running' || publishState === 'publishing'}
+            >
+                {t('widget.servers.hotReload.updateApplication')}
+            </button>
+            <button
+                className="theia-button secondary"
+                onClick={onReloadContext}
+                disabled={!activeServer || activeServer.state !== 'running'}
+            >
+                {t('widget.servers.hotReload.reloadContext')}
+            </button>
+            <label title={t('widget.servers.hotReload.autoSyncOnSave')}>
+                <input type="checkbox" checked={autoSyncEnabled} onChange={onToggleAutoSync} />
+                {t('widget.servers.hotReload.autoSyncOnSave')}
+            </label>
+        </div>
+        {publishState !== 'idle' && (
+            <div className={`kairo-hot-reload-status ${publishState}`} role="status" aria-live="polite">
+                {publishState === 'publishing' && <span className="codicon codicon-sync codicon-modifier-spin" aria-hidden="true" />}
+                {publishState === 'success' && <span className="codicon codicon-check" aria-hidden="true" />}
+                {publishMessage}
+            </div>
+        )}
+    </div>
+);
 
 interface ServerViewProps {
     store: ServerStore;
     commandService: CommandService;
     runtime: RuntimeConnectionService;
+    i18n: KairoI18nService;
 }
 
-const ServerViewComponent: React.FC<ServerViewProps> = ({ store, commandService, runtime }) => {
+const ServerViewComponent: React.FC<ServerViewProps> = ({ store, commandService, runtime, i18n }) => {
+    const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
+    const [, forceUpdate] = React.useReducer(x => x + 1, 0);
     const [servers, setServers] = React.useState<ServerInstance[]>(store.getServers());
     const [connectionState, setConnectionState] = React.useState<ConnectionState>(store.getConnectionState());
-    const [reloadPaused, setReloadPaused] = React.useState(false);
+    const [autoSyncEnabled, setAutoSyncEnabled] = React.useState(() => {
+        try { return localStorage.getItem('kairo.hotReload.autoSyncOnSave') !== 'false'; } catch { return true; }
+    });
     const [publishState, setPublishState] = React.useState<'idle' | 'publishing' | 'success' | 'error'>('idle');
-    const [publishMessage, setPublishMessage] = React.useState('Manual mode — no file watcher is active.');
+    const [publishMessage, setPublishMessage] = React.useState(t('widget.servers.hotReload.autoSyncActive'));
     const [hotReloadStatus, setHotReloadStatus] = React.useState<HotReloadStatus>(store.getHotReloadStatus());
+
+    React.useEffect(() => {
+        const disposable = i18n.onDidChangeLanguage(() => forceUpdate());
+        return () => disposable.dispose();
+    }, [i18n]);
 
     React.useEffect(() => {
         const sub = store.onDidChange(s => setServers([...s]));
@@ -87,41 +166,46 @@ const ServerViewComponent: React.FC<ServerViewProps> = ({ store, commandService,
     const handleStop = () => commandService.executeCommand('kairo.server.stop');
     const handleRestart = () => commandService.executeCommand('kairo.server.restart');
     const handleOpenApp = () => commandService.executeCommand('kairo.app.open');
-    const publishStatic = async () => {
-        if (!activeServer || reloadPaused) return;
-        setPublishState('publishing'); setPublishMessage('Publishing JSP/CSS/JS and static resources…');
-        try {
-            const result = await runtime.request('POST /api/v1/deployments', { projectId: activeServer.projectId, buildId: '', scope: 'webapp', intent: 'publish-static-changes' });
-            setPublishState('success'); setPublishMessage(`${result.filesTouched} file(s), ${result.bytes} bytes published without context reload.`);
-        } catch (error) {
-            setPublishState('error'); setPublishMessage(error instanceof Error ? error.message : 'Publish failed. Retry when ready.');
+    const handleUpdate = () => {
+        setPublishState('publishing');
+        setPublishMessage(t('widget.servers.hotReload.updating'));
+        commandService.executeCommand('kairo.server.update');
+        setTimeout(() => {
+            setPublishState('success');
+            setPublishMessage(t('widget.servers.hotReload.updateTriggered'));
+        }, 1000);
+    };
+    const handleReloadContext = () => {
+        if (window.confirm(t('widget.servers.hotReload.reloadContextConfirm'))) {
+            setPublishState('publishing');
+            setPublishMessage(t('widget.servers.hotReload.reloading'));
+            commandService.executeCommand('kairo.server.reloadContext');
+            setTimeout(() => {
+                setPublishState('success');
+                setPublishMessage(t('widget.servers.hotReload.reloadTriggered'));
+            }, 1000);
         }
+    };
+    const toggleAutoSync = () => {
+        const next = !autoSyncEnabled;
+        setAutoSyncEnabled(next);
+        try { localStorage.setItem('kairo.hotReload.autoSyncOnSave', String(next)); } catch {}
+        setPublishMessage(next ? t('widget.servers.hotReload.autoSyncActive') : t('widget.servers.hotReload.autoSyncPaused'));
     };
 
     if (connectionState === 'loading') {
         return (
-            <>
             <div className="kairo-widget" data-testid="server-view">
                 <div className="kairo-widget-header" data-testid="server-view-header">
-                    <span className="kairo-widget-title">Server</span>
+                    <span className="kairo-widget-title">{t('widget.servers.title')}</span>
                 </div>
-                <p className="kairo-empty" data-testid="server-loading">Loading...</p>
+                <div className="kairo-widget-body">
+                    <div className="kairo-empty-state" data-testid="server-loading">
+                        <span className="kairo-empty-state-glyph codicon codicon-loading codicon-modifier-spin" aria-hidden="true" />
+                        <h3 className="kairo-empty-state-title">{t('common.loading')}</h3>
+                    </div>
+                </div>
             </div>
-
-            <div className="kairo-widget-section" data-testid="hot-reload-section">
-                <div className="kairo-section-title">Static Hot Reload (manual)</div>
-                <div className="kairo-hot-reload-indicator" data-testid="hot-reload-indicator" title={hotReloadStatusLabel(hotReloadStatus)}>
-                    <span className="kairo-hot-reload-dot" style={{ display: 'inline-block', width: 10, height: 10, borderRadius: '50%', backgroundColor: hotReloadStatusColor(hotReloadStatus), marginRight: 6, verticalAlign: 'middle' }} />
-                    <span className="kairo-hot-reload-label">{hotReloadStatusLabel(hotReloadStatus)}</span>
-                </div>
-                <div className="kairo-widget-toolbar">
-                    <button className="theia-button" onClick={() => void publishStatic()} disabled={!activeServer || activeServer.state !== 'running' || reloadPaused || publishState === 'publishing'}>Publish Changed Files</button>
-                    <button className="theia-button secondary" onClick={() => setReloadPaused(value => !value)} aria-pressed={reloadPaused}>{reloadPaused ? 'Resume' : 'Pause'}</button>
-                </div>
-                <div className={`kairo-hot-reload-status ${publishState}`} role="status">{publishMessage}</div>
-                <p className="kairo-help-text">JSP/CSS/JS and static bytes are merge-copied. Deletes are not propagated. Java/class changes require Build + Publish and may require restart; HotSwap is not claimed.</p>
-            </div>
-            </>
         );
     }
 
@@ -129,14 +213,21 @@ const ServerViewComponent: React.FC<ServerViewProps> = ({ store, commandService,
         return (
             <div className="kairo-widget" data-testid="server-view">
                 <div className="kairo-widget-header" data-testid="server-view-header">
-                    <span className="kairo-widget-title">Server</span>
+                    <span className="kairo-widget-title">{t('widget.servers.title')}</span>
                     <span className="kairo-server-state" data-testid="server-state" data-state="disconnected">
-                        Disconnected
+                        <span className={`codicon ${stateIconClass('disconnected')}`} aria-hidden="true" /> {t('widget.servers.state.disconnected')}
                     </span>
                 </div>
-                <p className="kairo-empty" data-testid="server-disconnected">
-                    Cannot reach the runtime agent. Server commands are unavailable.
-                </p>
+                <div className="kairo-empty-state" data-testid="server-disconnected">
+                    <span className="kairo-empty-state-glyph codicon codicon-plug" aria-hidden="true" />
+                    <h3 className="kairo-empty-state-title">{t('widget.servers.disconnectedStateTitle')}</h3>
+                    <p className="kairo-empty-state-reason">{t('widget.servers.disconnectedStateReason')}</p>
+                    <div className="kairo-empty-state-action">
+                        <button className="theia-button main" onClick={() => commandService.executeCommand('kairo.agent.reconnect')}>
+                            {t('widget.servers.disconnectedStateAction')}
+                        </button>
+                    </div>
+                </div>
             </div>
         );
     }
@@ -144,7 +235,7 @@ const ServerViewComponent: React.FC<ServerViewProps> = ({ store, commandService,
     return (
         <div className="kairo-widget" data-testid="server-view">
             <div className="kairo-widget-header" data-testid="server-view-header">
-                <span className="kairo-widget-title">Server</span>
+                <span className="kairo-widget-title">{t('widget.servers.title')}</span>
                 {activeServer ? (
                     <span
                         className="kairo-server-state"
@@ -152,72 +243,81 @@ const ServerViewComponent: React.FC<ServerViewProps> = ({ store, commandService,
                         data-state={activeServer.state}
                         aria-live="polite"
                     >
-                        {stateIcon(activeServer.state)} {stateLabel(activeServer.state)}
+                        <span className={`codicon ${stateIconClass(activeServer.state)}`} aria-hidden="true" /> {stateLabel(activeServer.state, t)}
                     </span>
                 ) : (
                     <span className="kairo-server-state" data-testid="server-state" data-state="stopped" aria-live="polite">
-                        {stateIcon('stopped')} Stopped
+                        <span className={`codicon ${stateIconClass('stopped')}`} aria-hidden="true" /> {t('widget.servers.state.stopped')}
                     </span>
                 )}
             </div>
 
-            <div className="kairo-widget-toolbar" data-testid="server-view-toolbar">
+            <div className="kairo-server-toolbar" data-testid="server-view-toolbar">
                 <button
-                    className="theia-button"
+                    className="theia-button main"
                     data-testid="server-start-button"
                     onClick={handleStart}
                     disabled={activeServer?.state === 'running' || activeServer?.state === 'starting' || isDisconnected}
-                    aria-label="Start server"
+                    aria-label={t('widget.servers.toolbar.startServerAria')}
                 >
-                    Start
+                    <span className="codicon codicon-play" aria-hidden="true" />
+                    {t('common.start')}
                 </button>
                 <button
-                    className="theia-button"
+                    className="theia-button secondary"
                     data-testid="server-debug-button"
                     onClick={handleDebug}
                     disabled={activeServer?.state === 'running' || activeServer?.state === 'starting' || isDisconnected}
-                    aria-label="Start server with JDWP enabled"
-                    title="Start Tomcat with a local JDWP port. Debug Adapter connection is shown separately."
+                    aria-label={t('widget.servers.toolbar.debugServerAria')}
+                    title={t('widget.servers.toolbar.debugServerTooltip')}
                 >
-                    Debug Server
+                    <span className="codicon codicon-debug-alt" aria-hidden="true" />
+                    {t('widget.servers.toolbar.debugServer')}
                 </button>
+                <div className="kairo-server-toolbar-separator" />
                 <button
-                    className="theia-button"
+                    className="theia-button toolbar"
                     data-testid="server-stop-button"
                     onClick={handleStop}
                     disabled={!activeServer || activeServer.state === 'stopped' || isDisconnected}
-                    aria-label="Stop server"
+                    aria-label={t('widget.servers.toolbar.stopServerAria')}
+                    title={t('common.stop')}
                 >
-                    Stop
+                    <span className="codicon codicon-primitive-square" aria-hidden="true" />
+                    {t('common.stop')}
                 </button>
                 <button
-                    className="theia-button"
+                    className="theia-button toolbar"
                     data-testid="server-restart-button"
                     onClick={handleRestart}
                     disabled={!activeServer || activeServer.state === 'stopped' || isBusy || isDisconnected}
-                    aria-label="Restart server"
+                    aria-label={t('widget.servers.toolbar.restartServerAria')}
+                    title={t('common.restart')}
                 >
-                    Restart
+                    <span className="codicon codicon-refresh" aria-hidden="true" />
+                    {t('common.restart')}
                 </button>
                 <button
-                    className="theia-button"
+                    className="theia-button toolbar"
                     data-testid="server-open-button"
                     onClick={handleOpenApp}
                     disabled={!activeServer || activeServer.state !== 'running' || !activeServer.url}
-                    aria-label="Open application in browser"
+                    aria-label={t('widget.servers.toolbar.openAppAria')}
+                    title={t('widget.servers.toolbar.openApp')}
                 >
-                    Open App
+                    <span className="codicon codicon-globe" aria-hidden="true" />
+                    {t('widget.servers.toolbar.openApp')}
                 </button>
             </div>
 
             {activeServer && activeServer.url && activeServer.state === 'running' && (
                 <div className="kairo-server-url" data-testid="server-url">
-                    <span className="kairo-server-url-label">URL: </span>
+                    <span className="kairo-server-url-label">{t('widget.servers.info.url')}</span>
                     <a
                         href={activeServer.url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        aria-label={`Open ${activeServer.url} in browser`}
+                        aria-label={t('widget.servers.info.urlAria', { url: activeServer.url })}
                         data-testid="server-url-link"
                     >
                         {activeServer.url}
@@ -227,48 +327,53 @@ const ServerViewComponent: React.FC<ServerViewProps> = ({ store, commandService,
 
             {activeServer && (
                 <div className="kairo-widget-section" data-testid="server-info">
-                    <div className="kairo-section-title">Server Info</div>
+                    <div className="kairo-section-title">{t('widget.servers.info.title')}</div>
                     <dl className="kairo-info-list" data-testid="server-info-list">
-                        <dt>ID</dt>
+                        <dt>{t('widget.servers.info.id')}</dt>
                         <dd data-testid="server-info-id">{activeServer.id}</dd>
-                        <dt>Port</dt>
+                        <dt>{t('widget.servers.info.port')}</dt>
                         <dd data-testid="server-info-port">{activeServer.httpPort}</dd>
                         {Boolean(activeServer.debugPort) && (
                             <>
-                                <dt>JDWP</dt>
+                                <dt>{t('widget.servers.info.jdwp')}</dt>
                                 <dd data-testid="server-info-debug-port">
-                                    127.0.0.1:{activeServer.debugPort} (ready)
+                                    {t('widget.servers.info.jdwpReady', { port: activeServer.debugPort! })}
                                 </dd>
                             </>
                         )}
-                        <dt>PID</dt>
+                        <dt>{t('widget.servers.info.pid')}</dt>
                         <dd data-testid="server-info-pid">{activeServer.pid}</dd>
-                        <dt>Started</dt>
+                        <dt>{t('widget.servers.info.started')}</dt>
                         <dd data-testid="server-info-start-time">{activeServer.startTime}</dd>
                     </dl>
                 </div>
             )}
 
-            <div className="kairo-widget-section" data-testid="hot-reload-section">
-                <div className="kairo-section-title">Static Hot Reload (manual)</div>
-                <div className="kairo-hot-reload-indicator" data-testid="hot-reload-indicator" title={hotReloadStatusLabel(hotReloadStatus)}>
-                    <span className="kairo-hot-reload-dot" style={{ display: 'inline-block', width: 10, height: 10, borderRadius: '50%', backgroundColor: hotReloadStatusColor(hotReloadStatus), marginRight: 6, verticalAlign: 'middle' }} />
-                    <span className="kairo-hot-reload-label">{hotReloadStatusLabel(hotReloadStatus)}</span>
-                </div>
-                <div className="kairo-widget-toolbar">
-                    <button className="theia-button" onClick={() => void publishStatic()} disabled={!activeServer || activeServer.state !== 'running' || reloadPaused || publishState === 'publishing'}>Publish Changed Files</button>
-                    <button className="theia-button secondary" onClick={() => setReloadPaused(value => !value)} aria-pressed={reloadPaused}>{reloadPaused ? 'Resume' : 'Pause'}</button>
-                </div>
-                <div className={`kairo-hot-reload-status ${publishState}`} role="status">{publishMessage}</div>
-                <p className="kairo-help-text">JSP/CSS/JS and static bytes are merge-copied. Deletes are not propagated. Java/class changes require Build + Publish and may require restart; HotSwap is not claimed.</p>
-            </div>
+            <HotReloadSection
+                t={t}
+                hotReloadStatus={hotReloadStatus}
+                publishState={publishState}
+                publishMessage={publishMessage}
+                autoSyncEnabled={autoSyncEnabled}
+                activeServer={activeServer}
+                onUpdate={handleUpdate}
+                onReloadContext={handleReloadContext}
+                onToggleAutoSync={toggleAutoSync}
+            />
 
             <div className="kairo-widget-section" data-testid="server-list-section">
-                <div className="kairo-section-title">All Servers</div>
+                <div className="kairo-section-title">{t('widget.servers.allServers')}</div>
                 {isEmpty ? (
-                    <p className="kairo-empty" data-testid="server-empty">
-                        No servers registered. Press <strong>Start</strong> to launch one.
-                    </p>
+                    <div className="kairo-empty-state" data-testid="server-empty">
+                        <span className="kairo-empty-state-glyph codicon codicon-server" aria-hidden="true" />
+                        <h3 className="kairo-empty-state-title">{t('widget.servers.emptyListTitle')}</h3>
+                        <p className="kairo-empty-state-reason">{t('widget.servers.emptyListReason', { action: t('common.start') })}</p>
+                        <div className="kairo-empty-state-action">
+                            <button className="theia-button main" onClick={handleStart}>
+                                {t('common.start')}
+                            </button>
+                        </div>
+                    </div>
                 ) : (
                     <ul className="kairo-server-list" data-testid="server-list">
                         {servers.map(s => (
@@ -277,15 +382,15 @@ const ServerViewComponent: React.FC<ServerViewProps> = ({ store, commandService,
                                 className={`kairo-server-item kairo-server-${s.state}`}
                                 data-testid={`server-${s.id}`}
                             >
-                                <span className="kairo-server-state-icon">{stateIcon(s.state)}</span>
+                                <span className={`kairo-server-state-icon codicon ${stateIconClass(s.state)}`} aria-hidden="true" title={stateLabel(s.state, t)} />
                                 <span className="kairo-server-id">{s.id}</span>
+                                <span className="kairo-server-item-state" data-state={s.state}>{stateLabel(s.state, t)}</span>
                                 <span className="kairo-server-port">:{s.httpPort}</span>
                                 {Boolean(s.debugPort) && (
-                                    <span className="kairo-server-debug-port" title="JDWP debug-ready port">
-                                        {' '}JDWP:{s.debugPort}
+                                    <span className="kairo-server-debug-port" title={t('widget.servers.jdwpTooltip')}>
+                                        JDWP:{s.debugPort}
                                     </span>
                                 )}
-                                <span className="kairo-server-status">{stateLabel(s.state)}</span>
                             </li>
                         ))}
                     </ul>
@@ -302,6 +407,7 @@ export class ServerViewWidget extends ReactWidget {
     @inject(ServerStore) protected readonly serverStore!: ServerStore;
     @inject(CommandService) protected readonly commandService!: CommandService;
     @inject(RuntimeConnectionService) protected readonly runtime!: RuntimeConnectionService;
+    @inject(KairoI18nService) protected readonly i18n!: KairoI18nService;
 
     constructor() {
         super();
@@ -311,11 +417,23 @@ export class ServerViewWidget extends ReactWidget {
         this.addClass('kairo-widget');
     }
 
+    @postConstruct()
+    protected init(): void {
+        this.updateTitle();
+        this.toDispose.push(this.i18n.onDidChangeLanguage(() => this.updateTitle()));
+    }
+
+    protected updateTitle(): void {
+        this.title.label = this.i18n.t('widget.servers.title');
+        this.title.caption = this.i18n.t('widget.servers.caption');
+    }
+
     protected render(): React.ReactNode {
         return React.createElement(ServerViewComponent, {
             store: this.serverStore,
             commandService: this.commandService,
             runtime: this.runtime,
+            i18n: this.i18n,
         });
     }
 }
