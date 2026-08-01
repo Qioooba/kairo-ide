@@ -379,6 +379,54 @@ func TestBuild_ListEmpty(t *testing.T) {
 	}
 }
 
+// TestBuild_ListChronological 验证 List 按 StartedAt 升序返回（最后一个是最近构建）。
+// 前端 getLatestBuild() 与 E2E fixtures 均假设数组最后一个元素是最新构建；
+// Go map 迭代顺序是随机的，必须显式排序。
+func TestBuild_ListChronological(t *testing.T) {
+	engine := newTestAsyncBuildEngine(t)
+	// Insert out of order with distinct timestamps.
+	insert := func(id, startedAt string) {
+		engine.mu.Lock()
+		defer engine.mu.Unlock()
+		engine.finished[id] = &api.BuildResult{ID: id, StartedAt: startedAt, State: "success"}
+	}
+	insert("b-late", "2026-08-01T10:00:00Z")
+	insert("b-mid", "2026-08-01T09:30:00.500Z")
+	insert("b-early", "2026-08-01T09:00:00Z")
+
+	items := engine.List()
+	if len(items) != 3 {
+		t.Fatalf("len(List) = %d, want 3", len(items))
+	}
+	got := []string{items[0].ID, items[1].ID, items[2].ID}
+	want := []string{"b-early", "b-mid", "b-late"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("List order[%d] = %q, want %q (full order: %v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+// TestBuild_ListUnparsableStartedAt 验证无法解析的 StartedAt 排在最前，不会遮蔽真实历史。
+func TestBuild_ListUnparsableStartedAt(t *testing.T) {
+	engine := newTestAsyncBuildEngine(t)
+	engine.mu.Lock()
+	engine.finished["b-bad"] = &api.BuildResult{ID: "b-bad", StartedAt: "not-a-time", State: "success"}
+	engine.finished["b-good"] = &api.BuildResult{ID: "b-good", StartedAt: "2026-08-01T10:00:00Z", State: "success"}
+	engine.mu.Unlock()
+
+	items := engine.List()
+	if len(items) != 2 {
+		t.Fatalf("len(List) = %d, want 2", len(items))
+	}
+	if items[0].ID != "b-bad" {
+		t.Errorf("List[0] = %q, want b-bad (unparsable sorts first)", items[0].ID)
+	}
+	if items[1].ID != "b-good" {
+		t.Errorf("List[1] = %q, want b-good", items[1].ID)
+	}
+}
+
 // TestBuild_CancelNonExistent 验证取消不存在的构建返回错误
 func TestBuild_CancelNonExistent(t *testing.T) {
 	engine := newTestAsyncBuildEngine(t)

@@ -15,7 +15,10 @@ require('../setup-tmp.cjs'); // KAIRO_TMP override
 import { test as base, expect, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
-import * as os from 'node:os';
+import * as cp from 'node:child_process';
+// Use CJS require so setup-tmp.cjs's monkey-patch of os.tmpdir() is visible.
+// (esbuild's __toESM shallow-copies the builtin namespace, hiding the patch.)
+const os = require('node:os') as typeof import('node:os');
 
 // ---------------------------------------------------------------------------
 // Types
@@ -111,7 +114,17 @@ function copyDirSync(src: string, dest: string): void {
 
 function removeDirSync(dir: string): void {
   if (fs.existsSync(dir)) {
-    fs.rmSync(dir, { recursive: true, force: true });
+    try {
+      fs.rmSync(dir, { recursive: true, force: true });
+    } catch (err) {
+      // Windows EBUSY: the shared Theia backend holds watcher/file handles on
+      // the workspace. Fall back to in-place overwrite (copyDirSync below);
+      // stale extra files are harmless because tests only assert on files
+      // that exist in legacy-sample.
+      console.warn(
+        `[fixtures] removeDirSync failed, falling back to overwrite: ${(err as Error).message}`,
+      );
+    }
   }
 }
 
@@ -150,6 +163,18 @@ export const test = base.extend<KairoFixtures>({
     const projectName = 'legacy-sample';
     const rootPath = path.join(os.tmpdir(), 'kairo-e2e-workspaces', projectName);
 
+    // KAIRO-S27 / E2E-SERVER: earlier tests leave Tomcat (and possibly JDT)
+    // java processes alive. On Windows those processes hold file handles on
+    // the shared workspace (EBUSY on delete) and stale "running" records,
+    // which break server-start / port tests. Kill leftover java processes
+    // before refreshing the workspace.
+    try {
+      cp.execSync('taskkill /F /IM java.exe', { stdio: 'ignore' });
+    } catch {
+      /* no java process to kill */
+    }
+    await new Promise((r) => setTimeout(r, 500));
+
     // Ensure the shared workspace exists and is up-to-date
     removeDirSync(rootPath);
     copyDirSync(LEGACY_SAMPLE_ROOT, rootPath);
@@ -162,6 +187,10 @@ export const test = base.extend<KairoFixtures>({
     // Register workspace with the agent (idempotent)
     const api = createAgentApi();
     await api.post('/api/v1/workspaces', { rootPath });
+
+    // KAIRO-RC-WEB-040 / KAIRO-S27: delete any prior import of this project so
+    // the Import Wizard's re-import does not hit "project already exists: 409".
+    await api.delete(`/api/v1/projects/project-${projectName}`);
 
     // Use the workspace in the test
     await use(ctx);
@@ -469,8 +498,23 @@ export async function openFileViaQuickOpen(
   page: Page,
   fileName: string,
 ): Promise<void> {
-  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+P' : 'Control+P');
-  await page.waitForSelector('.quick-input-widget', { timeout: 5_000 });
+  // Dismiss any stale quick input first. Theia keeps a hidden instance around
+  // when a previous quick-open was interrupted (e.g. focus stolen by the
+  // import wizard), and pressing Ctrl+P again would only re-show that one.
+  await page.keyboard.press('Escape').catch(() => {});
+  await page.waitForTimeout(150);
+  let opened = false;
+  for (let attempt = 0; attempt < 3 && !opened; attempt++) {
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+P' : 'Control+P');
+    try {
+      await page.waitForSelector('.quick-input-widget:visible', { timeout: 4_000 });
+      opened = true;
+    } catch {
+      // The widget may already exist but be hidden; close it and retry.
+      await page.keyboard.press('Escape').catch(() => {});
+      await page.waitForTimeout(300);
+    }
+  }
   await page.keyboard.type(fileName, { delay: 50 });
   await page.waitForTimeout(500);
   await page.keyboard.press('Enter');
@@ -593,7 +637,11 @@ export async function runKairoImportWizard(
       await dismissSaveWorkspaceDialog(page, 1_000).catch(() => {/* already dismissed */});
       await dismissTrustDialog(page, 1_000).catch(() => {/* already dismissed */});
       const t = await getStatusBarText(page);
-      if (!t.includes('Project: (no workspace)') && t.includes('Project: ')) {
+      // KAIRO-S27: 兼容 zh 文案（项目：/项目：（无工作区））与 en 文案（Project: ...）
+      const hasNoProject =
+        t.includes('Project: (no workspace)') || t.includes('项目：（无工作区）');
+      const hasProject = /(Project:|项目：)/.test(t);
+      if (!hasNoProject && hasProject) {
         ready = t;
         break;
       }
@@ -606,6 +654,14 @@ export async function runKairoImportWizard(
       // file is updated; dismiss it again so the caller sees the files.
       await dismissTrustDialog(page, 5_000).catch(() => {/* already dismissed */});
       await dismissSaveWorkspaceDialog(page, 5_000).catch(() => {/* already dismissed */});
+      // KAIRO-S27 / E2E-03: reopening an already-open workspace root makes
+      // "Open Project Folder" a no-op, which can leave the wizard's success
+      // dialog on screen and block every later modal (e.g. the Search
+      // Center). Explicitly close it when it is still visible.
+      await page
+        .locator('[data-testid="ready-close-btn"]')
+        .click({ timeout: 3_000 })
+        .catch(() => {/* wizard already closed */});
     }
     return { opened: ready !== null, reason: ready ? 'opened' : 'project-not-in-status' };
   }
@@ -796,18 +852,26 @@ export async function getServerViewState(page: Page): Promise<unknown[]> {
       const body = await res.json();
       const list = body?.payload || [];
       if (!Array.isArray(list) || list.length === 0) return [];
-      return list.map((s: Record<string, unknown>) => {
-        const ports = (s.ports as Record<string, number>) || {};
-        return {
-          state: s.state,
-          stateText: String(s.state || ''),
-          stateAttr: String(s.state || ''),
-          url: s.url || '',
-          httpPort: ports.http || 0,
-          debugPort: ports.debug || 0,
-          source: 'api',
-        };
-      });
+      // Sort newest-first so callers that take [0] get the most recent server
+      // instead of an old stopped record (KAIRO-S27: agent keeps history).
+      return list
+        .slice()
+        .sort((a: Record<string, unknown>, b: Record<string, unknown>) =>
+          String(b.startedAt || '').localeCompare(String(a.startedAt || '')),
+        )
+        .map((s: Record<string, unknown>) => {
+          const ports = (s.ports as Record<string, number>) || {};
+          return {
+            state: s.state,
+            stateText: String(s.state || ''),
+            stateAttr: String(s.state || ''),
+            url: s.url || '',
+            httpPort: ports.http || 0,
+            debugPort: ports.debug || 0,
+            startedAt: String(s.startedAt || ''),
+            source: 'api',
+          };
+        });
     } catch {
       return [];
     }
@@ -859,28 +923,35 @@ export async function getProblemsViewState(page: Page): Promise<unknown[]> {
  * BOTH naming conventions and normalise to the API form before
  * comparing.
  */
+/**
+ * Normalize a build state to the UI convention
+ * ("succeeded"/"failed") regardless of whether it came from the
+ * UI (`data-state` = "succeeded") or the Runtime Agent API
+ * (state = "success"/"failure").
+ */
+export function normalizeBuildState(state: string): string {
+  if (state === 'succeeded' || state === 'success') return 'succeeded';
+  if (state === 'failed' || state === 'failure') return 'failed';
+  return state;
+}
+
 export async function waitForBuildState(
   page: Page,
   targetState: string,
   timeoutMs = 120_000,
 ): Promise<unknown | null> {
-  // Normalize both the target and the observed state so the test can
-  // pass "succeeded" / "failed" (UI convention) or "success" / "failure"
-  // (API convention) and still match either form.
-  const normalize = (state: string): string => {
-    if (state === 'succeeded' || state === 'success') return 'succeeded';
-    if (state === 'failed' || state === 'failure') return 'failed';
-    return state;
-  };
-  const want = normalize(targetState);
+  const want = normalizeBuildState(targetState);
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     const builds = await getBuildViewState(page);
     if (builds && builds.length > 0) {
       const last = builds[builds.length - 1] as Record<string, string>;
-      const got = normalize(last.state);
+      const got = normalizeBuildState(last.state);
       if (got === want) {
-        return last;
+        // Return the normalized state so callers can assert on a
+        // stable value regardless of whether the source was the UI
+        // ("succeeded") or the agent API ("success").
+        return { ...last, state: got };
       }
     }
     await page.waitForTimeout(1_000);
@@ -996,15 +1067,25 @@ export function setupSampleProject(workspace: WorkspaceContext): string {
 // ---------------------------------------------------------------------------
 
 /**
- * Waits for JDT LS to be ready. Polls the status bar until "JDT LS: ready"
- * appears or the timeout is reached.
+ * Waits for JDT LS to be ready. Polls the status bar until the JDK entry
+ * shows a concrete version (e.g. "JDK: 17"), which is the readiness signal
+ * since Session 16 Phase F merged the Java/JDT LS states into one entry
+ * (JDT LS state only lives in the tooltip). During startup the entry shows
+ * a state word instead ("JDK: starting" / "JDK: initializing"), and the
+ * initial placeholder is "JDK: -", so a version pattern is unambiguous.
  */
 export async function waitForJavaReady(
   page: Page,
   timeoutMs = 120_000,
 ): Promise<boolean> {
-  const result = await waitForStatusContains(page, 'JDT LS: ready', timeoutMs);
-  return result !== null;
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const t = await getStatusBarText(page);
+    // KAIRO-S27: JDK 条目在 en/zh 下冒号不同（"JDK: 17" / "JDK：17"），两者都接受。
+    if (/JDK[：:]\s*\d/.test(t)) return true;
+    await page.waitForTimeout(500);
+  }
+  return false;
 }
 
 /**

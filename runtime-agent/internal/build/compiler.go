@@ -18,6 +18,7 @@ import (
 
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/domain"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/proc"
+	"golang.org/x/text/encoding/simplifiedchinese"
 )
 
 type Request struct {
@@ -54,14 +55,141 @@ type Diagnostic struct {
 }
 
 type Compiler struct {
-	mu       sync.Mutex
-	javaHome string
+	mu             sync.Mutex
+	javaHome       string
+	minSourceLevel int // lowest -source level accepted by this JDK's javac (0 = unknown)
 }
 
 const compilerStopTimeout = 5 * time.Second
 
 func New(javaHome string) *Compiler {
-	return &Compiler{javaHome: javaHome}
+	c := &Compiler{javaHome: javaHome}
+	if javaHome != "" {
+		if bin, err := locateJavac(javaHome); err == nil {
+			c.minSourceLevel = probeMinSourceLevel(bin)
+		}
+	}
+	return c
+}
+
+func locateJavac(javaHome string) (string, error) {
+	name := "javac"
+	if runtime.GOOS == "windows" {
+		name = "javac.exe"
+	}
+	bin := filepath.Join(javaHome, "bin", name)
+	if _, err := os.Stat(bin); err == nil {
+		return bin, nil
+	}
+	return "", fmt.Errorf("javac not found in %s", javaHome)
+}
+
+// supportedReleasesRE matches the "-help" line that lists the source
+// versions a javac accepts. javac localizes its help text, so accept both
+// the English forms ("Supported releases: 7, 8, ..." / older
+// "Supported source versions: ...") and the Chinese forms
+// ("支持的发行版本：8, 9, ..." on JDK 21, "支持的发行版：7, 8, ..." on JDK 17).
+// Go's \w is ASCII-only, so use [^：:\s] for the middle of the Chinese phrase.
+var supportedReleasesRE = regexp.MustCompile(`(?i)(?:supported\s+(?:source\s+)?(?:releases|versions)|支持[^：:\s]*版(?:本)?)\s*[：:]\s*([0-9][0-9,\s.]*)`)
+
+// probeMinSourceLevel asks javac for the lowest -source level it supports.
+// JDK 20+ removed source/target 6, so legacy projects (source 1.6) must be
+// raised to the minimum to compile on newer JDKs.
+//
+// The javac -help text is localized; on Windows with a Chinese locale it is
+// GBK-encoded, which does not decode as UTF-8. We try UTF-8 first, then a
+// GBK decoding, and finally fall back to deriving the minimum from the
+// (ASCII) javac -version output.
+func probeMinSourceLevel(javacPath string) int {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, javacPath, "-help").CombinedOutput()
+	if err != nil && len(out) == 0 {
+		return 0
+	}
+	if min := parseSupportedReleases(string(out)); min > 0 {
+		return min
+	}
+	if dec, derr := simplifiedchinese.GBK.NewDecoder().Bytes(out); derr == nil {
+		if min := parseSupportedReleases(string(dec)); min > 0 {
+			return min
+		}
+	}
+	return minLevelFromVersion(javacPath, ctx)
+}
+
+// parseSupportedReleases extracts the lowest supported -source level from a
+// javac -help text (English "Supported releases: ..." or localized
+// "支持的发行版本：..."), returning 0 when no version list is found.
+func parseSupportedReleases(help string) int {
+	min := 0
+	for _, m := range supportedReleasesRE.FindAllStringSubmatch(help, -1) {
+		if len(m) < 2 {
+			continue
+		}
+		for _, tok := range strings.Split(m[1], ",") {
+			tok = strings.TrimSpace(tok)
+			if v, err := strconv.Atoi(tok); err == nil && (min == 0 || v < min) {
+				min = v
+			}
+		}
+	}
+	return min
+}
+
+// minLevelFromVersion derives the minimum -source level from `javac -version`
+// (pure ASCII). JDK 21 rejects -source below 8; JDK 17-19 still accept 6.
+func minLevelFromVersion(javacPath string, ctx context.Context) int {
+	out, err := exec.CommandContext(ctx, javacPath, "-version").CombinedOutput()
+	if err != nil && len(out) == 0 {
+		return 0
+	}
+	s := string(out)
+	m := javacVersionRE.FindStringSubmatch(s)
+	if len(m) < 2 {
+		return 0
+	}
+	if major, err := strconv.Atoi(m[1]); err == nil {
+		if major >= 21 {
+			return 8
+		}
+		if major >= 9 {
+			return 6
+		}
+		return 6
+	}
+	return 0
+}
+
+// javacVersionRE matches the first number in "javac 21.0.11" (or the
+// legacy "javac 1.8.0_345"; both resolve to a minimum of 6 below).
+var javacVersionRE = regexp.MustCompile(`(?i)javac\s+(\d+)`)
+
+// parseLevel converts a javac level like "1.6" or "8" into an int (6, 8).
+// Returns 0 when the level cannot be parsed.
+func parseLevel(level string) int {
+	level = strings.TrimSpace(level)
+	if v, err := strconv.Atoi(level); err == nil {
+		return v
+	}
+	if strings.HasPrefix(level, "1.") {
+		if v, err := strconv.Atoi(strings.TrimPrefix(level, "1.")); err == nil {
+			return v
+		}
+	}
+	return 0
+}
+
+// normalizeLevel raises a -source/-target level to the JDK's minimum.
+// Levels equal to or above the minimum, and unparsable values, pass through.
+func normalizeLevel(level string, min int) string {
+	if min <= 0 || level == "" {
+		return level
+	}
+	if v := parseLevel(level); v > 0 && v < min {
+		return strconv.Itoa(min)
+	}
+	return level
 }
 
 func (c *Compiler) Compile(ctx context.Context, req Request) (*Result, error) {
@@ -82,9 +210,12 @@ func (c *Compiler) Compile(ctx context.Context, req Request) (*Result, error) {
 	if req.Args != nil {
 		args = append(args, req.Args...)
 	} else {
+		// KAIRO-S27/JDK21: newer javac drops support for legacy source levels
+		// (JDK 20+ removed source/target 6). Clamp to the JDK's minimum so
+		// legacy projects still compile on JDK 17/21 toolchains.
 		args = append(args,
-			"-source", req.SourceLevel,
-			"-target", req.TargetLevel,
+			"-source", normalizeLevel(req.SourceLevel, c.minSourceLevel),
+			"-target", normalizeLevel(req.TargetLevel, c.minSourceLevel),
 		)
 		if req.Encoding != "" {
 			args = append(args, "-encoding", req.Encoding)

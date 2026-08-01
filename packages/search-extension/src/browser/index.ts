@@ -77,6 +77,12 @@ export function bindSearchExtension(bind: interfaces.Bind): void {
     createWidget: () => context.container.get(SearchCenterWidget),
   })).inSingletonScope();
   bindViewContribution(bind, SearchCenterContribution);
+  // bindViewContribution does NOT register the contribution as a
+  // FrontendApplicationContribution, so SearchCenterContribution.onStart()
+  // (which installs the Ctrl+Shift+F window keydown handler) was never
+  // invoked and the shortcut fell through to Theia's built-in search.
+  // Bind it explicitly so the Search Center opens from the shortcut.
+  bind(FrontendApplicationContribution).toService(SearchCenterContribution);
   bind(SearchEverywhereModel).toSelf().inSingletonScope();
   bind(SearchEverywhereFilesProvider).toSelf().inSingletonScope();
   bind(SearchEverywhereJavaProvider).toSelf().inSingletonScope();

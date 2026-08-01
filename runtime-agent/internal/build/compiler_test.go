@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -565,8 +566,7 @@ func TestCompile_CustomArgs(t *testing.T) {
 	// We expect an error because javac is not found at the fake path
 	// and likely not on PATH either. But we just want to exercise the
 	// custom Args path — any error is acceptable.
-	if err == nil {
-		// javac happened to be on PATH and -version succeeded
+	if err == nil {		// javac happened to be on PATH and -version succeeded
 		t.Log("javac was found on PATH; custom Args path exercised")
 	}
 }
@@ -959,6 +959,126 @@ func TestSourceToClassFile_NotJava(t *testing.T) {
 	if result != "" {
 		t.Errorf("expected empty for non-java file, got %q", result)
 	}
+}
+
+// =============================================================================
+// Legacy source-level normalization (KAIRO-S27 / JDK 21)
+// =============================================================================
+
+func TestParseLevel(t *testing.T) {
+	cases := []struct {
+		in   string
+		want int
+	}{
+		{"1.6", 6},
+		{"1.8", 8},
+		{"6", 6},
+		{"8", 8},
+		{"11", 11},
+		{"17", 17},
+		{"", 0},
+		{"abc", 0},
+		{"1.", 0},
+		{" 1.7 ", 7},
+	}
+	for _, tc := range cases {
+		if got := parseLevel(tc.in); got != tc.want {
+			t.Errorf("parseLevel(%q) = %d, want %d", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestNormalizeLevel(t *testing.T) {
+	cases := []struct {
+		level string
+		min   int
+		want  string
+	}{
+		{"1.6", 7, "7"},   // legacy source raised to JDK 21 minimum
+		{"1.6", 8, "8"},   // raised further when JDK min is 8
+		{"1.6", 0, "1.6"}, // unknown minimum → pass through
+		{"8", 7, "8"},     // already supported → unchanged
+		{"7", 7, "7"},     // exactly the minimum → unchanged
+		{"11", 7, "11"},   // above minimum → unchanged
+		{"", 7, ""},       // empty → unchanged
+		{"abc", 7, "abc"}, // unparsable → unchanged
+	}
+	for _, tc := range cases {
+		if got := normalizeLevel(tc.level, tc.min); got != tc.want {
+			t.Errorf("normalizeLevel(%q, %d) = %q, want %q", tc.level, tc.min, got, tc.want)
+		}
+	}
+}
+
+func TestProbeMinSourceLevel(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell fixture; Windows probing is covered by real JDK E2E")
+	}
+
+	t.Run("english-jdk21", func(t *testing.T) {
+		javac := writeFakeJavac(t, "Usage: javac <options> <source files>\nSupported releases: 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21\n")
+		if got := probeMinSourceLevel(javac); got != 7 {
+			t.Fatalf("probeMinSourceLevel = %d, want 7", got)
+		}
+	})
+
+	t.Run("chinese-jdk21", func(t *testing.T) {
+		// javac localizes its -help text; the Chinese build lists the
+		// supported releases as "支持的发行版本：8, 9, ...".
+		javac := writeFakeJavac(t, "用法: javac <options> <source files>\n--release <release>\n    为指定的 Java SE 版本编译。支持的发行版本：8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21\n")
+		if got := probeMinSourceLevel(javac); got != 8 {
+			t.Fatalf("probeMinSourceLevel = %d, want 8", got)
+		}
+	})
+}
+
+// TestSupportedReleasesRE validates the javac -help parser against both the
+// English and localized (Chinese) help texts. Runs on every platform.
+func TestSupportedReleasesRE(t *testing.T) {
+	cases := []struct {
+		in   string
+		want int
+	}{
+		{"Supported releases: 7, 8, 11, 17, 21", 7},
+		{"Supported source versions: 8, 11, 17", 8},
+		{"支持的发行版本：8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21", 8},
+		{"为指定的 Java SE 发行版编译。支持的发行版：7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17", 7},
+		{"no version list here", 0},
+		{"", 0},
+	}
+	for _, tc := range cases {
+		min := 0
+		for _, m := range supportedReleasesRE.FindAllStringSubmatch(tc.in, -1) {
+			if len(m) < 2 {
+				continue
+			}
+			for _, tok := range strings.Split(m[1], ",") {
+				if v, err := strconv.Atoi(strings.TrimSpace(tok)); err == nil && (min == 0 || v < min) {
+					min = v
+				}
+			}
+		}
+		if min != tc.want {
+			t.Errorf("supportedReleasesRE(%q) min = %d, want %d", tc.in, min, tc.want)
+		}
+	}
+}
+
+// writeFakeJavac writes an executable sh script that echoes the given help
+// text (probeMinSourceLevel invokes javac with -help).
+func writeFakeJavac(t *testing.T, helpText string) string {
+	t.Helper()
+	javaHome := t.TempDir()
+	binDir := filepath.Join(javaHome, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	javac := filepath.Join(binDir, "javac")
+	script := "#!/bin/sh\nprintf '%s' " + strconv.Quote(helpText) + "\n"
+	if err := os.WriteFile(javac, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return javac
 }
 
 // writeFile is a helper for test file creation.

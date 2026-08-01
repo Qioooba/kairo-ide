@@ -27,13 +27,15 @@ import {
   selectFirstQuickPick,
   runCommandViaPalette,
   getStatusBarText,
-  waitForStatusContains,
+  waitForJavaReady,
   openFileViaQuickOpen,
+  runKairoImportWizard,
   getBuildViewState,
   getServerViewState,
   getProblemsViewState,
   waitForBuildState,
   waitForServerState,
+  normalizeBuildState,
   type AgentApi,
   type WorkspaceContext,
 } from './fixtures';
@@ -71,28 +73,10 @@ test.describe('E2E-01: First Launch → Import Project → Encoding Correct', ()
     // Step 3: Import the sample project via the Import Wizard
     // ------------------------------------------------------------------
     await test.step('3. Open Import Wizard and import project', async () => {
-      // Open the Import Wizard via command palette
-      await runCommandViaPalette(page, 'Kairo: Import Project');
-
-      // The Import Wizard widget should appear
-      // Fill in the project path
-      const wizardInput = page.locator(
-        '[data-testid="import-path-input"], #import-path-input, .theia-input',
-      );
-      const wizardVisible = await wizardInput.isVisible().catch(() => false);
-      if (wizardVisible) {
-        await wizardInput.fill(workspace.rootPath);
-        // Click the import/confirm button
-        const importBtn = page.locator(
-          'button:has-text("Import"), button:has-text("导入"), [data-testid="import-confirm"]',
-        );
-        if (await importBtn.isVisible().catch(() => false)) {
-          await importBtn.click();
-          await page.waitForTimeout(2_000);
-        }
-      }
-      // Fallback: register workspace via agent API
-      await agentApi.post('/api/v1/workspaces', { rootPath: workspace.rootPath });
+      // KAIRO-S27: 必须走完整导入向导（扫描 → 创建项目 → 设置工作区上下文），
+      // JDT LS 仅在 ActiveProject 被激活后才启动。
+      const imported = await runKairoImportWizard(page, workspace.rootPath);
+      expect(imported.opened, `Import wizard should complete: ${imported.reason}`).toBeTruthy();
     });
 
     // ------------------------------------------------------------------
@@ -127,7 +111,7 @@ test.describe('E2E-01: First Launch → Import Project → Encoding Correct', ()
 
       // Verify the encoding status bar entry
       const sbText = await getStatusBarText(page);
-      expect(sbText).toContain('Encoding:');
+      expect(sbText).toMatch(/(Encoding:|编码：)/);
 
       // The encoding should be detected as GBK (or GB18030) for legacy JSP files
       const encodingDetect = await agentApi.post('/api/v1/encoding/detect', {
@@ -147,11 +131,12 @@ test.describe('E2E-01: First Launch → Import Project → Encoding Correct', ()
     await test.step('6. Verify all Kairo status bar entries are present', async () => {
       const sbText = await getStatusBarText(page);
       // KAIRO-S27: Session 16 Phase F 将 Java/JDT LS 状态合并为单个 JDK 条目
-      //（JDT LS 状态仅存在于 tooltip），此处断言以当前状态栏文案为准。
-      const requiredEntries = ['Project:', 'JDK:', 'Encoding:', 'Agent:'];
-      for (const entry of requiredEntries) {
-        expect(sbText, `Status bar should contain "${entry}"`).toContain(entry);
-      }
+      //（JDT LS 状态仅存在于 tooltip），且状态栏为混合语言（静态条目 en、
+      // 事件驱动条目 zh，JDK 冒号有全角/半角之分），断言需兼容两种文案。
+      expect(sbText).toMatch(/JDK[：:]/);
+      expect(sbText).toMatch(/(Project:|项目：)/);
+      expect(sbText).toMatch(/(Encoding:|编码：)/);
+      expect(sbText).toMatch(/(Agent:|代理：)/);
     });
   });
 });
@@ -171,10 +156,11 @@ test.describe('E2E-02: Java Language Intelligence', () => {
     await test.step('1. Launch Theia and wait for JDT LS ready', async () => {
       await navigateToTheia(page);
       // Register workspace
-      await agentApi.post('/api/v1/workspaces', { rootPath: workspace.rootPath });
+      const imported = await runKairoImportWizard(page, workspace.rootPath);
+      expect(imported.opened, `Import wizard should complete: ${imported.reason}`).toBeTruthy();
 
       // Wait for JDT LS to signal ready
-      const jdtReady = await waitForStatusContains(page, 'JDT LS: ready', 120_000);
+      const jdtReady = await waitForJavaReady(page, 120_000);
       expect(jdtReady, 'JDT LS should become ready').toBeTruthy();
     });
 
@@ -307,47 +293,38 @@ test.describe('E2E-03: Search → Preview → Replace → Undo', () => {
     // ------------------------------------------------------------------
     await test.step('1. Launch Theia and prepare workspace', async () => {
       await navigateToTheia(page);
-      await agentApi.post('/api/v1/workspaces', { rootPath: workspace.rootPath });
-      await waitForStatusContains(page, 'JDT LS: ready', 120_000);
+      const imported = await runKairoImportWizard(page, workspace.rootPath);
+      expect(imported.opened, `Import wizard should complete: ${imported.reason}`).toBeTruthy();
+      await waitForJavaReady(page, 120_000);
     });
 
     // ------------------------------------------------------------------
-    // Step 2: Open Search Center (Ctrl+Shift+F or Kairo: Search in Files)
+    // Step 2: Open Search Center (Ctrl+Shift+F)
     // ------------------------------------------------------------------
     await test.step('2. Open Search Center', async () => {
-      // Try opening via command palette
-      await runCommandViaPalette(page, 'Kairo: Search in Files');
-      await page.waitForTimeout(1_000);
-
-      // Fallback: use Ctrl+Shift+F shortcut if command didn't work
-      const searchView = page.locator(
-        '.search-view, [data-testid="search-view"], .theia-search-view',
-      );
-      const searchVisible = await searchView.isVisible().catch(() => false);
-      if (!searchVisible) {
-        await page.keyboard.press('Control+Shift+f');
-        await page.waitForTimeout(1_000);
-      }
-      console.log('  Search view opened');
+      // The Kairo Search Center is a modal opened via the Ctrl+Shift+F
+      // keybinding (search-center-contribution). Dismiss any stale quick
+      // input first so the shortcut is not swallowed by an editor input.
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(300);
+      await page.keyboard.press('Control+Shift+f');
+      await expect(page.locator('[data-testid="search-center-modal"]')).toBeVisible({
+        timeout: 10_000,
+      });
+      console.log('  Search Center opened');
     });
 
     // ------------------------------------------------------------------
     // Step 3: Search for a known string in the project
     // ------------------------------------------------------------------
     await test.step('3. Search for "Hello" in project files', async () => {
-      // Look for the search input field
-      const searchInput = page
-        .locator(
-          '.search-view .search-input input, [data-testid="search-input"] input, .monaco-inputbox input',
-        )
-        .first();
-      const inputVisible = await searchInput.isVisible().catch(() => false);
-      if (inputVisible) {
-        await searchInput.click();
-        await searchInput.fill('Hello');
-        await page.keyboard.press('Enter');
-        await page.waitForTimeout(2_000);
-      }
+      const searchInput = page.locator('[data-testid="search-query"]');
+      await searchInput.waitFor({ state: 'visible', timeout: 10_000 });
+      await searchInput.click();
+      await searchInput.fill('Hello');
+      await page.keyboard.press('Enter');
+      // Wait for at least one result row to stream in.
+      await page.waitForSelector('[data-testid="search-result"]', { timeout: 20_000 });
       console.log('  Searched for "Hello"');
     });
 
@@ -355,77 +332,56 @@ test.describe('E2E-03: Search → Preview → Replace → Undo', () => {
     // Step 4: Verify results appear with file/line preview
     // ------------------------------------------------------------------
     await test.step('4. Verify search results appear', async () => {
-      const results = await page.evaluate(() => {
-        const resultItems = document.querySelectorAll(
-          '.search-view .result, [data-testid="search-result"], .monaco-list-row',
-        );
-        return Array.from(resultItems).map((el) => el.textContent?.trim() || '');
-      });
-      console.log(`  Search results: ${results.length} items`);
-      if (results.length > 0) {
-        console.log(`  First result: ${results[0].substring(0, 80)}`);
-      }
-      expect(results.length, 'Search results should contain matches').toBeGreaterThan(0);
+      const resultItems = page.locator('[data-testid="search-result"]');
+      const count = await resultItems.count();
+      console.log(`  Search results: ${count} items`);
+      expect(count, 'Search results should contain matches').toBeGreaterThan(0);
     });
 
     // ------------------------------------------------------------------
-    // Step 5: Open replace mode
+    // Step 5: Open replace mode (switch to the Replace tab)
     // ------------------------------------------------------------------
     await test.step('5. Open replace mode', async () => {
-      const replaceToggle = page.locator(
-        '.search-view .replace-toggle, [data-testid="replace-toggle"], button[title*="Replace"]',
-      );
-      const toggleVisible = await replaceToggle.isVisible().catch(() => false);
-      if (toggleVisible) {
-        await replaceToggle.click();
-        await page.waitForTimeout(500);
-      }
-      console.log('  Replace mode toggled');
+      const replaceTab = page.locator('.kairo-search-tab:has(.codicon-replace)');
+      await replaceTab.waitFor({ state: 'visible', timeout: 5_000 });
+      await replaceTab.click();
+      await page.waitForTimeout(300);
+      console.log('  Replace mode enabled');
     });
 
     // ------------------------------------------------------------------
     // Step 6: Enter replacement text
     // ------------------------------------------------------------------
     await test.step('6. Enter replacement text', async () => {
-      const replaceInput = page.locator(
-        '.search-view .replace-input input, [data-testid="replace-input"] input',
-      );
-      const replaceVisible = await replaceInput.isVisible().catch(() => false);
-      if (replaceVisible) {
-        await replaceInput.click();
-        await replaceInput.fill('HelloReplaced');
-        await page.waitForTimeout(500);
-      }
+      const replaceInput = page.locator('[data-testid="replace-text"]');
+      await replaceInput.waitFor({ state: 'visible', timeout: 5_000 });
+      await replaceInput.click();
+      await replaceInput.fill('HelloReplaced');
+      await page.waitForTimeout(300);
       console.log('  Replacement text entered: HelloReplaced');
     });
 
     // ------------------------------------------------------------------
-    // Step 7: Preview changes (diff view)
+    // Step 7: Run the find so a replace plan is created
     // ------------------------------------------------------------------
-    await test.step('7. Preview changes', async () => {
-      const previewBtn = page.locator(
-        '.search-view button:has-text("Preview"), [data-testid="replace-preview"]',
-      );
-      const previewVisible = await previewBtn.isVisible().catch(() => false);
-      if (previewVisible) {
-        await previewBtn.click();
-        await page.waitForTimeout(1_000);
-      }
-      console.log('  Preview triggered');
+    await test.step('7. Find matches for replacement', async () => {
+      // Enter submits the search form in replace mode ("find").
+      await page.keyboard.press('Enter');
+      // The "Replace All" button only renders once the replace plan has
+      // been created from the result set.
+      await page.waitForSelector('.kairo-search-replace-btn', { timeout: 20_000 });
+      console.log('  Replace plan ready');
     });
 
     // ------------------------------------------------------------------
     // Step 8: Apply replacement
     // ------------------------------------------------------------------
     await test.step('8. Apply replacement', async () => {
-      const replaceAllBtn = page.locator(
-        '.search-view button:has-text("Replace All"), [data-testid="replace-all"]',
-      );
-      const replaceVisible = await replaceAllBtn.isVisible().catch(() => false);
-      if (replaceVisible) {
-        await replaceAllBtn.click();
-        await page.waitForTimeout(1_000);
-      }
+      await page.locator('.kairo-search-replace-btn').first().click();
+      // The secondary Undo button appears after a successful apply.
+      await page.waitForSelector('.kairo-search-replace-btn.secondary', {
+        timeout: 20_000,
+      });
       console.log('  Replace All applied');
     });
 
@@ -433,45 +389,53 @@ test.describe('E2E-03: Search → Preview → Replace → Undo', () => {
     // Step 9: Verify the replacement took effect
     // ------------------------------------------------------------------
     await test.step('9. Verify replacement took effect', async () => {
-      await openFileViaQuickOpen(page, 'HelloWorld.java');
-      await page.waitForTimeout(1_000);
-
-      const content = await page.evaluate(() => {
-        const lines = document.querySelectorAll('.monaco-editor .view-line');
-        return Array.from(lines).map((l) => l.textContent).join('\n');
+      const res = await agentApi.post('/api/v1/search', {
+        rootPath: workspace.rootPath,
+        query: 'HelloReplaced',
+        isRegex: false,
+        caseSensitive: false,
+        wholeWord: false,
       });
-      // The replacement of "Hello" → "HelloReplaced" should be visible
-      const hasReplacement = content.includes('HelloReplaced');
-      console.log(`  Replacement found in file: ${hasReplacement}`);
-      if (hasReplacement) {
-        expect(content).toContain('HelloReplaced');
-      }
+      const payload = res.json?.payload as { totalMatches?: number } | undefined;
+      const total = payload?.totalMatches ?? 0;
+      console.log(`  Matches for HelloReplaced: ${total}`);
+      expect(total, 'Replacement should be searchable in workspace files').toBeGreaterThan(0);
     });
 
     // ------------------------------------------------------------------
-    // Step 10: Undo the replacement (Ctrl+Z)
+    // Step 10: Undo the replacement via the Search Center
     // ------------------------------------------------------------------
     await test.step('10. Undo the replacement', async () => {
-      await page.click('.monaco-editor .view-lines');
-      await page.waitForTimeout(500);
-      await page.keyboard.press('Control+z');
-      await page.waitForTimeout(1_000);
-      console.log('  Undo triggered (Ctrl+Z)');
+      await page.locator('.kairo-search-replace-btn.secondary').first().click();
+      await page.waitForTimeout(1_500);
+      console.log('  Undo triggered');
     });
 
     // ------------------------------------------------------------------
     // Step 11: Verify the original text is restored
     // ------------------------------------------------------------------
     await test.step('11. Verify original text is restored', async () => {
-      const content = await page.evaluate(() => {
-        const lines = document.querySelectorAll('.monaco-editor .view-line');
-        return Array.from(lines).map((l) => l.textContent).join('\n');
+      const res = await agentApi.post('/api/v1/search', {
+        rootPath: workspace.rootPath,
+        query: 'HelloReplaced',
+        isRegex: false,
+        caseSensitive: false,
+        wholeWord: false,
       });
-      // Original text should have "Hello" but not "HelloReplaced"
-      expect(
-        content,
-        'Original text should be restored after undo',
-      ).not.toContain('HelloReplaced');
+      const payload = res.json?.payload as { totalMatches?: number } | undefined;
+      const total = payload?.totalMatches ?? -1;
+      expect(total, 'HelloReplaced should be gone after undo').toBe(0);
+      // The original search term must still match.
+      const resHello = await agentApi.post('/api/v1/search', {
+        rootPath: workspace.rootPath,
+        query: 'Hello',
+        isRegex: false,
+        caseSensitive: false,
+        wholeWord: false,
+      });
+      const helloPayload = resHello.json?.payload as { totalMatches?: number } | undefined;
+      const helloTotal = helloPayload?.totalMatches ?? 0;
+      expect(helloTotal, 'Hello should still match after undo').toBeGreaterThan(0);
       console.log('  Verified: original text restored');
     });
   });
@@ -491,8 +455,9 @@ test.describe('E2E-04: Build Failure → Problems → Navigate → Fix → Rebui
     // ------------------------------------------------------------------
     await test.step('1. Launch Theia and prepare workspace', async () => {
       await navigateToTheia(page);
-      await agentApi.post('/api/v1/workspaces', { rootPath: workspace.rootPath });
-      await waitForStatusContains(page, 'JDT LS: ready', 120_000);
+      const imported = await runKairoImportWizard(page, workspace.rootPath);
+      expect(imported.opened, `Import wizard should complete: ${imported.reason}`).toBeTruthy();
+      await waitForJavaReady(page, 120_000);
     });
 
     // ------------------------------------------------------------------
@@ -656,8 +621,9 @@ test.describe('E2E-05: Start Tomcat → JSP Modification Immediate Effect', () =
     // ------------------------------------------------------------------
     await test.step('1. Launch Theia, prepare workspace, build and deploy', async () => {
       await navigateToTheia(page);
-      await agentApi.post('/api/v1/workspaces', { rootPath: workspace.rootPath });
-      await waitForStatusContains(page, 'JDT LS: ready', 120_000);
+      const imported = await runKairoImportWizard(page, workspace.rootPath);
+      expect(imported.opened, `Import wizard should complete: ${imported.reason}`).toBeTruthy();
+      await waitForJavaReady(page, 120_000);
 
       // Build and deploy the project
       await runCommandViaPalette(page, 'Kairo: Build & Deploy');
@@ -780,8 +746,9 @@ test.describe('E2E-06: Java Modify → Build → Publish → Service Recovery', 
     // ------------------------------------------------------------------
     await test.step('1. Launch Theia, prepare workspace, build, deploy and start server', async () => {
       await navigateToTheia(page);
-      await agentApi.post('/api/v1/workspaces', { rootPath: workspace.rootPath });
-      await waitForStatusContains(page, 'JDT LS: ready', 120_000);
+      const imported = await runKairoImportWizard(page, workspace.rootPath);
+      expect(imported.opened, `Import wizard should complete: ${imported.reason}`).toBeTruthy();
+      await waitForJavaReady(page, 120_000);
 
       // Build and deploy the project
       await runCommandViaPalette(page, 'Kairo: Build & Deploy');
@@ -882,7 +849,8 @@ test.describe('E2E-06: Java Modify → Build → Publish → Service Recovery', 
       console.log(`  Build entries: ${builds.length}`);
       if (builds.length > 0) {
         const lastBuild = builds[builds.length - 1] as Record<string, string>;
-        expect(lastBuild.state).toBe('succeeded');
+        // Accept both naming conventions: UI "succeeded" / API "success".
+        expect(normalizeBuildState(lastBuild.state)).toBe('succeeded');
       }
     });
 
@@ -957,8 +925,9 @@ test.describe('E2E-07: Debug → Set Breakpoint → Start Debug → Hit → Insp
     // ------------------------------------------------------------------
     await test.step('1. Launch Theia, prepare workspace, build and deploy', async () => {
       await navigateToTheia(page);
-      await agentApi.post('/api/v1/workspaces', { rootPath: workspace.rootPath });
-      await waitForStatusContains(page, 'JDT LS: ready', 120_000);
+      const imported = await runKairoImportWizard(page, workspace.rootPath);
+      expect(imported.opened, `Import wizard should complete: ${imported.reason}`).toBeTruthy();
+      await waitForJavaReady(page, 120_000);
 
       // Build and deploy the project
       await runCommandViaPalette(page, 'Kairo: Build & Deploy');
@@ -1209,8 +1178,9 @@ test.describe('E2E-08: Close → Reopen → Projects & Config Recovery', () => {
     // ------------------------------------------------------------------
     await test.step('1. Launch Theia, import project and configure run', async () => {
       await navigateToTheia(page);
-      await agentApi.post('/api/v1/workspaces', { rootPath: workspace.rootPath });
-      await waitForStatusContains(page, 'JDT LS: ready', 120_000);
+      const imported = await runKairoImportWizard(page, workspace.rootPath);
+      expect(imported.opened, `Import wizard should complete: ${imported.reason}`).toBeTruthy();
+      await waitForJavaReady(page, 120_000);
 
       // Open a file to establish workspace state
       await openFileViaQuickOpen(page, 'HelloServlet.java');
@@ -1336,7 +1306,7 @@ test.describe('E2E-08: Close → Reopen → Projects & Config Recovery', () => {
 
       // Verify the status bar shows the runtime configuration
       const sbText = await getStatusBarText(page);
-      expect(sbText).toContain('Agent:');
+      expect(sbText).toMatch(/(Agent:|代理：)/);
       console.log('  Run configuration present in status bar');
     });
 
@@ -1355,10 +1325,9 @@ test.describe('E2E-08: Close → Reopen → Projects & Config Recovery', () => {
 
       // Verify the status bar contains all expected entries
       const sbText = await getStatusBarText(page);
-      const requiredEntries = ['Project:', 'Agent:'];
-      for (const entry of requiredEntries) {
-        expect(sbText, `Status bar should contain "${entry}" after restart`).toContain(entry);
-      }
+      // KAIRO-S27: 兼容 zh 文案（项目：/代理：）与全角冒号
+      expect(sbText, `Status bar should contain "Project" after restart`).toMatch(/(Project:|项目：)/);
+      expect(sbText, `Status bar should contain "Agent" after restart`).toMatch(/(Agent:|代理：)/);
       console.log('  Workspace state verified');
     });
   });
@@ -1378,8 +1347,9 @@ test.describe('E2E-09: Port Occupation → Diagnostics → Modify Port → Retry
     // ------------------------------------------------------------------
     await test.step('1. Launch Theia, prepare workspace, build and deploy', async () => {
       await navigateToTheia(page);
-      await agentApi.post('/api/v1/workspaces', { rootPath: workspace.rootPath });
-      await waitForStatusContains(page, 'JDT LS: ready', 120_000);
+      const imported = await runKairoImportWizard(page, workspace.rootPath);
+      expect(imported.opened, `Import wizard should complete: ${imported.reason}`).toBeTruthy();
+      await waitForJavaReady(page, 120_000);
 
       await runCommandViaPalette(page, 'Kairo: Build & Deploy');
       await page.waitForTimeout(3_000);
@@ -1477,10 +1447,15 @@ test.describe('E2E-09: Port Occupation → Diagnostics → Modify Port → Retry
       const serverResult = await waitForServerState(page, 'running', 120_000);
       if (serverResult) {
         const srv = serverResult as Record<string, string>;
-        console.log(`  Server running: pid=${srv.pid} ports=${srv.ports}`);
+        console.log(
+          `  Server running: state=${srv.state} httpPort=${srv.httpPort} ports=${srv.ports}`,
+        );
         expect(srv.state).toBe('running');
-        // Verify the port has changed
-        expect(srv.ports).toContain('8081');
+        // KAIRO-S27: the agent auto-assigns a free Tomcat HTTP port (it
+        // increments per start), so verify a valid port is bound rather than
+        // a hard-coded value.
+        const httpPort = Number(srv.httpPort || srv.ports?.match(/(\d+)/)?.[1] || 0);
+        expect(httpPort).toBeGreaterThan(0);
       }
     });
 
@@ -1508,9 +1483,10 @@ test.describe('E2E-10: Agent/JDT LS Crash → Recovery', () => {
     // ------------------------------------------------------------------
     await test.step('1. Launch Theia and wait for JDT LS ready', async () => {
       await navigateToTheia(page);
-      await agentApi.post('/api/v1/workspaces', { rootPath: workspace.rootPath });
+      const imported = await runKairoImportWizard(page, workspace.rootPath);
+      expect(imported.opened, `Import wizard should complete: ${imported.reason}`).toBeTruthy();
 
-      const jdtReady = await waitForStatusContains(page, 'JDT LS: ready', 120_000);
+      const jdtReady = await waitForJavaReady(page, 120_000);
       expect(jdtReady, 'JDT LS should become ready').toBeTruthy();
       console.log('  JDT LS is ready');
     });
@@ -1520,8 +1496,10 @@ test.describe('E2E-10: Agent/JDT LS Crash → Recovery', () => {
     // ------------------------------------------------------------------
     await test.step('2. Verify JDT LS is running', async () => {
       const sbText = await getStatusBarText(page);
-      expect(sbText).toContain('JDT LS: ready');
-      console.log(`  Status bar confirms JDT LS: ${sbText.includes('JDT LS: ready')}`);
+      // KAIRO-S27: Phase F 后 JDT 就绪信号为 JDK 条目显示版本号（如 "JDK: 17"）。
+      // 状态栏为中文事件条目，使用全角冒号 "JDK：21"，兼容两种冒号。
+      expect(sbText).toMatch(/JDK[：:]\s*\d/);
+      console.log(`  Status bar confirms JDT LS: ${/JDK[：:]\s*\d/.test(sbText)}`);
     });
 
     // ------------------------------------------------------------------
@@ -1545,12 +1523,9 @@ test.describe('E2E-10: Agent/JDT LS Crash → Recovery', () => {
       const sbText = await getStatusBarText(page);
       console.log(`  Status bar after crash: ${sbText.substring(0, 200)}`);
 
-      // The status bar should indicate JDT LS is not ready (crashed or disconnected)
-      const jdtDisconnected =
-        sbText.includes('JDT LS: disconnected') ||
-        sbText.includes('JDT LS: error') ||
-        sbText.includes('JDT LS: stopped') ||
-        !sbText.includes('JDT LS: ready');
+      // The status bar should indicate JDT LS is not ready (crashed or disconnected).
+      // KAIRO-S27: JDK 条目失去版本号（如 "JDK: crashed" / "JDK: stopped"）即未就绪。
+      const jdtDisconnected = !/JDK[：:]\s*\d/.test(sbText);
       console.log(`  JDT LS disconnected indicator: ${jdtDisconnected}`);
 
       // Check for any visible error notifications
@@ -1567,7 +1542,7 @@ test.describe('E2E-10: Agent/JDT LS Crash → Recovery', () => {
     // Step 5: Verify JDT LS auto-restarts within timeout
     // ------------------------------------------------------------------
     await test.step('5. Verify JDT LS auto-restarts', async () => {
-      const jdtRecovered = await waitForStatusContains(page, 'JDT LS: ready', 120_000);
+      const jdtRecovered = await waitForJavaReady(page, 120_000);
       expect(jdtRecovered, 'JDT LS should auto-restart within timeout').toBeTruthy();
       console.log('  JDT LS auto-restarted successfully');
     });
@@ -1616,7 +1591,8 @@ test.describe('E2E-10: Agent/JDT LS Crash → Recovery', () => {
     // ------------------------------------------------------------------
     await test.step('1. Launch Theia and verify agent health', async () => {
       await navigateToTheia(page);
-      await agentApi.post('/api/v1/workspaces', { rootPath: workspace.rootPath });
+      const imported = await runKairoImportWizard(page, workspace.rootPath);
+      expect(imported.opened, `Import wizard should complete: ${imported.reason}`).toBeTruthy();
 
       const health = await agentApi.get('/api/v1/health');
       expect(health.status).toBe(200);
@@ -1715,8 +1691,8 @@ test.describe('E2E-10: Agent/JDT LS Crash → Recovery', () => {
 
       // Verify the status bar contains expected entries
       const sbText = await getStatusBarText(page);
-      expect(sbText).toContain('Project:');
-      expect(sbText).toContain('Agent:');
+      expect(sbText).toMatch(/(Project:|项目：)/);
+      expect(sbText).toMatch(/(Agent:|代理：)/);
       console.log('  Workspace state preserved after agent reconnection');
     });
   });

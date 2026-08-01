@@ -28,7 +28,8 @@ import {
 } from './fixtures';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import * as os from 'node:os';
+// Use CJS require so setup-tmp.cjs's monkey-patch of os.tmpdir() is visible.
+const os = require('node:os') as typeof import('node:os');
 
 // Detect if running on Windows
 const isWindows = process.platform === 'win32';

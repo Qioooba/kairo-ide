@@ -155,6 +155,25 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
     return () => window.removeEventListener('keydown', handleGlobalKeyDown, true);
   }, [onClose]);
 
+  // Build the replace plan from the current result set. The plan powers the
+  // "Replace All" button; without it the button never appears and the replace
+  // workflow is a dead end. Rebuild it whenever a new search completes or the
+  // replacement text changes, and drop it when matches are cleared.
+  React.useEffect(() => {
+    if (currentMode !== 'replace' || !onCreateReplacePlan || !replacement.trim() || state.matches.length === 0) {
+      setReplacePlan(undefined);
+      return;
+    }
+    let cancelled = false;
+    onCreateReplacePlan(state.matches, replacement.trim())
+      .then(plan => { if (!cancelled) setReplacePlan(plan); })
+      .catch(() => { if (!cancelled) setReplacePlan(undefined); });
+    return () => { cancelled = true; };
+    // state.matches is bound to state.requestId; the request id + status are
+    // the stable keys for "a new result set arrived".
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentMode, state.requestId, state.status, replacement, onCreateReplacePlan]);
+
   const toggleFileCollapse = (file: string): void => {
     setCollapsedFiles(prev => {
       const next = new Set(prev);
@@ -268,6 +287,13 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
         toggleFileCollapse(item.file);
       }
     } else if (event.key === 'Enter' && !event.defaultPrevented) {
+      // When an input inside the form has focus (search query / replace
+      // text / file mask), Enter must submit the form — the default action
+      // — not be swallowed by the results-list navigation handler below.
+      const target = event.target as HTMLElement | null;
+      if (target?.closest('input, select, textarea')) {
+        return;
+      }
       event.preventDefault();
       const item = flatItems[selectedIndex];
       if (item?.kind === 'match' && item.match) {

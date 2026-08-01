@@ -315,7 +315,23 @@ func (b *asyncBuildEngine) List() []*api.BuildResult {
 	for _, bs := range b.finished {
 		items = append(items, cloneBuildResult(bs))
 	}
+	// Deterministic chronological order (oldest first, newest last): the
+	// frontend's getLatestBuild() and the E2E fixtures both treat the LAST
+	// array element as the most recent build. Go map iteration order is
+	// random, so sort explicitly instead of leaking map order to clients.
+	sort.Slice(items, func(i, j int) bool {
+		return buildStartedAt(items[i].StartedAt).Before(buildStartedAt(items[j].StartedAt))
+	})
 	return items
+}
+
+// buildStartedAt parses a BuildResult StartedAt (RFC3339Nano). Unparsable
+// values sort first so they can never shadow real build history.
+func buildStartedAt(s string) time.Time {
+	if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
+		return t
+	}
+	return time.Time{}
 }
 
 // Cancel is idempotent. Cancelling a terminal build returns its unchanged

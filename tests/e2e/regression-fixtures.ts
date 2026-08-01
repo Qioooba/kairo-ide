@@ -9,7 +9,8 @@ require('../setup-tmp.cjs'); // KAIRO_TMP override
 import { test as base, expect, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
-import * as os from 'node:os';
+// Use CJS require so setup-tmp.cjs's monkey-patch of os.tmpdir() is visible.
+const os = require('node:os') as typeof import('node:os');
 
 const THEIA_BASE = process.env.THEIA_URL || 'http://127.0.0.1:3050';
 const AGENT_PORT = process.env.AGENT_PORT || '18180';
@@ -183,12 +184,21 @@ export async function waitForBuildState(
   targetState: string,
   timeoutMs = 120_000,
 ): Promise<unknown | null> {
+  // The build view reports the UI convention ("succeeded") while the
+  // agent API reports the external convention ("success"). Normalize
+  // both sides so either source satisfies the wait.
+  const normalize = (state: string): string => {
+    if (state === 'succeeded' || state === 'success') return 'succeeded';
+    if (state === 'failed' || state === 'failure') return 'failed';
+    return state;
+  };
+  const want = normalize(targetState);
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     const builds = await getBuildViewState(page);
     if (builds && builds.length > 0) {
       const last = builds[builds.length - 1] as Record<string, string>;
-      if (last.state === targetState) return last;
+      if (normalize(last.state) === want) return { ...last, state: want };
     }
     await page.waitForTimeout(1_000);
   }
@@ -214,8 +224,15 @@ export async function waitForServerState(
 }
 
 export async function waitForJavaReady(page: Page, timeoutMs = 180_000): Promise<boolean> {
-  const result = await waitForStatusContains(page, 'JDT LS: ready', timeoutMs);
-  return result !== null;
+  // Session 16 Phase F: Java/JDT LS 状态合并为单个 JDK 条目（JDT LS 状态仅存于 tooltip）。
+  // 就绪信号 = JDK 条目显示具体版本（如 "JDK: 17"），启动/占位态为状态词或 "-"。
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const t = await getStatusBarText(page);
+    if (/JDK[：:]\s*\d/.test(t)) return true;
+    await page.waitForTimeout(500);
+  }
+  return false;
 }
 
 export async function agentApi(
