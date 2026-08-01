@@ -2,6 +2,7 @@
 // Key fixes: cached EditorManager, AMD array require, content verification, more P0 tests
 const fs = require('fs');
 const path = require('path');
+require('../../tests/setup-tmp.cjs'); // KAIRO_TMP override
 const os = require('os');
 const { _electron: electron } = require('playwright');
 

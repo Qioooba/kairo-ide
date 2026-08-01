@@ -152,6 +152,16 @@ async function flush() {
   }
 }
 
+async function waitFor(predicate, timeoutMs = 3000) {
+  const start = Date.now();
+  while (!predicate()) {
+    if (Date.now() - start > timeoutMs) {
+      throw new Error('waitFor timeout: predicate never became true');
+    }
+    await new Promise(resolve => setImmediate(resolve));
+  }
+}
+
 const DESCRIPTOR = {
   command: '/jre17/bin/java',
   args: [
@@ -301,8 +311,9 @@ test('switching project stops the old ready process before starting the new root
 
   mocks.listeners.project({ workspaceId: 'ws1', projectId: 'p1' });
   await flush();
+  await waitFor(() => mocks.calls.some(c => c.kind === 'start'));
   mocks.listeners.project({ workspaceId: 'ws1', projectId: 'p2' });
-  await flush();
+  await waitFor(() => mocks.calls.filter(c => c.kind === 'start').length === 2);
 
   assert.deepEqual(
     mocks.calls.filter(c => c.kind === 'start' || c.kind === 'stop').map(c => c.kind),
@@ -342,12 +353,18 @@ test('overlapping project switches serialize stop and only start the latest proj
 
   mocks.listeners.project({ workspaceId: 'ws1', projectId: 'p1' });
   await flush();
+  // p1's descriptor fetch and client.start are async; wait deterministically
+  // until the first start landed so that `state` is 'ready' before p2 fires.
+  await waitFor(() => mocks.calls.some(c => c.kind === 'start'));
   mocks.listeners.project({ workspaceId: 'ws1', projectId: 'p2' });
-  await flush();
+  // `delay(0)` uses setTimeout with a ~1ms timer; a bounded setImmediate
+  // flush can finish before it fires, so wait for the stop call itself.
+  await waitFor(() => mocks.calls.filter(c => c.kind === 'stop').length === 1);
   assert.equal(mocks.calls.filter(c => c.kind === 'stop').length, 1, 'p2 transition must be waiting for stop');
   mocks.listeners.project({ workspaceId: 'ws1', projectId: 'p3' });
   await flush();
   releaseStop();
+  await waitFor(() => mocks.calls.filter(c => c.kind === 'start').length === 2);
   await flush();
 
   const starts = mocks.calls.filter(c => c.kind === 'start');

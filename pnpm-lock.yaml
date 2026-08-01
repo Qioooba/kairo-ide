@@ -245,6 +245,9 @@ importers:
 
   packages/git-extension:
     dependencies:
+      '@kairo/i18n':
+        specifier: workspace:*
+        version: link:../i18n
       '@theia/core':
         specifier: 1.73.1
         version: 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react-dom@18.3.5(@types/react@18.3.1))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
@@ -280,6 +283,9 @@ importers:
 
   packages/java-extension:
     dependencies:
+      '@kairo/i18n':
+        specifier: workspace:*
+        version: link:../i18n
       '@kairo/project-extension':
         specifier: workspace:*
         version: link:../project-extension
@@ -382,6 +388,9 @@ importers:
       '@kairo/config-schema':
         specifier: workspace:*
         version: link:../config-schema
+      '@kairo/i18n':
+        specifier: workspace:*
+        version: link:../i18n
       '@kairo/protocol':
         specifier: workspace:*
         version: link:../protocol
@@ -422,6 +431,9 @@ importers:
 
   packages/remote-extension:
     dependencies:
+      '@kairo/i18n':
+        specifier: workspace:*
+        version: link:../i18n
       '@kairo/protocol':
         specifier: workspace:*
         version: link:../protocol
@@ -466,6 +478,9 @@ importers:
 
   packages/search-extension:
     dependencies:
+      '@kairo/i18n':
+        specifier: workspace:*
+        version: link:../i18n
       '@kairo/java-extension':
         specifier: workspace:*
         version: link:../java-extension
@@ -491,6 +506,9 @@ importers:
 
   packages/sql-extension:
     dependencies:
+      '@kairo/i18n':
+        specifier: workspace:*
+        version: link:../i18n
       '@theia/core':
         specifier: ^1.58.0
         version: 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react-dom@18.3.5(@types/react@18.3.1))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
@@ -507,6 +525,9 @@ importers:
 
   packages/svn-extension:
     dependencies:
+      '@kairo/i18n':
+        specifier: workspace:*
+        version: link:../i18n
       '@theia/core':
         specifier: 1.73.1
         version: 1.73.1(@theia/electron@1.73.1(electron@39.8.7))(@types/react-dom@18.3.5(@types/react@18.3.1))(@types/react@18.3.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
@@ -535,6 +556,9 @@ importers:
 
   packages/test-extension:
     dependencies:
+      '@kairo/i18n':
+        specifier: workspace:*
+        version: link:../i18n
       '@kairo/project-extension':
         specifier: workspace:*
         version: link:../project-extension

@@ -15,6 +15,7 @@
     "test": "node --test src/browser/remote-exports.test.cjs src/browser/remote-sandbox.test.cjs src/browser/remote-connection-service.test.cjs src/browser/remote-panel-widget.test.cjs"
   },
   "dependencies": {
+    "@kairo/i18n": "workspace:*",
     "@kairo/protocol": "workspace:*",
     "@kairo/runtime-extension": "workspace:*"
   },

@@ -16,6 +16,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
 const path = require('node:path');
+require('../../../../tests/setup-tmp.cjs'); // KAIRO_TMP override
 const os = require('node:os');
 const fs = require('node:fs');
 const net = require('node:net');

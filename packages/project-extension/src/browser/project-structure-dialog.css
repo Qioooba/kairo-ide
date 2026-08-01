@@ -58,6 +58,23 @@
   padding: 16px 20px;
 }
 
+.kairo-ps-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+}
+
+.kairo-ps-loading-message {
+  text-align: center;
+  opacity: 0.7;
+}
+
+.kairo-ps-loading-icon {
+  font-size: 24px;
+  margin-bottom: 8px;
+}
+
 .kairo-ps-section-title {
   font-size: 15px;
   font-weight: 600;
@@ -95,6 +112,10 @@
   font-size: 12px;
   color: var(--theia-descriptionForeground);
   margin: -4px 0 12px 160px;
+}
+
+.kairo-ps-hint.kairo-ps-hint-flush {
+  margin: -8px 0 12px 0;
 }
 
 .kairo-ps-section-sep {
@@ -145,6 +166,14 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.kairo-ps-list-item-icon {
+  font-size: 14px;
+}
+
+.kairo-ps-btn-icon {
+  margin-right: 4px;
 }
 
 .kairo-ps-badge {

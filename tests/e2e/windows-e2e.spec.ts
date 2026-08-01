@@ -15,6 +15,7 @@
  *   2. Run `pnpm dev:browser` in another terminal
  *   3. Run: npx playwright test --config tests/e2e/playwright.config.ts tests/e2e/windows-e2e.spec.ts
  */
+require('../setup-tmp.cjs'); // KAIRO_TMP override
 import { test, expect } from './fixtures';
 import {
   navigateToTheia,

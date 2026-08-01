@@ -1,8 +1,9 @@
 import * as React from 'react';
-import { inject, injectable } from '@theia/core/shared/inversify';
+import { inject, injectable, postConstruct } from '@theia/core/shared/inversify';
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import URI from '@theia/core/lib/common/uri';
 import { EditorManager } from '@theia/editor/lib/browser/editor-manager';
+import { KairoI18nService } from '@kairo/i18n';
 import type {
   LSPCallHierarchyItem,
   LSPTypeHierarchyItem,
@@ -28,41 +29,55 @@ interface HierarchyWidgetState {
   rootItem: HierarchyTreeItem | null;
   loading: boolean;
   error: string | null;
-  title: string;
+  titleKey: string;
+  titleParams?: { symbolName?: string };
 }
 
 export interface HierarchyWidgetProps {
   state: HierarchyWidgetState;
   onToggleExpand: (item: HierarchyTreeItem) => void;
   onNavigate: (item: HierarchyTreeItem) => void;
+  i18n: KairoI18nService;
 }
 
-const HierarchyItemComponent: React.FC<{
+interface HierarchyItemComponentProps {
   item: HierarchyTreeItem;
   onToggleExpand: (item: HierarchyTreeItem) => void;
   onNavigate: (item: HierarchyTreeItem) => void;
-}> = ({ item, onToggleExpand, onNavigate }) => {
+  i18n: KairoI18nService;
+}
+
+const HierarchyItemComponent: React.FC<HierarchyItemComponentProps> = ({ item, onToggleExpand, onNavigate, i18n }) => {
+  const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
   const hasChildren = item.children.length > 0 || !item.loaded;
-  const paddingLeft = item.depth * 16 + 8;
 
   return (
     <div>
       <div
-        className="kairo-hierarchy-item"
-        style={{ paddingLeft: `${paddingLeft}px`, cursor: 'pointer', display: 'flex', alignItems: 'center', height: '24px', userSelect: 'none' }}
+        className="kairo-java-hierarchy-item"
+        style={{ ['--kairo-java-hierarchy-depth' as any]: item.depth }}
         onClick={() => onNavigate(item)}
+        role="button"
+        tabIndex={0}
+        onKeyDown={e => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onNavigate(item);
+          }
+        }}
       >
         <span
-          style={{ width: '16px', flexShrink: 0, textAlign: 'center', cursor: 'pointer' }}
+          className="kairo-java-hierarchy-toggle codicon"
           onClick={(e) => { e.stopPropagation(); onToggleExpand(item); }}
+          role="button"
+          tabIndex={-1}
+          aria-hidden={!hasChildren}
         >
-          {hasChildren ? (item.expanded ? '▾' : '▸') : ' '}
+          {hasChildren ? (item.expanded ? <span className="codicon codicon-chevron-down" aria-hidden="true" /> : <span className="codicon codicon-chevron-right" aria-hidden="true" />) : null}
         </span>
-        <span className="codicon codicon-symbol-method" style={{ marginRight: '4px', flexShrink: 0 }} />
-        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {item.label}
-          {item.detail ? <span style={{ color: 'var(--theia-descriptionForeground)', marginLeft: '8px' }}>{item.detail}</span> : null}
-        </span>
+        <span className="codicon codicon-symbol-method kairo-java-hierarchy-icon" aria-hidden="true" />
+        <span className="kairo-java-hierarchy-label">{item.label}</span>
+        {item.detail ? <span className="kairo-java-hierarchy-detail">{item.detail}</span> : null}
       </div>
       {item.expanded && item.children.length > 0 && (
         <div>
@@ -72,55 +87,66 @@ const HierarchyItemComponent: React.FC<{
               item={child}
               onToggleExpand={onToggleExpand}
               onNavigate={onNavigate}
+              i18n={i18n}
             />
           ))}
         </div>
       )}
       {item.expanded && !item.loaded && (
-        <div style={{ paddingLeft: `${paddingLeft + 16}px`, color: 'var(--theia-descriptionForeground)', fontSize: '12px', height: '20px' }}>
-          Loading…
+        <div className="kairo-java-hierarchy-loading-children" style={{ ['--kairo-java-hierarchy-depth' as any]: item.depth }}>
+          <span className="codicon codicon-sync codicon-modifier-spin" aria-hidden="true" />
+          {' '}{t('widget.java.hierarchy.loadingChildren')}
         </div>
       )}
     </div>
   );
 };
 
-export const HierarchyWidgetComponent: React.FC<HierarchyWidgetProps> = ({ state, onToggleExpand, onNavigate }) => {
+export const HierarchyWidgetComponent: React.FC<HierarchyWidgetProps> = ({ state, onToggleExpand, onNavigate, i18n }) => {
+  const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
+
   if (state.loading) {
     return (
-      <div className="kairo-hierarchy-container" style={{ padding: '16px' }}>
-        <div className="kairo-hierarchy-loading">Loading hierarchy…</div>
+      <div className="kairo-widget-body kairo-loading kairo-java-hierarchy-loading">
+        <span className="kairo-spinner" aria-hidden="true" />
+        <span>{t('widget.java.hierarchy.loading')}</span>
       </div>
     );
   }
 
   if (state.error) {
     return (
-      <div className="kairo-hierarchy-container" style={{ padding: '16px' }}>
-        <div className="kairo-hierarchy-error" style={{ color: 'var(--theia-errorForeground)' }}>{state.error}</div>
+      <div className="kairo-widget-body kairo-java-hierarchy-error">
+        <div className="kairo-error-banner" role="alert">
+          <span className="codicon codicon-error" aria-hidden="true" />
+          <span>{state.error}</span>
+        </div>
       </div>
     );
   }
 
   if (!state.rootItem) {
     return (
-      <div className="kairo-hierarchy-container" style={{ padding: '16px' }}>
-        <div className="kairo-hierarchy-placeholder">
-          Place the cursor on a method or class and run <strong>Show Call Hierarchy</strong> or <strong>Show Type Hierarchy</strong> from the command palette.
+      <div className="kairo-widget-body kairo-empty-state kairo-java-hierarchy-empty">
+        <div className="kairo-empty-state-glyph">
+          <span className="codicon codicon-type-hierarchy" aria-hidden="true" />
         </div>
+        <p className="kairo-empty-state-title">{t('widget.java.hierarchy.empty.title')}</p>
+        <p className="kairo-empty-state-reason">{t('widget.java.hierarchy.empty.reason')}</p>
       </div>
     );
   }
 
   return (
-    <div className="kairo-hierarchy-container" style={{ padding: '4px 0', overflow: 'auto', height: '100%' }}>
-      <div style={{ padding: '4px 8px', fontSize: '12px', color: 'var(--theia-descriptionForeground)', borderBottom: '1px solid var(--theia-sideBarSectionHeader-border)' }}>
-        {state.title}
+    <div className="kairo-widget-body kairo-java-hierarchy-container">
+      <div className="kairo-widget-header kairo-java-hierarchy-header">
+        <span className="kairo-widget-title">{t(state.titleKey, state.titleParams)}</span>
       </div>
       <HierarchyItemComponent
         item={state.rootItem}
         onToggleExpand={onToggleExpand}
         onNavigate={onNavigate}
+        i18n={i18n}
       />
     </div>
   );
@@ -136,22 +162,41 @@ export class JavaHierarchyWidget extends ReactWidget {
   @inject(EditorManager)
   protected readonly editorManager!: EditorManager;
 
+  @inject(KairoI18nService)
+  protected readonly i18n!: KairoI18nService;
+
   protected widgetState: HierarchyWidgetState = {
     mode: 'call-incoming',
     rootItem: null,
     loading: false,
     error: null,
-    title: 'Call Hierarchy',
+    titleKey: 'widget.java.hierarchy.title',
   };
 
   constructor() {
     super();
     this.id = JavaHierarchyWidget.ID;
-    this.title.label = 'Java Hierarchy';
-    this.title.caption = 'Java Call / Type Hierarchy';
     this.title.iconClass = 'codicon codicon-type-hierarchy';
     this.title.closable = true;
-    this.addClass('kairo-hierarchy-widget');
+    this.addClass('kairo-widget kairo-java-hierarchy-widget');
+  }
+
+  @postConstruct()
+  protected init(): void {
+    this.updateTitle();
+    this.toDispose.push(this.i18n.onDidChangeLanguage(() => {
+      this.updateTitle();
+      this.update();
+    }));
+  }
+
+  protected t(key: string, params?: Record<string, string | number>): string {
+    return this.i18n.t(key as any, params);
+  }
+
+  protected updateTitle(): void {
+    this.title.label = this.t(this.widgetState.titleKey, this.widgetState.titleParams);
+    this.title.caption = this.t('widget.java.hierarchy.caption');
   }
 
   /**
@@ -164,8 +209,9 @@ export class JavaHierarchyWidget extends ReactWidget {
       rootItem: null,
       loading: true,
       error: null,
-      title: mode === 'call-incoming' ? 'Call Hierarchy — Incoming Calls' : 'Call Hierarchy — Outgoing Calls',
+      titleKey: mode === 'call-incoming' ? 'widget.java.hierarchy.title.callIncoming' : 'widget.java.hierarchy.title.callOutgoing',
     };
+    this.updateTitle();
     this.update();
 
     try {
@@ -174,7 +220,7 @@ export class JavaHierarchyWidget extends ReactWidget {
         this.widgetState = {
           ...this.widgetState,
           loading: false,
-          error: 'No call hierarchy information available at this position.',
+          error: this.t('widget.java.hierarchy.error.noCallHierarchy'),
         };
         this.update();
         return;
@@ -187,13 +233,15 @@ export class JavaHierarchyWidget extends ReactWidget {
         ...this.widgetState,
         rootItem: treeItem,
         loading: false,
+        titleParams: { symbolName: treeItem.label },
       };
+      this.updateTitle();
       this.update();
     } catch (err) {
       this.widgetState = {
         ...this.widgetState,
         loading: false,
-        error: `Failed to load call hierarchy: ${String(err)}`,
+        error: this.t('widget.java.hierarchy.error.loadCallHierarchy', { message: String(err) }),
       };
       this.update();
     }
@@ -209,8 +257,9 @@ export class JavaHierarchyWidget extends ReactWidget {
       rootItem: null,
       loading: true,
       error: null,
-      title: mode === 'type-supertypes' ? 'Type Hierarchy — Supertypes' : 'Type Hierarchy — Subtypes',
+      titleKey: mode === 'type-supertypes' ? 'widget.java.hierarchy.title.typeSupertypes' : 'widget.java.hierarchy.title.typeSubtypes',
     };
+    this.updateTitle();
     this.update();
 
     try {
@@ -219,7 +268,7 @@ export class JavaHierarchyWidget extends ReactWidget {
         this.widgetState = {
           ...this.widgetState,
           loading: false,
-          error: 'No type hierarchy information available at this position.',
+          error: this.t('widget.java.hierarchy.error.noTypeHierarchy'),
         };
         this.update();
         return;
@@ -232,13 +281,15 @@ export class JavaHierarchyWidget extends ReactWidget {
         ...this.widgetState,
         rootItem: treeItem,
         loading: false,
+        titleParams: { symbolName: treeItem.label },
       };
+      this.updateTitle();
       this.update();
     } catch (err) {
       this.widgetState = {
         ...this.widgetState,
         loading: false,
-        error: `Failed to load type hierarchy: ${String(err)}`,
+        error: this.t('widget.java.hierarchy.error.loadTypeHierarchy', { message: String(err) }),
       };
       this.update();
     }
@@ -308,7 +359,7 @@ export class JavaHierarchyWidget extends ReactWidget {
     } catch (err) {
       item.expanded = false;
       item.loaded = false;
-      this.widgetState.error = `Failed to expand: ${String(err)}`;
+      this.widgetState.error = this.t('widget.java.hierarchy.error.expand', { message: String(err) });
       this.update();
     }
   }
@@ -368,6 +419,7 @@ export class JavaHierarchyWidget extends ReactWidget {
         state={this.widgetState}
         onToggleExpand={item => this.toggleExpand(item)}
         onNavigate={item => this.navigateTo(item)}
+        i18n={this.i18n}
       />
     );
   }

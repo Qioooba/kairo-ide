@@ -1,9 +1,10 @@
 import * as React from 'react';
-import { inject, injectable, optional } from '@theia/core/shared/inversify';
+import { inject, injectable, postConstruct, optional } from '@theia/core/shared/inversify';
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import URI from '@theia/core/lib/common/uri';
 import { EditorManager } from '@theia/editor/lib/browser/editor-manager';
 import { WorkspaceService } from '@theia/workspace/lib/browser';
+import { KairoI18nService } from '@kairo/i18n';
 import type { LSPLocation } from '../common/lsp-protocol';
 import { JavaLanguageClient } from './java-language-client';
 import * as monaco from '@theia/monaco-editor-core';
@@ -32,118 +33,119 @@ interface ReferencesWidgetState {
   error: string | null;
 }
 
-const ReferencesGroupComponent: React.FC<{
+interface ReferencesGroupComponentProps {
   group: ReferenceGroup;
   onToggleExpand: () => void;
   onNavigate: (item: ReferenceItem) => void;
-}> = ({ group, onToggleExpand, onNavigate }) => {
+  i18n: KairoI18nService;
+}
+
+const ReferencesGroupComponent: React.FC<ReferencesGroupComponentProps> = ({ group, onToggleExpand, onNavigate, i18n }) => {
+  const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
+
   return (
-    <div>
+    <div className="kairo-java-references-group">
       <div
-        className="kairo-refs-group"
-        style={{
-          padding: '4px 8px',
-          cursor: 'pointer',
-          display: 'flex',
-          alignItems: 'center',
-          fontWeight: 500,
-          backgroundColor: 'var(--theia-list-hoverBackground)',
-          userSelect: 'none',
-        }}
+        className="kairo-java-references-group-header"
         onClick={onToggleExpand}
+        role="button"
+        tabIndex={0}
+        aria-expanded={group.expanded}
+        onKeyDown={e => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onToggleExpand();
+          }
+        }}
       >
-        <span style={{ width: '16px', flexShrink: 0, textAlign: 'center' }}>
-          {group.expanded ? '▾' : '▸'}
-        </span>
-        <span className="codicon codicon-file-code" style={{ marginRight: '4px', flexShrink: 0 }} />
-        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {group.fileName}
-        </span>
-        <span style={{ color: 'var(--theia-descriptionForeground)', marginLeft: '8px', fontSize: '12px' }}>
-          ({group.references.length})
-        </span>
-        <span style={{ color: 'var(--theia-descriptionForeground)', marginLeft: '8px', fontSize: '11px', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'right' }}>
-          {group.filePath}
-        </span>
+        <span className={`kairo-java-references-toggle codicon ${group.expanded ? 'codicon-chevron-down' : 'codicon-chevron-right'}`} aria-hidden="true" />
+        <span className="codicon codicon-file-code kairo-java-references-file-icon" aria-hidden="true" />
+        <span className="kairo-java-references-file-name">{group.fileName}</span>
+        <span className="kairo-java-references-count">({group.references.length})</span>
+        <span className="kairo-java-references-path">{group.filePath}</span>
       </div>
       {group.expanded && group.references.map((ref, idx) => (
         <div
           key={`${ref.uri}:${ref.line}:${idx}`}
-          className="kairo-refs-item"
-          style={{
-            padding: '2px 8px 2px 32px',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'flex-start',
-            fontSize: '12px',
-            lineHeight: '18px',
-          }}
+          className="kairo-java-references-item"
           onClick={() => onNavigate(ref)}
-          onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--theia-list-hoverBackground)'; }}
-          onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent'; }}
+          role="button"
+          tabIndex={0}
+          onKeyDown={e => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              onNavigate(ref);
+            }
+          }}
         >
-          <span style={{ color: 'var(--theia-descriptionForeground)', marginRight: '8px', flexShrink: 0, minWidth: '40px', textAlign: 'right' }}>
-            {ref.line + 1}
-          </span>
-          <code style={{
-            fontFamily: 'var(--theia-ui-font-monospace)',
-            whiteSpace: 'pre',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            flex: 1,
-          }}>
-            {ref.preview}
-          </code>
+          <span className="kairo-java-references-line">{ref.line + 1}</span>
+          <code className="kairo-java-references-preview">{ref.preview}</code>
         </div>
       ))}
     </div>
   );
 };
 
-const ReferencesWidgetComponent: React.FC<{
+interface ReferencesWidgetComponentProps {
   state: ReferencesWidgetState;
   onToggleGroup: (idx: number) => void;
   onNavigate: (item: ReferenceItem) => void;
-}> = ({ state, onToggleGroup, onNavigate }) => {
+  i18n: KairoI18nService;
+}
+
+const ReferencesWidgetComponent: React.FC<ReferencesWidgetComponentProps> = ({ state, onToggleGroup, onNavigate, i18n }) => {
+  const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
+
   if (state.loading) {
     return (
-      <div className="kairo-refs-container" style={{ padding: '16px' }}>
-        <div className="kairo-refs-loading">Finding usages...</div>
+      <div className="kairo-widget-body kairo-loading kairo-java-references-loading">
+        <span className="codicon codicon-sync codicon-modifier-spin kairo-loading-icon" aria-hidden="true" />
+        <span>{t('widget.java.references.loading')}</span>
       </div>
     );
   }
 
   if (state.error) {
     return (
-      <div className="kairo-refs-container" style={{ padding: '16px' }}>
-        <div className="kairo-refs-error" style={{ color: 'var(--theia-errorForeground)' }}>{state.error}</div>
+      <div className="kairo-widget-body kairo-java-references-error">
+        <div className="kairo-error-banner" role="alert">
+          <span className="codicon codicon-error" aria-hidden="true" />
+          <span>{state.error}</span>
+        </div>
       </div>
     );
   }
 
   if (state.groups.length === 0) {
     return (
-      <div className="kairo-refs-container" style={{ padding: '16px' }}>
-        <div className="kairo-refs-placeholder">
-          Place the cursor on a symbol and press <strong>Alt+F7</strong> to find usages.
+      <div className="kairo-widget-body kairo-empty-state kairo-java-references-empty">
+        <div className="kairo-empty-state-glyph">
+          <span className="codicon codicon-search" aria-hidden="true" />
         </div>
+        <p className="kairo-empty-state-title">{t('widget.java.references.empty.title')}</p>
+        <p className="kairo-empty-state-reason">{t('widget.java.references.empty.reason')}</p>
       </div>
     );
   }
 
+  const totalUsages = state.groups.reduce((acc, g) => acc + g.references.length, 0);
+
   return (
-    <div className="kairo-refs-container" style={{ padding: '4px 0', overflow: 'auto', height: '100%' }}>
-      <div style={{ padding: '4px 8px', fontSize: '12px', color: 'var(--theia-descriptionForeground)', borderBottom: '1px solid var(--theia-sideBarSectionHeader-border)' }}>
-        Found {state.groups.reduce((acc, g) => acc + g.references.length, 0)} usages of '{state.symbolName}'
+    <div className="kairo-widget-body kairo-java-references-container">
+      <div className="kairo-widget-header kairo-java-references-summary">
+        <span>{t('widget.java.references.resultSummary', { count: totalUsages, symbolName: state.symbolName })}</span>
       </div>
-      {state.groups.map((group, idx) => (
-        <ReferencesGroupComponent
-          key={group.uri}
-          group={group}
-          onToggleExpand={() => onToggleGroup(idx)}
-          onNavigate={onNavigate}
-        />
-      ))}
+      <div className="kairo-java-references-list">
+        {state.groups.map((group, idx) => (
+          <ReferencesGroupComponent
+            key={group.uri}
+            group={group}
+            onToggleExpand={() => onToggleGroup(idx)}
+            onNavigate={onNavigate}
+            i18n={i18n}
+          />
+        ))}
+      </div>
     </div>
   );
 };
@@ -162,6 +164,9 @@ export class JavaReferencesWidget extends ReactWidget {
   @optional()
   protected readonly workspaceService?: WorkspaceService;
 
+  @inject(KairoI18nService)
+  protected readonly i18n!: KairoI18nService;
+
   protected widgetState: ReferencesWidgetState = {
     symbolName: '',
     groups: [],
@@ -172,22 +177,39 @@ export class JavaReferencesWidget extends ReactWidget {
   constructor() {
     super();
     this.id = JavaReferencesWidget.ID;
-    this.title.label = 'Find Usages';
-    this.title.caption = 'Find Usages';
     this.title.iconClass = 'codicon codicon-search';
     this.title.closable = true;
-    this.addClass('kairo-references-widget');
+    this.addClass('kairo-widget kairo-java-references-widget');
+  }
+
+  @postConstruct()
+  protected init(): void {
+    this.updateTitle();
+    this.toDispose.push(this.i18n.onDidChangeLanguage(() => {
+      this.updateTitle();
+      this.update();
+    }));
+  }
+
+  protected t(key: string, params?: Record<string, string | number>): string {
+    return this.i18n.t(key as any, params);
+  }
+
+  protected updateTitle(): void {
+    this.title.label = this.widgetState.symbolName
+      ? this.t('widget.java.references.titleWithSymbol', { symbolName: this.widgetState.symbolName })
+      : this.t('widget.java.references.title');
   }
 
   async findUsages(uri: string, line: number, character: number, symbolName?: string): Promise<void> {
     this.widgetState = {
-      symbolName: symbolName ?? 'symbol',
+      symbolName: symbolName ?? '',
       groups: [],
       loading: true,
       error: null,
     };
+    this.updateTitle();
     this.update();
-    this.title.label = `Find Usages — ${symbolName ?? '...'}`;
 
     try {
       const references = await this.languageClient.references({ uri, line, character, includeDeclaration: true });
@@ -195,7 +217,7 @@ export class JavaReferencesWidget extends ReactWidget {
         this.widgetState = {
           ...this.widgetState,
           loading: false,
-          error: 'No usages found.',
+          error: this.t('widget.java.references.empty.noResults'),
         };
         this.update();
         return;
@@ -210,13 +232,13 @@ export class JavaReferencesWidget extends ReactWidget {
         loading: false,
         error: null,
       };
-      this.title.label = `Find Usages — ${name} (${references.length})`;
+      this.title.label = this.t('widget.java.references.titleWithCount', { name, count: references.length });
       this.update();
     } catch (err) {
       this.widgetState = {
         ...this.widgetState,
         loading: false,
-        error: `Failed to find usages: ${String(err)}`,
+        error: this.t('widget.java.references.error.fetchFailed', { message: String(err) }),
       };
       this.update();
     }
@@ -266,7 +288,7 @@ export class JavaReferencesWidget extends ReactWidget {
     } catch {
       // ignore
     }
-    return `// Line ${line + 1}`;
+    return this.t('widget.java.references.linePreview', { line: line + 1 });
   }
 
   protected extractSymbolName(uri: string, line: number, character: number): string {
@@ -281,7 +303,7 @@ export class JavaReferencesWidget extends ReactWidget {
     } catch {
       // ignore
     }
-    return 'symbol';
+    return this.t('widget.java.references.fallbackSymbol');
   }
 
   protected toggleGroup(idx: number): void {
@@ -306,6 +328,7 @@ export class JavaReferencesWidget extends ReactWidget {
         state={this.widgetState}
         onToggleGroup={idx => this.toggleGroup(idx)}
         onNavigate={item => this.navigateTo(item)}
+        i18n={this.i18n}
       />
     );
   }

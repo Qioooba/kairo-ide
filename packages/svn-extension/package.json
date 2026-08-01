@@ -11,6 +11,9 @@
     "lint": "tsc -p tsconfig.json --noEmit",
     "test": "node --test src/browser/svn-parser.test.cjs src/browser/svn-detector.test.cjs"
   },
+  "dependencies": {
+    "@kairo/i18n": "workspace:*"
+  },
   "peerDependencies": {
     "@theia/core": "1.73.1",
     "@theia/editor": "1.73.1",

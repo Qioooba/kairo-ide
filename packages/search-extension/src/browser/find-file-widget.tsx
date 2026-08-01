@@ -1,9 +1,10 @@
 import * as React from 'react';
-import { inject, injectable } from '@theia/core/shared/inversify';
+import { inject, injectable, postConstruct } from '@theia/core/shared/inversify';
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import type { Message } from '@theia/core/shared/@lumino/messaging';
 import URI from '@theia/core/lib/common/uri';
 import { EditorManager } from '@theia/editor/lib/browser/editor-manager';
+import { KairoI18nService } from '@kairo/i18n';
 import { FindFileModel, type FindFileItem, type FindFileState } from './find-file-model';
 import { VirtualList } from '@kairo/ui-kit';
 
@@ -14,9 +15,11 @@ export interface FindFileProps {
   state: FindFileState;
   onOpen: (item: FindFileItem) => Promise<unknown>;
   onClose: () => void;
+  i18n: KairoI18nService;
 }
 
-export const FindFileComponent: React.FC<FindFileProps> = ({ model, state, onOpen, onClose }) => {
+export const FindFileComponent: React.FC<FindFileProps> = ({ model, state, onOpen, onClose, i18n }) => {
+  const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
   const [query, setQuery] = React.useState(state.query);
   const [selectedIndex, setSelectedIndex] = React.useState(0);
   const [openError, setOpenError] = React.useState<Error | undefined>();
@@ -84,17 +87,17 @@ export const FindFileComponent: React.FC<FindFileProps> = ({ model, state, onOpe
 
   const renderStatus = (): React.ReactNode => {
     if (openError) {
-      return <div className="kairo-find-status is-error" role="alert">{openError.message}</div>;
+      return <div className="kairo-find-status kairo-error-banner" role="alert">{openError.message}</div>;
     }
     switch (state.status) {
       case 'loading':
-        return <div className="kairo-find-status" role="status">搜索中…</div>;
+        return <div className="kairo-find-status kairo-empty-state" role="status">{t('widget.search.findFile.status.loading')}</div>;
       case 'idle':
-        return <div className="kairo-find-status">输入文件名进行搜索，最近打开的文件将显示在这里</div>;
+        return <div className="kairo-find-status kairo-empty-state">{t('widget.search.findFile.status.idle')}</div>;
       case 'empty':
-        return <div className="kairo-find-status">未找到匹配的文件</div>;
+        return <div className="kairo-find-status kairo-empty-state">{t('widget.search.findFile.status.empty')}</div>;
       case 'error':
-        return <div className="kairo-find-status is-error" role="alert">{state.error?.message ?? '搜索失败'}</div>;
+        return <div className="kairo-find-status kairo-error-banner" role="alert">{state.error?.message ?? t('widget.search.findFile.status.unknownError')}</div>;
       case 'results':
         return undefined;
     }
@@ -109,7 +112,7 @@ export const FindFileComponent: React.FC<FindFileProps> = ({ model, state, onOpe
         onClick={event => event.stopPropagation()}
         role="dialog"
         aria-modal="true"
-        aria-label="查找文件"
+        aria-label={t('widget.search.findFile.title')}
         data-testid="find-file"
       >
         <div className="kairo-find-header">
@@ -118,8 +121,8 @@ export const FindFileComponent: React.FC<FindFileProps> = ({ model, state, onOpe
             className="theia-input kairo-find-input"
             value={query}
             onChange={event => setQuery(event.target.value)}
-            placeholder="输入文件名搜索 (e.g. UserController.java)"
-            aria-label="文件名搜索"
+            placeholder={t('widget.search.findFile.placeholder')}
+            aria-label={t('widget.search.findFile.ariaLabel.query')}
             data-testid="find-file-query"
           />
         </div>
@@ -131,7 +134,7 @@ export const FindFileComponent: React.FC<FindFileProps> = ({ model, state, onOpe
             selectedIndex={selectedIndex}
             onSelectIndex={index => { setSelectedIndex(index); model.select(index); }}
             className="kairo-find-results"
-            ariaLabel="文件搜索结果"
+            ariaLabel={t('widget.search.findFile.ariaLabel.results')}
             testId="find-file-results"
             renderItem={(item, _index, isSelected) => (
               <button
@@ -139,12 +142,11 @@ export const FindFileComponent: React.FC<FindFileProps> = ({ model, state, onOpe
                 role="option"
                 aria-selected={isSelected}
                 className={`kairo-find-item${isSelected ? ' is-selected' : ''}`}
-                style={{ height: '100%', width: '100%', display: 'flex', alignItems: 'center', gap: '8px', padding: '0 12px' }}
                 onMouseEnter={() => { setSelectedIndex(_index); model.select(_index); }}
                 onClick={() => void openItem(item)}
                 data-testid="find-file-result"
               >
-                <span className="codicon codicon-file" aria-hidden="true" />
+                <span className="kairo-find-kind"><span className="codicon codicon-file" aria-hidden="true" /></span>
                 <span className="kairo-find-label">{item.label}</span>
                 <span className="kairo-find-detail">{item.detail}</span>
               </button>
@@ -168,6 +170,7 @@ export class FindFileWidget extends ReactWidget {
 
   @inject(FindFileModel) protected readonly model!: FindFileModel;
   @inject(EditorManager) protected readonly editors!: EditorManager;
+  @inject(KairoI18nService) protected readonly i18n!: KairoI18nService;
 
   protected state: FindFileState = { status: 'idle', query: '', items: [], selectedIndex: 0 };
   protected unsubscribe: (() => void) | undefined;
@@ -175,9 +178,22 @@ export class FindFileWidget extends ReactWidget {
   constructor() {
     super();
     this.id = FindFileWidget.ID;
-    this.title.label = '查找文件';
     this.title.closable = true;
     this.addClass('kairo-find-file-widget');
+  }
+
+  @postConstruct()
+  protected init(): void {
+    const t = (key: string, params?: Record<string, string | number>) => this.i18n.t(key as any, params);
+    const updateTitle = (): void => {
+      this.title.label = t('widget.search.findFile.title');
+      this.title.caption = t('widget.search.findFile.caption');
+    };
+    updateTitle();
+    this.toDispose.push(this.i18n.onDidChangeLanguage(() => {
+      updateTitle();
+      this.update();
+    }));
   }
 
   protected onAfterAttach(message: Message): void {
@@ -205,6 +221,7 @@ export class FindFileWidget extends ReactWidget {
         state={this.state}
         onOpen={item => this.open(item)}
         onClose={() => this.close()}
+        i18n={this.i18n}
       />
     );
   }

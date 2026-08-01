@@ -12,6 +12,7 @@ import * as React from 'react';
 import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import { ILogger } from '@theia/core/lib/common/logger';
+import { KairoI18nService } from '@kairo/i18n';
 import { MultiModuleDebugManager } from './java-multi-module-debug';
 import type { DebugSession } from './java-multi-module-debug';
 
@@ -65,9 +66,11 @@ export const KAIRO_MULTIMODULE_DEBUG_FACTORY_ID = 'kairo-multimodule-debug';
 interface MultiModuleDebugProps {
     debugManager: MultiModuleDebugManager;
     logger: ILogger;
+    i18n: KairoI18nService;
 }
 
-const MultiModuleDebugPanel: React.FC<MultiModuleDebugProps> = ({ debugManager, logger }) => {
+const MultiModuleDebugPanel: React.FC<MultiModuleDebugProps> = ({ debugManager, logger, i18n }) => {
+    const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
     const [state, setState] = React.useState<MultiModuleDebugState>({
         sessions: [],
         breakpoints: [],
@@ -153,104 +156,66 @@ const MultiModuleDebugPanel: React.FC<MultiModuleDebugProps> = ({ debugManager, 
         }));
     };
 
-    const tabStyle = (tab: string): React.CSSProperties => ({
-        padding: '6px 16px',
-        cursor: 'pointer',
-        borderBottom: activeTab === tab ? '2px solid var(--theia-focusBorder)' : '2px solid transparent',
-        color: activeTab === tab ? 'var(--theia-focusBorder)' : 'var(--theia-descriptionForeground)',
-        fontWeight: activeTab === tab ? 600 : 400,
-        fontSize: '12px',
-        background: 'none',
-        border: 'none',
-    });
-
-    const sessionStateColor = (s: string): string => {
-        switch (s) {
-            case 'running': return '#4caf50';
-            case 'suspended': return '#2196f3';
-            case 'connected': return '#ff9800';
-            case 'not_connected': return '#9e9e9e';
-            case 'terminated': return '#f44336';
-            default: return '#9e9e9e';
-        }
-    };
-
     // Loading state — skeleton placeholder
     if (state.loading) {
         return (
-            <div className="kairo-multimodule-debug" role="status" aria-label="Loading debug sessions" style={{ padding: '16px' }}>
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
-                    <div style={{
-                        width: '24px',
-                        height: '24px',
-                        border: '3px solid var(--theia-dropdown-border)',
-                        borderTopColor: 'var(--theia-focusBorder)',
-                        borderRadius: '50%',
-                        animation: 'kairo-spin 0.8s linear infinite',
-                    }} />
-                    <p style={{ color: 'var(--theia-descriptionForeground)', fontSize: '13px', margin: 0 }}>
-                        Loading debug sessions...
-                    </p>
-                    <div style={{ width: '80%', maxWidth: '300px' }}>
-                        {[0, 1, 2].map(i => (
-                            <div key={i} style={{
-                                height: '12px',
-                                backgroundColor: 'var(--theia-dropdown-border)',
-                                borderRadius: '3px',
-                                marginBottom: '8px',
-                                opacity: 0.5 - i * 0.15,
-                                width: `${90 - i * 15}%`,
-                            }} />
-                        ))}
+            <div className="kairo-widget kairo-debug-multimodule-widget" role="status" aria-label={t('widget.java.debugMultimodule.loadingAriaLabel')}>
+                <div className="kairo-widget-body kairo-loading kairo-debug-multimodule-loading">
+                    <span className="kairo-spinner kairo-debug-multimodule-spinner" aria-hidden="true" />
+                    <p className="kairo-debug-multimodule-loading-text">{t('widget.java.debugMultimodule.loading')}</p>
+                    <div className="kairo-debug-multimodule-skeleton">
+                        <div className="kairo-debug-multimodule-skeleton-line" />
+                        <div className="kairo-debug-multimodule-skeleton-line" />
+                        <div className="kairo-debug-multimodule-skeleton-line" />
                     </div>
                 </div>
-                <style>{`@keyframes kairo-spin { to { transform: rotate(360deg); } }`}</style>
             </div>
         );
     }
 
     // Error state — categorized by error type
     if (state.error) {
-        const isTimeout = state.error.toLowerCase().includes('timeout') || state.error.toLowerCase().includes('timed out');
-        const isDebugger = state.error.toLowerCase().includes('port') || state.error.toLowerCase().includes('attach') || state.error.toLowerCase().includes('debug');
-        const isModule = state.error.toLowerCase().includes('module') || state.error.toLowerCase().includes('project');
-        const errorIcon = isTimeout ? '⏱' : isDebugger ? '🐛' : isModule ? '📦' : '⚠';
-        const errorTitle = isTimeout ? 'Connection Timed Out' : isDebugger ? 'Debugger Error' : isModule ? 'Module Error' : 'Error loading debug data';
+        const errorLower = state.error.toLowerCase();
+        const isTimeout = errorLower.includes('timeout') || errorLower.includes('timed out');
+        const isDebugger = errorLower.includes('port') || errorLower.includes('attach') || errorLower.includes('debug');
+        const isModule = errorLower.includes('module') || errorLower.includes('project');
+        const errorIcon = isTimeout ? 'codicon-clock' : isDebugger ? 'codicon-bug' : isModule ? 'codicon-package' : 'codicon-warning';
+        const errorTitleKey = isTimeout
+            ? 'widget.java.debugMultimodule.error.timeoutTitle'
+            : isDebugger
+                ? 'widget.java.debugMultimodule.error.debuggerTitle'
+                : isModule
+                    ? 'widget.java.debugMultimodule.error.moduleTitle'
+                    : 'widget.java.debugMultimodule.error.genericTitle';
         return (
-            <div className="kairo-multimodule-debug" role="alert" aria-live="assertive" style={{ padding: '16px' }}>
-                <div style={{
-                    padding: '12px',
-                    backgroundColor: 'rgba(244,67,54,0.1)',
-                    border: '1px solid rgba(244,67,54,0.3)',
-                    borderRadius: '4px',
-                    color: 'var(--theia-errorForeground)',
-                    fontSize: '13px',
-                }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                        <span style={{ fontSize: '18px' }} aria-hidden="true">{errorIcon}</span>
-                        <strong>{errorTitle}</strong>
+            <div className="kairo-widget kairo-debug-multimodule-widget" role="alert" aria-live="assertive">
+                <div className="kairo-widget-body kairo-debug-multimodule-error">
+                    <div className="kairo-error-banner" role="alert">
+                        <span className={`codicon ${errorIcon}`} aria-hidden="true" />
+                        <div className="kairo-debug-multimodule-error-content">
+                            <strong>{t(errorTitleKey)}</strong>
+                            <p>{state.error}</p>
+                            <button
+                                className="theia-button kairo-debug-multimodule-retry"
+                                onClick={loadData}
+                                title={t('widget.java.debugMultimodule.retryTitle')}
+                                aria-label={t('widget.java.debugMultimodule.retryTitle')}
+                            >
+                                {t('widget.java.debugMultimodule.retry')}
+                            </button>
+                        </div>
                     </div>
-                    <p style={{ margin: '4px 0 0 0', fontSize: '12px' }}>{state.error}</p>
-                    <button
-                        className="theia-button"
-                        onClick={loadData}
-                        title="Retry loading debug data"
-                        aria-label="Retry loading debug data"
-                        style={{ marginTop: '8px', fontSize: '11px', padding: '2px 12px' }}
-                    >
-                        Retry
-                    </button>
                 </div>
             </div>
         );
     }
 
     const tabs = ['sessions', 'deps', 'breakpoints', 'events'] as const;
-    const tabLabels: Record<string, string> = {
-        sessions: 'Sessions',
-        deps: 'Dependencies',
-        breakpoints: 'Breakpoints',
-        events: 'Events',
+    const tabTitleKeys: Record<string, string> = {
+        sessions: 'widget.java.debugMultimodule.tabTitle.sessions',
+        deps: 'widget.java.debugMultimodule.tabTitle.dependencies',
+        breakpoints: 'widget.java.debugMultimodule.tabTitle.breakpoints',
+        events: 'widget.java.debugMultimodule.tabTitle.events',
     };
 
     const handleTabKeyDown = (e: React.KeyboardEvent, tab: string) => {
@@ -268,17 +233,17 @@ const MultiModuleDebugPanel: React.FC<MultiModuleDebugProps> = ({ debugManager, 
     };
 
     return (
-        <div className="kairo-multimodule-debug" role="region" aria-label="Multi-Module Debug" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+        <div className="kairo-widget kairo-debug-multimodule-widget" role="region" aria-label={t('widget.java.debugMultimodule.title')}>
             {/* Header */}
-            <div className="kairo-widget-header" style={{ padding: '8px 12px', borderBottom: '1px solid var(--theia-panel-border)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ fontWeight: 600, fontSize: '13px' }}>Multi-Module Debug</span>
-                <span style={{ fontSize: '11px', color: 'var(--theia-descriptionForeground)' }}>
-                    {state.sessions.length} session{state.sessions.length !== 1 ? 's' : ''}
+            <div className="kairo-widget-header kairo-debug-multimodule-header">
+                <span className="kairo-widget-title">{t('widget.java.debugMultimodule.title')}</span>
+                <span className="kairo-debug-multimodule-session-count">
+                    {t('widget.java.debugMultimodule.sessionCount', { count: state.sessions.length })}
                 </span>
             </div>
 
             {/* Tabs */}
-            <div role="tablist" aria-label="Debug panel sections" style={{ display: 'flex', borderBottom: '1px solid var(--theia-panel-border)', padding: '0 8px' }}>
+            <div className="kairo-debug-multimodule-tabs" role="tablist" aria-label={t('widget.java.debugMultimodule.tablistAriaLabel')}>
                 {tabs.map(tab => (
                     <button
                         key={tab}
@@ -286,37 +251,37 @@ const MultiModuleDebugPanel: React.FC<MultiModuleDebugProps> = ({ debugManager, 
                         aria-selected={activeTab === tab}
                         aria-controls={`kairo-debug-tabpanel-${tab}`}
                         id={`kairo-debug-tab-${tab}`}
-                        style={tabStyle(tab)}
+                        className={`kairo-debug-multimodule-tab ${activeTab === tab ? 'active' : ''}`}
                         onClick={() => setActiveTab(tab)}
                         onKeyDown={e => handleTabKeyDown(e, tab)}
                         tabIndex={activeTab === tab ? 0 : -1}
-                        title={`${tabLabels[tab]} (${tab === 'sessions' ? 'Active debug sessions' : tab === 'deps' ? 'Module dependency tree' : tab === 'breakpoints' ? 'Cross-module breakpoints' : 'Debug event log'})`}
+                        title={t(tabTitleKeys[tab])}
                     >
-                        {tabLabels[tab]}
+                        {t(`widget.java.debugMultimodule.tab.${tab}`)}
                     </button>
                 ))}
             </div>
 
             {/* Content */}
-            <div style={{ flex: 1, overflow: 'auto', padding: '12px' }}>
+            <div className="kairo-widget-body kairo-debug-multimodule-body">
                 {activeTab === 'sessions' && (
                     <div role="tabpanel" id="kairo-debug-tabpanel-sessions" aria-labelledby="kairo-debug-tab-sessions">
-                        <SessionsTab sessions={state.sessions} stateColor={sessionStateColor} />
+                        <SessionsTab sessions={state.sessions} i18n={i18n} />
                     </div>
                 )}
                 {activeTab === 'deps' && (
                     <div role="tabpanel" id="kairo-debug-tabpanel-deps" aria-labelledby="kairo-debug-tab-deps">
-                        <DependenciesTab moduleOrder={state.moduleOrder} />
+                        <DependenciesTab moduleOrder={state.moduleOrder} i18n={i18n} />
                     </div>
                 )}
                 {activeTab === 'breakpoints' && (
                     <div role="tabpanel" id="kairo-debug-tabpanel-breakpoints" aria-labelledby="kairo-debug-tab-breakpoints">
-                        <BreakpointsTab breakpoints={state.breakpoints} onToggle={handleToggleBreakpoint} />
+                        <BreakpointsTab breakpoints={state.breakpoints} onToggle={handleToggleBreakpoint} i18n={i18n} />
                     </div>
                 )}
                 {activeTab === 'events' && (
                     <div role="tabpanel" id="kairo-debug-tabpanel-events" aria-labelledby="kairo-debug-tab-events">
-                        <EventsTab events={state.events} />
+                        <EventsTab events={state.events} i18n={i18n} />
                     </div>
                 )}
             </div>
@@ -330,49 +295,45 @@ const MultiModuleDebugPanel: React.FC<MultiModuleDebugProps> = ({ debugManager, 
 
 interface SessionsTabProps {
     sessions: ModuleDebugSession[];
-    stateColor: (s: string) => string;
+    i18n: KairoI18nService;
 }
 
-const SessionsTab: React.FC<SessionsTabProps> = ({ sessions, stateColor }) => {
+const SessionsTab: React.FC<SessionsTabProps> = ({ sessions, i18n }) => {
+    const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
+
     if (sessions.length === 0) {
         return (
-            <div role="status" aria-label="No debug sessions" style={{ textAlign: 'center', padding: '20px', color: 'var(--theia-descriptionForeground)', fontSize: '13px' }}>
-                No debug sessions. Start a debug session to see it here.
+            <div className="kairo-empty-state kairo-debug-multimodule-empty" role="status" aria-label={t('widget.java.debugMultimodule.sessions.emptyAriaLabel')}>
+                <div className="kairo-empty-state-glyph">
+                    <span className="codicon codicon-debug-alt" aria-hidden="true" />
+                </div>
+                <p className="kairo-empty-state-title">{t('widget.java.debugMultimodule.sessions.emptyTitle')}</p>
+                <p className="kairo-empty-state-reason">{t('widget.java.debugMultimodule.sessions.emptyReason')}</p>
             </div>
         );
     }
 
     return (
-        <div role="list" aria-label="Debug session list">
+        <div className="kairo-debug-multimodule-session-list" role="list" aria-label={t('widget.java.debugMultimodule.sessions.listAriaLabel')}>
             {sessions.map(session => (
-                <div key={session.id} role="listitem" style={{
-                    marginBottom: '10px',
-                    padding: '10px 12px',
-                    backgroundColor: 'var(--theia-editor-background)',
-                    borderRadius: '4px',
-                    border: '1px solid var(--theia-dropdown-border)',
-                }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                        <span style={{ fontWeight: 600, fontSize: '13px' }}>{session.moduleName}</span>
-                        <span style={{
-                            display: 'inline-block',
-                            padding: '2px 8px',
-                            borderRadius: '3px',
-                            fontSize: '10px',
-                            fontWeight: 600,
-                            color: '#fff',
-                            backgroundColor: stateColor(session.state),
-                            textTransform: 'uppercase',
-                        }}
+                <div key={session.id} className={`kairo-debug-multimodule-session kairo-debug-multimodule-session-state-${session.state}`} role="listitem">
+                    <div className="kairo-debug-multimodule-session-header">
+                        <span className="kairo-debug-multimodule-session-name">{session.moduleName}</span>
+                        <span
+                            className={`kairo-debug-multimodule-state kairo-debug-multimodule-state-${session.state}`}
                             role="status"
-                            aria-label={`${session.moduleName} is ${session.state.replace('_', ' ')}`}
+                            aria-label={t('widget.java.debugMultimodule.session.stateAria', { moduleName: session.moduleName, state: t(`widget.java.debugMultimodule.state.${session.state}`) })}
                         >
-                            {session.state.replace('_', ' ')}
+                            {t(`widget.java.debugMultimodule.state.${session.state}`)}
                         </span>
                     </div>
-                    <div style={{ fontSize: '11px', color: 'var(--theia-descriptionForeground)' }}>
-                        <div title={`Host: ${session.hostname}:${session.port}`}>{session.hostname}:{session.port}</div>
-                        <div title={`Started: ${session.startedAt}`}>Started: {session.startedAt}</div>
+                    <div className="kairo-debug-multimodule-session-info">
+                        <div title={t('widget.java.debugMultimodule.session.hostTitle', { hostname: session.hostname, port: session.port })}>
+                            {session.hostname}:{session.port}
+                        </div>
+                        <div title={t('widget.java.debugMultimodule.session.startedTitle', { startedAt: session.startedAt })}>
+                            {t('widget.java.debugMultimodule.session.startedLabel', { startedAt: session.startedAt })}
+                        </div>
                     </div>
                 </div>
             ))}
@@ -382,37 +343,43 @@ const SessionsTab: React.FC<SessionsTabProps> = ({ sessions, stateColor }) => {
 
 interface DependenciesTabProps {
     moduleOrder: string[];
+    i18n: KairoI18nService;
 }
 
-const DependenciesTab: React.FC<DependenciesTabProps> = ({ moduleOrder }) => {
+const DependenciesTab: React.FC<DependenciesTabProps> = ({ moduleOrder, i18n }) => {
+    const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
+
     if (moduleOrder.length === 0) {
         return (
-            <div role="status" aria-label="No modules" style={{ textAlign: 'center', padding: '20px', color: 'var(--theia-descriptionForeground)', fontSize: '13px' }}>
-                No modules loaded. Module dependencies will appear here.
+            <div className="kairo-empty-state kairo-debug-multimodule-empty" role="status" aria-label={t('widget.java.debugMultimodule.dependencies.emptyAriaLabel')}>
+                <div className="kairo-empty-state-glyph">
+                    <span className="codicon codicon-package" aria-hidden="true" />
+                </div>
+                <p className="kairo-empty-state-title">{t('widget.java.debugMultimodule.dependencies.emptyTitle')}</p>
+                <p className="kairo-empty-state-reason">{t('widget.java.debugMultimodule.dependencies.emptyReason')}</p>
             </div>
         );
     }
 
     return (
-        <div role="group" aria-label="Module dependency tree">
-            <div style={{ fontWeight: 600, fontSize: '13px', marginBottom: '8px' }}>
-                Module Dependency Tree
+        <div className="kairo-debug-multimodule-dependencies" role="group" aria-label={t('widget.java.debugMultimodule.dependencies.treeAriaLabel')}>
+            <div className="kairo-widget-section-title kairo-debug-multimodule-dependencies-title">
+                {t('widget.java.debugMultimodule.dependencies.title')}
             </div>
-            <div style={{ fontSize: '12px' }} role="tree" aria-label="Module dependency tree">
+            <div className="kairo-debug-multimodule-deps-tree" role="tree" aria-label={t('widget.java.debugMultimodule.dependencies.treeAriaLabel')}>
                 {moduleOrder.map((mod, idx) => (
-                    <div key={mod} role="treeitem" aria-level={idx + 1} style={{
-                        padding: '6px 10px',
-                        paddingLeft: `${12 + idx * 20}px`,
-                        borderLeft: idx > 0 ? '2px solid var(--theia-dropdown-border)' : 'none',
-                        marginLeft: idx > 0 ? '8px' : '0',
-                        color: 'var(--theia-foreground)',
-                    }}
-                        title={`Module: ${mod}${idx < moduleOrder.length - 1 ? ' (depends on next)' : ''}`}
+                    <div
+                        key={mod}
+                        className="kairo-debug-multimodule-dep-node"
+                        role="treeitem"
+                        aria-level={idx + 1}
+                        style={{ ['--kairo-debug-multimodule-dep-depth' as any]: idx }}
+                        title={t('widget.java.debugMultimodule.dependencies.nodeTitle', { module: mod, relation: idx < moduleOrder.length - 1 ? t('widget.java.debugMultimodule.dependencies.dependsOn') : '' })}
                     >
-                        <span style={{ fontWeight: 500 }}>{mod}</span>
+                        <span className="kairo-debug-multimodule-dep-name">{mod}</span>
                         {idx < moduleOrder.length - 1 && (
-                            <span style={{ color: 'var(--theia-descriptionForeground)', fontSize: '10px', marginLeft: '8px' }}>
-                                depends on
+                            <span className="kairo-debug-multimodule-dep-relation">
+                                {t('widget.java.debugMultimodule.dependencies.dependsOn')}
                             </span>
                         )}
                     </div>
@@ -425,67 +392,64 @@ const DependenciesTab: React.FC<DependenciesTabProps> = ({ moduleOrder }) => {
 interface BreakpointsTabProps {
     breakpoints: CrossModuleBreakpoint[];
     onToggle: (id: number) => void;
+    i18n: KairoI18nService;
 }
 
-const BreakpointsTab: React.FC<BreakpointsTabProps> = ({ breakpoints, onToggle }) => {
+const BreakpointsTab: React.FC<BreakpointsTabProps> = ({ breakpoints, onToggle, i18n }) => {
+    const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
+
     if (breakpoints.length === 0) {
         return (
-            <div role="status" aria-label="No breakpoints" style={{ textAlign: 'center', padding: '20px', color: 'var(--theia-descriptionForeground)', fontSize: '13px' }}>
-                No breakpoints set. Set breakpoints in your code to see them here.
+            <div className="kairo-empty-state kairo-debug-multimodule-empty" role="status" aria-label={t('widget.java.debugMultimodule.breakpoints.emptyAriaLabel')}>
+                <div className="kairo-empty-state-glyph">
+                    <span className="codicon codicon-debug-breakpoint" aria-hidden="true" />
+                </div>
+                <p className="kairo-empty-state-title">{t('widget.java.debugMultimodule.breakpoints.emptyTitle')}</p>
+                <p className="kairo-empty-state-reason">{t('widget.java.debugMultimodule.breakpoints.emptyReason')}</p>
             </div>
         );
     }
 
     const enabledCount = breakpoints.filter(bp => bp.enabled).length;
     return (
-        <div role="list" aria-label={`Breakpoint list, ${enabledCount} of ${breakpoints.length} enabled`}>
-            <div style={{ fontSize: '11px', color: 'var(--theia-descriptionForeground)', marginBottom: '8px' }} aria-live="polite">
-                {enabledCount} of {breakpoints.length} enabled
+        <div className="kairo-debug-multimodule-breakpoint-list" role="list" aria-label={t('widget.java.debugMultimodule.breakpoints.listAriaLabel', { enabled: enabledCount, total: breakpoints.length })}>
+            <div className="kairo-debug-multimodule-breakpoint-summary" aria-live="polite">
+                {t('widget.java.debugMultimodule.breakpoints.summary', { enabled: enabledCount, total: breakpoints.length })}
             </div>
             {breakpoints.map(bp => (
-                <div key={bp.id} role="listitem" style={{
-                    padding: '6px 10px',
-                    borderBottom: '1px solid var(--theia-sideBarSectionHeader-border)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '8px',
-                    fontSize: '12px',
-                }}>
+                <div key={bp.id} className={`kairo-debug-multimodule-breakpoint ${bp.enabled ? '' : 'disabled'}`} role="listitem">
                     <input
                         type="checkbox"
                         checked={bp.enabled}
                         onChange={() => onToggle(bp.id)}
-                        title={bp.enabled ? `Disable breakpoint at ${bp.className}:${bp.lineNumber}` : `Enable breakpoint at ${bp.className}:${bp.lineNumber}`}
-                        aria-label={`${bp.enabled ? 'Disable' : 'Enable'} breakpoint at ${bp.moduleName}: ${bp.className}:${bp.lineNumber}`}
-                        style={{ cursor: 'pointer' }}
+                        title={bp.enabled
+                            ? t('widget.java.debugMultimodule.breakpoint.disableTitle', { className: bp.className, lineNumber: bp.lineNumber })
+                            : t('widget.java.debugMultimodule.breakpoint.enableTitle', { className: bp.className, lineNumber: bp.lineNumber })}
+                        aria-label={bp.enabled
+                            ? t('widget.java.debugMultimodule.breakpoint.disableAria', { moduleName: bp.moduleName, className: bp.className, lineNumber: bp.lineNumber })
+                            : t('widget.java.debugMultimodule.breakpoint.enableAria', { moduleName: bp.moduleName, className: bp.className, lineNumber: bp.lineNumber })}
                     />
-                    <span style={{
-                        color: bp.enabled ? 'var(--theia-foreground)' : 'var(--theia-descriptionForeground)',
-                        textDecoration: bp.enabled ? 'none' : 'line-through',
-                    }}
-                        title={`${bp.moduleName}: ${bp.className}:${bp.lineNumber}`}
+                    <span
+                        className="kairo-debug-multimodule-breakpoint-location"
+                        title={t('widget.java.debugMultimodule.breakpoint.locationTitle', { moduleName: bp.moduleName, className: bp.className, lineNumber: bp.lineNumber })}
                     >
                         {bp.moduleName}: {bp.className}:{bp.lineNumber}
                     </span>
                     {bp.isDeferred && (
-                        <span style={{
-                            fontSize: '10px',
-                            color: '#ff9800',
-                            backgroundColor: 'rgba(255,152,0,0.15)',
-                            padding: '1px 4px',
-                            borderRadius: '2px',
-                        }}
-                            title="This breakpoint is deferred — resolution pending"
-                            aria-label="Deferred breakpoint"
+                        <span
+                            className="kairo-debug-multimodule-breakpoint-deferred"
+                            title={t('widget.java.debugMultimodule.breakpoint.deferredTitle')}
+                            aria-label={t('widget.java.debugMultimodule.breakpoint.deferredAria')}
                         >
-                            deferred
+                            {t('widget.java.debugMultimodule.breakpoint.deferred')}
                         </span>
                     )}
                     {bp.resolvedClassNames.length > 0 && (
-                        <span style={{ fontSize: '10px', color: 'var(--theia-descriptionForeground)', marginLeft: 'auto' }}
-                            title={`Resolved to: ${bp.resolvedClassNames.join(', ')}`}
+                        <span
+                            className="kairo-debug-multimodule-breakpoint-resolved"
+                            title={t('widget.java.debugMultimodule.breakpoint.resolvedTitle', { classes: bp.resolvedClassNames.join(', ') })}
                         >
-                            → {bp.resolvedClassNames.join(', ')}
+                            {t('widget.java.debugMultimodule.breakpoint.resolved', { classes: bp.resolvedClassNames.join(', ') })}
                         </span>
                     )}
                 </div>
@@ -496,49 +460,51 @@ const BreakpointsTab: React.FC<BreakpointsTabProps> = ({ breakpoints, onToggle }
 
 interface EventsTabProps {
     events: DebugEvent[];
+    i18n: KairoI18nService;
 }
 
-const EventsTab: React.FC<EventsTabProps> = ({ events }) => {
+const EventsTab: React.FC<EventsTabProps> = ({ events, i18n }) => {
+    const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
+
     if (events.length === 0) {
         return (
-            <div role="status" aria-label="No events" style={{ textAlign: 'center', padding: '20px', color: 'var(--theia-descriptionForeground)', fontSize: '13px' }}>
-                No debug events recorded. Events will appear here during debugging.
+            <div className="kairo-empty-state kairo-debug-multimodule-empty" role="status" aria-label={t('widget.java.debugMultimodule.events.emptyAriaLabel')}>
+                <div className="kairo-empty-state-glyph">
+                    <span className="codicon codicon-output" aria-hidden="true" />
+                </div>
+                <p className="kairo-empty-state-title">{t('widget.java.debugMultimodule.events.emptyTitle')}</p>
+                <p className="kairo-empty-state-reason">{t('widget.java.debugMultimodule.events.emptyReason')}</p>
             </div>
         );
     }
 
     return (
-        <div role="log" aria-label="Debug event log" aria-live="polite">
+        <div className="kairo-debug-multimodule-event-list" role="log" aria-label={t('widget.java.debugMultimodule.events.listAriaLabel')} aria-live="polite">
             {events.map((event, idx) => (
-                <div key={`${event.timestamp}-${idx}`} style={{
-                    padding: '6px 10px',
-                    borderBottom: '1px solid var(--theia-sideBarSectionHeader-border)',
-                    fontSize: '12px',
-                }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span style={{
-                            display: 'inline-block',
-                            padding: '1px 6px',
-                            borderRadius: '3px',
-                            fontSize: '10px',
-                            fontWeight: 600,
-                            backgroundColor: 'var(--theia-badge-background)',
-                            color: 'var(--theia-badge-foreground)',
-                        }}
-                            title={`Event type: ${event.eventType}`}
+                <div key={`${event.timestamp}-${idx}`} className="kairo-debug-multimodule-event">
+                    <div className="kairo-debug-multimodule-event-header">
+                        <span
+                            className="kairo-debug-multimodule-event-type"
+                            title={t('widget.java.debugMultimodule.events.typeTitle', { eventType: event.eventType })}
                         >
                             {event.eventType}
                         </span>
-                        <span style={{ fontWeight: 500 }} title={`Module: ${event.moduleName}`}>{event.moduleName}</span>
+                        <span className="kairo-debug-multimodule-event-module" title={t('widget.java.debugMultimodule.events.moduleTitle', { moduleName: event.moduleName })}>
+                            {event.moduleName}
+                        </span>
                     </div>
                     {event.className && (
-                        <div style={{ color: 'var(--theia-descriptionForeground)', fontSize: '11px', marginTop: '2px' }}
-                            title={`Location: ${event.className}:${event.lineNumber}`}>
+                        <div
+                            className="kairo-debug-multimodule-event-location"
+                            title={t('widget.java.debugMultimodule.events.locationTitle', { className: event.className, lineNumber: event.lineNumber })}
+                        >
                             {event.className}:{event.lineNumber}
                         </div>
                     )}
-                    <div style={{ color: 'var(--theia-descriptionForeground)', fontSize: '10px', marginTop: '1px' }}
-                        title={`Timestamp: ${event.timestamp}`}>
+                    <div
+                        className="kairo-debug-multimodule-event-time"
+                        title={t('widget.java.debugMultimodule.events.timeTitle', { timestamp: event.timestamp })}
+                    >
                         {event.timestamp}
                     </div>
                 </div>
@@ -585,20 +551,33 @@ export class DebugMultiModuleWidget extends ReactWidget {
     @inject(ILogger)
     protected readonly logger!: ILogger;
 
+    @inject(KairoI18nService)
+    protected readonly i18n!: KairoI18nService;
+
     @postConstruct()
     protected init(): void {
         this.id = DebugMultiModuleWidget.ID;
-        this.title.label = DebugMultiModuleWidget.LABEL;
-        this.title.caption = 'Kairo Multi-Module Debug Panel';
         this.title.closable = true;
-        this.addClass('kairo-widget');
+        this.updateTitle();
+        this.toDispose.push(this.i18n.onDidChangeLanguage(() => this.updateTitle()));
+        this.addClass('kairo-widget kairo-debug-multimodule-widget');
         this.update();
+    }
+
+    protected t(key: string, params?: Record<string, string | number>): string {
+        return this.i18n.t(key as any, params);
+    }
+
+    protected updateTitle(): void {
+        this.title.label = this.t('widget.java.debugMultimodule.title');
+        this.title.caption = this.t('widget.java.debugMultimodule.caption');
     }
 
     protected render(): React.ReactNode {
         return React.createElement(MultiModuleDebugPanel, {
             debugManager: this.debugManager,
             logger: this.logger,
+            i18n: this.i18n,
         });
     }
 }

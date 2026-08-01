@@ -15,6 +15,7 @@ const { test, describe, afterEach } = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
+require('../setup-tmp.cjs'); // KAIRO_TMP override
 const os = require('node:os');
 const { execSync } = require('node:child_process');
 

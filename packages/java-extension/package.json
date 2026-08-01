@@ -12,9 +12,10 @@
     "build": "tsc -p tsconfig.json",
     "clean": "rm -rf lib",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "test": "node --test src/common/lsp-protocol.test.cjs src/node/jdt-ls-manager.test.cjs src/node/jdt-ls-semantic.test.cjs src/node/java-language-server-contribution.test.cjs src/browser/java-document-sync.test.cjs src/browser/java-hotswap-service.test.cjs src/browser/java-junit-runner.test.cjs src/browser/java-language-client-contribution.test.cjs src/browser/java-live-templates.test.cjs src/browser/java-ls-lifecycle.test.cjs src/browser/java-monaco-registration.test.cjs src/browser/java-refactoring.test.cjs src/browser/java-save-actions.test.cjs src/browser/java-semantic-provider.test.cjs src/browser/java-exports-extended.test.cjs src/browser/java-diagnostics-manager.test.cjs src/browser/java-hierarchy-contribution.test.cjs src/browser/java-intellisense-provider.test.cjs src/browser/java-completion-provider.test.cjs src/browser/java-language-client.test.cjs src/browser/debug-multimodule-widget.test.cjs"
+    "test": "node --test src/common/lsp-protocol.test.cjs src/node/jdt-ls-manager.test.cjs src/node/jdt-ls-semantic.test.cjs src/node/java-language-server-contribution.test.cjs src/browser/java-document-sync.test.cjs src/browser/java-hotswap-service.test.cjs src/browser/java-junit-runner.test.cjs src/browser/java-language-client-contribution.test.cjs src/browser/java-live-templates.test.cjs src/browser/java-ls-lifecycle.test.cjs src/browser/java-monaco-registration.test.cjs src/browser/java-refactoring.test.cjs src/browser/java-save-actions.test.cjs src/browser/java-semantic-provider.test.cjs src/browser/java-exports-extended.test.cjs src/browser/java-diagnostics-manager.test.cjs src/browser/java-hierarchy-contribution.test.cjs src/browser/java-intellisense-provider.test.cjs src/browser/java-completion-provider.test.cjs src/browser/java-language-client.test.cjs src/browser/debug-multimodule-widget.test.cjs src/browser/java-remote-debug-config.test.cjs"
   },
   "dependencies": {
+    "@kairo/i18n": "workspace:*",
     "@kairo/project-extension": "workspace:*",
     "@kairo/protocol": "workspace:*",
     "@kairo/runtime-extension": "workspace:*",

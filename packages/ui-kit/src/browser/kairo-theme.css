@@ -7736,6 +7736,30 @@ p.kairo-empty {
     padding: 4px 0;
 }
 
+.kairo-test-tree-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px 4px calc(4px + var(--kairo-test-tree-depth, 0) * 16px);
+    cursor: pointer;
+    user-select: none;
+    border-radius: 3px;
+    transition: background-color 100ms ease;
+}
+
+.kairo-test-tree-item:hover {
+    background: var(--kairo-hover-overlay);
+}
+
+.kairo-test-failure {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    padding: 6px 8px 6px calc(4px + var(--kairo-test-tree-depth, 0) * 16px);
+    color: var(--kairo-error);
+    font-size: 12px;
+}
+
 .kairo-test-class-group {
     border-bottom: 1px solid var(--kairo-border);
 }
@@ -7996,5 +8020,2611 @@ p.kairo-empty {
     font-weight: 700;
     color: var(--kairo-text);
 }
+
+/* === Phase O extension widget styles === */
+
+/* --- Shared Phase O primitives --- */
+.kairo-section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 8px 12px;
+    background: var(--kairo-bg-secondary);
+    border-bottom: 1px solid var(--kairo-border);
+}
+
+.kairo-warning-button {
+    background: var(--kairo-warning);
+    color: #1e1f22;
+}
+
+.kairo-warning-button:hover {
+    background: var(--kairo-warning);
+    filter: brightness(1.1);
+}
+
+/* --- Build extension --- */
+.kairo-custom-build {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+.kairo-custom-build-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--kairo-border);
+}
+
+.kairo-custom-build-input {
+    flex: 1;
+    min-width: 0;
+}
+
+.kairo-custom-build-output {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    font-family: var(--theia-ui-font-family, sans-serif);
+    font-size: 12px;
+    line-height: 1.5;
+    padding: 8px 12px;
+}
+
+.kairo-build-log-line {
+    padding: 1px 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.kairo-build-log-line.error,
+.kairo-build-log-line.stderr {
+    color: var(--kairo-error);
+}
+
+.kairo-build-log-line.warn,
+.kairo-build-log-line.warning {
+    color: var(--kairo-warning);
+}
+
+.kairo-build-log-line.info {
+    color: var(--kairo-info);
+}
+
+.kairo-build-log-line.success {
+    color: var(--kairo-success);
+}
+
+.kairo-custom-build-result {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-radius: 4px;
+    margin: 8px 12px;
+}
+
+.kairo-custom-build-result-success {
+    background: color-mix(in srgb, var(--kairo-success) 12%, transparent);
+    color: var(--kairo-success);
+    border: 1px solid var(--kairo-success);
+}
+
+.kairo-custom-build-result-failed {
+    background: color-mix(in srgb, var(--kairo-error) 12%, transparent);
+    color: var(--kairo-error);
+    border: 1px solid var(--kairo-error);
+}
+
+.kairo-build-state-icon {
+    margin-right: 6px;
+}
+
+/* --- Git extension --- */
+.kairo-git-file-list,
+.kairo-svn-file-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.kairo-git-file-item,
+.kairo-svn-file-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 8px;
+    border-radius: 3px;
+    cursor: pointer;
+}
+
+.kairo-git-file-item:hover,
+.kairo-svn-file-item:hover {
+    background: var(--kairo-hover-overlay);
+}
+
+.kairo-git-file-selected,
+.kairo-svn-file-selected {
+    background: color-mix(in srgb, var(--kairo-primary) 14%, transparent);
+}
+
+.kairo-git-file-checkbox,
+.kairo-svn-file-checkbox {
+    margin: 0;
+    flex-shrink: 0;
+}
+
+.kairo-git-file-name,
+.kairo-svn-file-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.kairo-git-old-name {
+    color: var(--kairo-text-secondary);
+    font-size: 11px;
+}
+
+.kairo-git-status-badge,
+.kairo-svn-status-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 3px;
+    font-size: 12px;
+    flex-shrink: 0;
+}
+
+[class^="kairo-git-status-"],
+[class^="kairo-svn-status-"] {
+    color: var(--kairo-text);
+}
+
+.kairo-git-status-modified,
+.kairo-svn-status-modified {
+    color: var(--kairo-warning);
+}
+
+.kairo-git-status-added,
+.kairo-svn-status-added {
+    color: var(--kairo-success);
+}
+
+.kairo-git-status-deleted,
+.kairo-svn-status-deleted {
+    color: var(--kairo-error);
+}
+
+.kairo-git-status-untracked,
+.kairo-svn-status-untracked {
+    color: var(--kairo-text-secondary);
+}
+
+.kairo-git-status-renamed {
+    color: var(--kairo-info);
+}
+
+.kairo-svn-status-conflict {
+    color: var(--kairo-error);
+}
+
+.kairo-svn-status-missing {
+    color: var(--kairo-warning);
+}
+
+.kairo-svn-status-ignored {
+    color: var(--kairo-text-secondary);
+}
+
+.kairo-svn-status-replaced {
+    color: var(--kairo-info);
+}
+
+.kairo-svn-status-locked {
+    color: var(--kairo-warning);
+}
+
+.kairo-git-stage-btn,
+.kairo-svn-action-btn {
+    margin-left: auto;
+}
+
+.kairo-git-branch,
+.kairo-svn-branch {
+    color: var(--kairo-text-secondary);
+    font-size: 12px;
+    margin-left: auto;
+}
+
+.kairo-git-commit-template {
+    margin-bottom: 8px;
+}
+
+.kairo-git-template-select,
+.kairo-git-commit-input,
+.kairo-stash-message-input,
+.kairo-history-search-input,
+.kairo-svn-filter-input {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.kairo-git-commit-input,
+.kairo-svn-commit-message,
+.kairo-stash-message-input {
+    resize: vertical;
+    min-height: 64px;
+}
+
+.kairo-git-commit-meta {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 4px 0;
+    font-size: 12px;
+}
+
+.kairo-git-commit-char-count {
+    color: var(--kairo-text-secondary);
+    margin-left: auto;
+}
+
+.kairo-git-commit-warning,
+.kairo-git-amend-warning {
+    color: var(--kairo-warning);
+    font-size: 12px;
+}
+
+.kairo-git-commit-options,
+.kairo-git-suggestions,
+.kairo-precommit-summary,
+.kairo-precommit-details,
+.kairo-stash-push-body,
+.kairo-stash-show-content {
+    margin-top: 8px;
+    padding: 8px 12px;
+    background: var(--kairo-bg-secondary);
+    border: 1px solid var(--kairo-border);
+    border-radius: 4px;
+}
+
+.kairo-git-commit-options-title,
+.kairo-git-suggestions-header {
+    font-weight: 600;
+    margin-bottom: 6px;
+    color: var(--kairo-text);
+}
+
+.kairo-git-check-label,
+.kairo-stash-check-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 0;
+    cursor: pointer;
+    font-size: 12px;
+}
+
+.kairo-git-suggestions {
+    position: absolute;
+    z-index: 10;
+    width: calc(100% - 24px);
+    max-height: 200px;
+    overflow: auto;
+}
+
+.kairo-git-suggestion-item {
+    padding: 6px 8px;
+    cursor: pointer;
+    border-radius: 3px;
+}
+
+.kairo-git-suggestion-item:hover {
+    background: var(--kairo-hover-overlay);
+}
+
+.kairo-git-suggestion-msg {
+    font-size: 12px;
+    color: var(--kairo-text);
+}
+
+.kairo-git-commit-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding-top: 8px;
+}
+
+.kairo-git-commit-hint {
+    color: var(--kairo-text-secondary);
+    font-size: 11px;
+    margin-top: 6px;
+}
+
+.kairo-commit-result-success,
+.kairo-commit-result-error,
+.kairo-commit-result-warning {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border-radius: 4px;
+    font-size: 12px;
+    margin-top: 8px;
+}
+
+.kairo-commit-result-success {
+    background: color-mix(in srgb, var(--kairo-success) 12%, transparent);
+    color: var(--kairo-success);
+}
+
+.kairo-commit-result-error {
+    background: color-mix(in srgb, var(--kairo-error) 12%, transparent);
+    color: var(--kairo-error);
+}
+
+.kairo-commit-result-warning {
+    background: color-mix(in srgb, var(--kairo-warning) 12%, transparent);
+    color: var(--kairo-warning);
+}
+
+.kairo-precommit-progress {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    color: var(--kairo-text-secondary);
+}
+
+.kairo-precommit-spinner {
+    animation: spin 1s linear infinite;
+}
+
+.kairo-precommit-summary {
+    cursor: pointer;
+}
+
+.kairo-precommit-summary-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.kairo-precommit-summary-status {
+    margin-left: auto;
+    font-weight: 600;
+}
+
+.kairo-precommit-passed {
+    color: var(--kairo-success);
+}
+
+.kairo-precommit-failed {
+    color: var(--kairo-error);
+}
+
+.kairo-precommit-toggle {
+    margin-left: 4px;
+    color: var(--kairo-text-secondary);
+}
+
+.kairo-precommit-result {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    border-radius: 3px;
+    font-size: 12px;
+}
+
+.kairo-precommit-result + .kairo-precommit-result {
+    border-top: 1px solid var(--kairo-border);
+}
+
+.kairo-precommit-result-label {
+    font-weight: 600;
+    min-width: 60px;
+}
+
+.kairo-precommit-result-message {
+    color: var(--kairo-text-secondary);
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.kairo-precommit-status-icon {
+    flex-shrink: 0;
+}
+
+[class^="kairo-precommit-result-"] .kairo-precommit-status-icon {
+    margin-right: 0;
+}
+
+.kairo-precommit-result-passed {
+    color: var(--kairo-success);
+}
+
+.kairo-precommit-result-failed,
+.kairo-precommit-result-error {
+    color: var(--kairo-error);
+}
+
+.kairo-precommit-result-timed_out {
+    color: var(--kairo-warning);
+}
+
+.kairo-precommit-result-skipped {
+    color: var(--kairo-text-secondary);
+}
+
+.kairo-git-staged-count {
+    background: var(--kairo-badge-info-bg);
+    color: var(--kairo-badge-info-fg);
+    font-size: 11px;
+    padding: 2px 6px;
+    border-radius: 10px;
+    margin-left: auto;
+}
+
+/* --- Git / SVN history --- */
+.kairo-history-widget,
+.kairo-svn-history {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+.kairo-history-header,
+.kairo-svn-history .kairo-widget-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.kairo-history-refresh,
+.kairo-history-action-btn,
+.kairo-svn-action-btn {
+    flex-shrink: 0;
+}
+
+.kairo-history-searchbar,
+.kairo-svn-history .kairo-widget-toolbar {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--kairo-border);
+}
+
+.kairo-history-search-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.kairo-history-search-status,
+.kairo-history-search-summary {
+    font-size: 12px;
+    color: var(--kairo-text-secondary);
+    padding-top: 4px;
+}
+
+.kairo-history-body,
+.kairo-svn-history-body {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+}
+
+.kairo-history-content,
+.kairo-svn-history-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 4px 0;
+}
+
+.kairo-history-list {
+    list-style: none;
+    margin: 0;
+    padding: 4px 0;
+}
+
+.kairo-history-item,
+.kairo-svn-log-entry {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 6px 12px;
+    border-radius: 3px;
+    cursor: pointer;
+}
+
+.kairo-history-item:hover,
+.kairo-svn-log-entry:hover {
+    background: var(--kairo-hover-overlay);
+}
+
+.kairo-history-item-selected,
+.kairo-svn-log-entry.selected {
+    background: color-mix(in srgb, var(--kairo-primary) 14%, transparent);
+}
+
+.kairo-history-item-main,
+.kairo-svn-log-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.kairo-history-item-message,
+.kairo-svn-log-message {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 500;
+}
+
+.kairo-history-item-hash,
+.kairo-svn-log-rev {
+    font-family: monospace;
+    font-size: 11px;
+    color: var(--kairo-text-secondary);
+    flex-shrink: 0;
+}
+
+.kairo-history-item-meta,
+.kairo-svn-log-author,
+.kairo-svn-log-date {
+    font-size: 11px;
+    color: var(--kairo-text-secondary);
+}
+
+.kairo-history-item-actions {
+    display: flex;
+    gap: 4px;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+}
+
+.kairo-history-item:hover .kairo-history-item-actions {
+    opacity: 1;
+}
+
+.kairo-history-detail,
+.kairo-svn-history-detail {
+    padding: 12px;
+    border-top: 1px solid var(--kairo-border);
+    background: var(--kairo-bg-secondary);
+}
+
+.kairo-history-detail-subject {
+    font-weight: 600;
+    margin-bottom: 8px;
+}
+
+.kairo-history-detail-meta,
+.kairo-history-detail-body {
+    font-size: 12px;
+    color: var(--kairo-text-secondary);
+}
+
+.kairo-svn-log-expand {
+    flex-shrink: 0;
+    color: var(--kairo-text-secondary);
+}
+
+.kairo-svn-log-changes {
+    padding: 6px 0 0 20px;
+}
+
+.kairo-svn-changes-title {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--kairo-text-secondary);
+    margin-bottom: 4px;
+}
+
+.kairo-svn-changes-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.kairo-svn-change-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 0;
+    font-size: 12px;
+}
+
+.kairo-svn-change-action {
+    flex-shrink: 0;
+}
+
+.kairo-svn-change-path {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+[class^="kairo-svn-history-action-"] {
+    font-weight: 600;
+}
+
+.kairo-svn-history-action-added {
+    color: var(--kairo-success);
+}
+
+.kairo-svn-history-action-deleted {
+    color: var(--kairo-error);
+}
+
+.kairo-svn-history-action-modified {
+    color: var(--kairo-warning);
+}
+
+.kairo-svn-history-action-replaced {
+    color: var(--kairo-info);
+}
+
+/* --- Git stash --- */
+.kairo-stash-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 6px 12px;
+    border-radius: 3px;
+    cursor: pointer;
+}
+
+.kairo-stash-item:hover {
+    background: var(--kairo-hover-overlay);
+}
+
+.kairo-stash-item-selected {
+    background: color-mix(in srgb, var(--kairo-primary) 14%, transparent);
+}
+
+.kairo-stash-item-main {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.kairo-stash-item-ref {
+    font-weight: 600;
+}
+
+.kairo-stash-item-hash {
+    font-family: monospace;
+    font-size: 11px;
+    color: var(--kairo-text-secondary);
+}
+
+.kairo-stash-item-message {
+    font-size: 12px;
+    color: var(--kairo-text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.kairo-stash-item-meta {
+    font-size: 11px;
+    color: var(--kairo-text-secondary);
+}
+
+.kairo-stash-item-actions {
+    display: flex;
+    gap: 4px;
+    margin-top: 4px;
+}
+
+.kairo-stash-list-actions {
+    display: flex;
+    gap: 6px;
+}
+
+.kairo-stash-check-row {
+    display: flex;
+    gap: 16px;
+    padding: 4px 0;
+}
+
+.kairo-stash-pre {
+    background: var(--kairo-bg);
+    border: 1px solid var(--kairo-border);
+    border-radius: 4px;
+    padding: 8px;
+    font-family: monospace;
+    font-size: 12px;
+    overflow: auto;
+    max-height: 300px;
+}
+
+/* --- Git / SVN diff --- */
+.kairo-diff-container,
+.kairo-diff-pre {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    font-family: monospace;
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.kairo-diff-line {
+    display: flex;
+    min-width: 100%;
+}
+
+.kairo-diff-line-num,
+.kairo-diff-old-num,
+.kairo-diff-new-num {
+    width: 48px;
+    padding: 0 8px;
+    text-align: right;
+    color: var(--kairo-text-secondary);
+    background: var(--kairo-bg-secondary);
+    border-right: 1px solid var(--kairo-border);
+    flex-shrink: 0;
+    user-select: none;
+}
+
+.kairo-diff-line-content {
+    flex: 1;
+    padding: 0 8px;
+    white-space: pre;
+}
+
+.kairo-diff-line.add,
+.kairo-diff-line-content.add {
+    background: color-mix(in srgb, var(--kairo-success) 10%, transparent);
+}
+
+.kairo-diff-line.remove,
+.kairo-diff-line-content.remove {
+    background: color-mix(in srgb, var(--kairo-error) 10%, transparent);
+}
+
+.kairo-diff-line.context,
+.kairo-diff-line-content.context {
+    background: transparent;
+}
+
+.kairo-svn-diff-widget,
+.kairo-svn-diff-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.kairo-svn-diff-toolbar {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--kairo-border);
+    flex-wrap: wrap;
+}
+
+.kairo-svn-diff-input,
+.kairo-svn-diff-input--file,
+.kairo-svn-diff-input--rev {
+    min-width: 120px;
+    width: 160px;
+}
+
+.kairo-svn-diff-separator {
+    color: var(--kairo-text-secondary);
+    padding: 0 4px;
+}
+
+.kairo-svn-diff-pick-btn,
+.kairo-svn-diff-swap-btn,
+.kairo-svn-diff-go-btn {
+    flex-shrink: 0;
+}
+
+.kairo-svn-diff-status-bar {
+    display: flex;
+    gap: 16px;
+    padding: 6px 12px;
+    border-top: 1px solid var(--kairo-border);
+    font-size: 12px;
+    color: var(--kairo-text-secondary);
+}
+
+.kairo-svn-diff-status-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.kairo-svn-diff-status-item--error {
+    color: var(--kairo-error);
+}
+
+.kairo-svn-diff-editor {
+    flex: 1;
+    min-height: 0;
+}
+
+.kairo-svn-commit-section,
+.kairo-svn-context-menu {
+    background: var(--kairo-bg-secondary);
+    border: 1px solid var(--kairo-border);
+    border-radius: 4px;
+    padding: 8px;
+}
+
+.kairo-svn-commit-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding-top: 8px;
+}
+
+.kairo-svn-commit-buttons {
+    display: flex;
+    gap: 8px;
+}
+
+.kairo-svn-commit-hint,
+.kairo-svn-selected-count {
+    font-size: 12px;
+    color: var(--kairo-text-secondary);
+}
+
+.kairo-svn-context-menu {
+    position: absolute;
+    z-index: 100;
+    min-width: 180px;
+    padding: 4px 0;
+    box-shadow: 0 4px 12px var(--kairo-shadow);
+}
+
+.kairo-svn-context-menu-header {
+    padding: 6px 12px;
+    font-weight: 600;
+    border-bottom: 1px solid var(--kairo-border);
+    margin-bottom: 4px;
+}
+
+.kairo-svn-context-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 6px 12px;
+    background: transparent;
+    border: none;
+    color: var(--kairo-text);
+    text-align: left;
+    cursor: pointer;
+}
+
+.kairo-svn-context-menu-item:hover {
+    background: var(--kairo-hover-overlay);
+}
+
+.kairo-svn-context-menu-sep {
+    height: 1px;
+    background: var(--kairo-border);
+    margin: 4px 0;
+}
+
+.kairo-svn-detail-content {
+    padding: 8px 12px;
+}
+
+.kairo-svn-detail-message {
+    background: var(--kairo-bg);
+    border: 1px solid var(--kairo-border);
+    border-radius: 4px;
+    padding: 8px;
+    font-family: monospace;
+    font-size: 12px;
+    white-space: pre-wrap;
+}
+
+.kairo-svn-lock-indicator {
+    color: var(--kairo-warning);
+    margin-left: 4px;
+}
+
+/* --- Search extension --- */
+.kairo-find-modal-backdrop,
+.kairo-search-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding-top: 80px;
+    z-index: 1000;
+}
+
+.kairo-find-modal,
+.kairo-search-modal {
+    background: var(--kairo-surface);
+    border: 1px solid var(--kairo-border);
+    border-radius: 6px;
+    box-shadow: 0 8px 24px var(--kairo-shadow);
+    width: 600px;
+    max-width: 90vw;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.kairo-find-header,
+.kairo-search-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px;
+    border-bottom: 1px solid var(--kairo-border);
+}
+
+.kairo-find-input,
+.kairo-search-input,
+.kairo-everywhere-input {
+    flex: 1;
+    min-width: 0;
+}
+
+.kairo-find-results,
+.kairo-search-results,
+.kairo-everywhere-body {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    padding: 4px 0;
+}
+
+.kairo-find-item,
+.kairo-search-result-item,
+.kairo-everywhere-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    cursor: pointer;
+    border-radius: 3px;
+}
+
+.kairo-find-item:hover,
+.kairo-search-result-item:hover,
+.kairo-everywhere-item:hover {
+    background: var(--kairo-hover-overlay);
+}
+
+.kairo-find-item.is-selected,
+.kairo-search-result-item.is-selected,
+.kairo-everywhere-item.is-selected {
+    background: color-mix(in srgb, var(--kairo-primary) 14%, transparent);
+}
+
+.kairo-find-kind,
+.kairo-everywhere-kind {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    flex-shrink: 0;
+    color: var(--kairo-text-secondary);
+}
+
+.kairo-find-label,
+.kairo-everywhere-status {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.kairo-find-detail,
+.kairo-find-shortcut {
+    color: var(--kairo-text-secondary);
+    font-size: 12px;
+    flex-shrink: 0;
+}
+
+.kairo-find-status,
+.kairo-search-status {
+    padding: 12px;
+    text-align: center;
+}
+
+.kairo-search-tabs {
+    display: flex;
+    gap: 2px;
+    padding: 0 12px;
+    border-bottom: 1px solid var(--kairo-border);
+}
+
+.kairo-search-tab,
+.kairo-everywhere-tabs {
+    padding: 8px 12px;
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--kairo-text-secondary);
+    cursor: pointer;
+}
+
+.kairo-search-tab.is-active,
+.kairo-everywhere-tabs .is-active {
+    color: var(--kairo-primary);
+    border-bottom-color: var(--kairo-primary);
+}
+
+.kairo-search-close {
+    margin-left: auto;
+    background: transparent;
+    border: none;
+    color: var(--kairo-text-secondary);
+    cursor: pointer;
+}
+
+.kairo-search-input-area {
+    padding: 12px;
+    border-bottom: 1px solid var(--kairo-border);
+}
+
+.kairo-search-input-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.kairo-search-icon {
+    color: var(--kairo-text-secondary);
+    flex-shrink: 0;
+}
+
+.kairo-search-filter-btns {
+    display: flex;
+    gap: 4px;
+}
+
+.kairo-search-filter-btn {
+    padding: 4px 8px;
+    background: var(--kairo-bg-secondary);
+    border: 1px solid var(--kairo-border);
+    border-radius: 3px;
+    color: var(--kairo-text-secondary);
+    cursor: pointer;
+    font-size: 12px;
+}
+
+.kairo-search-filter-btn.is-active {
+    background: var(--kairo-primary);
+    color: #fff;
+    border-color: var(--kairo-primary);
+}
+
+.kairo-search-options-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.kairo-search-file-mask {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1;
+}
+
+.kairo-search-mask-input,
+.kairo-search-scope-select {
+    min-width: 120px;
+}
+
+.kairo-search-submit,
+.kairo-search-replace-btn {
+    flex-shrink: 0;
+}
+
+.kairo-search-results-area {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.kairo-search-result-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    background: var(--kairo-bg-secondary);
+    border-bottom: 1px solid var(--kairo-border);
+    cursor: pointer;
+}
+
+.kairo-search-chevron {
+    flex-shrink: 0;
+    color: var(--kairo-text-secondary);
+}
+
+.kairo-search-result-filename {
+    font-weight: 600;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.kairo-search-result-filepath,
+.kairo-search-result-count,
+.kairo-search-stats,
+.kairo-search-truncated {
+    font-size: 11px;
+    color: var(--kairo-text-secondary);
+}
+
+.kairo-search-result-lineno {
+    font-family: monospace;
+    color: var(--kairo-text-secondary);
+    min-width: 28px;
+    text-align: right;
+    flex-shrink: 0;
+}
+
+.kairo-search-result-preview {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12px;
+}
+
+.kairo-search-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 12px;
+    border-top: 1px solid var(--kairo-border);
+    font-size: 12px;
+    color: var(--kairo-text-secondary);
+}
+
+.kairo-search-footer-btn {
+    background: transparent;
+    border: none;
+    color: var(--kairo-text-secondary);
+    cursor: pointer;
+}
+
+.kairo-search-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.kairo-search-preview-pane {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    border-left: 1px solid var(--kairo-border);
+    overflow: hidden;
+}
+
+.kairo-search-preview-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--kairo-border);
+    background: var(--kairo-bg-secondary);
+}
+
+.kairo-search-preview-file {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 600;
+}
+
+.kairo-search-preview-line {
+    color: var(--kairo-text-secondary);
+    font-size: 12px;
+}
+
+.kairo-search-preview-toggle {
+    background: transparent;
+    border: none;
+    color: var(--kairo-text-secondary);
+    cursor: pointer;
+}
+
+.kairo-search-preview-content {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    font-family: monospace;
+    font-size: 12px;
+    line-height: 1.5;
+    padding: 8px 0;
+}
+
+.kairo-search-preview-context {
+    color: var(--kairo-text-secondary);
+}
+
+.kairo-search-preview-line-context,
+.kairo-search-preview-current {
+    display: flex;
+    gap: 8px;
+    padding: 0 12px;
+}
+
+.kairo-search-preview-current {
+    background: color-mix(in srgb, var(--kairo-primary) 12%, transparent);
+}
+
+.kairo-search-preview-lineno,
+.kairo-search-preview-lineno-current {
+    min-width: 36px;
+    text-align: right;
+    color: var(--kairo-text-secondary);
+    user-select: none;
+    flex-shrink: 0;
+}
+
+.kairo-search-preview-lineno-current {
+    color: var(--kairo-primary);
+    font-weight: 600;
+}
+
+.kairo-search-preview-code {
+    flex: 1;
+    white-space: pre;
+}
+
+.kairo-search-highlight {
+    background: color-mix(in srgb, var(--kairo-warning) 35%, transparent);
+    border-radius: 2px;
+}
+
+.kairo-everywhere {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+.kairo-everywhere-tabs {
+    display: flex;
+    gap: 8px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--kairo-border);
+}
+
+.kairo-everywhere-input {
+    margin: 12px;
+    width: calc(100% - 24px);
+}
+
+/* --- SQL extension --- */
+.kairo-sql-connection-widget,
+.kairo-sql-editor-widget,
+.kairo-sql-results-widget {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+/* --- Test extension --- */
+.kairo-test-run-btn {
+    margin-left: auto;
+}
+
+.kairo-test-summary-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.kairo-test-status-idle {
+    color: var(--kairo-text-secondary);
+}
+
+.kairo-test-status-running {
+    color: var(--kairo-info);
+}
+
+/* --- Java extension --- */
+.kairo-maven-view {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+.kairo-maven-content {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    padding: 8px 12px;
+}
+
+.kairo-maven-empty,
+.kairo-maven-not-found {
+    padding: 24px;
+    text-align: center;
+    color: var(--kairo-text-secondary);
+}
+
+.kairo-maven-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--kairo-border);
+}
+
+.kairo-maven-detect-btn,
+.kairo-maven-refresh-btn,
+.kairo-maven-phase-run-btn {
+    flex-shrink: 0;
+}
+
+.kairo-maven-path-input {
+    flex: 1;
+    min-width: 0;
+}
+
+.kairo-maven-tabs {
+    display: flex;
+    gap: 2px;
+    border-bottom: 1px solid var(--kairo-border);
+    padding: 0 12px;
+}
+
+.kairo-maven-tab {
+    padding: 8px 12px;
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--kairo-text-secondary);
+    cursor: pointer;
+}
+
+.kairo-maven-tab.active {
+    color: var(--kairo-primary);
+    border-bottom-color: var(--kairo-primary);
+}
+
+.kairo-maven-section-title,
+.kairo-maven-subsection-title {
+    margin: 12px 0 8px;
+}
+
+.kairo-maven-tree,
+.kairo-maven-module-tree,
+.kairo-maven-dep-tree,
+.kairo-maven-deps-tree,
+.kairo-maven-phase-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.kairo-maven-module-node,
+.kairo-maven-dep-node,
+.kairo-maven-phase-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 8px;
+    border-radius: 3px;
+}
+
+.kairo-maven-module-node {
+    padding-left: calc(8px + var(--kairo-maven-module-depth, 0) * 16px);
+}
+
+.kairo-maven-module-node:hover,
+.kairo-maven-dep-node:hover,
+.kairo-maven-phase-item:hover {
+    background: var(--kairo-hover-overlay);
+}
+
+.kairo-maven-module-name,
+.kairo-maven-dep-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.kairo-maven-module-packaging,
+.kairo-maven-phase-label,
+.kairo-maven-phase-desc {
+    font-size: 12px;
+    color: var(--kairo-text-secondary);
+}
+
+.kairo-maven-phase-info {
+    margin-left: auto;
+    display: flex;
+    gap: 8px;
+}
+
+.kairo-maven-phase-run-btn {
+    opacity: 0;
+    transition: opacity 0.15s ease;
+}
+
+.kairo-maven-phase-item:hover .kairo-maven-phase-run-btn {
+    opacity: 1;
+}
+
+.kairo-maven-progress {
+    padding: 12px;
+    background: var(--kairo-bg-secondary);
+    border: 1px solid var(--kairo-border);
+    border-radius: 4px;
+    margin-bottom: 12px;
+}
+
+.kairo-maven-progress-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+}
+
+.kairo-maven-progress-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 600;
+}
+
+.kairo-maven-progress-status.running {
+    color: var(--kairo-info);
+}
+
+.kairo-maven-progress-status.success {
+    color: var(--kairo-success);
+}
+
+.kairo-maven-progress-status.failed {
+    color: var(--kairo-error);
+}
+
+.kairo-maven-progress-phase {
+    color: var(--kairo-text-secondary);
+    font-size: 12px;
+}
+
+.kairo-maven-progress-bar-container {
+    height: 6px;
+    background: var(--kairo-border);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.kairo-maven-progress-bar {
+    width: var(--kairo-maven-progress-width, 0%);
+    height: 100%;
+    background: var(--kairo-primary);
+    transition: width 0.2s ease;
+}
+
+.kairo-maven-progress-bar.running {
+    background: var(--kairo-info);
+}
+
+.kairo-maven-progress-bar.success {
+    background: var(--kairo-success);
+}
+
+.kairo-maven-progress-bar.failed {
+    background: var(--kairo-error);
+}
+
+.kairo-maven-progress-message {
+    margin: 8px 0 0;
+    font-size: 12px;
+    color: var(--kairo-text-secondary);
+}
+
+.kairo-maven-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 10px;
+    margin-top: 12px;
+}
+
+.kairo-maven-summary-item {
+    background: var(--kairo-bg-secondary);
+    border: 1px solid var(--kairo-border);
+    border-radius: 4px;
+    padding: 10px;
+}
+
+.kairo-maven-output-text {
+    background: var(--kairo-bg);
+    border: 1px solid var(--kairo-border);
+    border-radius: 4px;
+    padding: 8px;
+    font-family: monospace;
+    font-size: 12px;
+    overflow: auto;
+    max-height: 300px;
+    white-space: pre-wrap;
+}
+
+.kairo-maven-warning {
+    color: var(--kairo-warning);
+    font-size: 12px;
+}
+
+.kairo-maven-warnings {
+    margin-top: 8px;
+}
+
+/* Java hierarchy / references / hotswap */
+.kairo-java-hierarchy-container,
+.kairo-java-references-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+.kairo-java-hierarchy-header,
+.kairo-java-references-summary {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--kairo-border);
+}
+
+.kairo-java-hierarchy-loading,
+.kairo-java-hierarchy-empty,
+.kairo-java-hierarchy-error,
+.kairo-java-references-loading,
+.kairo-java-references-empty,
+.kairo-java-references-error {
+    padding: 24px;
+    text-align: center;
+    color: var(--kairo-text-secondary);
+}
+
+.kairo-java-hierarchy-icon,
+.kairo-java-references-toggle,
+.kairo-java-references-file-icon {
+    flex-shrink: 0;
+    color: var(--kairo-text-secondary);
+}
+
+.kairo-java-hierarchy-toggle {
+    cursor: pointer;
+}
+
+.kairo-java-hierarchy-item,
+.kairo-java-references-group-header,
+.kairo-java-references-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 12px;
+    cursor: pointer;
+}
+
+.kairo-java-hierarchy-item {
+    padding-left: calc(8px + var(--kairo-java-hierarchy-depth, 0) * 16px);
+}
+
+.kairo-java-hierarchy-loading-children {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 12px 4px calc(24px + var(--kairo-java-hierarchy-depth, 0) * 16px);
+    color: var(--kairo-text-secondary);
+    font-size: 12px;
+}
+
+.kairo-java-hierarchy-item:hover,
+.kairo-java-references-item:hover {
+    background: var(--kairo-hover-overlay);
+}
+
+.kairo-java-hierarchy-label,
+.kairo-java-references-file-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.kairo-java-hierarchy-detail,
+.kairo-java-references-preview {
+    padding: 8px 12px;
+    border-top: 1px solid var(--kairo-border);
+    background: var(--kairo-bg-secondary);
+    font-size: 12px;
+}
+
+.kairo-java-references-group {
+    border-bottom: 1px solid var(--kairo-border);
+}
+
+.kairo-java-references-path {
+    color: var(--kairo-text-secondary);
+    font-size: 11px;
+    margin-left: auto;
+}
+
+.kairo-java-references-line {
+    font-family: monospace;
+    color: var(--kairo-text-secondary);
+    min-width: 28px;
+    text-align: right;
+}
+
+.kairo-java-references-count {
+    background: var(--kairo-badge-info-bg);
+    color: var(--kairo-badge-info-fg);
+    font-size: 11px;
+    padding: 2px 6px;
+    border-radius: 10px;
+    margin-left: auto;
+}
+
+/* Remote JDWP debug configuration */
+.kairo-remote-debug-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: auto;
+    padding: 12px;
+    gap: 12px;
+}
+
+.kairo-remote-debug-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.kairo-remote-debug-header h3 {
+    margin: 0;
+    flex: 1;
+    min-width: 0;
+}
+
+.kairo-remote-debug-experimental {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: var(--kairo-warning);
+    color: #1e1f22;
+}
+
+.kairo-remote-debug-empty {
+    padding: 24px;
+    text-align: center;
+    color: var(--kairo-text-secondary);
+}
+
+.kairo-remote-debug-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.kairo-remote-debug-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    background: var(--kairo-bg-secondary);
+    border: 1px solid var(--kairo-border);
+    border-radius: 4px;
+}
+
+.kairo-remote-debug-item-info {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: 1;
+    min-width: 0;
+    flex-wrap: wrap;
+}
+
+.kairo-remote-debug-item-info strong {
+    font-weight: 600;
+}
+
+.kairo-remote-debug-auth {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: var(--kairo-badge-info-bg);
+    color: var(--kairo-badge-info-fg);
+}
+
+.kairo-remote-debug-item-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+.kairo-remote-debug-form {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 12px;
+    background: var(--kairo-bg-secondary);
+    border: 1px solid var(--kairo-border);
+    border-radius: 4px;
+}
+
+.kairo-remote-debug-form h4 {
+    margin: 0;
+}
+
+.kairo-remote-debug-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.kairo-remote-debug-field label {
+    font-size: 12px;
+    color: var(--kairo-text-secondary);
+}
+
+.kairo-remote-debug-form-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 4px;
+}
+
+.kairo-remote-debug-add {
+    display: flex;
+    justify-content: flex-start;
+}
+
+.kairo-java-hotswap-content {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.kairo-java-hotswap-list {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    padding: 4px 0;
+}
+
+.kairo-java-hotswap-entry {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 12px;
+    cursor: pointer;
+    border-radius: 3px;
+}
+
+.kairo-java-hotswap-entry:hover {
+    background: var(--kairo-hover-overlay);
+}
+
+.kairo-java-hotswap-entry.selected {
+    background: color-mix(in srgb, var(--kairo-primary) 14%, transparent);
+}
+
+.kairo-java-hotswap-status {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+}
+
+.kairo-java-hotswap-status-success {
+    color: var(--kairo-success);
+}
+
+.kairo-java-hotswap-status-failed {
+    color: var(--kairo-error);
+}
+
+.kairo-java-hotswap-status-pending {
+    color: var(--kairo-warning);
+}
+
+.kairo-java-hotswap-file {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.kairo-java-hotswap-time,
+.kairo-java-hotswap-duration {
+    font-size: 11px;
+    color: var(--kairo-text-secondary);
+}
+
+.kairo-java-hotswap-detail {
+    padding: 12px;
+    border-top: 1px solid var(--kairo-border);
+    background: var(--kairo-bg-secondary);
+}
+
+.kairo-java-hotswap-detail h4 {
+    margin: 0 0 8px;
+}
+
+.kairo-java-hotswap-detail dl {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 4px 12px;
+    margin: 0;
+    font-size: 12px;
+}
+
+.kairo-java-hotswap-detail dt {
+    color: var(--kairo-text-secondary);
+}
+
+.kairo-java-hotswap-empty,
+.kairo-java-hotswap-hint {
+    padding: 24px;
+    text-align: center;
+    color: var(--kairo-text-secondary);
+}
+
+.kairo-java-hotswap-hint {
+    padding: 8px 12px;
+    font-size: 12px;
+    text-align: left;
+}
+
+/* Multi-module debug */
+.kairo-debug-multimodule-widget {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+.kairo-debug-multimodule-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.kairo-debug-multimodule-session-count {
+    background: var(--kairo-badge-default-bg);
+    color: var(--kairo-badge-default-fg);
+    font-size: 11px;
+    padding: 2px 6px;
+    border-radius: 10px;
+    margin-left: auto;
+}
+
+.kairo-debug-multimodule-tabs {
+    display: flex;
+    gap: 2px;
+    border-bottom: 1px solid var(--kairo-border);
+    padding: 0 12px;
+}
+
+.kairo-debug-multimodule-tab {
+    padding: 8px 12px;
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--kairo-text-secondary);
+    cursor: pointer;
+}
+
+.kairo-debug-multimodule-tab.active {
+    color: var(--kairo-primary);
+    border-bottom-color: var(--kairo-primary);
+}
+
+.kairo-debug-multimodule-body {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    padding: 8px 12px;
+}
+
+.kairo-debug-multimodule-loading,
+.kairo-debug-multimodule-empty,
+.kairo-debug-multimodule-error {
+    padding: 24px;
+    text-align: center;
+}
+
+.kairo-debug-multimodule-loading-text {
+    color: var(--kairo-text-secondary);
+    margin-top: 8px;
+}
+
+.kairo-debug-multimodule-spinner {
+    animation: spin 1s linear infinite;
+}
+
+.kairo-debug-multimodule-skeleton {
+    margin-top: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.kairo-debug-multimodule-skeleton-line {
+    height: 12px;
+    background: var(--kairo-border);
+    border-radius: 3px;
+    animation: pulse 1.5s ease-in-out infinite;
+}
+
+.kairo-debug-multimodule-error-content p {
+    margin: 6px 0 0;
+    font-size: 12px;
+}
+
+.kairo-debug-multimodule-retry {
+    margin-top: 12px;
+}
+
+.kairo-debug-multimodule-session-list,
+.kairo-debug-multimodule-breakpoint-list,
+.kairo-debug-multimodule-event-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.kairo-debug-multimodule-session {
+    padding: 10px 12px;
+    border: 1px solid var(--kairo-border);
+    border-radius: 4px;
+    background: var(--kairo-bg-secondary);
+}
+
+.kairo-debug-multimodule-session-header,
+.kairo-debug-multimodule-event-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+
+.kairo-debug-multimodule-session-name,
+.kairo-debug-multimodule-event-type {
+    font-weight: 600;
+}
+
+.kairo-debug-multimodule-session-info,
+.kairo-debug-multimodule-event-location,
+.kairo-debug-multimodule-event-module,
+.kairo-debug-multimodule-event-time {
+    font-size: 12px;
+    color: var(--kairo-text-secondary);
+}
+
+.kairo-debug-multimodule-state {
+    font-size: 11px;
+    padding: 2px 6px;
+    border-radius: 10px;
+    font-weight: 600;
+}
+
+.kairo-debug-multimodule-state-not_connected {
+    background: var(--kairo-badge-default-bg);
+    color: var(--kairo-badge-default-fg);
+}
+
+.kairo-debug-multimodule-state-connected {
+    background: var(--kairo-badge-info-bg);
+    color: var(--kairo-badge-info-fg);
+}
+
+.kairo-debug-multimodule-state-running {
+    background: var(--kairo-badge-success-bg);
+    color: var(--kairo-badge-success-fg);
+}
+
+.kairo-debug-multimodule-state-suspended {
+    background: var(--kairo-badge-warning-bg);
+    color: var(--kairo-badge-warning-fg);
+}
+
+.kairo-debug-multimodule-state-terminated {
+    background: var(--kairo-badge-error-bg);
+    color: var(--kairo-badge-error-fg);
+}
+
+[class^="kairo-debug-multimodule-session-state-"] {
+    border-left-width: 3px;
+    border-left-style: solid;
+}
+
+.kairo-debug-multimodule-session-state-not_connected {
+    border-left-color: var(--kairo-badge-default-bg);
+}
+
+.kairo-debug-multimodule-session-state-connected {
+    border-left-color: var(--kairo-badge-info-bg);
+}
+
+.kairo-debug-multimodule-session-state-running {
+    border-left-color: var(--kairo-badge-success-bg);
+}
+
+.kairo-debug-multimodule-session-state-suspended {
+    border-left-color: var(--kairo-badge-warning-bg);
+}
+
+.kairo-debug-multimodule-session-state-terminated {
+    border-left-color: var(--kairo-badge-error-bg);
+}
+
+.kairo-debug-multimodule-dependencies {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.kairo-debug-multimodule-deps-tree {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.kairo-debug-multimodule-dep-node {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px 6px calc(12px + var(--kairo-debug-multimodule-dep-depth, 0) * 20px);
+    border-radius: 3px;
+    background: var(--kairo-bg-secondary);
+    border: 1px solid var(--kairo-border);
+}
+
+.kairo-debug-multimodule-dep-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 500;
+}
+
+.kairo-debug-multimodule-dep-relation {
+    font-size: 11px;
+    color: var(--kairo-text-secondary);
+}
+
+.kairo-debug-multimodule-breakpoint-summary {
+    font-size: 12px;
+    color: var(--kairo-text-secondary);
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--kairo-border);
+}
+
+.kairo-debug-multimodule-breakpoint {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    border-radius: 3px;
+}
+
+.kairo-debug-multimodule-breakpoint:hover {
+    background: var(--kairo-hover-overlay);
+}
+
+.kairo-debug-multimodule-breakpoint.disabled {
+    opacity: 0.6;
+}
+
+.kairo-debug-multimodule-breakpoint-location {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: monospace;
+    font-size: 12px;
+}
+
+.kairo-debug-multimodule-breakpoint-deferred,
+.kairo-debug-multimodule-breakpoint-resolved {
+    font-size: 10px;
+    padding: 1px 4px;
+    border-radius: 3px;
+    background: var(--kairo-badge-info-bg);
+    color: var(--kairo-badge-info-fg);
+}
+
+.kairo-debug-multimodule-breakpoint-resolved {
+    background: var(--kairo-badge-success-bg);
+    color: var(--kairo-badge-success-fg);
+}
+
+.kairo-debug-multimodule-event {
+    padding: 8px 12px;
+    border: 1px solid var(--kairo-border);
+    border-radius: 4px;
+    background: var(--kairo-bg-secondary);
+}
+
+.kairo-debug-multimodule-event-module {
+    margin-left: auto;
+}
+
+/* --- Remote extension --- */
+.kairo-remote-connection,
+.kairo-remote-panel,
+.kairo-remote-debug-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+.kairo-remote-connection-tabs,
+.kairo-remote-panel-tabs {
+    display: flex;
+    gap: 2px;
+    border-bottom: 1px solid var(--kairo-border);
+    padding: 0 12px;
+}
+
+.kairo-remote-connection-tab,
+.kairo-remote-panel-tab {
+    padding: 8px 12px;
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--kairo-text-secondary);
+    cursor: pointer;
+}
+
+.kairo-remote-connection-tab.active,
+.kairo-remote-panel-tab.active {
+    color: var(--kairo-primary);
+    border-bottom-color: var(--kairo-primary);
+}
+
+.kairo-remote-connection-body,
+.kairo-remote-panel-body {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    padding: 12px;
+}
+
+.kairo-remote-connection-form {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    max-width: 480px;
+}
+
+.kairo-remote-form-row {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.kairo-remote-label,
+.kairo-remote-connection-path-label {
+    font-size: 12px;
+    color: var(--kairo-text-secondary);
+}
+
+.kairo-remote-form-actions {
+    display: flex;
+    gap: 8px;
+    padding-top: 8px;
+}
+
+.kairo-remote-connection-files-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--kairo-border);
+    margin-bottom: 8px;
+}
+
+.kairo-remote-connection-files,
+.kairo-remote-connection-files-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.kairo-remote-connection-file,
+.kairo-remote-connection-dir {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 8px;
+    border-radius: 3px;
+    cursor: pointer;
+}
+
+.kairo-remote-connection-file:hover,
+.kairo-remote-connection-dir:hover {
+    background: var(--kairo-hover-overlay);
+}
+
+.kairo-remote-connection-dir {
+    font-weight: 500;
+}
+
+.kairo-remote-connection-error-detail {
+    font-size: 12px;
+    color: var(--kairo-text-secondary);
+    margin-top: 4px;
+}
+
+.kairo-remote-connection-terminal-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--kairo-border);
+    margin-bottom: 8px;
+}
+
+.kairo-remote-connection-terminal-sessions {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.kairo-remote-connection-terminal-session {
+    border: 1px solid var(--kairo-border);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.kairo-remote-connection-terminal-session-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    background: var(--kairo-bg-secondary);
+    border-bottom: 1px solid var(--kairo-border);
+}
+
+.kairo-remote-connection-terminal-body {
+    padding: 8px;
+    font-family: monospace;
+    font-size: 12px;
+    min-height: 120px;
+    max-height: 300px;
+    overflow: auto;
+}
+
+.kairo-remote-panel-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--kairo-border);
+}
+
+.kairo-remote-panel-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 600;
+}
+
+.kairo-remote-panel-status-text {
+    font-size: 12px;
+    color: var(--kairo-text-secondary);
+}
+
+.kairo-remote-panel-loading {
+    padding: 24px;
+    text-align: center;
+    color: var(--kairo-text-secondary);
+}
+
+.kairo-remote-panel-skeleton-bar {
+    height: 12px;
+    background: var(--kairo-border);
+    border-radius: 3px;
+    margin-bottom: 8px;
+    animation: pulse 1.5s ease-in-out infinite;
+}
+
+.kairo-remote-panel-card {
+    background: var(--kairo-bg-secondary);
+    border: 1px solid var(--kairo-border);
+    border-radius: 4px;
+    padding: 12px;
+    margin-bottom: 12px;
+}
+
+.kairo-remote-panel-container {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--kairo-border);
+}
+
+.kairo-remote-panel-container-header {
+    flex: 1;
+    min-width: 0;
+}
+
+.kairo-remote-panel-container-image {
+    width: 40px;
+    height: 40px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--kairo-bg);
+    border: 1px solid var(--kairo-border);
+    border-radius: 4px;
+}
+
+.kairo-remote-panel-container-name {
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.kairo-remote-panel-container-ports {
+    font-size: 12px;
+    color: var(--kairo-text-secondary);
+}
+
+.kairo-remote-panel-container-actions {
+    display: flex;
+    gap: 6px;
+    margin-left: auto;
+}
+
+.kairo-remote-panel-session {
+    border: 1px solid var(--kairo-border);
+    border-radius: 4px;
+    margin-bottom: 8px;
+    overflow: hidden;
+}
+
+.kairo-remote-panel-session-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: var(--kairo-bg-secondary);
+    border-bottom: 1px solid var(--kairo-border);
+}
+
+.kairo-remote-panel-session-meta {
+    display: flex;
+    gap: 12px;
+    font-size: 12px;
+    color: var(--kairo-text-secondary);
+}
+
+.kairo-remote-panel-sessions-count {
+    background: var(--kairo-badge-default-bg);
+    color: var(--kairo-badge-default-fg);
+    font-size: 11px;
+    padding: 2px 6px;
+    border-radius: 10px;
+    margin-left: auto;
+}
+
+.kairo-remote-panel-latency-label {
+    font-size: 12px;
+    color: var(--kairo-text-secondary);
+}
+
+.kairo-remote-panel-latency-good {
+    color: var(--kairo-success);
+}
+
+.kairo-remote-panel-latency-high {
+    color: var(--kairo-error);
+}
+
+.kairo-remote-panel-progress {
+    margin: 8px 0;
+}
+
+.kairo-remote-panel-progress-header {
+    font-size: 12px;
+    margin-bottom: 4px;
+}
+
+.kairo-remote-panel-progress-svg {
+    width: 100%;
+    height: 8px;
+}
+
+.kairo-remote-panel-progress-track {
+    fill: none;
+    stroke: var(--kairo-border);
+}
+
+.kairo-remote-panel-progress-fill {
+    fill: none;
+    stroke: var(--kairo-primary);
+    transition: stroke-dashoffset 0.3s ease;
+}
+
+.kairo-remote-panel-error-detail {
+    font-size: 12px;
+    color: var(--kairo-text-secondary);
+    margin-top: 4px;
+}
+
+.kairo-remote-debug-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--kairo-border);
+    margin-bottom: 12px;
+}
+
+.kairo-remote-debug-empty,
+.kairo-remote-debug-experimental {
+    padding: 12px;
+    border-radius: 4px;
+    text-align: center;
+    font-size: 12px;
+}
+
+.kairo-remote-debug-experimental {
+    background: color-mix(in srgb, var(--kairo-warning) 12%, transparent);
+    color: var(--kairo-warning);
+    margin-bottom: 12px;
+}
+
+.kairo-remote-debug-form {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    max-width: 480px;
+}
+
+.kairo-remote-debug-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.kairo-remote-debug-auth {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.kairo-remote-debug-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.kairo-remote-debug-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: var(--kairo-bg-secondary);
+    border: 1px solid var(--kairo-border);
+    border-radius: 4px;
+}
+
+.kairo-remote-debug-item-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.kairo-remote-debug-item-actions {
+    display: flex;
+    gap: 6px;
+    margin-left: auto;
+}
+
+.kairo-remote-debug-add {
+    margin-top: 8px;
+}
+
+.kairo-remote-debug-form-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.kairo-remote-status-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    border-top: 1px solid var(--kairo-border);
+    font-size: 12px;
+}
+
+.kairo-remote-status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+}
+
+.kairo-remote-status-label {
+    color: var(--kairo-text-secondary);
+}
+
+.kairo-remote-status-addr {
+    margin-left: auto;
+    font-family: monospace;
+    color: var(--kairo-text-secondary);
+}
+
+.kairo-remote-connected .kairo-remote-status-dot {
+    background: var(--kairo-success);
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
 
 

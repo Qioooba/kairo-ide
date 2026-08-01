@@ -26,8 +26,11 @@ if (-not (Test-Path $key)) { New-Item -Path $key -Force | Out-Null }
 Set-ItemProperty -Path $key -Name 'AllowDevelopmentWithoutDevLicense' -Value 1 -Type DWord
 
 # 3) Grant SeCreateSymbolicLinkPrivilege via secedit
-$tmpInf = 'C:\Users\Qi\AppData\Local\Temp\kairo-seclink.inf'
-$tmpSdb = 'C:\Users\Qi\AppData\Local\Temp\kairo-seclink.sdb'
+# KAIRO_TMP: 优先写到工作区旁, 避免污染 C:\Users\Qi\AppData\Local\Temp
+$KairoTmp = if ($env:KAIRO_TMP) { $env:KAIRO_TMP } else { Join-Path $PSScriptRoot '..\tmp' }
+New-Item -ItemType Directory -Force -Path $KairoTmp | Out-Null
+$tmpInf = Join-Path $KairoTmp 'kairo-seclink.inf'
+$tmpSdb = Join-Path $KairoTmp 'kairo-seclink.sdb'
 @"
 [Unicode]
 Unicode=yes

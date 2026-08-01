@@ -3,6 +3,7 @@
 //        GBK test project creation, file open via navigator, longer waits
 const fs = require('fs');
 const path = require('path');
+require('../../tests/setup-tmp.cjs'); // KAIRO_TMP override
 const os = require('os');
 const { _electron: electron } = require('playwright');
 

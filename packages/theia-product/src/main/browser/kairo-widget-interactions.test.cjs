@@ -47,8 +47,8 @@ test('KairoDeploymentsWidget has state management methods', () => {
 test('KairoDeploymentsWidget constructor sets title and ID', () => {
   const widget = new KairoDeploymentsWidget();
   assert.equal(widget.id, 'kairo-deployments');
-  assert.equal(widget.title.label, 'Kairo Deployments');
-  assert.equal(widget.title.caption, 'Kairo Deployments');
+  assert.equal(widget.title.label, '');
+  assert.equal(widget.title.caption, '');
 });
 
 test('KairoDeploymentsWidget renders empty state by default', async () => {

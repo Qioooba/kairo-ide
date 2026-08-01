@@ -7,6 +7,7 @@ import { injectable, inject, postConstruct } from '@theia/core/shared/inversify'
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import * as React from '@theia/core/shared/react';
 import { SqlQueryResult, SqlColumnDef, SqlExecutionService } from './sql-execution-service';
+import { KairoI18nService } from '@kairo/i18n';
 
 interface ResultsWidgetState {
   result: SqlQueryResult | null;
@@ -25,6 +26,9 @@ export class SqlResultsWidget extends ReactWidget {
   @inject(SqlExecutionService)
   protected readonly executionService!: SqlExecutionService;
 
+  @inject(KairoI18nService)
+  protected readonly i18n!: KairoI18nService;
+
   private state: ResultsWidgetState = {
     result: null,
     error: null,
@@ -38,8 +42,9 @@ export class SqlResultsWidget extends ReactWidget {
   protected init(): void {
     this.id = SqlResultsWidget.ID;
     this.title.label = SqlResultsWidget.LABEL;
-    this.title.caption = 'SQL Query Results';
+    this.title.caption = this.t('widget.sql.results.caption');
     this.title.closable = true;
+    this.i18n.onDidChangeLanguage(() => this.update());
     this.update();
   }
 
@@ -56,9 +61,9 @@ export class SqlResultsWidget extends ReactWidget {
 
     if (error) {
       return (
-        <div className="sql-results-widget">
-          <div className="sql-results-error">
-            <h4>Execution Error</h4>
+        <div className="sql-results-widget kairo-sql-results-widget">
+          <div className="sql-results-error kairo-error-banner" role="alert">
+            <h4>{this.t('widget.sql.results.error.title')}</h4>
             <pre>{error}</pre>
           </div>
         </div>
@@ -67,8 +72,8 @@ export class SqlResultsWidget extends ReactWidget {
 
     if (!result) {
       return (
-        <div className="sql-results-widget">
-          <div className="sql-empty-message">Execute a SQL statement to see results here.</div>
+        <div className="sql-results-widget kairo-sql-results-widget">
+          <div className="sql-empty-message kairo-empty-state">{this.t('widget.sql.results.empty')}</div>
         </div>
       );
     }
@@ -78,29 +83,29 @@ export class SqlResultsWidget extends ReactWidget {
     const pageRows = sortedRows.slice(currentPage * pageSize, (currentPage + 1) * pageSize);
 
     return (
-      <div className="sql-results-widget">
+      <div className="sql-results-widget kairo-sql-results-widget">
         <div className="sql-results-header">
           <span className="sql-results-count">
-            {result.rowCount} row{result.rowCount !== 1 ? 's' : ''}
-            {result.truncated && ` (truncated, ${result.totalRows || '?'} total)`}
+            {this.t('widget.sql.results.rowCount', { count: result.rowCount })}
+            {result.truncated && this.t('widget.sql.results.truncated', { total: result.totalRows || '?' })}
           </span>
           <span className="sql-results-time">
-            {result.executionTimeMs}ms
+            {this.t('widget.sql.results.executionTime', { time: result.executionTimeMs })}
           </span>
           <button
             className="theia-button"
             onClick={() => this.handleExportCsv()}
           >
-            Export CSV
+            {this.t('widget.sql.results.exportCsv')}
           </button>
           <button
             className="theia-button"
             onClick={() => this.handleExportJson()}
           >
-            Export JSON
+            {this.t('widget.sql.results.exportJson')}
           </button>
           {result.truncated && (
-            <span className="sql-results-warning">Results truncated. Refine your query to see more rows.</span>
+            <span className="sql-results-warning">{this.t('widget.sql.results.truncatedHint')}</span>
           )}
         </div>
 
@@ -140,7 +145,7 @@ export class SqlResultsWidget extends ReactWidget {
         key={col.name}
         onClick={() => this.handleSort(col.name)}
         className="sql-results-th"
-        title={`${col.label} (${col.type})`}
+        title={this.t('widget.sql.results.columnTooltip', { label: col.label, type: col.type })}
       >
         <span className="sql-results-col-name">{col.label || col.name}</span>
         <span className="sql-results-col-type">{col.type}</span>
@@ -157,18 +162,23 @@ export class SqlResultsWidget extends ReactWidget {
           disabled={currentPage === 0}
           onClick={() => this.setState({ currentPage: currentPage - 1 })}
         >
-          Previous
+          {this.t('widget.sql.results.previous')}
         </button>
         <span className="sql-results-page-info">
-          Page {currentPage + 1} of {totalPages}
-          {' '}({(currentPage * this.state.pageSize) + 1}-{Math.min((currentPage + 1) * this.state.pageSize, result.rowCount)} of {result.rowCount} rows)
+          {this.t('widget.sql.results.pageInfo', {
+            current: currentPage + 1,
+            total: totalPages,
+            start: (currentPage * this.state.pageSize) + 1,
+            end: Math.min((currentPage + 1) * this.state.pageSize, result.rowCount),
+            count: result.rowCount,
+          })}
         </span>
         <button
           className="theia-button"
           disabled={currentPage >= totalPages - 1}
           onClick={() => this.setState({ currentPage: currentPage + 1 })}
         >
-          Next
+          {this.t('widget.sql.results.next')}
         </button>
       </div>
     );
@@ -212,7 +222,7 @@ export class SqlResultsWidget extends ReactWidget {
 
   private formatCellValue(value: unknown): string {
     if (value === null || value === undefined) {
-      return '<NULL>';
+      return this.t('widget.sql.results.nullValue');
     }
     if (typeof value === 'object') {
       return JSON.stringify(value);
@@ -227,7 +237,7 @@ export class SqlResultsWidget extends ReactWidget {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `sql-results-${new Date().toISOString().replace(/[:.]/g, '-')}.csv`;
+    a.download = this.t('widget.sql.results.csvFileName', { timestamp: new Date().toISOString().replace(/[:.]/g, '-') });
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -239,9 +249,13 @@ export class SqlResultsWidget extends ReactWidget {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `sql-results-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+    a.download = this.t('widget.sql.results.jsonFileName', { timestamp: new Date().toISOString().replace(/[:.]/g, '-') });
     a.click();
     URL.revokeObjectURL(url);
+  }
+
+  private t(key: string, params?: Record<string, string | number>): string {
+    return this.i18n.t(key as any, params);
   }
 
   private setState(partial: Partial<ResultsWidgetState>): void {

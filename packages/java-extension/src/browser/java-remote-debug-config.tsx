@@ -1,5 +1,5 @@
 /**
- * 远程调试配置 UI — P3-ADVDBG-03
+ * Remote debug configuration UI — P3-ADVDBG-03
  *
  * UI for configuring remote debug connections.
  * Fields: host, port, auth type (none/SSH key/token), SSH key path.
@@ -12,6 +12,7 @@ import { injectable, inject, postConstruct } from '@theia/core/shared/inversify'
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import { MessageService } from '@theia/core/lib/common/message-service';
 import { StorageService } from '@theia/core/lib/browser';
+import { KairoI18nService } from '@kairo/i18n';
 import { RemoteDebugTunnel, type RemoteDebugConfig, type RemoteDebugAuthType } from './java-remote-debug-tunnel';
 
 export const KAIRO_REMOTE_DEBUG_CONFIG_ID = 'kairo-remote-debug-config';
@@ -25,6 +26,7 @@ export class RemoteDebugConfigWidget extends ReactWidget {
   @inject(MessageService) protected readonly messages!: MessageService;
   @inject(StorageService) protected readonly storage!: StorageService;
   @inject(RemoteDebugTunnel) protected readonly tunnel!: RemoteDebugTunnel;
+  @inject(KairoI18nService) protected readonly i18n!: KairoI18nService;
 
   protected configs: RemoteDebugConfig[] = [];
   protected editingConfig: RemoteDebugConfig | undefined;
@@ -34,16 +36,28 @@ export class RemoteDebugConfigWidget extends ReactWidget {
   constructor() {
     super();
     this.id = KAIRO_REMOTE_DEBUG_CONFIG_ID;
-    this.title.label = '远程调试';
-    this.title.caption = 'Kairo 远程 JDWP 调试配置';
     this.title.iconClass = 'codicon codicon-debug';
     this.title.closable = true;
   }
 
   @postConstruct()
   protected async init(): Promise<void> {
+    this.updateTitle();
+    this.toDispose.push(this.i18n.onDidChangeLanguage(() => {
+      this.updateTitle();
+      this.update();
+    }));
     await this.loadConfigs();
     this.update();
+  }
+
+  protected t(key: string, params?: Record<string, string | number>): string {
+    return this.i18n.t(key as any, params);
+  }
+
+  protected updateTitle(): void {
+    this.title.label = this.t('widget.java.remoteDebug.title');
+    this.title.caption = this.t('widget.java.remoteDebug.caption');
   }
 
   render(): React.ReactNode {
@@ -53,6 +67,7 @@ export class RemoteDebugConfigWidget extends ReactWidget {
       isTesting: this.isTesting,
       isConnecting: this.isConnecting,
       tunnelStatus: this.tunnel.status,
+      i18n: this.i18n,
       onAdd: () => this.startNew(),
       onEdit: (c: RemoteDebugConfig) => this.startEdit(c),
       onDelete: (c: RemoteDebugConfig) => this.deleteConfig(c),
@@ -88,7 +103,7 @@ export class RemoteDebugConfigWidget extends ReactWidget {
 
   protected async saveConfig(config: RemoteDebugConfig): Promise<void> {
     if (!config.name.trim() || !config.host.trim()) {
-      this.messages.error('请填写名称和主机地址。');
+      this.messages.error(this.t('widget.java.remoteDebug.validation.required'));
       return;
     }
 
@@ -116,11 +131,11 @@ export class RemoteDebugConfigWidget extends ReactWidget {
     try {
       this.tunnel.showExperimentalWarning();
       const localPort = await this.tunnel.connect(config);
-      this.messages.info(`连接测试成功: localhost:${localPort}`);
+      this.messages.info(this.t('widget.java.remoteDebug.toast.testConnected', { localPort }));
       await this.tunnel.disconnect();
     } catch (error) {
       this.messages.error(
-        `连接失败: ${error instanceof Error ? error.message : String(error)}`,
+        this.t('widget.java.remoteDebug.toast.connectionFailed', { message: error instanceof Error ? error.message : String(error) }),
       );
     } finally {
       this.isTesting = false;
@@ -135,10 +150,10 @@ export class RemoteDebugConfigWidget extends ReactWidget {
     try {
       this.tunnel.showExperimentalWarning();
       const localPort = await this.tunnel.connect(config);
-      this.messages.info(`已连接到远程调试: localhost:${localPort}`);
+      this.messages.info(this.t('widget.java.remoteDebug.toast.connected', { localPort }));
     } catch (error) {
       this.messages.error(
-        `连接失败: ${error instanceof Error ? error.message : String(error)}`,
+        this.t('widget.java.remoteDebug.toast.connectionFailed', { message: error instanceof Error ? error.message : String(error) }),
       );
     } finally {
       this.isConnecting = false;
@@ -204,6 +219,7 @@ interface RemoteDebugConfigPanelProps {
   isTesting: boolean;
   isConnecting: boolean;
   tunnelStatus: { state: string };
+  i18n: KairoI18nService;
   onAdd: () => void;
   onEdit: (c: RemoteDebugConfig) => void;
   onDelete: (c: RemoteDebugConfig) => void;
@@ -214,16 +230,17 @@ interface RemoteDebugConfigPanelProps {
   onDisconnect: () => void;
 }
 
-const AUTH_TYPES: { value: RemoteDebugAuthType; label: string }[] = [
-  { value: 'none', label: '无认证' },
-  { value: 'ssh-key', label: 'SSH 密钥' },
-  { value: 'token', label: 'Token' },
-];
-
 const RemoteDebugConfigPanel: React.FC<RemoteDebugConfigPanelProps> = ({
-  configs, editingConfig, isTesting, isConnecting, tunnelStatus,
+  configs, editingConfig, isTesting, isConnecting, tunnelStatus, i18n,
   onAdd, onEdit, onDelete, onSave, onCancel, onTest, onConnect, onDisconnect,
 }) => {
+  const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
+  const authTypes = React.useMemo(() => [
+    { value: 'none' as RemoteDebugAuthType, label: t('widget.java.remoteDebug.authType.none') },
+    { value: 'ssh-key' as RemoteDebugAuthType, label: t('widget.java.remoteDebug.authType.sshKey') },
+    { value: 'token' as RemoteDebugAuthType, label: t('widget.java.remoteDebug.authType.token') },
+  ], [t]);
+
   const [draft, setDraft] = React.useState<RemoteDebugConfig>(
     editingConfig || { id: '', name: '', host: '', port: 8000, authType: 'none' },
   );
@@ -234,20 +251,29 @@ const RemoteDebugConfigPanel: React.FC<RemoteDebugConfigPanelProps> = ({
     }
   }, [editingConfig]);
 
+  React.useEffect(() => {
+    const disposable = i18n.onDidChangeLanguage(() => {
+      // Force re-render on language change; draft and authTypes will recompute.
+      setDraft(prev => ({ ...prev }));
+    });
+    return () => disposable.dispose();
+  }, [i18n]);
+
   const isConnected = tunnelStatus.state === 'connected';
+  const isEditingExisting = editingConfig && editingConfig.id === draft.id && draft.name;
 
   return (
     <div className="kairo-remote-debug-container">
       <div className="kairo-remote-debug-header">
-        <h3>远程 JDWP 调试配置</h3>
-        <span className="kairo-remote-debug-experimental">实验性功能</span>
+        <h3>{t('widget.java.remoteDebug.header')}</h3>
+        <span className="kairo-remote-debug-experimental">{t('widget.java.remoteDebug.experimental')}</span>
         {isConnected && (
           <button
             type="button"
             className="theia-button secondary"
             onClick={onDisconnect}
           >
-            断开连接
+            {t('widget.java.remoteDebug.disconnect')}
           </button>
         )}
       </div>
@@ -265,7 +291,7 @@ const RemoteDebugConfigPanel: React.FC<RemoteDebugConfigPanelProps> = ({
                 <strong>{config.name}</strong>
                 <span>{config.host}:{config.port}</span>
                 <span className="kairo-remote-debug-auth">
-                  {AUTH_TYPES.find(a => a.value === config.authType)?.label || config.authType}
+                  {authTypes.find(a => a.value === config.authType)?.label || config.authType}
                 </span>
               </div>
               <div className="kairo-remote-debug-item-actions">
@@ -275,7 +301,7 @@ const RemoteDebugConfigPanel: React.FC<RemoteDebugConfigPanelProps> = ({
                   onClick={() => onConnect(config)}
                   disabled={isTesting || isConnecting || isConnected}
                 >
-                  连接
+                  {t('widget.java.remoteDebug.action.connect')}
                 </button>
                 <button
                   type="button"
@@ -283,21 +309,21 @@ const RemoteDebugConfigPanel: React.FC<RemoteDebugConfigPanelProps> = ({
                   onClick={() => onTest(config)}
                   disabled={isTesting || isConnecting}
                 >
-                  {isTesting ? '测试中...' : '测试'}
+                  {isTesting ? t('widget.java.remoteDebug.action.testing') : t('widget.java.remoteDebug.action.test')}
                 </button>
                 <button
                   type="button"
                   className="theia-button secondary"
                   onClick={() => onEdit(config)}
                 >
-                  编辑
+                  {t('widget.java.remoteDebug.action.edit')}
                 </button>
                 <button
                   type="button"
                   className="theia-button secondary"
                   onClick={() => onDelete(config)}
                 >
-                  删除
+                  {t('widget.java.remoteDebug.action.delete')}
                 </button>
               </div>
             </div>
@@ -307,36 +333,36 @@ const RemoteDebugConfigPanel: React.FC<RemoteDebugConfigPanelProps> = ({
 
       {configs.length === 0 && !editingConfig && (
         <p className="kairo-remote-debug-empty">
-          暂无远程调试配置。点击"添加配置"创建新的远程连接。
+          {t('widget.java.remoteDebug.empty')}
         </p>
       )}
 
       {/* Edit form */}
       {editingConfig && (
         <div className="kairo-remote-debug-form">
-          <h4>{editingConfig.id === draft.id && draft.name ? '编辑配置' : '新建配置'}</h4>
+          <h4>{isEditingExisting ? t('widget.java.remoteDebug.editConfig') : t('widget.java.remoteDebug.newConfig')}</h4>
           <div className="kairo-remote-debug-field">
-            <label>名称</label>
+            <label>{t('widget.java.remoteDebug.label.name')}</label>
             <input
               type="text"
               value={draft.name}
               onChange={e => setDraft({ ...draft, name: e.target.value })}
-              placeholder="例如：生产服务器"
+              placeholder={t('widget.java.remoteDebug.placeholder.name')}
               className="theia-input"
             />
           </div>
           <div className="kairo-remote-debug-field">
-            <label>主机</label>
+            <label>{t('widget.java.remoteDebug.label.host')}</label>
             <input
               type="text"
               value={draft.host}
               onChange={e => setDraft({ ...draft, host: e.target.value })}
-              placeholder="例如：192.168.1.100"
+              placeholder={t('widget.java.remoteDebug.placeholder.host')}
               className="theia-input"
             />
           </div>
           <div className="kairo-remote-debug-field">
-            <label>端口</label>
+            <label>{t('widget.java.remoteDebug.label.port')}</label>
             <input
               type="number"
               value={draft.port}
@@ -347,43 +373,43 @@ const RemoteDebugConfigPanel: React.FC<RemoteDebugConfigPanelProps> = ({
             />
           </div>
           <div className="kairo-remote-debug-field">
-            <label>认证方式</label>
+            <label>{t('widget.java.remoteDebug.label.authType')}</label>
             <select
               value={draft.authType}
               onChange={e => setDraft({ ...draft, authType: e.target.value as RemoteDebugAuthType })}
               className="theia-select"
             >
-              {AUTH_TYPES.map(a => (
+              {authTypes.map(a => (
                 <option key={a.value} value={a.value}>{a.label}</option>
               ))}
             </select>
           </div>
           {draft.authType === 'ssh-key' && (
             <div className="kairo-remote-debug-field">
-              <label>SSH 密钥路径</label>
+              <label>{t('widget.java.remoteDebug.label.sshKeyPath')}</label>
               <input
                 type="text"
                 value={draft.sshKeyPath || ''}
                 onChange={e => setDraft({ ...draft, sshKeyPath: e.target.value })}
-                placeholder="例如：~/.ssh/id_rsa"
+                placeholder={t('widget.java.remoteDebug.placeholder.sshKeyPath')}
                 className="theia-input"
               />
             </div>
           )}
           {draft.authType === 'token' && (
             <div className="kairo-remote-debug-field">
-              <label>Token</label>
+              <label>{t('widget.java.remoteDebug.label.token')}</label>
               <input
                 type="password"
                 value={draft.token || ''}
                 onChange={e => setDraft({ ...draft, token: e.target.value })}
-                placeholder="输入认证 Token"
+                placeholder={t('widget.java.remoteDebug.placeholder.token')}
                 className="theia-input"
               />
             </div>
           )}
           <div className="kairo-remote-debug-field">
-            <label>本地端口（可选）</label>
+            <label>{t('widget.java.remoteDebug.label.localPort')}</label>
             <input
               type="number"
               value={draft.localPort || ''}
@@ -391,7 +417,7 @@ const RemoteDebugConfigPanel: React.FC<RemoteDebugConfigPanelProps> = ({
                 const v = parseInt(e.target.value, 10);
                 setDraft({ ...draft, localPort: isNaN(v) ? undefined : v });
               }}
-              placeholder="自动分配"
+              placeholder={t('widget.java.remoteDebug.placeholder.localPort')}
               min={1024}
               max={65535}
               className="theia-input"
@@ -403,14 +429,14 @@ const RemoteDebugConfigPanel: React.FC<RemoteDebugConfigPanelProps> = ({
               className="theia-button"
               onClick={() => onSave(draft)}
             >
-              保存
+              {t('common.save')}
             </button>
             <button
               type="button"
               className="theia-button secondary"
               onClick={onCancel}
             >
-              取消
+              {t('common.cancel')}
             </button>
           </div>
         </div>
@@ -424,7 +450,7 @@ const RemoteDebugConfigPanel: React.FC<RemoteDebugConfigPanelProps> = ({
             className="theia-button"
             onClick={onAdd}
           >
-            添加配置
+            {t('widget.java.remoteDebug.addConfig')}
           </button>
         </div>
       )}

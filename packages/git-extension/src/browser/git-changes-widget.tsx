@@ -1,18 +1,19 @@
 import * as React from 'react';
-import { injectable, inject } from '@theia/core/shared/inversify';
+import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
+import { KairoI18nService } from '@kairo/i18n';
 import { GitStore, GitChangesState } from './git-store';
 import { GitFileStatus } from './git-service';
 
-function statusIcon(status: string): string {
+function statusIconClass(status: string): string {
     switch (status) {
-        case 'M': return 'M';
-        case 'A': return 'A';
-        case 'D': return 'D';
-        case 'R': return 'R';
-        case 'C': return 'C';
-        case '?': return 'U';
-        default: return '?';
+        case 'M': return 'codicon-diff-modified';
+        case 'A': return 'codicon-diff-added';
+        case 'D': return 'codicon-diff-removed';
+        case 'R': return 'codicon-diff-renamed';
+        case 'C': return 'codicon-diff';
+        case '?': return 'codicon-file';
+        default: return 'codicon-question';
     }
 }
 
@@ -29,9 +30,13 @@ function statusClass(status: string): string {
 
 interface GitChangesProps {
     store: GitStore;
+    i18n: KairoI18nService;
 }
 
-const GitChangesComponent: React.FC<GitChangesProps> = ({ store }) => {
+const GitChangesComponent: React.FC<GitChangesProps> = ({ store, i18n }) => {
+    const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
+    const [, forceUpdate] = React.useReducer(x => x + 1, 0);
+
     const [state, setState] = React.useState<GitChangesState>(store.getState());
     const [selectedStaged, setSelectedStaged] = React.useState<Set<string>>(new Set());
     const [selectedUnstaged, setSelectedUnstaged] = React.useState<Set<string>>(new Set());
@@ -40,6 +45,11 @@ const GitChangesComponent: React.FC<GitChangesProps> = ({ store }) => {
         const sub = store.onDidChange(s => setState({ ...s }));
         return () => sub.dispose();
     }, [store]);
+
+    React.useEffect(() => {
+        const disposable = i18n.onDidChangeLanguage(() => forceUpdate());
+        return () => disposable.dispose();
+    }, [i18n]);
 
     const handleRefresh = () => store.refresh();
     const handleStageAll = () => store.stageAll();
@@ -77,7 +87,12 @@ const GitChangesComponent: React.FC<GitChangesProps> = ({ store }) => {
 
     const renderFileList = (files: GitFileStatus[], selected: Set<string>, onToggle: (f: string) => void) => {
         if (files.length === 0) {
-            return <p className="kairo-empty">No changes</p>;
+            return (
+                <div className="kairo-empty-state compact">
+                    <span className="kairo-empty-state-glyph codicon codicon-check" aria-hidden="true" />
+                    <h3 className="kairo-empty-state-title">{t('widget.git.changes.noChanges')}</h3>
+                </div>
+            );
         }
         return (
             <ul className="kairo-git-file-list">
@@ -92,13 +107,13 @@ const GitChangesComponent: React.FC<GitChangesProps> = ({ store }) => {
                             onChange={() => onToggle(f.path)}
                             className="kairo-git-file-checkbox"
                         />
-                        <span className={`kairo-git-status-badge ${statusClass(f.status)}`}>
-                            {statusIcon(f.status)}
+                        <span className={`kairo-git-status-badge ${statusClass(f.status)}`} aria-hidden="true">
+                            <span className={`codicon ${statusIconClass(f.status)}`} />
                         </span>
                         <span
                             className="kairo-git-file-name"
                             onClick={() => handleFileClick(f)}
-                            title="Click to view diff"
+                            title={t('widget.git.changes.viewDiffTooltip')}
                         >
                             {f.path}
                             {f.origPath && <span className="kairo-git-old-name"> ({f.origPath})</span>}
@@ -112,7 +127,7 @@ const GitChangesComponent: React.FC<GitChangesProps> = ({ store }) => {
     return (
         <div className="kairo-widget" data-testid="git-changes-view">
             <div className="kairo-widget-header" data-testid="git-changes-header">
-                <span className="kairo-widget-title">Git Changes</span>
+                <span className="kairo-widget-title">{t('widget.git.changes.title')}</span>
                 {state.branch && (
                     <span className="kairo-git-branch" data-testid="git-branch">
                         {state.branch}
@@ -127,44 +142,45 @@ const GitChangesComponent: React.FC<GitChangesProps> = ({ store }) => {
                     className="theia-button"
                     onClick={handleRefresh}
                     disabled={state.loading}
-                    aria-label="Refresh git status"
+                    aria-label={t('widget.git.changes.refreshButtonAria')}
                 >
-                    {state.loading ? 'Refreshing…' : 'Refresh'}
+                    {state.loading ? t('widget.git.changes.refreshing') : t('widget.git.changes.refreshButton')}
                 </button>
                 <button
                     className="theia-button"
                     onClick={handleStageAll}
                     disabled={state.loading || state.unstagedChanges.length === 0}
-                    aria-label="Stage all changes"
+                    aria-label={t('widget.git.changes.stageAllButtonAria')}
                 >
-                    Stage All
+                    {t('widget.git.changes.stageAllButton')}
                 </button>
                 <button
                     className="theia-button secondary"
                     onClick={handleUnstageAll}
                     disabled={state.loading || state.stagedChanges.length === 0}
-                    aria-label="Unstage all changes"
+                    aria-label={t('widget.git.changes.unstageAllButtonAria')}
                 >
-                    Unstage All
+                    {t('widget.git.changes.unstageAllButton')}
                 </button>
             </div>
 
             {state.error && (
-                <div className="theia-error" role="alert" data-testid="git-error">
-                    {state.error}
+                <div className="kairo-error-banner" role="alert" data-testid="git-error">
+                    <span className="codicon codicon-error" aria-hidden="true" />
+                    <span>{state.error}</span>
                 </div>
             )}
 
             <div className="kairo-widget-section" data-testid="git-staged-section">
                 <div className="kairo-section-header">
-                    <span className="kairo-section-title">Staged Changes</span>
+                    <span className="kairo-section-title">{t('widget.git.changes.stagedTitle')}</span>
                     {selectedStaged.size > 0 && (
                         <button
                             className="theia-button secondary kairo-git-stage-btn"
                             onClick={handleUnstageSelected}
-                            aria-label="Unstage selected"
+                            aria-label={t('widget.git.changes.unstageSelectedButtonAria')}
                         >
-                            Unstage Selected
+                            {t('widget.git.changes.unstageSelectedButton')}
                         </button>
                     )}
                 </div>
@@ -173,14 +189,14 @@ const GitChangesComponent: React.FC<GitChangesProps> = ({ store }) => {
 
             <div className="kairo-widget-section" data-testid="git-unstaged-section">
                 <div className="kairo-section-header">
-                    <span className="kairo-section-title">Changes</span>
+                    <span className="kairo-section-title">{t('widget.git.changes.unstagedTitle')}</span>
                     {selectedUnstaged.size > 0 && (
                         <button
                             className="theia-button kairo-git-stage-btn"
                             onClick={handleStageSelected}
-                            aria-label="Stage selected"
+                            aria-label={t('widget.git.changes.stageSelectedButtonAria')}
                         >
-                            Stage Selected
+                            {t('widget.git.changes.stageSelectedButton')}
                         </button>
                     )}
                 </div>
@@ -195,16 +211,31 @@ export class GitChangesWidget extends ReactWidget {
     static readonly ID = 'kairo-git-changes-view';
 
     @inject(GitStore) protected readonly store!: GitStore;
+    @inject(KairoI18nService) protected readonly i18n!: KairoI18nService;
 
     constructor() {
         super();
         this.id = GitChangesWidget.ID;
-        this.title.label = 'Git Changes';
-        this.title.caption = 'Git Changes View';
+        this.title.label = '';
+        this.title.caption = '';
         this.addClass('kairo-widget');
     }
 
+    @postConstruct()
+    protected init(): void {
+        this.updateTitle();
+        this.toDispose.push(this.i18n.onDidChangeLanguage(() => this.updateTitle()));
+    }
+
+    protected updateTitle(): void {
+        this.title.label = this.i18n.t('widget.git.changes.title' as any);
+        this.title.caption = this.i18n.t('widget.git.changes.caption' as any);
+    }
+
     protected render(): React.ReactNode {
-        return React.createElement(GitChangesComponent, { store: this.store });
+        return React.createElement(GitChangesComponent, {
+            store: this.store,
+            i18n: this.i18n,
+        });
     }
 }

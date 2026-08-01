@@ -1,9 +1,10 @@
 import * as React from 'react';
-import { inject, injectable } from '@theia/core/shared/inversify';
+import { inject, injectable, postConstruct } from '@theia/core/shared/inversify';
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import type { Message } from '@theia/core/shared/@lumino/messaging';
 import URI from '@theia/core/lib/common/uri';
 import { EditorManager } from '@theia/editor/lib/browser/editor-manager';
+import { KairoI18nService } from '@kairo/i18n';
 import { JavaLanguageClient } from '@kairo/java-extension';
 import { fuzzyScore } from './search-everywhere-model';
 import { VirtualList } from '@kairo/ui-kit';
@@ -35,14 +36,14 @@ const SYMBOL_KINDS = new Set([6, 7, 8, 9, 12, 13, 14]); // Method, Property, Fie
 
 function symbolKindIcon(kind: number): string {
   switch (kind) {
-    case 6: return '\u0192';       // Method
-    case 7: return '\u2699';       // Property
-    case 8: return '\uD83D\uDD11'; // Field
-    case 9: return '\uD83D\uDEE0'; // Constructor
-    case 12: return '\u0192';      // Function
-    case 13: return '\uD83D\uDD22'; // Variable
-    case 14: return '\uD83D\uDD12'; // Constant
-    default: return '\u0192';
+    case 6: return 'codicon-symbol-method';
+    case 7: return 'codicon-symbol-property';
+    case 8: return 'codicon-symbol-field';
+    case 9: return 'codicon-symbol-constructor';
+    case 12: return 'codicon-symbol-function';
+    case 13: return 'codicon-symbol-variable';
+    case 14: return 'codicon-symbol-constant';
+    default: return 'codicon-symbol-method';
   }
 }
 
@@ -130,9 +131,11 @@ export interface FindSymbolProps {
   state: FindSymbolState;
   onOpen: (item: FindSymbolItem) => Promise<unknown>;
   onClose: () => void;
+  i18n: KairoI18nService;
 }
 
-export const FindSymbolComponent: React.FC<FindSymbolProps> = ({ model, state, onOpen, onClose }) => {
+export const FindSymbolComponent: React.FC<FindSymbolProps> = ({ model, state, onOpen, onClose, i18n }) => {
+  const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
   const [query, setQuery] = React.useState(state.query);
   const [selectedIndex, setSelectedIndex] = React.useState(0);
   const [openError, setOpenError] = React.useState<Error | undefined>();
@@ -199,17 +202,17 @@ export const FindSymbolComponent: React.FC<FindSymbolProps> = ({ model, state, o
 
   const renderStatus = (): React.ReactNode => {
     if (openError) {
-      return <div className="kairo-find-status is-error" role="alert">{openError.message}</div>;
+      return <div className="kairo-find-status kairo-error-banner" role="alert">{openError.message}</div>;
     }
     switch (state.status) {
       case 'loading':
-        return <div className="kairo-find-status" role="status">搜索符号中…</div>;
+        return <div className="kairo-find-status kairo-empty-state" role="status">{t('widget.search.findSymbol.status.loading')}</div>;
       case 'idle':
-        return <div className="kairo-find-status">输入符号名搜索方法、字段、常量等</div>;
+        return <div className="kairo-find-status kairo-empty-state">{t('widget.search.findSymbol.status.idle')}</div>;
       case 'empty':
-        return <div className="kairo-find-status">未找到匹配的符号</div>;
+        return <div className="kairo-find-status kairo-empty-state">{t('widget.search.findSymbol.status.empty')}</div>;
       case 'error':
-        return <div className="kairo-find-status is-error" role="alert">{state.error?.message ?? '搜索失败'}</div>;
+        return <div className="kairo-find-status kairo-error-banner" role="alert">{state.error?.message ?? t('widget.search.findSymbol.status.unknownError')}</div>;
       case 'results':
         return undefined;
     }
@@ -224,7 +227,7 @@ export const FindSymbolComponent: React.FC<FindSymbolProps> = ({ model, state, o
         onClick={event => event.stopPropagation()}
         role="dialog"
         aria-modal="true"
-        aria-label="查找符号"
+        aria-label={t('widget.search.findSymbol.title')}
         data-testid="find-symbol"
       >
         <div className="kairo-find-header">
@@ -233,8 +236,8 @@ export const FindSymbolComponent: React.FC<FindSymbolProps> = ({ model, state, o
             className="theia-input kairo-find-input"
             value={query}
             onChange={event => setQuery(event.target.value)}
-            placeholder="输入符号名搜索 (e.g. getUserById)"
-            aria-label="符号搜索"
+            placeholder={t('widget.search.findSymbol.placeholder')}
+            aria-label={t('widget.search.findSymbol.ariaLabel.query')}
             data-testid="find-symbol-query"
           />
         </div>
@@ -246,7 +249,7 @@ export const FindSymbolComponent: React.FC<FindSymbolProps> = ({ model, state, o
             selectedIndex={selectedIndex}
             onSelectIndex={index => { setSelectedIndex(index); model.select(index); }}
             className="kairo-find-results"
-            ariaLabel="符号搜索结果"
+            ariaLabel={t('widget.search.findSymbol.ariaLabel.results')}
             testId="find-symbol-results"
             renderItem={(item, _index, isSelected) => (
               <button
@@ -254,12 +257,11 @@ export const FindSymbolComponent: React.FC<FindSymbolProps> = ({ model, state, o
                 role="option"
                 aria-selected={isSelected}
                 className={`kairo-find-item${isSelected ? ' is-selected' : ''}`}
-                style={{ height: '100%', width: '100%', display: 'flex', alignItems: 'center', gap: '8px', padding: '0 12px' }}
                 onMouseEnter={() => { setSelectedIndex(_index); model.select(_index); }}
                 onClick={() => void openItem(item)}
                 data-testid="find-symbol-result"
               >
-                <span className="kairo-find-kind">{symbolKindIcon(item.kind)}</span>
+                <span className="kairo-find-kind"><span className={`codicon ${symbolKindIcon(item.kind)}`} aria-hidden="true" /></span>
                 <span className="kairo-find-label">{item.label}</span>
                 <span className="kairo-find-detail">{item.detail}</span>
               </button>
@@ -283,6 +285,7 @@ export class FindSymbolWidget extends ReactWidget {
 
   @inject(FindSymbolModel) protected readonly model!: FindSymbolModel;
   @inject(EditorManager) protected readonly editors!: EditorManager;
+  @inject(KairoI18nService) protected readonly i18n!: KairoI18nService;
 
   protected state: FindSymbolState = { status: 'idle', query: '', items: [], selectedIndex: 0 };
   protected unsubscribe: (() => void) | undefined;
@@ -290,9 +293,22 @@ export class FindSymbolWidget extends ReactWidget {
   constructor() {
     super();
     this.id = FindSymbolWidget.ID;
-    this.title.label = '查找符号';
     this.title.closable = true;
     this.addClass('kairo-find-symbol-widget');
+  }
+
+  @postConstruct()
+  protected init(): void {
+    const t = (key: string, params?: Record<string, string | number>) => this.i18n.t(key as any, params);
+    const updateTitle = (): void => {
+      this.title.label = t('widget.search.findSymbol.title');
+      this.title.caption = t('widget.search.findSymbol.caption');
+    };
+    updateTitle();
+    this.toDispose.push(this.i18n.onDidChangeLanguage(() => {
+      updateTitle();
+      this.update();
+    }));
   }
 
   protected onAfterAttach(message: Message): void {
@@ -326,6 +342,7 @@ export class FindSymbolWidget extends ReactWidget {
         state={this.state}
         onOpen={item => this.open(item)}
         onClose={() => this.close()}
+        i18n={this.i18n}
       />
     );
   }

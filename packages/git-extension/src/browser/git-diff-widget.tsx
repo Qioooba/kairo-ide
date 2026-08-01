@@ -1,6 +1,7 @@
 import * as React from 'react';
-import { injectable, inject } from '@theia/core/shared/inversify';
+import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
+import { KairoI18nService } from '@kairo/i18n';
 import { GitStore } from './git-store';
 import { GitService } from './git-service';
 
@@ -14,9 +15,13 @@ interface DiffLine {
 interface GitDiffProps {
     store: GitStore;
     gitService: GitService;
+    i18n: KairoI18nService;
 }
 
-const GitDiffComponent: React.FC<GitDiffProps> = ({ store, gitService }) => {
+const GitDiffComponent: React.FC<GitDiffProps> = ({ store, gitService, i18n }) => {
+    const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
+    const [, forceUpdate] = React.useReducer(x => x + 1, 0);
+
     const [file, setFile] = React.useState<string>('');
     const [staged, setStaged] = React.useState<boolean>(false);
     const [diffLines, setDiffLines] = React.useState<DiffLine[]>([]);
@@ -33,6 +38,11 @@ const GitDiffComponent: React.FC<GitDiffProps> = ({ store, gitService }) => {
         });
         return () => sub.dispose();
     }, [store, gitService]);
+
+    React.useEffect(() => {
+        const disposable = i18n.onDidChangeLanguage(() => forceUpdate());
+        return () => disposable.dispose();
+    }, [i18n]);
 
     const loadDiff = async (f: string, s: boolean) => {
         setLoading(true);
@@ -87,10 +97,14 @@ const GitDiffComponent: React.FC<GitDiffProps> = ({ store, gitService }) => {
     if (!file) {
         return (
             <div className="kairo-widget" data-testid="git-diff-view">
-                <div className="kairo-widget-header">
-                    <span className="kairo-widget-title">Diff</span>
+                <div className="kairo-widget-header" data-testid="git-diff-header">
+                    <span className="kairo-widget-title">{t('widget.git.diff.title')}</span>
                 </div>
-                <p className="kairo-empty">Select a file from the Changes view to see its diff.</p>
+                <div className="kairo-empty-state" data-testid="git-diff-empty">
+                    <span className="kairo-empty-state-glyph codicon codicon-diff" aria-hidden="true" />
+                    <h3 className="kairo-empty-state-title">{t('widget.git.diff.emptyStateTitle')}</h3>
+                    <p className="kairo-empty-state-reason">{t('widget.git.diff.emptyStateReason')}</p>
+                </div>
             </div>
         );
     }
@@ -98,15 +112,25 @@ const GitDiffComponent: React.FC<GitDiffProps> = ({ store, gitService }) => {
     return (
         <div className="kairo-widget" data-testid="git-diff-view">
             <div className="kairo-widget-header" data-testid="git-diff-header">
-                <span className="kairo-widget-title">Diff</span>
+                <span className="kairo-widget-title">{t('widget.git.diff.title')}</span>
                 <span className="kairo-git-diff-file" data-testid="git-diff-file">
                     {file}
-                    {staged && ' (staged)'}
+                    {staged && t('widget.git.diff.stagedSuffix')}
                 </span>
             </div>
 
-            {loading && <p className="kairo-empty">Loading diff…</p>}
-            {error && <div className="theia-error" role="alert">{error}</div>}
+            {loading && (
+                <div className="kairo-loading" data-testid="git-diff-loading">
+                    <span className="kairo-loading-icon codicon codicon-loading codicon-modifier-spin" aria-hidden="true" />
+                    <span>{t('widget.git.diff.loading')}</span>
+                </div>
+            )}
+            {error && (
+                <div className="kairo-error-banner" role="alert" data-testid="git-diff-error">
+                    <span className="codicon codicon-error" aria-hidden="true" />
+                    <span>{error}</span>
+                </div>
+            )}
 
             {!loading && diffLines.length > 0 && (
                 <div className="kairo-diff-container" data-testid="git-diff-content">
@@ -135,16 +159,32 @@ export class GitDiffWidget extends ReactWidget {
 
     @inject(GitStore) protected readonly store!: GitStore;
     @inject(GitService) protected readonly gitService!: GitService;
+    @inject(KairoI18nService) protected readonly i18n!: KairoI18nService;
 
     constructor() {
         super();
         this.id = GitDiffWidget.ID;
-        this.title.label = 'Git Diff';
-        this.title.caption = 'Git Diff View';
+        this.title.label = '';
+        this.title.caption = '';
         this.addClass('kairo-widget');
     }
 
+    @postConstruct()
+    protected init(): void {
+        this.updateTitle();
+        this.toDispose.push(this.i18n.onDidChangeLanguage(() => this.updateTitle()));
+    }
+
+    protected updateTitle(): void {
+        this.title.label = this.i18n.t('widget.git.diff.title' as any);
+        this.title.caption = this.i18n.t('widget.git.diff.caption' as any);
+    }
+
     protected render(): React.ReactNode {
-        return React.createElement(GitDiffComponent, { store: this.store, gitService: this.gitService });
+        return React.createElement(GitDiffComponent, {
+            store: this.store,
+            gitService: this.gitService,
+            i18n: this.i18n,
+        });
     }
 }

@@ -60,8 +60,8 @@ test('BuildViewWidget: instantiation sets id', () => {
 
 test('BuildViewWidget: instantiation sets title', () => {
   const widget = new build.BuildViewWidget();
-  assert.strictEqual(widget.title.label, 'Kairo Build');
-  assert.strictEqual(widget.title.caption, 'Kairo Build View');
+  assert.strictEqual(widget.title.label, '');
+  assert.strictEqual(widget.title.caption, '');
 });
 
 test('BuildViewWidget: has kairo-widget CSS class', () => {

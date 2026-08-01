@@ -15,6 +15,7 @@
     "test": "node --test src/browser/test-exports.test.cjs src/browser/test-runner.test.cjs src/browser/test-discovery.test.cjs src/browser/test-store.test.cjs src/browser/test-extra.test.cjs"
   },
   "dependencies": {
+    "@kairo/i18n": "workspace:*",
     "@kairo/protocol": "workspace:*",
     "@kairo/runtime-extension": "workspace:*",
     "@kairo/project-extension": "workspace:*"

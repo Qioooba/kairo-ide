@@ -10,6 +10,7 @@ import { Emitter } from '@theia/core/lib/common/event';
 import * as React from '@theia/core/shared/react';
 import { SqlExecutionService, SqlQueryResult, SqlHistoryEntry } from './sql-execution-service';
 import { SqlConnectionService, SqlConnectionConfig } from './sql-connection-service';
+import { KairoI18nService } from '@kairo/i18n';
 
 interface EditorWidgetState {
   sql: string;
@@ -33,6 +34,9 @@ export class SqlEditorWidget extends ReactWidget {
   @inject(SqlConnectionService)
   protected readonly connectionService!: SqlConnectionService;
 
+  @inject(KairoI18nService)
+  protected readonly i18n!: KairoI18nService;
+
   private textAreaRef = React.createRef<HTMLTextAreaElement>();
 
   private state: EditorWidgetState = {
@@ -50,8 +54,9 @@ export class SqlEditorWidget extends ReactWidget {
   protected init(): void {
     this.id = SqlEditorWidget.ID;
     this.title.label = SqlEditorWidget.LABEL;
-    this.title.caption = 'Oracle SQL Editor';
+    this.title.caption = this.t('widget.sql.editor.caption');
     this.title.closable = true;
+    this.i18n.onDidChangeLanguage(() => this.update());
     this.update();
   }
 
@@ -73,17 +78,17 @@ export class SqlEditorWidget extends ReactWidget {
     const { connections, connectionId, sql, isExecuting, readOnly, history, showHistory, confirmDialog } = this.state;
 
     return (
-      <div className="sql-editor-widget">
+      <div className="sql-editor-widget kairo-sql-editor-widget">
         <div className="sql-editor-toolbar">
           <select
             value={connectionId}
             onChange={(e) => this.setState({ connectionId: e.target.value })}
             className="sql-connection-selector"
           >
-            <option value="">-- Select Connection --</option>
+            <option value="">{this.t('widget.sql.editor.selectConnection')}</option>
             {connections.map((c) => (
               <option key={c.id} value={c.id}>
-                {c.name} ({c.username}@{c.host}:{c.port})
+                {this.t('widget.sql.editor.connectionOption', { name: c.name, username: c.username, host: c.host, port: c.port })}
               </option>
             ))}
           </select>
@@ -91,9 +96,9 @@ export class SqlEditorWidget extends ReactWidget {
             className="theia-button"
             onClick={() => this.handleExecute()}
             disabled={!connectionId || !sql.trim() || isExecuting}
-            title="Execute (F5 / Ctrl+Enter)"
+            title={this.t('widget.sql.editor.executeTooltip')}
           >
-            {isExecuting ? 'Executing...' : 'Execute'}
+            {isExecuting ? this.t('widget.sql.editor.executing') : this.t('widget.sql.editor.execute')}
           </button>
           <label className="sql-readonly-toggle">
             <input
@@ -101,13 +106,13 @@ export class SqlEditorWidget extends ReactWidget {
               checked={readOnly}
               onChange={(e) => this.handleReadOnlyToggle(e.target.checked)}
             />
-            Read-only
+            {this.t('widget.sql.editor.readOnly')}
           </label>
           <button
             className="theia-button"
             onClick={() => this.setState({ showHistory: !showHistory })}
           >
-            {showHistory ? 'Hide History' : 'History'}
+            {showHistory ? this.t('widget.sql.editor.hideHistory') : this.t('widget.sql.editor.history')}
           </button>
         </div>
 
@@ -118,7 +123,7 @@ export class SqlEditorWidget extends ReactWidget {
             value={sql}
             onChange={(e) => this.setState({ sql: e.target.value })}
             onKeyDown={(e) => this.handleKeyDown(e)}
-            placeholder="Enter SQL statement here...&#10;&#10;F5 or Ctrl+Enter to execute"
+            placeholder={this.t('widget.sql.editor.placeholder')}
             spellCheck={false}
             readOnly={isExecuting}
           />
@@ -126,22 +131,22 @@ export class SqlEditorWidget extends ReactWidget {
 
         {showHistory && (
           <div className="sql-history-panel">
-            <h4>Statement History (last 50)</h4>
+            <h4>{this.t('widget.sql.editor.historyTitle')}</h4>
             {history.length === 0 && (
-              <div className="sql-empty-message">No executed statements yet.</div>
+              <div className="sql-empty-message kairo-empty-state">{this.t('widget.sql.editor.historyEmpty')}</div>
             )}
             {history.map((entry) => (
               <div
                 key={entry.id}
                 className={`sql-history-item ${entry.success ? 'sql-history-success' : 'sql-history-error'}`}
                 onClick={() => this.setState({ sql: entry.sql })}
-                title="Click to load into editor"
+                title={this.t('widget.sql.editor.historyItemTooltip')}
               >
                 <span className="sql-history-time">{new Date(entry.executedAt).toLocaleTimeString()}</span>
                 <span className="sql-history-sql">{entry.sql.substring(0, 100)}</span>
                 <span className="sql-history-meta">
-                  {entry.executionTimeMs}ms
-                  {entry.rowCount !== undefined && ` | ${entry.rowCount} rows`}
+                  {this.t('widget.sql.editor.historyTime', { time: entry.executionTimeMs })}
+                  {entry.rowCount !== undefined && this.t('widget.sql.editor.historyRowCount', { count: entry.rowCount })}
                 </span>
               </div>
             ))}
@@ -160,13 +165,13 @@ export class SqlEditorWidget extends ReactWidget {
                     this.setState({ confirmDialog: null });
                   }}
                 >
-                  Execute Anyway
+                  {this.t('widget.sql.editor.executeAnyway')}
                 </button>
                 <button
                   className="theia-button"
                   onClick={() => this.setState({ confirmDialog: null })}
                 >
-                  Cancel
+                  {this.t('common.cancel')}
                 </button>
               </div>
             </div>
@@ -185,7 +190,7 @@ export class SqlEditorWidget extends ReactWidget {
 
   private handleReadOnlyToggle(checked: boolean): void {
     if (!checked) {
-      if (window.confirm('Are you sure you want to disable read-only mode? You will be able to execute DDL statements.')) {
+      if (window.confirm(this.t('widget.sql.editor.disableReadOnlyConfirm'))) {
         this.setState({ readOnly: false });
       }
     } else {
@@ -204,7 +209,7 @@ export class SqlEditorWidget extends ReactWidget {
       if (dangerous.dangerous) {
         this.setState({
           confirmDialog: {
-            message: `⚠️ Dangerous Statement: ${dangerous.reason}\n\n${selectedSql.substring(0, 200)}`,
+            message: this.t('widget.sql.editor.dangerousStatement', { reason: dangerous.reason || '', sql: selectedSql.substring(0, 200) }),
             onConfirm: () => this.doExecute(),
           },
         });
@@ -232,7 +237,7 @@ export class SqlEditorWidget extends ReactWidget {
       // Emit an event so the results widget can show the result
       this.onResultReadyEmitter.fire(result);
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Unknown error';
+      const message = err instanceof Error ? err.message : this.t('common.unknownError');
       this.setState({
         history: this.executionService.getHistory(connectionId),
       });
@@ -260,6 +265,10 @@ export class SqlEditorWidget extends ReactWidget {
 
   private readonly onErrorEmitter = new Emitter<string>();
   readonly onError = this.onErrorEmitter.event;
+
+  private t(key: string, params?: Record<string, string | number>): string {
+    return this.i18n.t(key as any, params);
+  }
 
   private setState(partial: Partial<EditorWidgetState>): void {
     this.state = { ...this.state, ...partial };

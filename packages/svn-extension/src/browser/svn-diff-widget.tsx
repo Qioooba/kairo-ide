@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// Kairo SVN Diff Widget — IDEA-style side-by-side diff using Monaco's
+// Kairo SVN Diff Widget - IDEA-style side-by-side diff using Monaco's
 // built-in DiffEditor. Supports:
 //   - Local vs BASE
 //   - Local vs HEAD
@@ -8,12 +8,13 @@
 //   - Revision A vs Revision B (with two revision pickers)
 //
 // Provides character-level inline highlights, minimap, prev/next diff
-// navigation, and synchronized scrolling — all from Monaco out of the box.
+// navigation, and synchronized scrolling - all from Monaco out of the box.
 
 import * as React from 'react';
 import * as monaco from '@theia/monaco-editor-core';
-import { injectable, inject } from '@theia/core/shared/inversify';
+import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
+import { KairoI18nService } from '@kairo/i18n';
 import { MessageService } from '@theia/core/lib/common/message-service';
 import { QuickInputService } from '@theia/core/lib/browser/quick-input/quick-input-service';
 import { FileService } from '@theia/filesystem/lib/browser/file-service';
@@ -29,6 +30,7 @@ interface SvnDiffComponentProps {
   quickInputService: QuickInputService;
   messageService: MessageService;
   workspaceService: WorkspaceService;
+  i18n: KairoI18nService;
   initialFilePath?: string;
   initialBaseRevision?: string | number;
   initialTargetRevision?: string | number;
@@ -48,12 +50,15 @@ const SvnDiffComponent: React.FC<SvnDiffComponentProps> = (props) => {
     quickInputService,
     messageService,
     workspaceService,
+    i18n,
     initialFilePath,
     initialBaseRevision,
     initialTargetRevision,
     onPickRevision,
     onLoadDiff,
   } = props;
+
+  const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
 
   const [filePath, setFilePath] = React.useState<string>(initialFilePath || '');
   const [mode, setMode] = React.useState<SvnDiffMode>(
@@ -134,7 +139,7 @@ const SvnDiffComponent: React.FC<SvnDiffComponentProps> = (props) => {
     r: string | number,
   ) => {
     if (!fp) {
-      setError('Please enter a file path');
+      setError(t('widget.svn.diff.error.enterFilePath'));
       return;
     }
     setLoading(true);
@@ -142,18 +147,18 @@ const SvnDiffComponent: React.FC<SvnDiffComponentProps> = (props) => {
     try {
       const result = await onLoadDiff(fp, md, l, r);
       if (!result.leftContent && !result.rightContent) {
-        setError('No diff content available (file may be binary or unversioned)');
+        setError(t('widget.svn.diff.error.noDiffContent'));
       } else {
         applyModels(result.leftContent, result.rightContent, fp);
         setLeftLabel(result.leftLabel);
         setRightLabel(result.rightLabel);
       }
     } catch (e) {
-      setError((e as Error).message || 'Failed to load diff');
+      setError(t('widget.svn.diff.error.loadFailed', { message: (e as Error).message || t('common.unknown') }));
     } finally {
       setLoading(false);
     }
-  }, [onLoadDiff, applyModels]);
+  }, [onLoadDiff, applyModels, t]);
 
   // Auto-load when initial values provided
   React.useEffect(() => {
@@ -165,14 +170,13 @@ const SvnDiffComponent: React.FC<SvnDiffComponentProps> = (props) => {
 
   const handleShowDiff = () => {
     if (!filePath) {
-      messageService.warn('Please enter a file path first');
+      messageService.warn(t('widget.svn.diff.enterFilePathFirst'));
       return;
     }
     void loadAndApply(filePath, mode, leftRev, rightRev);
   };
 
   const handleSwap = () => {
-    const newMode: SvnDiffMode = mode === 'rev-rev' ? 'rev-rev' : mode;
     const oldLeft = leftRev;
     const oldRight = rightRev;
     const oldLeftLabel = leftLabel;
@@ -224,173 +228,116 @@ const SvnDiffComponent: React.FC<SvnDiffComponentProps> = (props) => {
   const showRevPicker = mode === 'local-rev' || mode === 'rev-rev';
 
   return (
-    <div className="kairo-svn-diff-widget-root" style={styles.root}>
-      <div style={styles.toolbar}>
+    <div className="kairo-widget kairo-svn-diff-widget">
+      <div className="kairo-widget-header">
+        <span className="kairo-widget-title">{t('widget.svn.diff.title')}</span>
+      </div>
+
+      <div className="kairo-widget-toolbar kairo-svn-diff-toolbar">
         <select
           value={mode}
           onChange={e => handleModeChange(e.target.value as SvnDiffMode)}
-          style={styles.select}
-          aria-label="Compare mode"
+          className="kairo-svn-diff-mode-select"
+          aria-label={t('widget.svn.diff.mode.label')}
         >
-          <option value="local-base">Local ↔ BASE</option>
-          <option value="local-head">Local ↔ HEAD</option>
-          <option value="local-rev">Local ↔ Revision…</option>
-          <option value="rev-rev">Revision ↔ Revision</option>
+          <option value="local-base">{t('widget.svn.diff.mode.localBase')}</option>
+          <option value="local-head">{t('widget.svn.diff.mode.localHead')}</option>
+          <option value="local-rev">{t('widget.svn.diff.mode.localRev')}</option>
+          <option value="rev-rev">{t('widget.svn.diff.mode.revRev')}</option>
         </select>
         <input
-          style={{ ...styles.input, flex: '1 1 200px', minWidth: '180px' }}
+          className="kairo-svn-diff-input kairo-svn-diff-input--file"
           value={filePath}
           onChange={e => setFilePath(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter') handleShowDiff(); }}
-          placeholder="File path relative to WC root (e.g. src/main/java/Hello.java)"
-          aria-label="File path"
+          placeholder={t('widget.svn.diff.filePathPlaceholder')}
+          aria-label={t('widget.svn.diff.filePathAria')}
         />
-        <span style={styles.at}>@</span>
+        <span className="kairo-svn-diff-separator">@</span>
         <input
-          style={{ ...styles.input, width: '100px' }}
+          className="kairo-svn-diff-input kairo-svn-diff-input--rev"
           value={leftRev}
           onChange={e => setLeftRev(e.target.value)}
-          placeholder="BASE / HEAD / r123"
-          aria-label="Left revision"
+          placeholder={t('widget.svn.diff.leftRevisionPlaceholder')}
+          aria-label={t('widget.svn.diff.leftRevisionAria')}
         />
         {showRevPicker && (
-          <button style={styles.pickBtn} onClick={handlePickLeft} title="Pick from history">…</button>
+          <button
+            className="theia-button secondary kairo-svn-diff-pick-btn"
+            onClick={handlePickLeft}
+            title={t('widget.svn.diff.pickRevisionTooltip')}
+            aria-label={t('widget.svn.diff.pickRevisionTooltip')}
+          >
+            <span className="codicon codicon-ellipsis" aria-hidden="true" />
+          </button>
         )}
-        <span style={styles.colon}>↔</span>
+        <span className="kairo-svn-diff-separator">
+          <span className="codicon codicon-arrow-swap" aria-hidden="true" />
+        </span>
         <input
-          style={{ ...styles.input, width: '100px' }}
+          className="kairo-svn-diff-input kairo-svn-diff-input--rev"
           value={rightRev}
           onChange={e => setRightRev(e.target.value)}
-          placeholder="WORKING / HEAD / r123"
-          aria-label="Right revision"
+          placeholder={t('widget.svn.diff.rightRevisionPlaceholder')}
+          aria-label={t('widget.svn.diff.rightRevisionAria')}
         />
         {showRevPicker && (
-          <button style={styles.pickBtn} onClick={handlePickRight} title="Pick from history">…</button>
+          <button
+            className="theia-button secondary kairo-svn-diff-pick-btn"
+            onClick={handlePickRight}
+            title={t('widget.svn.diff.pickRevisionTooltip')}
+            aria-label={t('widget.svn.diff.pickRevisionTooltip')}
+          >
+            <span className="codicon codicon-ellipsis" aria-hidden="true" />
+          </button>
         )}
-        <button style={styles.swapBtn} onClick={handleSwap} title="Swap left and right">⇄</button>
-        <button style={styles.goBtn} onClick={handleShowDiff} disabled={loading}>
-          {loading ? 'Loading…' : 'Show Diff'}
+        <button
+          className="theia-button secondary kairo-svn-diff-swap-btn"
+          onClick={handleSwap}
+          title={t('widget.svn.diff.swapTooltip')}
+          aria-label={t('widget.svn.diff.swapTooltip')}
+        >
+          <span className="codicon codicon-arrow-swap" aria-hidden="true" />
+        </button>
+        <button
+          className="theia-button primary kairo-svn-diff-go-btn"
+          onClick={handleShowDiff}
+          disabled={loading}
+        >
+          <span className={`codicon ${loading ? 'codicon-loading codicon-modifier-spin' : 'codicon-diff'}`} aria-hidden="true" />
+          {loading ? t('widget.svn.diff.loading') : t('widget.svn.diff.showDiff')}
         </button>
       </div>
 
       {error && (
-        <div style={styles.errorBanner}>
-          ⚠️ {error}
+        <div className="kairo-error-banner" role="alert">
+          <span className="codicon codicon-warning" aria-hidden="true" />
+          {error}
         </div>
       )}
 
-      <div style={styles.statusBar} data-testid="svn-diff-status">
-        <span style={styles.statusItem}>
-          {leftLabel ? `Left: ${leftLabel}` : mode === 'local-base' || mode === 'local-head' || mode === 'local-rev' ? `Left: r${leftRev}` : `Left: r${leftRev}`}
+      <div className="kairo-svn-diff-status-bar" data-testid="svn-diff-status">
+        <span className="kairo-svn-diff-status-item">
+          {leftLabel
+            ? t('widget.svn.diff.status.leftLabel', { label: leftLabel })
+            : t('widget.svn.diff.status.leftRev', { rev: leftRev })}
         </span>
-        <span style={styles.statusItem}>
-          {rightLabel ? `Right: ${rightLabel}` : 'Right: working copy'}
+        <span className="kairo-svn-diff-status-item">
+          {rightLabel
+            ? t('widget.svn.diff.status.rightLabel', { label: rightLabel })
+            : t('widget.svn.diff.status.rightWorkingCopy')}
         </span>
         {!available && (
-          <span style={{ ...styles.statusItem, color: 'var(--theia-editorError-foreground)' }}>
-            ⚠️ SVN client not available
+          <span className="kairo-svn-diff-status-item kairo-svn-diff-status-item--error">
+            <span className="codicon codicon-warning" aria-hidden="true" />
+            {t('widget.svn.diff.status.svnNotAvailable')}
           </span>
         )}
       </div>
 
-      <div ref={containerRef} style={styles.editorContainer} data-testid="svn-diff-editor" />
-
-      <style>{`
-        .kairo-svn-diff-widget-root .monaco-diff-editor .editor.original {
-          border-right: 1px solid var(--theia-editorIndentGuide-background1, #444);
-        }
-      `}</style>
+      <div ref={containerRef} className="kairo-svn-diff-editor" data-testid="svn-diff-editor" />
     </div>
   );
-};
-
-const styles: { [k: string]: React.CSSProperties } = {
-  root: {
-    display: 'flex',
-    flexDirection: 'column',
-    height: '100%',
-    backgroundColor: 'var(--theia-editor-background)',
-    color: 'var(--theia-editor-foreground)',
-  },
-  toolbar: {
-    display: 'flex',
-    flexWrap: 'wrap',
-    gap: '6px',
-    alignItems: 'center',
-    padding: '6px 8px',
-    borderBottom: '1px solid var(--theia-dropdown-border)',
-    backgroundColor: 'var(--theia-editorWidget-background)',
-  },
-  select: {
-    padding: '3px 6px',
-    backgroundColor: 'var(--theia-input-background)',
-    color: 'var(--theia-input-foreground)',
-    border: '1px solid var(--theia-input-border)',
-    borderRadius: '2px',
-    fontSize: '12px',
-  },
-  input: {
-    padding: '3px 8px',
-    backgroundColor: 'var(--theia-input-background)',
-    color: 'var(--theia-input-foreground)',
-    border: '1px solid var(--theia-input-border)',
-    borderRadius: '2px',
-    fontSize: '12px',
-  },
-  at: { fontSize: '12px', color: 'var(--theia-descriptionForeground)' },
-  colon: { fontSize: '12px', color: 'var(--theia-descriptionForeground)' },
-  pickBtn: {
-    padding: '2px 8px',
-    backgroundColor: 'var(--theia-button-secondaryBackground)',
-    color: 'var(--theia-button-secondaryForeground)',
-    border: '1px solid var(--theia-button-border)',
-    borderRadius: '2px',
-    cursor: 'pointer',
-    fontSize: '12px',
-  },
-  swapBtn: {
-    padding: '3px 10px',
-    backgroundColor: 'var(--theia-button-secondaryBackground)',
-    color: 'var(--theia-button-secondaryForeground)',
-    border: '1px solid var(--theia-button-border)',
-    borderRadius: '2px',
-    cursor: 'pointer',
-    fontSize: '14px',
-  },
-  goBtn: {
-    padding: '4px 14px',
-    backgroundColor: 'var(--theia-button-background)',
-    color: 'var(--theia-button-foreground)',
-    border: 'none',
-    borderRadius: '2px',
-    cursor: 'pointer',
-    fontSize: '12px',
-    fontWeight: 500,
-  },
-  errorBanner: {
-    padding: '6px 10px',
-    color: 'var(--theia-errorForeground)',
-    backgroundColor: 'var(--theia-inputValidation-errorBackground)',
-    borderBottom: '1px solid var(--theia-inputValidation-errorBorder)',
-    fontSize: '12px',
-  },
-  statusBar: {
-    display: 'flex',
-    gap: '16px',
-    padding: '3px 10px',
-    fontSize: '11px',
-    color: 'var(--theia-descriptionForeground)',
-    backgroundColor: 'var(--theia-statusBar-background)',
-    borderBottom: '1px solid var(--theia-dropdown-border)',
-  },
-  statusItem: {
-    fontFamily: 'var(--theia-editor-font-family, monospace)',
-  },
-  editorContainer: {
-    flex: 1,
-    minHeight: 0,
-    overflow: 'hidden',
-  },
 };
 
 function detectLanguageFromPath(path: string): string {
@@ -438,6 +385,7 @@ export class SvnDiffWidget extends ReactWidget {
   @inject(QuickInputService) protected readonly quickInputService!: QuickInputService;
   @inject(MessageService) protected readonly messageService!: MessageService;
   @inject(WorkspaceService) protected readonly workspaceService!: WorkspaceService;
+  @inject(KairoI18nService) protected readonly i18n!: KairoI18nService;
 
   protected filePath: string = '';
   protected baseRevision: string | number = 'BASE';
@@ -447,11 +395,25 @@ export class SvnDiffWidget extends ReactWidget {
   constructor() {
     super();
     this.id = SvnDiffWidget.ID;
-    this.title.label = SvnDiffWidget.LABEL;
-    this.title.caption = SvnDiffWidget.LABEL;
     this.title.iconClass = 'codicon codicon-diff';
     this.title.closable = true;
     this.addClass('kairo-svn-diff-widget');
+  }
+
+  @postConstruct()
+  protected init(): void {
+    this.updateTitle();
+    this.toDispose.push(this.i18n.onDidChangeLanguage(() => this.updateTitle()));
+  }
+
+  protected updateTitle(): void {
+    this.title.caption = this.i18n.t('widget.svn.diff.caption' as any);
+    if (!this.filePath) {
+      this.title.label = this.i18n.t('widget.svn.diff.title' as any);
+    } else {
+      const name = this.filePath.split(/[\\/]/).pop() || this.filePath;
+      this.title.label = this.i18n.t('widget.svn.diff.titleWithFile' as any, { name });
+    }
   }
 
   /**
@@ -464,8 +426,7 @@ export class SvnDiffWidget extends ReactWidget {
     this.baseRevision = 'BASE';
     this.targetRevision = 'HEAD';
     this.mode = 'local-base';
-    this.title.label = SvnDiffWidget.LABEL;
-    this.title.caption = SvnDiffWidget.LABEL;
+    this.updateTitle();
     this.update();
   }
 
@@ -478,8 +439,7 @@ export class SvnDiffWidget extends ReactWidget {
     if (targetRevision !== undefined) {
       this.targetRevision = targetRevision;
     }
-    const baseName = filePath.split(/[\\/]/).pop() || filePath;
-    this.title.label = `SVN Diff: ${baseName}`;
+    this.updateTitle();
     this.update();
   }
 
@@ -495,6 +455,7 @@ export class SvnDiffWidget extends ReactWidget {
       quickInputService: this.quickInputService,
       messageService: this.messageService,
       workspaceService: this.workspaceService,
+      i18n: this.i18n,
       initialFilePath: this.filePath,
       initialBaseRevision: this.baseRevision,
       initialTargetRevision: this.targetRevision,
@@ -505,33 +466,34 @@ export class SvnDiffWidget extends ReactWidget {
   }
 
   protected async handlePickRevision(target: 'left' | 'right'): Promise<string | number | undefined> {
+    const t = (key: string, params?: Record<string, string | number>) => this.i18n.t(key as any, params);
     if (!this.filePath) {
-      this.messageService.warn('Enter a file path first to load its history');
+      this.messageService.warn(t('widget.svn.diff.enterFilePathFirst'));
       return undefined;
     }
     try {
       const entries: SvnLogEntry[] = await this.svnService.getLog(this.filePath, { limit: 200 });
       if (entries.length === 0) {
-        this.messageService.warn('No history available for this file');
+        this.messageService.warn(t('widget.svn.diff.noHistoryForFile'));
         return undefined;
       }
       interface RevPickItem { label: string; description?: string; rev: number | string; }
       const items: RevPickItem[] = entries.map(e => ({
-        label: `r${e.revision} — ${(e.message || '(no message)').split('\n')[0].slice(0, 60)}`,
-        description: `${e.author} · ${e.date.toLocaleString()}`,
+        label: `r${e.revision} - ${(e.message || t('widget.svn.diff.noMessage')).split('\n')[0].slice(0, 60)}`,
+        description: `${e.author} | ${e.date.toLocaleString()}`,
         rev: e.revision,
       }));
       // Allow special keywords
-      items.unshift({ label: 'BASE (last committed)', rev: 'BASE' });
-      items.unshift({ label: 'HEAD (latest)', rev: 'HEAD' });
-      items.unshift({ label: 'PREV (previous to BASE)', rev: 'PREV' });
-      items.unshift({ label: 'COMMITTED (last commit affecting this path)', rev: 'COMMITTED' });
+      items.unshift({ label: t('widget.svn.diff.revBase'), rev: 'BASE' });
+      items.unshift({ label: t('widget.svn.diff.revHead'), rev: 'HEAD' });
+      items.unshift({ label: t('widget.svn.diff.revPrev'), rev: 'PREV' });
+      items.unshift({ label: t('widget.svn.diff.revCommitted'), rev: 'COMMITTED' });
       const selected = await this.quickInputService.showQuickPick(items, {
-        placeholder: `Pick ${target} revision (${this.filePath})`,
+        placeholder: t('widget.svn.diff.pickRevisionPlaceholder', { target, path: this.filePath }),
       });
       return selected?.rev;
     } catch (e) {
-      this.messageService.error(`Failed to load history: ${(e as Error).message}`);
+      this.messageService.error(t('widget.svn.diff.loadHistoryFailed', { message: (e as Error).message }));
       return undefined;
     }
   }
@@ -544,36 +506,31 @@ export class SvnDiffWidget extends ReactWidget {
   ): Promise<{ leftContent: string; rightContent: string; leftLabel: string; rightLabel: string }> {
     const wcRoot = this.svnService.getActiveWcRoot();
     if (!wcRoot) {
-      this.messageService.warn('No active SVN working copy');
+      this.messageService.warn(this.i18n.t('widget.svn.diff.noActiveWorkingCopy' as any));
       return { leftContent: '', rightContent: '', leftLabel: '', rightLabel: '' };
     }
 
     const isSpecialLeft = (v: string | number) => typeof v === 'string' && /^(BASE|HEAD|PREV|COMMITTED|WORKING)$/i.test(v);
     const isSpecialRight = (v: string | number) => typeof v === 'string' && /^(BASE|HEAD|PREV|COMMITTED|WORKING)$/i.test(v);
 
+    const t = (key: string, params?: Record<string, string | number>) => this.i18n.t(key as any, params);
+
     const resolveLeft = async (): Promise<{ content: string; label: string }> => {
-      if (mode === 'local-base' || mode === 'local-head' || mode === 'local-rev' || isSpecialLeft(left)) {
-        // Left side is from a SVN revision
-        const rev = String(left);
-        const content = await this.svnService.getFileAtRevision(filePath, rev);
-        return { content, label: `r${rev} from repository` };
-      }
-      // rev-rev mode: also from repository
       const rev = String(left);
       const content = await this.svnService.getFileAtRevision(filePath, rev);
-      return { content, label: `r${rev} from repository` };
+      return { content, label: t('widget.svn.diff.status.repositoryRev', { rev }) };
     };
 
     const resolveRight = async (): Promise<{ content: string; label: string }> => {
       // In any "local-*" mode, right side is the working copy file
       if (mode === 'local-base' || mode === 'local-head' || mode === 'local-rev') {
         const content = await readWorkingCopyContent(this.fileService, this.workspaceService, wcRoot, filePath);
-        return { content, label: 'working copy' };
+        return { content, label: t('widget.svn.diff.status.workingCopy') };
       }
       // rev-rev mode: right side is from repository
       const rev = String(right);
       const content = await this.svnService.getFileAtRevision(filePath, rev);
-      return { content, label: `r${rev} from repository` };
+      return { content, label: t('widget.svn.diff.status.repositoryRev', { rev }) };
     };
 
     const [leftResult, rightResult] = await Promise.all([resolveLeft(), resolveRight()]);

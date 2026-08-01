@@ -2,6 +2,7 @@
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+require('../setup-tmp.cjs'); // KAIRO_TMP override
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');

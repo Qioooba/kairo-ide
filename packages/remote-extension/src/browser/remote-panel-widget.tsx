@@ -12,6 +12,7 @@ import * as React from 'react';
 import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import { ILogger } from '@theia/core/lib/common/logger';
+import { KairoI18nService } from '@kairo/i18n';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                               */
@@ -63,14 +64,55 @@ export interface RemotePanelState {
 export const KAIRO_REMOTE_PANEL_FACTORY_ID = 'kairo-remote-panel';
 
 /* ------------------------------------------------------------------ */
+/*  Helpers                                                             */
+/* ------------------------------------------------------------------ */
+
+function containerBadgeClass(state: ContainerInfo['state']): string {
+    switch (state) {
+        case 'running': return 'kairo-badge-success';
+        case 'stopped': return 'kairo-badge-error';
+        case 'paused': return 'kairo-badge-warning';
+        default: return 'kairo-badge-default';
+    }
+}
+
+interface ErrorType {
+    icon: string;
+    titleKey: string;
+}
+
+function classifyError(error: string): ErrorType {
+    const lower = error.toLowerCase();
+    if (lower.includes('timeout') || lower.includes('timed out')) {
+        return { icon: 'codicon-clock', titleKey: 'widget.remote.panel.error.timeoutTitle' };
+    }
+    if (lower.includes('permission') || lower.includes('denied') || lower.includes('unauthorized')) {
+        return { icon: 'codicon-lock', titleKey: 'widget.remote.panel.error.permissionTitle' };
+    }
+    if (lower.includes('network') || lower.includes('connect') || lower.includes('unreachable')) {
+        return { icon: 'codicon-globe', titleKey: 'widget.remote.panel.error.networkTitle' };
+    }
+    return { icon: 'codicon-warning', titleKey: 'widget.remote.panel.error.genericTitle' };
+}
+
+/* ------------------------------------------------------------------ */
 /*  React Component                                                     */
 /* ------------------------------------------------------------------ */
 
 interface RemotePanelProps {
     logger: ILogger;
+    i18n: KairoI18nService;
 }
 
-const RemotePanelComponent: React.FC<RemotePanelProps> = ({ logger }) => {
+const RemotePanelComponent: React.FC<RemotePanelProps> = ({ logger, i18n }) => {
+    const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
+    const [, forceUpdate] = React.useReducer(x => x + 1, 0);
+
+    React.useEffect(() => {
+        const disposable = i18n.onDidChangeLanguage(() => forceUpdate());
+        return () => disposable.dispose();
+    }, [i18n]);
+
     const [state, setState] = React.useState<RemotePanelState>({
         connected: false,
         connectionInfo: null,
@@ -85,8 +127,6 @@ const RemotePanelComponent: React.FC<RemotePanelProps> = ({ logger }) => {
     const loadData = React.useCallback(() => {
         setState(prev => ({ ...prev, loading: true, error: null }));
         try {
-            // In a real implementation, this would fetch from remote services.
-            // For now, we provide the UI structure with mock data.
             const mockConnectionInfo: ConnectionInfo = {
                 host: '192.168.1.100',
                 port: 22,
@@ -178,107 +218,11 @@ const RemotePanelComponent: React.FC<RemotePanelProps> = ({ logger }) => {
         }));
     };
 
-    const tabStyle = (tab: string): React.CSSProperties => ({
-        padding: '6px 16px',
-        cursor: 'pointer',
-        borderBottom: activeTab === tab ? '2px solid var(--theia-focusBorder)' : '2px solid transparent',
-        color: activeTab === tab ? 'var(--theia-focusBorder)' : 'var(--theia-descriptionForeground)',
-        fontWeight: activeTab === tab ? 600 : 400,
-        fontSize: '12px',
-        background: 'none',
-        border: 'none',
-    });
-
-    const stateColor = (s: string): string => {
-        switch (s) {
-            case 'running': return '#4caf50';
-            case 'stopped': return '#f44336';
-            case 'paused': return '#ff9800';
-            default: return '#9e9e9e';
-        }
-    };
-
     const syncProgress = state.fileSync.totalFiles > 0
         ? Math.round((state.fileSync.syncedFiles / state.fileSync.totalFiles) * 100)
         : 0;
 
-    // Loading state — skeleton placeholder
-    if (state.loading) {
-        return (
-            <div className="kairo-remote-panel" role="status" aria-label="Loading remote panel" style={{ padding: '16px' }}>
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
-                    <div style={{
-                        width: '24px',
-                        height: '24px',
-                        border: '3px solid var(--theia-dropdown-border)',
-                        borderTopColor: 'var(--theia-focusBorder)',
-                        borderRadius: '50%',
-                        animation: 'kairo-spin 0.8s linear infinite',
-                    }} />
-                    <p style={{ color: 'var(--theia-descriptionForeground)', fontSize: '13px', margin: 0 }}>
-                        Loading remote panel data...
-                    </p>
-                    <div style={{ width: '80%', maxWidth: '300px' }}>
-                        {[0, 1, 2].map(i => (
-                            <div key={i} style={{
-                                height: '12px',
-                                backgroundColor: 'var(--theia-dropdown-border)',
-                                borderRadius: '3px',
-                                marginBottom: '8px',
-                                opacity: 0.5 - i * 0.15,
-                                width: `${90 - i * 15}%`,
-                            }} />
-                        ))}
-                    </div>
-                </div>
-                <style>{`@keyframes kairo-spin { to { transform: rotate(360deg); } }`}</style>
-            </div>
-        );
-    }
-
-    // Error state — categorized by error type
-    if (state.error) {
-        const isTimeout = state.error.toLowerCase().includes('timeout') || state.error.toLowerCase().includes('timed out');
-        const isPermission = state.error.toLowerCase().includes('permission') || state.error.toLowerCase().includes('denied') || state.error.toLowerCase().includes('unauthorized');
-        const isNetwork = state.error.toLowerCase().includes('network') || state.error.toLowerCase().includes('connect') || state.error.toLowerCase().includes('unreachable');
-        const errorIcon = isTimeout ? '⏱' : isPermission ? '🔒' : isNetwork ? '🌐' : '⚠';
-        const errorTitle = isTimeout ? 'Connection Timed Out' : isPermission ? 'Permission Denied' : isNetwork ? 'Network Error' : 'Error loading remote panel';
-        return (
-            <div className="kairo-remote-panel" role="alert" aria-live="assertive" style={{ padding: '16px' }}>
-                <div style={{
-                    padding: '12px',
-                    backgroundColor: 'rgba(244,67,54,0.1)',
-                    border: '1px solid rgba(244,67,54,0.3)',
-                    borderRadius: '4px',
-                    color: 'var(--theia-errorForeground)',
-                    fontSize: '13px',
-                }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                        <span style={{ fontSize: '18px' }} aria-hidden="true">{errorIcon}</span>
-                        <strong>{errorTitle}</strong>
-                    </div>
-                    <p style={{ margin: '4px 0 0 0', fontSize: '12px' }}>{state.error}</p>
-                    <button
-                        className="theia-button"
-                        onClick={loadData}
-                        title="Retry loading remote panel data"
-                        aria-label="Retry loading remote panel data"
-                        style={{ marginTop: '8px', fontSize: '11px', padding: '2px 12px' }}
-                    >
-                        Retry
-                    </button>
-                </div>
-            </div>
-        );
-    }
-
     const tabs = ['connection', 'sync', 'containers', 'sessions'] as const;
-    const tabLabels: Record<string, string> = {
-        connection: 'Connection',
-        sync: 'File Sync',
-        containers: 'Containers',
-        sessions: 'Sessions',
-    };
 
     const handleTabKeyDown = (e: React.KeyboardEvent, tab: string) => {
         const idx = tabs.indexOf(tab as typeof tabs[number]);
@@ -295,78 +239,266 @@ const RemotePanelComponent: React.FC<RemotePanelProps> = ({ logger }) => {
     };
 
     return (
-        <div className="kairo-remote-panel" role="region" aria-label="Remote Panel" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-            {/* Header */}
-            <div className="kairo-widget-header" style={{ padding: '8px 12px', borderBottom: '1px solid var(--theia-panel-border)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ fontWeight: 600, fontSize: '13px' }}>Remote Panel</span>
-                <span style={{
-                    display: 'inline-block',
-                    width: '8px',
-                    height: '8px',
-                    borderRadius: '50%',
-                    backgroundColor: state.connected ? '#4caf50' : '#f44336',
-                }}
-                    title={state.connected ? 'Connected to remote' : 'Disconnected from remote'}
-                    aria-label={state.connected ? 'Connected' : 'Disconnected'}
-                />
-                <span style={{ fontSize: '11px', color: state.connected ? '#4caf50' : '#f44336' }}>
-                    {state.connected ? 'Connected' : 'Disconnected'}
+        <div className="kairo-widget kairo-remote-panel">
+            <div className="kairo-widget-header">
+                <span className="kairo-widget-title">
+                    {t('widget.remote.panel.header.title' as any)}
                 </span>
+                <div className="kairo-remote-panel-status">
+                    <span className={`kairo-remote-status-dot ${state.connected ? 'kairo-status-dot-success' : 'kairo-status-dot-error'}`} />
+                    <span className={`kairo-remote-panel-status-text ${state.connected ? 'connected' : 'disconnected'}`}>
+                        {state.connected
+                            ? t('widget.remote.panel.header.connected' as any)
+                            : t('widget.remote.panel.header.disconnected' as any)}
+                    </span>
+                </div>
             </div>
 
-            {/* Tabs */}
-            <div role="tablist" aria-label="Remote panel sections" style={{ display: 'flex', borderBottom: '1px solid var(--theia-panel-border)', padding: '0 8px' }}>
-                {tabs.map(tab => (
-                    <button
-                        key={tab}
-                        role="tab"
-                        aria-selected={activeTab === tab}
-                        aria-controls={`kairo-remote-tabpanel-${tab}`}
-                        id={`kairo-remote-tab-${tab}`}
-                        style={tabStyle(tab)}
-                        onClick={() => setActiveTab(tab)}
-                        onKeyDown={e => handleTabKeyDown(e, tab)}
-                        tabIndex={activeTab === tab ? 0 : -1}
-                        title={`${tabLabels[tab]} (${tab === 'connection' ? 'View connection details' : tab === 'sync' ? 'View file sync status' : tab === 'containers' ? 'Manage containers' : 'View active sessions'})`}
-                    >
-                        {tabLabels[tab]}
-                    </button>
-                ))}
-            </div>
+            {!state.loading && !state.error && (
+                <div
+                    className="kairo-widget-toolbar kairo-remote-panel-tabs"
+                    role="tablist"
+                    aria-label={t('widget.remote.panel.tabsAria' as any)}
+                >
+                    {tabs.map(tab => (
+                        <button
+                            key={tab}
+                            role="tab"
+                            aria-selected={activeTab === tab}
+                            aria-controls={`kairo-remote-tabpanel-${tab}`}
+                            id={`kairo-remote-tab-${tab}`}
+                            className={`kairo-remote-panel-tab ${activeTab === tab ? 'active' : ''}`}
+                            onClick={() => setActiveTab(tab)}
+                            onKeyDown={e => handleTabKeyDown(e, tab)}
+                            tabIndex={activeTab === tab ? 0 : -1}
+                            title={t(`widget.remote.panel.tab.${tab}Tooltip` as any)}
+                        >
+                            {t(`widget.remote.panel.tab.${tab}` as any)}
+                        </button>
+                    ))}
+                </div>
+            )}
 
-            {/* Content */}
-            <div style={{ flex: 1, overflow: 'auto', padding: '12px' }}>
-                {activeTab === 'connection' && (
-                    <div role="tabpanel" id="kairo-remote-tabpanel-connection" aria-labelledby="kairo-remote-tab-connection">
-                        {state.connectionInfo ? (
-                            <ConnectionTab info={state.connectionInfo} />
-                        ) : (
-                            <div style={{ textAlign: 'center', padding: '20px', color: 'var(--theia-descriptionForeground)', fontSize: '13px' }}>
-                                No connection information available. Connect to a remote host to see details.
+            <div className="kairo-widget-body kairo-remote-panel-body">
+                {state.loading && <LoadingView i18n={i18n} />}
+                {!state.loading && state.error && (
+                    <ErrorView error={state.error} onRetry={loadData} i18n={i18n} />
+                )}
+                {!state.loading && !state.error && (
+                    <>
+                        {activeTab === 'connection' && (
+                            <div role="tabpanel" id="kairo-remote-tabpanel-connection" aria-labelledby="kairo-remote-tab-connection">
+                                {state.connectionInfo ? (
+                                    <ConnectionTab info={state.connectionInfo} i18n={i18n} />
+                                ) : (
+                                    <EmptyState
+                                        icon="codicon-remote"
+                                        titleKey="widget.remote.panel.connection.emptyTitle"
+                                        reasonKey="widget.remote.panel.connection.emptyReason"
+                                        i18n={i18n}
+                                    />
+                                )}
                             </div>
                         )}
-                    </div>
-                )}
-                {activeTab === 'sync' && (
-                    <div role="tabpanel" id="kairo-remote-tabpanel-sync" aria-labelledby="kairo-remote-tab-sync">
-                        <FileSyncTab sync={state.fileSync} progress={syncProgress} />
-                    </div>
-                )}
-                {activeTab === 'containers' && (
-                    <div role="tabpanel" id="kairo-remote-tabpanel-containers" aria-labelledby="kairo-remote-tab-containers">
-                        <ContainersTab
-                            containers={state.containers}
-                            onAction={handleContainerAction}
-                            stateColor={stateColor}
-                        />
-                    </div>
-                )}
-                {activeTab === 'sessions' && (
-                    <div role="tabpanel" id="kairo-remote-tabpanel-sessions" aria-labelledby="kairo-remote-tab-sessions">
-                        <SessionsTab sessions={state.sessions} />
-                    </div>
+                        {activeTab === 'sync' && (
+                            <div role="tabpanel" id="kairo-remote-tabpanel-sync" aria-labelledby="kairo-remote-tab-sync">
+                                <FileSyncTab sync={state.fileSync} progress={syncProgress} i18n={i18n} />
+                            </div>
+                        )}
+                        {activeTab === 'containers' && (
+                            <div role="tabpanel" id="kairo-remote-tabpanel-containers" aria-labelledby="kairo-remote-tab-containers">
+                                <ContainersTab
+                                    containers={state.containers}
+                                    onAction={handleContainerAction}
+                                    i18n={i18n}
+                                />
+                            </div>
+                        )}
+                        {activeTab === 'sessions' && (
+                            <div role="tabpanel" id="kairo-remote-tabpanel-sessions" aria-labelledby="kairo-remote-tab-sessions">
+                                <SessionsTab sessions={state.sessions} i18n={i18n} />
+                            </div>
+                        )}
+                    </>
                 )}
             </div>
+
+            <style>{`
+                .kairo-remote-panel-status {
+                    align-items: center;
+                    display: inline-flex;
+                    gap: 8px;
+                }
+                .kairo-remote-panel-status-text {
+                    font-size: 12px;
+                    font-weight: 600;
+                }
+                .kairo-remote-panel-status-text.connected {
+                    color: var(--kairo-success);
+                }
+                .kairo-remote-panel-status-text.disconnected {
+                    color: var(--kairo-error);
+                }
+                .kairo-remote-panel-tabs {
+                    border-bottom: 1px solid var(--kairo-border);
+                    gap: 0;
+                    padding: 0 12px;
+                }
+                .kairo-remote-panel-tab {
+                    background: transparent;
+                    border: none;
+                    border-bottom: 2px solid transparent;
+                    color: var(--kairo-text-secondary);
+                    cursor: pointer;
+                    font-size: 12px;
+                    font-weight: 500;
+                    padding: 8px 14px;
+                    transition: color 0.15s ease, border-color 0.15s ease;
+                }
+                .kairo-remote-panel-tab:hover {
+                    color: var(--kairo-text);
+                }
+                .kairo-remote-panel-tab.active {
+                    border-bottom-color: var(--kairo-primary);
+                    color: var(--kairo-primary);
+                }
+                .kairo-remote-panel-card {
+                    background: var(--kairo-bg-secondary);
+                    border: 1px solid var(--kairo-border);
+                    border-radius: 6px;
+                    margin-bottom: 12px;
+                    padding: 12px;
+                }
+                .kairo-remote-panel-card:last-child {
+                    margin-bottom: 0;
+                }
+                .kairo-remote-panel-row {
+                    align-items: center;
+                    display: flex;
+                    font-size: 12px;
+                    justify-content: space-between;
+                    padding: 4px 0;
+                }
+                .kairo-remote-panel-row span:first-child {
+                    color: var(--kairo-text-secondary);
+                }
+                .kairo-remote-panel-row span:last-child {
+                    color: var(--kairo-text);
+                    font-weight: 600;
+                }
+                .kairo-remote-panel-latency-good {
+                    color: var(--kairo-success);
+                }
+                .kairo-remote-panel-latency-high {
+                    color: var(--kairo-warning);
+                }
+                .kairo-remote-panel-latency-label {
+                    font-size: 10px;
+                    margin-left: 4px;
+                    opacity: 0.7;
+                }
+                .kairo-remote-panel-progress {
+                    margin-bottom: 12px;
+                }
+                .kairo-remote-panel-progress-header {
+                    color: var(--kairo-text-secondary);
+                    font-size: 11px;
+                    margin-bottom: 4px;
+                }
+                .kairo-remote-panel-progress-svg {
+                    display: block;
+                    width: 100%;
+                }
+                .kairo-remote-panel-progress-track {
+                    fill: var(--kairo-border);
+                }
+                .kairo-remote-panel-progress-fill {
+                    fill: var(--kairo-success);
+                    transition: width 0.3s ease;
+                }
+                .kairo-remote-panel-skeleton {
+                    max-width: 300px;
+                    width: 80%;
+                }
+                .kairo-remote-panel-skeleton-bar {
+                    background: var(--kairo-border);
+                    border-radius: 3px;
+                    height: 12px;
+                    margin-bottom: 8px;
+                }
+                .kairo-remote-panel-skeleton-bar:nth-child(1) {
+                    opacity: 0.5;
+                    width: 90%;
+                }
+                .kairo-remote-panel-skeleton-bar:nth-child(2) {
+                    opacity: 0.35;
+                    width: 75%;
+                }
+                .kairo-remote-panel-skeleton-bar:nth-child(3) {
+                    opacity: 0.2;
+                    width: 60%;
+                }
+                .kairo-remote-panel-loading .kairo-empty-state-glyph .codicon {
+                    font-size: 32px;
+                }
+                .kairo-remote-panel-error-detail {
+                    color: var(--kairo-text-secondary);
+                    font-size: 12px;
+                    margin: 4px 0 0 0;
+                }
+                .kairo-remote-panel-container-header {
+                    align-items: center;
+                    display: flex;
+                    justify-content: space-between;
+                    margin-bottom: 6px;
+                }
+                .kairo-remote-panel-container-name {
+                    font-size: 13px;
+                    font-weight: 600;
+                }
+                .kairo-remote-panel-container-image {
+                    color: var(--kairo-text-secondary);
+                    font-size: 11px;
+                    margin-left: 8px;
+                }
+                .kairo-remote-panel-container-ports {
+                    color: var(--kairo-text-secondary);
+                    font-size: 11px;
+                    margin-bottom: 6px;
+                }
+                .kairo-remote-panel-container-ports span {
+                    margin-right: 8px;
+                }
+                .kairo-remote-panel-container-actions {
+                    display: flex;
+                    gap: 4px;
+                }
+                .kairo-remote-panel-container-actions .codicon {
+                    margin-right: 4px;
+                }
+                .kairo-remote-panel-sessions-count {
+                    color: var(--kairo-text-secondary);
+                    font-size: 11px;
+                    margin-bottom: 8px;
+                }
+                .kairo-remote-panel-session-header {
+                    align-items: center;
+                    display: flex;
+                    justify-content: space-between;
+                    margin-bottom: 4px;
+                }
+                .kairo-remote-panel-session-header > span:first-child {
+                    font-size: 12px;
+                    font-weight: 600;
+                }
+                .kairo-remote-panel-session-meta {
+                    color: var(--kairo-text-secondary);
+                    font-size: 10px;
+                }
+                .kairo-remote-panel-session-meta > div {
+                    margin-bottom: 2px;
+                }
+            `}</style>
         </div>
     );
 };
@@ -375,49 +507,116 @@ const RemotePanelComponent: React.FC<RemotePanelProps> = ({ logger }) => {
 /*  Sub-components                                                      */
 /* ------------------------------------------------------------------ */
 
-interface ConnectionTabProps {
-    info: ConnectionInfo;
+interface EmptyStateProps {
+    icon: string;
+    titleKey: string;
+    reasonKey: string;
+    i18n: KairoI18nService;
 }
 
-const ConnectionTab: React.FC<ConnectionTabProps> = ({ info }) => {
-    const latencyLabel = info.latency < 20 ? 'Excellent' : info.latency < 50 ? 'Good' : 'High';
+const EmptyState: React.FC<EmptyStateProps> = ({ icon, titleKey, reasonKey, i18n }) => {
+    const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
     return (
-        <div style={{
-            padding: '10px 12px',
-            backgroundColor: 'var(--theia-editor-background)',
-            borderRadius: '4px',
-            border: '1px solid var(--theia-dropdown-border)',
-        }}
-            role="group"
-            aria-label="Connection details"
-        >
-            <div style={{ fontWeight: 600, fontSize: '13px', marginBottom: '8px' }}>
-                Connection Details
+        <div className="kairo-empty-state">
+            <span className="kairo-empty-state-glyph">
+                <span className={`codicon ${icon}`} aria-hidden="true" />
+            </span>
+            <div className="kairo-empty-state-title">{t(titleKey as any)}</div>
+            <p className="kairo-empty-state-reason">{t(reasonKey as any)}</p>
+        </div>
+    );
+};
+
+interface LoadingViewProps {
+    i18n: KairoI18nService;
+}
+
+const LoadingView: React.FC<LoadingViewProps> = ({ i18n }) => {
+    const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
+    return (
+        <div className="kairo-empty-state kairo-remote-panel-loading" role="status">
+            <span className="kairo-empty-state-glyph">
+                <span className="codicon codicon-sync codicon-modifier-spin" aria-hidden="true" />
+            </span>
+            <div className="kairo-empty-state-title">{t('widget.remote.panel.loadingTitle' as any)}</div>
+            <p className="kairo-empty-state-reason">{t('widget.remote.panel.loadingReason' as any)}</p>
+            <div className="kairo-remote-panel-skeleton">
+                <div className="kairo-remote-panel-skeleton-bar" />
+                <div className="kairo-remote-panel-skeleton-bar" />
+                <div className="kairo-remote-panel-skeleton-bar" />
             </div>
-            <div style={{ fontSize: '12px', color: 'var(--theia-descriptionForeground)' }}>
-                <div style={rowStyle} title={`Host: ${info.host}`}>
-                    <span>Host:</span>
-                    <span style={{ fontWeight: 600, color: 'var(--theia-foreground)' }}>{info.host}</span>
-                </div>
-                <div style={rowStyle} title={`Port: ${info.port}`}>
-                    <span>Port:</span>
-                    <span style={{ fontWeight: 600, color: 'var(--theia-foreground)' }}>{info.port}</span>
-                </div>
-                <div style={rowStyle} title={`TLS Version: ${info.tlsVersion}`}>
-                    <span>TLS Version:</span>
-                    <span style={{ fontWeight: 600, color: '#4caf50' }}>{info.tlsVersion}</span>
-                </div>
-                <div style={rowStyle} title={`Connected at: ${info.connectedAt}`}>
-                    <span>Connected At:</span>
-                    <span style={{ fontWeight: 600, color: 'var(--theia-foreground)' }}>{info.connectedAt}</span>
-                </div>
-                <div style={rowStyle} title={`Latency: ${info.latency}ms (${latencyLabel})`}>
-                    <span>Latency:</span>
-                    <span style={{ fontWeight: 600, color: info.latency < 50 ? '#4caf50' : '#ff9800' }}>
-                        {info.latency}ms
-                        <span style={{ fontSize: '10px', marginLeft: '4px', opacity: 0.7 }}>({latencyLabel})</span>
+        </div>
+    );
+};
+
+interface ErrorViewProps {
+    error: string;
+    onRetry: () => void;
+    i18n: KairoI18nService;
+}
+
+const ErrorView: React.FC<ErrorViewProps> = ({ error, onRetry, i18n }) => {
+    const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
+    const errorType = React.useMemo(() => classifyError(error), [error]);
+    return (
+        <div className="kairo-error-banner" role="alert" aria-live="assertive">
+            <span className={`codicon ${errorType.icon}`} aria-hidden="true" />
+            <div>
+                <strong>{t(errorType.titleKey as any)}</strong>
+                <p className="kairo-remote-panel-error-detail">{error}</p>
+                <button
+                    className="theia-button secondary"
+                    onClick={onRetry}
+                    title={t('common.retry' as any)}
+                    aria-label={t('common.retry' as any)}
+                >
+                    {t('common.retry' as any)}
+                </button>
+            </div>
+        </div>
+    );
+};
+
+interface ConnectionTabProps {
+    info: ConnectionInfo;
+    i18n: KairoI18nService;
+}
+
+const ConnectionTab: React.FC<ConnectionTabProps> = ({ info, i18n }) => {
+    const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
+    const latencyKey = info.latency < 20 ? 'excellent' : info.latency < 50 ? 'good' : 'high';
+    const latencyClass = info.latency < 50 ? 'kairo-remote-panel-latency-good' : 'kairo-remote-panel-latency-high';
+    return (
+        <div
+            className="kairo-remote-panel-card"
+            role="group"
+            aria-label={t('widget.remote.panel.connection.title' as any)}
+        >
+            <div className="kairo-section-title">{t('widget.remote.panel.connection.title' as any)}</div>
+            <div className="kairo-remote-panel-row" title={`${t('widget.remote.panel.connection.host' as any)}: ${info.host}`}>
+                <span>{t('widget.remote.panel.connection.host' as any)}</span>
+                <span>{info.host}</span>
+            </div>
+            <div className="kairo-remote-panel-row" title={`${t('widget.remote.panel.connection.port' as any)}: ${info.port}`}>
+                <span>{t('widget.remote.panel.connection.port' as any)}</span>
+                <span>{info.port}</span>
+            </div>
+            <div className="kairo-remote-panel-row" title={`${t('widget.remote.panel.connection.tlsVersion' as any)}: ${info.tlsVersion}`}>
+                <span>{t('widget.remote.panel.connection.tlsVersion' as any)}</span>
+                <span className="kairo-remote-panel-latency-good">{info.tlsVersion}</span>
+            </div>
+            <div className="kairo-remote-panel-row" title={`${t('widget.remote.panel.connection.connectedAt' as any)}: ${info.connectedAt}`}>
+                <span>{t('widget.remote.panel.connection.connectedAt' as any)}</span>
+                <span>{info.connectedAt}</span>
+            </div>
+            <div className="kairo-remote-panel-row" title={`${t('widget.remote.panel.connection.latency' as any)}: ${info.latency}ms`}>
+                <span>{t('widget.remote.panel.connection.latency' as any)}</span>
+                <span className={latencyClass}>
+                    {info.latency}ms
+                    <span className="kairo-remote-panel-latency-label">
+                        ({t(`widget.remote.panel.connection.latency.${latencyKey}` as any)})
                     </span>
-                </div>
+                </span>
             </div>
         </div>
     );
@@ -426,80 +625,56 @@ const ConnectionTab: React.FC<ConnectionTabProps> = ({ info }) => {
 interface FileSyncTabProps {
     sync: FileSyncStatus;
     progress: number;
+    i18n: KairoI18nService;
 }
 
-const FileSyncTab: React.FC<FileSyncTabProps> = ({ sync, progress }) => {
+const FileSyncTab: React.FC<FileSyncTabProps> = ({ sync, progress, i18n }) => {
+    const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
     return (
-        <div role="group" aria-label="File sync status">
-            <div style={{
-                padding: '10px 12px',
-                backgroundColor: 'var(--theia-editor-background)',
-                borderRadius: '4px',
-                border: '1px solid var(--theia-dropdown-border)',
-                marginBottom: '12px',
-            }}>
-                <div style={{ fontWeight: 600, fontSize: '13px', marginBottom: '8px' }}>
-                    Sync Status
+        <div role="group" aria-label={t('widget.remote.panel.sync.title' as any)}>
+            <div className="kairo-remote-panel-card">
+                <div className="kairo-section-title">{t('widget.remote.panel.sync.title' as any)}</div>
+                <div className="kairo-remote-panel-row" title={`${t('widget.remote.panel.sync.statusLabel' as any)}: ${sync.syncing ? t('widget.remote.panel.sync.status.syncing' as any) : t('widget.remote.panel.sync.status.inSync' as any)}`}>
+                    <span>{t('widget.remote.panel.sync.statusLabel' as any)}</span>
+                    <span className={sync.syncing ? 'kairo-remote-panel-latency-high' : 'kairo-remote-panel-latency-good'}>
+                        {sync.syncing
+                            ? t('widget.remote.panel.sync.status.syncing' as any)
+                            : t('widget.remote.panel.sync.status.inSync' as any)}
+                    </span>
                 </div>
-                <div style={{ fontSize: '12px', color: 'var(--theia-descriptionForeground)' }}>
-                    <div style={rowStyle} title={`Sync status: ${sync.syncing ? 'Syncing' : 'In Sync'}`}>
-                        <span>Status:</span>
-                        <span style={{
-                            fontWeight: 600,
-                            color: sync.syncing ? '#ff9800' : '#4caf50',
-                        }}>
-                            {sync.syncing ? 'Syncing...' : 'In Sync'}
-                        </span>
-                    </div>
-                    <div style={rowStyle} title={`Files synced: ${sync.syncedFiles} of ${sync.totalFiles}`}>
-                        <span>Files:</span>
-                        <span style={{ fontWeight: 600, color: 'var(--theia-foreground)' }}>
-                            {sync.syncedFiles} / {sync.totalFiles}
-                        </span>
-                    </div>
-                    <div style={rowStyle} title={`Last sync: ${sync.lastSync || 'N/A'}`}>
-                        <span>Last Sync:</span>
-                        <span style={{ fontWeight: 600, color: 'var(--theia-foreground)' }}>{sync.lastSync || 'N/A'}</span>
-                    </div>
-                    <div style={rowStyle} title={`Conflicts: ${sync.conflicts}${sync.conflicts > 0 ? ' — action required' : ''}`}>
-                        <span>Conflicts:</span>
-                        <span style={{
-                            fontWeight: 600,
-                            color: sync.conflicts > 0 ? '#f44336' : '#4caf50',
-                        }}>
-                            {sync.conflicts}
-                        </span>
-                    </div>
+                <div className="kairo-remote-panel-row" title={`${t('widget.remote.panel.sync.files' as any)}: ${sync.syncedFiles} / ${sync.totalFiles}`}>
+                    <span>{t('widget.remote.panel.sync.files' as any)}</span>
+                    <span>{sync.syncedFiles} / {sync.totalFiles}</span>
+                </div>
+                <div className="kairo-remote-panel-row" title={`${t('widget.remote.panel.sync.lastSync' as any)}: ${sync.lastSync || 'N/A'}`}>
+                    <span>{t('widget.remote.panel.sync.lastSync' as any)}</span>
+                    <span>{sync.lastSync || 'N/A'}</span>
+                </div>
+                <div className="kairo-remote-panel-row" title={`${t('widget.remote.panel.sync.conflicts' as any)}: ${sync.conflicts}`}>
+                    <span>{t('widget.remote.panel.sync.conflicts' as any)}</span>
+                    <span className={sync.conflicts > 0 ? 'kairo-remote-panel-latency-high' : 'kairo-remote-panel-latency-good'}>
+                        {sync.conflicts}
+                    </span>
                 </div>
             </div>
 
-            {/* Progress bar */}
-            <div style={{ marginBottom: '12px' }}>
-                <div style={{ fontSize: '11px', color: 'var(--theia-descriptionForeground)', marginBottom: '4px' }}>
-                    Sync Progress: {progress}%
+            <div className="kairo-remote-panel-progress">
+                <div className="kairo-remote-panel-progress-header">
+                    {t('widget.remote.panel.sync.progress' as any)} {progress}%
                 </div>
-                <div
-                    style={{
-                        height: '8px',
-                        backgroundColor: 'var(--theia-dropdown-border)',
-                        borderRadius: '4px',
-                        overflow: 'hidden',
-                    }}
+                <svg
+                    className="kairo-remote-panel-progress-svg"
                     role="progressbar"
                     aria-valuenow={progress}
                     aria-valuemin={0}
                     aria-valuemax={100}
-                    aria-label={`File sync progress: ${progress}%`}
-                    title={`${progress}% complete`}
+                    aria-label={`${t('widget.remote.panel.sync.progress' as any)}: ${progress}%`}
+                    height="8"
+                    width="100%"
                 >
-                    <div style={{
-                        height: '100%',
-                        width: `${progress}%`,
-                        backgroundColor: '#4caf50',
-                        borderRadius: '4px',
-                        transition: 'width 0.3s ease',
-                    }} />
-                </div>
+                    <rect className="kairo-remote-panel-progress-track" width="100%" height="8" rx="4" />
+                    <rect className="kairo-remote-panel-progress-fill" width={`${progress}%`} height="8" rx="4" />
+                </svg>
             </div>
         </div>
     );
@@ -508,68 +683,56 @@ const FileSyncTab: React.FC<FileSyncTabProps> = ({ sync, progress }) => {
 interface ContainersTabProps {
     containers: ContainerInfo[];
     onAction: (id: string, action: 'start' | 'stop' | 'pause') => void;
-    stateColor: (s: string) => string;
+    i18n: KairoI18nService;
 }
 
-const ContainersTab: React.FC<ContainersTabProps> = ({ containers, onAction, stateColor }) => {
+const ContainersTab: React.FC<ContainersTabProps> = ({ containers, onAction, i18n }) => {
+    const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
     if (containers.length === 0) {
         return (
-            <div role="status" aria-label="No containers" style={{ textAlign: 'center', padding: '20px', color: 'var(--theia-descriptionForeground)', fontSize: '13px' }}>
-                No containers found. Start a container to see it here.
-            </div>
+            <EmptyState
+                icon="codicon-package"
+                titleKey="widget.remote.panel.containers.emptyTitle"
+                reasonKey="widget.remote.panel.containers.emptyReason"
+                i18n={i18n}
+            />
         );
     }
 
     return (
-        <div role="list" aria-label="Container list">
+        <div role="list" aria-label={t('widget.remote.panel.containers.title' as any)}>
             {containers.map(container => (
-                <div key={container.id} role="listitem" style={{
-                    marginBottom: '10px',
-                    padding: '10px 12px',
-                    backgroundColor: 'var(--theia-editor-background)',
-                    borderRadius: '4px',
-                    border: '1px solid var(--theia-dropdown-border)',
-                }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                <div key={container.id} role="listitem" className="kairo-remote-panel-card kairo-remote-panel-container">
+                    <div className="kairo-remote-panel-container-header">
                         <div>
-                            <span style={{ fontWeight: 600, fontSize: '13px' }}>{container.name}</span>
-                            <span style={{ marginLeft: '8px', fontSize: '11px', color: 'var(--theia-descriptionForeground)' }}>
-                                {container.image}
-                            </span>
+                            <span className="kairo-remote-panel-container-name">{container.name}</span>
+                            <span className="kairo-remote-panel-container-image">{container.image}</span>
                         </div>
-                        <span style={{
-                            display: 'inline-block',
-                            padding: '2px 8px',
-                            borderRadius: '3px',
-                            fontSize: '10px',
-                            fontWeight: 600,
-                            color: '#fff',
-                            backgroundColor: stateColor(container.state),
-                            textTransform: 'uppercase',
-                        }}
+                        <span
+                            className={`kairo-badge ${containerBadgeClass(container.state)}`}
                             role="status"
-                            aria-label={`Container ${container.name} is ${container.state}`}
+                            aria-label={`${container.name} ${t(`widget.remote.panel.containers.state.${container.state}` as any)}`}
                         >
-                            {container.state}
+                            {t(`widget.remote.panel.containers.state.${container.state}` as any)}
                         </span>
                     </div>
-                    <div style={{ fontSize: '11px', color: 'var(--theia-descriptionForeground)', marginBottom: '6px' }}>
+                    <div className="kairo-remote-panel-container-ports">
                         {container.ports.map((p, i) => (
-                            <span key={i} style={{ marginRight: '8px' }} title={`Host port ${p.hostPort} → Container port ${p.containerPort}`}>
+                            <span key={i} title={`Host port ${p.hostPort} → Container port ${p.containerPort}`}>
                                 {p.hostPort}:{p.containerPort}
                             </span>
                         ))}
                     </div>
-                    <div style={{ display: 'flex', gap: '4px' }}>
+                    <div className="kairo-remote-panel-container-actions">
                         {container.state !== 'running' && (
                             <button
-                                className="theia-button"
+                                className="theia-button main"
                                 onClick={() => onAction(container.id, 'start')}
-                                title={`Start container ${container.name}`}
-                                aria-label={`Start container ${container.name}`}
-                                style={{ fontSize: '10px', padding: '2px 8px' }}
+                                title={t('widget.remote.panel.containers.action.start' as any)}
+                                aria-label={t('widget.remote.panel.containers.action.start' as any)}
                             >
-                                Start
+                                <span className="codicon codicon-play" aria-hidden="true" />
+                                {t('widget.remote.panel.containers.action.start' as any)}
                             </button>
                         )}
                         {container.state === 'running' && (
@@ -577,20 +740,20 @@ const ContainersTab: React.FC<ContainersTabProps> = ({ containers, onAction, sta
                                 <button
                                     className="theia-button secondary"
                                     onClick={() => onAction(container.id, 'stop')}
-                                    title={`Stop container ${container.name}`}
-                                    aria-label={`Stop container ${container.name}`}
-                                    style={{ fontSize: '10px', padding: '2px 8px' }}
+                                    title={t('widget.remote.panel.containers.action.stop' as any)}
+                                    aria-label={t('widget.remote.panel.containers.action.stop' as any)}
                                 >
-                                    Stop
+                                    <span className="codicon codicon-debug-stop" aria-hidden="true" />
+                                    {t('widget.remote.panel.containers.action.stop' as any)}
                                 </button>
                                 <button
                                     className="theia-button secondary"
                                     onClick={() => onAction(container.id, 'pause')}
-                                    title={`Pause container ${container.name}`}
-                                    aria-label={`Pause container ${container.name}`}
-                                    style={{ fontSize: '10px', padding: '2px 8px' }}
+                                    title={t('widget.remote.panel.containers.action.pause' as any)}
+                                    aria-label={t('widget.remote.panel.containers.action.pause' as any)}
                                 >
-                                    Pause
+                                    <span className="codicon codicon-debug-pause" aria-hidden="true" />
+                                    {t('widget.remote.panel.containers.action.pause' as any)}
                                 </button>
                             </>
                         )}
@@ -603,61 +766,51 @@ const ContainersTab: React.FC<ContainersTabProps> = ({ containers, onAction, sta
 
 interface SessionsTabProps {
     sessions: SessionInfo[];
+    i18n: KairoI18nService;
 }
 
-const SessionsTab: React.FC<SessionsTabProps> = ({ sessions }) => {
+const SessionsTab: React.FC<SessionsTabProps> = ({ sessions, i18n }) => {
+    const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
     if (sessions.length === 0) {
         return (
-            <div role="status" aria-label="No sessions" style={{ textAlign: 'center', padding: '20px', color: 'var(--theia-descriptionForeground)', fontSize: '13px' }}>
-                No active sessions. Users will appear here when they connect.
-            </div>
+            <EmptyState
+                icon="codicon-person"
+                titleKey="widget.remote.panel.sessions.emptyTitle"
+                reasonKey="widget.remote.panel.sessions.emptyReason"
+                i18n={i18n}
+            />
         );
     }
 
     return (
-        <div role="list" aria-label="Session list">
-            <div style={{ fontSize: '11px', color: 'var(--theia-descriptionForeground)', marginBottom: '8px' }} aria-live="polite">
-                {sessions.length} active session{sessions.length !== 1 ? 's' : ''}
+        <div role="list" aria-label={t('widget.remote.panel.sessions.title' as any)}>
+            <div className="kairo-remote-panel-sessions-count" aria-live="polite">
+                {t('widget.remote.panel.sessions.count' as any, { count: sessions.length })}
             </div>
             {sessions.map(session => (
-                <div key={session.id} role="listitem" style={{
-                    marginBottom: '8px',
-                    padding: '8px 12px',
-                    backgroundColor: 'var(--theia-editor-background)',
-                    borderRadius: '4px',
-                    border: '1px solid var(--theia-dropdown-border)',
-                }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                        <span style={{ fontWeight: 600, fontSize: '12px' }}>{session.username}</span>
-                        <span style={{
-                            display: 'inline-block',
-                            padding: '1px 6px',
-                            borderRadius: '3px',
-                            fontSize: '10px',
-                            backgroundColor: 'var(--theia-badge-background)',
-                            color: 'var(--theia-badge-foreground)',
-                            textTransform: 'capitalize',
-                        }}
-                            title={`Role: ${session.role}`}
-                            aria-label={`Role: ${session.role}`}
+                <div key={session.id} role="listitem" className="kairo-remote-panel-card kairo-remote-panel-session">
+                    <div className="kairo-remote-panel-session-header">
+                        <span>{session.username}</span>
+                        <span
+                            className="kairo-badge kairo-badge-info"
+                            title={`${t('widget.remote.panel.sessions.role' as any)}: ${session.role}`}
+                            aria-label={`${t('widget.remote.panel.sessions.role' as any)}: ${session.role}`}
                         >
-                            {session.role}
+                            {t(`widget.remote.panel.sessions.role.${session.role}` as any)}
                         </span>
                     </div>
-                    <div style={{ fontSize: '10px', color: 'var(--theia-descriptionForeground)' }}>
-                        <div title={`Active since: ${session.activeSince}`}>Active since: {session.activeSince}</div>
-                        <div title={`Last active: ${session.lastActive}`}>Last active: {session.lastActive}</div>
+                    <div className="kairo-remote-panel-session-meta">
+                        <div title={`${t('widget.remote.panel.sessions.activeSince' as any)}: ${session.activeSince}`}>
+                            {t('widget.remote.panel.sessions.activeSince' as any)}: {session.activeSince}
+                        </div>
+                        <div title={`${t('widget.remote.panel.sessions.lastActive' as any)}: ${session.lastActive}`}>
+                            {t('widget.remote.panel.sessions.lastActive' as any)}: {session.lastActive}
+                        </div>
                     </div>
                 </div>
             ))}
         </div>
     );
-};
-
-const rowStyle: React.CSSProperties = {
-    display: 'flex',
-    justifyContent: 'space-between',
-    padding: '4px 0',
 };
 
 /* ------------------------------------------------------------------ */
@@ -672,17 +825,29 @@ export class RemotePanelWidget extends ReactWidget {
     @inject(ILogger)
     protected readonly logger!: ILogger;
 
+    @inject(KairoI18nService)
+    protected readonly i18n!: KairoI18nService;
+
     @postConstruct()
     protected init(): void {
         this.id = RemotePanelWidget.ID;
-        this.title.label = RemotePanelWidget.LABEL;
-        this.title.caption = 'Kairo Remote Connection Panel';
         this.title.closable = true;
+        this.title.iconClass = 'codicon codicon-remote';
         this.addClass('kairo-widget');
+        this.updateTitle();
+        this.toDispose.push(this.i18n.onDidChangeLanguage(() => {
+            this.updateTitle();
+            this.update();
+        }));
         this.update();
     }
 
+    private updateTitle(): void {
+        this.title.label = this.i18n.t('widget.remote.panel.title' as any);
+        this.title.caption = this.i18n.t('widget.remote.panel.caption' as any);
+    }
+
     protected render(): React.ReactNode {
-        return React.createElement(RemotePanelComponent, { logger: this.logger });
+        return React.createElement(RemotePanelComponent, { logger: this.logger, i18n: this.i18n });
     }
 }

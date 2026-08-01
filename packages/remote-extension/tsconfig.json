@@ -8,5 +8,8 @@
     "declarationMap": true,
     "sourceMap": true
   },
-  "include": ["src/**/*"]
+  "include": ["src/**/*"],
+  "references": [
+    { "path": "../i18n" }
+  ]
 }

@@ -396,8 +396,8 @@ export class KairoDeploymentsWidget extends ReactWidget {
   constructor() {
     super();
     this.id = KairoDeploymentsWidget.ID;
-    this.title.label = 'Kairo Deployments';
-    this.title.caption = 'Kairo Deployments';
+    this.title.label = '';
+    this.title.caption = '';
     this.addClass('kairo-widget');
   }
 

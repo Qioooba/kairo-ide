@@ -3,6 +3,7 @@
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
+require('../tests/setup-tmp.cjs'); // KAIRO_TMP override
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');

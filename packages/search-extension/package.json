@@ -14,6 +14,7 @@
   "dependencies": {
     "@kairo/protocol": "workspace:*",
     "@kairo/java-extension": "workspace:*",
+    "@kairo/i18n": "workspace:*",
     "@kairo/runtime-extension": "workspace:*",
     "@kairo/ui-kit": "workspace:*"
   },

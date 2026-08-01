@@ -36,9 +36,9 @@ export class ProjectSelectorWidget extends ReactWidget {
     constructor() {
         super();
         this.id = ProjectSelectorWidget.ID;
-        this.title.label = 'Project';
+        this.title.label = '';
         this.title.closable = true;
-        this.title.caption = 'Select active project';
+        this.title.caption = '';
         this.addClass('kairo-widget');
     }
 

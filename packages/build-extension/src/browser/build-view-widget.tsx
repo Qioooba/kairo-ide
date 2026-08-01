@@ -258,8 +258,8 @@ export class BuildViewWidget extends ReactWidget {
     constructor() {
         super();
         this.id = BuildViewWidget.ID;
-        this.title.label = 'Kairo Build';
-        this.title.caption = 'Kairo Build View';
+        this.title.label = '';
+        this.title.caption = '';
         this.addClass('kairo-widget');
     }
 

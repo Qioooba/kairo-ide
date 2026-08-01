@@ -1,10 +1,11 @@
 import * as React from 'react';
-import { inject, injectable } from '@theia/core/shared/inversify';
+import { inject, injectable, postConstruct } from '@theia/core/shared/inversify';
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import type { Message } from '@theia/core/shared/@lumino/messaging';
 import { EditorManager } from '@theia/editor/lib/browser/editor-manager';
 import type { SearchMatch } from '@kairo/protocol';
 import { WorkspaceContextService } from '@kairo/runtime-extension';
+import { KairoI18nService } from '@kairo/i18n';
 import { KairoSearchSessionModel, type SearchSessionState } from './search-session-model';
 import { SearchReplaceService, type ReplaceApplyResult, type ReplacePlan } from './search-replace-service';
 import { resolveWorkspaceMatchUri } from './search-path';
@@ -35,6 +36,7 @@ export interface SearchCenterProps {
   scopeModel?: SearchScopeModel;
   onClose: () => void;
   mode?: 'search' | 'replace';
+  i18n: KairoI18nService;
 }
 
 export interface SearchResultGroup {
@@ -83,7 +85,9 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
   scopeModel,
   onClose,
   mode = 'search',
+  i18n,
 }) => {
+  const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
   const [query, setQuery] = React.useState('');
   const [include, setInclude] = React.useState('');
   const [exclude, setExclude] = React.useState('');
@@ -316,7 +320,7 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
             type="button"
             className="kairo-search-preview-toggle"
             onClick={() => setShowPreview(false)}
-            title="隐藏预览"
+            title={t('widget.search.center.preview.hide')}
           >
             <span className="codicon codicon-chevron-down" />
           </button>
@@ -360,112 +364,120 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
 
   const renderStatus = (): React.ReactNode => {
     if (submissionError) {
-      return <div className="kairo-idea-search-status is-error" role="alert" data-testid="search-error">{submissionError.message}</div>;
+      return (
+        <div className="kairo-search-status kairo-error-banner" role="alert" data-testid="search-error">
+          {submissionError.message}
+        </div>
+      );
     }
     switch (state.status) {
       case 'idle':
-        return <div className="kairo-idea-search-status">输入搜索词开始查找</div>;
+        return <div className="kairo-search-status kairo-empty-state" data-testid="search-idle">{t('widget.search.center.status.idle')}</div>;
       case 'loading':
         if (matches.length === 0) {
           return (
-            <div className="kairo-idea-search-status is-loading" role="status" data-testid="search-loading">
-              <span className="kairo-idea-search-spinner" aria-hidden="true" />
-              搜索中…
+            <div className="kairo-search-status kairo-empty-state is-loading" role="status" data-testid="search-loading">
+              <span className="kairo-search-spinner" aria-hidden="true" />
+              {t('widget.search.center.status.loading')}
             </div>
           );
         }
         return undefined;
       case 'empty':
-        return <div className="kairo-idea-search-status" data-testid="search-empty">未找到匹配项</div>;
+        return <div className="kairo-search-status kairo-empty-state" data-testid="search-empty">{t('widget.search.center.status.empty')}</div>;
       case 'error':
-        return <div className="kairo-idea-search-status is-error" role="alert" data-testid="search-error">搜索失败: {state.error?.message ?? '未知错误'}</div>;
+        return (
+          <div className="kairo-search-status kairo-error-banner" role="alert" data-testid="search-error">
+            {t('widget.search.center.status.error', { message: state.error?.message ?? t('widget.search.center.status.unknownError') })}
+          </div>
+        );
       case 'cancelled':
-        return <div className="kairo-idea-search-status" role="status" data-testid="search-cancelled">搜索已取消</div>;
+        return <div className="kairo-search-status kairo-empty-state" role="status" data-testid="search-cancelled">{t('widget.search.center.status.cancelled')}</div>;
       case 'results':
         return undefined;
     }
   };
 
   return (
-    <div className="kairo-idea-search-backdrop" onClick={() => onClose()} data-testid="search-center-backdrop">
+    <div className="kairo-search-backdrop" onClick={() => onClose()} data-testid="search-center-backdrop">
       <div
-        className="kairo-idea-search-modal"
+        className="kairo-search-modal"
         ref={containerRef}
         onKeyDown={keyDown}
         onClick={event => event.stopPropagation()}
         role="dialog"
         aria-modal="true"
-        aria-label={currentMode === 'replace' ? '在路径中替换' : '在路径中查找'}
+        aria-label={currentMode === 'replace' ? t('widget.search.center.ariaLabel.replaceInPath') : t('widget.search.center.ariaLabel.findInPath')}
         data-testid="search-center-modal"
       >
-        <div className="kairo-idea-search-header">
-          <div className="kairo-idea-search-tabs">
+        <div className="kairo-search-header">
+          <div className="kairo-search-tabs">
             <button
               type="button"
-              className={`kairo-idea-search-tab${currentMode === 'search' ? ' is-active' : ''}`}
+              className={`kairo-search-tab${currentMode === 'search' ? ' is-active' : ''}`}
               onClick={() => setCurrentMode('search')}
             >
               <span className="codicon codicon-search" aria-hidden="true" />
-              查找
+              {t('widget.search.center.mode.search')}
             </button>
             {onCreateReplacePlan && onApplyReplacePlan && (
               <button
                 type="button"
-                className={`kairo-idea-search-tab${currentMode === 'replace' ? ' is-active' : ''}`}
+                className={`kairo-search-tab${currentMode === 'replace' ? ' is-active' : ''}`}
                 onClick={() => setCurrentMode('replace')}
               >
                 <span className="codicon codicon-replace" aria-hidden="true" />
-                替换
+                {t('widget.search.center.mode.replace')}
               </button>
             )}
           </div>
           <button
             type="button"
-            className="kairo-idea-search-close"
+            className="kairo-search-close"
             onClick={() => onClose()}
-            title="关闭 (Esc)"
+            title={t('widget.search.center.closeTooltip')}
           >
             <span className="codicon codicon-chrome-close" />
           </button>
         </div>
 
-        <div className="kairo-idea-search-input-area">
+        <div className="kairo-search-input-area">
           <form onSubmit={event => void submit(event)} data-testid="search-form">
-            <div className="kairo-idea-search-input-row">
-              <span className="codicon codicon-search kairo-idea-search-icon" aria-hidden="true" />
+            <div className="kairo-search-input-row">
+              <span className="codicon codicon-search kairo-search-icon" aria-hidden="true" />
               <input
                 ref={inputRef}
-                className="kairo-idea-search-input"
+                className="kairo-search-input"
                 value={query}
                 onChange={event => setQuery(event.target.value)}
-                placeholder={currentMode === 'replace' ? '输入要替换的文本' : '输入要查找的文本'}
-                aria-label="搜索文本"
+                placeholder={currentMode === 'replace' ? t('widget.search.center.placeholder.replace') : t('widget.search.center.placeholder.search')}
+                aria-label={t('widget.search.center.ariaLabel.searchQuery')}
                 data-testid="search-query"
               />
-              <div className="kairo-idea-search-filter-btns">
+              <div className="kairo-search-filter-btns">
                 <button
                   type="button"
-                  className={`kairo-idea-filter-btn${caseSensitive ? ' is-active' : ''}`}
+                  className={`kairo-search-filter-btn${caseSensitive ? ' is-active' : ''}`}
                   onClick={() => setCaseSensitive(!caseSensitive)}
-                  title="匹配大小写 (Aa)"
+                  title={t('widget.search.center.filter.case.title')}
                   data-testid="filter-case"
                 >
                   Aa
                 </button>
                 <button
                   type="button"
-                  className={`kairo-idea-filter-btn${isRegex ? ' is-active' : ''}`}
+                  className={`kairo-search-filter-btn${isRegex ? ' is-active' : ''}`}
                   onClick={() => setRegex(!isRegex)}
-                  title="正则表达式 (.*)"
+                  title={t('widget.search.center.filter.regex.title')}
                   data-testid="filter-regex"
                 >
                   .*
                 </button>
                 <button
                   type="button"
-                  className={`kairo-idea-filter-btn${wholeWord ? ' is-active' : ''}`}
+                  className={`kairo-search-filter-btn${wholeWord ? ' is-active' : ''}`}
                   onClick={() => setWholeWord(!wholeWord)}
-                  title="整个单词 (W)"
+                  title={t('widget.search.center.filter.word.title')}
                   data-testid="filter-word"
                 >
                   W
@@ -473,35 +485,35 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
               </div>
             </div>
             {currentMode === 'replace' && (
-              <div className="kairo-idea-search-input-row">
-                <span className="codicon codicon-replace kairo-idea-search-icon" aria-hidden="true" />
+              <div className="kairo-search-input-row">
+                <span className="codicon codicon-replace kairo-search-icon" aria-hidden="true" />
                 <input
-                  className="kairo-idea-search-input"
+                  className="kairo-search-input"
                   value={replacement}
                   onChange={event => setReplacement(event.target.value)}
-                  placeholder="替换为"
-                  aria-label="替换文本"
+                  placeholder={t('widget.search.center.placeholder.replaceWith')}
+                  aria-label={t('widget.search.center.ariaLabel.replaceText')}
                   data-testid="replace-text"
                 />
               </div>
             )}
-            <div className="kairo-idea-search-options-row">
-              <div className="kairo-idea-search-file-mask">
+            <div className="kairo-search-options-row">
+              <div className="kairo-search-file-mask">
                 <span className="codicon codicon-filter" aria-hidden="true" />
                 <input
-                  className="kairo-idea-mask-input"
+                  className="kairo-search-mask-input"
                   value={fileTypes}
                   onChange={event => { setFileTypes(event.target.value); scopeModel?.setFileTypes(event.target.value); }}
-                  placeholder="文件类型 (如 *.java,*.xml)"
-                  aria-label="文件类型过滤"
+                  placeholder={t('widget.search.center.placeholder.fileTypes')}
+                  aria-label={t('widget.search.center.ariaLabel.fileTypes')}
                   data-testid="filter-file-types"
                 />
               </div>
               <select
-                className="kairo-idea-scope-select"
+                className="kairo-search-scope-select"
                 value={scope}
                 onChange={event => { setScope(event.target.value as SearchScope); scopeModel?.setScope(event.target.value as SearchScope); }}
-                aria-label="搜索范围"
+                aria-label={t('widget.search.center.ariaLabel.scope')}
                 data-testid="scope-selector"
               >
                 {SCOPE_OPTIONS.map(option => (
@@ -510,16 +522,16 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
               </select>
               <button
                 type="submit"
-                className="kairo-idea-search-submit"
+                className="kairo-search-submit"
                 disabled={!query.trim() || isStreaming}
                 data-testid="search-submit"
               >
-                {isStreaming ? '搜索中…' : (currentMode === 'replace' ? '查找' : '搜索')}
+                {isStreaming ? t('widget.search.center.submit.searching') : (currentMode === 'replace' ? t('widget.search.center.submit.find') : t('widget.search.center.submit.search'))}
               </button>
               {currentMode === 'replace' && replacePlan && (
                 <button
                   type="button"
-                  className="kairo-idea-replace-btn"
+                  className="kairo-search-replace-btn"
                   disabled={applying}
                   onClick={() => replacePlan && void (async () => {
                     setApplying(true);
@@ -534,13 +546,13 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
                     }
                   })()}
                 >
-                  {applying ? '替换中…' : '替换全部'}
+                  {applying ? t('widget.search.center.replace.replacing') : t('widget.search.center.replace.all')}
                 </button>
               )}
               {onUndoReplace && canUndo && (
                 <button
                   type="button"
-                  className="kairo-idea-replace-btn secondary"
+                  className="kairo-search-replace-btn secondary"
                   disabled={applying}
                   onClick={() => void (async () => {
                     setApplying(true);
@@ -553,14 +565,14 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
                     }
                   })()}
                 >
-                  撤销
+                  {t('widget.search.center.replace.undo')}
                 </button>
               )}
             </div>
           </form>
         </div>
 
-        <div className="kairo-idea-search-results-area">
+        <div className="kairo-search-results-area">
           {renderStatus()}
           {(state.status === 'results' || state.status === 'loading') && matches.length > 0 && (
             <VirtualList
@@ -575,24 +587,23 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
                   }
                 }
               }}
-              className="kairo-idea-search-results"
-              ariaLabel="搜索结果"
+              className="kairo-search-results"
+              ariaLabel={t('widget.search.center.ariaLabel.results')}
               testId="search-results"
               renderItem={(item, _index, isSelected) => {
                 if (item.kind === 'header') {
                   return (
                     <button
                       type="button"
-                      className="kairo-idea-result-group"
+                      className="kairo-search-result-group"
                       onClick={() => item.file && toggleFileCollapse(item.file)}
-                      style={{ display: 'flex', alignItems: 'center', height: '100%', width: '100%', border: 0, background: 'transparent', cursor: 'pointer', padding: '0 8px', gap: '6px' }}
                       data-testid="search-group"
                     >
-                      <span className={`codicon ${item.collapsed ? 'codicon-chevron-right' : 'codicon-chevron-down'}`} aria-hidden="true" style={{ fontSize: '12px' }} />
+                      <span className={`codicon kairo-search-chevron ${item.collapsed ? 'codicon-chevron-right' : 'codicon-chevron-down'}`} aria-hidden="true" />
                       <span className={`codicon ${getFileIcon(item.file || '')}`} aria-hidden="true" />
-                      <span className="kairo-idea-result-filename">{getFileName(item.file || '')}</span>
-                      <span className="kairo-idea-result-filepath">{getFilePath(item.file || '')}</span>
-                      <span className="kairo-idea-result-count">{item.matchCount}</span>
+                      <span className="kairo-search-result-filename">{getFileName(item.file || '')}</span>
+                      <span className="kairo-search-result-filepath">{getFilePath(item.file || '')}</span>
+                      <span className="kairo-search-result-count">{item.matchCount}</span>
                     </button>
                   );
                 }
@@ -602,8 +613,7 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
                     type="button"
                     role="option"
                     aria-selected={isSelected}
-                    className={`kairo-idea-result-item${isSelected ? ' is-selected' : ''}`}
-                    style={{ height: '100%', width: '100%', border: 0, borderLeft: '2px solid transparent', background: 'transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: '0 12px 0 28px', gap: '12px' }}
+                    className={`kairo-search-result-item${isSelected ? ' is-selected' : ''}`}
                     onMouseEnter={() => {
                       setSelectedIndex(item.flatIndex);
                       void openSelected(match, true);
@@ -615,8 +625,8 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
                     }}
                     data-testid="search-result"
                   >
-                    <span className="kairo-idea-result-lineno">{match.line}</span>
-                    <span className="kairo-idea-result-preview">
+                    <span className="kairo-search-result-lineno">{match.line}</span>
+                    <span className="kairo-search-result-preview">
                       {match.contextBefore}<mark>{match.matchText}</mark>{match.contextAfter}
                     </span>
                   </button>
@@ -638,8 +648,8 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
             />
           )}
           {state.truncated && (
-            <div className="kairo-idea-search-truncated" role="status">
-              结果已达上限，请优化搜索条件
+            <div className="kairo-search-truncated" role="status">
+              {t('widget.search.center.truncated')}
             </div>
           )}
         </div>
@@ -649,35 +659,37 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
             {!showPreview && (
               <button
                 type="button"
-                className="kairo-idea-preview-show"
+                className="kairo-search-preview-show"
                 onClick={() => setShowPreview(true)}
               >
                 <span className="codicon codicon-chevron-up" />
-                显示预览
+                {t('widget.search.center.preview.show')}
               </button>
             )}
             {renderPreview()}
           </>
         )}
 
-        <div className="kairo-idea-search-footer">
-          <span className="kairo-idea-search-stats" data-testid="search-count">
-            {matchCount > 0 && `${matchCount} 个匹配${fileCount > 0 ? `，在 ${fileCount} 个文件中` : ''}`}
-            {isStreaming && matches.length > 0 && ' （搜索中…）'}
+        <div className="kairo-search-footer">
+          <span className="kairo-search-stats" data-testid="search-count">
+            {matchCount > 0 && (fileCount > 0
+              ? t('widget.search.center.stats.matchInFiles', { count: matchCount, fileCount })
+              : t('widget.search.center.stats.match', { count: matchCount }))}
+            {isStreaming && matches.length > 0 && t('widget.search.center.stats.streaming')}
           </span>
-          <div className="kairo-idea-search-actions">
+          <div className="kairo-search-actions">
             {state.status === 'loading' && (
-              <button type="button" className="kairo-idea-footer-btn" onClick={onCancel} data-testid="search-cancel">
-                取消
+              <button type="button" className="kairo-search-footer-btn" onClick={onCancel} data-testid="search-cancel">
+                {t('widget.search.center.cancel')}
               </button>
             )}
             <button
               type="button"
-              className="kairo-idea-footer-btn"
+              className="kairo-search-footer-btn"
               onClick={() => setShowPreview(!showPreview)}
-              title={showPreview ? '隐藏预览' : '显示预览'}
+              title={showPreview ? t('widget.search.center.preview.hide') : t('widget.search.center.preview.show')}
             >
-              {showPreview ? '隐藏预览' : '显示预览'}
+              {showPreview ? t('widget.search.center.preview.hide') : t('widget.search.center.preview.show')}
             </button>
           </div>
         </div>
@@ -695,6 +707,7 @@ export class SearchCenterWidget extends ReactWidget {
   @inject(EditorManager) protected readonly editorManager!: EditorManager;
   @inject(SearchReplaceService) protected readonly replaceService!: SearchReplaceService;
   @inject(SearchScopeModel) protected readonly scopeModel!: SearchScopeModel;
+  @inject(KairoI18nService) protected readonly i18n!: KairoI18nService;
 
   protected state: SearchSessionState = {
     status: 'idle', requestId: 0, matches: [], totalMatches: 0, truncated: false, erroredFiles: [],
@@ -704,11 +717,23 @@ export class SearchCenterWidget extends ReactWidget {
   constructor() {
     super();
     this.id = SearchCenterWidget.ID;
-    this.title.label = '在路径中查找';
-    this.title.caption = 'Kairo Find in Path';
-    this.title.iconClass = 'codicon codicon-search';
     this.title.closable = true;
+    this.title.iconClass = 'codicon codicon-search';
     this.addClass('kairo-search-center-widget');
+  }
+
+  @postConstruct()
+  protected init(): void {
+    const t = (key: string, params?: Record<string, string | number>) => this.i18n.t(key as any, params);
+    const updateTitles = (): void => {
+      this.title.label = t('widget.search.center.title');
+      this.title.caption = t('widget.search.center.caption');
+    };
+    updateTitles();
+    this.toDispose.push(this.i18n.onDidChangeLanguage(() => {
+      updateTitles();
+      this.update();
+    }));
   }
 
   protected onAfterAttach(message: Message): void {
@@ -756,6 +781,7 @@ export class SearchCenterWidget extends ReactWidget {
       isStreaming={streamState?.status === 'streaming'}
       scopeModel={this.scopeModel}
       onClose={() => this.close()}
+      i18n={this.i18n}
     />;
   }
 }

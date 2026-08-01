@@ -1,6 +1,6 @@
 # Kairo IDE 未来路线图
 
-> 最后更新: 2026-07-24 (Session 9 — 独立审查 + Mock 集成测试 + 性能基线 + 文档全面更新)
+> 最后更新: 2026-08-01 (Session 27 — Phase Q 稳定性与质量收官)
 
 ## 近期（Phase 1+ 收尾）— 进度 99%
 
@@ -58,6 +58,32 @@
 - ✅ Desktop 打包策略 (electron-builder 配置, ADR-0026)
 - ✅ Build & Deploy 全链路验证完成
 - ✅ Java Language Intelligence 核心能力实现
+- ✅ Phase O — 业务扩展 widgets 批量类化与验证（Build/Search/Git/SVN/Java/Test/SQL/Remote）
+
+## 本次会话成果 (2026-08-01 Session 27 — Phase Q 稳定性与质量收官)
+
+- 🟢 Flaky 测试修复：java-ls-lifecycle 引入 waitFor 确定性轮询，8 次连续运行全部通过
+- 🟢 Run 菜单截图修复：Lumino v2 选择器更新，13-run-menu.png 成功生成
+- 🟢 Go 覆盖率：76.3% → 80.1%（发现并修复 atomicfile 测试文件命名 bug）
+- 🟢 E2E 回归：standalone-smoke 5/5 通过，UI 无回归；core-e2e 环境限制已记录
+- 🟢 5 项验证门禁全部通过（含无 flaky 全量前端测试）
+
+## 本次会话成果 (2026-08-01 Session 26 — Phase P 全局审计与收尾)
+
+- 🟢 内联样式审计：11 处已全部合规（CSS 变量或 virtual-list.tsx 例外），Maven 进度条迁移为 CSS 变量
+- 🟢 硬编码文案清零：11 个 widget 标题默认值改为空字符串（运行时段 i18n 覆盖）；编码下拉 4 个选项接入 i18n
+- 🟢 i18n 键一致性：en.ts / zh-CN.ts 零差异
+- 🟢 git-stash-widget 内联样式全面迁移为 kairo-stash-* CSS 类
+- 🟢 回归截图：browser 应用启动 + capture-current-ui.cjs 生成 13 张最新基准截图
+- 🟢 5 项验证门禁全部通过
+
+## 本次会话成果 (2026-08-01 Session 25 — Phase O 验证收尾 + 关键测试补充 + 文档更新)
+
+- 🟢 Search Everywhere 测试修复：为 `SearchEverywhereComponent` 补充 `mockI18n` prop，修复 `pnpm -r test` 失败
+- 🟢 Remote Debug Config 测试增强：新增保存校验、持久化/加载往返、删除、连接生命周期等 8 个行为测试，并注册到 package test 脚本
+- 🟢 全局快速审计：`packages/*/src/browser/*.tsx` 无内联样式、无硬编码中文
+- 🟢 5 项验证门禁全部通过：`tsc --noEmit` 0 errors、`pnpm -r test` 全量通过、`go test ./...` 33/33、`pnpm -r run build` 通过、`browser build` 0 errors
+- 🟢 文档更新：HANDOVER.md / MILESTONES.md / ROADMAP.md 新增 Session 25 交付摘要
 
 ## 本次会话成果 (2026-07-24 Session 9 — 独立审查 + Mock 集成测试 + 性能基线 + 文档全面更新)
 

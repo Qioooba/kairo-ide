@@ -1,51 +1,50 @@
 import * as React from 'react';
-import { injectable, inject } from '@theia/core/shared/inversify';
+import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import { CommandService } from '@theia/core/lib/common';
-import { TestStore, TestItem, TestStatus, TestRun as _TestRun } from './test-store';
+import { KairoI18nService } from '@kairo/i18n';
+import { TestStore, TestItem, TestStatus } from './test-store';
 
-function statusIcon(status: TestStatus): string {
+function statusIconClass(status: TestStatus): string {
     switch (status) {
-        case 'idle': return '\u25CB';     // hollow circle
-        case 'running': return '\u25D0';  // half circle
-        case 'passed': return '\u2713';   // check mark
-        case 'failed': return '\u2717';   // ballot x
-        case 'skipped': return '\u29B8';  // circle with horizontal bar
-        case 'error': return '\u26A0';    // warning sign
+        case 'idle': return 'codicon codicon-circle-outline';
+        case 'running': return 'codicon codicon-sync codicon-modifier-spin';
+        case 'passed': return 'codicon codicon-check';
+        case 'failed': return 'codicon codicon-error';
+        case 'skipped': return 'codicon codicon-circle-slash';
+        case 'error': return 'codicon codicon-warning';
     }
 }
 
-function statusClass(status: TestStatus): string {
-    switch (status) {
-        case 'passed': return 'kairo-test-passed';
-        case 'failed': return 'kairo-test-failed';
-        case 'skipped': return 'kairo-test-skipped';
-        case 'error': return 'kairo-test-error';
-        case 'running': return 'kairo-test-running';
-        default: return 'kairo-test-idle';
-    }
+function statusColorClass(status: TestStatus): string {
+    return `kairo-test-status-${status}`;
 }
 
-function kindIcon(kind: TestItem['kind']): string {
+function kindIconClass(kind: TestItem['kind']): string {
     switch (kind) {
-        case 'package': return '\uD83D\uDCE6'; // package
-        case 'class': return '\uD83D\uDCDD';   // memo
-        case 'method': return '\u2699';         // gear
+        case 'package': return 'codicon codicon-package';
+        case 'class': return 'codicon codicon-symbol-class';
+        case 'method': return 'codicon codicon-gear';
     }
 }
 
 interface TestTreeProps {
     store: TestStore;
     commandService: CommandService;
+    i18n: KairoI18nService;
 }
 
-/** Single tree node component. */
-const TestTreeNode: React.FC<{
+interface TestTreeNodeProps {
     item: TestItem;
     store: TestStore;
     depth: number;
     onRun: (item: TestItem) => void;
-}> = ({ item, store, depth, onRun }) => {
+    i18n: KairoI18nService;
+}
+
+/** Single tree node component. */
+const TestTreeNode: React.FC<TestTreeNodeProps> = ({ item, store, depth, onRun, i18n }) => {
+    const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
     const [expanded, setExpanded] = React.useState(false);
     const children = store.getChildren(item.id);
     const hasChildren = children.length > 0;
@@ -58,19 +57,23 @@ const TestTreeNode: React.FC<{
         <div className="kairo-test-tree-node">
             <div
                 className="kairo-test-tree-item"
-                style={{ paddingLeft: `${depth * 16 + 4}px` }}
+                style={{ ['--kairo-test-tree-depth' as any]: depth }}
                 onClick={toggle}
                 data-testid={`test-item-${item.id}`}
                 role="treeitem"
                 aria-expanded={hasChildren ? expanded : undefined}
             >
                 <span className="kairo-test-tree-toggle">
-                    {hasChildren ? (expanded ? '\u25BC' : '\u25B6') : '\u00A0'}
+                    {hasChildren ? (
+                        <span className={`codicon ${expanded ? 'codicon-chevron-down' : 'codicon-chevron-right'}`} aria-hidden="true" />
+                    ) : (
+                        <span className="kairo-test-tree-toggle-placeholder" aria-hidden="true">&nbsp;</span>
+                    )}
                 </span>
-                <span className={`kairo-test-status ${statusClass(item.status)}`} aria-label={item.status}>
-                    {statusIcon(item.status)}
+                <span className={`kairo-test-status ${statusColorClass(item.status)}`} aria-label={t(`widget.test.tree.status.${item.status}` as any)}>
+                    <span className={statusIconClass(item.status)} aria-hidden="true" />
                 </span>
-                <span className="kairo-test-kind-icon">{kindIcon(item.kind)}</span>
+                <span className="kairo-test-kind-icon"><span className={kindIconClass(item.kind)} aria-hidden="true" /></span>
                 <span className="kairo-test-label">{item.label}</span>
                 {item.durationMs !== undefined && (
                     <span className="kairo-test-duration">{formatDuration(item.durationMs)}</span>
@@ -79,19 +82,19 @@ const TestTreeNode: React.FC<{
                     className="theia-button secondary kairo-test-run-btn"
                     onClick={e => { e.stopPropagation(); onRun(item); }}
                     data-testid={`run-test-${item.id}`}
-                    aria-label={`Run ${item.label}`}
+                    aria-label={t('widget.test.tree.runAria', { label: item.label })}
                 >
-                    Run
+                    {t('widget.test.tree.run')}
                 </button>
             </div>
             {item.status === 'failed' && item.failureMessage && (
                 <div
                     className="kairo-test-failure"
-                    style={{ paddingLeft: `${(depth + 1) * 16 + 4}px` }}
+                    style={{ ['--kairo-test-tree-depth' as any]: depth + 1 }}
                     role="alert"
                     data-testid={`test-failure-${item.id}`}
                 >
-                    <span className="kairo-test-failure-icon">{statusIcon('failed')}</span>
+                    <span className="kairo-test-failure-icon"><span className={statusIconClass('failed')} aria-hidden="true" /></span>
                     <span className="kairo-test-failure-msg">{item.failureMessage}</span>
                 </div>
             )}
@@ -104,6 +107,7 @@ const TestTreeNode: React.FC<{
                             store={store}
                             depth={depth + 1}
                             onRun={onRun}
+                            i18n={i18n}
                         />
                     ))}
                 </div>
@@ -112,7 +116,9 @@ const TestTreeNode: React.FC<{
     );
 };
 
-const TestTreeComponent: React.FC<TestTreeProps> = ({ store, commandService: _commandService }) => {
+const TestTreeComponent: React.FC<TestTreeProps> = ({ store, commandService: _commandService, i18n }) => {
+    const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
+    const [, forceUpdate] = React.useReducer(x => x + 1, 0);
     const [items, setItems] = React.useState<TestItem[]>(store.getRootItems());
     const [connectionState, setConnectionState] = React.useState(store.getConnectionState());
     const [cancelError, setCancelError] = React.useState('');
@@ -127,6 +133,11 @@ const TestTreeComponent: React.FC<TestTreeProps> = ({ store, commandService: _co
         const sub = store.onConnectionStateChange(s => setConnectionState(s));
         return () => sub.dispose();
     }, [store]);
+
+    React.useEffect(() => {
+        const disposable = i18n.onDidChangeLanguage(() => forceUpdate());
+        return () => disposable.dispose();
+    }, [i18n]);
 
     const latestRun = store.getLatestRun();
     const isBusy = latestRun?.state === 'running' || latestRun?.state === 'pending';
@@ -154,9 +165,12 @@ const TestTreeComponent: React.FC<TestTreeProps> = ({ store, commandService: _co
         return (
             <div className="kairo-widget" data-testid="test-view">
                 <div className="kairo-widget-header">
-                    <span className="kairo-widget-title">Tests</span>
+                    <span className="kairo-widget-title">{t('widget.test.tree.title')}</span>
                 </div>
-                <p className="kairo-empty" data-testid="test-loading">Loading...</p>
+                <div className="kairo-empty-state" data-testid="test-loading">
+                    <span className="kairo-empty-state-glyph codicon codicon-loading codicon-modifier-spin" aria-hidden="true" />
+                    <h3 className="kairo-empty-state-title">{t('widget.test.tree.loading')}</h3>
+                </div>
             </div>
         );
     }
@@ -165,11 +179,13 @@ const TestTreeComponent: React.FC<TestTreeProps> = ({ store, commandService: _co
         return (
             <div className="kairo-widget" data-testid="test-view">
                 <div className="kairo-widget-header">
-                    <span className="kairo-widget-title">Tests</span>
+                    <span className="kairo-widget-title">{t('widget.test.tree.title')}</span>
                 </div>
-                <p className="kairo-empty" data-testid="test-disconnected">
-                    Cannot reach the runtime agent. Test commands are unavailable.
-                </p>
+                <div className="kairo-empty-state" data-testid="test-disconnected">
+                    <span className="kairo-empty-state-glyph codicon codicon-warning" aria-hidden="true" />
+                    <h3 className="kairo-empty-state-title">{t('widget.test.tree.disconnectedTitle')}</h3>
+                    <p className="kairo-empty-state-reason">{t('widget.test.tree.disconnectedReason')}</p>
+                </div>
             </div>
         );
     }
@@ -179,10 +195,12 @@ const TestTreeComponent: React.FC<TestTreeProps> = ({ store, commandService: _co
     return (
         <div className="kairo-widget" data-testid="test-view">
             <div className="kairo-widget-header">
-                <span className="kairo-widget-title">Tests</span>
+                <span className="kairo-widget-title">{t('widget.test.tree.title')}</span>
                 {totalCount > 0 && (
                     <span className="kairo-test-count" data-testid="test-count">
-                        {totalCount} test{totalCount !== 1 ? 's' : ''}
+                        {totalCount === 1
+                            ? t('widget.test.tree.count.one', { count: totalCount })
+                            : t('widget.test.tree.count.other', { count: totalCount })}
                     </span>
                 )}
             </div>
@@ -193,57 +211,71 @@ const TestTreeComponent: React.FC<TestTreeProps> = ({ store, commandService: _co
                     data-testid="run-all-tests"
                     onClick={handleRunAll}
                     disabled={isBusy}
-                    aria-label="Run all tests"
+                    aria-label={t('widget.test.tree.runAllAria')}
                 >
-                    Run All
+                    {t('widget.test.tree.runAll')}
                 </button>
                 <button
                     className="theia-button secondary"
                     data-testid="discover-tests"
                     onClick={handleDiscover}
                     disabled={isBusy}
-                    aria-label="Refresh test list"
+                    aria-label={t('widget.test.tree.refreshAria')}
                 >
-                    Refresh
+                    {t('widget.test.tree.refresh')}
                 </button>
                 <button
                     className="theia-button secondary"
                     data-testid="cancel-tests"
                     onClick={handleCancel}
                     disabled={!isBusy || cancelling}
-                    aria-label="Cancel test run"
+                    aria-label={t('widget.test.tree.cancelAria')}
                 >
-                    {cancelling ? 'Cancelling...' : 'Cancel'}
+                    {cancelling ? t('widget.test.tree.cancelling') : t('widget.test.tree.cancel')}
                 </button>
             </div>
 
-            {cancelError && <div className="theia-error" role="alert" data-testid="cancel-test-error">{cancelError}</div>}
+            {cancelError && (
+                <div className="kairo-error-banner" role="alert" data-testid="cancel-test-error">
+                    <span className="codicon codicon-warning" aria-hidden="true" />
+                    <span>{cancelError}</span>
+                </div>
+            )}
 
             {latestRun && (
                 <div className="kairo-test-summary" data-testid="test-run-summary">
-                    <span className={`kairo-test-summary-item ${statusClass(latestRun.state === 'succeeded' ? 'passed' : latestRun.state === 'failed' ? 'failed' : 'running')}`}>
-                        {statusIcon(latestRun.state === 'succeeded' ? 'passed' : latestRun.state === 'failed' ? 'failed' : 'running')}{' '}
-                        {latestRun.passedCount}/{latestRun.totalCount} passed
+                    <span className={`kairo-test-summary-item ${statusColorClass(latestRun.state === 'succeeded' ? 'passed' : latestRun.state === 'failed' ? 'failed' : 'running')}`}>
+                        <span className={statusIconClass(latestRun.state === 'succeeded' ? 'passed' : latestRun.state === 'failed' ? 'failed' : 'running')} aria-hidden="true" />
+                        {' '}
+                        {t('widget.test.tree.summary.passed', { passed: latestRun.passedCount, total: latestRun.totalCount })}
                     </span>
                     {latestRun.failedCount > 0 && (
-                        <span className="kairo-test-summary-item kairo-test-failed">
-                            {statusIcon('failed')} {latestRun.failedCount} failed
+                        <span className={`kairo-test-summary-item ${statusColorClass('failed')}`}>
+                            <span className={statusIconClass('failed')} aria-hidden="true" />
+                            {' '}
+                            {t('widget.test.tree.summary.failed', { count: latestRun.failedCount })}
                         </span>
                     )}
                     {latestRun.skippedCount > 0 && (
-                        <span className="kairo-test-summary-item kairo-test-skipped">
-                            {statusIcon('skipped')} {latestRun.skippedCount} skipped
+                        <span className={`kairo-test-summary-item ${statusColorClass('skipped')}`}>
+                            <span className={statusIconClass('skipped')} aria-hidden="true" />
+                            {' '}
+                            {t('widget.test.tree.summary.skipped', { count: latestRun.skippedCount })}
                         </span>
                     )}
                 </div>
             )}
 
             {items.length === 0 ? (
-                <p className="kairo-empty" data-testid="test-empty">
-                    No tests discovered. Press <strong>Refresh</strong> to scan the project.
-                </p>
+                <div className="kairo-empty-state" data-testid="test-empty">
+                    <span className="kairo-empty-state-glyph codicon codicon-beaker" aria-hidden="true" />
+                    <h3 className="kairo-empty-state-title">{t('widget.test.tree.emptyStateTitle')}</h3>
+                    <p className="kairo-empty-state-reason">
+                        {t('widget.test.tree.emptyStateReason', { action: t('widget.test.tree.refresh') })}
+                    </p>
+                </div>
             ) : (
-                <div className="kairo-test-tree" role="tree" aria-label="Test tree" data-testid="test-tree">
+                <div className="kairo-test-tree" role="tree" aria-label={t('widget.test.tree.treeAria')} data-testid="test-tree">
                     {items.map(item => (
                         <TestTreeNode
                             key={item.id}
@@ -251,6 +283,7 @@ const TestTreeComponent: React.FC<TestTreeProps> = ({ store, commandService: _co
                             store={store}
                             depth={0}
                             onRun={handleRunItem}
+                            i18n={i18n}
                         />
                     ))}
                 </div>
@@ -280,19 +313,22 @@ export class TestTreeWidget extends ReactWidget {
 
     @inject(TestStore) protected readonly testStore!: TestStore;
     @inject(CommandService) protected readonly commandService!: CommandService;
+    @inject(KairoI18nService) protected readonly i18n!: KairoI18nService;
 
-    constructor() {
-        super();
+    @postConstruct()
+    protected init(): void {
         this.id = TestTreeWidget.ID;
-        this.title.label = 'Kairo Tests';
-        this.title.caption = 'Kairo Test Explorer';
+        this.title.label = this.i18n.t('widget.test.tree.title' as any);
+        this.title.caption = this.i18n.t('widget.test.tree.caption' as any);
         this.addClass('kairo-widget');
+        this.update();
     }
 
     protected render(): React.ReactNode {
         return React.createElement(TestTreeComponent, {
             store: this.testStore,
             commandService: this.commandService,
+            i18n: this.i18n,
         });
     }
 }

@@ -11,6 +11,7 @@
  * Run: node --require ts-node/register --test test/extension-installer.test.ts
  */
 
+require('../../../tests/setup-tmp.cjs'); // KAIRO_TMP override
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';

@@ -1,27 +1,9 @@
 .kairo-custom-build {
-    padding: 12px;
-    height: 100%;
-    display: flex;
-    flex-direction: column;
-    font-family: var(--theia-ui-font-family);
-    background: var(--theia-editor-background);
-    color: var(--theia-foreground);
+    /* Layout is provided by the shared .kairo-widget class. */
 }
 
-.kairo-custom-build-header {
-    margin-bottom: 8px;
-}
-
-.kairo-custom-build-header h3 {
-    margin: 0 0 8px 0;
-    font-size: 14px;
-    font-weight: 600;
-}
-
-.kairo-custom-build-controls {
-    display: flex;
+.kairo-custom-build-toolbar {
     gap: 8px;
-    align-items: center;
 }
 
 .kairo-custom-build-input {
@@ -31,46 +13,34 @@
     padding: 6px 10px;
 }
 
-.kairo-build-run {
-    background-color: var(--theia-button-background);
+.kairo-custom-build-run {
     padding: 6px 16px;
     font-size: 13px;
 }
 
-.kairo-build-cancel {
-    background-color: var(--theia-terminal-ansiRed);
-    color: white;
+.kairo-custom-build-cancel {
     padding: 6px 16px;
     font-size: 13px;
 }
 
-.kairo-build-result {
-    padding: 8px 12px;
-    margin-bottom: 8px;
-    border-radius: 4px;
-    font-size: 13px;
-    font-weight: 600;
+.kairo-custom-build-result {
+    /* Inherits .kairo-error-banner base styling; modifiers override colors. */
 }
 
-.kairo-build-success {
+.kairo-error-banner.kairo-custom-build-result-success {
     background-color: rgba(0, 255, 0, 0.1);
-    color: var(--theia-terminal-ansiGreen);
-    border: 1px solid var(--theia-terminal-ansiGreen);
+    border-color: var(--theia-terminal-ansiGreen, var(--kairo-success, #3dcc91));
+    color: var(--theia-terminal-ansiGreen, var(--kairo-success, #3dcc91));
 }
 
-.kairo-build-failed {
-    background-color: rgba(255, 0, 0, 0.1);
-    color: var(--theia-terminal-ansiRed);
-    border: 1px solid var(--theia-terminal-ansiRed);
+.kairo-error-banner.kairo-custom-build-result-success .codicon {
+    color: var(--theia-terminal-ansiGreen, var(--kairo-success, #3dcc91));
 }
 
 .kairo-custom-build-output {
-    flex: 1;
-    overflow-y: auto;
     background: var(--theia-terminal-background);
     border: 1px solid var(--theia-panel-border);
     border-radius: 4px;
-    padding: 8px;
     font-family: var(--theia-editor-font-family);
     font-size: 12px;
     line-height: 1.4;
@@ -87,3 +57,12 @@
 .kairo-build-log-line.info { color: var(--theia-debugTokenExpression-type, var(--kairo-info, #4a9eff)); }
 .kairo-build-log-line.error { color: var(--theia-errorForeground, var(--kairo-error, #f04757)); }
 .kairo-build-log-line.success { color: var(--theia-terminal-ansiGreen, var(--kairo-success, #3dcc91)); }
+
+/* Maven dependency tree depth overrides (used by maven-view-widget.tsx).
+   kairo-theme.css reads --kairo-maven-dep-depth on .kairo-maven-dep-item. */
+.kairo-maven-dep-depth-0 { --kairo-maven-dep-depth: 0; }
+.kairo-maven-dep-depth-1 { --kairo-maven-dep-depth: 1; }
+.kairo-maven-dep-depth-2 { --kairo-maven-dep-depth: 2; }
+.kairo-maven-dep-depth-3 { --kairo-maven-dep-depth: 3; }
+.kairo-maven-dep-depth-4 { --kairo-maven-dep-depth: 4; }
+.kairo-maven-dep-depth-5 { --kairo-maven-dep-depth: 5; }

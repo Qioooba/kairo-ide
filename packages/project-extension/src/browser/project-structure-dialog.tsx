@@ -2,7 +2,9 @@ import * as React from '@theia/core/shared/react';
 import { ReactDialog } from '@theia/core/lib/browser/dialogs/react-dialog';
 import { DialogProps } from '@theia/core/lib/browser/dialogs';
 import { MessageService } from '@theia/core/lib/common/message-service';
+import { Disposable } from '@theia/core/lib/common/disposable';
 import { FileDialogService } from '@theia/filesystem/lib/browser/file-dialog';
+import { KairoI18nService, type KairoI18nKey } from '@kairo/i18n';
 import { KairoProjectService } from './project-service';
 import { ActiveProjectService } from './active-project-service';
 import { RuntimeConnectionService } from '@kairo/runtime-extension';
@@ -12,6 +14,8 @@ import './project-structure-dialog.css';
 type TabId = 'project' | 'sdk' | 'sources' | 'dependencies';
 type SourceLevel = '1.5' | '1.6' | '1.7' | '1.8' | '9' | '11' | '17';
 type ClasspathSource = 'ant' | 'yaml' | 'autodetect' | 'manual';
+
+type TFunction = (key: KairoI18nKey, params?: Record<string, string | number>) => string;
 
 interface SourceDirEntry {
     path: string;
@@ -29,6 +33,7 @@ interface ProjectStructureDialogProps extends DialogProps {
     runtime: RuntimeConnectionService;
     messageService: MessageService;
     fileDialogService: FileDialogService;
+    i18n: KairoI18nService;
 }
 
 interface DialogState {
@@ -50,19 +55,19 @@ interface DialogState {
 }
 
 const SOURCE_LEVELS: SourceLevel[] = ['1.5', '1.6', '1.7', '1.8', '9', '11', '17'];
-const ENCODINGS: { id: EncodingId; label: string }[] = [
-    { id: 'utf-8', label: 'UTF-8' },
-    { id: 'gbk', label: 'GBK' },
-    { id: 'gb18030', label: 'GB18030' },
-    { id: 'iso-8859-1', label: 'ISO-8859-1' },
-    { id: 'utf-8-bom', label: 'UTF-8 with BOM' },
+const ENCODINGS: { id: EncodingId; labelKey: KairoI18nKey }[] = [
+    { id: 'utf-8', labelKey: 'widget.projectStructure.encoding.utf8' },
+    { id: 'gbk', labelKey: 'widget.projectStructure.encoding.gbk' },
+    { id: 'gb18030', labelKey: 'widget.projectStructure.encoding.gb18030' },
+    { id: 'iso-8859-1', labelKey: 'widget.projectStructure.encoding.iso8859' },
+    { id: 'utf-8-bom', labelKey: 'widget.projectStructure.encoding.utf8Bom' },
 ];
 
-const TABS: { id: TabId; label: string; icon: string }[] = [
-    { id: 'project', label: 'Project', icon: 'codicon-folder' },
-    { id: 'sdk', label: 'SDKs', icon: 'codicon-server-environment' },
-    { id: 'sources', label: 'Sources', icon: 'codicon-source-control' },
-    { id: 'dependencies', label: 'Dependencies', icon: 'codicon-library' },
+const TABS: { id: TabId; labelKey: KairoI18nKey; icon: string }[] = [
+    { id: 'project', labelKey: 'widget.projectStructure.tabs.project', icon: 'codicon-folder' },
+    { id: 'sdk', labelKey: 'widget.projectStructure.tabs.sdk', icon: 'codicon-server-environment' },
+    { id: 'sources', labelKey: 'widget.projectStructure.tabs.sources', icon: 'codicon-source-control' },
+    { id: 'dependencies', labelKey: 'widget.projectStructure.tabs.dependencies', icon: 'codicon-library' },
 ];
 
 export class ProjectStructureDialog extends ReactDialog<void> {
@@ -71,12 +76,14 @@ export class ProjectStructureDialog extends ReactDialog<void> {
     protected readonly runtime: RuntimeConnectionService;
     protected readonly messageService: MessageService;
     protected readonly fileDialogService: FileDialogService;
+    protected readonly i18n: KairoI18nService;
+    protected languageChangeDisposable?: Disposable;
 
     protected state: DialogState;
 
     constructor(props: ProjectStructureDialogProps) {
         super({
-            title: 'Project Structure',
+            title: props.i18n.t('widget.projectStructure.title'),
             maxWidth: 900,
         } as DialogProps);
         this.projectService = props.projectService;
@@ -84,10 +91,15 @@ export class ProjectStructureDialog extends ReactDialog<void> {
         this.runtime = props.runtime;
         this.messageService = props.messageService;
         this.fileDialogService = props.fileDialogService;
+        this.i18n = props.i18n;
         this.state = this.createInitialState();
         this.addClass('kairo-project-structure-dialog');
         this.id = 'kairo-project-structure-dialog';
         this.closeCrossNode.classList.add('codicon', 'codicon-close');
+    }
+
+    protected t(key: KairoI18nKey, params?: Record<string, string | number>): string {
+        return this.i18n.t(key, params);
     }
 
     protected createInitialState(): DialogState {
@@ -112,7 +124,14 @@ export class ProjectStructureDialog extends ReactDialog<void> {
 
     protected override onAfterAttach(msg: import('@theia/core/shared/@lumino/messaging').Message): void {
         super.onAfterAttach(msg);
+        this.languageChangeDisposable = this.i18n.onDidChangeLanguage(() => this.update());
         void this.loadData();
+    }
+
+    protected override onBeforeDetach(msg: import('@theia/core/shared/@lumino/messaging').Message): void {
+        this.languageChangeDisposable?.dispose();
+        this.languageChangeDisposable = undefined;
+        super.onBeforeDetach(msg);
     }
 
     get value(): undefined {
@@ -127,7 +146,7 @@ export class ProjectStructureDialog extends ReactDialog<void> {
     protected async loadData(): Promise<void> {
         const project = this.activeProject.project;
         if (!project) {
-            this.setState({ loading: false, error: 'No active project.' });
+            this.setState({ loading: false, error: this.t('widget.projectStructure.messages.noActiveProject') });
             return;
         }
 
@@ -201,10 +220,10 @@ export class ProjectStructureDialog extends ReactDialog<void> {
         if (s.loading) {
             return (
                 <div className="kairo-ps-body">
-                    <div className="kairo-ps-content" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <div style={{ textAlign: 'center', opacity: 0.7 }}>
-                            <i className="codicon codicon-loading codicon-modifier-spin" style={{ fontSize: 24, marginBottom: 8 }} />
-                            <div>Loading project configuration...</div>
+                    <div className="kairo-ps-content kairo-ps-loading">
+                        <div className="kairo-ps-loading-message">
+                            <i className="codicon codicon-loading codicon-modifier-spin kairo-ps-loading-icon" />
+                            <div>{this.t('widget.projectStructure.loading')}</div>
                         </div>
                     </div>
                     {this.renderFooter()}
@@ -224,7 +243,7 @@ export class ProjectStructureDialog extends ReactDialog<void> {
                             onClick={() => this.setState({ activeTab: tab.id })}
                         >
                             <i className={`codicon ${tab.icon} kairo-ps-tab-icon`} />
-                            <span>{tab.label}</span>
+                            <span>{this.t(tab.labelKey)}</span>
                         </div>
                     ))}
                 </div>
@@ -248,21 +267,21 @@ export class ProjectStructureDialog extends ReactDialog<void> {
                     disabled={this.state.saving}
                     onClick={() => this.close()}
                 >
-                    Cancel
+                    {this.t('common.cancel')}
                 </button>
                 <button
                     className="theia-button secondary"
                     disabled={this.state.saving}
                     onClick={() => void this.handleApply()}
                 >
-                    {this.state.saving ? 'Saving...' : 'Apply'}
+                    {this.state.saving ? this.t('widget.projectStructure.buttons.saving') : this.t('common.apply')}
                 </button>
                 <button
                     className="theia-button main"
                     disabled={this.state.saving}
                     onClick={() => void this.handleOk()}
                 >
-                    {this.state.saving ? 'Saving...' : 'OK'}
+                    {this.state.saving ? this.t('widget.projectStructure.buttons.saving') : this.t('common.ok')}
                 </button>
             </div>
         );
@@ -281,16 +300,16 @@ export class ProjectStructureDialog extends ReactDialog<void> {
         const s = this.state;
         return (
             <div>
-                <h3 className="kairo-ps-section-title">Project Settings</h3>
-                {this.field('Project name:', (
+                <h3 className="kairo-ps-section-title">{this.t('widget.projectStructure.projectTab.title')}</h3>
+                {this.field(this.t('widget.projectStructure.projectTab.name'), (
                     <input className="theia-input" type="text" value={s.projectName} readOnly />
                 ))}
-                {this.field('Project root:', (
+                {this.field(this.t('widget.projectStructure.projectTab.root'), (
                     <input className="theia-input" type="text" value={s.projectRoot} readOnly />
                 ))}
                 <div className="kairo-ps-section-sep" />
-                <h4 className="kairo-ps-subtitle">Compiler</h4>
-                {this.field('Source level:', (
+                <h4 className="kairo-ps-subtitle">{this.t('widget.projectStructure.projectTab.compiler')}</h4>
+                {this.field(this.t('widget.projectStructure.projectTab.sourceLevel'), (
                     <select
                         className="theia-select"
                         value={s.sourceLevel}
@@ -299,7 +318,7 @@ export class ProjectStructureDialog extends ReactDialog<void> {
                         {SOURCE_LEVELS.map(lv => <option key={lv} value={lv}>{lv}</option>)}
                     </select>
                 ))}
-                {this.field('Target bytecode level:', (
+                {this.field(this.t('widget.projectStructure.projectTab.targetLevel'), (
                     <select
                         className="theia-select"
                         value={s.targetLevel}
@@ -308,13 +327,13 @@ export class ProjectStructureDialog extends ReactDialog<void> {
                         {SOURCE_LEVELS.map(lv => <option key={lv} value={lv}>{lv}</option>)}
                     </select>
                 ))}
-                {this.field('File encoding:', (
+                {this.field(this.t('widget.projectStructure.projectTab.encoding'), (
                     <select
                         className="theia-select"
                         value={s.encoding}
                         onChange={e => this.setState({ encoding: e.target.value as EncodingId })}
                     >
-                        {ENCODINGS.map(enc => <option key={enc.id} value={enc.id}>{enc.label}</option>)}
+                        {ENCODINGS.map(enc => <option key={enc.id} value={enc.id}>{this.t(enc.labelKey)}</option>)}
                     </select>
                 ))}
             </div>
@@ -325,9 +344,9 @@ export class ProjectStructureDialog extends ReactDialog<void> {
         const s = this.state;
         return (
             <div>
-                <h3 className="kairo-ps-section-title">SDKs / JDKs</h3>
-                <p className="kairo-ps-hint" style={{ margin: '-8px 0 12px 0' }}>
-                    Select the JDK used for compilation and language server.
+                <h3 className="kairo-ps-section-title">{this.t('widget.projectStructure.sdkTab.title')}</h3>
+                <p className="kairo-ps-hint kairo-ps-hint-flush">
+                    {this.t('widget.projectStructure.sdkTab.hint')}
                 </p>
                 <div
                     className={`kairo-ps-jdk-item ${s.selectedJdkId === 'auto' ? 'selected' : ''}`}
@@ -341,8 +360,8 @@ export class ProjectStructureDialog extends ReactDialog<void> {
                         onChange={() => this.setState({ selectedJdkId: 'auto' })}
                     />
                     <div className="kairo-ps-jdk-info">
-                        <div className="kairo-ps-jdk-name">Auto-detect (recommended)</div>
-                        <div className="kairo-ps-jdk-path">Let Kairo choose the best matching JDK for this project</div>
+                        <div className="kairo-ps-jdk-name">{this.t('widget.projectStructure.sdkTab.autoDetect')}</div>
+                        <div className="kairo-ps-jdk-path">{this.t('widget.projectStructure.sdkTab.autoDetectDesc')}</div>
                     </div>
                 </div>
                 {s.toolchains.map(jdk => (
@@ -373,8 +392,8 @@ export class ProjectStructureDialog extends ReactDialog<void> {
                         className="theia-button"
                         onClick={() => void this.handleAddJdk()}
                     >
-                        <i className="codicon codicon-add" style={{ marginRight: 4 }} />
-                        Add / Scan JDK
+                        <i className="codicon codicon-add kairo-ps-btn-icon" />
+                        {this.t('widget.projectStructure.sdkTab.addJdk')}
                     </button>
                 </div>
             </div>
@@ -385,9 +404,9 @@ export class ProjectStructureDialog extends ReactDialog<void> {
         const s = this.state;
         return (
             <div>
-                <h3 className="kairo-ps-section-title">Source Directories</h3>
+                <h3 className="kairo-ps-section-title">{this.t('widget.projectStructure.sourcesTab.title')}</h3>
                 {s.sourceDirs.length === 0 ? (
-                    <div className="kairo-ps-empty">No source directories configured.</div>
+                    <div className="kairo-ps-empty">{this.t('widget.projectStructure.sourcesTab.empty')}</div>
                 ) : (
                     <div className="kairo-ps-list">
                         {s.sourceDirs.map((src, idx) => (
@@ -396,9 +415,9 @@ export class ProjectStructureDialog extends ReactDialog<void> {
                                 className={`kairo-ps-list-item ${s.selectedSourceIdx === idx ? 'selected' : ''}`}
                                 onClick={() => this.setState({ selectedSourceIdx: idx })}
                             >
-                                <i className="codicon codicon-folder" style={{ fontSize: 14 }} />
+                                <i className="codicon codicon-folder kairo-ps-list-item-icon" />
                                 <span className="kairo-ps-list-item-path">{src.path}</span>
-                                {src.isTest && <span className="kairo-ps-badge">Test</span>}
+                                {src.isTest && <span className="kairo-ps-badge">{this.t('widget.projectStructure.sourcesTab.testBadge')}</span>}
                                 <label className="kairo-ps-checkbox-label" onClick={e => e.stopPropagation()}>
                                     <input
                                         type="checkbox"
@@ -409,7 +428,7 @@ export class ProjectStructureDialog extends ReactDialog<void> {
                                             this.setState({ sourceDirs: updated });
                                         }}
                                     />
-                                    <span>Test source</span>
+                                    <span>{this.t('widget.projectStructure.sourcesTab.testSource')}</span>
                                 </label>
                             </div>
                         ))}
@@ -420,16 +439,16 @@ export class ProjectStructureDialog extends ReactDialog<void> {
                         className="theia-button"
                         onClick={() => void this.handleAddSourceDir()}
                     >
-                        <i className="codicon codicon-add" style={{ marginRight: 4 }} />
-                        Add
+                        <i className="codicon codicon-add kairo-ps-btn-icon" />
+                        {this.t('common.add')}
                     </button>
                     <button
                         className="theia-button secondary"
                         disabled={s.selectedSourceIdx < 0}
                         onClick={() => this.handleRemoveSourceDir()}
                     >
-                        <i className="codicon codicon-remove" style={{ marginRight: 4 }} />
-                        Remove
+                        <i className="codicon codicon-remove kairo-ps-btn-icon" />
+                        {this.t('common.remove')}
                     </button>
                 </div>
             </div>
@@ -439,14 +458,14 @@ export class ProjectStructureDialog extends ReactDialog<void> {
     protected renderDependenciesTab(): React.ReactNode {
         const s = this.state;
         const sourceBadge = (src: ClasspathSource) => {
-            const label = src === 'autodetect' ? 'Auto-detected' : src.toUpperCase();
+            const label = src === 'autodetect' ? this.t('widget.projectStructure.dependenciesTab.autoDetected') : src.toUpperCase();
             return <span className={`kairo-ps-badge ${src}`}>{label}</span>;
         };
         return (
             <div>
-                <h3 className="kairo-ps-section-title">Dependencies (Classpath)</h3>
+                <h3 className="kairo-ps-section-title">{this.t('widget.projectStructure.dependenciesTab.title')}</h3>
                 {s.classpath.length === 0 ? (
-                    <div className="kairo-ps-empty">No dependencies detected.</div>
+                    <div className="kairo-ps-empty">{this.t('widget.projectStructure.dependenciesTab.empty')}</div>
                 ) : (
                     <div className="kairo-ps-list">
                         {s.classpath.map((cp, idx) => (
@@ -455,7 +474,7 @@ export class ProjectStructureDialog extends ReactDialog<void> {
                                 className={`kairo-ps-list-item ${s.selectedClasspathIdx === idx ? 'selected' : ''}`}
                                 onClick={() => this.setState({ selectedClasspathIdx: idx })}
                             >
-                                <i className={`codicon ${cp.path.endsWith('.jar') ? 'codicon-file-binary' : 'codicon-folder'}`} style={{ fontSize: 14 }} />
+                                <i className={`codicon ${cp.path.endsWith('.jar') ? 'codicon-file-binary' : 'codicon-folder'} kairo-ps-list-item-icon`} />
                                 <span className="kairo-ps-list-item-path" title={cp.path}>{cp.path}</span>
                                 {sourceBadge(cp.source)}
                             </div>
@@ -467,23 +486,23 @@ export class ProjectStructureDialog extends ReactDialog<void> {
                         className="theia-button"
                         onClick={() => void this.handleAddJar()}
                     >
-                        <i className="codicon codicon-add" style={{ marginRight: 4 }} />
-                        Add JAR
+                        <i className="codicon codicon-add kairo-ps-btn-icon" />
+                        {this.t('widget.projectStructure.dependenciesTab.addJar')}
                     </button>
                     <button
                         className="theia-button"
                         onClick={() => void this.handleAddDirectory()}
                     >
-                        <i className="codicon codicon-folder-opened" style={{ marginRight: 4 }} />
-                        Add Directory
+                        <i className="codicon codicon-folder-opened kairo-ps-btn-icon" />
+                        {this.t('widget.projectStructure.dependenciesTab.addDirectory')}
                     </button>
                     <button
                         className="theia-button secondary"
                         disabled={s.selectedClasspathIdx < 0 || s.classpath[s.selectedClasspathIdx]?.source !== 'manual'}
                         onClick={() => this.handleRemoveClasspath()}
                     >
-                        <i className="codicon codicon-remove" style={{ marginRight: 4 }} />
-                        Remove
+                        <i className="codicon codicon-remove kairo-ps-btn-icon" />
+                        {this.t('common.remove')}
                     </button>
                 </div>
             </div>
@@ -581,12 +600,12 @@ export class ProjectStructureDialog extends ReactDialog<void> {
             );
 
             this.setState({ saving: false });
-            void this.messageService.info(`Project structure for "${saved.name}" saved successfully.`);
+            void this.messageService.info(this.t('widget.projectStructure.messages.saveSuccess', { name: saved.name }));
             return true;
         } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
             this.setState({ saving: false, error: msg });
-            void this.messageService.error(`Failed to save project structure: ${msg}`);
+            void this.messageService.error(this.t('widget.projectStructure.messages.saveError', { message: msg }));
             return false;
         }
     }
@@ -594,7 +613,7 @@ export class ProjectStructureDialog extends ReactDialog<void> {
     protected async handleAddJdk(): Promise<void> {
         try {
             const dialog = await this.fileDialogService.showOpenDialog({
-                title: 'Select JDK Home Directory',
+                title: this.t('widget.projectStructure.dialogs.selectJdkHome'),
                 canSelectFiles: false,
                 canSelectFolders: true,
                 canSelectMany: false,
@@ -610,14 +629,14 @@ export class ProjectStructureDialog extends ReactDialog<void> {
                 toolchains: [...this.state.toolchains, imported],
                 selectedJdkId: imported.id,
             });
-            void this.messageService.info(`JDK ${imported.version} added successfully.`);
+            void this.messageService.info(this.t('widget.projectStructure.messages.jdkAdded', { version: imported.version }));
         } catch (err) {
             this.setState({ error: err instanceof Error ? err.message : String(err) });
         }
     }
 
     protected async handleAddSourceDir(): Promise<void> {
-        const path = window.prompt('Enter source directory path (relative to project root, e.g. src/main/java):');
+        const path = window.prompt(this.t('widget.projectStructure.dialogs.enterSourceDir'));
         if (!path) return;
         const trimmed = path.trim();
         if (!trimmed) return;
@@ -637,7 +656,7 @@ export class ProjectStructureDialog extends ReactDialog<void> {
     protected async handleAddJar(): Promise<void> {
         try {
             const dialog = await this.fileDialogService.showOpenDialog({
-                title: 'Select JAR file',
+                title: this.t('widget.projectStructure.dialogs.selectJar'),
                 canSelectFiles: true,
                 canSelectFolders: false,
                 canSelectMany: false,
@@ -656,7 +675,7 @@ export class ProjectStructureDialog extends ReactDialog<void> {
     protected async handleAddDirectory(): Promise<void> {
         try {
             const dialog = await this.fileDialogService.showOpenDialog({
-                title: 'Select classes directory',
+                title: this.t('widget.projectStructure.dialogs.selectClassesDir'),
                 canSelectFiles: false,
                 canSelectFolders: true,
                 canSelectMany: false,

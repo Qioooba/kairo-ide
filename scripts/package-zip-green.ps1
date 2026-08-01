@@ -302,10 +302,17 @@ Step "electron-builder --win zip (出绿色版)"
 
 # electron-builder 默认 output 写到 $DesktopDir\dist (含 win-unpacked 子目录)
 # 项目内的 win-unpacked 经常被 TRAE IDE 锁住 -> EnsureEmptyDir 挂死
-# 策略:用 --config 临时把 output 目录改写到 %TEMP%\kairo-out-$PID
+# 策略:用 --config 临时把 output 目录改写到 KAIRO_TMP\kairo-out-$PID
 #       跑完只把 zip 复制回 dist,不解锁原 win-unpacked
+# 优先级:
+#   1. $env:KAIRO_TMP   (推荐, 例如 E:\AI\kairo-ide\tmp 或 $RepoRoot\tmp)
+#   2. $RepoRoot\tmp    (默认, 落到工作区旁, 不污染 C 盘)
+#   3. C:\Users\Qi\AppData\Local\Temp  (最后兜底, 留作环境隔离测试)
 
-$tmpOut = Join-Path ([System.IO.Path]::GetTempPath()) "kairo-out-$PID"
+$KairoTmpRoot = $env:KAIRO_TMP
+if (-not $KairoTmpRoot) { $KairoTmpRoot = Join-Path $RepoRoot "tmp" }
+New-Item -ItemType Directory -Force -Path $KairoTmpRoot | Out-Null
+$tmpOut = Join-Path $KairoTmpRoot "kairo-out-$PID"
 if (Test-Path $tmpOut) { Remove-Item -Path $tmpOut -Recurse -Force -ErrorAction SilentlyContinue }
 New-Item -ItemType Directory -Force -Path $tmpOut | Out-Null
 

@@ -10,8 +10,10 @@
  */
 
 import * as React from 'react';
-import { injectable, postConstruct } from '@theia/core/shared/inversify';
+import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
+import { KairoI18nService } from '@kairo/i18n';
+import './kairo-custom-build-runner.css';
 
 /** A Maven lifecycle goal. */
 export interface MavenGoal {
@@ -73,13 +75,13 @@ export interface MavenBuildResult {
 
 /** Default Maven lifecycle goals. */
 const DEFAULT_GOALS: MavenGoal[] = [
-  { id: 'clean', label: 'Clean', description: 'Delete target/ directory', phase: 'clean' },
-  { id: 'validate', label: 'Validate', description: 'Validate project structure', phase: 'validate' },
-  { id: 'compile', label: 'Compile', description: 'Compile Java sources', phase: 'compile' },
-  { id: 'test', label: 'Test', description: 'Run unit tests', phase: 'test' },
-  { id: 'package', label: 'Package', description: 'Package into JAR/WAR', phase: 'package' },
-  { id: 'verify', label: 'Verify', description: 'Run integration tests', phase: 'verify' },
-  { id: 'install', label: 'Install', description: 'Install to local repository', phase: 'install' },
+  { id: 'clean', label: '', description: '', phase: 'clean' },
+  { id: 'validate', label: '', description: '', phase: 'validate' },
+  { id: 'compile', label: '', description: '', phase: 'compile' },
+  { id: 'test', label: '', description: '', phase: 'test' },
+  { id: 'package', label: '', description: '', phase: 'package' },
+  { id: 'verify', label: '', description: '', phase: 'verify' },
+  { id: 'install', label: '', description: '', phase: 'install' },
 ];
 
 /** Detect dependency conflicts by looking for duplicate groupId:artifactId. */
@@ -133,7 +135,9 @@ interface MavenViewState {
   showConflictWarning: boolean;
 }
 
-const MavenView: React.FC = () => {
+const MavenView: React.FC<{ i18n: KairoI18nService }> = ({ i18n }) => {
+  const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
+  const [, forceUpdate] = React.useReducer(x => x + 1, 0);
   const [state, setState] = React.useState<MavenViewState>({
     project: null,
     dependencies: [],
@@ -149,6 +153,11 @@ const MavenView: React.FC = () => {
     showConflictWarning: false,
   });
 
+  React.useEffect(() => {
+    const disposable = i18n.onDidChangeLanguage(() => forceUpdate());
+    return () => disposable.dispose();
+  }, [i18n]);
+
   /** Simulate detecting a Maven project by fetching pom.xml metadata. */
   React.useEffect(() => {
     const detectProject = async () => {
@@ -161,14 +170,15 @@ const MavenView: React.FC = () => {
         if (response.ok) {
           const data = await response.json();
           if (data.found) {
+            const detectedConflicts = detectConflicts(data.dependencies || []);
             setState(prev => ({
               ...prev,
               project: data.project || null,
               dependencies: data.dependencies || [],
               tree: data.tree || [],
-              conflicts: detectConflicts(data.dependencies || []),
+              conflicts: detectedConflicts,
               loading: false,
-              showConflictWarning: (detectConflicts(data.dependencies || [])).length > 0,
+              showConflictWarning: detectedConflicts.length > 0,
             }));
             return;
           }
@@ -233,23 +243,25 @@ const MavenView: React.FC = () => {
     const key = `${node.groupId}:${node.artifactId}:${node.version}`;
     const hasChildren = node.children && node.children.length > 0;
     const isExpanded = state.expandedDeps.has(key);
+    const depthClass = `kairo-maven-dep-depth-${Math.min(depth, 5)}`;
 
     return (
       <div key={key + depth}>
         <div
-          className="kairo-maven-dep-item"
-          style={{ '--kairo-maven-dep-depth': depth } as React.CSSProperties}
+          className={`kairo-maven-dep-item ${depthClass}`}
           onClick={() => hasChildren && toggleDep(key)}
           role={hasChildren ? 'button' : undefined}
           tabIndex={hasChildren ? 0 : undefined}
           onKeyDown={e => { if (hasChildren && (e.key === 'Enter' || e.key === ' ')) toggleDep(key); }}
         >
           {hasChildren && (
-            <span className="kairo-maven-dep-toggle">{isExpanded ? '\u25BC' : '\u25B6'}</span>
+            <span className="kairo-maven-dep-toggle">
+              <span className={`codicon ${isExpanded ? 'codicon-chevron-down' : 'codicon-chevron-right'}`} aria-hidden="true" />
+            </span>
           )}
           <span className="kairo-maven-dep-coord">{formatCoord(node.groupId, node.artifactId, node.version)}</span>
           <span className={`kairo-maven-dep-scope kairo-maven-scope-${node.scope}`}>{node.scope}</span>
-          {node.optional && <span className="kairo-maven-dep-optional">optional</span>}
+          {node.optional && <span className="kairo-maven-dep-optional">{t('common.optional')}</span>}
         </div>
         {hasChildren && isExpanded && node.children!.map(child => renderTreeNode(child, depth + 1))}
       </div>
@@ -258,56 +270,67 @@ const MavenView: React.FC = () => {
 
   if (state.loading) {
     return (
-      <div className="kairo-widget">
-        <div className="kairo-widget-header">
-          <span className="kairo-widget-title">Maven</span>
+      <div className="kairo-widget" data-testid="maven-view">
+        <div className="kairo-widget-header" data-testid="maven-header">
+          <span className="kairo-widget-title">{t('widget.build.maven.title')}</span>
         </div>
-        <p className="kairo-empty">Detecting Maven project...</p>
+        <div className="kairo-widget-body">
+          <div className="kairo-empty-state" data-testid="maven-loading">
+            <span className="kairo-empty-state-glyph codicon codicon-loading codicon-modifier-spin" aria-hidden="true" />
+            <h3 className="kairo-empty-state-title">{t('widget.build.maven.loading')}</h3>
+          </div>
+        </div>
       </div>
     );
   }
 
   if (!state.project) {
     return (
-      <div className="kairo-widget">
-        <div className="kairo-widget-header">
-          <span className="kairo-widget-title">Maven</span>
+      <div className="kairo-widget" data-testid="maven-view">
+        <div className="kairo-widget-header" data-testid="maven-header">
+          <span className="kairo-widget-title">{t('widget.build.maven.title')}</span>
         </div>
-        <p className="kairo-empty">No pom.xml found in workspace. Open a Maven project to use this view.</p>
+        <div className="kairo-widget-body">
+          <div className="kairo-empty-state" data-testid="maven-empty">
+            <span className="kairo-empty-state-glyph codicon codicon-folder" aria-hidden="true" />
+            <h3 className="kairo-empty-state-title">{t('widget.build.maven.empty.noProjectTitle')}</h3>
+            <p className="kairo-empty-state-reason">{t('widget.build.maven.empty.noProjectReason')}</p>
+          </div>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="kairo-widget">
+    <div className="kairo-widget" data-testid="maven-view">
       {/* Project Info */}
-      <div className="kairo-widget-header">
-        <span className="kairo-widget-title">Maven</span>
+      <div className="kairo-widget-header" data-testid="maven-header">
+        <span className="kairo-widget-title">{t('widget.build.maven.title')}</span>
         <span className="kairo-maven-project-name">
           {state.project.name || `${state.project.groupId}:${state.project.artifactId}`}
         </span>
       </div>
 
-      <div className="kairo-maven-project-info">
+      <div className="kairo-maven-project-info" data-testid="maven-project-info">
         <div className="kairo-maven-info-row">
-          <span className="kairo-maven-info-label">Group:</span>
+          <span className="kairo-maven-info-label">{t('widget.build.maven.label.group')}</span>
           <span>{state.project.groupId}</span>
         </div>
         <div className="kairo-maven-info-row">
-          <span className="kairo-maven-info-label">Artifact:</span>
+          <span className="kairo-maven-info-label">{t('widget.build.maven.label.artifact')}</span>
           <span>{state.project.artifactId}</span>
         </div>
         <div className="kairo-maven-info-row">
-          <span className="kairo-maven-info-label">Version:</span>
+          <span className="kairo-maven-info-label">{t('widget.build.maven.label.version')}</span>
           <span>{state.project.version}</span>
         </div>
         <div className="kairo-maven-info-row">
-          <span className="kairo-maven-info-label">Packaging:</span>
+          <span className="kairo-maven-info-label">{t('widget.build.maven.label.packaging')}</span>
           <span>{state.project.packaging}</span>
         </div>
         {state.project.description && (
           <div className="kairo-maven-info-row">
-            <span className="kairo-maven-info-label">Description:</span>
+            <span className="kairo-maven-info-label">{t('widget.build.maven.label.description')}</span>
             <span>{state.project.description}</span>
           </div>
         )}
@@ -315,20 +338,21 @@ const MavenView: React.FC = () => {
 
       {/* Lifecycle Goals */}
       <div className="kairo-widget-section">
-        <div className="kairo-section-title">Lifecycle Goals</div>
-        <div className="kairo-maven-goals">
+        <div className="kairo-section-title">{t('widget.build.maven.section.lifecycleGoals')}</div>
+        <div className="kairo-maven-goals" data-testid="maven-goals">
           {state.goals.map(goal => (
             <button
               key={goal.id}
               className="theia-button kairo-maven-goal-button"
               onClick={() => runGoal(goal.id)}
               disabled={state.running}
-              title={goal.description}
+              title={t(`widget.build.maven.goal.${goal.id}.description`)}
+              data-testid={`maven-goal-${goal.id}`}
             >
               {state.running && state.currentTask === goal.id ? (
-                <span className="kairo-maven-spinner">\u25D0 </span>
+                <span className="codicon codicon-loading codicon-modifier-spin" aria-hidden="true" />
               ) : null}
-              {goal.label}
+              {t(`widget.build.maven.goal.${goal.id}.label`)}
             </button>
           ))}
         </div>
@@ -338,19 +362,20 @@ const MavenView: React.FC = () => {
       {state.showConflictWarning && state.conflicts.length > 0 && (
         <div className="kairo-widget-section">
           <div className="kairo-section-title kairo-section-title-warning">
-            \u26A0 Dependency Conflicts ({state.conflicts.length})
+            <span className="codicon codicon-warning" aria-hidden="true" />
+            {t('widget.build.maven.section.conflicts', { count: state.conflicts.length })}
           </div>
-          <div className="kairo-maven-conflicts">
+          <div className="kairo-maven-conflicts" data-testid="maven-conflicts">
             {state.conflicts.map(conflict => (
               <div key={`${conflict.groupId}:${conflict.artifactId}`} className="kairo-maven-conflict-item">
                 <span className="kairo-maven-conflict-coord">
                   {conflict.groupId}:{conflict.artifactId}
                 </span>
                 <span className="kairo-maven-conflict-versions">
-                  Versions: {conflict.versions.join(', ')}
+                  {t('widget.build.maven.conflict.versions', { versions: conflict.versions.join(', ') })}
                 </span>
                 <span className="kairo-maven-conflict-resolved">
-                  Resolved: {conflict.resolvedVersion}
+                  {t('widget.build.maven.conflict.resolved', { version: conflict.resolvedVersion })}
                 </span>
               </div>
             ))}
@@ -361,19 +386,19 @@ const MavenView: React.FC = () => {
       {/* Dependency Tree */}
       <div className="kairo-widget-section">
         <div className="kairo-section-title">
-          Dependencies ({state.dependencies.length})
+          {t('widget.build.maven.section.dependencies', { count: state.dependencies.length })}
         </div>
         {state.tree.length > 0 ? (
-          <div className="kairo-maven-dep-tree">
+          <div className="kairo-maven-dep-tree" data-testid="maven-dep-tree">
             {state.tree.map(node => renderTreeNode(node))}
           </div>
         ) : (
-          <div className="kairo-maven-dep-list">
+          <div className="kairo-maven-dep-list" data-testid="maven-dep-list">
             {state.dependencies.map(dep => (
               <div key={`${dep.groupId}:${dep.artifactId}:${dep.version}`} className="kairo-maven-dep-item">
                 <span className="kairo-maven-dep-coord">{formatCoord(dep.groupId, dep.artifactId, dep.version)}</span>
                 <span className={`kairo-maven-dep-scope kairo-maven-scope-${dep.scope}`}>{dep.scope}</span>
-                {dep.optional && <span className="kairo-maven-dep-optional">optional</span>}
+                {dep.optional && <span className="kairo-maven-dep-optional">{t('common.optional')}</span>}
               </div>
             ))}
           </div>
@@ -384,18 +409,20 @@ const MavenView: React.FC = () => {
       {state.output && (
         <div className="kairo-widget-section">
           <div className="kairo-section-title">
-            Build Output: {state.currentTask || state.error ? 'Failed' : 'Success'}
+            {state.currentTask || state.error
+              ? t('widget.build.maven.output.failed')
+              : t('widget.build.maven.output.success')}
           </div>
-          <pre className="kairo-maven-output">{state.output}</pre>
+          <pre className="kairo-maven-output" data-testid="maven-output">{state.output}</pre>
         </div>
       )}
 
       {state.error && (
         <div className="kairo-widget-section">
-          <div className="kairo-section-title kairo-section-title-error">
-            Error
+          <div className="kairo-error-banner" role="alert" data-testid="maven-error">
+            <span className="codicon codicon-error" aria-hidden="true" />
+            <span>{state.error}</span>
           </div>
-          <pre className="kairo-maven-error">{state.error}</pre>
         </div>
       )}
     </div>
@@ -406,17 +433,30 @@ const MavenView: React.FC = () => {
 export class MavenViewWidget extends ReactWidget {
   static readonly ID = 'kairo-maven-view';
 
-  @postConstruct()
-  protected init(): void {
+  @inject(KairoI18nService) protected readonly i18n!: KairoI18nService;
+
+  constructor() {
+    super();
     this.id = MavenViewWidget.ID;
-    this.title.label = 'Maven';
-    this.title.caption = 'Kairo Maven Project Management';
+    this.title.label = '';
+    this.title.caption = '';
     this.title.closable = true;
     this.addClass('kairo-widget');
+  }
+
+  @postConstruct()
+  protected init(): void {
+    this.updateTitle();
+    this.toDispose.push(this.i18n.onDidChangeLanguage(() => this.updateTitle()));
     this.update();
   }
 
+  protected updateTitle(): void {
+    this.title.label = this.i18n.t('widget.build.maven.title' as any);
+    this.title.caption = this.i18n.t('widget.build.maven.caption' as any);
+  }
+
   protected render(): React.ReactNode {
-    return <MavenView />;
+    return <MavenView i18n={this.i18n} />;
   }
 }

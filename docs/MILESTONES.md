@@ -1,6 +1,6 @@
 # Kairo IDE Milestones — Current State Matrix
 
-> Last verified: 2026-08-01 (Session 23 — Phase N：Toolbar / Status Bar 统一美化)
+> Last verified: 2026-08-01 (Session 27 — Phase Q 稳定性与质量收官)
 > Baseline: Wave 0 (Bleeding Fixes Complete)
 > Status: Each item must be one of: verified, partial, not_started, deferred
 > ADR: 30 records (001-0030)
@@ -155,6 +155,18 @@ All Wave 0 gates pass. See [WAVE0_BASELINE.md](progress/WAVE0_BASELINE.md) for f
 | Status bar semantic state classes (Session 23 Phase N) | verified | `kairo-status-bar-contribution.ts`, `kairo-theme.css` | Added `.itemStateClass()` mapping runtime states to `.kairo-statusbar-state-success/active/warning/error/neutral`; applied to JDK/build/server/agent/debug/hot-reload entries |
 | Status bar i18n hardcoded cleanup (Session 23 Phase N) | verified | `kairo-status-bar-contribution.ts`, `en.ts`, `zh-CN.ts` | Replaced hardcoded 'Java Debug service unavailable' with `statusBar.debugUnavailable` key; added zh-CN translation |
 | Phase N verification (Session 23) | verified | `tsc --noEmit`, `pnpm -r test`, `go test ./...`, builds for ui-kit/theia-product/browser | 0 TS errors; all frontend tests pass; 33 Go packages pass; browser bundle builds with 0 errors |
+| Search Everywhere i18n prop test fix (Session 25 Phase O) | verified | `search-everywhere-model.test.cjs`, `search-everywhere-widget.tsx` | Component requires `i18n` prop after KairoI18nService integration; test now passes mock i18n |
+| Remote debug config widget tests (Session 25 Phase O) | verified | `java-remote-debug-config.test.cjs`, `java-extension/package.json` | Added save validation, persist/load, delete, connect lifecycle tests; test file registered in package script |
+| Extension widgets inline-style audit (Session 25 Phase O) | verified | `packages/*/src/browser/*.tsx` | No remaining inline `style={{...}}` across browser widgets |
+| Extension widgets hardcoded Chinese audit (Session 25 Phase O) | verified | `packages/*/src/browser/*.tsx` | No remaining hardcoded Chinese strings across browser widgets |
+| Phase O verification (Session 25) | verified | `tsc --noEmit`, `pnpm -r test`, `go test ./...`, `pnpm -r run build`, browser build | 0 TS errors; all frontend tests pass; 33 Go packages pass; all package + browser builds with 0 errors |
+| Phase P 全局审计完成 (Session 26) | verified | 内联样式扫描 + Maven 进度条迁移 + 11 widget 标题 i18n + 编码下拉翻译 + en/zh-CN 键一致性 | 0 内联布局样式; 0 硬编码中文; 0 硬编码英文文案; i18n 键 0 差异; 截图更新 |
+| Phase P 验证门禁 (Session 26) | verified | tsc + pnpm test + go test + build + browser build | 0 errors; 全量通过; 34/34 Go packages; browser build 0 errors |
+| Phase Q flaky test fix (Session 27) | verified | `java-ls-lifecycle.test.cjs` | waitFor 确定性轮询替换 setImmediate flush；8 次连续运行 14/14 通过，无 flaky |
+| Phase Q Run menu screenshot (Session 27) | verified | `capture-current-ui.cjs` | Lumino v2 `lm-` 前缀选择器；13-run-menu.png 16KB 成功生成 |
+| Phase Q Go coverage 80% (Session 27) | verified | 新增 13 个测试文件 + atomicfile 测试文件重命名 | 76.3% → 80.1%；atomicfile 47.7% → 75.8%；api 64.5% → 74.8% |
+| Phase Q E2E regression (Session 27) | verified | `standalone-smoke.spec.ts` + `docs/progress/phase-q-e2e-regression.md` | 5/5 通过；core-e2e 环境相关失败已记录（JDT LS bundle 缺失） |
+| Phase Q verification (Session 27) | verified | tsc + pnpm test + go test + build + browser build | 0 errors; 全量通过无 flaky; Go 全量通过; browser build 0 errors |
 
 ## Backend API
 

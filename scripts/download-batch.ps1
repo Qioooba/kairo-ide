@@ -15,7 +15,10 @@
 #   本脚本下载 apache-tomcat-6.0.53.zip（跨平台通用包），二者均可用于开发环境。
 $ErrorActionPreference = 'SilentlyContinue'
 $ProgressPreference = 'SilentlyContinue'
-$Dest = Join-Path $env:TEMP 'kairo-install'
+# KAIRO_TMP: 优先写到工作区旁, 避免污染 C:\Users\Qi\AppData\Local\Temp
+$KairoTmp = if ($env:KAIRO_TMP) { $env:KAIRO_TMP } else { Join-Path $PSScriptRoot '..\tmp' }
+New-Item -ItemType Directory -Force -Path $KairoTmp | Out-Null
+$Dest = Join-Path $KairoTmp 'kairo-install'
 New-Item -ItemType Directory -Force -Path $Dest | Out-Null
 
 $jobs = @(

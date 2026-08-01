@@ -162,8 +162,8 @@ test('ImportWizardWidget: instantiation sets id', () => {
 
 test('ImportWizardWidget: instantiation sets title', () => {
   const widget = new project.ImportWizardWidget();
-  assert.strictEqual(widget.title.label, 'Kairo IDE - Import Project');
-  assert.strictEqual(widget.title.caption, 'Kairo Project Import Wizard');
+  assert.strictEqual(widget.title.label, '');
+  assert.strictEqual(widget.title.caption, '');
 });
 
 test('ImportWizardWidget: instantiation sets closable', () => {

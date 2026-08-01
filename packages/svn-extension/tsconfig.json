@@ -9,5 +9,8 @@
     "jsx": "react"
   },
   "include": ["src/**/*.ts", "src/**/*.tsx"],
-  "exclude": ["node_modules", "lib"]
+  "exclude": ["node_modules", "lib"],
+  "references": [
+    { "path": "../i18n" }
+  ]
 }

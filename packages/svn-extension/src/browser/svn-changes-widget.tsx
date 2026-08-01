@@ -1,23 +1,24 @@
 import * as React from 'react';
-import { injectable, inject } from '@theia/core/shared/inversify';
+import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
+import { KairoI18nService } from '@kairo/i18n';
 import { SvnStore, SvnChangesState } from './svn-store';
-import { SvnFileStatus, SvnStatusEntry, getStatusLabel } from './svn-types';
+import { SvnFileStatus, SvnStatusEntry } from './svn-types';
 
-function statusIcon(status: SvnFileStatus): string {
+function statusIconClass(status: SvnFileStatus): string {
   switch (status) {
-    case SvnFileStatus.Modified: return 'M';
-    case SvnFileStatus.Added: return 'A';
-    case SvnFileStatus.Deleted: return 'D';
-    case SvnFileStatus.Conflict: return '!';
-    case SvnFileStatus.Missing: return '!';
-    case SvnFileStatus.Unversioned: return '?';
-    case SvnFileStatus.Ignored: return 'I';
-    case SvnFileStatus.Replaced: return 'R';
-    case SvnFileStatus.Obstructed: return '~';
-    case SvnFileStatus.Locked: return 'L';
-    case SvnFileStatus.Switched: return 'S';
-    case SvnFileStatus.External: return 'X';
+    case SvnFileStatus.Modified: return 'codicon-edit';
+    case SvnFileStatus.Added: return 'codicon-add';
+    case SvnFileStatus.Deleted: return 'codicon-trash';
+    case SvnFileStatus.Conflict: return 'codicon-warning';
+    case SvnFileStatus.Missing: return 'codicon-circle-slash';
+    case SvnFileStatus.Unversioned: return 'codicon-question';
+    case SvnFileStatus.Ignored: return 'codicon-eye-closed';
+    case SvnFileStatus.Replaced: return 'codicon-refresh';
+    case SvnFileStatus.Locked: return 'codicon-lock';
+    case SvnFileStatus.Switched: return 'codicon-repo';
+    case SvnFileStatus.External: return 'codicon-link';
+    case SvnFileStatus.Obstructed: return 'codicon-error';
     default: return '';
   }
 }
@@ -39,6 +40,7 @@ function statusClass(status: SvnFileStatus): string {
 
 interface SvnChangesProps {
   store: SvnStore;
+  i18n: KairoI18nService;
 }
 
 interface FileItemProps {
@@ -46,31 +48,39 @@ interface FileItemProps {
   selected: boolean;
   onToggle: (path: string) => void;
   onClick: (entry: SvnStatusEntry) => void;
+  i18n: KairoI18nService;
 }
 
-const FileItem: React.FC<FileItemProps> = ({ entry, selected, onToggle, onClick }) => (
-  <li
-    className={`kairo-svn-file-item ${selected ? 'kairo-svn-file-selected' : ''}`}
-  >
-    <input
-      type="checkbox"
-      checked={selected}
-      onChange={() => onToggle(entry.path)}
-      className="kairo-svn-file-checkbox"
-    />
-    <span className={`kairo-svn-status-badge ${statusClass(entry.status)}`}>
-      {statusIcon(entry.status)}
-    </span>
-    <span
-      className="kairo-svn-file-name"
-      onClick={() => onClick(entry)}
-      title={`${entry.path} - ${getStatusLabel(entry.status)}`}
+const FileItem: React.FC<FileItemProps> = ({ entry, selected, onToggle, onClick, i18n }) => {
+  const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
+  const iconClass = statusIconClass(entry.status);
+  const lockTitle = entry.isLocked
+    ? t('widget.svn.changes.lockedBy', { owner: entry.lockOwner || t('common.unknown') })
+    : undefined;
+  return (
+    <li
+      className={`kairo-svn-file-item ${selected ? 'kairo-svn-file-selected' : ''}`}
     >
-      {entry.path}
-      {entry.isLocked && <span className="kairo-svn-lock-indicator" title={`Locked by ${entry.lockOwner || 'unknown'}`}>🔒</span>}
-    </span>
-  </li>
-);
+      <input
+        type="checkbox"
+        checked={selected}
+        onChange={() => onToggle(entry.path)}
+        className="kairo-svn-file-checkbox"
+      />
+      <span className={`kairo-svn-status-badge ${statusClass(entry.status)} ${iconClass ? `codicon ${iconClass}` : ''}`} aria-hidden="true" />
+      <span
+        className="kairo-svn-file-name"
+        onClick={() => onClick(entry)}
+        title={entry.path}
+      >
+        {entry.path}
+        {entry.isLocked && (
+          <span className="kairo-svn-lock-indicator codicon codicon-lock" title={lockTitle} />
+        )}
+      </span>
+    </li>
+  );
+};
 
 interface FileSectionProps {
   title: string;
@@ -81,6 +91,7 @@ interface FileSectionProps {
   actionLabel?: string;
   onAction?: () => void;
   emptyText?: string;
+  i18n: KairoI18nService;
 }
 
 const FileSection: React.FC<FileSectionProps> = ({
@@ -92,6 +103,7 @@ const FileSection: React.FC<FileSectionProps> = ({
   actionLabel,
   onAction,
   emptyText,
+  i18n,
 }) => {
   if (files.length === 0 && !actionLabel) {
     return null;
@@ -99,7 +111,7 @@ const FileSection: React.FC<FileSectionProps> = ({
   return (
     <div className="kairo-widget-section">
       <div className="kairo-section-header">
-        <span className="kairo-section-title">{title} ({files.length})</span>
+        <span className="kairo-section-title">{title}</span>
         {actionLabel && onAction && files.length > 0 && (
           <button
             className="theia-button secondary kairo-svn-action-btn"
@@ -110,7 +122,7 @@ const FileSection: React.FC<FileSectionProps> = ({
         )}
       </div>
       {files.length === 0 ? (
-        emptyText ? <p className="kairo-empty">{emptyText}</p> : null
+        emptyText ? <p className="kairo-empty-state">{emptyText}</p> : null
       ) : (
         <ul className="kairo-svn-file-list">
           {files.map(f => (
@@ -120,6 +132,7 @@ const FileSection: React.FC<FileSectionProps> = ({
               selected={selectedFiles.has(f.path)}
               onToggle={onToggle}
               onClick={onFileClick}
+              i18n={i18n}
             />
           ))}
         </ul>
@@ -128,7 +141,8 @@ const FileSection: React.FC<FileSectionProps> = ({
   );
 };
 
-const SvnChangesComponent: React.FC<SvnChangesProps> = ({ store }) => {
+const SvnChangesComponent: React.FC<SvnChangesProps> = ({ store, i18n }) => {
+  const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
   const [state, setState] = React.useState<SvnChangesState>(store.getState());
 
   React.useEffect(() => {
@@ -163,7 +177,7 @@ const SvnChangesComponent: React.FC<SvnChangesProps> = ({ store }) => {
   };
   const handleRevertSelected = async () => {
     const toRevert = Array.from(state.selectedFiles);
-    if (toRevert.length > 0 && confirm(`Revert ${toRevert.length} file(s)? Local changes will be lost.`)) {
+    if (toRevert.length > 0 && confirm(t('widget.svn.changes.revertConfirm', { count: toRevert.length }))) {
       await store.revertFiles(toRevert);
     }
   };
@@ -179,7 +193,7 @@ const SvnChangesComponent: React.FC<SvnChangesProps> = ({ store }) => {
   return (
     <div className="kairo-widget" data-testid="svn-changes-view">
       <div className="kairo-widget-header" data-testid="svn-changes-header">
-        <span className="kairo-widget-title">SVN Local Changes</span>
+        <span className="kairo-widget-title">{t('widget.svn.changes.title')}</span>
         {state.available && state.branchName && (
           <span className="kairo-svn-branch" data-testid="svn-branch">
             {state.branchName}
@@ -193,108 +207,119 @@ const SvnChangesComponent: React.FC<SvnChangesProps> = ({ store }) => {
           className="theia-button"
           onClick={handleRefresh}
           disabled={state.loading || !state.available}
-          aria-label="Refresh SVN status"
+          aria-label={t('widget.svn.changes.refresh')}
         >
-          {state.loading ? 'Refreshing…' : '⟳ Refresh'}
+          <span className={`codicon ${state.loading ? 'codicon-loading codicon-modifier-spin' : 'codicon-refresh'}`} aria-hidden="true" />
+          {state.loading ? t('widget.svn.changes.refreshing') : t('widget.svn.changes.refresh')}
         </button>
         <button
           className="theia-button"
           onClick={handleUpdate}
           disabled={state.isUpdating || !state.available}
-          aria-label="Update from repository"
+          aria-label={t('widget.svn.changes.update')}
         >
-          {state.isUpdating ? 'Updating…' : '↓ Update'}
+          <span className={`codicon ${state.isUpdating ? 'codicon-loading codicon-modifier-spin' : 'codicon-cloud-download'}`} aria-hidden="true" />
+          {state.isUpdating ? t('widget.svn.changes.updating') : t('widget.svn.changes.update')}
         </button>
         <button
           className="theia-button secondary"
           onClick={handleSelectAll}
           disabled={totalChanges === 0}
         >
-          Select All
+          {t('widget.svn.changes.selectAll')}
         </button>
         <button
           className="theia-button secondary"
           onClick={handleDeselectAll}
           disabled={state.selectedFiles.size === 0}
         >
-          Deselect
+          {t('widget.svn.changes.deselect')}
         </button>
       </div>
 
       {!state.available && (
-        <div className="theia-warning" role="alert">
-          SVN client not detected. Please install Subversion (svn command-line tool) to use version control features.
+        <div className="kairo-error-banner" role="alert">
+          <span className="codicon codicon-warning" aria-hidden="true" />
+          {t('widget.svn.changes.svnNotDetected')}
         </div>
       )}
 
       {state.error && (
-        <div className="theia-error" role="alert" data-testid="svn-error">
+        <div className="kairo-error-banner" role="alert" data-testid="svn-error">
+          <span className="codicon codicon-warning" aria-hidden="true" />
           {state.error}
         </div>
       )}
 
       {state.conflictedFiles.length > 0 && (
-        <div className="theia-error" role="alert">
-          ⚠️ {state.conflictedFiles.length} conflict(s) must be resolved before committing.
+        <div className="kairo-error-banner" role="alert">
+          <span className="codicon codicon-warning" aria-hidden="true" />
+          {t('widget.svn.changes.conflictsBanner', { count: state.conflictedFiles.length })}
         </div>
       )}
 
       {state.available && (
-        <>
+        <div className="kairo-widget-body">
           <FileSection
-            title="Conflicts"
+            title={t('widget.svn.changes.conflictsTitle', { count: state.conflictedFiles.length })}
             files={state.conflictedFiles}
             selectedFiles={state.selectedFiles}
             onToggle={toggleFile}
             onFileClick={handleFileClick}
-            actionLabel="Resolve"
-            emptyText="No conflicts"
+            actionLabel={state.conflictedFiles.length > 0 ? t('widget.svn.changes.resolve') : undefined}
+            onAction={handleRevertSelected}
+            emptyText={t('widget.svn.changes.noConflicts')}
+            i18n={i18n}
           />
 
           <FileSection
-            title="Default Changelist"
+            title={t('widget.svn.changes.defaultChangelistTitle', { count: state.modifiedFiles.length + state.addedFiles.length + state.deletedFiles.length + state.replacedFiles.length + state.missingFiles.length })}
             files={[...state.modifiedFiles, ...state.addedFiles, ...state.deletedFiles, ...state.replacedFiles, ...state.missingFiles]}
             selectedFiles={state.selectedFiles}
             onToggle={toggleFile}
             onFileClick={handleFileClick}
-            actionLabel={state.selectedFiles.size > 0 ? 'Revert' : undefined}
+            actionLabel={state.selectedFiles.size > 0 ? t('widget.svn.changes.revert') : undefined}
             onAction={handleRevertSelected}
+            i18n={i18n}
           />
 
           <FileSection
-            title="Unversioned Files"
+            title={t('widget.svn.changes.unversionedFilesTitle', { count: state.unversionedFiles.length })}
             files={state.unversionedFiles}
             selectedFiles={state.selectedFiles}
             onToggle={toggleFile}
             onFileClick={handleFileClick}
-            actionLabel={state.selectedFiles.size > 0 && state.unversionedFiles.some(u => state.selectedFiles.has(u.path)) ? 'Add' : undefined}
+            actionLabel={state.selectedFiles.size > 0 && state.unversionedFiles.some(u => state.selectedFiles.has(u.path)) ? t('widget.svn.changes.add') : undefined}
             onAction={handleAddSelected}
+            i18n={i18n}
           />
 
           <FileSection
-            title="Ignored Files"
+            title={t('widget.svn.changes.ignoredFilesTitle', { count: state.ignoredFiles.length })}
             files={state.ignoredFiles}
             selectedFiles={state.selectedFiles}
             onToggle={toggleFile}
             onFileClick={handleFileClick}
+            i18n={i18n}
           />
 
           <FileSection
-            title="Locked Files"
+            title={t('widget.svn.changes.lockedFilesTitle', { count: state.lockedFiles.length })}
             files={state.lockedFiles}
             selectedFiles={state.selectedFiles}
             onToggle={toggleFile}
             onFileClick={handleFileClick}
+            i18n={i18n}
           />
 
           <div className="kairo-svn-commit-section">
             <div className="kairo-section-header">
-              <span className="kairo-section-title">Commit Message</span>
-              <span className="kairo-svn-commit-hint">Ctrl+Enter to commit</span>
+              <span className="kairo-section-title">{t('widget.svn.changes.commitMessageTitle')}</span>
+              <span className="kairo-svn-commit-hint">{t('widget.svn.changes.commitHint')}</span>
             </div>
             <textarea
               className="kairo-svn-commit-message"
-              placeholder="Enter commit message..."
+              placeholder={t('widget.svn.changes.commitMessagePlaceholder')}
               value={state.commitMessage}
               onChange={e => store.setCommitMessage(e.target.value)}
               onKeyDown={e => {
@@ -306,7 +331,7 @@ const SvnChangesComponent: React.FC<SvnChangesProps> = ({ store }) => {
             />
             <div className="kairo-svn-commit-actions">
               <span className="kairo-svn-selected-count">
-                {state.selectedFiles.size} file(s) selected
+                {t('widget.svn.changes.selectedCount', { count: state.selectedFiles.size })}
               </span>
               <div className="kairo-svn-commit-buttons">
                 <button
@@ -314,178 +339,23 @@ const SvnChangesComponent: React.FC<SvnChangesProps> = ({ store }) => {
                   onClick={handleRevertSelected}
                   disabled={state.selectedFiles.size === 0 || state.isCommitting}
                 >
-                  ↩ Revert
+                  <span className="codicon codicon-discard" aria-hidden="true" />
+                  {t('widget.svn.changes.revert')}
                 </button>
                 <button
                   className="theia-button primary"
                   onClick={handleCommit}
                   disabled={!canCommit}
-                  aria-label="Commit selected files"
+                  aria-label={t('widget.svn.changes.commit')}
                 >
-                  {state.isCommitting ? 'Committing…' : '✓ Commit'}
+                  <span className={`codicon ${state.isCommitting ? 'codicon-loading codicon-modifier-spin' : 'codicon-check'}`} aria-hidden="true" />
+                  {state.isCommitting ? t('widget.svn.changes.committing') : t('widget.svn.changes.commit')}
                 </button>
               </div>
             </div>
           </div>
-        </>
+        </div>
       )}
-
-      <style>{`
-        .kairo-svn-file-list {
-          list-style: none;
-          padding: 0;
-          margin: 4px 0;
-          max-height: 300px;
-          overflow-y: auto;
-        }
-        .kairo-svn-file-item {
-          display: flex;
-          align-items: center;
-          padding: 2px 8px;
-          cursor: pointer;
-          font-size: 13px;
-          line-height: 22px;
-          border-radius: 3px;
-        }
-        .kairo-svn-file-item:hover {
-          background: var(--theia-list-hoverBackground);
-        }
-        .kairo-svn-file-selected {
-          background: var(--theia-list-activeSelectionBackground);
-          color: var(--theia-list-activeSelectionForeground);
-        }
-        .kairo-svn-file-checkbox {
-          margin-right: 6px;
-          flex-shrink: 0;
-        }
-        .kairo-svn-status-badge {
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          width: 18px;
-          height: 18px;
-          font-size: 11px;
-          font-weight: bold;
-          margin-right: 6px;
-          border-radius: 3px;
-          flex-shrink: 0;
-        }
-        .kairo-svn-status-modified {
-          color: var(--theia-gitDecoration-modifiedResourceForeground);
-        }
-        .kairo-svn-status-added {
-          color: var(--theia-gitDecoration-addedResourceForeground);
-        }
-        .kairo-svn-status-deleted {
-          color: var(--theia-gitDecoration-deletedResourceForeground);
-        }
-        .kairo-svn-status-untracked {
-          color: var(--theia-gitDecoration-untrackedResourceForeground);
-        }
-        .kairo-svn-status-conflict {
-          color: var(--theia-gitDecoration-conflictingResourceForeground);
-          font-weight: bold;
-        }
-        .kairo-svn-status-missing {
-          color: var(--theia-editorError-foreground);
-        }
-        .kairo-svn-status-ignored {
-          color: var(--theia-gitDecoration-ignoredResourceForeground);
-        }
-        .kairo-svn-status-replaced {
-          color: var(--theia-textLink-foreground);
-        }
-        .kairo-svn-status-locked {
-          color: var(--theia-editorWarning-foreground);
-        }
-        .kairo-svn-file-name {
-          flex: 1;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-        }
-        .kairo-svn-lock-indicator {
-          margin-left: 4px;
-          font-size: 10px;
-        }
-        .kairo-svn-branch {
-          font-size: 12px;
-          color: var(--theia-descriptionForeground);
-          margin-left: auto;
-          padding: 2px 8px;
-          background: var(--theia-badge-background);
-          color: var(--theia-badge-foreground);
-          border-radius: 10px;
-        }
-        .kairo-svn-action-btn {
-          font-size: 11px;
-          padding: 2px 8px;
-        }
-        .kairo-svn-commit-section {
-          padding: 8px;
-          border-top: 1px solid var(--theia-sideBarSectionHeader-border);
-          margin-top: 8px;
-        }
-        .kairo-svn-commit-hint {
-          font-size: 11px;
-          color: var(--theia-descriptionForeground);
-        }
-        .kairo-svn-commit-message {
-          width: 100%;
-          min-height: 80px;
-          margin: 8px 0;
-          padding: 8px;
-          background: var(--theia-input-background);
-          color: var(--theia-input-foreground);
-          border: 1px solid var(--theia-input-border);
-          border-radius: 3px;
-          font-family: var(--theia-ui-font-family);
-          font-size: 13px;
-          resize: vertical;
-          box-sizing: border-box;
-        }
-        .kairo-svn-commit-message:focus {
-          outline: none;
-          border-color: var(--theia-focusBorder);
-        }
-        .kairo-svn-commit-actions {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-        }
-        .kairo-svn-selected-count {
-          font-size: 12px;
-          color: var(--theia-descriptionForeground);
-        }
-        .kairo-svn-commit-buttons {
-          display: flex;
-          gap: 8px;
-        }
-        .kairo-widget-section {
-          margin: 4px 0;
-        }
-        .kairo-section-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          padding: 4px 8px;
-          background: var(--theia-sideBarSectionHeader-background);
-          font-size: 11px;
-          font-weight: 600;
-          text-transform: uppercase;
-          color: var(--theia-sideBarSectionHeader-foreground);
-        }
-        .kairo-widget-toolbar {
-          display: flex;
-          gap: 4px;
-          padding: 4px 8px;
-          flex-wrap: wrap;
-        }
-        .kairo-widget-toolbar button {
-          font-size: 12px;
-          padding: 4px 8px;
-        }
-      `}</style>
     </div>
   );
 };
@@ -495,18 +365,28 @@ export class SvnChangesWidget extends ReactWidget {
   static readonly ID = 'kairo-svn-changes-view';
 
   @inject(SvnStore) protected readonly store!: SvnStore;
+  @inject(KairoI18nService) protected readonly i18n!: KairoI18nService;
 
   constructor() {
     super();
     this.id = SvnChangesWidget.ID;
-    this.title.label = 'SVN Changes';
-    this.title.caption = 'SVN Local Changes View';
     this.title.iconClass = 'codicon codicon-source-control';
     this.title.closable = true;
     this.addClass('kairo-widget');
   }
 
+  @postConstruct()
+  protected init(): void {
+    this.updateTitle();
+    this.toDispose.push(this.i18n.onDidChangeLanguage(() => this.updateTitle()));
+  }
+
+  protected updateTitle(): void {
+    this.title.label = this.i18n.t('widget.svn.changes.title' as any);
+    this.title.caption = this.i18n.t('widget.svn.changes.caption' as any);
+  }
+
   protected render(): React.ReactNode {
-    return React.createElement(SvnChangesComponent, { store: this.store });
+    return React.createElement(SvnChangesComponent, { store: this.store, i18n: this.i18n });
   }
 }

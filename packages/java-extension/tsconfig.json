@@ -12,6 +12,7 @@
   "include": ["src/**/*.ts", "src/**/*.tsx"],
   "exclude": ["node_modules", "lib", "**/*.test.ts"],
   "references": [
+    { "path": "../i18n" },
     { "path": "../project-extension" },
     { "path": "../protocol" },
     { "path": "../runtime-extension" }

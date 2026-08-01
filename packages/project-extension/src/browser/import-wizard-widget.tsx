@@ -62,11 +62,9 @@ export class ImportWizardWidget extends ReactWidget {
     constructor() {
         super();
         this.id = ImportWizardWidget.ID;
-        // Keep English defaults so unit tests that instantiate the widget
-        // without Inversify still see meaningful labels.
-        this.title.label = 'Kairo IDE - Import Project';
+        this.title.label = '';
         this.title.closable = true;
-        this.title.caption = 'Kairo Project Import Wizard';
+        this.title.caption = '';
         this.addClass('kairo-widget');
     }
 
@@ -481,10 +479,10 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
                                             onChange={e => setDefaultEncoding(e.target.value)}
                                             aria-label={t('widget.importWizard.encodingAria')}
                                         >
-                                            <option value="utf-8">UTF-8</option>
-                                            <option value="gbk">GBK</option>
-                                            <option value="gb18030">GB18030</option>
-                                            <option value="iso-8859-1">ISO-8859-1</option>
+                                            <option value="utf-8">{t('widget.importWizard.encoding.utf8')}</option>
+                                            <option value="gbk">{t('widget.importWizard.encoding.gbk')}</option>
+                                            <option value="gb18030">{t('widget.importWizard.encoding.gb18030')}</option>
+                                            <option value="iso-8859-1">{t('widget.importWizard.encoding.iso8859')}</option>
                                         </select>
                                     </label>
                                 </div>

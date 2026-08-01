@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
-import { injectable, inject } from '@theia/core/shared/inversify';
+import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
+import { KairoI18nService } from '@kairo/i18n';
 import { KairoMavenService, MavenDetectResult, MavenDependencyConflict, MavenDependencyTreeNode, MavenLifecycleTask, MavenBuildProgress, MavenViewTab } from './maven-service';
 
 /**
@@ -15,27 +16,47 @@ export class MavenViewWidget extends ReactWidget {
     @inject(KairoMavenService)
     protected readonly mavenService!: KairoMavenService;
 
+    @inject(KairoI18nService)
+    protected readonly i18n!: KairoI18nService;
+
     constructor() {
         super();
         this.id = MavenViewWidget.ID;
-        this.title.label = 'Maven';
         this.title.closable = true;
-        this.title.caption = 'Maven Project View';
-        this.addClass('kairo-widget');
+        this.title.iconClass = 'codicon codicon-package';
+        this.addClass('kairo-widget kairo-maven-view');
+    }
+
+    @postConstruct()
+    protected init(): void {
+        this.updateTitle();
+        this.toDispose.push(this.i18n.onDidChangeLanguage(() => this.updateTitle()));
+    }
+
+    protected t(key: string, params?: Record<string, string | number>): string {
+        return this.i18n.t(key as any, params);
+    }
+
+    protected updateTitle(): void {
+        this.title.label = this.t('widget.java.maven.title');
+        this.title.caption = this.t('widget.java.maven.caption');
     }
 
     protected render(): React.ReactNode {
         return React.createElement(MavenView, {
             mavenService: this.mavenService,
+            i18n: this.i18n,
         });
     }
 }
 
 interface MavenViewProps {
     mavenService: KairoMavenService;
+    i18n: KairoI18nService;
 }
 
-const MavenView: React.FC<MavenViewProps> = ({ mavenService }) => {
+const MavenView: React.FC<MavenViewProps> = ({ mavenService, i18n }) => {
+    const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
     const [result, setResult] = React.useState<MavenDetectResult | null>(mavenService.getDetectResult());
     const [progress, setProgress] = React.useState<MavenBuildProgress | null>(null);
     const [activeTab, setActiveTab] = React.useState<MavenViewTab>(mavenService.getActiveTab());
@@ -76,23 +97,23 @@ const MavenView: React.FC<MavenViewProps> = ({ mavenService }) => {
     };
 
     return (
-        <div className="kairo-maven-view" data-testid="maven-view">
+        <div className="kairo-widget kairo-maven-view" data-testid="maven-view">
             {/* Project Path Input */}
-            <div className="kairo-maven-toolbar" data-testid="maven-toolbar">
+            <div className="kairo-widget-toolbar kairo-maven-toolbar" data-testid="maven-toolbar">
                 <input
                     type="text"
-                    className="kairo-maven-path-input"
+                    className="theia-input kairo-maven-path-input"
                     data-testid="maven-path-input"
-                    placeholder="Project root path..."
+                    placeholder={t('widget.java.maven.pathPlaceholder')}
                     value={rootPath}
                     onChange={e => setRootPath(e.target.value)}
                 />
                 <button
-                    className="kairo-maven-detect-btn"
+                    className="theia-button kairo-maven-detect-btn"
                     data-testid="maven-detect-btn"
                     onClick={handleDetect}
                 >
-                    Detect
+                    {t('widget.java.maven.detect')}
                 </button>
             </div>
 
@@ -105,34 +126,35 @@ const MavenView: React.FC<MavenViewProps> = ({ mavenService }) => {
                         data-testid={`maven-tab-${tab}`}
                         onClick={() => handleTabChange(tab)}
                     >
-                        {tab.charAt(0).toUpperCase() + tab.slice(1)}
+                        {t(`widget.java.maven.tab.${tab}`)}
                     </button>
                 ))}
             </div>
 
             {/* Tab Content */}
-            <div className="kairo-maven-content" data-testid="maven-content">
+            <div className="kairo-widget-body kairo-maven-content" data-testid="maven-content">
                 {!result && (
-                    <p className="kairo-maven-empty" data-testid="maven-empty">
-                        Enter a project path and click Detect to scan for pom.xml.
+                    <p className="kairo-empty kairo-maven-empty" data-testid="maven-empty">
+                        {t('widget.java.maven.empty.detectPrompt')}
                     </p>
                 )}
                 {result && !result.found && (
-                    <p className="kairo-maven-not-found" data-testid="maven-not-found">
-                        No pom.xml found at the specified path.
-                    </p>
+                    <div className="kairo-error-banner kairo-maven-not-found" role="alert" data-testid="maven-not-found">
+                        <span className="codicon codicon-error" aria-hidden="true" />
+                        <span>{t('widget.java.maven.empty.notFound')}</span>
+                    </div>
                 )}
                 {result && result.found && activeTab === 'overview' && (
-                    <OverviewTab result={result} />
+                    <OverviewTab result={result} i18n={i18n} />
                 )}
                 {result && result.found && activeTab === 'dependencies' && (
-                    <DependenciesTab result={result} onRefresh={handleRefreshDeps} />
+                    <DependenciesTab result={result} onRefresh={handleRefreshDeps} i18n={i18n} />
                 )}
                 {result && result.found && activeTab === 'lifecycle' && (
-                    <LifecycleTab result={result} progress={progress} buildOutput={buildOutput} onRunTask={handleRunTask} />
+                    <LifecycleTab result={result} progress={progress} buildOutput={buildOutput} onRunTask={handleRunTask} i18n={i18n} />
                 )}
                 {result && result.found && activeTab === 'modules' && (
-                    <ModulesTab result={result} />
+                    <ModulesTab result={result} i18n={i18n} />
                 )}
             </div>
         </div>
@@ -141,79 +163,97 @@ const MavenView: React.FC<MavenViewProps> = ({ mavenService }) => {
 
 // ── Overview Tab ────────────────────────────────────────────────
 
-const OverviewTab: React.FC<{ result: MavenDetectResult }> = ({ result }) => {
+interface OverviewTabProps {
+    result: MavenDetectResult;
+    i18n: KairoI18nService;
+}
+
+const OverviewTab: React.FC<OverviewTabProps> = ({ result, i18n }) => {
+    const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
     const p = result.project;
     if (!p) return null;
 
     return (
         <div className="kairo-maven-overview" data-testid="maven-overview">
-            <h3 className="kairo-maven-section-title">Project Info</h3>
-            <table className="kairo-maven-info-table" data-testid="maven-info-table">
-                <tbody>
-                    <InfoRow label="Group ID" value={p.groupId} />
-                    <InfoRow label="Artifact ID" value={p.artifactId} />
-                    <InfoRow label="Version" value={p.version} />
-                    <InfoRow label="Packaging" value={p.packaging} />
-                    <InfoRow label="Name" value={p.name || '-'} />
-                    <InfoRow label="Description" value={p.description || '-'} />
-                    <InfoRow label="Build Dir" value={p.buildDir} />
-                    <InfoRow label="Output Dir" value={p.outputDir} />
-                </tbody>
-            </table>
+            <h3 className="kairo-section-title kairo-maven-section-title">{t('widget.java.maven.overview.projectInfo')}</h3>
+            <div className="kairo-maven-project-info" data-testid="maven-info-table">
+                <InfoRow label={t('widget.java.maven.overview.groupId')} value={p.groupId} i18n={i18n} />
+                <InfoRow label={t('widget.java.maven.overview.artifactId')} value={p.artifactId} i18n={i18n} />
+                <InfoRow label={t('widget.java.maven.overview.version')} value={p.version} i18n={i18n} />
+                <InfoRow label={t('widget.java.maven.overview.packaging')} value={p.packaging} i18n={i18n} />
+                <InfoRow label={t('widget.java.maven.overview.name')} value={p.name} i18n={i18n} />
+                <InfoRow label={t('widget.java.maven.overview.description')} value={p.description} i18n={i18n} />
+                <InfoRow label={t('widget.java.maven.overview.buildDir')} value={p.buildDir} i18n={i18n} />
+                <InfoRow label={t('widget.java.maven.overview.outputDir')} value={p.outputDir} i18n={i18n} />
+            </div>
 
-            <h3 className="kairo-maven-section-title">Quick Summary</h3>
+            <h3 className="kairo-section-title kairo-maven-section-title">{t('widget.java.maven.overview.summary')}</h3>
             <div className="kairo-maven-summary" data-testid="maven-summary">
                 <span className="kairo-maven-summary-item">
-                    {result.dependencies.length} dependencies
+                    {t('widget.java.maven.overview.dependencyCount', { count: result.dependencies.length })}
                 </span>
                 <span className="kairo-maven-summary-item">
-                    {result.conflicts?.length ?? 0} conflicts
+                    {t('widget.java.maven.overview.conflictCount', { count: result.conflicts?.length ?? 0 })}
                 </span>
                 <span className="kairo-maven-summary-item">
-                    {result.tasks.length} lifecycle tasks
+                    {t('widget.java.maven.overview.taskCount', { count: result.tasks.length })}
                 </span>
             </div>
         </div>
     );
 };
 
-const InfoRow: React.FC<{ label: string; value: string }> = ({ label, value }) => (
-    <tr>
-        <td className="kairo-maven-info-label">{label}</td>
-        <td className="kairo-maven-info-value">{value}</td>
-    </tr>
-);
+interface InfoRowProps {
+    label: string;
+    value: string | undefined;
+    i18n: KairoI18nService;
+}
+
+const InfoRow: React.FC<InfoRowProps> = ({ label, value, i18n }) => {
+    const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
+    const displayValue = value || t('widget.java.maven.emptyValue');
+    return (
+        <div className="kairo-maven-info-row">
+            <span className="kairo-maven-info-label">{label}</span>
+            <span className="kairo-maven-info-value">{displayValue}</span>
+        </div>
+    );
+};
 
 // ── Dependencies Tab ─────────────────────────────────────────────
 
-const DependenciesTab: React.FC<{
+interface DependenciesTabProps {
     result: MavenDetectResult;
     onRefresh: () => void;
-}> = ({ result, onRefresh }) => {
+    i18n: KairoI18nService;
+}
+
+const DependenciesTab: React.FC<DependenciesTabProps> = ({ result, onRefresh, i18n }) => {
+    const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
     const conflicts = result.conflicts || [];
     const tree = result.tree || [];
 
     return (
         <div className="kairo-maven-dependencies" data-testid="maven-dependencies">
             <div className="kairo-maven-deps-header">
-                <h3 className="kairo-maven-section-title">Dependency Tree</h3>
+                <h3 className="kairo-section-title kairo-maven-section-title">{t('widget.java.maven.dependencies.title')}</h3>
                 <button
-                    className="kairo-maven-refresh-btn"
+                    className="theia-button kairo-maven-refresh-btn"
                     data-testid="maven-refresh-deps"
                     onClick={onRefresh}
                 >
-                    Refresh
+                    {t('widget.java.maven.dependencies.refresh')}
                 </button>
             </div>
 
             {/* Conflict Detection */}
             {conflicts.length > 0 && (
                 <div className="kairo-maven-conflicts" data-testid="maven-conflicts">
-                    <h4 className="kairo-maven-subsection-title">
-                        Conflicts ({conflicts.length})
+                    <h4 className="kairo-section-title kairo-maven-subsection-title">
+                        {t('widget.java.maven.dependencies.conflictsTitle', { count: conflicts.length })}
                     </h4>
                     {conflicts.map((c, i) => (
-                        <ConflictItem key={i} conflict={c} />
+                        <ConflictItem key={i} conflict={c} i18n={i18n} />
                     ))}
                 </div>
             )}
@@ -221,62 +261,73 @@ const DependenciesTab: React.FC<{
             {/* Dependency Tree */}
             <div className="kairo-maven-tree" data-testid="maven-dep-tree">
                 {tree.length === 0 && (
-                    <p className="kairo-maven-empty">No dependencies found.</p>
+                    <p className="kairo-empty kairo-maven-empty">{t('widget.java.maven.dependencies.noDependencies')}</p>
                 )}
                 {tree.map((node, i) => (
-                    <TreeNodeComponent key={i} node={node} depth={0} />
+                    <TreeNodeComponent key={i} node={node} depth={0} i18n={i18n} />
                 ))}
             </div>
         </div>
     );
 };
 
-const ConflictItem: React.FC<{ conflict: MavenDependencyConflict }> = ({ conflict }) => (
-    <div className="kairo-maven-conflict-item" data-testid="maven-conflict-item">
-        <span className="kairo-maven-conflict-artifact">
-            {conflict.groupId}:{conflict.artifactId}
-        </span>
-        <span className="kairo-maven-conflict-versions">
-            Versions: {conflict.versions.join(', ')}
-        </span>
-        <span className="kairo-maven-conflict-resolved">
-            Resolved: {conflict.resolvedVersion}
-        </span>
-    </div>
-);
+interface ConflictItemProps {
+    conflict: MavenDependencyConflict;
+    i18n: KairoI18nService;
+}
 
-const TreeNodeComponent: React.FC<{ node: MavenDependencyTreeNode; depth: number }> = ({ node, depth }) => {
+const ConflictItem: React.FC<ConflictItemProps> = ({ conflict, i18n }) => {
+    const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
+    return (
+        <div className="kairo-maven-conflict-item" data-testid="maven-conflict-item">
+            <span className="kairo-maven-conflict-coord">
+                {conflict.groupId}:{conflict.artifactId}
+            </span>
+            <span className="kairo-maven-conflict-versions">
+                {t('widget.java.maven.dependencies.versions', { versions: conflict.versions.join(', ') })}
+            </span>
+            <span className="kairo-maven-conflict-resolved">
+                {t('widget.java.maven.dependencies.resolved', { version: conflict.resolvedVersion })}
+            </span>
+        </div>
+    );
+};
+
+interface TreeNodeComponentProps {
+    node: MavenDependencyTreeNode;
+    depth: number;
+    i18n: KairoI18nService;
+}
+
+const TreeNodeComponent: React.FC<TreeNodeComponentProps> = ({ node, depth, i18n }) => {
+    const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
     const [expanded, setExpanded] = React.useState(true);
     const hasChildren = node.children && node.children.length > 0;
-    const paddingLeft = depth * 16 + 8;
-
-    const scopeColor = node.scope === 'test' ? 'var(--theia-testing-iconFailed)'
-        : node.scope === 'provided' ? 'var(--theia-editorWarning-foreground)'
-        : 'var(--theia-foreground)';
+    const scopeClass = `kairo-maven-scope-${node.scope}`;
 
     return (
         <div>
             <div
-                className="kairo-maven-tree-node"
-                style={{ paddingLeft: `${paddingLeft}px`, cursor: 'pointer', display: 'flex', alignItems: 'center', height: '22px' }}
+                className="kairo-maven-dep-item"
+                style={{ ['--kairo-maven-dep-depth' as any]: depth }}
                 data-testid={`dep-node-${node.artifactId}`}
             >
                 <span
-                    style={{ width: '16px', flexShrink: 0, textAlign: 'center', cursor: 'pointer' }}
-                    onClick={() => setExpanded(!expanded)}
+                    className="kairo-maven-dep-toggle codicon"
+                    onClick={e => { e.stopPropagation(); setExpanded(!expanded); }}
                 >
-                    {hasChildren ? (expanded ? '▾' : '▸') : ' '}
+                    {hasChildren ? (expanded ? <span className="codicon codicon-chevron-down" aria-hidden="true" /> : <span className="codicon codicon-chevron-right" aria-hidden="true" />) : null}
                 </span>
-                <span style={{ color: scopeColor, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <span className={`kairo-maven-dep-coord ${scopeClass}`}>
                     {node.groupId}:{node.artifactId}:{node.version}
-                    {node.optional && <span style={{ fontStyle: 'italic', marginLeft: '4px' }}>(optional)</span>}
+                    {node.optional && <span className="kairo-maven-dep-optional">({t('widget.java.maven.dependencies.optional')})</span>}
                 </span>
-                <span style={{ marginLeft: '8px', fontSize: '11px', opacity: 0.7 }}>
-                    [{node.scope}]
+                <span className="kairo-maven-dep-scope">
+                    {node.scope}
                 </span>
             </div>
             {expanded && hasChildren && node.children!.map((child, i) => (
-                <TreeNodeComponent key={i} node={child} depth={depth + 1} />
+                <TreeNodeComponent key={i} node={child} depth={depth + 1} i18n={i18n} />
             ))}
         </div>
     );
@@ -284,12 +335,16 @@ const TreeNodeComponent: React.FC<{ node: MavenDependencyTreeNode; depth: number
 
 // ── Lifecycle Tab ────────────────────────────────────────────────
 
-const LifecycleTab: React.FC<{
+interface LifecycleTabProps {
     result: MavenDetectResult;
     progress: MavenBuildProgress | null;
     buildOutput: string;
     onRunTask: (task: string) => void;
-}> = ({ result, progress, buildOutput, onRunTask }) => {
+    i18n: KairoI18nService;
+}
+
+const LifecycleTab: React.FC<LifecycleTabProps> = ({ result, progress, buildOutput, onRunTask, i18n }) => {
+    const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
     const [runningTask, setRunningTask] = React.useState<string | null>(null);
 
     const handleRun = async (task: MavenLifecycleTask) => {
@@ -298,24 +353,33 @@ const LifecycleTab: React.FC<{
         setRunningTask(null);
     };
 
+    const progressIcon = (status: MavenBuildProgress['status']): string => {
+        switch (status) {
+            case 'running': return 'codicon codicon-sync codicon-modifier-spin';
+            case 'success': return 'codicon codicon-check';
+            case 'failed': return 'codicon codicon-error';
+            default: return 'codicon codicon-circle-outline';
+        }
+    };
+
     return (
         <div className="kairo-maven-lifecycle" data-testid="maven-lifecycle">
-            <h3 className="kairo-maven-section-title">Lifecycle Phases</h3>
+            <h3 className="kairo-section-title kairo-maven-section-title">{t('widget.java.maven.lifecycle.title')}</h3>
 
             {/* Build Progress */}
             {progress && (
                 <div className="kairo-maven-progress" data-testid="maven-build-progress">
                     <div className="kairo-maven-progress-header">
                         <span className={`kairo-maven-progress-status ${progress.status}`}>
-                            {progress.status === 'running' ? '⏳' : progress.status === 'success' ? '✅' : '❌'}
-                            {' '}{progress.status.toUpperCase()}
+                            <span className={progressIcon(progress.status)} aria-hidden="true" />
+                            {' '}{t(`widget.java.maven.lifecycle.status.${progress.status}`)}
                         </span>
                         <span className="kairo-maven-progress-phase">{progress.phase}</span>
                     </div>
                     <div className="kairo-maven-progress-bar-container">
                         <div
                             className={`kairo-maven-progress-bar ${progress.status}`}
-                            style={{ width: `${progress.percentComplete}%` }}
+                            style={{ ['--kairo-maven-progress-width' as any]: `${progress.percentComplete}%` }}
                             data-testid="maven-progress-bar"
                         />
                     </div>
@@ -326,7 +390,7 @@ const LifecycleTab: React.FC<{
             {/* Build Output */}
             {buildOutput && (
                 <div className="kairo-maven-output" data-testid="maven-build-output">
-                    <h4 className="kairo-maven-subsection-title">Build Output</h4>
+                    <h4 className="kairo-section-title kairo-maven-subsection-title">{t('widget.java.maven.lifecycle.outputTitle')}</h4>
                     <pre className="kairo-maven-output-text">{buildOutput}</pre>
                 </div>
             )}
@@ -344,12 +408,14 @@ const LifecycleTab: React.FC<{
                             <span className="kairo-maven-phase-desc">{task.description}</span>
                         </div>
                         <button
-                            className="kairo-maven-phase-run-btn"
+                            className="theia-button kairo-maven-phase-run-btn"
                             data-testid={`maven-run-${task.id}`}
                             disabled={runningTask === task.id}
                             onClick={() => handleRun(task)}
                         >
-                            {runningTask === task.id ? 'Running...' : 'Run'}
+                            {runningTask === task.id
+                                ? t('widget.java.maven.lifecycle.running')
+                                : t('widget.java.maven.lifecycle.run')}
                         </button>
                     </div>
                 ))}
@@ -360,10 +426,16 @@ const LifecycleTab: React.FC<{
 
 // ── Modules Tab ──────────────────────────────────────────────────
 
-const ModulesTab: React.FC<{ result: MavenDetectResult }> = ({ result }) => {
+interface ModulesTabProps {
+    result: MavenDetectResult;
+    i18n: KairoI18nService;
+}
+
+const ModulesTab: React.FC<ModulesTabProps> = ({ result, i18n }) => {
+    const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
     return (
         <div className="kairo-maven-modules" data-testid="maven-modules">
-            <h3 className="kairo-maven-section-title">Multi-Module Project Tree</h3>
+            <h3 className="kairo-section-title kairo-maven-section-title">{t('widget.java.maven.modules.title')}</h3>
             {result.warnings && result.warnings.length > 0 && (
                 <div className="kairo-maven-warnings" data-testid="maven-warnings">
                     {result.warnings.map((w, i) => (
@@ -379,6 +451,7 @@ const ModulesTab: React.FC<{ result: MavenDetectResult }> = ({ result }) => {
                         name={result.project.name || result.project.artifactId}
                         isRoot={true}
                         depth={0}
+                        i18n={i18n}
                     />
                 )}
             </div>
@@ -386,30 +459,29 @@ const ModulesTab: React.FC<{ result: MavenDetectResult }> = ({ result }) => {
     );
 };
 
-const ModuleNodeComponent: React.FC<{
+interface ModuleNodeComponentProps {
     artifactId: string;
     packaging: string;
     name: string;
     isRoot: boolean;
     depth: number;
-}> = ({ artifactId, packaging, name, isRoot, depth }) => {
-    const paddingLeft = depth * 16 + 8;
-    const icon = packaging === 'pom' ? '📦' : packaging === 'war' ? '🌐' : '📄';
+    i18n: KairoI18nService;
+}
+
+const ModuleNodeComponent: React.FC<ModuleNodeComponentProps> = ({ artifactId, packaging, name, isRoot, depth, i18n }) => {
+    const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
+    const iconClass = packaging === 'pom' ? 'codicon-package' : packaging === 'war' ? 'codicon-globe' : 'codicon-file';
 
     return (
         <div
             className="kairo-maven-module-node"
-            style={{ paddingLeft: `${paddingLeft}px`, height: '24px', display: 'flex', alignItems: 'center' }}
+            style={{ ['--kairo-maven-module-depth' as any]: depth }}
             data-testid={`module-node-${artifactId}`}
         >
-            <span>{icon}</span>
-            <span style={{ marginLeft: '6px', fontWeight: isRoot ? 'bold' : 'normal' }}>
-                {name}
-            </span>
-            <span style={{ marginLeft: '8px', fontSize: '11px', opacity: 0.7 }}>
-                [{packaging}]
-            </span>
-            {isRoot && <span style={{ marginLeft: '6px', fontSize: '11px', color: 'var(--theia-badge-background)' }}>(root)</span>}
+            <span className={`codicon ${iconClass}`} aria-hidden="true" />
+            <span className="kairo-maven-module-name">{name}</span>
+            <span className="kairo-maven-module-packaging">[{packaging}]</span>
+            {isRoot && <span className="kairo-maven-module-root">({t('widget.java.maven.modules.root')})</span>}
         </div>
     );
 };

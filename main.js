@@ -79,6 +79,13 @@ function initFileLogger() {
     }
     candidates.push(path.join(process.env.APPDATA || path.join(require('os').homedir(), 'AppData', 'Roaming'), '@kairo', 'desktop', 'logs', 'desktop-main.log'));
     candidates.push(path.join(path.dirname(process.execPath), 'logs', 'desktop-main.log'));
+    // KAIRO_LOG_DIR / KAIRO_TMP: 优先写到工作区旁, 避免污染 C:\Users\Qi\AppData\Local\Temp
+    if (process.env.KAIRO_LOG_DIR) {
+        candidates.push(path.join(process.env.KAIRO_LOG_DIR, 'kairo-desktop-main.log'));
+    }
+    if (process.env.KAIRO_TMP) {
+        candidates.push(path.join(process.env.KAIRO_TMP, 'kairo-desktop-main.log'));
+    }
     candidates.push(path.join(require('os').tmpdir(), 'kairo-desktop-main.log'));
     for (const candidate of candidates) {
         try {

@@ -11,6 +11,7 @@
  *   import { test, expect } from './fixtures';
  *   test('my scenario', async ({ theiaPage, workspace }) => { ... });
  */
+require('../setup-tmp.cjs'); // KAIRO_TMP override
 import { test as base, expect, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';

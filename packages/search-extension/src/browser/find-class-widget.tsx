@@ -1,9 +1,10 @@
 import * as React from 'react';
-import { inject, injectable } from '@theia/core/shared/inversify';
+import { inject, injectable, postConstruct } from '@theia/core/shared/inversify';
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import type { Message } from '@theia/core/shared/@lumino/messaging';
 import URI from '@theia/core/lib/common/uri';
 import { EditorManager } from '@theia/editor/lib/browser/editor-manager';
+import { KairoI18nService } from '@kairo/i18n';
 import { FindClassModel, type FindClassItem, type FindClassState } from './find-class-model';
 import { VirtualList } from '@kairo/ui-kit';
 
@@ -11,11 +12,11 @@ const ROW_HEIGHT = 28;
 
 function classKindIcon(kind: number): string {
   switch (kind) {
-    case 5: return '\uD83C\uDFD7';  // Class
-    case 10: return '\uD83D\uDDDD'; // Enum
-    case 11: return '\u25CB';       // Interface
-    case 23: return '\uD83D\uDEE0'; // Struct
-    default: return '\uD83C\uDFD7';
+    case 5: return 'codicon-symbol-class';
+    case 10: return 'codicon-symbol-enum';
+    case 11: return 'codicon-symbol-interface';
+    case 23: return 'codicon-symbol-struct';
+    default: return 'codicon-symbol-class';
   }
 }
 
@@ -24,9 +25,11 @@ export interface FindClassProps {
   state: FindClassState;
   onOpen: (item: FindClassItem) => Promise<unknown>;
   onClose: () => void;
+  i18n: KairoI18nService;
 }
 
-export const FindClassComponent: React.FC<FindClassProps> = ({ model, state, onOpen, onClose }) => {
+export const FindClassComponent: React.FC<FindClassProps> = ({ model, state, onOpen, onClose, i18n }) => {
+  const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
   const [query, setQuery] = React.useState(state.query);
   const [selectedIndex, setSelectedIndex] = React.useState(0);
   const [openError, setOpenError] = React.useState<Error | undefined>();
@@ -93,17 +96,17 @@ export const FindClassComponent: React.FC<FindClassProps> = ({ model, state, onO
 
   const renderStatus = (): React.ReactNode => {
     if (openError) {
-      return <div className="kairo-find-status is-error" role="alert">{openError.message}</div>;
+      return <div className="kairo-find-status kairo-error-banner" role="alert">{openError.message}</div>;
     }
     switch (state.status) {
       case 'loading':
-        return <div className="kairo-find-status" role="status">搜索类中…</div>;
+        return <div className="kairo-find-status kairo-empty-state" role="status">{t('widget.search.findClass.status.loading')}</div>;
       case 'idle':
-        return <div className="kairo-find-status">输入类名进行搜索</div>;
+        return <div className="kairo-find-status kairo-empty-state">{t('widget.search.findClass.status.idle')}</div>;
       case 'empty':
-        return <div className="kairo-find-status">未找到匹配的类</div>;
+        return <div className="kairo-find-status kairo-empty-state">{t('widget.search.findClass.status.empty')}</div>;
       case 'error':
-        return <div className="kairo-find-status is-error" role="alert">{state.error?.message ?? '搜索失败'}</div>;
+        return <div className="kairo-find-status kairo-error-banner" role="alert">{state.error?.message ?? t('widget.search.findClass.status.unknownError')}</div>;
       case 'results':
         return undefined;
     }
@@ -118,7 +121,7 @@ export const FindClassComponent: React.FC<FindClassProps> = ({ model, state, onO
         onClick={event => event.stopPropagation()}
         role="dialog"
         aria-modal="true"
-        aria-label="查找类"
+        aria-label={t('widget.search.findClass.title')}
         data-testid="find-class"
       >
         <div className="kairo-find-header">
@@ -127,8 +130,8 @@ export const FindClassComponent: React.FC<FindClassProps> = ({ model, state, onO
             className="theia-input kairo-find-input"
             value={query}
             onChange={event => setQuery(event.target.value)}
-            placeholder="输入类名搜索 (e.g. UserController)"
-            aria-label="类名搜索"
+            placeholder={t('widget.search.findClass.placeholder')}
+            aria-label={t('widget.search.findClass.ariaLabel.query')}
             data-testid="find-class-query"
           />
         </div>
@@ -140,7 +143,7 @@ export const FindClassComponent: React.FC<FindClassProps> = ({ model, state, onO
             selectedIndex={selectedIndex}
             onSelectIndex={index => { setSelectedIndex(index); model.select(index); }}
             className="kairo-find-results"
-            ariaLabel="类搜索结果"
+            ariaLabel={t('widget.search.findClass.ariaLabel.results')}
             testId="find-class-results"
             renderItem={(item, _index, isSelected) => (
               <button
@@ -148,12 +151,11 @@ export const FindClassComponent: React.FC<FindClassProps> = ({ model, state, onO
                 role="option"
                 aria-selected={isSelected}
                 className={`kairo-find-item${isSelected ? ' is-selected' : ''}`}
-                style={{ height: '100%', width: '100%', display: 'flex', alignItems: 'center', gap: '8px', padding: '0 12px' }}
                 onMouseEnter={() => { setSelectedIndex(_index); model.select(_index); }}
                 onClick={() => void openItem(item)}
                 data-testid="find-class-result"
               >
-                <span className="kairo-find-kind">{classKindIcon(item.kind)}</span>
+                <span className="kairo-find-kind"><span className={`codicon ${classKindIcon(item.kind)}`} aria-hidden="true" /></span>
                 <span className="kairo-find-label">{item.label}</span>
                 <span className="kairo-find-detail">{item.detail}</span>
               </button>
@@ -177,6 +179,7 @@ export class FindClassWidget extends ReactWidget {
 
   @inject(FindClassModel) protected readonly model!: FindClassModel;
   @inject(EditorManager) protected readonly editors!: EditorManager;
+  @inject(KairoI18nService) protected readonly i18n!: KairoI18nService;
 
   protected state: FindClassState = { status: 'idle', query: '', items: [], selectedIndex: 0 };
   protected unsubscribe: (() => void) | undefined;
@@ -184,9 +187,22 @@ export class FindClassWidget extends ReactWidget {
   constructor() {
     super();
     this.id = FindClassWidget.ID;
-    this.title.label = '查找类';
     this.title.closable = true;
     this.addClass('kairo-find-class-widget');
+  }
+
+  @postConstruct()
+  protected init(): void {
+    const t = (key: string, params?: Record<string, string | number>) => this.i18n.t(key as any, params);
+    const updateTitle = (): void => {
+      this.title.label = t('widget.search.findClass.title');
+      this.title.caption = t('widget.search.findClass.caption');
+    };
+    updateTitle();
+    this.toDispose.push(this.i18n.onDidChangeLanguage(() => {
+      updateTitle();
+      this.update();
+    }));
   }
 
   protected onAfterAttach(message: Message): void {
@@ -220,6 +236,7 @@ export class FindClassWidget extends ReactWidget {
         state={this.state}
         onOpen={item => this.open(item)}
         onClose={() => this.close()}
+        i18n={this.i18n}
       />
     );
   }

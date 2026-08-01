@@ -7,6 +7,7 @@ import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import type { Message } from '@theia/core/shared/@lumino/messaging';
 import * as React from '@theia/core/shared/react';
 import { SqlConnectionService, SqlConnectionConfig, SqlConnectionStatus } from './sql-connection-service';
+import { KairoI18nService } from '@kairo/i18n';
 
 interface ConnectionWidgetState {
   connections: SqlConnectionConfig[];
@@ -30,17 +31,6 @@ interface SqlConnectionFormData {
   password: string;
 }
 
-const EMPTY_FORM: SqlConnectionFormData = {
-  name: '',
-  host: 'localhost',
-  port: 1521,
-  sid: 'orcl',
-  serviceName: '',
-  useServiceName: false,
-  username: '',
-  password: '',
-};
-
 @injectable()
 export class SqlConnectionWidget extends ReactWidget {
   static readonly ID = 'kairo-sql-connection-widget';
@@ -49,6 +39,9 @@ export class SqlConnectionWidget extends ReactWidget {
   @inject(SqlConnectionService)
   protected readonly connectionService!: SqlConnectionService;
 
+  @inject(KairoI18nService)
+  protected readonly i18n!: KairoI18nService;
+
   private state: ConnectionWidgetState = {
     connections: [],
     connectionStates: {},
@@ -56,7 +49,16 @@ export class SqlConnectionWidget extends ReactWidget {
     errors: {},
     editingId: null,
     showAddForm: false,
-    formData: { ...EMPTY_FORM },
+    formData: {
+      name: '',
+      host: 'localhost',
+      port: 1521,
+      sid: 'orcl',
+      serviceName: '',
+      useServiceName: false,
+      username: '',
+      password: '',
+    },
     testResults: {},
   };
 
@@ -64,8 +66,9 @@ export class SqlConnectionWidget extends ReactWidget {
   protected init(): void {
     this.id = SqlConnectionWidget.ID;
     this.title.label = SqlConnectionWidget.LABEL;
-    this.title.caption = 'Oracle 11g SQL Connections';
+    this.title.caption = this.t('widget.sql.connection.caption');
     this.title.closable = true;
+    this.i18n.onDidChangeLanguage(() => this.update());
     this.update();
   }
 
@@ -100,14 +103,14 @@ export class SqlConnectionWidget extends ReactWidget {
 
   protected render(): React.ReactNode {
     return (
-      <div className="sql-connection-widget">
-        <div className="sql-connection-header">
-          <h3>Oracle Connections</h3>
+      <div className="sql-connection-widget kairo-sql-connection-widget">
+        <div className="sql-connection-header kairo-widget-header">
+          <h3 className="kairo-widget-title">{this.t('widget.sql.connection.title')}</h3>
           <button
             className="theia-button"
             onClick={() => this.setState({ showAddForm: !this.state.showAddForm, editingId: null })}
           >
-            {this.state.showAddForm ? 'Cancel' : '+ Add Connection'}
+            {this.state.showAddForm ? this.t('common.cancel') : this.t('widget.sql.connection.addConnection')}
           </button>
         </div>
 
@@ -116,7 +119,7 @@ export class SqlConnectionWidget extends ReactWidget {
 
         <div className="sql-connection-list">
           {this.state.connections.length === 0 && (
-            <div className="sql-empty-message">No connections configured. Add one to get started.</div>
+            <div className="sql-empty-message kairo-empty-state">{this.t('widget.sql.connection.empty')}</div>
           )}
           {this.state.connections.map((conn) => this.renderConnectionItem(conn))}
         </div>
@@ -126,13 +129,13 @@ export class SqlConnectionWidget extends ReactWidget {
             className="theia-button"
             onClick={() => this.handleExport()}
           >
-            Export Configs
+            {this.t('widget.sql.connection.exportConfigs')}
           </button>
           <button
             className="theia-button"
             onClick={() => this.handleImport()}
           >
-            Import Configs
+            {this.t('widget.sql.connection.importConfigs')}
           </button>
         </div>
       </div>
@@ -145,32 +148,29 @@ export class SqlConnectionWidget extends ReactWidget {
     const error = this.state.errors[conn.id];
     const testResult = this.state.testResults[conn.id];
 
-    const statusColors: Record<SqlConnectionStatus, string> = {
-      disconnected: '#888',
-      connecting: '#f0ad4e',
-      connected: '#5cb85c',
-      error: '#d9534f',
-    };
-
     return (
       <div key={conn.id} className="sql-connection-item">
         <div className="sql-connection-item-header">
           <span
-            className="sql-connection-status-dot"
-            style={{ backgroundColor: statusColors[status] }}
-            title={status}
+            className={`sql-connection-status-dot kairo-status-${status}`}
+            title={this.t(`widget.sql.connection.status.${status}`)}
           />
           <span className="sql-connection-name">{conn.name}</span>
           <span className="sql-connection-detail">
-            {conn.username}@{conn.host}:{conn.port}/{conn.useServiceName ? conn.serviceName : conn.sid}
+            {this.t('widget.sql.connection.detail', {
+              username: conn.username,
+              host: conn.host,
+              port: conn.port,
+              database: (conn.useServiceName ? conn.serviceName : conn.sid) || '',
+            })}
           </span>
         </div>
         <div className="sql-connection-item-info">
           {status === 'connected' && version && (
-            <span className="sql-connection-version">Oracle {version}</span>
+            <span className="sql-connection-version">{this.t('widget.sql.connection.oracleVersion', { version: version || '' })}</span>
           )}
           {status === 'error' && error && (
-            <span className="sql-connection-error" title={error}>{error}</span>
+            <span className="sql-connection-error kairo-error-banner" title={error}>{error}</span>
           )}
         </div>
         <div className="sql-connection-item-actions">
@@ -179,7 +179,7 @@ export class SqlConnectionWidget extends ReactWidget {
             onClick={() => this.handleTestConnection(conn.id)}
             disabled={testResult?.running}
           >
-            {testResult?.running ? 'Testing...' : 'Test'}
+            {testResult?.running ? this.t('widget.sql.connection.testing') : this.t('widget.sql.connection.test')}
           </button>
           {status !== 'connected' ? (
             <button
@@ -187,27 +187,27 @@ export class SqlConnectionWidget extends ReactWidget {
               onClick={() => this.handleConnect(conn.id)}
               disabled={status === 'connecting'}
             >
-              {status === 'connecting' ? 'Connecting...' : 'Connect'}
+              {status === 'connecting' ? this.t('common.inProgress') : this.t('common.connect')}
             </button>
           ) : (
             <button
               className="theia-button"
               onClick={() => this.handleDisconnect(conn.id)}
             >
-              Disconnect
+              {this.t('common.disconnect')}
             </button>
           )}
           <button
             className="theia-button"
             onClick={() => this.handleEdit(conn)}
           >
-            Edit
+            {this.t('common.edit')}
           </button>
           <button
             className="theia-button theia-button-danger"
             onClick={() => this.handleDelete(conn.id)}
           >
-            Delete
+            {this.t('common.delete')}
           </button>
         </div>
         {testResult?.result && (
@@ -223,27 +223,27 @@ export class SqlConnectionWidget extends ReactWidget {
 
     return (
       <div className="sql-connection-form">
-        <h4>{isEditing ? 'Edit Connection' : 'New Connection'}</h4>
+        <h4>{isEditing ? this.t('widget.sql.connection.editTitle') : this.t('widget.sql.connection.newTitle')}</h4>
         <div className="sql-form-field">
-          <label>Connection Name</label>
+          <label>{this.t('widget.sql.connection.nameLabel')}</label>
           <input
             type="text"
             value={f.name}
             onChange={(e) => this.updateForm('name', e.target.value)}
-            placeholder="My Oracle DB"
+            placeholder={this.t('widget.sql.connection.namePlaceholder')}
           />
         </div>
         <div className="sql-form-field">
-          <label>Host</label>
+          <label>{this.t('widget.sql.connection.hostLabel')}</label>
           <input
             type="text"
             value={f.host}
             onChange={(e) => this.updateForm('host', e.target.value)}
-            placeholder="localhost"
+            placeholder={this.t('widget.sql.connection.hostPlaceholder')}
           />
         </div>
         <div className="sql-form-field">
-          <label>Port</label>
+          <label>{this.t('widget.sql.connection.portLabel')}</label>
           <input
             type="number"
             value={f.port}
@@ -257,46 +257,46 @@ export class SqlConnectionWidget extends ReactWidget {
               checked={f.useServiceName}
               onChange={(e) => this.updateForm('useServiceName', e.target.checked)}
             />
-            Use Service Name
+            {this.t('widget.sql.connection.useServiceName')}
           </label>
         </div>
         {f.useServiceName ? (
           <div className="sql-form-field">
-            <label>Service Name</label>
+            <label>{this.t('widget.sql.connection.serviceNameLabel')}</label>
             <input
               type="text"
               value={f.serviceName}
               onChange={(e) => this.updateForm('serviceName', e.target.value)}
-              placeholder="orcl.example.com"
+              placeholder={this.t('widget.sql.connection.serviceNamePlaceholder')}
             />
           </div>
         ) : (
           <div className="sql-form-field">
-            <label>SID</label>
+            <label>{this.t('widget.sql.connection.sidLabel')}</label>
             <input
               type="text"
               value={f.sid}
               onChange={(e) => this.updateForm('sid', e.target.value)}
-              placeholder="orcl"
+              placeholder={this.t('widget.sql.connection.sidPlaceholder')}
             />
           </div>
         )}
         <div className="sql-form-field">
-          <label>Username</label>
+          <label>{this.t('widget.sql.connection.usernameLabel')}</label>
           <input
             type="text"
             value={f.username}
             onChange={(e) => this.updateForm('username', e.target.value)}
-            placeholder="scott"
+            placeholder={this.t('widget.sql.connection.usernamePlaceholder')}
           />
         </div>
         <div className="sql-form-field">
-          <label>Password</label>
+          <label>{this.t('widget.sql.connection.passwordLabel')}</label>
           <input
             type="password"
             value={f.password}
             onChange={(e) => this.updateForm('password', e.target.value)}
-            placeholder="Enter password"
+            placeholder={this.t('widget.sql.connection.passwordPlaceholder')}
           />
         </div>
         <div className="sql-form-actions">
@@ -305,13 +305,13 @@ export class SqlConnectionWidget extends ReactWidget {
             onClick={() => this.handleSave()}
             disabled={!f.name || !f.host || !f.username}
           >
-            {isEditing ? 'Update' : 'Save'}
+            {isEditing ? this.t('widget.sql.connection.update') : this.t('widget.sql.connection.save')}
           </button>
           <button
             className="theia-button"
             onClick={() => this.cancelForm()}
           >
-            Cancel
+            {this.t('common.cancel')}
           </button>
         </div>
       </div>
@@ -325,7 +325,20 @@ export class SqlConnectionWidget extends ReactWidget {
   }
 
   private cancelForm(): void {
-    this.setState({ showAddForm: false, editingId: null, formData: { ...EMPTY_FORM } });
+    this.setState({
+      showAddForm: false,
+      editingId: null,
+      formData: {
+        name: '',
+        host: 'localhost',
+        port: 1521,
+        sid: 'orcl',
+        serviceName: '',
+        useServiceName: false,
+        username: '',
+        password: '',
+      },
+    });
   }
 
   private async handleSave(): Promise<void> {
@@ -366,7 +379,7 @@ export class SqlConnectionWidget extends ReactWidget {
   }
 
   private async handleDelete(id: string): Promise<void> {
-    if (window.confirm('Are you sure you want to delete this connection?')) {
+    if (window.confirm(this.t('widget.sql.connection.deleteConfirm'))) {
       await this.connectionService.deleteConnection(id);
     }
   }
@@ -385,8 +398,11 @@ export class SqlConnectionWidget extends ReactWidget {
         [id]: {
           running: false,
           result: result.success
-            ? `Connected! Oracle ${result.oracleVersion}${result.instanceName ? ` (${result.instanceName})` : ''}`
-            : `Failed: ${result.error}`,
+            ? this.t('widget.sql.connection.testSuccess', {
+                version: result.oracleVersion || '',
+                instance: result.instanceName || '',
+              })
+            : this.t('widget.sql.connection.testFailed', { error: result.error || '' }),
         },
       },
     });
@@ -423,13 +439,17 @@ export class SqlConnectionWidget extends ReactWidget {
         const configs = JSON.parse(text);
         if (Array.isArray(configs)) {
           const count = await this.connectionService.importConnections(configs);
-          alert(`Imported ${count} connections. Passwords need to be set manually.`);
+          alert(this.t('widget.sql.connection.imported', { count }));
         }
       } catch {
-        alert('Invalid connection export file.');
+        alert(this.t('widget.sql.connection.invalidImport'));
       }
     };
     input.click();
+  }
+
+  private t(key: string, params?: Record<string, string | number>): string {
+    return this.i18n.t(key as any, params);
   }
 
   private setState(partial: Partial<ConnectionWidgetState>): void {

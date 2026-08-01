@@ -98,8 +98,8 @@ test('LogViewerWidget: instantiation sets id', () => {
 
 test('LogViewerWidget: instantiation sets title', () => {
   const widget = new tomcat.LogViewerWidget();
-  assert.strictEqual(widget.title.label, 'Server Logs');
-  assert.strictEqual(widget.title.caption, 'Kairo Server Log Viewer');
+  assert.strictEqual(widget.title.label, '');
+  assert.strictEqual(widget.title.caption, '');
   assert.strictEqual(widget.title.closable, true);
 });
 

@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
-import { injectable, inject } from '@theia/core/shared/inversify';
+import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
 import { ServerStore } from './server-store';
 import { RuntimeConnectionService, WorkspaceContextService } from '@kairo/runtime-extension';
 import { BoundedLogBuffer, filterLogLines, HistoryDeltaTracker, mergeLogHistory, normalizeLogEntry, safeLogFilename, type KairoLogLine, type LogStream } from './log-buffer';
@@ -14,7 +14,27 @@ export class LogViewerWidget extends ReactWidget {
     @inject(RuntimeConnectionService) protected readonly runtime!: RuntimeConnectionService;
     @inject(WorkspaceContextService) protected readonly workspaceContext!: WorkspaceContextService;
     @inject(KairoI18nService) protected readonly i18n!: KairoI18nService;
-    constructor() { super(); this.id = LogViewerWidget.ID; this.title.label = 'Server Logs'; this.title.closable = true; this.title.caption = 'Kairo Server Log Viewer'; this.addClass('kairo-widget'); }
+
+    constructor() {
+        super();
+        this.id = LogViewerWidget.ID;
+        this.title.label = '';
+        this.title.closable = true;
+        this.title.caption = '';
+        this.addClass('kairo-widget');
+    }
+
+    @postConstruct()
+    protected init(): void {
+        this.updateTitle();
+        this.toDispose.push(this.i18n.onDidChangeLanguage(() => this.updateTitle()));
+    }
+
+    protected updateTitle(): void {
+        this.title.label = this.i18n.t('widget.logs.title');
+        this.title.caption = this.i18n.t('widget.logs.caption');
+    }
+
     protected render(): React.ReactNode { return <LogViewer serverStore={this.serverStore} runtime={this.runtime} workspaceContext={this.workspaceContext} i18n={this.i18n} />; }
 }
 

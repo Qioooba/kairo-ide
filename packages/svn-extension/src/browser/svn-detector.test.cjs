@@ -2,6 +2,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert');
 const path = require('node:path');
+require('../../../../tests/setup-tmp.cjs'); // KAIRO_TMP override
 const os = require('node:os');
 
 // Tests for SvnDetector concepts (path resolution, platform detection, etc.)

@@ -1,6 +1,7 @@
 import * as React from 'react';
-import { injectable, inject } from '@theia/core/shared/inversify';
+import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
+import { KairoI18nService } from '@kairo/i18n';
 import { GitStore, GitChangesState } from './git-store';
 import { GitPreCommitChecker, PreCommitCheckSummary, PreCommitCheckResult } from './git-precommit-check';
 import { GitCommitTemplateService, CommitTemplate, CommitSuggestion } from './git-commit-template';
@@ -9,9 +10,13 @@ interface GitCommitProps {
     store: GitStore;
     preCommitChecker: GitPreCommitChecker;
     templateService: GitCommitTemplateService;
+    i18n: KairoI18nService;
 }
 
-const GitCommitComponent: React.FC<GitCommitProps> = ({ store, preCommitChecker, templateService }) => {
+const GitCommitComponent: React.FC<GitCommitProps> = ({ store, preCommitChecker, templateService, i18n }) => {
+    const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
+    const [, forceUpdate] = React.useReducer(x => x + 1, 0);
+
     const [state, setState] = React.useState<GitChangesState>(store.getState());
     const [message, setMessage] = React.useState<string>('');
     const [amend, setAmend] = React.useState<boolean>(false);
@@ -53,7 +58,7 @@ const GitCommitComponent: React.FC<GitCommitProps> = ({ store, preCommitChecker,
         // Load template preferences
         templateService.loadTemplatePreferences();
         setTemplates(templateService.getTemplates());
-        setSelectedTemplateIdx(templateService.getSelectedTemplate ? 
+        setSelectedTemplateIdx(templateService.getSelectedTemplate ?
             templates.indexOf(templateService.getSelectedTemplate()) : 0);
 
         // Load suggestions
@@ -68,6 +73,11 @@ const GitCommitComponent: React.FC<GitCommitProps> = ({ store, preCommitChecker,
         });
         return () => sub.dispose();
     }, [store, preCommitChecker, templateService]);
+
+    React.useEffect(() => {
+        const disposable = i18n.onDidChangeLanguage(() => forceUpdate());
+        return () => disposable.dispose();
+    }, [i18n]);
 
     const handleRunBuildChange = (checked: boolean) => {
         setRunBuild(checked);
@@ -91,7 +101,7 @@ const GitCommitComponent: React.FC<GitCommitProps> = ({ store, preCommitChecker,
             try {
                 // Check if last commit is pushed by checking remote status
                 if (state.ahead === 0) {
-                    setAmendWarning('警告：上一个提交可能已推送，amend 将重写历史');
+                    setAmendWarning(t('widget.git.commit.amendWarning'));
                 }
             } catch {
                 // Ignore
@@ -138,7 +148,7 @@ const GitCommitComponent: React.FC<GitCommitProps> = ({ store, preCommitChecker,
             setCommitting(false);
 
             if (summary.hasFailures) {
-                setCommitResult('预提交检查失败，请查看下方详情。您可以修复问题后重试，或选择「强制提交」。');
+                setCommitResult(t('widget.git.commit.preCommitFailed'));
                 setCommitResultType('warning');
                 return;
             }
@@ -150,7 +160,7 @@ const GitCommitComponent: React.FC<GitCommitProps> = ({ store, preCommitChecker,
         setCommitResultType('success');
         try {
             const result = await store.commit(message.trim(), amend);
-            setCommitResult(`提交成功: ${result.hash}`);
+            setCommitResult(t('widget.git.commit.successWithHash', { hash: result.hash }));
             setCommitResultType('success');
             setMessage('');
             setAmend(false);
@@ -193,25 +203,34 @@ const GitCommitComponent: React.FC<GitCommitProps> = ({ store, preCommitChecker,
 
     const renderCheckStatusIcon = (result: PreCommitCheckResult) => {
         switch (result.status) {
-            case 'passed': return <span className="kairo-check-passed">✓</span>;
-            case 'failed': return <span className="kairo-check-failed">✗</span>;
-            case 'timed_out': return <span className="kairo-check-timeout">⏱</span>;
-            case 'error': return <span className="kairo-check-error">!</span>;
-            case 'skipped': return <span className="kairo-check-skipped">-</span>;
+            case 'passed': return <span className="kairo-precommit-status-icon codicon codicon-check" aria-hidden="true" />;
+            case 'failed': return <span className="kairo-precommit-status-icon codicon codicon-error" aria-hidden="true" />;
+            case 'timed_out': return <span className="kairo-precommit-status-icon codicon codicon-clock" aria-hidden="true" />;
+            case 'error': return <span className="kairo-precommit-status-icon codicon codicon-warning" aria-hidden="true" />;
+            case 'skipped': return <span className="kairo-precommit-status-icon codicon codicon-circle-slash" aria-hidden="true" />;
             default: return null;
         }
     };
 
+    const checkTypeLabel = (type: string): string => {
+        switch (type) {
+            case 'build': return t('widget.git.commit.checkType.build');
+            case 'test': return t('widget.git.commit.checkType.test');
+            case 'lint': return t('widget.git.commit.checkType.lint');
+            default: return type;
+        }
+    };
+
+    const runningCheckLabel = (check: string | undefined): string => {
+        if (!check) return t('widget.git.commit.checkType.checking');
+        return checkTypeLabel(check);
+    };
+
     const renderCheckResult = (result: PreCommitCheckResult) => {
-        const labelMap: Record<string, string> = {
-            build: '构建',
-            test: '测试',
-            lint: '代码检查',
-        };
         return (
             <div key={result.type} className={`kairo-precommit-result kairo-precommit-result-${result.status}`}>
                 {renderCheckStatusIcon(result)}
-                <span className="kairo-precommit-result-label">{labelMap[result.type] || result.type}</span>
+                <span className="kairo-precommit-result-label">{checkTypeLabel(result.type)}</span>
                 <span className="kairo-precommit-result-message">{result.message}</span>
             </div>
         );
@@ -220,10 +239,12 @@ const GitCommitComponent: React.FC<GitCommitProps> = ({ store, preCommitChecker,
     return (
         <div className="kairo-widget" data-testid="git-commit-view">
             <div className="kairo-widget-header" data-testid="git-commit-header">
-                <span className="kairo-widget-title">Commit</span>
+                <span className="kairo-widget-title">{t('widget.git.commit.title')}</span>
                 {stagedCount > 0 && (
                     <span className="kairo-git-staged-count">
-                        {stagedCount} staged file{stagedCount !== 1 ? 's' : ''}
+                        {stagedCount === 1
+                            ? t('widget.git.commit.stagedCountSingular', { count: stagedCount })
+                            : t('widget.git.commit.stagedCountPlural', { count: stagedCount })}
                     </span>
                 )}
             </div>
@@ -238,8 +259,8 @@ const GitCommitComponent: React.FC<GitCommitProps> = ({ store, preCommitChecker,
                         disabled={committing}
                         data-testid="git-template-select"
                     >
-                        {templates.map((t, i) => (
-                            <option key={t.name} value={i}>{t.name} - {t.description}</option>
+                        {templates.map((tmpl, i) => (
+                            <option key={tmpl.name} value={i}>{tmpl.name} - {tmpl.description}</option>
                         ))}
                     </select>
                 </div>
@@ -248,7 +269,7 @@ const GitCommitComponent: React.FC<GitCommitProps> = ({ store, preCommitChecker,
                 <textarea
                     className="kairo-git-commit-input"
                     data-testid="git-commit-message"
-                    placeholder="提交信息…"
+                    placeholder={t('widget.git.commit.placeholder')}
                     value={message}
                     onChange={e => setMessage(e.target.value)}
                     onKeyDown={handleKeyDown}
@@ -260,12 +281,15 @@ const GitCommitComponent: React.FC<GitCommitProps> = ({ store, preCommitChecker,
 
                 {/* Character count and warnings */}
                 <div className="kairo-git-commit-meta">
-                    <span className="kairo-git-commit-char-count">{stats.charCount} 字符</span>
+                    <span className="kairo-git-commit-char-count">{t('widget.git.commit.charCount', { count: stats.charCount })}</span>
                     {bodyWarnings.length > 0 && (
-                        <span className="kairo-git-commit-warning" title={bodyWarnings.map(w =>
-                            `第 ${w.line} 行 ${w.length} 字符，超过建议的 72 字符`
-                        ).join('\n')}>
-                            {bodyWarnings.length} 行超过长度限制
+                        <span
+                            className="kairo-git-commit-warning"
+                            title={bodyWarnings.map(w =>
+                                t('widget.git.commit.bodyWarningTooltip', { line: w.line, length: w.length })
+                            ).join('\n')}
+                        >
+                            {t('widget.git.commit.bodyWarningText', { count: bodyWarnings.length })}
                         </span>
                     )}
                 </div>
@@ -273,7 +297,7 @@ const GitCommitComponent: React.FC<GitCommitProps> = ({ store, preCommitChecker,
                 {/* Suggestions Dropdown */}
                 {showSuggestions && suggestions.length > 0 && (
                     <div className="kairo-git-suggestions" data-testid="git-suggestions">
-                        <div className="kairo-git-suggestions-header">最近提交</div>
+                        <div className="kairo-git-suggestions-header">{t('widget.git.commit.suggestionsTitle')}</div>
                         {suggestions.slice(0, 8).map((s, i) => (
                             <div
                                 key={i}
@@ -288,7 +312,7 @@ const GitCommitComponent: React.FC<GitCommitProps> = ({ store, preCommitChecker,
 
                 {/* Pre-commit Check Options */}
                 <div className="kairo-git-commit-options" data-testid="git-precommit-options">
-                    <div className="kairo-git-commit-options-title">预提交检查</div>
+                    <div className="kairo-git-commit-options-title">{t('widget.git.commit.preCommitChecksTitle')}</div>
                     <label className="kairo-git-check-label">
                         <input
                             type="checkbox"
@@ -297,7 +321,7 @@ const GitCommitComponent: React.FC<GitCommitProps> = ({ store, preCommitChecker,
                             disabled={committing || checksRunning}
                             data-testid="git-precommit-build"
                         />
-                        提交前运行构建
+                        {t('widget.git.commit.runBuildLabel')}
                     </label>
                     <label className="kairo-git-check-label">
                         <input
@@ -307,7 +331,7 @@ const GitCommitComponent: React.FC<GitCommitProps> = ({ store, preCommitChecker,
                             disabled={committing || checksRunning}
                             data-testid="git-precommit-test"
                         />
-                        提交前运行测试
+                        {t('widget.git.commit.runTestsLabel')}
                     </label>
                     <label className="kairo-git-check-label">
                         <input
@@ -317,13 +341,13 @@ const GitCommitComponent: React.FC<GitCommitProps> = ({ store, preCommitChecker,
                             disabled={committing || checksRunning}
                             data-testid="git-precommit-lint"
                         />
-                        检查编译错误
+                        {t('widget.git.commit.runLintLabel')}
                     </label>
                 </div>
 
                 {/* Commit Options */}
                 <div className="kairo-git-commit-options" data-testid="git-commit-options">
-                    <div className="kairo-git-commit-options-title">提交选项</div>
+                    <div className="kairo-git-commit-options-title">{t('widget.git.commit.commitOptionsTitle')}</div>
                     <label className="kairo-git-check-label">
                         <input
                             type="checkbox"
@@ -332,7 +356,7 @@ const GitCommitComponent: React.FC<GitCommitProps> = ({ store, preCommitChecker,
                             disabled={committing || checksRunning || stagedCount === 0}
                             data-testid="git-amend-checkbox"
                         />
-                        修改上一次提交 (--amend)
+                        {t('widget.git.commit.amendLabel')}
                     </label>
                     {amendWarning && (
                         <div className="kairo-git-amend-warning" data-testid="git-amend-warning">
@@ -347,7 +371,7 @@ const GitCommitComponent: React.FC<GitCommitProps> = ({ store, preCommitChecker,
                             disabled={committing || checksRunning}
                             data-testid="git-signoff-checkbox"
                         />
-                        添加 Signed-off-by (--signoff)
+                        {t('widget.git.commit.signoffLabel')}
                     </label>
                     <label className="kairo-git-check-label">
                         <input
@@ -357,17 +381,15 @@ const GitCommitComponent: React.FC<GitCommitProps> = ({ store, preCommitChecker,
                             disabled={committing || checksRunning}
                             data-testid="git-noverify-checkbox"
                         />
-                        跳过预提交钩子 (--no-verify)
+                        {t('widget.git.commit.noVerifyLabel')}
                     </label>
                 </div>
 
                 {/* Pre-commit Check Progress */}
                 {checksRunning && (
                     <div className="kairo-precommit-progress" data-testid="git-precommit-progress">
-                        <div className="kairo-precommit-spinner" />
-                        <span>正在运行预提交检查: {checkSummary.runningCheck === 'build' ? '构建' :
-                            checkSummary.runningCheck === 'test' ? '测试' :
-                                checkSummary.runningCheck === 'lint' ? '代码检查' : '检查中'}...</span>
+                        <span className="kairo-precommit-spinner codicon codicon-loading codicon-modifier-spin" aria-hidden="true" />
+                        <span>{t('widget.git.commit.preCommitProgress', { check: runningCheckLabel(checkSummary.runningCheck) })}</span>
                     </div>
                 )}
 
@@ -379,9 +401,9 @@ const GitCommitComponent: React.FC<GitCommitProps> = ({ store, preCommitChecker,
                             onClick={() => setShowCheckDetails(!showCheckDetails)}
                         >
                             <span className={`kairo-precommit-summary-status ${checkSummary.hasFailures ? 'kairo-precommit-failed' : 'kairo-precommit-passed'}`}>
-                                {checkSummary.hasFailures ? '检查失败' : '检查全部通过'}
+                                {checkSummary.hasFailures ? t('widget.git.commit.checkStatusFailed') : t('widget.git.commit.checkStatusPassed')}
                             </span>
-                            <span className="kairo-precommit-toggle">{showCheckDetails ? '▲' : '▼'}</span>
+                            <span className={`kairo-precommit-toggle codicon ${showCheckDetails ? 'codicon-chevron-up' : 'codicon-chevron-down'}`} aria-hidden="true" />
                         </div>
                         {showCheckDetails && (
                             <div className="kairo-precommit-details">
@@ -398,9 +420,9 @@ const GitCommitComponent: React.FC<GitCommitProps> = ({ store, preCommitChecker,
                         data-testid="git-commit-button"
                         onClick={() => handleCommit(false)}
                         disabled={!canCommit}
-                        aria-label="提交暂存的更改"
+                        aria-label={t('widget.git.commit.commitButtonAria')}
                     >
-                        {committing ? '提交中…' : checksRunning ? '检查中…' : '提交'}
+                        {committing ? t('widget.git.commit.committing') : checksRunning ? t('widget.git.commit.checking') : t('widget.git.commit.commitButton')}
                     </button>
 
                     {checksEnabled && !checksRunning && (
@@ -409,9 +431,9 @@ const GitCommitComponent: React.FC<GitCommitProps> = ({ store, preCommitChecker,
                             data-testid="git-skip-checks-commit"
                             onClick={() => handleCommit(true)}
                             disabled={!stagedCount || !message.trim() || committing}
-                            aria-label="跳过检查并提交"
+                            aria-label={t('widget.git.commit.skipChecksButtonAria')}
                         >
-                            跳过检查并提交
+                            {t('widget.git.commit.skipChecksButton')}
                         </button>
                     )}
 
@@ -421,22 +443,22 @@ const GitCommitComponent: React.FC<GitCommitProps> = ({ store, preCommitChecker,
                             data-testid="git-commit-anyway"
                             onClick={handleCommitAnyway}
                             disabled={!stagedCount || !message.trim() || committing}
-                            aria-label="忽略检查失败，强制提交"
+                            aria-label={t('widget.git.commit.forceCommitButtonAria')}
                         >
-                            强制提交
+                            {t('widget.git.commit.forceCommitButton')}
                         </button>
                     )}
 
                     <span className="kairo-git-commit-hint">
-                        {committing ? '' : checksRunning ? '' : 'Cmd+Enter 提交'}
+                        {committing ? '' : checksRunning ? '' : t('widget.git.commit.commitHint')}
                     </span>
                 </div>
 
                 {/* Commit Result */}
                 {commitResult && (
                     <div
-                        className={commitResultType === 'success' ? 'theia-success' :
-                            commitResultType === 'warning' ? 'kairo-warning' : 'theia-error'}
+                        className={commitResultType === 'success' ? 'kairo-commit-result-success' :
+                            commitResultType === 'warning' ? 'kairo-commit-result-warning' : 'kairo-commit-result-error'}
                         role="alert"
                         data-testid="git-commit-result"
                     >
@@ -446,9 +468,11 @@ const GitCommitComponent: React.FC<GitCommitProps> = ({ store, preCommitChecker,
             </div>
 
             {stagedCount === 0 && (
-                <p className="kairo-empty" data-testid="git-commit-empty">
-                    请在 Changes 视图中暂存文件以进行提交。
-                </p>
+                <div className="kairo-empty-state" data-testid="git-commit-empty">
+                    <span className="kairo-empty-state-glyph codicon codicon-git-commit" aria-hidden="true" />
+                    <h3 className="kairo-empty-state-title">{t('widget.git.commit.emptyStateTitle')}</h3>
+                    <p className="kairo-empty-state-reason">{t('widget.git.commit.emptyStateReason')}</p>
+                </div>
             )}
         </div>
     );
@@ -461,13 +485,25 @@ export class GitCommitWidget extends ReactWidget {
     @inject(GitStore) protected readonly store!: GitStore;
     @inject(GitPreCommitChecker) protected readonly preCommitChecker!: GitPreCommitChecker;
     @inject(GitCommitTemplateService) protected readonly templateService!: GitCommitTemplateService;
+    @inject(KairoI18nService) protected readonly i18n!: KairoI18nService;
 
     constructor() {
         super();
         this.id = GitCommitWidget.ID;
-        this.title.label = 'Git Commit';
-        this.title.caption = 'Git Commit View';
+        this.title.label = '';
+        this.title.caption = '';
         this.addClass('kairo-widget');
+    }
+
+    @postConstruct()
+    protected init(): void {
+        this.updateTitle();
+        this.toDispose.push(this.i18n.onDidChangeLanguage(() => this.updateTitle()));
+    }
+
+    protected updateTitle(): void {
+        this.title.label = this.i18n.t('widget.git.commit.title' as any);
+        this.title.caption = this.i18n.t('widget.git.commit.caption' as any);
     }
 
     protected render(): React.ReactNode {
@@ -475,6 +511,7 @@ export class GitCommitWidget extends ReactWidget {
             store: this.store,
             preCommitChecker: this.preCommitChecker,
             templateService: this.templateService,
+            i18n: this.i18n,
         });
     }
 }

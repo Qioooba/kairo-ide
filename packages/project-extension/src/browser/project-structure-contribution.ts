@@ -3,6 +3,7 @@ import { Command, CommandContribution, CommandRegistry } from '@theia/core/lib/c
 import { KeybindingContribution, KeybindingRegistry } from '@theia/core/lib/browser/keybinding';
 import { MessageService } from '@theia/core/lib/common/message-service';
 import { FileDialogService } from '@theia/filesystem/lib/browser/file-dialog';
+import { KairoI18nService } from '@kairo/i18n';
 import { ActiveProjectService } from './active-project-service';
 import { KairoProjectService } from './project-service';
 import { RuntimeConnectionService } from '@kairo/runtime-extension';
@@ -33,6 +34,9 @@ export class ProjectStructureContribution implements CommandContribution, Keybin
     @inject(FileDialogService)
     protected readonly fileDialogService!: FileDialogService;
 
+    @inject(KairoI18nService)
+    protected readonly i18n!: KairoI18nService;
+
     protected dialog: ProjectStructureDialog | null = null;
 
     registerCommands(registry: CommandRegistry): void {
@@ -60,12 +64,13 @@ export class ProjectStructureContribution implements CommandContribution, Keybin
             return;
         }
         this.dialog = new ProjectStructureDialog({
-            title: 'Project Structure',
+            title: this.i18n.t('widget.projectStructure.title'),
             projectService: this.projectService,
             activeProject: this.activeProject,
             runtime: this.runtime,
             messageService: this.messageService,
             fileDialogService: this.fileDialogService,
+            i18n: this.i18n,
         });
         this.dialog.open();
     }

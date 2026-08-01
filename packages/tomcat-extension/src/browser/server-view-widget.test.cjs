@@ -100,8 +100,8 @@ test('ServerViewWidget: instantiation sets id', () => {
 
 test('ServerViewWidget: instantiation sets title', () => {
   const widget = new tomcat.ServerViewWidget();
-  assert.strictEqual(widget.title.label, 'Kairo Server');
-  assert.strictEqual(widget.title.caption, 'Kairo Server View');
+  assert.strictEqual(widget.title.label, '');
+  assert.strictEqual(widget.title.caption, '');
 });
 
 test('ServerViewWidget: has kairo-widget CSS class', () => {

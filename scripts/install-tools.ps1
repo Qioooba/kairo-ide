@@ -36,7 +36,10 @@ $ProgressPreference    = 'SilentlyContinue'
 
 $TOOLS    = 'E:\Tools'
 $APPS     = 'E:\Apps'
-$DOWNLOAD = Join-Path $env:TEMP 'kairo-install'
+# KAIRO_TMP: 优先写到工作区旁, 避免污染 C:\Users\Qi\AppData\Local\Temp
+$KairoTmp = if ($env:KAIRO_TMP) { $env:KAIRO_TMP } else { Join-Path $PSScriptRoot '..\tmp' }
+New-Item -ItemType Directory -Force -Path $KairoTmp | Out-Null
+$DOWNLOAD = Join-Path $KairoTmp 'kairo-install'
 New-Item -ItemType Directory -Force -Path $DOWNLOAD | Out-Null
 
 function Get-File {

@@ -77,12 +77,17 @@ test('DoubleShiftDetector is bounded and rejects modified Shift sequences', () =
   assert.strictEqual(detector.accept({ ...shift, repeat: true }, 2700), false);
 });
 
+const mockI18n = {
+  t: (key) => key,
+  onDidChangeLanguage: { event: () => ({ dispose: () => {} }) },
+};
+
 test('Search Everywhere renders open failures instead of leaking rejected promises', async () => {
   const model = modelWith([]);
   model.state = { status: 'results', query: 'x', category: 'all', selectedIndex: 0, items: [{ id: 'x', category: 'files', label: 'x', uri: 'file:///x' }] };
   const container = document.createElement('div'); document.body.appendChild(container); const root = createRoot(container);
   try {
-    React.act(() => root.render(React.createElement(SearchEverywhereComponent, { model, state: model.snapshot, onOpen: async () => { throw new Error('cannot open'); } })));
+    React.act(() => root.render(React.createElement(SearchEverywhereComponent, { model, state: model.snapshot, onOpen: async () => { throw new Error('cannot open'); }, i18n: mockI18n })));
     await React.act(async () => container.querySelector('[role="option"]').click());
     assert.match(container.querySelector('[data-testid="everywhere-open-error"]').textContent, /cannot open/);
   } finally { React.act(() => root.unmount()); container.remove(); }

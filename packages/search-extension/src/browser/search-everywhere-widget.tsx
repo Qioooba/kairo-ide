@@ -1,33 +1,45 @@
 import * as React from 'react';
-import { inject, injectable } from '@theia/core/shared/inversify';
+import { inject, injectable, postConstruct } from '@theia/core/shared/inversify';
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import type { Message } from '@theia/core/shared/@lumino/messaging';
 import URI from '@theia/core/lib/common/uri';
 import { CommandService } from '@theia/core/lib/common/command';
 import { EditorManager } from '@theia/editor/lib/browser/editor-manager';
+import { KairoI18nService } from '@kairo/i18n';
 import { SearchEverywhereModel, type SearchEverywhereCategory, type SearchEverywhereItem, type SearchEverywhereState } from './search-everywhere-model';
 
 const CATEGORIES: SearchEverywhereCategory[] = ['all', 'files', 'types', 'symbols', 'actions'];
 
-/** Map LSP SymbolKind to a short display icon. */
+/** Map LSP SymbolKind to a codicon class. */
 function symbolKindIcon(kind: number | undefined): string {
   switch (kind) {
-    case 1: return '\uD83D\uDCC4'; // File
-    case 2: return '\uD83D\uDCE6'; // Module
-    case 3: return '\uD83D\uDCC1'; // Namespace
-    case 4: return '\uD83D\uDCE6'; // Package
-    case 5: return '\uD83C\uDFD7'; // Class
-    case 6: return '\u0192';       // Method
-    case 7: return '\u2699';       // Property
-    case 8: return '\uD83D\uDD11'; // Field
-    case 9: return '\uD83D\uDEE0'; // Constructor
-    case 10: return '\uD83D\uDDDD'; // Enum
-    case 11: return '\u25CB';      // Interface
-    case 12: return '\u0192';      // Function
-    case 13: return '\uD83D\uDD22'; // Variable
-    case 14: return '\uD83D\uDD12'; // Constant
-    case 23: return '\uD83D\uDEE0'; // Struct
-    default: return '';
+    case 1: return 'codicon-symbol-file';
+    case 2: return 'codicon-symbol-namespace';
+    case 3: return 'codicon-symbol-namespace';
+    case 4: return 'codicon-symbol-namespace';
+    case 5: return 'codicon-symbol-class';
+    case 6: return 'codicon-symbol-method';
+    case 7: return 'codicon-symbol-property';
+    case 8: return 'codicon-symbol-field';
+    case 9: return 'codicon-symbol-constructor';
+    case 10: return 'codicon-symbol-enum';
+    case 11: return 'codicon-symbol-interface';
+    case 12: return 'codicon-symbol-function';
+    case 13: return 'codicon-symbol-variable';
+    case 14: return 'codicon-symbol-constant';
+    case 23: return 'codicon-symbol-struct';
+    default: return 'codicon-symbol-method';
+  }
+}
+
+function categoryIcon(category: SearchEverywhereCategory): string {
+  switch (category) {
+    case 'all': return 'codicon-search';
+    case 'files': return 'codicon-file';
+    case 'types': return 'codicon-symbol-class';
+    case 'symbols': return 'codicon-symbol-method';
+    case 'actions': return 'codicon-symbol-event';
+    default: return 'codicon-search';
   }
 }
 
@@ -35,9 +47,11 @@ export interface SearchEverywhereProps {
   model: SearchEverywhereModel;
   state: SearchEverywhereState;
   onOpen: (item: SearchEverywhereItem) => unknown;
+  i18n: KairoI18nService;
 }
 
-export const SearchEverywhereComponent: React.FC<SearchEverywhereProps> = ({ model, state, onOpen }) => {
+export const SearchEverywhereComponent: React.FC<SearchEverywhereProps> = ({ model, state, onOpen, i18n }) => {
+  const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
   const [query, setQuery] = React.useState(state.query);
   const [openError, setOpenError] = React.useState<Error | undefined>();
   const containerRef = React.useRef<HTMLDivElement>(null);
@@ -74,19 +88,33 @@ export const SearchEverywhereComponent: React.FC<SearchEverywhereProps> = ({ mod
     catch (error) { setOpenError(error instanceof Error ? error : new Error(String(error))); }
   };
 
-  return <div className="kairo-everywhere" data-testid="search-everywhere" ref={containerRef} onKeyDown={keyDown} role="dialog" aria-modal="true" aria-label="Search Everywhere">
-    <input autoFocus className="theia-input kairo-everywhere-input" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search files, types, symbols, actions" aria-label="Search query" data-testid="everywhere-query" />
-    <nav className="kairo-everywhere-tabs" aria-label="Search categories">
-      {CATEGORIES.map(category => <button key={category} type="button" className={state.category === category ? 'is-active' : ''} aria-label={`Search in ${category}`} aria-pressed={state.category === category} onClick={() => void model.query(query, category, 100)} data-testid={`category-${category}`}>{category[0].toUpperCase() + category.slice(1)}</button>)}
+  const renderStatus = (): React.ReactNode => {
+    if (openError) {
+      return <div className="kairo-everywhere-status kairo-error-banner" role="alert" data-testid="everywhere-open-error">{openError.message}</div>;
+    }
+    switch (state.status) {
+      case 'loading':
+        return <div className="kairo-everywhere-status kairo-empty-state" role="status">{t('widget.search.everywhere.status.loading')}</div>;
+      case 'idle':
+        return <div className="kairo-everywhere-status kairo-empty-state">{t('widget.search.everywhere.status.idle')}</div>;
+      case 'empty':
+        return <div className="kairo-everywhere-status kairo-empty-state">{t('widget.search.everywhere.status.empty')}</div>;
+      case 'error':
+        return <div className="kairo-everywhere-status kairo-error-banner" role="alert">{state.error?.message}</div>;
+      case 'results':
+        return undefined;
+    }
+  };
+
+  return <div className="kairo-everywhere" data-testid="search-everywhere" ref={containerRef} onKeyDown={keyDown} role="dialog" aria-modal="true" aria-label={t('widget.search.everywhere.title')}>
+    <input autoFocus className="theia-input kairo-everywhere-input" value={query} onChange={event => setQuery(event.target.value)} placeholder={t('widget.search.everywhere.placeholder')} aria-label={t('widget.search.everywhere.ariaLabel.query')} data-testid="everywhere-query" />
+    <nav className="kairo-everywhere-tabs" aria-label={t('widget.search.everywhere.ariaLabel.categories')}>
+      {CATEGORIES.map(category => <button key={category} type="button" className={state.category === category ? 'is-active' : ''} aria-label={t('widget.search.everywhere.category.ariaLabel', { category: t(`widget.search.everywhere.category.${category}`) })} aria-pressed={state.category === category} onClick={() => void model.query(query, category, 100)} data-testid={`category-${category}`}><span className={`codicon ${categoryIcon(category)}`} aria-hidden="true" /> {t(`widget.search.everywhere.category.${category}`)}</button>)}
     </nav>
     <div className="kairo-everywhere-body" role="listbox">
-      {state.status === 'loading' && <div role="status">Searching…</div>}
-      {state.status === 'idle' && <div>Type to search. Recent items appear here.</div>}
-      {state.status === 'empty' && <div>No matching items.</div>}
-      {state.status === 'error' && <div role="alert">{state.error?.message}</div>}
-      {openError && <div role="alert" data-testid="everywhere-open-error">{openError.message}</div>}
-      {state.items.map((item, index) => <button type="button" role="option" aria-selected={index === state.selectedIndex} className={`kairo-everywhere-item${index === state.selectedIndex ? ' is-selected' : ''}`} key={item.id} onMouseEnter={() => model.select(index)} onClick={() => void openItem(item)}>
-        <span className="kairo-everywhere-kind">{(item.kind !== undefined ? symbolKindIcon(item.kind) : item.category) || item.category}</span><span>{item.label}</span><small>{item.detail}</small>
+      {renderStatus()}
+      {state.items.map((item, index) => <button type="button" role="option" aria-selected={index === state.selectedIndex} className={`kairo-everywhere-item${index === state.selectedIndex ? ' is-selected' : ''}`} key={item.id} onMouseEnter={() => model.select(index)} onClick={() => void openItem(item)} data-testid="everywhere-item">
+        <span className="kairo-everywhere-kind"><span className={`codicon ${item.kind !== undefined ? symbolKindIcon(item.kind) : categoryIcon(item.category)}`} aria-hidden="true" /></span><span>{item.label}</span><small>{item.detail}</small>
       </button>)}
     </div>
   </div>;
@@ -98,12 +126,28 @@ export class SearchEverywhereWidget extends ReactWidget {
   @inject(SearchEverywhereModel) protected readonly model!: SearchEverywhereModel;
   @inject(EditorManager) protected readonly editors!: EditorManager;
   @inject(CommandService) protected readonly commands!: CommandService;
+  @inject(KairoI18nService) protected readonly i18n!: KairoI18nService;
   protected state: SearchEverywhereState = { status: 'idle', query: '', category: 'all', items: [], selectedIndex: 0 };
   protected unsubscribe: (() => void) | undefined;
 
   constructor() {
-    super(); this.id = SearchEverywhereWidget.ID; this.title.label = 'Search Everywhere'; this.title.closable = true; this.addClass('kairo-search-everywhere-widget');
+    super(); this.id = SearchEverywhereWidget.ID; this.title.closable = true; this.addClass('kairo-search-everywhere-widget');
   }
+
+  @postConstruct()
+  protected init(): void {
+    const t = (key: string, params?: Record<string, string | number>) => this.i18n.t(key as any, params);
+    const updateTitle = (): void => {
+      this.title.label = t('widget.search.everywhere.title');
+      this.title.caption = t('widget.search.everywhere.caption');
+    };
+    updateTitle();
+    this.toDispose.push(this.i18n.onDidChangeLanguage(() => {
+      updateTitle();
+      this.update();
+    }));
+  }
+
   protected onAfterAttach(message: Message): void { super.onAfterAttach(message); this.unsubscribe ??= this.model.subscribe(state => { this.state = state; this.update(); }); }
   dispose(): void { this.unsubscribe?.(); this.model.cancel(); super.dispose(); }
   protected async open(item: SearchEverywhereItem): Promise<void> {
@@ -111,5 +155,5 @@ export class SearchEverywhereWidget extends ReactWidget {
     if (item.commandId) await this.commands.executeCommand(item.commandId);
     else if (item.uri) await this.editors.open(new URI(item.uri), { mode: 'activate', selection: item.line === undefined ? undefined : { start: { line: item.line, character: item.character ?? 0 } } });
   }
-  protected render(): React.ReactNode { return <SearchEverywhereComponent model={this.model} state={this.state} onOpen={item => void this.open(item)} />; }
+  protected render(): React.ReactNode { return <SearchEverywhereComponent model={this.model} state={this.state} onOpen={item => void this.open(item)} i18n={this.i18n} />; }
 }

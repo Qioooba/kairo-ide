@@ -412,8 +412,8 @@ export class ServerViewWidget extends ReactWidget {
     constructor() {
         super();
         this.id = ServerViewWidget.ID;
-        this.title.label = 'Kairo Server';
-        this.title.caption = 'Kairo Server View';
+        this.title.label = '';
+        this.title.caption = '';
         this.addClass('kairo-widget');
     }
 

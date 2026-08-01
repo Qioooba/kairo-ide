@@ -132,11 +132,16 @@ async function capturePanel(page, name, selector) {
     await page.keyboard.press('Escape');
 
     // 13. Menu bar (Run menu open)
-    const runMenu = page.locator('.p-MenuBar-item:has-text("Run"), .menubar-menu-button:has-text("Run")').first();
+    // Current Theia (1.73) uses Lumino v2 class prefixes (`lm-`), so the old
+    // `p-`/VS Code style selectors no longer match. Probe verified:
+    //   menubar: .lm-MenuBar (inside #theia-top-panel)
+    //   item:    li.lm-MenuBar-item > div.lm-MenuBar-itemLabel
+    //   menu:    div.lm-Menu.lm-MenuBar-menu
+    const runMenu = page.locator('.lm-MenuBar-item:has-text("Run"), .p-MenuBar-item:has-text("Run")').first();
     if (await runMenu.count() > 0) {
         await runMenu.click();
         await sleep(500);
-        await capturePanel(page, '13-run-menu', '.p-Menu, .monaco-menu');
+        await capturePanel(page, '13-run-menu', '.lm-Menu, .monaco-menu');
         await page.keyboard.press('Escape');
     }
 

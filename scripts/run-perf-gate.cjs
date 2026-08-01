@@ -11,6 +11,7 @@
  */
 
 const fs = require('node:fs');
+require('../tests/setup-tmp.cjs'); // KAIRO_TMP override
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync, execSync } = require('node:child_process');

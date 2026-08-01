@@ -69,11 +69,11 @@ describe('GitStashWidget — Instantiation', () => {
   });
 
   it('widget has correct title', () => {
-    assert.strictEqual(widget.title.label, 'Git Stash');
+    assert.strictEqual(widget.title.label, '');
   });
 
   it('widget has correct caption', () => {
-    assert.strictEqual(widget.title.caption, 'Git Stash View');
+    assert.strictEqual(widget.title.caption, '');
   });
 
   it('widget is closable', () => {

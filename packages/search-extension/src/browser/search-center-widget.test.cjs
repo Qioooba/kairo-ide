@@ -36,7 +36,7 @@ Module._extensions['.css'] = function (module, filename) {
 };
 
 // Mock @theia/monaco-editor-core to avoid the ESM import issue in CJS tests.
-// @kairo/ui-kit → kairo-theme-contribution.ts → @theia/monaco-editor-core
+// @kairo/ui-kit -> kairo-theme-contribution.ts -> @theia/monaco-editor-core
 // which uses ESM `import` that cannot be loaded via `require` in Node CJS mode.
 // We intercept the module resolution before the ESM file is ever loaded.
 const origResolveFilename = Module._resolveFilename;
@@ -67,6 +67,19 @@ const { resolveWorkspaceMatchUri } = require('../../lib/browser/search-path');
 
 const act = React.act;
 
+function mockI18n() {
+  return {
+    t: (key, params = {}) => {
+      if (key === 'widget.search.center.status.empty') return '未找到匹配项';
+      if (key === 'widget.search.center.stats.matchInFiles') return `${params.count} 个匹配，在 ${params.fileCount} 个文件中`;
+      if (key === 'widget.search.center.stats.match') return `${params.count} 个匹配`;
+      if (key === 'widget.search.center.status.error') return `搜索失败: ${params.message}`;
+      return String(key);
+    },
+    onDidChangeLanguage: () => ({ dispose: () => {} }),
+  };
+}
+
 function state(status, overrides = {}) {
   return {
     status,
@@ -89,6 +102,7 @@ function mount(initialState, callbacks = {}) {
     onCancel: callbacks.onCancel || (() => undefined),
     onOpen: callbacks.onOpen || (() => undefined),
     onClose: callbacks.onClose || (() => undefined),
+    i18n: mockI18n(),
   };
   act(() => root.render(React.createElement(SearchCenterComponent, props)));
   return {
