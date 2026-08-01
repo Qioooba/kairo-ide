@@ -638,7 +638,10 @@ function buildMenuTemplate(): MenuItemConstructorOptions[] {
         { label: 'New File...', ...action('workbench.action.files.pickNewFile') },
         { type: 'separator' },
         { label: 'Open File...', ...action('core.open') },
-        { label: 'Open Folder...', ...action('workspace:open') },
+        // NOTE: Theia disables `workspace:open` on Windows/Electron
+        // (isEnabled: isOSX || !isElectron). Use `workspace:openFolder`
+        // which is always enabled and opens the native directory dialog.
+        { label: 'Open Folder...', ...action('workspace:openFolder') },
         { type: 'separator' },
         { label: 'Save', accelerator: 'CmdOrCtrl+S', ...action('core.save') },
         { label: 'Save As...', accelerator: 'CmdOrCtrl+Shift+S', ...action('file.saveAs') },
@@ -956,6 +959,14 @@ async function createWindow(): Promise<void> {
       if (u.protocol !== 'http:' && u.protocol !== 'https:') {
         console.warn('[kairo] refusing to open URL with non-http(s) scheme:', u.protocol);
         return { action: 'deny' };
+      }
+      // Allow localhost window.open: Theia creates a new window via
+      // window.open when opening a folder/workspace while
+      // workspace.preserveWindow=false. External URLs are still refused
+      // unless KAIRO_ALLOW_EXTERNAL_LINKS=1.
+      if (u.hostname === '127.0.0.1' || u.hostname === 'localhost') {
+        console.log('[kairo] allowing local window.open:', url);
+        return { action: 'allow' };
       }
       if (!allowExternalLinks) {
         console.warn(`[kairo] refusing to open external URL (set KAIRO_ALLOW_EXTERNAL_LINKS=1 to allow): ${url}`);

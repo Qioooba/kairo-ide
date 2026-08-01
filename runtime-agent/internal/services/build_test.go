@@ -182,7 +182,7 @@ func TestCollectAuthorizedJavaSourcesSkipsGeneratedAndMetadataTrees(t *testing.T
 	if err := os.WriteFile(keep, []byte("class Keep {}"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	for _, excluded := range []string{".git", ".legacyflow", "node_modules", "target", filepath.Join("build", "classes")} {
+	for _, excluded := range []string{".git", ".svn", ".kairo", ".settings", ".idea", ".legacyflow", "node_modules", "target", filepath.Join("build", "classes"), filepath.Join(".kairo", "local-history")} {
 		file := filepath.Join(root, excluded, "Ignore.java")
 		if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
 			t.Fatal(err)

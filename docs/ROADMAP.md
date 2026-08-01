@@ -1,6 +1,6 @@
 # Kairo IDE 未来路线图
 
-> 最后更新: 2026-08-01 (Session 27 — Phase Q 稳定性与质量收官)
+> 最后更新: 2026-08-01 (Session 29 — Phase S E2E 全量回归复跑与修复)
 
 ## 近期（Phase 1+ 收尾）— 进度 99%
 
@@ -23,8 +23,24 @@
 - ✅ Wave 12 Maven 完整支持
 - ✅ Wave 13 多模块调试
 - ✅ Wave 14 企业合规性套件
-- ⬜ 真实遗留项目 E2E 验证 (需 Java 6 + Tomcat 6)
+- ✅ 核心流程 E2E 验证（core-e2e 11/11 全绿，windows-e2e 13/13 全绿，standalone-smoke 5/5）
+- ⬜ 真实遗留项目 E2E 验证 (需 Java 6 + Tomcat 6 真实环境)
 - ⬜ Windows 10 真实环境完整验证
+
+## 本次会话成果 (2026-08-01 Session 29 — Phase S E2E 全量回归复跑与修复)
+
+- 🟢 分层 E2E 回归：core-e2e 11/11（13.6m 零失败零重试）、windows-e2e 13/13（1.5m，含 WIN-12 环境变量场景）、standalone-smoke 5/5
+- 🟢 修复产品级 bug：构建源码扫描 `collectAuthorizedJavaSources` 排除集补齐 `.kairo/.svn/.settings/.idea/build`（E2E-04 损坏快照不再被当源码编译）
+- 🟢 修复测试环境约定：`AGENT_PORT` 必须与 agent 端口一致（18080），否则 agentApi 全 status 0
+- 🟢 修复测试代码：Node Buffer 不支持 gbk → 改 agent recode API；WIN-04 特殊字符集剔除 GBK 外的 ♠♣♥♦/CJK 兼容字（Go 逐 rune 验证边界）
+
+## 本次会话成果 (2026-08-01 Session 28 — Phase R 剩余 widgets 全局收尾)
+
+- 🟢 全局审计：内联 style 仅剩 CSS 变量动态值（合理例外）；JSX 硬编码中英文 = 0；37+ widgets 已接入 KairoI18nService
+- 🟢 6 个辅助 widget 补齐 i18n：compliance（~60 键全量重写）、keymap（~27 键）、notification、bookmarks、debug-toolbar、debug-watches 补漏
+- 🟢 emoji→codicon 错误图标；hover JS 操作迁移 CSS；内联样式全类化（`.kairo-compliance-*`/`.kairo-keymap-*`/`.kairo-bookmarks-*`/`.kairo-dtw-*` 等 431 行）
+- 🟢 i18n 键 en/zh-CN 同步零差异；kairo-theme.css 追加 Phase R 类
+- 🟢 5 项验证门禁全部通过 + standalone-smoke 5/5 浏览器回归
 
 ## 中期（Phase 2+）— 进度 85%
 

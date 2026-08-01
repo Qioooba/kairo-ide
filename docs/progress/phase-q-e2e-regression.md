@@ -63,6 +63,18 @@
 - `os.tmpdir()` monkey-patch 因 esbuild `__toESM` 浅拷贝 builtin 命名空间不生效 → 工作区落在真实系统 Temp。
 - 修复：fixtures 用 `const os = require('node:os')`；fixture 开头 `taskkill /F /IM java.exe` 杀残留 Tomcat 进程（EBUSY 文件锁），`removeDirSync` 失败回退覆盖式复制。
 
+### 2.10 build 源码扫描未排除 `.kairo`（Session 29 复跑发现，产品级 bug）
+- **现象**：core-e2e 复跑时 E2E-06 构建返回 `failed`（此前 11/11 全绿）。诊断构建输出：
+  ```
+  <workspace>\.kairo\local-history\snapshot-*.java:10: 错误: 需要class, interface或enum
+  INVALID_SYNTAX_HERE;
+  ```
+- **根因链**：E2E-04（构建失败场景）故意写入 `INVALID_SYNTAX_HERE;` 制造编译错误 → local-history 保存损坏快照 → 后续场景构建时 `collectAuthorizedJavaSources`（`services/build.go`）递归扫描整个 workspace，**排除集缺失 `.kairo`**（仅 `.git/.legacyflow/node_modules/target`）→ 损坏快照被当源码编译 → 构建失败。
+- 对比：`build/compiler.go` 的 `defaultExcludeDirs` 与 `deploy/plan.go` 均已含 `.kairo`，唯独生产构建路径 `collectAuthorizedJavaSources` 遗漏。
+- 修复：`collectAuthorizedJavaSources` 排除集补齐 `.kairo`/`.svn`/`.settings`/`.idea`/`build`；测试 `TestCollectAuthorizedJavaSourcesSkipsGeneratedAndMetadataTrees` 扩展 `.kairo/local-history` 用例。
+- 复跑：E2E-06 单场景通过（Build: succeeded）→ 全量 core-e2e **11/11 通过（13.6m）**。
+- **测试启动约定**：`AGENT_PORT=18080` 必须与 agent 端口一致（fixtures 默认 `AGENT_PORT=18300`，缺失时 agentApi 全部 status 0）。
+
 ---
 
 ## 3. 结论

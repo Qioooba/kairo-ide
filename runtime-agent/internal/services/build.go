@@ -474,7 +474,8 @@ func evalSymlinksNearestBuildPath(candidate string) (string, error) {
 
 func collectAuthorizedJavaSources(root, outputDir string) ([]string, error) {
 	excludedDirectories := map[string]struct{}{
-		".git": {}, ".legacyflow": {}, "node_modules": {}, "target": {},
+		".git": {}, ".svn": {}, ".kairo": {}, ".settings": {}, ".idea": {},
+		".legacyflow": {}, "node_modules": {}, "target": {}, "build": {},
 	}
 	var sources []string
 	err := filepath.WalkDir(root, func(candidate string, entry os.DirEntry, walkErr error) error {

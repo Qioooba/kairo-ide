@@ -225,9 +225,15 @@ test.describe('WIN-04: Encoding Switching (GBK/UTF-8)', () => {
     const testFile = path.join(workspace.rootPath, '.kairo', `encoding-test-${Date.now()}.txt`);
 
     await test.step('Create GBK-encoded file', async () => {
-      const gbkContent = Buffer.from('GBK编码测试：你好，世界！', 'gbk');
+      // Node Buffer 不支持 'gbk' 编码；先写 UTF-8，再经 agent recode API 转为 GBK。
       fs.mkdirSync(path.dirname(testFile), { recursive: true });
-      fs.writeFileSync(testFile, gbkContent);
+      fs.writeFileSync(testFile, 'GBK编码测试：你好，世界！', 'utf-8');
+      const recode = await agentApi.post('/api/v1/encoding/recode', {
+        file: testFile,
+        from: 'utf-8',
+        to: 'gbk',
+      });
+      expect(recode.status, `recode utf-8→gbk should succeed: ${recode.error}`).toBe(200);
       console.log('  Created GBK encoded file');
     });
 
@@ -279,10 +285,19 @@ test.describe('WIN-04: Encoding Switching (GBK/UTF-8)', () => {
       const testFile = path.join(workspace.rootPath, '.kairo', `win-encoding-${Date.now()}.txt`);
       fs.mkdirSync(path.dirname(testFile), { recursive: true });
 
-      // GBK special characters that are common in Chinese Windows
-      const specialChars = '①②③④⑤★☆♠♣♥♦㈱㈲㈳㈴㈵';
-      const gbkContent = Buffer.from(`特殊字符：${specialChars}`, 'gbk');
-      fs.writeFileSync(testFile, gbkContent);
+      // GBK special characters that are common in Chinese Windows.
+      // Verified against simplifiedchinese.GBK strict encoder: 圈数字、
+      // 星花、几何图形、数学符号、全角符号均收录；CJK 兼容字(㈱)与
+      // 扑克花色(♠♣♥♦)不在 GBK 内，会导致严格编码 RepertoireError。
+      const specialChars = '①②③④⑤⑥⑦⑧⑨⑩★☆▲△◇◆■□●○×÷℃§№→←↑↓';
+      // Node Buffer 不支持 'gbk' 编码；先写 UTF-8，再经 agent recode API 转为 GBK。
+      fs.writeFileSync(testFile, `特殊字符：${specialChars}`, 'utf-8');
+      const recode = await agentApi.post('/api/v1/encoding/recode', {
+        file: testFile,
+        from: 'utf-8',
+        to: 'gbk',
+      });
+      expect(recode.status, `recode utf-8→gbk should succeed: ${recode.error}`).toBe(200);
 
       const resp = await agentApi.post('/api/v1/encoding/detect', {
         file: testFile,

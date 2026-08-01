@@ -148,8 +148,9 @@ function Invoke-StaleCleanup {
             $staleList = $hits | Select-Object -Skip $skip
             foreach ($s in $staleList) {
                 $size = if ($s.PSIsContainer) {
-                    (Get-ChildItem $s.FullName -Recurse -File -ErrorAction SilentlyContinue |
-                     Measure-Object -Property Length -Sum).Sum
+                    $sum = (Get-ChildItem $s.FullName -Recurse -File -ErrorAction SilentlyContinue |
+                            Measure-Object -Property Length -Sum).Sum
+                    if ($null -eq $sum) { 0 } else { $sum }
                 } else { $s.Length }
                 Remove-Item $s.FullName -Recurse -Force -ErrorAction SilentlyContinue
                 if (Test-Path $s.FullName) {

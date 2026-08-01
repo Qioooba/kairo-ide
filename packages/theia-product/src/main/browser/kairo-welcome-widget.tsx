@@ -167,7 +167,10 @@ const KairoWelcome: React.FC<KairoWelcomeProps> = ({
     {
       testId: 'welcome-open-workspace',
       labelKey: 'widget.welcome.openWorkspace',
-      command: 'workspace:open',
+      // NOTE: Theia disables `workspace:open` on Windows/Electron.
+      // `workspace:openFolder` is always enabled and opens the native
+      // directory picker on desktop.
+      command: 'workspace:openFolder',
       failMessageKey: 'widget.welcome.openWorkspaceFailed',
       iconClass: 'window',
     },

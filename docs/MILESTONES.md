@@ -167,6 +167,17 @@ All Wave 0 gates pass. See [WAVE0_BASELINE.md](progress/WAVE0_BASELINE.md) for f
 | Phase Q Go coverage 80% (Session 27) | verified | 新增 13 个测试文件 + atomicfile 测试文件重命名 | 76.3% → 80.1%；atomicfile 47.7% → 75.8%；api 64.5% → 74.8% |
 | Phase Q E2E regression (Session 27) | verified | `standalone-smoke.spec.ts` + `docs/progress/phase-q-e2e-regression.md` | 5/5 通过；core-e2e 环境相关失败已记录（JDT LS bundle 缺失） |
 | Phase Q verification (Session 27) | verified | tsc + pnpm test + go test + build + browser build | 0 errors; 全量通过无 flaky; Go 全量通过; browser build 0 errors |
+| Phase Q E2E core-e2e 11/11 (Session Q) | verified | `core-e2e.spec.ts` 11 场景 | 11/11 通过（13.7m 零失败零重试）；9 条真实根因链修复：JDT LS 需 Java 21、javac GBK/双语归一化、构建状态双轨制与 List 排序、Search Center 注册缺失、Enter 吞事件、选择器重写、导入向导残留、Windows 文件锁 |
+| Phase R compliance widget i18n/CSS (Session 28) | verified | `kairo-compliance-widget.tsx`, `kairo-theme.css`, `en.ts`, `zh-CN.ts` | 全量重写：注入 KairoI18nService，~60 个 `widget.compliance.*` 键，emoji→codicon，tab/卡片/事件列表/徽章/行布局全类化（`.kairo-compliance-*`） |
+| Phase R keymap widget i18n/CSS (Session 28) | verified | `kairo-keymap-widget.tsx`, `kairo-theme.css`, `en.ts`, `zh-CN.ts` | 表头/按钮/冲突横幅/空状态本地化（~27 键）；搜索/表格/冲突区类化（`.kairo-keymap-*`）；MessageService 文案本地化 |
+| Phase R notification center i18n (Session 28) | verified | `kairo-notification-center.tsx`, `en.ts`, `zh-CN.ts` | 标题/空状态/dismiss 本地化；状态栏 tooltip 与 accessibilityInformation 本地化（`widget.notification.*`） |
+| Phase R bookmarks widget i18n/CSS (Session 28) | verified | `kairo-bookmark-widget.tsx`, `kairo-theme.css`, `en.ts`, `zh-CN.ts` | 文案 i18n（~9 键）；hover 迁移 CSS `.kairo-bookmark-row:hover`；工具栏/分组/行类化（`.kairo-bookmarks-*`） |
+| Phase R debug toolbar widget i18n/CSS (Session 28) | verified | `debug-toolbar-widget.tsx`, `kairo-theme.css`, `en.ts`, `zh-CN.ts` | 6 按钮 + 无会话/会话结束提示本地化（`widget.debug.toolbar.*`）；按钮类化（`.kairo-dtw-*`） |
+| Phase R debug watches 补漏 (Session 28) | verified | `debug-watches-idea.tsx`, `en.ts`, `zh-CN.ts` | 补 `removeAria/newWatch/removeAll/expressionPlaceholder` 4 处遗漏 title/placeholder |
+| Phase R verification (Session 28) | verified | tsc + pnpm test + i18n/ui-kit/theia-product/browser build + standalone-smoke | 0 errors; 全量通过（theia-product 65/65）; 各包 build 通过; standalone-smoke 5/5 |
+| Phase S E2E 全量回归 (Session 29) | verified | core-e2e 11 场景 + windows-e2e 13 场景 | core-e2e 11/11（13.6m 零失败零重试）; windows-e2e 13/13（1.5m，含 WIN-12）; standalone-smoke 5/5 |
+| Phase S 构建扫描排除修复 (Session 29) | verified | `services/build.go`, `build_test.go` | `collectAuthorizedJavaSources` 排除集补齐 `.kairo/.svn/.settings/.idea/build`，修复 E2E-04 损坏快照被编译导致的 E2E-06 构建失败 |
+| Phase S WIN-04 编码测试修复 (Session 29) | verified | `tests/e2e/windows-e2e.spec.ts` | Node Buffer 不支持 gbk → 改 agent recode API；特殊字符集剔除 GBK 外的 ♠♣♥♦/CJK 兼容字（Go 逐 rune 验证） |
 
 ## Backend API
 

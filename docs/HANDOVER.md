@@ -1,7 +1,7 @@
 # Kairo IDE 开发交接文档
 
 > 生成时间：2026-07-23  
-> 最后更新：2026-08-01（Session 28 — Phase R 剩余 widgets 全局收尾）  
+> 最后更新：2026-08-01（Session 29 — Phase S E2E 全量回归复跑与修复）  
 > 最新提交：见 `git log`（Session 22–23 已推送至 main）  
 > 分支：`main`  
 > 目标读者：接手开发的 AI 工程师 / 人类开发者  
@@ -9,7 +9,52 @@
 
 ---
 
-## Session 28 交付摘要 (2026-08-01) 🆕
+## Session 29 交付摘要 (2026-08-01) 🆕
+
+### Phase S — core-e2e / windows-e2e 全量回归复跑与修复
+
+**目标**：对 Session Q/R 的全部改动执行分层 E2E 回归（core-e2e 11 场景 + windows-e2e 13 场景 + standalone-smoke 5 场景），确认无退化，并修复回归中发现的产品级 / 测试级 bug。
+
+**回归结果**：
+
+| 套件 | 场景数 | 结果 |
+|------|--------|------|
+| core-e2e | 11 | ✅ 11/11 通过（13.6m，零失败零重试） |
+| windows-e2e | 13 | ✅ 13/13 通过（1.5m，含 WIN-12 环境变量场景） |
+| standalone-smoke | 5 | ✅ 5/5（Session 28 已验证） |
+
+**发现并修复的问题**：
+
+1. **产品级 bug：构建源码扫描未排除 `.kairo`（`runtime-agent/internal/services/build.go`）**
+   - 现象：E2E-06 构建返回 `failed`（此前 11/11 全绿）。构建输出含 `<workspace>\.kairo\local-history\snapshot-*.java:10: 错误: 需要class, interface或enum / INVALID_SYNTAX_HERE;`。
+   - 根因链：E2E-04（构建失败场景）故意写入 `INVALID_SYNTAX_HERE;` → local-history 保存损坏快照 → 后续场景 `collectAuthorizedJavaSources` 递归扫描整个 workspace，排除集缺失 `.kairo`（仅 `.git/.legacyflow/node_modules/target`）→ 损坏快照被当源码编译。
+   - 对比：`build/compiler.go` 的 `defaultExcludeDirs` 与 `deploy/plan.go` 均已含 `.kairo`，唯独生产构建路径遗漏。
+   - 修复：排除集补齐 `.kairo`/`.svn`/`.settings`/`.idea`/`build`；测试 `TestCollectAuthorizedJavaSourcesSkipsGeneratedAndMetadataTrees` 扩展 `.kairo/local-history` 用例。
+
+2. **测试启动约定：`AGENT_PORT` 必须与 agent 端口一致**
+   - 现象：core-e2e 首轮 11/11 全败，`agentApi.get('/api/v1/health')` 返回 status 0，页面 "Agent: disconnected"。
+   - 根因：fixtures.ts 默认 `AGENT_PORT=18300`，实际 agent 监听 18080。
+   - 修复：回归统一以 `AGENT_PORT=18080` + `KAIRO_AGENT_URL=http://127.0.0.1:18080` + `THEIA_URL=http://127.0.0.1:18301` 启动。
+
+3. **测试代码 bug：Node `Buffer` 不支持 `'gbk'` 编码（`tests/e2e/windows-e2e.spec.ts` WIN-04）**
+   - 现象：`Buffer.from(str, 'gbk')` 抛 `TypeError: Unknown encoding: gbk`。
+   - 修复：先写 UTF-8，再经 agent `POST /api/v1/encoding/recode`（utf-8→gbk）生成 GBK 文件。
+
+4. **字符集边界：`simplifiedchinese.GBK` 严格编码器不含扑克花色与 CJK 兼容字**
+   - 现象：特殊字符场景 recode 返回 500（`encoding: rune not supported by encoding`）。
+   - 验证（临时 Go 脚本逐个 rune 测）：♠♣♥♦（U+2660-2666）与 ㈱ 等 CJK 兼容字不在 GBK 映射；圈数字/星花/几何图形/数学符号/全角符号均收录。
+   - 修复：WIN-04 特殊字符集改为 `①②③④⑤⑥⑦⑧⑨⑩★☆▲△◇◆■□●○×÷℃§№→←↑↓`（附注释说明边界）。
+
+**已知问题**：无新增产品缺陷。TRAE 沙箱限制（访问 npm-cache/AppData 受限）为环境限制，不影响测试断言。
+
+**剩余待办**：
+- 提交 Session 29 变更并推送（由用户决定）。
+- 回归截图更新（`docs/screenshots/current-ui/`，需将脚本端口从 :3001 调整为 :18301）。
+- 后续可按 ROADMAP 规划推进 Wave 3.1 Debug 闭环端到端验证（需 JDK 6 + Tomcat 6 环境）。
+
+---
+
+## Session 28 交付摘要 (2026-08-01)
 
 ### Phase R — 剩余辅助 widgets 全局 i18n 接入与类化收尾
 
