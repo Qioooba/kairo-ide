@@ -97,7 +97,8 @@ const WatchRow: React.FC<{
     onEdit: () => void;
     onToggleChild: (child: WatchChild) => void;
     sessionService: KairoDebugSessionService;
-}> = ({ entry, isSelected, onSelect, onToggle, onRemove, onEdit, onToggleChild, sessionService }) => {
+    removeTitle: string;
+}> = ({ entry, isSelected, onSelect, onToggle, onRemove, onEdit, onToggleChild, sessionService, removeTitle }) => {
     const hasChildren = (entry.variablesReference ?? 0) > 0;
 
     const valueCls = entry.error ? 'error' : classifyValue(entry.result ?? '');
@@ -139,7 +140,7 @@ const WatchRow: React.FC<{
                 <button
                     className="kairo-debug-watch-remove"
                     onClick={(e) => { e.stopPropagation(); onRemove(); }}
-                    title="Remove"
+                    title={removeTitle}
                 >
                     ×
                 </button>
@@ -316,14 +317,14 @@ export const IDEAWatchesPanel: React.FC<IDEAWatchesPanelProps> = ({ sessionServi
                 <button
                     className="kairo-debug-watches-btn"
                     onClick={() => setAdding(true)}
-                    title="New Watch (Insert)"
+                    title={t('widget.debug.watch.newWatch')}
                 >
                     <span className="codicon codicon-add" style={{ fontSize: 14 }} />
                 </button>
                 <button
                     className="kairo-debug-watches-btn"
                     onClick={() => { setEntries([]); saveWatches([]); }}
-                    title="Remove All Watches"
+                    title={t('widget.debug.watch.removeAll')}
                 >
                     <span className="codicon codicon-clear-all" style={{ fontSize: 13 }} />
                 </button>
@@ -347,6 +348,7 @@ export const IDEAWatchesPanel: React.FC<IDEAWatchesPanelProps> = ({ sessionServi
                         onEdit={() => editWatch(idx)}
                         onToggleChild={toggleChild}
                         sessionService={sessionService}
+                        removeTitle={t('widget.debug.watch.removeAria')}
                     />
                 ))}
                 {adding && (
@@ -371,7 +373,7 @@ export const IDEAWatchesPanel: React.FC<IDEAWatchesPanelProps> = ({ sessionServi
                                     setAdding(false);
                                 }
                             }}
-                            placeholder="Expression..."
+                            placeholder={t('widget.debug.watch.expressionPlaceholder')}
                         />
                     </div>
                 )}

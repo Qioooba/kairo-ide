@@ -1,11 +1,59 @@
 # Kairo IDE 开发交接文档
 
 > 生成时间：2026-07-23  
-> 最后更新：2026-08-01（Session 26 — Phase P 全局审计与收尾）  
+> 最后更新：2026-08-01（Session 28 — Phase R 剩余 widgets 全局收尾）  
 > 最新提交：见 `git log`（Session 22–23 已推送至 main）  
 > 分支：`main`  
 > 目标读者：接手开发的 AI 工程师 / 人类开发者  
 > 本次会话模型：Kimi-K2.7-Code（TRAE）
+
+---
+
+## Session 28 交付摘要 (2026-08-01) 🆕
+
+### Phase R — 剩余辅助 widgets 全局 i18n 接入与类化收尾
+
+**目标**：全局审计确认「下一会话交接」中剩余辅助 widgets 的 i18n 接入与内联样式清零，实现全量 widgets 设计系统一致性。
+
+**全局扫描结论**：
+- 内联 `style={{...}}` 仅剩 11 处，全部为 CSS 变量动态值（`--kairo-*` 深度/进度/分数）或 virtual-list 动态高度——均为设计合理例外。
+- JSX 中无硬编码中文/英文文本节点（`[一-龥]` 与英文文本节点扫描均为 0）。
+- 37+ 个业务 widgets 均已接入 `KairoI18nService`；build-extension（custom-build-runner/maven-view）、theia-product 高频 widgets（test-results/problems/perf-dashboard）复核确认合规。
+
+**发现并修复的残留（6 个辅助 widgets 完全未接入 i18n）**：
+
+| 文件 | 问题 | 修复 |
+|------|------|------|
+| `kairo-compliance-widget.tsx` | 全量硬编码英文 + 大量内联样式 + emoji 错误图标 | 注入 i18n；全部文案走 `widget.compliance.*`（~60 键）；tab/卡片/事件列表/徽章/行布局全部类化（`.kairo-compliance-*`）；emoji→codicon |
+| `kairo-keymap-widget.tsx` | 硬编码表头/按钮/提示 + 内联表格样式 | 注入 i18n；`widget.keymap.*`（~27 键）；表格/搜索/冲突横幅类化（`.kairo-keymap-*`） |
+| `kairo-notification-center.tsx` | 硬编码标题/空状态/状态栏 tooltip | 注入 i18n；`widget.notification.*`（~9 键）；状态栏 tooltip 与 accessibilityInformation 本地化 |
+| `kairo-bookmark-widget.tsx` | 硬编码文案 + 内联样式 + JS hover 改背景 | 注入 i18n；`widget.bookmarks.*`（~9 键）；类化 + hover 迁移到 CSS |
+| `debug-toolbar-widget.tsx` | 硬编码按钮/标题/提示 | 注入 i18n；`widget.debug.toolbar.*`（6 按钮 + 2 提示）；按钮类化（`.kairo-dtw-*`） |
+| `debug-watches-idea.tsx` | 4 处遗漏硬编码 title/placeholder | 补 `widget.debug.watch.{removeAria,newWatch,removeAll,expressionPlaceholder}` |
+
+**i18n 键**：`packages/i18n/src/locales/en.ts` / `zh-CN.ts` 新增 `widget.compliance.*`（完整块）、`widget.keymap.*`、`widget.bookmarks.*`、`widget.notification.*` 扩展、`widget.debug.toolbar.*` 扩展、`widget.debug.watch.*` 补充；中英文键结构零差异。
+
+**CSS**：`packages/ui-kit/src/browser/kairo-theme.css` 追加 431 行 Phase R 类（`.kairo-compliance-*` / `.kairo-keymap-*` / `.kairo-notification-*` / `.kairo-bookmarks-*` / `.kairo-dtw-*`），并移除 `.kairo-compliance-card-title` 的 `text-transform: capitalize`（避免 "Sso" 缩写错误大写）。
+
+**验证**：
+
+| 检查项 | 结果 |
+|--------|------|
+| `pnpm -r --filter './packages/*' --filter './apps/*' exec tsc --noEmit` | ✅ 0 errors |
+| `pnpm -r test` | ✅ 全量通过（theia-product 65/65） |
+| `pnpm --filter @kairo/i18n build` | ✅ 通过（lib 产物同步） |
+| `pnpm --filter @kairo/ui-kit build` | ✅ 通过 |
+| `pnpm --filter @kairo/theia-product build` | ✅ 通过 |
+| `pnpm --filter @kairo/browser build` | ✅ 通过（需先终止残留 Theia 后端进程释放 conpty.node） |
+| standalone-smoke 浏览器回归 | ✅ 5/5 通过（3.1m，无视觉/功能退化） |
+
+**已知问题**：
+- 浏览器 build 前需检查并终止残留 Theia 后端进程（`apps/browser/lib/backend/main.js`）与 `ipc-bootstrap`，否则 `conpty.node` 被锁导致 `EBUSY`（同 Session 24 记录）。
+
+**剩余待办**：
+- 提交 Session 28 变更并推送（由用户决定）。
+- 回归截图更新（`docs/screenshots/current-ui/`）与 `13-run-menu.png` 选择器修复（历史遗留，低优先级）。
+- 后续可按 ROADMAP 规划推进 Wave 3.1 Debug 闭环端到端验证（需 JDK 6 + Tomcat 6 环境）。
 
 ---
 

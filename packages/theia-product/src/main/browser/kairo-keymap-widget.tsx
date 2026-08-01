@@ -19,6 +19,7 @@ import { KeybindingRegistry, KeybindingScope, ScopedKeybinding as _ScopedKeybind
 import { CommandRegistry } from '@theia/core/lib/common/command';
 import { MessageService } from '@theia/core/lib/common/message-service';
 import type { Keybinding as _Keybinding } from '@theia/core/lib/common/keybinding';
+import { KairoI18nService, type KairoI18nKey } from '@kairo/i18n';
 
 export const KAIRO_KEYMAP_FACTORY_ID = 'kairo-keymap';
 
@@ -37,11 +38,11 @@ interface ConflictGroup {
   entries: KeymapEntry[];
 }
 
-const SCOPE_LABELS: Record<KeybindingScope, string> = {
-  [KeybindingScope.DEFAULT]: 'Default',
-  [KeybindingScope.USER]: 'User',
-  [KeybindingScope.WORKSPACE]: 'Workspace',
-  [KeybindingScope.END]: 'END',
+const SCOPE_LABELS: Record<KeybindingScope, (i18n: KairoI18nService) => string> = {
+  [KeybindingScope.DEFAULT]: i18n => i18n.t('widget.keymap.scopeDefault' as KairoI18nKey),
+  [KeybindingScope.USER]: i18n => i18n.t('widget.keymap.scopeUser' as KairoI18nKey),
+  [KeybindingScope.WORKSPACE]: i18n => i18n.t('widget.keymap.scopeWorkspace' as KairoI18nKey),
+  [KeybindingScope.END]: () => 'END',
 };
 
 interface KeymapViewProps {
@@ -53,11 +54,20 @@ interface KeymapViewProps {
   onResetBinding: (entry: KeymapEntry) => void;
   onResetAll: (scope: KeybindingScope) => void;
   busy: boolean;
+  i18n: KairoI18nService;
 }
 
 const KeymapView: React.FC<KeymapViewProps> = ({
-  entries, conflicts, searchTerm, onSearchChange, onModifyBinding: _onModifyBinding, onResetBinding, onResetAll, busy,
+  entries, conflicts, searchTerm, onSearchChange, onModifyBinding: _onModifyBinding, onResetBinding, onResetAll, busy, i18n,
 }) => {
+  const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
+  const [, forceUpdate] = React.useReducer(x => x + 1, 0);
+
+  React.useEffect(() => {
+    const disposable = i18n.onDidChangeLanguage(() => forceUpdate());
+    return () => disposable.dispose();
+  }, [i18n]);
+
   const filtered = entries.filter(e => {
     if (!searchTerm) return true;
     const term = searchTerm.toLowerCase();
@@ -67,40 +77,39 @@ const KeymapView: React.FC<KeymapViewProps> = ({
   });
 
   return (
-    <div className="kairo-keymap-widget" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div className="kairo-keymap-widget">
       {/* Search bar */}
-      <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--theia-panel-border)' }}>
+      <div className="kairo-keymap-search">
         <input
-          className="theia-input"
+          className="theia-input kairo-keymap-search-input"
           type="search"
-          placeholder="Search keybindings by key or command..."
+          placeholder={t('widget.keymap.searchPlaceholder')}
           value={searchTerm}
           onChange={e => onSearchChange(e.target.value)}
-          aria-label="Search keybindings"
-          style={{ width: '100%', boxSizing: 'border-box' }}
+          aria-label={t('widget.keymap.searchAria')}
         />
       </div>
 
       {/* Toolbar */}
-      <div className="kairo-widget-toolbar" style={{ padding: '4px 12px', borderBottom: '1px solid var(--theia-panel-border)' }}>
+      <div className="kairo-widget-toolbar">
         <button className="theia-button secondary" disabled={busy} onClick={() => onResetAll(KeybindingScope.USER)}>
-          Reset User Keybindings
+          {t('widget.keymap.resetUser')}
         </button>
         <button className="theia-button secondary" disabled={busy} onClick={() => onResetAll(KeybindingScope.WORKSPACE)}>
-          Reset Workspace Keybindings
+          {t('widget.keymap.resetWorkspace')}
         </button>
-        <span style={{ marginLeft: 'auto', opacity: 0.7 }}>
-          {filtered.length} of {entries.length} bindings
+        <span className="kairo-keymap-count">
+          {t('widget.keymap.count', { filtered: filtered.length, total: entries.length })}
         </span>
       </div>
 
       {/* Conflicts */}
       {conflicts.length > 0 && (
-        <div style={{ padding: '8px 12px', background: 'var(--theia-editorWarning-foreground, #cca700)', color: 'var(--theia-editor-background, #1e1e1e)' }}>
-          <strong>⚠ Keybinding Conflicts ({conflicts.length})</strong>
+        <div className="kairo-keymap-conflicts">
+          <strong className="kairo-keymap-conflicts-title">{t('widget.keymap.conflicts', { count: conflicts.length })}</strong>
           {conflicts.map((c, i) => (
-            <div key={i} style={{ marginTop: 4, fontSize: '0.9em' }}>
-              <code>{c.keybinding}</code> is bound to:{' '}
+            <div key={i} className="kairo-keymap-conflicts-item">
+              <code>{c.keybinding}</code> {t('widget.keymap.boundTo')}{' '}
               {c.entries.map(e => e.commandLabel || e.command).join(', ')}
             </div>
           ))}
@@ -108,59 +117,52 @@ const KeymapView: React.FC<KeymapViewProps> = ({
       )}
 
       {/* Keybinding list */}
-      <div style={{ flex: 1, overflow: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse' }} aria-label="Keyboard shortcuts">
+      <div className="kairo-keymap-table-wrap">
+        <table className="kairo-keymap-table" aria-label={t('widget.keymap.tableAria')}>
           <thead>
-            <tr style={{ position: 'sticky', top: 0, background: 'var(--theia-editor-background, #1e1e1e)', borderBottom: '1px solid var(--theia-panel-border)' }}>
-              <th style={{ padding: '6px 12px', textAlign: 'left', width: '30%' }}>Command</th>
-              <th style={{ padding: '6px 12px', textAlign: 'left', width: '25%' }}>Keybinding</th>
-              <th style={{ padding: '6px 12px', textAlign: 'left', width: '15%' }}>Source</th>
-              <th style={{ padding: '6px 12px', textAlign: 'left', width: '15%' }}>When</th>
-              <th style={{ padding: '6px 12px', textAlign: 'right', width: '15%' }}>Actions</th>
+            <tr>
+              <th className="kairo-keymap-col-command">{t('widget.keymap.colCommand')}</th>
+              <th className="kairo-keymap-col-keybinding">{t('widget.keymap.colKeybinding')}</th>
+              <th className="kairo-keymap-col-source">{t('widget.keymap.colSource')}</th>
+              <th className="kairo-keymap-col-when">{t('widget.keymap.colWhen')}</th>
+              <th className="kairo-keymap-col-actions">{t('widget.keymap.colActions')}</th>
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 ? (
               <tr>
-                <td colSpan={5} style={{ padding: '24px', textAlign: 'center', opacity: 0.5 }}>
-                  {searchTerm ? 'No keybindings match your search.' : 'No keybindings registered.'}
+                <td colSpan={5} className="kairo-keymap-no-match">
+                  {searchTerm ? t('widget.keymap.noMatch') : t('widget.keymap.noBindings')}
                 </td>
               </tr>
             ) : (
               filtered.map((entry, idx) => (
-                <tr key={`${entry.command}-${entry.scope}-${idx}`} style={{ borderBottom: '1px solid var(--theia-panel-border)' }}>
-                  <td style={{ padding: '4px 12px' }}>
+                <tr key={`${entry.command}-${entry.scope}-${idx}`}>
+                  <td>
                     <div>{entry.commandLabel || entry.command}</div>
-                    <div style={{ fontSize: '0.8em', opacity: 0.6 }}>{entry.command}</div>
+                    <div className="kairo-keymap-command-label">{entry.command}</div>
                   </td>
-                  <td style={{ padding: '4px 12px' }}>
-                    <code style={{
-                      background: 'var(--theia-badge-background, #4d4d4d)',
-                      color: 'var(--theia-badge-foreground, #fff)',
-                      padding: '2px 6px',
-                      borderRadius: 3,
-                      fontSize: '0.9em',
-                    }}>
+                  <td>
+                    <code className="kairo-keymap-key">
                       {entry.keybinding || '—'}
                     </code>
                   </td>
-                  <td style={{ padding: '4px 12px', fontSize: '0.85em' }}>
+                  <td className="kairo-keymap-source">
                     {entry.scopeLabel}
-                    {entry.isDefault ? '' : ' (custom)'}
+                    {entry.isDefault ? '' : ` ${t('widget.keymap.custom')}`}
                   </td>
-                  <td style={{ padding: '4px 12px', fontSize: '0.85em', opacity: 0.7 }}>
+                  <td className="kairo-keymap-when">
                     {entry.when || '—'}
                   </td>
-                  <td style={{ padding: '4px 12px', textAlign: 'right' }}>
+                  <td className="kairo-keymap-col-actions">
                     {entry.scope !== KeybindingScope.DEFAULT && (
                       <button
                         className="theia-button secondary"
-                        style={{ fontSize: '0.8em', padding: '2px 8px' }}
                         disabled={busy}
                         onClick={() => onResetBinding(entry)}
-                        title="Reset to default"
+                        title={t('widget.keymap.resetAria')}
                       >
-                        Reset
+                        {t('widget.keymap.reset')}
                       </button>
                     )}
                   </td>
@@ -181,6 +183,7 @@ export class KairoKeymapWidget extends ReactWidget {
   @inject(KeybindingRegistry) protected readonly keybindingRegistry!: KeybindingRegistry;
   @inject(CommandRegistry) protected readonly commandRegistry!: CommandRegistry;
   @inject(MessageService) protected readonly messages!: MessageService;
+  @inject(KairoI18nService) protected readonly i18n!: KairoI18nService;
 
   protected searchTerm = '';
   protected busy = false;
@@ -188,11 +191,16 @@ export class KairoKeymapWidget extends ReactWidget {
   @postConstruct()
   protected init(): void {
     this.id = KAIRO_KEYMAP_FACTORY_ID;
-    this.title.label = 'Keyboard Shortcuts';
-    this.title.caption = 'Kairo IDE Keyboard Shortcuts';
+    this.title.label = this.i18n.t('widget.keymap.title' as KairoI18nKey);
+    this.title.caption = this.i18n.t('widget.keymap.caption' as KairoI18nKey);
     this.title.iconClass = 'codicon codicon-keyboard';
     this.title.closable = true;
     this.addClass('kairo-widget');
+    this.toDispose.push(this.i18n.onDidChangeLanguage(() => {
+      this.title.label = this.i18n.t('widget.keymap.title' as KairoI18nKey);
+      this.title.caption = this.i18n.t('widget.keymap.caption' as KairoI18nKey);
+      this.update();
+    }));
     this.update();
   }
 
@@ -212,6 +220,7 @@ export class KairoKeymapWidget extends ReactWidget {
         onResetBinding={entry => this.handleReset(entry)}
         onResetAll={scope => this.handleResetAll(scope)}
         busy={this.busy}
+        i18n={this.i18n}
       />
     );
   }
@@ -234,7 +243,7 @@ export class KairoKeymapWidget extends ReactWidget {
           keybinding: binding.keybinding,
           when: binding.when || '',
           scope,
-          scopeLabel: SCOPE_LABELS[scope] || 'Unknown',
+          scopeLabel: SCOPE_LABELS[scope] ? SCOPE_LABELS[scope](this.i18n) : 'Unknown',
           isDefault: scope === KeybindingScope.DEFAULT,
         });
       }
@@ -269,30 +278,32 @@ export class KairoKeymapWidget extends ReactWidget {
     // or programmatically via KeybindingRegistry.setKeymap().
     // For now, directing users to use the keybindings JSON editor
     // is the most reliable approach.
-    this.messages.info(
-      'To modify keybindings, open the keybindings JSON editor ' +
-      'via Preferences: Open Keyboard Shortcuts (JSON) in the command palette.',
-    );
+    this.messages.info(this.i18n.t('widget.keymap.modifyInfo' as KairoI18nKey));
   }
 
   protected handleReset(entry: KeymapEntry): void {
     try {
       this.keybindingRegistry.resetKeybindingsForScope(entry.scope);
-      this.messages.info(`Keybindings for ${entry.scopeLabel} scope have been reset to defaults.`);
+      this.messages.info(this.i18n.t('widget.keymap.resetInfo' as KairoI18nKey, { scope: entry.scopeLabel }));
       this.update();
     } catch (err) {
-      this.messages.error(`Failed to reset keybindings: ${err instanceof Error ? err.message : String(err)}`);
+      this.messages.error(this.i18n.t('widget.keymap.resetFailed' as KairoI18nKey, {
+        message: err instanceof Error ? err.message : String(err),
+      }));
     }
   }
 
   protected handleResetAll(scope: KeybindingScope): void {
-    const label = SCOPE_LABELS[scope] || 'Unknown';
+    const label = SCOPE_LABELS[scope] ? SCOPE_LABELS[scope](this.i18n) : 'Unknown';
     try {
       this.keybindingRegistry.resetKeybindingsForScope(scope);
-      this.messages.info(`${label} keybindings have been reset to defaults.`);
+      this.messages.info(this.i18n.t('widget.keymap.resetInfo' as KairoI18nKey, { scope: label }));
       this.update();
     } catch (err) {
-      this.messages.error(`Failed to reset ${label} keybindings: ${err instanceof Error ? err.message : String(err)}`);
+      this.messages.error(this.i18n.t('widget.keymap.resetAllFailed' as KairoI18nKey, {
+        scope: label,
+        message: err instanceof Error ? err.message : String(err),
+      }));
     }
   }
 }

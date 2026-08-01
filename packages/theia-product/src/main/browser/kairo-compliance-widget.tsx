@@ -3,12 +3,14 @@
  *
  * Provides RBAC role viewer, audit log viewer, data retention policy
  * status, and SSO configuration status in a single panel.
+ * All UI text is localized via KairoI18nService.
  */
 
 import * as React from 'react';
 import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import { ILogger } from '@theia/core/lib/common/logger';
+import { KairoI18nService } from '@kairo/i18n';
 import { KairoComplianceSuite } from './kairo-compliance';
 import { KairoAuditLog, type AuditLogEntry } from './kairo-audit-log';
 
@@ -65,9 +67,13 @@ interface CompliancePanelProps {
     complianceSuite: KairoComplianceSuite;
     auditLog: KairoAuditLog;
     logger: ILogger;
+    i18n: KairoI18nService;
 }
 
-const CompliancePanel: React.FC<CompliancePanelProps> = ({ complianceSuite, auditLog, logger }) => {
+const CompliancePanel: React.FC<CompliancePanelProps> = ({ complianceSuite, auditLog, logger, i18n }) => {
+    const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
+    const [, forceUpdate] = React.useReducer(x => x + 1, 0);
+
     const [state, setState] = React.useState<ComplianceState>({
         roles: [],
         auditEvents: [],
@@ -78,6 +84,11 @@ const CompliancePanel: React.FC<CompliancePanelProps> = ({ complianceSuite, audi
     });
     const [activeTab, setActiveTab] = React.useState<'roles' | 'audit' | 'retention' | 'sso'>('roles');
     const [auditFilter, setAuditFilter] = React.useState({ action: '', result: '', search: '' });
+
+    React.useEffect(() => {
+        const disposable = i18n.onDidChangeLanguage(() => forceUpdate());
+        return () => disposable.dispose();
+    }, [i18n]);
 
     const loadData = React.useCallback(() => {
         setState(prev => ({ ...prev, loading: true, error: null }));
@@ -172,68 +183,27 @@ const CompliancePanel: React.FC<CompliancePanelProps> = ({ complianceSuite, audi
     }, [state.auditEvents, auditFilter]);
 
     const resultBadge = (result: string) => {
-        const colors: Record<string, string> = {
-            ok: '#4caf50',
-            denied: '#ff9800',
-            error: '#f44336',
-        };
+        const variant = result === 'ok' ? 'ok' : result === 'denied' ? 'denied' : result === 'error' ? 'error' : 'neutral';
         return (
-            <span style={{
-                display: 'inline-block',
-                padding: '1px 6px',
-                borderRadius: '3px',
-                fontSize: '10px',
-                fontWeight: 600,
-                color: '#fff',
-                backgroundColor: colors[result] || '#999',
-                textTransform: 'uppercase',
-            }}>
+            <span className={`kairo-compliance-badge kairo-compliance-badge-${variant}`}>
                 {result}
             </span>
         );
     };
 
-    const tabStyle = (tab: string): React.CSSProperties => ({
-        padding: '6px 16px',
-        cursor: 'pointer',
-        borderBottom: activeTab === tab ? '2px solid var(--theia-focusBorder)' : '2px solid transparent',
-        color: activeTab === tab ? 'var(--theia-focusBorder)' : 'var(--theia-descriptionForeground)',
-        fontWeight: activeTab === tab ? 600 : 400,
-        fontSize: '12px',
-        background: 'none',
-        border: 'none',
-    });
-
     // Loading state — skeleton placeholder
     if (state.loading) {
         return (
-            <div className="kairo-compliance-widget" role="status" aria-label="Loading compliance data" style={{ padding: '16px' }}>
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
-                    <div style={{
-                        width: '24px',
-                        height: '24px',
-                        border: '3px solid var(--theia-dropdown-border)',
-                        borderTopColor: 'var(--theia-focusBorder)',
-                        borderRadius: '50%',
-                        animation: 'kairo-spin 0.8s linear infinite',
-                    }} />
-                    <p style={{ color: 'var(--theia-descriptionForeground)', fontSize: '13px', margin: 0 }}>
-                        Loading compliance data...
-                    </p>
-                    <div style={{ width: '80%', maxWidth: '300px' }}>
+            <div className="kairo-compliance-widget" role="status" aria-label={t('widget.compliance.loadingAria')}>
+                <div className="kairo-compliance-loading">
+                    <div className="kairo-compliance-spinner" aria-hidden="true" />
+                    <div>{t('widget.compliance.loading')}</div>
+                    <div className="kairo-compliance-skeleton">
                         {[0, 1, 2].map(i => (
-                            <div key={i} style={{
-                                height: '12px',
-                                backgroundColor: 'var(--theia-dropdown-border)',
-                                borderRadius: '3px',
-                                marginBottom: '8px',
-                                opacity: 0.5 - i * 0.15,
-                                width: `${90 - i * 15}%`,
-                            }} />
+                            <div key={i} className="kairo-compliance-skeleton-bar" style={{ opacity: 0.5 - i * 0.15, width: `${90 - i * 15}%` }} />
                         ))}
                     </div>
                 </div>
-                <style>{`@keyframes kairo-spin { to { transform: rotate(360deg); } }`}</style>
             </div>
         );
     }
@@ -243,44 +213,33 @@ const CompliancePanel: React.FC<CompliancePanelProps> = ({ complianceSuite, audi
         const isTimeout = state.error.toLowerCase().includes('timeout') || state.error.toLowerCase().includes('timed out');
         const isPermission = state.error.toLowerCase().includes('permission') || state.error.toLowerCase().includes('denied') || state.error.toLowerCase().includes('unauthorized');
         const isConfig = state.error.toLowerCase().includes('config') || state.error.toLowerCase().includes('setting');
-        const errorIcon = isTimeout ? '⏱' : isPermission ? '🔒' : isConfig ? '⚙' : '⚠';
-        const errorTitle = isTimeout ? 'Request Timed Out' : isPermission ? 'Permission Denied' : isConfig ? 'Configuration Error' : 'Error loading compliance data';
+        const errorIcon = isTimeout ? 'codicon-warning' : isPermission ? 'codicon-lock' : isConfig ? 'codicon-gear' : 'codicon-error';
+        const errorTitle = isTimeout ? t('widget.compliance.error.timeout')
+            : isPermission ? t('widget.compliance.error.permission')
+            : isConfig ? t('widget.compliance.error.config')
+            : t('widget.compliance.error.generic');
         return (
-            <div className="kairo-compliance-widget" role="alert" aria-live="assertive" style={{ padding: '16px' }}>
-                <div style={{
-                    padding: '12px',
-                    backgroundColor: 'rgba(244,67,54,0.1)',
-                    border: '1px solid rgba(244,67,54,0.3)',
-                    borderRadius: '4px',
-                    color: 'var(--theia-errorForeground)',
-                    fontSize: '13px',
-                }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                        <span style={{ fontSize: '18px' }} aria-hidden="true">{errorIcon}</span>
+            <div className="kairo-compliance-widget" role="alert" aria-live="assertive">
+                <div className="kairo-error-banner">
+                    <span className={`codicon ${errorIcon}`} aria-hidden="true" />
+                    <div>
                         <strong>{errorTitle}</strong>
+                        <div className="kairo-error-banner-detail">{state.error}</div>
+                        <button
+                            className="theia-button"
+                            onClick={loadData}
+                            title={t('widget.compliance.retryAria')}
+                            aria-label={t('widget.compliance.retryAria')}
+                        >
+                            {t('widget.compliance.retry')}
+                        </button>
                     </div>
-                    <p style={{ margin: '4px 0 0 0', fontSize: '12px' }}>{state.error}</p>
-                    <button
-                        className="theia-button"
-                        onClick={loadData}
-                        title="Retry loading compliance data"
-                        aria-label="Retry loading compliance data"
-                        style={{ marginTop: '8px', fontSize: '11px', padding: '2px 12px' }}
-                    >
-                        Retry
-                    </button>
                 </div>
             </div>
         );
     }
 
     const tabs = ['roles', 'audit', 'retention', 'sso'] as const;
-    const tabLabels: Record<string, string> = {
-        roles: 'RBAC Roles',
-        audit: 'Audit Log',
-        retention: 'Retention',
-        sso: 'SSO',
-    };
 
     const handleTabKeyDown = (e: React.KeyboardEvent, tab: string) => {
         const idx = tabs.indexOf(tab as typeof tabs[number]);
@@ -297,14 +256,14 @@ const CompliancePanel: React.FC<CompliancePanelProps> = ({ complianceSuite, audi
     };
 
     return (
-        <div className="kairo-compliance-widget" role="region" aria-label="Enterprise Compliance" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+        <div className="kairo-compliance-widget" role="region" aria-label={t('widget.compliance.caption')}>
             {/* Header */}
-            <div className="kairo-widget-header" style={{ padding: '8px 12px', borderBottom: '1px solid var(--theia-panel-border)' }}>
-                <span style={{ fontWeight: 600, fontSize: '13px' }}>Enterprise Compliance</span>
+            <div className="kairo-widget-header">
+                <span className="kairo-widget-title">{t('widget.compliance.title')}</span>
             </div>
 
             {/* Tabs */}
-            <div role="tablist" aria-label="Compliance panel sections" style={{ display: 'flex', borderBottom: '1px solid var(--theia-panel-border)', padding: '0 8px' }}>
+            <div role="tablist" aria-label="Compliance panel sections" className="kairo-compliance-tabs">
                 {tabs.map(tab => (
                     <button
                         key={tab}
@@ -312,22 +271,22 @@ const CompliancePanel: React.FC<CompliancePanelProps> = ({ complianceSuite, audi
                         aria-selected={activeTab === tab}
                         aria-controls={`kairo-compliance-tabpanel-${tab}`}
                         id={`kairo-compliance-tab-${tab}`}
-                        style={tabStyle(tab)}
+                        className={`kairo-compliance-tab${activeTab === tab ? ' kairo-compliance-tab-active' : ''}`}
                         onClick={() => setActiveTab(tab)}
                         onKeyDown={e => handleTabKeyDown(e, tab)}
                         tabIndex={activeTab === tab ? 0 : -1}
-                        title={`${tabLabels[tab]} (${tab === 'roles' ? 'View role-based access control' : tab === 'audit' ? 'View audit log entries' : tab === 'retention' ? 'View data retention policies' : 'View SSO configuration'})`}
+                        title={`${t(`widget.compliance.tabs.${tab}`)} (${t(`widget.compliance.tabs.${tab}Hint`)})`}
                     >
-                        {tabLabels[tab]}
+                        {t(`widget.compliance.tabs.${tab}`)}
                     </button>
                 ))}
             </div>
 
             {/* Content */}
-            <div style={{ flex: 1, overflow: 'auto', padding: '12px' }}>
+            <div className="kairo-compliance-content">
                 {activeTab === 'roles' && (
                     <div role="tabpanel" id="kairo-compliance-tabpanel-roles" aria-labelledby="kairo-compliance-tab-roles">
-                        <RolesTab roles={state.roles} />
+                        <RolesTab roles={state.roles} i18n={i18n} />
                     </div>
                 )}
                 {activeTab === 'audit' && (
@@ -338,17 +297,18 @@ const CompliancePanel: React.FC<CompliancePanelProps> = ({ complianceSuite, audi
                             onFilterChange={setAuditFilter}
                             resultBadge={resultBadge}
                             onRefresh={loadData}
+                            i18n={i18n}
                         />
                     </div>
                 )}
                 {activeTab === 'retention' && (
                     <div role="tabpanel" id="kairo-compliance-tabpanel-retention" aria-labelledby="kairo-compliance-tab-retention">
-                        <RetentionTab policies={state.retentionPolicies} />
+                        <RetentionTab policies={state.retentionPolicies} i18n={i18n} />
                     </div>
                 )}
                 {activeTab === 'sso' && (
                     <div role="tabpanel" id="kairo-compliance-tabpanel-sso" aria-labelledby="kairo-compliance-tab-sso">
-                        <SSOTab ssoStatus={state.ssoStatus} />
+                        <SSOTab ssoStatus={state.ssoStatus} i18n={i18n} />
                     </div>
                 )}
             </div>
@@ -362,13 +322,15 @@ const CompliancePanel: React.FC<CompliancePanelProps> = ({ complianceSuite, audi
 
 interface RolesTabProps {
     roles: UserRole[];
+    i18n: KairoI18nService;
 }
 
-const RolesTab: React.FC<RolesTabProps> = ({ roles }) => {
+const RolesTab: React.FC<RolesTabProps> = ({ roles, i18n }) => {
+    const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
     if (roles.length === 0) {
         return (
-            <div role="status" aria-label="No roles" style={{ textAlign: 'center', padding: '20px', color: 'var(--theia-descriptionForeground)', fontSize: '13px' }}>
-                No roles configured. Configure RBAC roles to manage access control.
+            <div className="kairo-compliance-empty" role="status" aria-label={t('widget.compliance.roles.empty')}>
+                {t('widget.compliance.roles.empty')}
             </div>
         );
     }
@@ -376,29 +338,16 @@ const RolesTab: React.FC<RolesTabProps> = ({ roles }) => {
     return (
         <div role="list" aria-label="Role list">
             {roles.map(role => (
-                <div key={role.name} role="listitem" style={{
-                    marginBottom: '12px',
-                    padding: '10px 12px',
-                    backgroundColor: 'var(--theia-editor-background)',
-                    borderRadius: '4px',
-                    border: '1px solid var(--theia-dropdown-border)',
-                }}>
-                    <div style={{ fontWeight: 600, fontSize: '13px', textTransform: 'capitalize', marginBottom: '6px' }}
-                        title={`Role: ${role.name} — ${role.permissions.length} permissions`}>
+                <div key={role.name} role="listitem" className="kairo-compliance-card">
+                    <div className="kairo-compliance-card-title"
+                        title={t('widget.compliance.roles.permissionsCount', { name: role.name, count: role.permissions.length })}>
                         {role.name}
                     </div>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                    <div className="kairo-compliance-perms">
                         {role.permissions.map(perm => (
-                            <span key={perm} style={{
-                                display: 'inline-block',
-                                padding: '2px 8px',
-                                borderRadius: '3px',
-                                fontSize: '11px',
-                                backgroundColor: 'var(--theia-badge-background)',
-                                color: 'var(--theia-badge-foreground)',
-                            }}
-                                title={`Permission: ${perm}`}
-                                aria-label={`Permission: ${perm}`}
+                            <span key={perm} className="kairo-compliance-perm"
+                                title={t('widget.compliance.roles.permission', { name: perm })}
+                                aria-label={t('widget.compliance.roles.permission', { name: perm })}
                             >
                                 {perm}
                             </span>
@@ -416,46 +365,32 @@ interface AuditTabProps {
     onFilterChange: (f: { action: string; result: string; search: string }) => void;
     resultBadge: (result: string) => React.ReactNode;
     onRefresh: () => void;
+    i18n: KairoI18nService;
 }
 
-const AuditTab: React.FC<AuditTabProps> = ({ events, filter, onFilterChange, resultBadge, onRefresh }) => {
+const AuditTab: React.FC<AuditTabProps> = ({ events, filter, onFilterChange, resultBadge, onRefresh, i18n }) => {
+    const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
     return (
         <div role="group" aria-label="Audit log">
             {/* Filter bar */}
-            <div style={{ display: 'flex', gap: '8px', marginBottom: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
+            <div className="kairo-compliance-toolbar">
                 <input
                     type="text"
-                    placeholder="Search..."
+                    className="kairo-compliance-field kairo-compliance-search"
+                    placeholder={t('widget.compliance.audit.searchPlaceholder')}
                     value={filter.search}
                     onChange={e => onFilterChange({ ...filter, search: e.target.value })}
-                    title="Search audit events by action, target, or user"
-                    aria-label="Search audit events"
-                    style={{
-                        padding: '4px 8px',
-                        fontSize: '12px',
-                        backgroundColor: 'var(--theia-input-background)',
-                        color: 'var(--theia-input-foreground)',
-                        border: '1px solid var(--theia-input-border)',
-                        borderRadius: '2px',
-                        flex: '1 1 120px',
-                        minWidth: '100px',
-                    }}
+                    title={t('widget.compliance.audit.searchHint')}
+                    aria-label={t('widget.compliance.audit.searchAria')}
                 />
                 <select
+                    className="kairo-compliance-field"
                     value={filter.action}
                     onChange={e => onFilterChange({ ...filter, action: e.target.value })}
-                    title="Filter by action category"
-                    aria-label="Filter by action category"
-                    style={{
-                        padding: '4px 8px',
-                        fontSize: '12px',
-                        backgroundColor: 'var(--theia-input-background)',
-                        color: 'var(--theia-input-foreground)',
-                        border: '1px solid var(--theia-input-border)',
-                        borderRadius: '2px',
-                    }}
+                    title={t('widget.compliance.audit.filterAction')}
+                    aria-label={t('widget.compliance.audit.filterAction')}
                 >
-                    <option value="">All Actions</option>
+                    <option value="">{t('widget.compliance.audit.allActions')}</option>
                     <option value="file">File</option>
                     <option value="build">Build</option>
                     <option value="debug">Debug</option>
@@ -464,20 +399,13 @@ const AuditTab: React.FC<AuditTabProps> = ({ events, filter, onFilterChange, res
                     <option value="sql">SQL</option>
                 </select>
                 <select
+                    className="kairo-compliance-field"
                     value={filter.result}
                     onChange={e => onFilterChange({ ...filter, result: e.target.value })}
-                    title="Filter by result"
-                    aria-label="Filter by result"
-                    style={{
-                        padding: '4px 8px',
-                        fontSize: '12px',
-                        backgroundColor: 'var(--theia-input-background)',
-                        color: 'var(--theia-input-foreground)',
-                        border: '1px solid var(--theia-input-border)',
-                        borderRadius: '2px',
-                    }}
+                    title={t('widget.compliance.audit.filterResult')}
+                    aria-label={t('widget.compliance.audit.filterResult')}
                 >
-                    <option value="">All Results</option>
+                    <option value="">{t('widget.compliance.audit.allResults')}</option>
                     <option value="ok">OK</option>
                     <option value="denied">Denied</option>
                     <option value="error">Error</option>
@@ -485,47 +413,38 @@ const AuditTab: React.FC<AuditTabProps> = ({ events, filter, onFilterChange, res
                 <button
                     className="theia-button secondary"
                     onClick={onRefresh}
-                    title="Refresh audit log"
-                    aria-label="Refresh audit log"
-                    style={{ fontSize: '11px', padding: '3px 10px' }}
+                    title={t('widget.compliance.audit.refreshAria')}
+                    aria-label={t('widget.compliance.audit.refreshAria')}
                 >
-                    Refresh
+                    {t('widget.compliance.audit.refresh')}
                 </button>
             </div>
 
             {/* Empty state */}
             {events.length === 0 && (
-                <div role="status" aria-label="No audit events" style={{ textAlign: 'center', padding: '20px', color: 'var(--theia-descriptionForeground)', fontSize: '13px' }}>
-                    No audit events found{filter.action || filter.result || filter.search ? ' matching current filters' : ''}.
+                <div className="kairo-compliance-empty" role="status"
+                    aria-label={filter.action || filter.result || filter.search ? t('widget.compliance.audit.emptyFiltered') : t('widget.compliance.audit.empty')}>
+                    {filter.action || filter.result || filter.search ? t('widget.compliance.audit.emptyFiltered') : t('widget.compliance.audit.empty')}
                 </div>
             )}
 
             {/* Audit event list */}
             {events.length > 0 && events.map((event, idx) => (
-                <div key={`${event.ts}-${idx}`} style={{
-                    padding: '6px 10px',
-                    borderBottom: '1px solid var(--theia-sideBarSectionHeader-border)',
-                    fontSize: '12px',
-                    display: 'flex',
-                    alignItems: 'flex-start',
-                    gap: '8px',
-                }}
+                <div key={`${event.ts}-${idx}`} className="kairo-compliance-event"
                     role="listitem"
-                    aria-label={`Audit event: ${event.action} by ${event.userId} — ${event.result}`}
+                    aria-label={t('widget.compliance.audit.eventAria', { action: event.action, user: event.userId, result: event.result })}
                 >
-                    <div style={{ flexShrink: 0, marginTop: '1px' }}>
-                        {resultBadge(event.result)}
-                    </div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontWeight: 500 }} title={`Action: ${event.action}`}>
+                    {resultBadge(event.result)}
+                    <div className="kairo-compliance-event-main">
+                        <div className="kairo-compliance-event-action" title={t('widget.compliance.audit.action', { action: event.action })}>
                             {event.action}
                         </div>
-                        <div style={{ color: 'var(--theia-descriptionForeground)', fontSize: '11px', marginTop: '2px' }}
-                            title={`Target: ${event.target}`}>
+                        <div className="kairo-compliance-event-meta"
+                            title={t('widget.compliance.audit.target', { target: event.target })}>
                             {event.target}
                         </div>
-                        <div style={{ color: 'var(--theia-descriptionForeground)', fontSize: '10px', marginTop: '1px' }}
-                            title={`Timestamp: ${event.ts} · User: ${event.userId}`}>
+                        <div className="kairo-compliance-event-meta"
+                            title={t('widget.compliance.audit.timestamp', { ts: event.ts, user: event.userId })}>
                             {event.ts} · {event.userId}
                         </div>
                     </div>
@@ -537,13 +456,15 @@ const AuditTab: React.FC<AuditTabProps> = ({ events, filter, onFilterChange, res
 
 interface RetentionTabProps {
     policies: RetentionPolicy[];
+    i18n: KairoI18nService;
 }
 
-const RetentionTab: React.FC<RetentionTabProps> = ({ policies }) => {
+const RetentionTab: React.FC<RetentionTabProps> = ({ policies, i18n }) => {
+    const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
     if (policies.length === 0) {
         return (
-            <div role="status" aria-label="No policies" style={{ textAlign: 'center', padding: '20px', color: 'var(--theia-descriptionForeground)', fontSize: '13px' }}>
-                No retention policies configured. Configure retention policies to manage data lifecycle.
+            <div className="kairo-compliance-empty" role="status" aria-label={t('widget.compliance.retention.empty')}>
+                {t('widget.compliance.retention.empty')}
             </div>
         );
     }
@@ -551,34 +472,30 @@ const RetentionTab: React.FC<RetentionTabProps> = ({ policies }) => {
     return (
         <div role="list" aria-label="Retention policy list">
             {policies.map(policy => (
-                <div key={policy.name} role="listitem" style={{
-                    marginBottom: '12px',
-                    padding: '10px 12px',
-                    backgroundColor: 'var(--theia-editor-background)',
-                    borderRadius: '4px',
-                    border: '1px solid var(--theia-dropdown-border)',
-                }}>
-                    <div style={{ fontWeight: 600, fontSize: '13px', marginBottom: '4px' }}
-                        title={`Policy: ${policy.name}`}>
+                <div key={policy.name} role="listitem" className="kairo-compliance-card">
+                    <div className="kairo-compliance-card-title"
+                        title={t('widget.compliance.retention.policy', { name: policy.name })}>
                         {policy.name}
                     </div>
-                    <div style={{ fontSize: '12px', color: 'var(--theia-descriptionForeground)' }}>
-                        <div title={`Resource type: ${policy.resourceType}`}>Resource Type: {policy.resourceType}</div>
-                        <div title={`Max age: ${policy.maxAge}`}>Max Age: {policy.maxAge}</div>
-                        <div title={`Max size: ${policy.maxSize}`}>Max Size: {policy.maxSize}</div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginTop: '2px' }}>
-                            Auto Cleanup:
-                            <span style={{
-                                display: 'inline-block',
-                                width: '8px',
-                                height: '8px',
-                                borderRadius: '50%',
-                                backgroundColor: policy.autoCleanup ? '#4caf50' : '#9e9e9e',
-                            }}
-                                title={policy.autoCleanup ? 'Auto cleanup enabled' : 'Auto cleanup disabled'}
-                                aria-label={policy.autoCleanup ? 'Auto cleanup enabled' : 'Auto cleanup disabled'}
-                            />
-                            {policy.autoCleanup ? 'Enabled' : 'Disabled'}
+                    <div>
+                        <div className="kairo-compliance-row" title={t('widget.compliance.retention.resourceType', { value: policy.resourceType })}>
+                            {t('widget.compliance.retention.resourceType', { value: policy.resourceType })}
+                        </div>
+                        <div className="kairo-compliance-row" title={t('widget.compliance.retention.maxAge', { value: policy.maxAge })}>
+                            {t('widget.compliance.retention.maxAge', { value: policy.maxAge })}
+                        </div>
+                        <div className="kairo-compliance-row" title={t('widget.compliance.retention.maxSize', { value: policy.maxSize })}>
+                            {t('widget.compliance.retention.maxSize', { value: policy.maxSize })}
+                        </div>
+                        <div className="kairo-compliance-row">
+                            <span>{t('widget.compliance.retention.autoCleanup')}</span>
+                            <span className={`kairo-compliance-row-value ${policy.autoCleanup ? 'kairo-compliance-row-value-success' : 'kairo-compliance-row-value-neutral'}`}>
+                                <span className={`kairo-compliance-status-dot ${policy.autoCleanup ? 'kairo-compliance-status-on' : 'kairo-compliance-status-off'}`}
+                                    title={policy.autoCleanup ? t('widget.compliance.retention.cleanupOn') : t('widget.compliance.retention.cleanupOff')}
+                                    aria-label={policy.autoCleanup ? t('widget.compliance.retention.cleanupOn') : t('widget.compliance.retention.cleanupOff')}
+                                />
+                                {policy.autoCleanup ? t('widget.compliance.retention.enabled') : t('widget.compliance.retention.disabled')}
+                            </span>
                         </div>
                     </div>
                 </div>
@@ -589,55 +506,42 @@ const RetentionTab: React.FC<RetentionTabProps> = ({ policies }) => {
 
 interface SSOTabProps {
     ssoStatus: SSOStatus;
+    i18n: KairoI18nService;
 }
 
-const SSOTab: React.FC<SSOTabProps> = ({ ssoStatus }) => {
+const SSOTab: React.FC<SSOTabProps> = ({ ssoStatus, i18n }) => {
+    const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
     return (
         <div role="group" aria-label="SSO configuration">
-            <div style={{
-                padding: '10px 12px',
-                backgroundColor: 'var(--theia-editor-background)',
-                borderRadius: '4px',
-                border: '1px solid var(--theia-dropdown-border)',
-            }}>
-                <div style={{ fontWeight: 600, fontSize: '13px', marginBottom: '8px' }}>
-                    SSO Configuration
+            <div className="kairo-compliance-card">
+                <div className="kairo-compliance-card-title">
+                    {t('widget.compliance.sso.configTitle')}
                 </div>
-                <div style={{ fontSize: '12px', color: 'var(--theia-descriptionForeground)' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}
-                        title={`SSO is ${ssoStatus.enabled ? 'enabled' : 'disabled'}`}>
-                        <span>Status:</span>
-                        <span style={{
-                            fontWeight: 600,
-                            color: ssoStatus.enabled ? '#4caf50' : '#9e9e9e',
-                        }}
-                            aria-label={`SSO is ${ssoStatus.enabled ? 'enabled' : 'disabled'}`}
-                        >
-                            {ssoStatus.enabled ? 'Enabled' : 'Disabled'}
+                <div>
+                    <div className="kairo-compliance-row"
+                        title={ssoStatus.enabled ? t('widget.compliance.sso.stateOn') : t('widget.compliance.sso.stateOff')}>
+                        <span>{t('widget.compliance.sso.status')}</span>
+                        <span className={`kairo-compliance-row-value ${ssoStatus.enabled ? 'kairo-compliance-row-value-success' : 'kairo-compliance-row-value-neutral'}`}
+                            aria-label={ssoStatus.enabled ? t('widget.compliance.sso.stateOn') : t('widget.compliance.sso.stateOff')}>
+                            {ssoStatus.enabled ? t('widget.compliance.sso.enabled') : t('widget.compliance.sso.disabled')}
                         </span>
                     </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}
-                        title={`Provider: ${ssoStatus.provider.toUpperCase()}`}>
-                        <span>Provider:</span>
-                        <span style={{ fontWeight: 600, textTransform: 'uppercase' }}>
-                            {ssoStatus.provider}
-                        </span>
+                    <div className="kairo-compliance-row"
+                        title={t('widget.compliance.sso.providerValue', { value: ssoStatus.provider.toUpperCase() })}>
+                        <span>{t('widget.compliance.sso.provider')}</span>
+                        <span className="kairo-compliance-row-value">{ssoStatus.provider}</span>
                     </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}
-                        title={`Issuer: ${ssoStatus.issuer || 'N/A'}`}>
-                        <span>Issuer:</span>
-                        <span>{ssoStatus.issuer || 'N/A'}</span>
+                    <div className="kairo-compliance-row"
+                        title={t('widget.compliance.sso.issuerValue', { value: ssoStatus.issuer || t('widget.compliance.sso.na') })}>
+                        <span>{t('widget.compliance.sso.issuer')}</span>
+                        <span>{ssoStatus.issuer || t('widget.compliance.sso.na')}</span>
                     </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}
-                        title={`Configured: ${ssoStatus.configured ? 'Yes' : 'No'}`}>
-                        <span>Configured:</span>
-                        <span style={{
-                            fontWeight: 600,
-                            color: ssoStatus.configured ? '#4caf50' : '#f44336',
-                        }}
-                            aria-label={`SSO ${ssoStatus.configured ? 'is' : 'is not'} configured`}
-                        >
-                            {ssoStatus.configured ? 'Yes' : 'No'}
+                    <div className="kairo-compliance-row"
+                        title={ssoStatus.configured ? t('widget.compliance.sso.configuredOn') : t('widget.compliance.sso.configuredOff')}>
+                        <span>{t('widget.compliance.sso.configured')}</span>
+                        <span className={`kairo-compliance-row-value ${ssoStatus.configured ? 'kairo-compliance-row-value-success' : 'kairo-compliance-row-value-danger'}`}
+                            aria-label={ssoStatus.configured ? t('widget.compliance.sso.configuredOn') : t('widget.compliance.sso.configuredOff')}>
+                            {ssoStatus.configured ? t('widget.compliance.sso.yes') : t('widget.compliance.sso.no')}
                         </span>
                     </div>
                 </div>
@@ -664,11 +568,19 @@ export class KairoComplianceWidget extends ReactWidget {
     @inject(ILogger)
     protected readonly logger!: ILogger;
 
+    @inject(KairoI18nService)
+    protected readonly i18n!: KairoI18nService;
+
     @postConstruct()
     protected init(): void {
         this.id = KairoComplianceWidget.ID;
-        this.title.label = KairoComplianceWidget.LABEL;
-        this.title.caption = 'Kairo Enterprise Compliance Panel';
+        this.title.label = this.i18n.t('widget.compliance.title' as any);
+        this.title.caption = this.i18n.t('widget.compliance.caption' as any);
+        this.toDispose.push(this.i18n.onDidChangeLanguage(() => {
+            this.title.label = this.i18n.t('widget.compliance.title' as any);
+            this.title.caption = this.i18n.t('widget.compliance.caption' as any);
+            this.update();
+        }));
         this.title.closable = true;
         this.addClass('kairo-widget');
         this.update();
@@ -679,6 +591,7 @@ export class KairoComplianceWidget extends ReactWidget {
             complianceSuite: this.complianceSuite,
             auditLog: this.auditLog,
             logger: this.logger,
+            i18n: this.i18n,
         });
     }
 }

@@ -23,6 +23,7 @@ import {
 import { Emitter, Event } from '@theia/core/lib/common/event';
 import { Command, CommandContribution, CommandRegistry, Disposable } from '@theia/core/lib/common';
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
+import { KairoI18nService, type KairoI18nKey } from '@kairo/i18n';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                               */
@@ -110,6 +111,7 @@ export class KairoNotificationServiceImpl {
 interface NotificationCenterProps {
   service: KairoNotificationServiceImpl;
   widgetManager: WidgetManager;
+  i18n: KairoI18nService;
 }
 
 function categoryIcon(category: NotificationCategory): string {
@@ -136,7 +138,15 @@ function formatTime(ts: number): string {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
-const NotificationCenter: React.FC<NotificationCenterProps> = ({ service }) => {
+const NotificationCenter: React.FC<NotificationCenterProps> = ({ service, i18n }) => {
+  const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
+  const [, forceUpdate] = React.useReducer(x => x + 1, 0);
+
+  React.useEffect(() => {
+    const disposable = i18n.onDidChangeLanguage(() => forceUpdate());
+    return () => disposable.dispose();
+  }, [i18n]);
+
   const [history, setHistory] = React.useState<ReadonlyArray<KairoNotification>>([]);
   const [expanded, setExpanded] = React.useState<Set<string>>(new Set());
 
@@ -162,22 +172,22 @@ const NotificationCenter: React.FC<NotificationCenterProps> = ({ service }) => {
   return (
     <div className="kairo-notification-center">
       <div className="kairo-notification-header">
-        <span className="kairo-notification-title">Notifications</span>
+        <span className="kairo-notification-title">{t('widget.notification.title')}</span>
         <div className="kairo-notification-header-actions">
           {history.length > 0 && (
             <button
               className="theia-button kairo-notification-clear-all"
               onClick={() => service.clearAll()}
-              title="Clear all notifications"
+              title={t('widget.notification.clearAllAria')}
             >
-              Clear All
+              {t('widget.notification.clearAll')}
             </button>
           )}
         </div>
       </div>
       <div className="kairo-notification-list">
         {history.length === 0 ? (
-          <p className="kairo-notification-empty">No notifications.</p>
+          <p className="kairo-notification-empty">{t('widget.notification.empty')}</p>
         ) : (
           history.map(n => (
             <div
@@ -197,7 +207,7 @@ const NotificationCenter: React.FC<NotificationCenterProps> = ({ service }) => {
                 <button
                   className="kairo-notification-dismiss"
                   onClick={e => { e.stopPropagation(); service.clear(n.id); }}
-                  title="Dismiss"
+                  title={t('widget.notification.dismiss')}
                 >
                   ×
                 </button>
@@ -231,20 +241,33 @@ export class KairoNotificationCenterWidget extends ReactWidget {
   @inject(WidgetManager)
   protected readonly widgetManager!: WidgetManager;
 
+  @inject(KairoI18nService)
+  protected readonly i18n!: KairoI18nService;
+
   constructor() {
     super();
     this.id = KAIRO_NOTIFICATION_CENTER_FACTORY_ID;
-    this.title.label = 'Notifications';
-    this.title.caption = 'Kairo Notification Center';
     this.title.iconClass = 'codicon codicon-bell';
     this.title.closable = true;
     this.addClass('kairo-widget');
+  }
+
+  @postConstruct()
+  protected init(): void {
+    this.updateTitle();
+    this.toDispose.push(this.i18n.onDidChangeLanguage(() => this.updateTitle()));
+  }
+
+  protected updateTitle(): void {
+    this.title.label = this.i18n.t('widget.notification.title' as KairoI18nKey);
+    this.title.caption = this.i18n.t('widget.notification.caption' as KairoI18nKey);
   }
 
   render(): React.ReactNode {
     return React.createElement(NotificationCenter, {
       service: this.notificationService,
       widgetManager: this.widgetManager,
+      i18n: this.i18n,
     });
   }
 }
@@ -271,6 +294,8 @@ export class KairoNotificationCenterContribution
   protected readonly widgetManager!: WidgetManager;
   @inject(ApplicationShell)
   protected readonly shell!: ApplicationShell;
+  @inject(KairoI18nService)
+  protected readonly i18n!: KairoI18nService;
 
   protected unsubscribeNotifications: Disposable | undefined;
 
@@ -299,8 +324,8 @@ export class KairoNotificationCenterContribution
     const unread = this.service.getUnreadCount();
     const badge = unread > 0 ? ` ${unread}` : '';
     const label = unread > 0
-      ? `${unread} unread notification${unread > 1 ? 's' : ''}. Click to open.`
-      : 'No notifications. Click to open.';
+      ? this.i18n.t('widget.notification.statusUnread' as KairoI18nKey, { count: unread })
+      : this.i18n.t('widget.notification.statusEmpty' as KairoI18nKey);
     this.statusBar.setElement('kairo.notifications', {
       text: `$(bell)${badge}`,
       tooltip: label,
@@ -308,7 +333,7 @@ export class KairoNotificationCenterContribution
       priority: 50,
       command: KairoNotificationCommands.TOGGLE.id,
       accessibilityInformation: {
-        label: `Notifications. ${label}`,
+        label: this.i18n.t('widget.notification.statusAria' as KairoI18nKey, { label }),
         role: 'button',
       },
     });

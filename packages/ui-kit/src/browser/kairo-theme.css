@@ -9053,6 +9053,436 @@ p.kairo-empty {
     text-align: center;
 }
 
+/* ============================================================
+   Phase R — 收尾类化：Compliance / Keymap / Notification /
+   Bookmarks / Debug Toolbar Widget
+   ============================================================ */
+
+/* ---------- Compliance ---------- */
+.kairo-compliance-widget {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+.kairo-compliance-loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 24px;
+    color: var(--theia-descriptionForeground);
+    font-size: 13px;
+}
+.kairo-compliance-spinner {
+    width: 24px;
+    height: 24px;
+    border: 3px solid var(--theia-dropdown-border);
+    border-top-color: var(--theia-focusBorder);
+    border-radius: 50%;
+    animation: kairo-spin 0.8s linear infinite;
+}
+@keyframes kairo-spin { to { transform: rotate(360deg); } }
+.kairo-compliance-skeleton {
+    width: 80%;
+    max-width: 300px;
+}
+.kairo-compliance-skeleton-bar {
+    height: 12px;
+    background-color: var(--theia-dropdown-border);
+    border-radius: 3px;
+    margin-bottom: 8px;
+}
+.kairo-compliance-tabs {
+    display: flex;
+    border-bottom: 1px solid var(--theia-panel-border);
+    padding: 0 8px;
+}
+.kairo-compliance-tab {
+    padding: 6px 16px;
+    cursor: pointer;
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--theia-descriptionForeground);
+    font-size: 12px;
+    font-weight: 400;
+}
+.kairo-compliance-tab:hover {
+    color: var(--theia-foreground);
+}
+.kairo-compliance-tab-active {
+    border-bottom-color: var(--theia-focusBorder);
+    color: var(--theia-focusBorder);
+    font-weight: 600;
+}
+.kairo-compliance-content {
+    flex: 1;
+    overflow: auto;
+    padding: 12px;
+}
+.kairo-compliance-toolbar {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+.kairo-compliance-field {
+    padding: 4px 8px;
+    font-size: 12px;
+    background-color: var(--theia-input-background);
+    color: var(--theia-input-foreground);
+    border: 1px solid var(--theia-input-border);
+    border-radius: 2px;
+}
+.kairo-compliance-search {
+    flex: 1 1 120px;
+    min-width: 100px;
+}
+.kairo-compliance-card {
+    margin-bottom: 12px;
+    padding: 10px 12px;
+    background-color: var(--theia-editor-background);
+    border-radius: 4px;
+    border: 1px solid var(--theia-dropdown-border);
+}
+.kairo-compliance-card-title {
+    font-weight: 600;
+    font-size: 13px;
+    margin-bottom: 6px;
+}
+.kairo-compliance-perms {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+.kairo-compliance-perm {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-size: 11px;
+    background-color: var(--theia-badge-background);
+    color: var(--theia-badge-foreground);
+}
+.kairo-compliance-event {
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--theia-sideBarSectionHeader-border);
+    font-size: 12px;
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+}
+.kairo-compliance-event-main {
+    flex: 1;
+    min-width: 0;
+}
+.kairo-compliance-event-action {
+    font-weight: 500;
+}
+.kairo-compliance-event-meta {
+    color: var(--theia-descriptionForeground);
+    font-size: 11px;
+    margin-top: 2px;
+}
+.kairo-compliance-badge {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 600;
+    color: #fff;
+    text-transform: uppercase;
+    flex-shrink: 0;
+    margin-top: 1px;
+}
+.kairo-compliance-badge-ok { background-color: #4caf50; }
+.kairo-compliance-badge-denied { background-color: #ff9800; }
+.kairo-compliance-badge-error { background-color: #f44336; }
+.kairo-compliance-badge-neutral { background-color: #999; }
+.kairo-compliance-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 4px 0;
+    font-size: 12px;
+    color: var(--theia-descriptionForeground);
+}
+.kairo-compliance-row-value {
+    font-weight: 600;
+    color: var(--theia-foreground);
+    text-transform: uppercase;
+}
+.kairo-compliance-row-value-success { color: #4caf50; }
+.kairo-compliance-row-value-danger { color: #f44336; }
+.kairo-compliance-row-value-neutral { color: #9e9e9e; }
+.kairo-compliance-status-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+}
+.kairo-compliance-status-on { background-color: #4caf50; }
+.kairo-compliance-status-off { background-color: #9e9e9e; }
+.kairo-compliance-empty {
+    text-align: center;
+    padding: 20px;
+    color: var(--theia-descriptionForeground);
+    font-size: 13px;
+}
+
+/* ---------- Keymap ---------- */
+.kairo-keymap-widget {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+.kairo-keymap-search {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--theia-panel-border);
+}
+.kairo-keymap-search-input {
+    width: 100%;
+    box-sizing: border-box;
+}
+.kairo-keymap-count {
+    margin-left: auto;
+    opacity: 0.7;
+}
+.kairo-keymap-conflicts {
+    padding: 8px 12px;
+    background: var(--theia-editorWarning-foreground, #cca700);
+    color: var(--theia-editor-background, #1e1e1e);
+}
+.kairo-keymap-conflicts-title {
+    font-weight: 600;
+}
+.kairo-keymap-conflicts-item {
+    margin-top: 4px;
+    font-size: 0.9em;
+}
+.kairo-keymap-table-wrap {
+    flex: 1;
+    overflow: auto;
+}
+.kairo-keymap-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+.kairo-keymap-table thead th {
+    position: sticky;
+    top: 0;
+    background: var(--theia-editor-background, #1e1e1e);
+    border-bottom: 1px solid var(--theia-panel-border);
+    padding: 6px 12px;
+    text-align: left;
+}
+.kairo-keymap-table tbody td {
+    padding: 4px 12px;
+}
+.kairo-keymap-table tbody tr {
+    border-bottom: 1px solid var(--theia-panel-border);
+}
+.kairo-keymap-col-command { width: 30%; }
+.kairo-keymap-col-keybinding { width: 25%; }
+.kairo-keymap-col-source { width: 15%; }
+.kairo-keymap-col-when { width: 15%; }
+.kairo-keymap-col-actions { width: 15%; text-align: right; }
+.kairo-keymap-command-label {
+    font-size: 0.8em;
+    opacity: 0.6;
+}
+.kairo-keymap-key {
+    background: var(--theia-badge-background, #4d4d4d);
+    color: var(--theia-badge-foreground, #fff);
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 0.9em;
+}
+.kairo-keymap-source { font-size: 0.85em; }
+.kairo-keymap-when { font-size: 0.85em; opacity: 0.7; }
+.kairo-keymap-no-match {
+    padding: 24px;
+    text-align: center;
+    opacity: 0.5;
+}
+
+/* ---------- Notification Center ---------- */
+.kairo-notification-center {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+.kairo-notification-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--theia-panel-border);
+}
+.kairo-notification-title {
+    font-weight: 600;
+    font-size: 12px;
+}
+.kairo-notification-list {
+    flex: 1;
+    overflow: auto;
+}
+.kairo-notification-empty {
+    padding: 24px;
+    text-align: center;
+    color: var(--theia-descriptionForeground);
+    font-size: 13px;
+}
+.kairo-notification-item {
+    border-bottom: 1px solid var(--theia-panel-border);
+    padding: 6px 12px;
+}
+.kairo-notification-summary {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+}
+.kairo-notification-message { flex: 1; }
+.kairo-notification-time {
+    color: var(--theia-descriptionForeground);
+    font-size: 11px;
+    flex-shrink: 0;
+}
+
+/* ---------- Bookmarks ---------- */
+.kairo-bookmarks-widget {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+.kairo-bookmarks-toolbar {
+    padding: 4px 8px;
+    border-bottom: 1px solid var(--theia-panel-border);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.kairo-bookmarks-title {
+    font-weight: 600;
+    font-size: 12px;
+}
+.kairo-bookmarks-count {
+    color: var(--theia-descriptionForeground);
+    font-size: 11px;
+}
+.kairo-bookmarks-spacer { flex: 1; }
+.kairo-bookmarks-list {
+    flex: 1;
+    overflow: auto;
+}
+.kairo-bookmarks-empty {
+    padding: 12px;
+    color: var(--theia-descriptionForeground);
+    font-size: 12px;
+    text-align: center;
+}
+.kairo-bookmarks-group {
+    padding: 4px 8px;
+    font-size: 11px;
+    font-weight: 600;
+    background: var(--theia-sideBarSectionHeader-background);
+    color: var(--theia-sideBarSectionHeader-foreground);
+    border-bottom: 1px solid var(--theia-panel-border);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.kairo-bookmark-row {
+    padding: 3px 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    line-height: 18px;
+    border-bottom: 1px solid var(--theia-panel-border);
+    cursor: pointer;
+}
+.kairo-bookmark-row:hover {
+    background: var(--theia-list-hoverBackground);
+}
+.kairo-bookmark-icon {
+    flex-shrink: 0;
+    width: 16px;
+    text-align: center;
+}
+.kairo-bookmark-icon-number { color: #ffc107; font-size: 12px; }
+.kairo-bookmark-icon-simple { color: #4fc3f7; font-size: 10px; }
+.kairo-bookmark-line {
+    min-width: 0;
+    flex: 1;
+    font-family: monospace;
+}
+.kairo-bookmark-remove {
+    padding: 0 6px;
+    font-size: 14px;
+    line-height: 18px;
+    flex-shrink: 0;
+}
+
+/* ---------- Debug Toolbar Widget ---------- */
+.kairo-debug-toolbar-widget {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+.kairo-dtw-title {
+    font-weight: 600;
+    font-size: 12px;
+}
+.kairo-dtw-session {
+    color: var(--theia-descriptionForeground);
+    font-size: 11px;
+}
+.kairo-dtw-state {
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    color: var(--theia-editor-background);
+}
+.kairo-dtw-groups {
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.kairo-dtw-btn-row {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+}
+.kairo-dtw-btn {
+    padding: 4px 10px;
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    white-space: nowrap;
+}
+.kairo-dtw-btn .codicon { font-size: 14px; }
+.kairo-dtw-btn-shortcut {
+    font-size: 10px;
+    opacity: 0.6;
+    margin-left: 2px;
+}
+.kairo-dtw-hint {
+    padding: 8px 12px;
+    color: var(--theia-descriptionForeground);
+    font-size: 12px;
+    text-align: center;
+}
+.kairo-dtw-error {
+    padding: 8px 12px;
+    color: var(--theia-errorForeground);
+    font-size: 12px;
+}
+
 .kairo-search-tabs {
     display: flex;
     gap: 2px;
