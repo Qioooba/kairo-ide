@@ -148,9 +148,9 @@ function Invoke-StaleCleanup {
             $staleList = $hits | Select-Object -Skip $skip
             foreach ($s in $staleList) {
                 $size = if ($s.PSIsContainer) {
-                    $sum = (Get-ChildItem $s.FullName -Recurse -File -ErrorAction SilentlyContinue |
-                            Measure-Object -Property Length -Sum).Sum
-                    if ($null -eq $sum) { 0 } else { $sum }
+                    $m = Get-ChildItem $s.FullName -Recurse -File -ErrorAction SilentlyContinue |
+                         Measure-Object -Property Length -Sum
+                    if ($null -eq $m) { 0 } else { $m.Sum }
                 } else { $s.Length }
                 Remove-Item $s.FullName -Recurse -Force -ErrorAction SilentlyContinue
                 if (Test-Path $s.FullName) {
@@ -425,7 +425,8 @@ if (Test-Path $jdtlsDir) {
     Get-ChildItem $jdtlsDir -Directory | Where-Object {
         $_.Name -match 'config_(linux|mac|ss_linux|ss_mac)'
     } | ForEach-Object {
-        $removedSize += (Get-ChildItem $_.FullName -Recurse -File | Measure-Object -Property Length -Sum).Sum
+        $m2 = Get-ChildItem $_.FullName -Recurse -File | Measure-Object -Property Length -Sum
+        $removedSize += if ($null -eq $m2) { 0 } else { $m2.Sum }
         Remove-Item $_.FullName -Recurse -Force
         Write-Host "  [OK]   已删除 JDT LS: $($_.Name)" -ForegroundColor Green
     }
