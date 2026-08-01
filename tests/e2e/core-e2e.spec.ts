@@ -146,7 +146,9 @@ test.describe('E2E-01: First Launch → Import Project → Encoding Correct', ()
     // ------------------------------------------------------------------
     await test.step('6. Verify all Kairo status bar entries are present', async () => {
       const sbText = await getStatusBarText(page);
-      const requiredEntries = ['Project:', 'Java:', 'JDT LS:', 'Encoding:', 'Agent:'];
+      // KAIRO-S27: Session 16 Phase F 将 Java/JDT LS 状态合并为单个 JDK 条目
+      //（JDT LS 状态仅存在于 tooltip），此处断言以当前状态栏文案为准。
+      const requiredEntries = ['Project:', 'JDK:', 'Encoding:', 'Agent:'];
       for (const entry of requiredEntries) {
         expect(sbText, `Status bar should contain "${entry}"`).toContain(entry);
       }
