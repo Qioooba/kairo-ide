@@ -46,7 +46,7 @@ core-e2e 是**验收标准型 stub 测试**（`core-e2e.spec.ts` 头部注释：
 
 ## 4. 后续建议（需完整环境执行）
 
-1. 通过 `scripts/prepare-bundled.ps1` 准备 JDT LS bundle，设置 `KAIRO_JDTLS_HOME`。
+1. ~~通过 `scripts/prepare-bundled.ps1` 准备 JDT LS bundle，设置 `KAIRO_JDTLS_HOME`~~ — **待运维离线供给**：本机无 JDT LS 源（`E:\Apps\eclipse-jdt-ls` / `%ProgramFiles%` / `%LOCALAPPDATA%` 均不存在），`supply-chain-lock.json` 的 `jdtls-windows` 条目要求设置 `KAIRO_JDTLS_WINDOWS_ARCHIVE_URL`（内网镜像或本地文件）+ `KAIRO_JDTLS_WINDOWS_SHA256`，需运维在内网镜像提供 `jdt-language-server-1.55.0-202601131729.tar.gz`（sha256 `90627c9f...`）。
 2. 以 `tests/legacy-sample`（或 `legacy-sample`）为 Theia 工作区启动 browser。
-3. 更新 E2E-01 Step 6 断言：`'Java:'` → `'JDK'`（匹配改造后状态栏文案）。
-4. 重跑 `core-e2e.spec.ts` 验证。
+3. ~~更新 E2E-01 Step 6 断言：`'Java:'` → `'JDK'`~~ — ✅ 已完成（Session 27）：`tests/e2e/core-e2e.spec.ts` Step 6 更新为 `['Project:', 'JDK:', 'Encoding:', 'Agent:']`，移除已并入 JDK 条目的 `'JDT LS:'`（提交 `999cea0`）。注意：E2E-02~10 中 `waitForStatusContains(page, 'JDT LS: ready', ...)` 同样指向已消失的文案，需在完整环境下按 JDK 条目（如 `JDK: 17` 出现即 JDT 就绪）重写。
+4. 重跑 `core-e2e.spec.ts` 验证 — 待 #1 就绪后执行。
