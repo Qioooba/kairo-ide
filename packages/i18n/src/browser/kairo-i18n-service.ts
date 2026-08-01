@@ -44,7 +44,9 @@ export class KairoI18nService implements I18nService {
     this.initialized = true;
 
     const configuredLang = this.preferences.get<KairoLanguageId>(KAIRO_LANGUAGE_PREFERENCE, KAIRO_DEFAULT_LANGUAGE);
-    await this.setLanguage(this.sanitizeLang(configuredLang), false);
+    // Fire so menus/commands/status bar that registered with English
+    // fallback re-apply labels after the locale pack finishes loading.
+    await this.setLanguage(this.sanitizeLang(configuredLang), true);
 
     this.preferences.onPreferenceChanged((e: PreferenceChange) => {
       if (e.preferenceName === KAIRO_LANGUAGE_PREFERENCE) {

@@ -138,11 +138,13 @@ const KairoWelcome: React.FC<KairoWelcomeProps> = ({
       if (!cancelled) {
         setRecentProjects([]);
         setLoading(false);
-        setError(err.message || 'Failed to load recent projects.');
+        const raw = err?.message || '';
+        const looksOffline = /failed to fetch|network|econnrefused|load failed/i.test(raw);
+        setError(looksOffline ? t('widget.welcome.agentUnavailable') : (raw || t('widget.welcome.importFailed')));
       }
     });
     return () => { cancelled = true; };
-  }, [projectService]);
+  }, [projectService, t]);
 
   const handleOpenRecent = (project: RecentProject) => {
     void workspaceService.open(new URI(project.rootPath));
@@ -176,13 +178,19 @@ const KairoWelcome: React.FC<KairoWelcomeProps> = ({
     },
   ];
 
-  const quickStartSteps = [
+  const quickStartSteps: Array<{
+    testId: string;
+    iconClass: string;
+    titleKey: string;
+    descKey: string;
+    /** Optional — step 1 reuses the primary Import CTA above, so no duplicate button. */
+    action?: WelcomeAction;
+  }> = [
     {
       testId: 'quickstart-import',
       iconClass: 'codicon-folder-opened',
       titleKey: 'widget.welcome.step1Title',
       descKey: 'widget.welcome.step1Desc',
-      action: welcomeActions[0],
     },
     {
       testId: 'quickstart-config',
@@ -194,7 +202,8 @@ const KairoWelcome: React.FC<KairoWelcomeProps> = ({
         labelKey: 'widget.welcome.openRunConfig',
         command: 'kairo.runConfigurations.manage',
         failMessageKey: 'widget.welcome.runConfigFailed',
-      } as WelcomeAction,
+        iconClass: 'gear',
+      },
     },
     {
       testId: 'quickstart-run',
@@ -206,7 +215,8 @@ const KairoWelcome: React.FC<KairoWelcomeProps> = ({
         labelKey: 'widget.welcome.buildRun',
         command: 'kairo.buildAndDeploy',
         failMessageKey: 'widget.welcome.buildFailed',
-      } as WelcomeAction,
+        iconClass: 'play',
+      },
     },
   ];
 
@@ -285,14 +295,16 @@ const KairoWelcome: React.FC<KairoWelcomeProps> = ({
                 <strong>{t(step.titleKey as any)}</strong>
                 <p>{t(step.descKey as any)}</p>
               </div>
-              <button
-                type="button"
-                className="kairo-button-secondary kairo-quickstart-action"
-                data-testid={`${step.testId}-action`}
-                onClick={() => run(step.action)}
-              >
-                {t(step.action.labelKey as any)}
-              </button>
+              {step.action && (
+                <button
+                  type="button"
+                  className="kairo-button-secondary kairo-quickstart-action"
+                  data-testid={`${step.testId}-action`}
+                  onClick={() => run(step.action!)}
+                >
+                  {t(step.action.labelKey as any)}
+                </button>
+              )}
             </li>
           ))}
         </ol>

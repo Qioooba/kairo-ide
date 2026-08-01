@@ -223,9 +223,6 @@ const BuildViewComponent: React.FC<BuildViewProps> = ({ store, commandService, i
                         <span className="kairo-empty-state-glyph codicon codicon-tools" aria-hidden="true" />
                         <h3 className="kairo-empty-state-title">{t('widget.builds.emptyStateTitle')}</h3>
                         <p className="kairo-empty-state-reason">{t('widget.builds.emptyStateReason')}</p>
-                        <div className="kairo-empty-state-action">
-                            <button className="theia-button main" onClick={handleBuild}>{t('widget.builds.emptyStateAction')}</button>
-                        </div>
                     </div>
                 ) : (
                     <ul className="kairo-build-list" data-testid="build-list">

@@ -1134,7 +1134,7 @@ const zhCNMessages: KairoI18nMessages = {
     welcome: {
       title: '欢迎',
       caption: 'Kairo IDE 欢迎',
-      newProject: '新建项目...',
+      newProject: '导入项目...',
       openProject: '打开项目...',
       openWorkspace: '打开工作区文件夹...',
       getStarted: '开始',
@@ -1156,6 +1156,7 @@ const zhCNMessages: KairoI18nMessages = {
       runConfigFailed: '打开运行配置失败',
       buildFailed: '构建和部署失败',
       errorLabel: '错误：',
+      agentUnavailable: '运行时代理未连接，无法加载最近项目。请启动代理后重新打开欢迎页。',
     },
     servers: {
       title: 'Kairo 服务器',
@@ -2005,6 +2006,7 @@ const zhCNMessages: KairoI18nMessages = {
       stepLabelComplete: '完成',
       welcomeTitle: '欢迎使用 Kairo IDE',
       welcomeDesc: 'Kairo 帮助您在 Tomcat 6 上离线运行遗留 Java Web 项目。',
+      welcomeToast: '欢迎使用 Kairo IDE！开始导入您的第一个项目吧。',
       welcomeTip1: '自动检测项目结构（源码目录、Web 根目录、编码）',
       welcomeTip2: '自动配置 Ant/javac 构建',
       welcomeTip3: '检测期间不会修改任何文件',
@@ -2424,7 +2426,7 @@ const zhCNMessages: KairoI18nMessages = {
   },
   statusBar: {
     project: '项目：{name}',
-    noProject: '项目：（无工作区）',
+    noProject: '项目：（未导入）',
     projectTooltip: '打开 Java Web 项目以开始使用。点击选择项目。',
     projectTooltipWithName: '{name}\n{root}\n工作区：{workspaceId}\n项目：{projectId}\n点击切换项目。',
     jdk: 'JDK：{version}',
@@ -2469,6 +2471,19 @@ const zhCNMessages: KairoI18nMessages = {
     debugServerLabel: '服务器：{serverId}',
     debugSessionLabel: '会话：{sessionId}',
     debugOpenViewTooltip: '点击打开调试视图。',
+    svnNotFound: 'SVN：未找到',
+    svnNotFoundTooltip: '未检测到 SVN 客户端。点击进行配置。',
+    svnVersion: 'SVN：{version}',
+    svnVersionTooltip: 'SVN 客户端 {version}（未打开工作副本）。点击查看操作。',
+    jdkState: {
+      crashed: '已崩溃',
+      uninitialized: '未就绪',
+      stopped: '已停止',
+      starting: '启动中…',
+      stopping: '停止中…',
+      ready: '就绪',
+      running: '运行中',
+    },
   },
   error: {
     generic: '发生错误：{message}',

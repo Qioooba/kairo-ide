@@ -341,11 +341,6 @@ const DeploymentsViewComponent: React.FC<DeploymentsViewProps> = ({
             <span className="kairo-empty-state-glyph codicon codicon-rocket" aria-hidden="true" />
             <h3 className="kairo-empty-state-title">{t('widget.deployments.emptyStateTitle')}</h3>
             <p className="kairo-empty-state-reason">{t('widget.deployments.emptyStateReason')}</p>
-            <div className="kairo-empty-state-action">
-              <button className="theia-button main" data-testid="deployments-empty-cta" onClick={handleDeploy}>
-                {t('widget.deployments.emptyStateAction')}
-              </button>
-            </div>
           </div>
         </div>
       ) : (
@@ -480,6 +475,8 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
   @inject(KairoI18nService) protected i18n!: KairoI18nService;
   protected javaDebug: KairoJavaDebugService | undefined;
   protected debugSessionService: KairoDebugSessionService | undefined;
+  /** Captured during registerCommands so labels can be refreshed after async i18n load. */
+  protected commandRegistry: CommandRegistry | undefined;
 
   protected eventsUnsub: (() => void) | undefined;
   protected statusUnsub: (() => void) | undefined;
@@ -568,6 +565,19 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
     return key ? { ...cmd, label: this.i18n.t(key as KairoI18nKey) } : cmd;
   }
 
+  /** Re-apply translated labels after language pack finishes loading / switching. */
+  protected refreshCommandLabels(): void {
+    if (!this.commandRegistry) {
+      return;
+    }
+    for (const [id, key] of Object.entries(this.commandI18nKeys)) {
+      const cmd = this.commandRegistry.getCommand(id);
+      if (cmd) {
+        cmd.label = this.i18n.t(key as KairoI18nKey);
+      }
+    }
+  }
+
   protected serversView: ServerViewWidget | undefined;
   protected buildsView: BuildViewWidget | undefined;
   protected deploymentsView: KairoDeploymentsWidget | undefined;
@@ -633,6 +643,9 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
         }
       });
     }
+
+    // Locale may finish loading after registerCommands; refresh once more.
+    this.refreshCommandLabels();
   }
 
   protected async maybeOpenWelcome(): Promise<void> {
@@ -647,7 +660,7 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
         const recent = await this.projectSvc.getRecentProjects();
         if (recent.length === 0) {
           // First launch: show a brief welcome tip before opening the import wizard
-          this.messages.info('Welcome to Kairo IDE! Let\'s import your first project.', { timeout: 5000 });
+          this.messages.info(this.i18n.t('widget.importWizard.welcomeToast'), { timeout: 5000 });
           // Auto-open the import wizard after a short delay
           setTimeout(() => {
             void this.commands.executeCommand('kairo.project.import');
@@ -674,6 +687,11 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
 
   async registerCommands(registry: CommandRegistry): Promise<void> {
     console.log('[kairo] KairoViewsContribution.registerCommands called');
+    this.commandRegistry = registry;
+    // Language pack may still be loading when commands first register;
+    // refresh once now and again whenever the locale changes.
+    this.refreshCommandLabels();
+    this.i18n.onDidChangeLanguage(() => this.refreshCommandLabels());
 
     registry.registerCommand(this.withLabel(KairoCommands.IMPORT_PROJECT), {
       execute: async () => {
@@ -1368,21 +1386,22 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
       order: 'e4',
     });
 
-    // KAIRO-RC-WEB-026: keep the existing File menu entries so
-    // File > Import Kairo Project still works when the File
-    // menu is provided by another extension.
+    // Keep a single File entry for Import — Select Project / Run Configs
+    // already live under the Kairo top menu; duplicating them here makes
+    // File feel cluttered for daily use.
     menus.registerMenuAction(CommonMenus.FILE_OPEN, {
       commandId: KairoCommands.IMPORT_PROJECT.id,
       order: 'a1',
     });
-    menus.registerMenuAction(CommonMenus.FILE_OPEN, {
-      commandId: KairoCommands.MANAGE_RUN_CONFIGURATIONS.id,
-      order: 'a3',
-    });
-    menus.registerMenuAction(CommonMenus.FILE_OPEN, {
-      commandId: KairoCommands.SELECT_PROJECT.id,
-      order: 'a2',
-    });
+
+    // Desktop/local IDE: Upload/Download are Theia browser leftovers and
+    // clutter File for daily use. Navigator context menu can keep them;
+    // strip from the top File menu only.
+    const downloadUploadMenu: MenuPath = [...CommonMenus.FILE, '4_downloadupload'];
+    menus.unregisterMenuAction('file.upload', downloadUploadMenu);
+    menus.unregisterMenuAction('file.download', downloadUploadMenu);
+    menus.unregisterMenuAction('file.copyDownloadLink', CommonMenus.EDIT_CLIPBOARD);
+
     menus.registerMenuAction(CommonMenus.HELP, {
       commandId: KairoCommands.SHOW_WELCOME.id,
       order: 'a1',

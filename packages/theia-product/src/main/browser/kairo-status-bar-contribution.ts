@@ -66,7 +66,7 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
   private isPlaceholderText(text: string): boolean {
     // Normalize Theia codicon prefix (e.g. "$(file-directory) ") and optional session suffix.
     const normalized = text.replace(/^\$\([^)]+\)\s*/, '').replace(/\s*·\s*.*$/, '').replace(/…$/, '');
-    return /(?:Project: \(no workspace\)|JDK: -|JDK: crashed|JDK: uninitialized|JDK: stopped|Encoding: -|Build: -|Build: no record|Server: stopped|Server: disconnected|Server: connecting|Agent: disconnected|Agent: closed|Agent: connecting|HotReload: -|Debug: unknown|Debug: unavailable|Debug: terminated|调试：无|项目：\(无工作区\)|JDK：-|编码：-|构建：-|构建：无记录|服务器：已停止|服务器：已断开|服务器：连接中…|代理：已断开|代理：已关闭|代理：连接中…|热重载：-)$/.test(normalized);
+    return /(?:Project: \(no workspace\)|Project: \(not imported\)|JDK: -|JDK: crashed|JDK: not ready|JDK: stopped|JDK: uninitialized|Encoding: -|Build: -|Build: no record|Server: stopped|Server: disconnected|Server: connecting|Agent: disconnected|Agent: closed|Agent: connecting|HotReload: -|Debug: unknown|Debug: unavailable|Debug: terminated|Debug: none|SVN: not found|调试：无|项目：\(无工作区\)|项目：\(未导入\)|JDK：-|JDK：已崩溃|JDK：未就绪|JDK：已停止|编码：-|构建：-|构建：无记录|服务器：已停止|服务器：已断开|服务器：连接中…|代理：已断开|代理：已关闭|代理：连接中…|热重载：-|SVN：未找到)$/.test(normalized);
   }
 
   /** Build a status-bar element class name that includes its logical group and optional placeholder marker. */
@@ -227,6 +227,23 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
     // Subscribe to ServerStore for hot reload status updates
     this.unsubscribeHotReload = this.serverStore.onHotReloadStatusChange(s => this.renderHotReloadStatus(s));
     this.renderHotReloadStatus(this.serverStore.getHotReloadStatus());
+    // Language pack loads async after @postConstruct — refresh all
+    // status texts once locale is ready / when the user switches language.
+    this.i18n.onDidChangeLanguage(() => this.refreshAllStatusTexts());
+  }
+
+  /** Re-render every status-bar entry with the current locale. */
+  protected refreshAllStatusTexts(): void {
+    this.renderProjectStatus(this.activeProject.project);
+    void this.refreshJdkStatus();
+    void this.refreshEncodingStatus();
+    this.renderBuildStatus();
+    this.renderServerStatus();
+    this.setAgentStatus(this.runtimeStatus);
+    this.renderHotReloadStatus(this.lastHotReloadStatus);
+    if (this.javaDebug) {
+      this.renderDebugStatus(this.javaDebug.currentStatus);
+    }
   }
 
   onStop(): void {
@@ -291,10 +308,21 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
     this.renderHotReloadStatus(this.lastHotReloadStatus);
   }
 
-  /**
-   * Render the JDK status entry based on the JDT LS state.
-   * Shows the current project JDK version from the JDT status.
-   */
+  /** Localize JDK lifecycle states used when no version is known yet. */
+  protected jdkStateLabel(state: string): string {
+    const map: Record<string, string> = {
+      crashed: 'statusBar.jdkState.crashed',
+      uninitialized: 'statusBar.jdkState.uninitialized',
+      stopped: 'statusBar.jdkState.stopped',
+      starting: 'statusBar.jdkState.starting',
+      stopping: 'statusBar.jdkState.stopping',
+      ready: 'statusBar.jdkState.ready',
+      running: 'statusBar.jdkState.running',
+    };
+    const key = map[state];
+    return key ? this.i18n.t(key as any) : state;
+  }
+
   protected setJdkStatus(
     s: JavaServiceState,
     st?: { state: string; jre?: string; pid?: number; lastError?: string; version?: string },
@@ -322,11 +350,12 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
           return '$(circle-outline)';
       }
     };
-    const text = jdkVersion ? t('statusBar.jdk', { version: jdkVersion }) : t('statusBar.jdk', { version: effective });
+    const versionOrState = jdkVersion ?? this.jdkStateLabel(effective);
+    const text = t('statusBar.jdk', { version: versionOrState });
     const tooltip = t('statusBar.jdkTooltipFull', {
-      version: jdkVersion ?? effective,
+      version: jdkVersion ?? this.jdkStateLabel(effective),
       jre: jre ?? '',
-      state: effective,
+      state: this.jdkStateLabel(effective),
       lsVersion: st?.version ?? '',
     });
     this.statusBar.setElement('kairo.jdk', {

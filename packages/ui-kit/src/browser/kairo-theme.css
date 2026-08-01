@@ -36,42 +36,43 @@
     --kairo-badge-default-fg: #ffffff;
 }
 
-/* Light theme parity */
-@media (prefers-color-scheme: light) {
-    :root {
-        --kairo-primary: #1a73e8;
-        --kairo-primary-hover: #1557b0;
-        --kairo-primary-light: #4a9eff;
-        --kairo-bg: #fafafa;
-        --kairo-bg-secondary: #ffffff;
-        --kairo-surface: #f3f3f3;
-        --kairo-text: #1f1f1f;
-        --kairo-text-secondary: #5f6368;
-        --kairo-border: #e0e0e0;
-        --kairo-success: #188038;
-        --kairo-warning: #f29900;
-        --kairo-error: #d93025;
-        --kairo-info: #1a73e8;
-        --kairo-shadow: rgba(0, 0, 0, 0.15);
-        --kairo-focus-ring: #1a73e8;
-        --kairo-hover-overlay: rgba(0, 0, 0, 0.04);
-        --kairo-disabled-fg: #80868b;
-        --kairo-disabled-bg: #f3f3f3;
-        --kairo-input-bg: #ffffff;
-        --kairo-input-border: #e0e0e0;
-        --kairo-input-fg: #1f1f1f;
-        --kairo-input-placeholder: #5f6368;
-        --kairo-badge-success-bg: #188038;
-        --kairo-badge-success-fg: #ffffff;
-        --kairo-badge-warning-bg: #f29900;
-        --kairo-badge-warning-fg: #1f1f1f;
-        --kairo-badge-error-bg: #d93025;
-        --kairo-badge-error-fg: #ffffff;
-        --kairo-badge-info-bg: #1a73e8;
-        --kairo-badge-info-fg: #ffffff;
-        --kairo-badge-default-bg: #5f6368;
-        --kairo-badge-default-fg: #ffffff;
-    }
+/* Light theme parity — follow Theia's theme type (body.theia-light),
+ * NOT the OS prefers-color-scheme. Windows light mode + Kairo dark
+ * theme previously forced --kairo-bg-secondary to #fff, producing
+ * jarring white toolbars/cards inside the dark shell. */
+body.theia-light {
+    --kairo-primary: #1a73e8;
+    --kairo-primary-hover: #1557b0;
+    --kairo-primary-light: #4a9eff;
+    --kairo-bg: #fafafa;
+    --kairo-bg-secondary: #ffffff;
+    --kairo-surface: #f3f3f3;
+    --kairo-text: #1f1f1f;
+    --kairo-text-secondary: #5f6368;
+    --kairo-border: #e0e0e0;
+    --kairo-success: #188038;
+    --kairo-warning: #f29900;
+    --kairo-error: #d93025;
+    --kairo-info: #1a73e8;
+    --kairo-shadow: rgba(0, 0, 0, 0.15);
+    --kairo-focus-ring: #1a73e8;
+    --kairo-hover-overlay: rgba(0, 0, 0, 0.04);
+    --kairo-disabled-fg: #80868b;
+    --kairo-disabled-bg: #f3f3f3;
+    --kairo-input-bg: #ffffff;
+    --kairo-input-border: #e0e0e0;
+    --kairo-input-fg: #1f1f1f;
+    --kairo-input-placeholder: #5f6368;
+    --kairo-badge-success-bg: #188038;
+    --kairo-badge-success-fg: #ffffff;
+    --kairo-badge-warning-bg: #f29900;
+    --kairo-badge-warning-fg: #1f1f1f;
+    --kairo-badge-error-bg: #d93025;
+    --kairo-badge-error-fg: #ffffff;
+    --kairo-badge-info-bg: #1a73e8;
+    --kairo-badge-info-fg: #ffffff;
+    --kairo-badge-default-bg: #5f6368;
+    --kairo-badge-default-fg: #ffffff;
 }
 
 /* D4.3: Respect user's motion preferences */
@@ -234,12 +235,14 @@
     font-size: 14px;
 }
 
-/* P2-UX-02: welcome tips in the import wizard */
+/* P2-UX-02: welcome tips in the import wizard — solid surface card
+ * so dark theme never paints a bright OS-light card. */
 .kairo-wizard-tips {
-    padding: 12px 16px;
-    margin-bottom: 16px;
-    background: color-mix(in srgb, var(--kairo-primary) 10%, transparent);
-    border: 1px solid color-mix(in srgb, var(--kairo-primary) 25%, transparent);
+    padding: 14px 18px;
+    margin-bottom: 20px;
+    background: var(--kairo-surface);
+    border: 1px solid var(--kairo-border);
+    border-left: 3px solid var(--kairo-primary);
     border-radius: 8px;
 }
 
@@ -271,7 +274,32 @@
     font-size: 11px;
     padding: 1px 4px;
     border-radius: 3px;
-    background: var(--kairo-bg-secondary);
+    background: var(--kairo-bg);
+    color: var(--kairo-text);
+    border: 1px solid var(--kairo-border);
+}
+
+/* Import path row: Scan is primary, Browse is secondary */
+.kairo-path-row .theia-button.secondary {
+    background: transparent;
+    border: 1px solid var(--kairo-border);
+    color: var(--kairo-text);
+}
+
+.kairo-path-row .theia-button.secondary:hover:not(:disabled) {
+    background: var(--kairo-hover-overlay);
+    border-color: var(--kairo-text-secondary);
+}
+
+.kairo-path-row .theia-button.main {
+    background: var(--kairo-primary);
+    border-color: var(--kairo-primary);
+    color: #ffffff;
+    font-weight: 600;
+}
+
+.kairo-path-row .theia-button.main:hover:not(:disabled) {
+    background: var(--kairo-primary-hover);
 }
 
 .kairo-selected-path {
@@ -628,10 +656,11 @@
     margin-left: 8px !important;
 }
 
-/* Placeholder/unknown status entries are visually de-emphasized. */
+/* Placeholder/unknown status entries are visually de-emphasized so
+ * real activity (Agent connected, Server running) stands out. */
 #theia-statusBar .element.kairo-statusbar-placeholder {
     color: var(--kairo-text-secondary, #9aa0a6) !important;
-    opacity: 0.7 !important;
+    opacity: 0.55 !important;
 }
 
 /* Semantic state colors for status-bar entries. These are intentionally

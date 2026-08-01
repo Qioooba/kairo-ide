@@ -349,17 +349,22 @@ const ServerViewComponent: React.FC<ServerViewProps> = ({ store, commandService,
                 </div>
             )}
 
-            <HotReloadSection
-                t={t}
-                hotReloadStatus={hotReloadStatus}
-                publishState={publishState}
-                publishMessage={publishMessage}
-                autoSyncEnabled={autoSyncEnabled}
-                activeServer={activeServer}
-                onUpdate={handleUpdate}
-                onReloadContext={handleReloadContext}
-                onToggleAutoSync={toggleAutoSync}
-            />
+            {/* Hot reload only matters while a server is live — hide the
+                IDEA-style update card when nothing is running to avoid
+                disabled-button noise on the first-run empty state. */}
+            {activeServer && (activeServer.state === 'running' || activeServer.state === 'starting') && (
+                <HotReloadSection
+                    t={t}
+                    hotReloadStatus={hotReloadStatus}
+                    publishState={publishState}
+                    publishMessage={publishMessage}
+                    autoSyncEnabled={autoSyncEnabled}
+                    activeServer={activeServer}
+                    onUpdate={handleUpdate}
+                    onReloadContext={handleReloadContext}
+                    onToggleAutoSync={toggleAutoSync}
+                />
+            )}
 
             <div className="kairo-widget-section" data-testid="server-list-section">
                 <div className="kairo-section-title">{t('widget.servers.allServers')}</div>
@@ -368,11 +373,6 @@ const ServerViewComponent: React.FC<ServerViewProps> = ({ store, commandService,
                         <span className="kairo-empty-state-glyph codicon codicon-server" aria-hidden="true" />
                         <h3 className="kairo-empty-state-title">{t('widget.servers.emptyListTitle')}</h3>
                         <p className="kairo-empty-state-reason">{t('widget.servers.emptyListReason', { action: t('common.start') })}</p>
-                        <div className="kairo-empty-state-action">
-                            <button className="theia-button main" onClick={handleStart}>
-                                {t('common.start')}
-                            </button>
-                        </div>
                     </div>
                 ) : (
                     <ul className="kairo-server-list" data-testid="server-list">

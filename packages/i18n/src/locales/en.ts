@@ -1137,7 +1137,7 @@ const enMessages = {
     welcome: {
       title: 'Welcome',
       caption: 'Kairo IDE Welcome',
-      newProject: 'New Project…',
+      newProject: 'Import Project…',
       openProject: 'Open Project…',
       openWorkspace: 'Open Workspace Folder…',
       getStarted: 'Get Started',
@@ -1159,6 +1159,7 @@ const enMessages = {
       runConfigFailed: 'Open Run Configurations failed',
       buildFailed: 'Build and deploy failed',
       errorLabel: 'Error:',
+      agentUnavailable: 'Runtime Agent is offline — recent projects cannot be loaded. Start the agent, then reopen Welcome.',
     },
     servers: {
       title: 'Kairo Servers',
@@ -2008,6 +2009,7 @@ const enMessages = {
       stepLabelComplete: 'Complete',
       welcomeTitle: 'Welcome to Kairo IDE',
       welcomeDesc: 'Kairo helps you run legacy Java Web projects on Tomcat 6 — entirely offline.',
+      welcomeToast: 'Welcome to Kairo IDE! Let\'s import your first project.',
       welcomeTip1: 'Auto-detects project structure (source dirs, web root, encoding)',
       welcomeTip2: 'Configures Ant/javac builds automatically',
       welcomeTip3: 'No files are modified during detection',
@@ -2427,7 +2429,7 @@ const enMessages = {
   },
   statusBar: {
     project: 'Project: {name}',
-    noProject: 'Project: (no workspace)',
+    noProject: 'Project: (not imported)',
     projectTooltip: 'Open a Java Web project to get started. Click to select a project.',
     projectTooltipWithName: '{name}\n{root}\nWorkspace: {workspaceId}\nProject: {projectId}\nClick to switch project.',
     jdk: 'JDK: {version}',
@@ -2472,6 +2474,19 @@ const enMessages = {
     debugServerLabel: 'Server: {serverId}',
     debugSessionLabel: 'Session: {sessionId}',
     debugOpenViewTooltip: 'Click to open Debug view.',
+    svnNotFound: 'SVN: not found',
+    svnNotFoundTooltip: 'SVN client not detected. Click to configure.',
+    svnVersion: 'SVN: {version}',
+    svnVersionTooltip: 'SVN client {version} (no working copy open). Click for actions.',
+    jdkState: {
+      crashed: 'crashed',
+      uninitialized: 'not ready',
+      stopped: 'stopped',
+      starting: 'starting…',
+      stopping: 'stopping…',
+      ready: 'ready',
+      running: 'running',
+    },
   },
   error: {
     generic: 'An error occurred: {message}',

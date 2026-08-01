@@ -5,6 +5,7 @@ import { SvnStore } from './svn-store';
 import { CommandRegistry } from '@theia/core/lib/common/command';
 import { WorkspaceService } from '@theia/workspace/lib/browser';
 import { QuickInputService, QuickPickItem } from '@theia/core/lib/browser/quick-input/quick-input-service';
+import { KairoI18nService } from '@kairo/i18n';
 
 export const SVN_STATUS_BAR_COMMAND = {
   id: 'svn.statusBar.click',
@@ -19,6 +20,7 @@ export class SvnStatusBarContribution implements FrontendApplicationContribution
   @inject(CommandRegistry) protected readonly commandRegistry!: CommandRegistry;
   @inject(WorkspaceService) protected readonly workspaceService!: WorkspaceService;
   @inject(QuickInputService) protected readonly quickInputService!: QuickInputService;
+  @inject(KairoI18nService) protected readonly i18n!: KairoI18nService;
 
   protected readonly statusBarId = 'kairo-svn-status';
 
@@ -28,6 +30,7 @@ export class SvnStatusBarContribution implements FrontendApplicationContribution
     this.svnService.onDidChangeStatus(() => this.updateStatusBar());
     this.svnService.onDidUpdateComplete(() => this.updateStatusBar());
     this.svnStore.onDidChange(() => this.updateStatusBar());
+    this.i18n.onDidChangeLanguage(() => this.updateStatusBar());
 
     this.commandRegistry.registerCommand(SVN_STATUS_BAR_COMMAND, {
       execute: () => this.showQuickActions(),
@@ -39,6 +42,7 @@ export class SvnStatusBarContribution implements FrontendApplicationContribution
   }
 
   protected updateStatusBar(): void {
+    const t = this.i18n.t.bind(this.i18n);
     const installation = this.svnService.getSvnInstallation();
     const wcRoot = this.svnService.getActiveWcRoot();
     const wcInfo = this.svnService.getWcInfoCache();
@@ -46,22 +50,25 @@ export class SvnStatusBarContribution implements FrontendApplicationContribution
 
     if (!installation) {
       this.statusBar.setElement(this.statusBarId, {
-        text: '$(source-control) SVN: not found',
+        text: `$(source-control) ${t('statusBar.svnNotFound')}`,
         alignment: StatusBarAlignment.LEFT,
         priority: 100,
-        tooltip: 'SVN client not detected. Click to configure.',
+        tooltip: t('statusBar.svnNotFoundTooltip'),
         command: SVN_STATUS_BAR_COMMAND.id,
+        className: 'kairo-statusbar-group-1 kairo-statusbar-placeholder',
       });
       return;
     }
 
     if (!wcRoot || !wcInfo) {
+      const version = installation.version.split(' ')[0];
       this.statusBar.setElement(this.statusBarId, {
-        text: `$(git-branch) SVN: ${installation.version.split(' ')[0]}`,
+        text: `$(git-branch) ${t('statusBar.svnVersion', { version })}`,
         alignment: StatusBarAlignment.LEFT,
         priority: 100,
-        tooltip: `SVN client ${installation.version} (no working copy open). Click for actions.`,
+        tooltip: t('statusBar.svnVersionTooltip', { version: installation.version }),
         command: SVN_STATUS_BAR_COMMAND.id,
+        className: 'kairo-statusbar-group-1 kairo-statusbar-placeholder',
       });
       return;
     }

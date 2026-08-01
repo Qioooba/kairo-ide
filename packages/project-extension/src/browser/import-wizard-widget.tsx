@@ -368,7 +368,7 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
                                 aria-label={t('widget.importWizard.projectPath')}
                             />
                             <button
-                                className="theia-button"
+                                className="theia-button secondary"
                                 onClick={handleSelectDirectory}
                                 disabled={scanning}
                                 data-testid="browse-btn"
@@ -379,9 +379,10 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
                             <button
                                 className="theia-button main"
                                 onClick={handleScanTypedPath}
-                                disabled={scanning}
+                                disabled={scanning || !workspacePath.trim()}
                                 data-testid="scan-btn"
                                 aria-label={t('widget.importWizard.scanAria')}
+                                title={!workspacePath.trim() ? t('widget.importWizard.pathPlaceholder') : undefined}
                             >
                                 {scanning ? t('widget.importWizard.scanning') : t('widget.importWizard.scan')}
                             </button>
