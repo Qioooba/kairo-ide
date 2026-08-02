@@ -9,14 +9,17 @@
 import { ContainerModule } from '@theia/core/shared/inversify';
 import { FrontendApplicationContribution } from '@theia/core/lib/browser/frontend-application-contribution';
 import { ColorContribution } from '@theia/core/lib/browser/color-application-contribution';
+import { PreferenceContribution } from '@theia/core/lib/common/preferences';
 import { KairoUiContribution } from './kairo-ui-contribution';
 import { KairoThemeContribution } from './kairo-theme-contribution';
+import { KairoIdeaEditorPreferenceContribution } from './kairo-idea-editor-preferences';
 import './kairo-theme.css';
 
 export * from './kairo-ui-contribution';
 export * from './kairo-theme';
 export * from './kairo-theme-idea';
 export * from './kairo-theme-contribution';
+export * from './kairo-idea-editor-preferences';
 export * from './virtual-list';
 export { default as KairoUiContribution } from './kairo-ui-contribution';
 
@@ -32,4 +35,5 @@ export default new ContainerModule(bind => {
   // leak through after KairoDarkTheme.activate() and override
   // the values we just wrote. See N-034.
   bind(ColorContribution).toService(KairoThemeContribution);
+  bind(PreferenceContribution).toConstantValue(KairoIdeaEditorPreferenceContribution);
 });

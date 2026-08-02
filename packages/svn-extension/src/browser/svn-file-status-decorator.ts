@@ -6,6 +6,7 @@ import { Title, Widget } from '@theia/core/shared/@lumino/widgets';
 import { EditorManager } from '@theia/editor/lib/browser/editor-manager';
 import { SvnService } from './svn-service';
 import { SvnFileStatus } from './svn-types';
+import { toWcRelativeFromUri } from './svn-path-utils';
 
 const STATUS_COLORS: Record<SvnFileStatus, string> = {
   [SvnFileStatus.Normal]: '',
@@ -86,14 +87,11 @@ export class SvnFileStatusDecorator implements TabBarDecorator {
 
     const uriStr = uri.toString();
     let relativePath: string | undefined;
-    if (uriStr.startsWith('file://')) {
-      const filePath = decodeURIComponent(uriStr.replace('file://', ''));
-      if (filePath.startsWith(wcRoot)) {
-        relativePath = filePath.substring(wcRoot.length + 1);
-      }
+    if (uriStr.startsWith('file:')) {
+      relativePath = toWcRelativeFromUri(uriStr, wcRoot);
     }
 
-    if (!relativePath) return [];
+    if (relativePath === undefined || relativePath === '') return [];
 
     const fileStatus = this.svnService.getFileStatus(relativePath);
     if (!fileStatus) return [];

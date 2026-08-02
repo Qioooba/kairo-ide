@@ -13,8 +13,11 @@ import {
   waitForServerState,
   setBreakpoint,
   waitForDebugPaused,
-  getDebugVariables,
   runKairoImportWizard,
+  hoverEditorIdentifier,
+  setConditionalBreakpoint,
+  collectDebugVariableEntries,
+  triggerHelloRequest,
 } from '../fixtures';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
@@ -788,16 +791,28 @@ test.describe('SHARD-06: 调试功能', () => {
 
     await test.step('3. 局部变量面板', async () => {
       const vars = await collectVariables();
-      // 记录实际变量数,允许 0
-      expect(Array.isArray(vars)).toBe(true);
+      const entries = await collectDebugVariableEntries(page);
+      const combined = vars.length > 0 ? vars : entries;
+      // Hard: paused session must expose at least one variable entry
+      expect(combined.length, `variables empty: ${JSON.stringify(combined)}`).toBeGreaterThan(0);
       await page.screenshot({ path: `${SCREENSHOT_DIR}/TEST-0604/03-local-variables.png` });
     });
 
     await test.step('4. 鼠标悬停在编辑器变量上', async () => {
-      const editor = page.locator('.monaco-editor').first();
-      await editor.hover({ position: { x: 200, y: 100 } });
-      await page.waitForTimeout(1500);
+      // Prefer a real identifier hover (no blind pixel); step once so `name` may be set
+      try {
+        await page.keyboard.press('F10');
+        await page.waitForTimeout(800);
+      } catch { /* ignore */ }
+      let hoverText = '';
+      for (const word of ['name', 'req', 'resp', 'this']) {
+        try {
+          hoverText = await hoverEditorIdentifier(page, word, 4_000);
+          if (hoverText) break;
+        } catch { /* try next */ }
+      }
       await page.screenshot({ path: `${SCREENSHOT_DIR}/TEST-0604/04-variable-hover.png` });
+      expect(hoverText.length, 'debug hover data tip must appear with a value').toBeGreaterThan(0);
     });
   });
 
@@ -934,52 +949,27 @@ test.describe('SHARD-06: 调试功能', () => {
   });
 
   test('TEST-0609: 条件断点', async ({ page, request }) => {
+    test.setTimeout(540_000);
     await openFileViaQuickOpen(page, 'HelloServlet.java');
     await page.waitForTimeout(2000);
 
-    await test.step('1. 设置断点后通过 F9 编辑为条件断点', async () => {
-      // KAIRO-RC-WEB-2026-07-26-24: 之前用右键 gutter + context menu
-      // 找 "Conditional Breakpoint" 失败 (Theia 不暴露该项)。
-      // 标准做法: 先 F9 设置普通断点,再右键断点小图标 → "Edit
-      // Breakpoint" → 输入条件,或通过 command palette
-      // "Debug: Add Conditional Breakpoint"。
-      await setBreakpoint(page, 'HelloServlet.java', 25);
-      await page.waitForTimeout(500);
+    await test.step('1. 设置条件 false — 请求不得暂停', async () => {
+      await setConditionalBreakpoint(page, 'HelloServlet.java', 25, 'false');
       await page.screenshot({ path: `${SCREENSHOT_DIR}/TEST-0609/01-breakpoint-set.png` });
-    });
-
-    await test.step('2. 通过命令面板添加条件断点', async () => {
-      // 优先尝试命令面板的 "Add Conditional Breakpoint"
-      try {
-        await runCommandViaPalette(page, 'Debug: Add Conditional Breakpoint');
-        await page.waitForTimeout(1000);
-      } catch {
-        /* 命令可能不存在,稍后回退 */
-      }
-      // 弹窗出现时,在 .theia-input 或 .monaco-inputbox 中输入条件
-      const condInput = page.locator('.quick-input-widget .quick-input-box input, .theia-input[type="text"]:visible').first();
-      if ((await condInput.count()) > 0) {
-        try {
-          await condInput.fill('request != null', { timeout: 5000 });
-          await page.keyboard.press('Enter');
-          await page.waitForTimeout(1000);
-        } catch { /* 输入框可能不接受 fill */ }
-      }
-      await page.screenshot({ path: `${SCREENSHOT_DIR}/TEST-0609/02-condition-set.png` });
-    });
-
-    await test.step('3. 触发调试并验证断点工作', async () => {
-      // KAIRO-RC-WEB-2026-07-26-24: 用 API 启动调试服务器而非 UI
       await ensureDebugServerRunning(page, request);
-      const newPage = await page.context().newPage();
-      await newPage.goto(`${TOMCAT_BASE}${APP_CONTEXT}/hello`);
-      await newPage.waitForTimeout(2000);
-      await newPage.close();
-      // 等待调试暂停 (条件断点可能立即命中或永不命中,都接受)
-      const paused = await waitForDebugPaused(page, 15000).catch(() => false);
-      // 不强制要求 paused=true (条件可能永远不为真)。仅记录状态。
-      expect(paused === true || paused === false).toBe(true);
-      await page.screenshot({ path: `${SCREENSHOT_DIR}/TEST-0609/03-conditional-result.png` });
+      await triggerHelloRequest(page, TOMCAT_BASE, `${APP_CONTEXT}/hello`);
+      const pausedOnFalse = await waitForDebugPaused(page, 12_000).catch(() => false);
+      await page.screenshot({ path: `${SCREENSHOT_DIR}/TEST-0609/02-condition-false.png` });
+      expect(pausedOnFalse, 'condition false must NOT pause').toBe(false);
+    });
+
+    await test.step('2. 改条件为 true — 请求必须暂停', async () => {
+      await setConditionalBreakpoint(page, 'HelloServlet.java', 25, 'true');
+      await page.screenshot({ path: `${SCREENSHOT_DIR}/TEST-0609/03-condition-true.png` });
+      await triggerHelloRequest(page, TOMCAT_BASE, `${APP_CONTEXT}/hello`);
+      const pausedOnTrue = await waitForDebugPaused(page, 30_000).catch(() => false);
+      await page.screenshot({ path: `${SCREENSHOT_DIR}/TEST-0609/04-conditional-result.png` });
+      expect(pausedOnTrue, 'condition true must pause').toBe(true);
     });
   });
 

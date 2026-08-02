@@ -1,7 +1,7 @@
 # Kairo IDE 开发交接文档
 
 > 生成时间：2026-07-23  
-> 最后更新：2026-08-01（Session 29 — Phase S E2E 全量回归复跑与修复）  
+> 最后更新：2026-08-01（Session 30 — 回归截图更新与截图脚本修复）  
 > 最新提交：见 `git log`（Session 22–23 已推送至 main）  
 > 分支：`main`  
 > 目标读者：接手开发的 AI 工程师 / 人类开发者  
@@ -9,7 +9,50 @@
 
 ---
 
-## Session 29 交付摘要 (2026-08-01) 🆕
+## Session 30 交付摘要 (2026-08-01) 🆕
+
+### 回归截图更新（未完成项第 4 项）
+
+**目标**：将 `docs/screenshots/current-ui/` 截图更新至最新 UI，修复截图脚本端口与 `13-run-menu.png` 选择器历史遗留问题。
+
+**完成内容**：
+
+1. **端口统一 :3001 → :18301**（与 `tests/e2e/playwright.config.ts` 对齐）：
+   - `docs/screenshots/capture-current-ui.cjs`（BASE_URL 改为 `CAPTURE_URL` 环境变量可覆盖，默认 18301）
+   - `tmp/probe-menubar.cjs`、`scripts/probe-kairo-menu.cjs`、`docs/screenshots/inspect-settings.cjs`
+   - `scripts/capture-screenshots.cjs`（`KAIRO_PORT` 默认 18301）
+   - `scripts/capture-more-screenshots.cjs`
+   - `docs/screenshots/verify-language-switch.cjs` / `verify-activity-bar-hover.cjs` / `verify-kairo-language.cjs`
+2. **13-run-menu.png 修复（历史遗留，HANDOVER 多轮记录未生成）**：
+   - probe 确认当前 Theia 菜单 DOM：menubar `.lm-MenuBar`（id=theia:menubar）→ `li.lm-MenuBar-item`（aria-haspopup）→ 展开菜单 `div.lm-Menu.lm-MenuBar-menu`。
+   - `capture-current-ui.cjs` 第 13 步选择器 `.lm-MenuBar-item:has-text("Run")` 点击验证成功（CLICK_OK），`.lm-Menu` 捕获 → **`13-run-menu.png` 本次成功生成（16KB）**。
+3. **补充截图脚本选择器修复**（`scripts/capture-more-screenshots.cjs` / `capture-screenshots.cjs`）：
+   - `13-expanded-tree`：旧 `text=LEGACY-SAMPLE`（大小写不匹配 + 根节点不可见）→ 改为展开 `src` → `main`（`.theia-TreeNodeSegmentGrow:text-is(...)`），避开 "Skip to main content" 误命中。
+   - `17-performance-dashboard`：View 子菜单实际名为 `Kairo: Show Performance`（非 "Performance Dashboard"）。
+   - `04-run-configurations` / `11-new-project-dialog`：过时文本点击 → 改走命令面板（`Kairo: Manage Run Configurations` / `Kairo: Import Project`）。
+4. **重新捕获**：`capture-current-ui.cjs`（01–14 全部 14 张）+ `capture-more-screenshots.cjs`（13–20 全部 8 张）+ `capture-screenshots.cjs`（12 张）+ verify-*（语言切换 / activity-bar hover）全部成功，`docs/screenshots/current-ui/` 已反映最新 UI。
+
+**验证**：
+
+| 检查项 | 结果 |
+|--------|------|
+| `capture-current-ui.cjs`（01–14） | ✅ 14/14 生成，含 `13-run-menu.png`（16KB） |
+| `capture-more-screenshots.cjs`（13–20） | ✅ 8/8 生成 |
+| `capture-screenshots.cjs` | ✅ 12/12 生成（含 04/11 修复后） |
+| verify-language-switch / activity-bar / kairo-language | ✅ 全部生成 |
+| 环境栈 | Runtime Agent 127.0.0.1:18080 + Theia Browser 127.0.0.1:18301 |
+
+**已知问题**：
+- 早期脚本生成的旧命名截图（`01-main.png`、`02-new-project-dialog.png`、`10-full-shell.png`、`11-command-palette.png`、`15/16-kairo-language-zh.png` 等）未被本轮脚本覆盖，保留未动（非本轮脚本输出）。
+- `scripts/_probe-axe-nodes.cjs`、`scripts/_probe-kairoagent.cjs` 仍引用 3001（一次性诊断探针，未改动）。
+
+**剩余待办**：
+- 提交 Session 30 变更并推送（由用户决定）。
+- 未完成项 1/2/3（真实遗留项目 E2E、Windows 10 验证、Wave 3.1 Debug 闭环）均依赖外部环境（Java 6 + Tomcat 6 / Windows 10 实体机），需环境就绪后推进。
+
+---
+
+## Session 29 交付摘要 (2026-08-01)
 
 ### Phase S — core-e2e / windows-e2e 全量回归复跑与修复
 
@@ -49,7 +92,7 @@
 
 **剩余待办**：
 - 提交 Session 29 变更并推送（由用户决定）。
-- 回归截图更新（`docs/screenshots/current-ui/`，需将脚本端口从 :3001 调整为 :18301）。
+- ~~回归截图更新（`docs/screenshots/current-ui/`，需将脚本端口从 :3001 调整为 :18301）。~~ → 已在 Session 30 完成（端口统一 :18301，13-run-menu.png 修复生成，全部截图重捕）。
 - 后续可按 ROADMAP 规划推进 Wave 3.1 Debug 闭环端到端验证（需 JDK 6 + Tomcat 6 环境）。
 
 ---

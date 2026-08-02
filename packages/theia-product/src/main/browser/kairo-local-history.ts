@@ -519,6 +519,13 @@ export class LocalHistoryContribution implements FrontendApplicationContribution
         return undefined;
       },
     });
+    // Palette / QA IDs: open the same timeline (compare/restore happen from the widget).
+    registry.registerCommand(LocalHistoryCommands.COMPARE_SNAPSHOT, {
+      execute: () => registry.executeCommand(LocalHistoryCommands.SHOW_HISTORY.id),
+    });
+    registry.registerCommand(LocalHistoryCommands.RESTORE_SNAPSHOT, {
+      execute: () => registry.executeCommand(LocalHistoryCommands.SHOW_HISTORY.id),
+    });
   }
 
   protected async snapshotBeforeSave(widget: Widget): Promise<void> {

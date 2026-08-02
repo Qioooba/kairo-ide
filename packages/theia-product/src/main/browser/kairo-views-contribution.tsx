@@ -26,8 +26,11 @@ import {
   WidgetManager,
   FrontendApplicationContribution,
   ApplicationShell,
+  OpenerService,
+  open,
 } from '@theia/core/lib/browser';
 import { Command, CommandRegistry, CommandService, MenuContribution, MenuModelRegistry, MenuPath, MessageService } from '@theia/core/lib/common';
+import URI from '@theia/core/lib/common/uri';
 import { KeybindingContribution, KeybindingRegistry } from '@theia/core/lib/browser/keybinding';
 import { isOSX } from '@theia/core/lib/common/os';
 import { CommonMenus } from '@theia/core/lib/browser/common-menus';
@@ -470,6 +473,7 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
   @inject(ActiveProjectService) protected activeProject!: ActiveProjectService;
   @inject(MessageService) protected messages!: MessageService;
   @inject(BuildStore) protected buildStore!: BuildStore;
+  @inject(OpenerService) protected openerService!: OpenerService;
   @inject(Container) protected readonly container!: Container;
   @inject(HotDeployService) protected hotDeploy!: HotDeployService;
   @inject(KairoI18nService) protected i18n!: KairoI18nService;
@@ -499,6 +503,60 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
       this.debugSessionService = await this.container.getAsync(KairoDebugSessionService);
     }
     return this.debugSessionService;
+  }
+
+  /**
+   * Probe Runtime Agent health before server lifecycle commands.
+   * Retries once after a soft reconnect so a stale EventStream does
+   * not silently block Tomcat start (KAIRO-QA-002).
+   */
+  protected async ensureRuntimeAgentHealthy(): Promise<boolean> {
+    const probe = async (): Promise<boolean> => {
+      const base = (this.runtime.baseUrl() || '').replace(/\/$/, '');
+      if (!base) {
+        return false;
+      }
+      try {
+        const ctl = new AbortController();
+        const timer = setTimeout(() => ctl.abort(), 4_000);
+        try {
+          const res = await fetch(`${base}/api/v1/health`, {
+            method: 'GET',
+            credentials: 'omit',
+            signal: ctl.signal,
+            headers: { Accept: 'application/json' },
+          });
+          return res.ok;
+        } finally {
+          clearTimeout(timer);
+        }
+      } catch {
+        return false;
+      }
+    };
+    const softReconnectWs = async (): Promise<void> => {
+      try {
+        await this.runtime.bootstrapFromTheiaConfig();
+      } catch {
+        /* ignore */
+      }
+      this.runtime.invalidateEndpoints();
+      this.runtime.disconnectEvents();
+      try {
+        this.runtime.openEvents();
+      } catch {
+        /* ignore */
+      }
+      await new Promise(r => setTimeout(r, 400));
+    };
+    // HTTP health can succeed while EventStream is still stale (KAIRO-QA-004).
+    // Always soft-reconnect WS once, then require health OK.
+    await softReconnectWs();
+    if (await probe()) {
+      return true;
+    }
+    await softReconnectWs();
+    return probe();
   }
 
   /**
@@ -654,21 +712,16 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
     }
     try {
       await this.revealOrCreateMain(KAIRO_WELCOME_FACTORY_ID, () => undefined, () => { /* singleton via WidgetManager */ });
-      // P2-UX-02: detect first launch — if no recent projects exist,
-      // auto-open the import wizard to guide the user.
+      // Do NOT auto-open the Import Wizard on top of Welcome — that hid the
+      // Recent section and failed A1 1.2/1.7 (KAIRO-QA-A1-001). Welcome already
+      // has a primary Import Project CTA; toast is enough for first-run guidance.
       try {
         const recent = await this.projectSvc.getRecentProjects();
         if (recent.length === 0) {
-          // First launch: show a brief welcome tip before opening the import wizard
           this.messages.info(this.i18n.t('widget.importWizard.welcomeToast'), { timeout: 5000 });
-          // Auto-open the import wizard after a short delay
-          setTimeout(() => {
-            void this.commands.executeCommand('kairo.project.import');
-          }, 500);
         }
       } catch {
-        // If getRecentProjects fails (e.g., agent not connected),
-        // still show the welcome page but skip auto-import.
+        // Agent may be offline — Welcome still shows empty Recent state.
       }
     } catch (err) {
       console.warn('[kairo] welcome tab failed to open', err);
@@ -744,10 +797,40 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
     registry.registerCommand(this.withLabel(KairoCommands.BUILD), {
       execute: async () => {
         try {
+          const agentOk = await this.ensureRuntimeAgentHealthy();
+          if (!agentOk) {
+            const url = this.runtime.baseUrl() || '(unset)';
+            this.messages.error(
+              `无法连接运行时代理（${url}）。请确认 kairo-runtime 已启动，点击状态栏「代理」重连，或刷新页面后重试。`,
+            );
+            return undefined;
+          }
           const p = await this.activeProject.requireProject();
-          const result = await this.runtime.request('POST /api/v1/builds', { projectId: p.projectId });
-          this.messages.info(`Build ${result.state}.`);
+          const result = await this.runtime.request('POST /api/v1/builds', { projectId: p.projectId }) as {
+            id?: string;
+            state?: string;
+            diagnostics?: Array<{ file: string; line?: number; column?: number; severity?: string; message?: string }>;
+          };
+          const finalBuild = await this.waitForBuildTerminal(result?.id, 90_000);
           await this.refreshBuilds();
+          await this.revealOrCreate(BuildViewWidget.ID, () => this.buildsView, w => { this.buildsView = w; });
+          const state = finalBuild?.state || result?.state || 'unknown';
+          const diags = (finalBuild?.diagnostics || result?.diagnostics || []) as Array<{
+            file: string; line?: number; column?: number; severity?: string; message?: string;
+          }>;
+          const firstError = diags.find(d => (d.severity || 'error') === 'error') || diags[0];
+          if (state === 'failed' || firstError) {
+            if (firstError?.file) {
+              this.messages.error(
+                `Build failed: ${firstError.file}:${firstError.line || 1} — ${firstError.message || 'error'}`,
+              );
+              await this.openBuildDiagnostic(firstError);
+            } else {
+              this.messages.error(`Build ${state}.`);
+            }
+          } else {
+            this.messages.info(`Build ${state}.`);
+          }
         } catch (err) {
           this.messages.error(kairoErrorMessage(err, 'Build failed'));
         }
@@ -762,10 +845,40 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
     registry.registerCommand(this.withLabel(KairoCommands.CLEAN_BUILD), {
       execute: async () => {
         try {
+          const agentOk = await this.ensureRuntimeAgentHealthy();
+          if (!agentOk) {
+            const url = this.runtime.baseUrl() || '(unset)';
+            this.messages.error(
+              `无法连接运行时代理（${url}）。请确认 kairo-runtime 已启动，点击状态栏「代理」重连，或刷新页面后重试。`,
+            );
+            return undefined;
+          }
           const p = await this.activeProject.requireProject();
-          const result = await this.runtime.request('POST /api/v1/builds', { projectId: p.projectId, clean: true });
-          this.messages.info(`Clean build ${result.state}.`);
+          const result = await this.runtime.request('POST /api/v1/builds', { projectId: p.projectId, clean: true }) as {
+            id?: string;
+            state?: string;
+            diagnostics?: Array<{ file: string; line?: number; column?: number; severity?: string; message?: string }>;
+          };
+          const finalBuild = await this.waitForBuildTerminal(result?.id, 90_000);
           await this.refreshBuilds();
+          await this.revealOrCreate(BuildViewWidget.ID, () => this.buildsView, w => { this.buildsView = w; });
+          const state = finalBuild?.state || result?.state || 'unknown';
+          const diags = (finalBuild?.diagnostics || result?.diagnostics || []) as Array<{
+            file: string; line?: number; column?: number; severity?: string; message?: string;
+          }>;
+          const firstError = diags.find(d => (d.severity || 'error') === 'error') || diags[0];
+          if (state === 'failed' || firstError) {
+            if (firstError?.file) {
+              this.messages.error(
+                `Clean build failed: ${firstError.file}:${firstError.line || 1} — ${firstError.message || 'error'}`,
+              );
+              await this.openBuildDiagnostic(firstError);
+            } else {
+              this.messages.error(`Clean build ${state}.`);
+            }
+          } else {
+            this.messages.info(`Clean build ${state}.`);
+          }
         } catch (err) {
           this.messages.error(kairoErrorMessage(err, 'Clean build failed'));
         }
@@ -811,6 +924,14 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
     registry.registerCommand(this.withLabel(KairoCommands.START_SERVER), {
       execute: async () => {
         try {
+          const agentOk = await this.ensureRuntimeAgentHealthy();
+          if (!agentOk) {
+            const url = this.runtime.baseUrl() || '(unset)';
+            this.messages.error(
+              `无法连接运行时代理（${url}）。请确认 kairo-runtime 已启动，点击状态栏「代理」重连，或刷新页面后重试。`,
+            );
+            return undefined;
+          }
           const p = await this.activeProject.requireProject();
           const srv = await this.serverSvc.start(p.projectId, false);
           this.messages.info(`Server ${srv.id} ${srv.state}.`);
@@ -1080,12 +1201,26 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
         return undefined;
       },
     });
-    // P1-INT-01: Agent reconnect — forces the EventStream to
-    // disconnect and reconnect to the Runtime Agent.
+    // P1-INT-01: Agent reconnect — re-read Theia-injected agent config
+    // (browser mode), then force the EventStream to reconnect.
     registry.registerCommand(this.withLabel(KairoCommands.RECONNECT_AGENT), {
-      execute: () => {
+      execute: async () => {
+        try {
+          await this.runtime.bootstrapFromTheiaConfig();
+        } catch {
+          /* desktop preload path may 404 the JSON endpoint — ignore */
+        }
+        this.runtime.invalidateEndpoints();
         this.runtime.disconnectEvents();
         this.runtime.openEvents();
+        const ok = await this.ensureRuntimeAgentHealthy();
+        if (ok) {
+          this.messages.info('已重新连接运行时代理');
+        } else {
+          this.messages.error(
+            `无法连接运行时代理（${this.runtime.baseUrl() || '(unset)'}）。请确认 agent 进程存活后重试。`,
+          );
+        }
         return undefined;
       },
     });
@@ -1103,10 +1238,12 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
     });
 
     // Welcome: reveal or create the welcome tab (closes automatically
-    // once a project is selected).
+    // once a project is selected). Close Import Wizard if it was covering Welcome.
     registry.registerCommand(this.withLabel(KairoCommands.SHOW_WELCOME), {
-      execute: () => {
-        void this.revealOrCreateMain(KAIRO_WELCOME_FACTORY_ID, () => undefined, () => undefined);
+      execute: async () => {
+        const importW = this.shell.getWidgets('main').find(widget => widget.id === KAIRO_IMPORT_WIZARD_FACTORY_ID);
+        importW?.close();
+        await this.revealOrCreateMain(KAIRO_WELCOME_FACTORY_ID, () => undefined, () => undefined);
       },
     });
 
@@ -1417,11 +1554,7 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
   }
 
   registerKeybindings(keybindings: KeybindingRegistry): void {
-    keybindings.registerKeybinding({
-      command: KairoCommands.TOGGLE_TERMINAL.id,
-      keybinding: 'alt+f12',
-    });
-
+    // Terminal toggle (Alt+F12) is registered in the IDEA keymap — avoid duplicate.
     // IDEA-style Update Application (Ctrl+F10)
     keybindings.registerKeybinding({
       command: KairoCommands.UPDATE_APPLICATION.id,
@@ -1431,6 +1564,9 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
     // IDEA-style Debug keybindings (platform-specific)
     // Note: stepOver/stepInto/stepOut/continue/runToCursor are registered
     // in the platform keymap files (kairo-idea-*-keymap.ts) to avoid duplication.
+    // Stop = Ctrl+F2 / Cmd+F2 (NOT Shift+F5 — that is VS Code).
+    // Rerun/Restart = Ctrl+F5 (Win) — matches IDEA Rerun.
+    // Debug tool window Alt/Cmd+5 is in the IDEA keymap (kairo.debug.openView).
     if (isOSX) {
       keybindings.registerKeybinding({
         command: KairoCommands.DEBUG_RESTART.id,
@@ -1447,10 +1583,6 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
         keybinding: 'alt+f8',
         when: 'inDebugMode',
       });
-      keybindings.registerKeybinding({
-        command: 'workbench.view.debug',
-        keybinding: 'cmd+5',
-      });
     } else {
       keybindings.registerKeybinding({
         command: KairoCommands.DEBUG_RESTART.id,
@@ -1459,17 +1591,13 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
       });
       keybindings.registerKeybinding({
         command: 'workbench.action.debug.stop',
-        keybinding: 'shift+f5',
+        keybinding: 'ctrl+f2',
         when: 'inDebugMode',
       });
       keybindings.registerKeybinding({
         command: KairoCommands.DEBUG_EVALUATE_EXPRESSION.id,
         keybinding: 'alt+f8',
         when: 'inDebugMode',
-      });
-      keybindings.registerKeybinding({
-        command: 'workbench.view.debug',
-        keybinding: 'alt+5',
       });
     }
   }
@@ -1553,6 +1681,79 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
       }
     } catch (err) {
       this.messages.error(kairoErrorMessage(err, 'Refresh builds failed'));
+    }
+  }
+
+  /** Poll until build leaves pending/running/queued, or timeout. */
+  protected async waitForBuildTerminal(
+    buildId: string | undefined,
+    timeoutMs: number,
+  ): Promise<{
+    id?: string;
+    state?: string;
+    diagnostics?: Array<{ file: string; line?: number; column?: number; severity?: string; message?: string }>;
+  } | undefined> {
+    if (!buildId) return undefined;
+    const t0 = Date.now();
+    while (Date.now() - t0 < timeoutMs) {
+      try {
+        const b = await this.runtime.request(
+          'GET /api/v1/builds/{buildId}' as any,
+          undefined,
+          { pathParams: { buildId } },
+        ) as {
+          id?: string;
+          state?: string;
+          diagnostics?: Array<{ file: string; line?: number; column?: number; severity?: string; message?: string }>;
+        };
+        if (b?.state && !/^(pending|running|queued)$/i.test(b.state)) {
+          return b;
+        }
+      } catch {
+        /* keep polling; event stream may still update the store */
+      }
+      await new Promise(r => setTimeout(r, 1000));
+      const fromStore = this.buildStore.getBuilds().find(x => x.id === buildId);
+      if (fromStore && !/^(pending|running|queued)$/i.test(fromStore.state)) {
+        return {
+          id: fromStore.id,
+          state: fromStore.state,
+          diagnostics: fromStore.diagnostics,
+        };
+      }
+    }
+    return this.buildStore.getBuilds().find(x => x.id === buildId) as any;
+  }
+
+  protected async openBuildDiagnostic(d: {
+    file: string;
+    line?: number;
+    column?: number;
+  }): Promise<void> {
+    try {
+      const normalized = String(d.file || '').replace(/\\/g, '/');
+      let uri: URI;
+      if (normalized.startsWith('file:')) {
+        uri = new URI(normalized);
+      } else if (/^[a-zA-Z]:\//.test(normalized) || normalized.startsWith('/')) {
+        uri = new URI(`file:///${normalized.replace(/^\/+/, '')}`);
+      } else {
+        const root =
+          this.projectSvc.currentWorkspace()?.rootPath ||
+          this.activeProject.project?.root ||
+          '';
+        const abs = root
+          ? `${String(root).replace(/\\/g, '/').replace(/\/+$/, '')}/${normalized.replace(/^\.\//, '')}`
+          : normalized;
+        uri = new URI(`file:///${abs.replace(/^\/+/, '')}`);
+      }
+      const line = Math.max(0, (d.line || 1) - 1);
+      const character = Math.max(0, (d.column || 1) - 1);
+      await open(this.openerService, uri, {
+        selection: { start: { line, character }, end: { line, character } },
+      });
+    } catch (err) {
+      console.warn('[kairo] openBuildDiagnostic failed', err);
     }
   }
 

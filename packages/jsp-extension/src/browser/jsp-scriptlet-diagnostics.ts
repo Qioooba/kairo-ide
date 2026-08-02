@@ -11,6 +11,12 @@ import * as monaco from '@theia/monaco-editor-core';
 import { JavaLanguageClient } from '@kairo/java-extension';
 import { JSP_LANGUAGE_ID } from './jsp-monarch';
 import { JspJavaParser } from './jsp-java-nav';
+import {
+  buildVirtualJavaFile,
+  parseVirtualUri,
+  virtualUriForBlock,
+  virtualWrapperLineCount,
+} from './jsp-virtual-java';
 
 /** Minimal LSP diagnostic shape we need for mapping. */
 interface LSPDiagnostic {
@@ -23,54 +29,6 @@ interface LSPDiagnostic {
 
 /** Debounce interval for sending diagnostics requests (ms). */
 const DIAGNOSTICS_DEBOUNCE_MS = 500;
-
-/** Virtual URI scheme prefix for JSP scriptlet blocks. */
-const VIRTUAL_URI_PREFIX = 'jsp-scriptlet:';
-
-/** Number of wrapper lines before the block content in the virtual file. */
-const WRAPPER_LINE_COUNT = 2; // class header + method header
-
-/**
- * Construct a virtual Java file URI for a specific block in a JSP file.
- */
-function virtualUriForBlock(jspUri: string, blockIndex: number): string {
-  return `${VIRTUAL_URI_PREFIX}//${jspUri}#block${blockIndex}`;
-}
-
-/**
- * Extract the JSP URI and block index from a virtual URI.
- */
-function parseVirtualUri(virtualUri: string): { jspUri: string; blockIndex: number } | null {
-  if (!virtualUri.startsWith(VIRTUAL_URI_PREFIX + '//')) {
-    return null;
-  }
-  const rest = virtualUri.slice(VIRTUAL_URI_PREFIX.length + 2);
-  const hashIdx = rest.lastIndexOf('#block');
-  if (hashIdx < 0) {
-    return null;
-  }
-  const jspUri = rest.slice(0, hashIdx);
-  const blockIndex = Number.parseInt(rest.slice(hashIdx + '#block'.length), 10);
-  if (!Number.isFinite(blockIndex)) {
-    return null;
-  }
-  return { jspUri, blockIndex };
-}
-
-/**
- * Build a minimal virtual Java file that wraps the block content so
- * JDT LS can parse it.
- *
- * Structure:
- *   class _JspVirtual {
- *       void _m() throws Exception {
- *   [BLOCK_CONTENT]
- *       }
- *   }
- */
-function buildVirtualJavaFile(blockContent: string): string {
-  return `class _JspVirtual {\n    void _m() throws Exception {\n${blockContent}\n    }\n}`;
-}
 
 /**
  * Convert a 0-based offset to a 0-based line number.
@@ -87,22 +45,22 @@ function offsetToLine(content: string, offset: number): number {
 function mapDiagnosticToJsp(
   blockContentStartLine: number,
   javaDiagnostic: LSPDiagnostic,
+  wrapperLineCount: number = virtualWrapperLineCount('scriptlet'),
 ): monaco.editor.IMarkerData {
   const diagLine = javaDiagnostic.range.start.line;
   const diagEndLine = javaDiagnostic.range.end.line;
 
-  // The virtual file has WRAPPER_LINE_COUNT lines before the block content.
-  const jspStartLine = blockContentStartLine + (diagLine - WRAPPER_LINE_COUNT);
-  const jspEndLine = blockContentStartLine + (diagEndLine - WRAPPER_LINE_COUNT);
+  const jspStartLine = blockContentStartLine + (diagLine - wrapperLineCount);
+  const jspEndLine = blockContentStartLine + (diagEndLine - wrapperLineCount);
 
   return {
     severity: severityToMarkerSeverity(javaDiagnostic.severity),
     message: javaDiagnostic.message,
     source: javaDiagnostic.source,
     code: javaDiagnostic.code === undefined ? undefined : String(javaDiagnostic.code),
-    startLineNumber: jspStartLine + 1, // 0-based → 1-based
+    startLineNumber: Math.max(1, jspStartLine + 1),
     startColumn: javaDiagnostic.range.start.character + 1,
-    endLineNumber: jspEndLine + 1,
+    endLineNumber: Math.max(1, jspEndLine + 1),
     endColumn: javaDiagnostic.range.end.character + 1,
   };
 }
@@ -153,15 +111,18 @@ export function registerJspScriptletDiagnostics(
 
     for (let i = 0; i < blocks.length; i++) {
       const block = blocks[i];
+      if (block.kind === 'directive') {
+        continue;
+      }
       const blockContent = content.slice(block.start, block.end);
       const virtualUri = virtualUriForBlock(state.jspUri, i);
       newVirtualUris.add(virtualUri);
 
-      // Build the virtual Java file and send to JDT LS.
-      const virtualJava = buildVirtualJavaFile(blockContent);
+      const kind = block.kind === 'declaration' ? 'declaration'
+        : block.kind === 'expression' ? 'expression'
+          : 'scriptlet';
+      const virtualJava = buildVirtualJavaFile(blockContent, kind);
       try {
-        // Use didOpen to send the virtual file to JDT LS.
-        // This triggers the LS to produce diagnostics.
         client.didOpen({
           uri: virtualUri,
           languageId: 'java',
@@ -273,6 +234,9 @@ export function registerJspScriptletDiagnostics(
 
     const block = blocks[parsed.blockIndex];
     const blockContent = content.slice(block.start, block.end);
+    const kind = block.kind === 'declaration' ? 'declaration'
+      : block.kind === 'expression' ? 'expression'
+        : 'scriptlet';
 
     // Calculate the JSP line where the block content starts.
     // If the first character is a newline, the content starts on the next line.
@@ -282,7 +246,7 @@ export function registerJspScriptletDiagnostics(
       : blockTagLine;
 
     const markers = params.diagnostics.map(d =>
-      mapDiagnosticToJsp(contentStartLine, d),
+      mapDiagnosticToJsp(contentStartLine, d, virtualWrapperLineCount(kind)),
     );
 
     // Set markers on the JSP model using the JSP diagnostics owner.

@@ -36,17 +36,17 @@ const HISTORY_STORAGE_KEY = 'kairo-search-history';
 const PINNED_STORAGE_KEY = 'kairo-search-pinned';
 
 export const SCOPE_OPTIONS: SearchScopeOption[] = [
-  { value: 'project', label: '项目' },
-  { value: 'directory', label: '目录' },
-  { value: 'module', label: '模块' },
-  { value: 'current-file', label: '当前文件' },
-  { value: 'selection', label: '选择区域' },
+  { value: 'project', label: 'Project' },
+  { value: 'directory', label: 'Directory' },
+  { value: 'module', label: 'Module' },
+  { value: 'current-file', label: 'Current File' },
+  { value: 'selection', label: 'Selection' },
 ];
 
 export const GROUP_MODE_OPTIONS: GroupModeOption[] = [
-  { value: 'by-directory', label: '按目录分组' },
-  { value: 'by-file', label: '按文件分组' },
-  { value: 'flat', label: '平铺' },
+  { value: 'by-directory', label: 'Group by Directory' },
+  { value: 'by-file', label: 'Group by File' },
+  { value: 'flat', label: 'Flat' },
 ];
 
 @injectable()

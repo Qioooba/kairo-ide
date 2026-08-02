@@ -241,9 +241,9 @@ const KairoWelcome: React.FC<KairoWelcomeProps> = ({
           </button>
         ))}
       </div>
-      {!loading && recentProjects.length > 0 && (
-        <div className="kairo-welcome-recent" data-testid="welcome-recent">
-          <h2 className="kairo-welcome-recent-title">{t('widget.welcome.recentProjects')}</h2>
+      <div className="kairo-welcome-recent" data-testid="welcome-recent">
+        <h2 className="kairo-welcome-recent-title">{t('widget.welcome.recentProjects')}</h2>
+        {!loading && recentProjects.length > 0 && (
           <ul className="kairo-welcome-recent-list" role="list" aria-label={t('widget.welcome.recentProjects')}>
             {recentProjects.map(p => (
               <li key={p.id} className="kairo-welcome-recent-item">
@@ -260,13 +260,18 @@ const KairoWelcome: React.FC<KairoWelcomeProps> = ({
               </li>
             ))}
           </ul>
-        </div>
-      )}
-      {!loading && recentProjects.length === 0 && !error && (
-        <p className="kairo-welcome-empty">
-          {t('widget.welcome.noRecentProjects')}
-        </p>
-      )}
+        )}
+        {!loading && recentProjects.length === 0 && !error && (
+          <p className="kairo-welcome-empty" data-testid="welcome-recent-empty">
+            {t('widget.welcome.noRecentProjects')}
+          </p>
+        )}
+        {loading && (
+          <p className="kairo-welcome-empty" data-testid="welcome-recent-loading">
+            {t('widget.welcome.recentProjects')}…
+          </p>
+        )}
+      </div>
       {!loading && error && !errorDismissed && (
         <div className="kairo-welcome-error" role="alert" data-testid="welcome-error">
           <div className="kairo-error-banner">

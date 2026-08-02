@@ -178,7 +178,8 @@ export class JavaHierarchyWidget extends ReactWidget {
     this.id = JavaHierarchyWidget.ID;
     this.title.iconClass = 'codicon codicon-type-hierarchy';
     this.title.closable = true;
-    this.addClass('kairo-widget kairo-java-hierarchy-widget');
+    this.addClass('kairo-widget');
+    this.addClass('kairo-java-hierarchy-widget');
   }
 
   @postConstruct()

@@ -519,6 +519,10 @@ export async function openFileViaQuickOpen(
   await page.waitForTimeout(500);
   await page.keyboard.press('Enter');
   await page.waitForTimeout(1_000);
+  // Best-effort: wait for Monaco to show content for the opened file.
+  try {
+    await page.locator('.monaco-editor .view-lines').first().waitFor({ state: 'visible', timeout: 15_000 });
+  } catch { /* caller may open differently */ }
 }
 
 /**
@@ -543,49 +547,95 @@ export async function runKairoImportWizard(
   const timeoutMs = options.timeoutMs ?? 60_000;
   const deadline = Date.now() + timeoutMs;
 
+  await page.keyboard.press('Escape').catch(() => undefined);
+  await page.waitForTimeout(200);
+
   // Check if import wizard is already open; if not, open it via the command palette.
-  const wizardOpen = (await page.locator('[data-testid="path-input"]').count()) > 0;
-  if (!wizardOpen) {
-    await runCommandViaPalette(page, 'Kairo: Import Project');
-    // Wait for step 1
-    try {
-      await page.waitForSelector('[data-testid="path-input"]', { timeout: 15_000 });
-    } catch {
-      return { opened: false, reason: 'import-wizard-did-not-open' };
+  // UI may be zh-CN — command label is localized via i18n (`Kairo: 导入项目`).
+  const step2Open = (await page.locator('[data-testid="import-project-btn"]').count()) > 0;
+  const step3Open = (await page.locator('[data-testid="open-project-btn"]').count()) > 0;
+  let wizardOpen = (await page.locator('[data-testid="path-input"]').count()) > 0;
+
+  if (step3Open) {
+    // Already at success step — fall through.
+  } else if (step2Open && !wizardOpen) {
+    // Continue from confirm step.
+  } else if (!wizardOpen) {
+    const openAttempts = [
+      'Kairo: 导入项目',
+      'Kairo: Import Project',
+      '导入项目',
+      'Import Project',
+    ];
+    for (const label of openAttempts) {
+      try {
+        await runCommandViaPalette(page, label);
+      } catch { /* try next */ }
+      try {
+        await page.waitForSelector(
+          '[data-testid="path-input"], [data-testid="import-project-btn"]',
+          { timeout: 5_000 },
+        );
+        wizardOpen = true;
+        break;
+      } catch { /* try next label */ }
+    }
+    if (!wizardOpen) {
+      // Welcome-page primary button fallback
+      const welcomeImport = page.locator(
+        'button:has-text("导入项目"), button:has-text("Import Project"), [data-testid="welcome-import"]',
+      ).first();
+      if ((await welcomeImport.count()) > 0) {
+        await welcomeImport.click({ timeout: 5_000 }).catch(() => undefined);
+        await page.waitForTimeout(800);
+      }
+      try {
+        await page.waitForSelector(
+          '[data-testid="path-input"], [data-testid="import-project-btn"]',
+          { timeout: 10_000 },
+        );
+      } catch {
+        return { opened: false, reason: 'import-wizard-did-not-open' };
+      }
     }
   }
 
-  // Step 1: Fill path and click Scan
-  const pathInput = page.locator('[data-testid="path-input"]').first();
-  await pathInput.click();
-  await pathInput.fill(projectPath);
-  // Click the Scan button to advance to step 2
-  const scanBtn = page.locator('[data-testid="scan-btn"]').first();
-  if (await scanBtn.count() > 0 && await scanBtn.isEnabled()) {
-    await scanBtn.click();
-  } else {
-    // Fallback: press Enter in the path input
-    await pathInput.press('Enter');
+  // Step 1: Fill path and click Scan (skip if already on step 2/3)
+  const stillOnStep1 = (await page.locator('[data-testid="path-input"]').count()) > 0
+    && (await page.locator('[data-testid="import-project-btn"]').count()) === 0;
+  if (stillOnStep1) {
+    const pathInput = page.locator('[data-testid="path-input"]').first();
+    await pathInput.click();
+    await pathInput.fill(projectPath);
+    const scanBtn = page.locator('[data-testid="scan-btn"]').first();
+    if (await scanBtn.count() > 0 && await scanBtn.isEnabled()) {
+      await scanBtn.click();
+    } else {
+      await pathInput.press('Enter');
+    }
   }
 
-  // Wait for step 2 to appear
-  try {
-    await page.waitForSelector('[data-testid="import-project-btn"]', {
-      timeout: 30_000,
-    });
-  } catch {
-    return { opened: false, reason: 'scan-did-not-advance' };
+  // Wait for step 2 to appear (unless already on step 3)
+  if ((await page.locator('[data-testid="open-project-btn"]').count()) === 0) {
+    try {
+      await page.waitForSelector('[data-testid="import-project-btn"]', {
+        timeout: 30_000,
+      });
+    } catch {
+      return { opened: false, reason: 'scan-did-not-advance' };
+    }
   }
   if (Date.now() > deadline) {
     return { opened: false, reason: 'timeout-before-step-2' };
   }
 
-  // Step 2: Click "Import Project"
+  // Step 2: Click "Import Project" if present
   const importBtn = page.locator('[data-testid="import-project-btn"]').first();
-  if (await importBtn.count() === 0) {
+  if ((await importBtn.count()) > 0) {
+    await importBtn.click();
+  } else if ((await page.locator('[data-testid="open-project-btn"]').count()) === 0) {
     return { opened: false, reason: 'import-button-missing' };
   }
-  await importBtn.click();
 
   // Wait for step 3 to appear (or the wizard to close)
   try {
@@ -639,8 +689,8 @@ export async function runKairoImportWizard(
       const t = await getStatusBarText(page);
       // KAIRO-S27: 兼容 zh 文案（项目：/项目：（无工作区））与 en 文案（Project: ...）
       const hasNoProject =
-        t.includes('Project: (no workspace)') || t.includes('项目：（无工作区）');
-      const hasProject = /(Project:|项目：)/.test(t);
+        t.includes('Project: (no workspace)') || t.includes('项目：（无工作区）') || t.includes('项目: (未导入)') || t.includes('项目：（未导入）');
+      const hasProject = /(Project:|项目[:：])/.test(t);
       if (!hasNoProject && hasProject) {
         ready = t;
         break;
@@ -1164,26 +1214,24 @@ export async function setBreakpoint(
 ): Promise<void> {
   await openFileInEditor(page, filePath);
   await page.waitForTimeout(1_000);
-
-  // Navigate to the target line
-  // Use Ctrl+G (Go to Line) to jump to the specific line
-  await page.click('.monaco-editor .view-lines');
-  await page.waitForTimeout(300);
-  await page.keyboard.press('Control+g');
-  await page.waitForTimeout(500);
-  await page.keyboard.type(String(lineNumber), { delay: 30 });
-  await page.waitForTimeout(300);
-  await page.keyboard.press('Enter');
-  await page.waitForTimeout(500);
-
-  // Toggle breakpoint on the current line
+  await gotoEditorLine(page, lineNumber);
   await page.keyboard.press('F9');
   await page.waitForTimeout(500);
 }
 
 /**
+ * Whether status-bar text indicates a paused debug session.
+ * Matches EN ("Debug: paused") and zh-CN ("调试：paused").
+ */
+export function isDebugPausedStatus(statusBarText: string): boolean {
+  return /(?:Debug|调试)\s*[:：]\s*paused/i.test(statusBarText)
+    || /Paused on breakpoint/i.test(statusBarText)
+    || /已暂停/.test(statusBarText);
+}
+
+/**
  * Waits for the debug session to pause (e.g., at a breakpoint).
- * Checks the status bar for "Debug: paused".
+ * Checks the status bar for "Debug: paused" / "调试：paused".
  */
 export async function waitForDebugPaused(
   page: Page,
@@ -1192,15 +1240,20 @@ export async function waitForDebugPaused(
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     const t = await getStatusBarText(page);
-    if (t.includes('Debug: paused')) {
+    if (isDebugPausedStatus(t)) {
       return true;
     }
     // Also check for the debug paused indicator in the DOM
     const pausedInDom = await page.evaluate(() => {
       const highlighted = document.querySelector(
-        '.monaco-editor .debug-current-line, .monaco-editor .debug-top-stack-frame',
+        '.monaco-editor .debug-current-line, .monaco-editor .debug-top-stack-frame, .monaco-editor .debug-top-stack-frame-line',
       );
-      return highlighted !== null;
+      if (highlighted) return true;
+      const labels = document.querySelectorAll('.theia-TreeNodeLabel, .monaco-list-row, [class*="debug"]');
+      for (const el of Array.from(labels)) {
+        if (/Paused on breakpoint|已暂停/i.test(el.textContent || '')) return true;
+      }
+      return false;
     });
     if (pausedInDom) {
       return true;
@@ -1348,5 +1401,559 @@ export async function getDebugVariables(page: Page): Promise<string[]> {
       '.theia-TreeNode, .monaco-list-row, [data-testid="variable-item"]',
     );
     return Array.from(items).map((el) => el.textContent?.trim() || '');
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Deep-debug helpers (DBG-DEEP / shard-06b) — click / hover first
+// ---------------------------------------------------------------------------
+
+export type DebugToolbarAction =
+  | 'continue'
+  | 'pause'
+  | 'stop'
+  | 'restart'
+  | 'stepOver'
+  | 'stepInto'
+  | 'stepOut'
+  | 'runToCursor'
+  | 'muteBreakpoints'
+  | 'dropFrame'
+  | 'evaluate';
+
+const DEBUG_TOOLBAR_ICON: Record<DebugToolbarAction, string> = {
+  continue: 'codicon-debug-continue',
+  pause: 'codicon-debug-pause',
+  stop: 'codicon-debug-stop',
+  restart: 'codicon-debug-restart',
+  stepOver: 'codicon-debug-step-over',
+  stepInto: 'codicon-debug-step-into',
+  stepOut: 'codicon-debug-step-out',
+  runToCursor: 'codicon-debug-continue',
+  muteBreakpoints: 'codicon-debug-disconnect',
+  dropFrame: 'codicon-debug-reverse-continue',
+  evaluate: 'codicon-debug-console',
+};
+
+/**
+ * Go to a line in the active Monaco editor (Ctrl+G).
+ */
+export async function gotoEditorLine(page: Page, lineNumber: number): Promise<void> {
+  const editor = page.locator('.monaco-editor .view-lines').first();
+  await editor.waitFor({ state: 'visible', timeout: 30_000 });
+  await editor.click({ timeout: 10_000 });
+  await page.waitForTimeout(200);
+  await page.keyboard.press('Control+g');
+  await page.waitForTimeout(400);
+  await page.keyboard.type(String(lineNumber), { delay: 20 });
+  await page.waitForTimeout(200);
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(300);
+}
+
+/**
+ * Click the editor gutter to toggle a breakpoint on `lineNumber`.
+ * Falls back to F9 if the gutter click does not produce a glyph.
+ */
+export async function clickGutterBreakpoint(
+  page: Page,
+  filePath: string,
+  lineNumber: number,
+): Promise<boolean> {
+  await openFileInEditor(page, filePath);
+  await page.waitForTimeout(800);
+  await gotoEditorLine(page, lineNumber);
+
+  const clicked = await page.evaluate((line) => {
+    const overlays = document.querySelector(
+      '.monaco-editor .margin-view-overlays, .monaco-editor .glyph-margin',
+    );
+    if (!overlays) return false;
+    const lineNodes = overlays.querySelectorAll('.cgmr, .margin-view-overlays > div, .line-numbers');
+    // Prefer exact line-number element
+    const numbers = document.querySelectorAll('.monaco-editor .line-numbers');
+    for (const el of Array.from(numbers)) {
+      if ((el.textContent || '').trim() === String(line)) {
+        const r = (el as HTMLElement).getBoundingClientRect();
+        const cx = Math.max(2, r.left - 8);
+        const cy = r.top + r.height / 2;
+        const target = document.elementFromPoint(cx, cy) as HTMLElement | null;
+        if (target) {
+          target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: cx, clientY: cy }));
+          target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: cx, clientY: cy }));
+          target.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: cx, clientY: cy }));
+          return true;
+        }
+      }
+    }
+    void lineNodes;
+    return false;
+  }, lineNumber);
+
+  if (!clicked) {
+    // Pixel click on margin relative to editor
+    const editor = page.locator('.monaco-editor').first();
+    const box = await editor.boundingBox();
+    if (box) {
+      const lineHeight = await page.evaluate(() => {
+        const ln = document.querySelector('.monaco-editor .view-line') as HTMLElement | null;
+        return ln ? ln.getBoundingClientRect().height || 18 : 18;
+      });
+      // Approximate: gutter ~ 40px from left; line offset from top of view
+      const currentLineInfo = await page.evaluate(() => {
+        const cur = document.querySelector('.monaco-editor .current-line, .monaco-editor .view-overlays .current-line');
+        if (cur) {
+          const r = (cur as HTMLElement).getBoundingClientRect();
+          return { y: r.top + r.height / 2 };
+        }
+        return null;
+      });
+      const y = currentLineInfo?.y ?? box.y + 40 + (lineNumber - 1) * lineHeight;
+      await page.mouse.click(box.x + 12, y);
+    } else {
+      await page.keyboard.press('F9');
+    }
+  }
+
+  await page.waitForTimeout(600);
+  let hasGlyph = await hasBreakpointGlyph(page);
+  if (!hasGlyph) {
+    await page.keyboard.press('F9');
+    await page.waitForTimeout(500);
+    hasGlyph = await hasBreakpointGlyph(page);
+  }
+  return hasGlyph;
+}
+
+/**
+ * Whether a breakpoint glyph is visible in the active editor margin.
+ */
+export async function hasBreakpointGlyph(page: Page): Promise<boolean> {
+  return page.evaluate(() => {
+    const sels = [
+      '.monaco-editor .codicon-debug-breakpoint',
+      '.monaco-editor .cgmr.codicon-debug-breakpoint',
+      '.monaco-editor .margin-view-overlays .codicon-debug-breakpoint',
+      '.monaco-editor .glyph-margin-widget',
+      '[class*="debug-breakpoint"]',
+    ];
+    for (const s of sels) {
+      if (document.querySelector(s)) return true;
+    }
+    return false;
+  });
+}
+
+/**
+ * Assert debug session is paused (status bar or current-line decoration).
+ */
+export async function assertDebugPaused(page: Page, timeoutMs = 30_000): Promise<void> {
+  const ok = await waitForDebugPaused(page, timeoutMs);
+  if (!ok) {
+    throw new Error('Expected debug session to be paused (status bar / current-line decoration)');
+  }
+}
+
+/**
+ * Best-effort current debug line number from Monaco decorations / cursor.
+ */
+export async function getCurrentDebugLine(page: Page): Promise<number | null> {
+  return page.evaluate(() => {
+    const highlighted = document.querySelector(
+      '.monaco-editor .debug-top-stack-frame-line, .monaco-editor .debug-current-line, .monaco-editor .view-overlays .current-line',
+    ) as HTMLElement | null;
+    if (highlighted) {
+      const numbers = document.querySelectorAll('.monaco-editor .line-numbers');
+      const hy = highlighted.getBoundingClientRect().top + highlighted.getBoundingClientRect().height / 2;
+      let best: { line: number; dist: number } | null = null;
+      for (const n of Array.from(numbers)) {
+        const text = (n.textContent || '').trim();
+        const line = parseInt(text, 10);
+        if (!Number.isFinite(line)) continue;
+        const r = (n as HTMLElement).getBoundingClientRect();
+        const dist = Math.abs(r.top + r.height / 2 - hy);
+        if (!best || dist < best.dist) best = { line, dist };
+      }
+      if (best && best.dist < 20) return best.line;
+    }
+    // Fallback: status / active line number class
+    const active = document.querySelector('.monaco-editor .line-numbers.active-line-number');
+    if (active) {
+      const line = parseInt((active.textContent || '').trim(), 10);
+      return Number.isFinite(line) ? line : null;
+    }
+    return null;
+  });
+}
+
+/**
+ * Assert the paused debug line equals (or is near) `expectedLine`.
+ */
+export async function assertCurrentDebugLine(
+  page: Page,
+  expectedLine: number,
+  tolerance = 0,
+): Promise<void> {
+  const line = await getCurrentDebugLine(page);
+  if (line === null) {
+    throw new Error(`Expected debug line ~${expectedLine}, but could not read current line`);
+  }
+  if (Math.abs(line - expectedLine) > tolerance) {
+    throw new Error(`Expected debug line ~${expectedLine} (±${tolerance}), got ${line}`);
+  }
+}
+
+/**
+ * Click a debug toolbar button (Kairo IDEA toolbar or Theia/codicon fallback).
+ */
+export async function clickDebugToolbar(
+  page: Page,
+  action: DebugToolbarAction,
+): Promise<boolean> {
+  const icon = DEBUG_TOOLBAR_ICON[action];
+  // Prefer Kairo IDEA toolbar button by icon class
+  const ideaBtn = page.locator(
+    `.kairo-debug-toolbar-idea .kairo-debug-toolbar-btn .${icon}, .kairo-debug-toolbar-idea .${icon}`,
+  ).first();
+  if ((await ideaBtn.count()) > 0) {
+    try {
+      await ideaBtn.click({ timeout: 3_000 });
+      await page.waitForTimeout(400);
+      return true;
+    } catch { /* fall through */ }
+  }
+
+  const legacyBtn = page.locator(
+    `.kairo-debug-toolbar-widget .${icon}, .theia-debug-toolbar .${icon}, .debug-toolbar .${icon}`,
+  ).first();
+  if ((await legacyBtn.count()) > 0) {
+    try {
+      await legacyBtn.click({ timeout: 3_000 });
+      await page.waitForTimeout(400);
+      return true;
+    } catch { /* fall through */ }
+  }
+
+  // Title-based fallback (localized labels may vary; use common English fragments)
+  const titleHints: Partial<Record<DebugToolbarAction, RegExp>> = {
+    continue: /resume|continue|继续/i,
+    pause: /pause|暂停/i,
+    stop: /stop|停止/i,
+    restart: /restart|rerun|重新/i,
+    stepOver: /step over|单步跳过|跳过/i,
+    stepInto: /step into|单步进入|进入/i,
+    stepOut: /step out|单步跳出|跳出/i,
+    muteBreakpoints: /mute|静音|禁用断点/i,
+    dropFrame: /drop frame|丢弃帧/i,
+    evaluate: /evaluate|求值/i,
+  };
+  const hint = titleHints[action];
+  if (hint) {
+    const byTitle = page.locator(`.kairo-debug-toolbar-btn[title]`).filter({ hasText: hint }).first();
+    // title is an attribute — filter via evaluate
+    const clicked = await page.evaluate((reSource) => {
+      const re = new RegExp(reSource, 'i');
+      const btns = document.querySelectorAll('.kairo-debug-toolbar-btn, .theia-debug-toolbar .theia-ui-button, button');
+      for (const b of Array.from(btns)) {
+        const title = b.getAttribute('title') || b.getAttribute('aria-label') || '';
+        if (re.test(title)) {
+          (b as HTMLElement).click();
+          return true;
+        }
+      }
+      return false;
+    }, hint.source);
+    if (clicked) {
+      await page.waitForTimeout(400);
+      return true;
+    }
+    void byTitle;
+  }
+
+  // Keyboard fallback for core actions
+  const keys: Partial<Record<DebugToolbarAction, string>> = {
+    continue: 'F5',
+    stop: 'Shift+F5',
+    stepOver: 'F10',
+    stepInto: 'F11',
+    stepOut: 'Shift+F11',
+    runToCursor: 'Alt+F9',
+  };
+  const key = keys[action];
+  if (key) {
+    await page.keyboard.press(key);
+    await page.waitForTimeout(400);
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Hover a specific identifier in the editor and return debug-hover text if shown.
+ * Locates the word via Monaco view-line text content (no blind pixel hover).
+ */
+export async function hoverEditorIdentifier(
+  page: Page,
+  word: string,
+  timeoutMs = 5_000,
+): Promise<string> {
+  // Find the DOM span that contains the identifier and hover its center
+  const found = await page.evaluate((w) => {
+    const lines = document.querySelectorAll('.monaco-editor .view-line span span, .monaco-editor .view-line span');
+    for (const el of Array.from(lines)) {
+      const text = (el.textContent || '').trim();
+      if (text === w || text.includes(w)) {
+        // Prefer exact token match
+        if (text !== w && !new RegExp(`\\b${w}\\b`).test(text)) continue;
+        const r = (el as HTMLElement).getBoundingClientRect();
+        if (r.width > 0 && r.height > 0) {
+          return { x: r.left + Math.min(r.width / 2, 8), y: r.top + r.height / 2, ok: true };
+        }
+      }
+    }
+    return { x: 0, y: 0, ok: false };
+  }, word);
+
+  if (!found.ok) {
+    throw new Error(`hoverEditorIdentifier: could not locate identifier "${word}" in editor DOM`);
+  }
+
+  await page.mouse.move(found.x, found.y);
+  await page.waitForTimeout(800);
+
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const text = await page.evaluate(() => {
+      const sels = [
+        '.kairo-debug-hover-widget',
+        '.debug-hover-widget',
+        '.monaco-hover',
+        '.theia-debug-hover',
+        '[class*="debug-hover"]',
+      ];
+      for (const s of sels) {
+        const el = document.querySelector(s) as HTMLElement | null;
+        if (el) {
+          const r = el.getBoundingClientRect();
+          if (r.width > 0 && r.height > 0) {
+            return (el.textContent || '').trim();
+          }
+        }
+      }
+      return '';
+    });
+    if (text) return text;
+    await page.waitForTimeout(250);
+  }
+  return '';
+}
+
+/**
+ * Set / update a conditional breakpoint at `lineNumber` with expression `condition`.
+ * Prefers command palette; falls back to F9 + Edit Breakpoint flow.
+ */
+export async function setConditionalBreakpoint(
+  page: Page,
+  filePath: string,
+  lineNumber: number,
+  condition: string,
+): Promise<void> {
+  await openFileInEditor(page, filePath);
+  await page.waitForTimeout(600);
+  await gotoEditorLine(page, lineNumber);
+
+  // Ensure a breakpoint exists first
+  if (!(await hasBreakpointGlyph(page))) {
+    await page.keyboard.press('F9');
+    await page.waitForTimeout(400);
+  }
+
+  try {
+    await runCommandViaPalette(page, 'Debug: Edit Breakpoint');
+  } catch {
+    try {
+      await runCommandViaPalette(page, 'Debug: Add Conditional Breakpoint');
+    } catch {
+      /* continue to input probe */
+    }
+  }
+  await page.waitForTimeout(600);
+
+  const condInput = page.locator(
+    '.quick-input-widget .quick-input-box input, .monaco-inputbox input, .theia-input[type="text"]:visible, input.theia-input:visible',
+  ).first();
+  if ((await condInput.count()) > 0) {
+    await condInput.fill(condition, { timeout: 5_000 });
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(500);
+    return;
+  }
+
+  // Right-click glyph → Edit Breakpoint
+  const glyph = page.locator('.monaco-editor .codicon-debug-breakpoint').first();
+  if ((await glyph.count()) > 0) {
+    await glyph.click({ button: 'right', timeout: 3_000 });
+    await page.waitForTimeout(400);
+    const editItem = page.locator('.p-Menu-itemLabel, .monaco-menu .action-label').filter({
+      hasText: /edit breakpoint|conditional|编辑断点|条件/i,
+    }).first();
+    if ((await editItem.count()) > 0) {
+      await editItem.click({ timeout: 3_000 });
+      await page.waitForTimeout(400);
+      const input2 = page.locator(
+        '.quick-input-widget .quick-input-box input, .monaco-inputbox input, input:visible',
+      ).first();
+      if ((await input2.count()) > 0) {
+        await input2.fill(condition, { timeout: 5_000 });
+        await page.keyboard.press('Enter');
+        await page.waitForTimeout(500);
+      }
+    }
+  }
+}
+
+/**
+ * Collect variable name/value pairs from any visible debug variables widget.
+ */
+export async function collectDebugVariableEntries(
+  page: Page,
+): Promise<Array<{ name: string; value: string }>> {
+  // Dismiss leftover palettes; expand Locals if collapsed.
+  try {
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(200);
+  } catch { /* ignore */ }
+  await page.evaluate(() => {
+    const labels = document.querySelectorAll(
+      '.theia-TreeNodeLabel, .monaco-list-row, .theia-debug-variables .theia-TreeNode, [class*="variable"]',
+    );
+    for (const el of Array.from(labels)) {
+      const text = (el.textContent || '').trim();
+      if (/^Locals$/i.test(text) || /^局部变量$/i.test(text)) {
+        (el as HTMLElement).click();
+        const twistie = el.closest('.theia-TreeNode')?.querySelector('.theia-ExpansionToggle, .codicon-tree-item-expanded, .codicon-chevron-right, .codicon-chevron-down');
+        if (twistie) (twistie as HTMLElement).click();
+      }
+    }
+  });
+  await page.waitForTimeout(600);
+
+  return page.evaluate(() => {
+    const selectors = [
+      '.theia-debug-variables .theia-TreeNode',
+      '.theia-debug-variables .monaco-list-row',
+      '.kairo-debug-variables .theia-TreeNode',
+      '.kairo-debug-variables-idea [class*="variable"]',
+      '.debug-variables .theia-TreeNode',
+      '[id*="debug.variables"] .theia-TreeNode',
+      '[id*="debug.variables"] .monaco-list-row',
+      '[data-testid="debug-variables"] .theia-TreeNode',
+      '.kairo-debug-tool-window [class*="variable"]',
+      '.theia-debug-session .theia-TreeNode',
+    ];
+    const items: Array<{ name: string; value: string }> = [];
+    for (const sel of selectors) {
+      const nodes = document.querySelectorAll(sel);
+      if (nodes.length === 0) continue;
+      for (const n of Array.from(nodes).slice(0, 80)) {
+        const text = (n.textContent || '').trim();
+        if (!text || /^(Local|Locals|Global|Arguments|Scopes|局部变量)/i.test(text)) continue;
+        const m = text.match(/^(\S+)\s*[:=]?\s*(.*)$/);
+        if (m) items.push({ name: m[1], value: m[2] || '' });
+        else items.push({ name: text, value: '' });
+      }
+      if (items.length > 0) break;
+    }
+    return items;
+  });
+}
+
+/**
+ * Trigger a GET to the sample HelloServlet and close the tab.
+ */
+export async function triggerHelloRequest(
+  page: Page,
+  baseUrl: string,
+  pathSuffix = '/hello',
+): Promise<number | null> {
+  const url = `${baseUrl.replace(/\/$/, '')}${pathSuffix.startsWith('/') ? pathSuffix : `/${pathSuffix}`}`;
+  const tab = await page.context().newPage();
+  try {
+    const resp = await tab.goto(url, { timeout: 15_000, waitUntil: 'domcontentloaded' });
+    await tab.waitForTimeout(800);
+    return resp ? resp.status() : null;
+  } catch {
+    return null;
+  } finally {
+    try { await tab.close(); } catch { /* ignore */ }
+  }
+}
+
+/**
+ * Query Agent GET /api/v1/debug/adapter/status for availability.
+ */
+export async function getDebugAdapterStatus(
+  request: { get: (url: string) => Promise<{ ok: () => boolean; json: () => Promise<unknown> }> },
+): Promise<{ available: boolean; raw: unknown }> {
+  const agentBase = `http://127.0.0.1:${process.env.AGENT_PORT || '18300'}`;
+  try {
+    const res = await request.get(`${agentBase}/api/v1/debug/adapter/status`);
+    const json = await res.json();
+    const payload = (json as { payload?: Record<string, unknown> })?.payload || json;
+    const text = JSON.stringify(payload || {}).toLowerCase();
+    const available =
+      text.includes('available') ||
+      text.includes('"ready"') ||
+      text.includes('adapterpath') ||
+      text.includes('jdk') ||
+      (!text.includes('unavailable') && !text.includes('not configured'));
+    return { available: !!available && res.ok(), raw: payload };
+  } catch (err) {
+    return { available: false, raw: String(err) };
+  }
+}
+
+/**
+ * Wait until debug is no longer paused (resumed or terminated).
+ */
+export async function waitForDebugResumed(
+  page: Page,
+  timeoutMs = 15_000,
+): Promise<boolean> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const t = await getStatusBarText(page);
+    const pausedDom = await page.evaluate(() => {
+      return !!document.querySelector(
+        '.monaco-editor .debug-current-line, .monaco-editor .debug-top-stack-frame-line',
+      );
+    });
+    if (!isDebugPausedStatus(t) && !pausedDom) {
+      // Prefer explicit connected/running, but absence of paused is enough
+      return true;
+    }
+    await page.waitForTimeout(400);
+  }
+  return false;
+}
+
+/**
+ * Count visible call-stack frames in Theia / Kairo debug views.
+ */
+export async function getCallStackFrameCount(page: Page): Promise<number> {
+  return page.evaluate(() => {
+    const sels = [
+      '.theia-debug-stack-frames .theia-TreeNode',
+      '.theia-debug-stack-frames .monaco-list-row',
+      '.kairo-debug-callstack .theia-TreeNode',
+      '.kairo-debug-frames-idea [class*="frame"]',
+      '[id*="debug.callStack"] .theia-TreeNode',
+      '[id*="debug.callstack"] .monaco-list-row',
+    ];
+    for (const s of sels) {
+      const n = document.querySelectorAll(s).length;
+      if (n > 0) return n;
+    }
+    return 0;
   });
 }

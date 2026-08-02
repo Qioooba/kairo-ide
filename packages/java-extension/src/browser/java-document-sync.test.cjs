@@ -117,6 +117,26 @@ test('changeDocument debounces and sends full-text didChange', async () => {
   sync.dispose();
 });
 
+test('flushPending sends pending didChange immediately', () => {
+  const client = makeClient('ready');
+  const sync = new JavaDocumentSync(client, LOGGER, 5000);
+  sync.openDocument(snapshot('class Main {}'));
+  sync.changeDocument(URI, 2, 'class Main { int a; }');
+  assert.equal(client.calls.filter(c => c.kind === 'didChange').length, 0);
+  sync.flushPending(URI);
+  const changes = client.calls.filter(c => c.kind === 'didChange');
+  assert.equal(changes.length, 1);
+  assert.equal(changes[0].p.version, 2);
+  assert.equal(changes[0].p.changes[0].text, 'class Main { int a; }');
+  sync.dispose();
+});
+
+test('JAVA_DOCUMENT_SYNC_DEBOUNCE_MS is 100ms for faster completion sync', () => {
+  const { JAVA_DOCUMENT_SYNC_DEBOUNCE_MS } = require('../../lib/browser/java-document-sync-core');
+  assert.equal(JAVA_DOCUMENT_SYNC_DEBOUNCE_MS, 100);
+});
+
+
 test('closeDocument sends didClose only when didOpen was delivered', () => {
   const client = makeClient('ready');
   const sync = new JavaDocumentSync(client, LOGGER, 10);
@@ -230,7 +250,8 @@ test('JdtLsManager.didChange sends textDocument + contentChanges envelope', () =
   ]);
 });
 
-test('JdtLsManager.didOpen throws while not ready (caller must gate)', () => {
+test('JdtLsManager.didOpen is a no-op while not ready (does not poison callers)', () => {
   const mgr = new JdtLsManager(LOGGER);
-  assert.throws(() => mgr.didOpen({ uri: URI, languageId: 'java', version: 1, text: '' }), /not ready/);
+  assert.doesNotThrow(() => mgr.didOpen({ uri: URI, languageId: 'java', version: 1, text: '' }));
+  assert.doesNotThrow(() => mgr.didChange({ uri: URI, version: 2, changes: [{ text: 'x' }] }));
 });

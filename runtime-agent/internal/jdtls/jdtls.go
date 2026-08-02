@@ -19,10 +19,10 @@
 // the launch descriptor. The Initialize/MarkInitialized LSP handshake
 // methods have been removed.
 //
-// The JDT LS requires a modern JRE (17 or 21). The runtime
-// agent keeps this JRE separate from the user's
-// `compilerJavaHome` and `tomcatJavaHome` so a JDT LS upgrade
-// never touches the legacy project JDK.
+// The JDT LS host runtime must be JDK/JRE 21+ for the pinned
+// 1.55.0 distribution (osgi.ee JavaSE 21). That host JRE is kept
+// separate from the project's compilerJavaHome / tomcatJavaHome
+// so a JDT LS upgrade never forces the legacy project onto JDK 21.
 package jdtls
 
 import (
@@ -115,7 +115,8 @@ func (m *Manager) AddListener(fn func(Event)) {
 }
 
 // SetJREPath overrides the JRE that Start will use. Empty
-// string is a no-op (Start then falls back to KAIRO_JRE17_HOME).
+// string is a no-op (Start then falls back to KAIRO_JDT_LS_JRE /
+// KAIRO_JRE17_HOME).
 func (m *Manager) SetJREPath(p string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -245,19 +246,16 @@ func (m *Manager) BuildLaunchDescriptor(workingDir string) (*LaunchDescriptor, e
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	jre := m.jrePath
-	if jre == "" {
-		jre = os.Getenv("KAIRO_JRE17_HOME")
-	}
-	if jre == "" {
-		return nil, errors.New("JDT LS requires a JRE 17+; set KAIRO_JRE17_HOME or pass --jre17")
+	jre, err := resolveHostJRE(m.jrePath, m.bundled)
+	if err != nil {
+		return nil, err
 	}
 	javaBin := filepath.Join(jre, "bin", "java")
 	if runtime.GOOS == "windows" {
 		javaBin += ".exe"
 	}
 	if _, err := os.Stat(javaBin); err != nil {
-		return nil, fmt.Errorf("JRE 17+ not found at %s", javaBin)
+		return nil, fmt.Errorf("JDT LS host JRE %d+ not found at %s", JDTLSRequiredJREMajor, javaBin)
 	}
 
 	rep, err := readInstallReport(m.dataDir)
@@ -431,19 +429,19 @@ func (m *Manager) Start(ctx context.Context) (*Status, error) {
 		return nil, fmt.Errorf("jdtls: no config for this OS at %s", hostCfg)
 	}
 
-	// Step 2: pick a JRE.
-	jre := m.jrePath
-	if jre == "" {
-		jre = os.Getenv("KAIRO_JRE17_HOME")
-	}
-	if jre == "" {
+	// Step 2: pick a host JRE that satisfies JDT LS (JDK 21+).
+	jre, err := resolveHostJRE(m.jrePath, m.bundled)
+	if err != nil {
 		m.state.Store(0)
-		return nil, errors.New("JDT LS requires a JRE 17+; set KAIRO_JRE17_HOME or pass --jre17")
+		return nil, err
 	}
 	javaBin := filepath.Join(jre, "bin", "java")
+	if runtime.GOOS == "windows" {
+		javaBin += ".exe"
+	}
 	if _, err := os.Stat(javaBin); err != nil {
 		m.state.Store(0)
-		return nil, fmt.Errorf("JRE 17+ not found at %s", javaBin)
+		return nil, fmt.Errorf("JDT LS host JRE %d+ not found at %s", JDTLSRequiredJREMajor, javaBin)
 	}
 
 	// Step 3: prepare the per-workspace data dir. If no

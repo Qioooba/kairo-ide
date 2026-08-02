@@ -171,7 +171,22 @@ func (s *Server) handleProjects(w http.ResponseWriter, r *http.Request) {
 		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInternal, Message: "ProjectStore not configured"})
 		return
 	}
-	writeOK(w, env, s.Services.ProjectStore.List())
+	all := s.Services.ProjectStore.List()
+	wsID := r.URL.Query().Get("workspaceId")
+	if wsID == "" {
+		wsID = r.Header.Get("X-Kairo-Workspace-Id")
+	}
+	if wsID != "" {
+		filtered := make([]domain.Project, 0, len(all))
+		for _, p := range all {
+			if string(p.WorkspaceID) == wsID {
+				filtered = append(filtered, p)
+			}
+		}
+		writeOK(w, env, filtered)
+		return
+	}
+	writeOK(w, env, all)
 }
 
 func (s *Server) handleProjectByID(w http.ResponseWriter, r *http.Request) {
@@ -1117,6 +1132,32 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	res, err := s.Services.Searcher.Search(r.Context(), extractPayload(body))
+	if err != nil {
+		code := protocol.ErrIOError
+		retryable := false
+		if errors.Is(err, context.Canceled) {
+			code = protocol.ErrCancelled
+		} else if errors.Is(err, context.DeadlineExceeded) {
+			code = protocol.ErrTimeout
+			retryable = true
+		}
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: code, Message: err.Error(), Retryable: retryable})
+		return
+	}
+	writeOK(w, env, res)
+}
+
+func (s *Server) handleSearchFiles(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, "", "", protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: "POST only"})
+		return
+	}
+	env, body, _ := readEnvelopeAndBody(r)
+	if s.Services.Searcher == nil {
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInternal, Message: "Searcher not configured"})
+		return
+	}
+	res, err := s.Services.Searcher.ListFiles(r.Context(), extractPayload(body))
 	if err != nil {
 		code := protocol.ErrIOError
 		retryable := false

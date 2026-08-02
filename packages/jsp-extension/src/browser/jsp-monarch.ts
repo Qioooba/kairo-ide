@@ -2,10 +2,12 @@
  * Monarch grammar data for JSP (pure data, no imports) so unit
  * tests can load it without a DOM/Monaco environment.
  *
- * Covers the most common JSP constructs: directives, declarations,
- * scriptlets, expressions, EL, JSTL, taglib invocation. The
- * embedded Java inside scriptlets is tokenized as a single block
- * (no nested Java highlighting) — documented v1 limitation.
+ * Tuned for scanability over IDEA defaults:
+ *   - Nested Java via nextEmbedded
+ *   - JSTL / taglib tags distinct from HTML
+ *   - Directive name as keyword
+ *   - EL keywords + implicit objects
+ *   - Attribute values with nested EL
  */
 
 interface MonarchLanguage {
@@ -18,6 +20,9 @@ interface MonarchLanguage {
 
 export const JSP_LANGUAGE_ID = 'jsp';
 
+/** Common JSTL / Jakarta tag prefixes for distinct coloring. */
+const JSTL_OPEN =
+  /<\s*(?:c|fmt|fn|sql|x|jsp|spring|form|security|s):[a-zA-Z_][\w-]*/;
 
 export const JSP_MONARCH: MonarchLanguage = {
   defaultToken: '',
@@ -25,51 +30,132 @@ export const JSP_MONARCH: MonarchLanguage = {
 
   tokenizer: {
     root: [
-      // Use states instead of scanning the rest of every line with four
-      // overlapping `[^%]*` expressions. This is linear, supports multiline
-      // blocks, and lets Monaco resume tokenization from its cached line state.
-      [/<\s*%@/, { token: 'tag.jsp-directive', next: '@jspDirective' }],
-      [/<\s*%!/, { token: 'tag.jsp-decl', next: '@jspDeclaration' }],
-      [/<\s*%=/, { token: 'tag.jsp-expr', next: '@jspExpression' }],
-      [/<\s*%/, { token: 'tag.jsp-scriptlet', next: '@jspScriptlet' }],
+      [/<!--/, { token: 'comment', next: '@htmlComment' }],
 
-      // EL: ${ ... } and #{ ... } (deprecated JSP EL)
-      [/\$\{[^}]*\}/, 'metatag.el'],
-      [/#\{[^}]*\}/, 'metatag.el'],
+      [/<%[@]/, { token: 'tag.jsp-directive', next: '@jspDirective' }],
+      [/<%!/, { token: 'tag.jsp-decl', next: '@jspDeclaration', nextEmbedded: 'java' }],
+      [/<%=/, { token: 'tag.jsp-expr', next: '@jspExpression', nextEmbedded: 'java' }],
+      [/<%/, { token: 'tag.jsp-scriptlet', next: '@jspScriptlet', nextEmbedded: 'java' }],
 
-      // JSTL tags: <c:if, <c:forEach, ...
-      [/<\s*(c:if|c:forEach|c:choose|c:when|c:otherwise|c:set|c:out|c:url|c:param|c:import|c:redirect)\b/, 'tag.jsp-jstl'],
+      [/\$\{/, { token: 'metatag.el', next: '@el' }],
+      [/#\{/, { token: 'metatag.el', next: '@el' }],
 
-      // JSP taglib invocation: <k:hello>
-      [/<\s*[a-zA-Z_][\w-]*:[a-zA-Z_][\w-]*/, 'tag.jsp-taglib'],
+      // JSTL / framework tags before generic HTML
+      [JSTL_OPEN, { token: 'tag.jsp-jstl', next: '@jstlOpen' }],
+      [/<\/\s*(?:c|fmt|fn|sql|x|jsp|spring|form|security|s):[a-zA-Z_][\w-]*/, { token: 'tag.jsp-jstl', next: '@tagCloseJstl' }],
 
-      // Standard HTML
-      [/<\/?\s*[a-zA-Z][\w-]*/, 'tag'],
-      [/\/?>/, 'tag'],
-      [/<\/\s*[a-zA-Z][\w-]*\s*>/, 'tag'],
+      // Custom taglib: <prefix:name
+      [/<\s*[a-zA-Z_][\w-]*:[a-zA-Z_][\w-]*/, { token: 'tag.jsp-taglib', next: '@taglibOpen' }],
+      [/<\/\s*[a-zA-Z_][\w-]*:[a-zA-Z_][\w-]*/, { token: 'tag.jsp-taglib', next: '@tagCloseTaglib' }],
 
-      // Numbers
-      [/\b\d+\b/, 'number'],
+      [/<\/\s*[a-zA-Z_][\w:.-]*/, { token: 'tag', next: '@tagClose' }],
+      [/<\s*[a-zA-Z_][\w:.-]*/, { token: 'tag', next: '@tagOpen' }],
+
+      [/<!DOCTYPE[^>]*>/i, 'metatag'],
+      [/[^<]+/, ''],
     ],
+
+    htmlComment: [
+      [/-->/, { token: 'comment', next: '@pop' }],
+      [/[^-]+/, 'comment'],
+      [/-/, 'comment'],
+    ],
+
     jspDirective: [
       [/%>/, { token: 'tag.jsp-directive', next: '@pop' }],
-      [/[^%]+/, 'tag.jsp-directive'],
+      [/\s+/, ''],
+      [/\b(page|taglib|include|tag|attribute|variable)\b/, 'keyword'],
+      [/[a-zA-Z_][\w-]*/, 'attribute.name'],
+      [/=/, 'delimiter'],
+      [/"/, { token: 'attribute.value', next: '@attrValueDq' }],
+      [/'/, { token: 'attribute.value', next: '@attrValueSq' }],
+      [/[^%\s=]+/, 'tag.jsp-directive'],
       [/%/, 'tag.jsp-directive'],
     ],
+
     jspDeclaration: [
-      [/%>/, { token: 'tag.jsp-decl', next: '@pop' }],
-      [/[^%]+/, 'tag.jsp-decl'],
-      [/%/, 'tag.jsp-decl'],
+      [/%>/, { token: 'tag.jsp-decl', next: '@pop', nextEmbedded: '@pop' }],
+      [/[^%]+/, ''],
+      [/%/, ''],
     ],
     jspExpression: [
-      [/%>/, { token: 'tag.jsp-expr', next: '@pop' }],
-      [/[^%]+/, 'tag.jsp-expr'],
-      [/%/, 'tag.jsp-expr'],
+      [/%>/, { token: 'tag.jsp-expr', next: '@pop', nextEmbedded: '@pop' }],
+      [/[^%]+/, ''],
+      [/%/, ''],
     ],
     jspScriptlet: [
-      [/%>/, { token: 'tag.jsp-scriptlet', next: '@pop' }],
-      [/[^%]+/, 'tag.jsp-scriptlet'],
-      [/%/, 'tag.jsp-scriptlet'],
+      [/%>/, { token: 'tag.jsp-scriptlet', next: '@pop', nextEmbedded: '@pop' }],
+      [/[^%]+/, ''],
+      [/%/, ''],
+    ],
+
+    el: [
+      [/\}/, { token: 'metatag.el', next: '@pop' }],
+      [/\s+/, ''],
+      [/\b(empty|not|and|or|true|false|null|eq|ne|lt|gt|le|ge|div|mod)\b/, 'keyword'],
+      [/\b(param|paramValues|header|headerValues|cookie|initParam|pageScope|requestScope|sessionScope|applicationScope|pageContext|request|session|application|out|response|config|page)\b/, 'predefined'],
+      [/"[^"]*"/, 'string'],
+      [/'[^']*'/, 'string'],
+      [/\d+(\.\d+)?/, 'number'],
+      [/[a-zA-Z_][\w.]*/, 'identifier'],
+      [/[^}\s]+/, 'metatag.el'],
+    ],
+
+    tagOpen: [
+      [/\s+/, ''],
+      [/\/?>/, { token: 'tag', next: '@pop' }],
+      [/[a-zA-Z_:][\w:.-]*/, 'attribute.name'],
+      [/=/, 'delimiter'],
+      [/"/, { token: 'attribute.value', next: '@attrValueDq' }],
+      [/'/, { token: 'attribute.value', next: '@attrValueSq' }],
+    ],
+
+    jstlOpen: [
+      [/\s+/, ''],
+      [/\/?>/, { token: 'tag.jsp-jstl', next: '@pop' }],
+      [/[a-zA-Z_:][\w:.-]*/, 'attribute.name'],
+      [/=/, 'delimiter'],
+      [/"/, { token: 'attribute.value', next: '@attrValueDq' }],
+      [/'/, { token: 'attribute.value', next: '@attrValueSq' }],
+    ],
+
+    taglibOpen: [
+      [/\s+/, ''],
+      [/\/?>/, { token: 'tag.jsp-taglib', next: '@pop' }],
+      [/[a-zA-Z_:][\w:.-]*/, 'attribute.name'],
+      [/=/, 'delimiter'],
+      [/"/, { token: 'attribute.value', next: '@attrValueDq' }],
+      [/'/, { token: 'attribute.value', next: '@attrValueSq' }],
+    ],
+
+    tagClose: [
+      [/\s*>/, { token: 'tag', next: '@pop' }],
+      [/>/, { token: 'tag', next: '@pop' }],
+    ],
+    tagCloseJstl: [
+      [/\s*>/, { token: 'tag.jsp-jstl', next: '@pop' }],
+      [/>/, { token: 'tag.jsp-jstl', next: '@pop' }],
+    ],
+    tagCloseTaglib: [
+      [/\s*>/, { token: 'tag.jsp-taglib', next: '@pop' }],
+      [/>/, { token: 'tag.jsp-taglib', next: '@pop' }],
+    ],
+
+    attrValueDq: [
+      [/"/, { token: 'attribute.value', next: '@pop' }],
+      [/\$\{/, { token: 'metatag.el', next: '@el' }],
+      [/#\{/, { token: 'metatag.el', next: '@el' }],
+      [/[^"$]+/, 'attribute.value'],
+      [/\$/, 'attribute.value'],
+      [/#/, 'attribute.value'],
+    ],
+    attrValueSq: [
+      [/'/, { token: 'attribute.value', next: '@pop' }],
+      [/\$\{/, { token: 'metatag.el', next: '@el' }],
+      [/#\{/, { token: 'metatag.el', next: '@el' }],
+      [/[^'$]+/, 'attribute.value'],
+      [/\$/, 'attribute.value'],
+      [/#/, 'attribute.value'],
     ],
   },
 };

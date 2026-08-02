@@ -407,6 +407,8 @@ export interface DeploymentResult {
 
 export interface SearchRequest {
   workspaceId: string;
+  /** Optional absolute path override (directory or single file). */
+  rootPath?: string;
   query: string;
   isRegex: boolean;
   caseSensitive: boolean;
@@ -417,6 +419,24 @@ export interface SearchRequest {
   maxResults?: number;
   /** If true, also return replace previews. */
   previewReplace?: string;
+}
+
+export interface FileListRequest {
+  workspaceId: string;
+  rootPath?: string;
+  include?: string[];
+  exclude?: string[];
+  maxFiles?: number;
+}
+
+export interface FileListEntry {
+  path: string;
+  name: string;
+}
+
+export interface FileListResponse {
+  files: FileListEntry[];
+  total: number;
 }
 
 export interface SearchMatch {
@@ -731,6 +751,7 @@ export interface EndpointMap {
   };
   // Search
   'POST /api/v1/search': { request: SearchRequest; response: SearchResponse };
+  'POST /api/v1/search/files': { request: FileListRequest; response: FileListResponse };
   // Toolchains
   'GET /api/v1/toolchains': { request: undefined; response: Toolchain[] };
   'POST /api/v1/toolchains/import': {

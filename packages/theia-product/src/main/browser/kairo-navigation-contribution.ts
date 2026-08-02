@@ -167,13 +167,12 @@ export class KairoNavigationContribution implements CommandContribution, Keybind
   }
 
   registerKeybindings(keybindings: KeybindingRegistry): void {
+    // IDEA chords only. Do NOT bind Ctrl+Shift+O (VS Code Go to Symbol —
+    // IDEA uses Ctrl+F12 File Structure) or Ctrl+Shift+T (IDEA Go to Test;
+    // we have no Go-to-Test command yet, and Go to Type must not steal it).
     keybindings.registerKeybinding({
       command: KairoNavigationCommands.GO_TO_LINE.id,
       keybinding: isOSX ? 'ctrlcmd+g' : 'ctrl+g',
-    });
-    keybindings.registerKeybinding({
-      command: KairoNavigationCommands.GO_TO_SYMBOL_IN_FILE.id,
-      keybinding: isOSX ? 'ctrlcmd+shift+o' : 'ctrl+shift+o',
     });
     keybindings.registerKeybinding({
       command: KairoNavigationCommands.QUICK_OUTLINE.id,
@@ -190,10 +189,6 @@ export class KairoNavigationContribution implements CommandContribution, Keybind
     keybindings.registerKeybinding({
       command: KairoNavigationCommands.RECENT_FILES.id,
       keybinding: isOSX ? 'ctrlcmd+e' : 'ctrl+e',
-    });
-    keybindings.registerKeybinding({
-      command: KairoNavigationCommands.GO_TO_TYPE.id,
-      keybinding: isOSX ? 'ctrlcmd+shift+t' : 'ctrl+shift+t',
     });
   }
 

@@ -43,6 +43,7 @@ export interface LSPTextDocumentItem {
 
 export interface LSPCompletionItem {
   label: string;
+  labelDetails?: { detail?: string; description?: string };
   kind?: number;
   detail?: string;
   documentation?: string | { kind: 'markdown' | 'plaintext'; value: string };
@@ -53,11 +54,15 @@ export interface LSPCompletionItem {
   textEdit?: {
     range: LSPRange;
     newText: string;
+    insert?: LSPRange;
+    replace?: LSPRange;
   };
   additionalTextEdits?: { range: LSPRange; newText: string }[];
   commitCharacters?: string[];
   command?: { title: string; command: string; arguments?: unknown[] };
   data?: unknown;
+  tags?: number[];
+  preselect?: boolean;
 }
 
 export interface LSPCompletionList {
@@ -246,6 +251,7 @@ export interface LSPInitializeParams {
           documentationFormat?: ('markdown' | 'plaintext')[];
           deprecatedSupport?: boolean;
           preselectSupport?: boolean;
+          resolveSupport?: { properties?: string[] };
         };
         contextSupport?: boolean;
         insertTextMode?: 1 | 2;

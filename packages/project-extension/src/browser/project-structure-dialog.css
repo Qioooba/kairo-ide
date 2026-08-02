@@ -8,6 +8,11 @@
   overflow: hidden;
 }
 
+/* Custom Cancel/Apply/OK live in .kairo-ps-dialog-footer; hide Theia's empty control strip. */
+.kairo-project-structure-dialog .dialogControl {
+  display: none;
+}
+
 .kairo-ps-body {
   display: flex;
   height: 520px;
@@ -276,10 +281,19 @@
 .kairo-ps-dialog-footer {
   display: flex;
   justify-content: flex-end;
+  align-items: center;
+  flex-shrink: 0;
   gap: 8px;
   padding: 10px 16px;
   border-top: 1px solid var(--theia-editorIndentGuide-background);
   background: var(--theia-sideBar-background);
+}
+
+.kairo-ps-dialog-footer .theia-button {
+  flex: 0 0 auto;
+  height: 28px;
+  min-width: 72px;
+  align-self: center;
 }
 
 .kairo-ps-error {

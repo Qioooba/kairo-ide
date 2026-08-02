@@ -3,6 +3,7 @@ import { Emitter, Event } from '@theia/core/lib/common/event';
 import { Disposable } from '@theia/core/lib/common/disposable';
 import { FileStat } from '@theia/filesystem/lib/common/files';
 import { FileService } from '@theia/filesystem/lib/browser/file-service';
+import { FileUri } from '@theia/core/lib/common/file-uri';
 import URI from '@theia/core/lib/common/uri';
 import { WorkspaceService } from '@theia/workspace/lib/browser/workspace-service';
 import { FrontendApplicationContribution, FrontendApplication } from '@theia/core/lib/browser';
@@ -42,6 +43,8 @@ export interface KairoProjectYaml {
     buildTool?: string;
     /** Web application context path. */
     contextPath?: string;
+    /** Library / classpath directories (e.g. lib). */
+    libraryDirs?: string[];
 }
 
 @injectable()
@@ -59,6 +62,9 @@ export class WorkspaceContextService implements FrontendApplicationContribution 
     private readonly onDidChangeProjectYamlEmitter = new Emitter<KairoProjectYaml | undefined>();
     /** Fires whenever .kairo/project.yaml is read or changes for the active workspace. */
     readonly onDidChangeProjectYaml: Event<KairoProjectYaml | undefined> = this.onDidChangeProjectYamlEmitter.event;
+    /** Serialises overlapping syncFromRoots calls (workspace-changed + initial roots). */
+    private syncInflight: Promise<void> | undefined;
+    private syncQueuedRoots: FileStat[] | undefined;
 
     @inject(WorkspaceService)
     protected readonly workspaceService!: WorkspaceService;
@@ -124,8 +130,33 @@ export class WorkspaceContextService implements FrontendApplicationContribution 
      * Resolve the Kairo workspace for the given Theia roots and
      * fire `onDidChangeContext` if it changed. Async; callers
      * should `void` the returned promise.
+     *
+     * Coalesces overlapping calls so the initial `roots` promise and
+     * `onWorkspaceChanged` do not both POST /workspaces.
      */
     protected async syncFromRoots(roots: FileStat[]): Promise<void> {
+        this.syncQueuedRoots = roots;
+        if (this.syncInflight) {
+            return this.syncInflight;
+        }
+        this.syncInflight = (async () => {
+            try {
+                // Drain the latest queued roots (may be overwritten while we run).
+                for (;;) {
+                    const target = this.syncQueuedRoots;
+                    if (!target) return;
+                    this.syncQueuedRoots = undefined;
+                    await this.doSyncFromRoots(target);
+                    if (!this.syncQueuedRoots) return;
+                }
+            } finally {
+                this.syncInflight = undefined;
+            }
+        })();
+        return this.syncInflight;
+    }
+
+    protected async doSyncFromRoots(roots: FileStat[]): Promise<void> {
         if (roots.length === 0) {
             if (this.currentContext !== undefined) {
                 this.currentContext = undefined;
@@ -135,18 +166,21 @@ export class WorkspaceContextService implements FrontendApplicationContribution 
         }
 
         const rootStat = roots[0];
-        const rootPath = rootStat.resource.path.toString();
+        // Use OS filesystem path for the agent API. Theia URI paths like
+        // `/g:/spaces/...` cause filepath.Abs / os.Stat to fail on Windows
+        // and the agent returns 403 Forbidden.
+        const rootPath = FileUri.fsPath(rootStat.resource);
 
         // KAIRO-RC-WEB-027: read .kairo/project.yaml if it exists so
         // the UI can fall back to the on-disk definition when the
         // Runtime Agent is unreachable. This is what "open this
         // folder and the project auto-loads" actually requires.
-        await this.refreshProjectYaml(rootPath);
+        await this.refreshProjectYaml(rootStat.resource, rootPath);
 
         try {
             // Call backend to get/create workspace
             const workspaces = await this.runtime.request('GET /api/v1/workspaces', undefined) as Workspace[];
-            const existing = workspaces.find((w: Workspace) => w.rootPath === rootPath);
+            const existing = workspaces.find((w: Workspace) => this.sameFsPath(w.rootPath, rootPath));
 
             if (existing) {
                 this.setWorkspace(existing.id, existing.rootPath);
@@ -162,6 +196,12 @@ export class WorkspaceContextService implements FrontendApplicationContribution 
         }
     }
 
+    /** Case- and separator-insensitive path equality for Windows/macOS. */
+    protected sameFsPath(a: string, b: string): boolean {
+        const norm = (p: string) => p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+        return norm(a) === norm(b);
+    }
+
     /**
      * Read .kairo/project.yaml from the workspace root and cache
      * the parsed result. Best-effort: any failure (file missing,
@@ -169,14 +209,12 @@ export class WorkspaceContextService implements FrontendApplicationContribution 
      * emits undefined so listeners can fall back to manual
      * project import.
      */
-    protected async refreshProjectYaml(rootPath: string): Promise<void> {
-        const candidates = [
-            `${rootPath}/.kairo/project.yaml`,
-            `${rootPath}/.kairo/project.yml`,
-        ];
-        for (const candidate of candidates) {
+    protected async refreshProjectYaml(rootUri: URI, rootPath: string): Promise<void> {
+        const candidates = ['.kairo/project.yaml', '.kairo/project.yml'];
+        for (const rel of candidates) {
             try {
-                const stat = await this.fileService.resolve(new URI(candidate));
+                const fileUri = rootUri.resolve(rel);
+                const stat = await this.fileService.resolve(fileUri);
                 if (!stat || !stat.isFile) {
                     continue;
                 }
@@ -237,7 +275,7 @@ export class WorkspaceContextService implements FrontendApplicationContribution 
             }
             listKey = undefined;
             const clean = value.replace(/^['"]|['"]$/g, '').trim();
-            if (['sourceRoots', 'resourceRoots', 'buildTargets'].includes(key)) {
+            if (['sourceRoots', 'resourceRoots', 'buildTargets', 'libraryDirs'].includes(key)) {
                 out[key] = [clean];
                 listKey = key;
             } else {
@@ -249,6 +287,7 @@ export class WorkspaceContextService implements FrontendApplicationContribution 
         if (typeof out.root === 'string') result.root = out.root;
         if (Array.isArray(out.sourceRoots)) result.sourceRoots = out.sourceRoots as string[];
         if (Array.isArray(out.resourceRoots)) result.resourceRoots = out.resourceRoots as string[];
+        if (Array.isArray(out.libraryDirs)) result.libraryDirs = out.libraryDirs as string[];
         if (typeof out.webappDir === 'string') result.webappDir = out.webappDir;
         if (typeof out.outputDir === 'string') result.outputDir = out.outputDir;
         if (typeof out.buildFile === 'string') result.buildFile = out.buildFile;

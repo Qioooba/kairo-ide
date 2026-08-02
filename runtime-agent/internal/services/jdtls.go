@@ -31,7 +31,13 @@ type jdtlsService struct {
 }
 
 func newJDTLSService(dataDir, bundled string, logger *log.Logger, skipSHAVerify bool, jdtlsURL string) *jdtlsService {
-	mgr := jdtls.New(dataDir, bundled, os.Getenv("KAIRO_JRE17_HOME"), skipSHAVerify, jdtlsURL, logger)
+	// Canonical host JRE for JDT LS is KAIRO_JDT_LS_JRE (JDK 21+).
+	// KAIRO_JRE17_HOME is retained as a legacy alias.
+	jre := os.Getenv("KAIRO_JDT_LS_JRE")
+	if jre == "" {
+		jre = os.Getenv("KAIRO_JRE17_HOME")
+	}
+	mgr := jdtls.New(dataDir, bundled, jre, skipSHAVerify, jdtlsURL, logger)
 	return &jdtlsService{
 		mgr:       mgr,
 		logger:    logger,

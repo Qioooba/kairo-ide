@@ -2,7 +2,7 @@ const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
 
-const BASE_URL = 'http://127.0.0.1:3001';
+const BASE_URL = 'http://127.0.0.1:18301';
 const OUT_DIR = path.join(__dirname, 'current-ui');
 if (!fs.existsSync(OUT_DIR)) fs.mkdirSync(OUT_DIR, { recursive: true });
 

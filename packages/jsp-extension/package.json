@@ -12,7 +12,7 @@
     "build": "tsc -p tsconfig.json",
     "clean": "rm -rf lib",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "test": "node --require source-map-support/register --import ./test/register-hooks.mjs --test src/browser/tld-parser.test.cjs src/browser/xml-language.test.cjs src/browser/properties-language.test.cjs src/browser/jsp-grammar.test.cjs src/browser/json-language.test.cjs src/browser/jsp-extension.test.cjs"
+    "test": "node --require source-map-support/register --import ./test/register-hooks.mjs --test src/browser/tld-parser.test.cjs src/browser/xml-language.test.cjs src/browser/properties-language.test.cjs src/browser/jsp-grammar.test.cjs src/browser/json-language.test.cjs src/browser/jsp-extension.test.cjs src/browser/jsp-virtual-java.test.cjs"
   },
   "dependencies": {
     "@kairo/java-extension": "workspace:*",

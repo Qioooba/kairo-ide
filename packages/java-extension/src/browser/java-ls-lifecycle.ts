@@ -69,6 +69,10 @@ export class JavaLanguageServerLifecycle {
     private restartTimer: ReturnType<typeof setTimeout> | undefined;
     private restartInFlight = false;
     private disposed = false;
+    /** Once true, do not auto-restart or re-prepare until the project changes. */
+    private restartExhausted = false;
+    private fatalFailureLogged = false;
+    private lastExitCode: number | null | undefined;
     /** Serializes stop/start transitions after async descriptor
      *  preparation, preventing two project changes from interleaving
      *  as stop(A) -> stop(B) -> start(A) -> start(B). */
@@ -119,6 +123,16 @@ export class JavaLanguageServerLifecycle {
         }));
 
         this.toDispose.push(this.javaClient.onState(state => this.onClientState(state)));
+        this.toDispose.push(this.javaClient.onLog(({ line }) => {
+            const m = /\[exit\]\s*code=(-?\d+)/i.exec(line)
+                || /JDT LS exited code=(-?\d+)/i.exec(line);
+            if (m) {
+                this.lastExitCode = Number(m[1]);
+            }
+            if (/Require-Capability:.*JavaSE.*21/i.test(line) || /osgi\.ee=JavaSE.*version=21/i.test(line)) {
+                this.lastExitCode = this.lastExitCode ?? 13;
+            }
+        }));
     }
 
     dispose(): void {
@@ -152,6 +166,9 @@ export class JavaLanguageServerLifecycle {
         this.desiredProject = { ...project };
         if (changed) {
             this.restartAttempts = 0;
+            this.restartExhausted = false;
+            this.fatalFailureLogged = false;
+            this.lastExitCode = undefined;
         }
         this.clearRestartTimer();
         const token = ++this.activationToken;
@@ -164,6 +181,9 @@ export class JavaLanguageServerLifecycle {
         this.launchDescriptor = undefined;
         this.lastStartKey = undefined;
         this.restartAttempts = 0;
+        this.restartExhausted = false;
+        this.fatalFailureLogged = false;
+        this.lastExitCode = undefined;
         this.clearRestartTimer();
         if (!this.deactivateChain) {
             this.deactivateChain = (async () => {
@@ -193,6 +213,9 @@ export class JavaLanguageServerLifecycle {
      * extract the correct workspace ID from error messages.
      */
     private async onProjectChanged(project: { workspaceId: string; projectId: string }, token: number): Promise<void> {
+        if (this.restartExhausted) {
+            return;
+        }
         const MAX_RETRIES = 12;
         const RETRY_DELAY_MS = 2000;
         let lastError: unknown;
@@ -269,6 +292,19 @@ export class JavaLanguageServerLifecycle {
                     this.logger.warn(`JDT LS not available for project ${project.projectId} (offline/air-gapped mode). The IDE will work without Java language features. To enable: set KAIRO_JDTLS_HOME or run pnpm bundled:prepare.`);
                     return;
                 }
+                // JDT LS 1.55 requires JDK 21+; launching on 17 exits 13 in a loop.
+                const isHostJreTooOld = errMsg.includes('requires a JDK/JRE 21')
+                    || errMsg.includes('requires a JRE 21')
+                    || errMsg.includes('osgi.ee JavaSE 21')
+                    || errMsg.includes('KAIRO_JDT_LS_JRE');
+                if (isHostJreTooOld) {
+                    this.restartExhausted = true;
+                    this.logger.error(
+                        `JDT LS host runtime is incompatible for project ${project.projectId}: ${errMsg.slice(0, 300)}. ` +
+                        `Install JDK 21+ and set KAIRO_JDT_LS_JRE (project JAVA_HOME may remain on 17).`,
+                    );
+                    return;
+                }
                 if (!isRetryable || attempt >= MAX_RETRIES) {
                     this.logger.error(`Failed to prepare JDT LS for project ${project.projectId}: ${errMsg}`);
                     return;
@@ -306,7 +342,8 @@ export class JavaLanguageServerLifecycle {
             }
             const rootUri = pathToFileUri(descriptor.workingDir);
             const home = extractJdtLsHome(descriptor);
-            const startKey = `${rootUri}|${workspaceDataDir}|${home ?? ''}`;
+            const jreHome = extractJavaHome(descriptor);
+            const startKey = `${rootUri}|${workspaceDataDir}|${home ?? ''}|${jreHome ?? ''}`;
 
             const state = await this.javaClient.fetchState();
             if (!this.desiredProject || token !== this.activationToken || this.disposed) return;
@@ -319,16 +356,21 @@ export class JavaLanguageServerLifecycle {
                 if (!this.desiredProject || token !== this.activationToken || this.disposed) return;
             }
 
-            const result = await this.javaClient.start({ rootUri, workspaceDataDir, home });
+            const result = await this.javaClient.start({ rootUri, workspaceDataDir, home, jreHome });
             if (result.ok) {
                 this.lastStartKey = startKey;
                 this.logger.info(`JDT LS start requested for ${rootUri}`);
             } else {
                 const errMsg = String(result.reason);
+                if (isFatalJdtLsFailure(errMsg, this.lastExitCode)) {
+                    this.markFatalFailure(errMsg);
+                    return;
+                }
                 const isTransient = errMsg.includes('connection got disposed')
                     || errMsg.includes('Pending response rejected')
                     || errMsg.includes('Backend service not available')
-                    || errMsg.includes('WebSocket is not open');
+                    || errMsg.includes('WebSocket is not open')
+                    || errMsg.includes('already open');
                 if (isTransient) {
                     this.logger.warn(`JDT LS connection transient error for ${projectId}, will retry: ${errMsg.slice(0, 200)}`);
                     throw new Error(errMsg);
@@ -338,11 +380,16 @@ export class JavaLanguageServerLifecycle {
             }
         } catch (err) {
             const errMsg = String(err);
+            if (isFatalJdtLsFailure(errMsg, this.lastExitCode)) {
+                this.markFatalFailure(errMsg);
+                return;
+            }
             const isTransient = errMsg.includes('connection got disposed')
                 || errMsg.includes('Pending response rejected')
                 || errMsg.includes('connection is disposed')
                 || errMsg.includes('Backend service not available')
-                || errMsg.includes('WebSocket is not open');
+                || errMsg.includes('WebSocket is not open')
+                || errMsg.includes('already open');
             if (isTransient) {
                 this.logger.warn(`JDT LS connection transient error for ${projectId}, will retry: ${errMsg.slice(0, 200)}`);
                 throw err;
@@ -360,16 +407,39 @@ export class JavaLanguageServerLifecycle {
 
     private onClientState(state: JdtLsState): void {
         if (state === 'crashed' || state === 'failed') {
+            if (isFatalJdtLsFailure('', this.lastExitCode)) {
+                this.markFatalFailure(`JDT LS exited with code ${this.lastExitCode}`);
+                return;
+            }
             this.scheduleRestart();
         }
+    }
+
+    private markFatalFailure(reason: string): void {
+        this.restartExhausted = true;
+        this.clearRestartTimer();
+        if (this.fatalFailureLogged) return;
+        this.fatalFailureLogged = true;
+        this.logger.error(
+            `JDT LS fatal failure (no automatic restart): ${reason.slice(0, 400)}. ` +
+            `If this is a JavaSE 21 / exit-code-13 failure, install JDK 21+ and set KAIRO_JDT_LS_JRE.`,
+        );
     }
 
     private scheduleRestart(): void {
         const project = this.desiredProject;
         const descriptor = this.launchDescriptor;
-        if (this.disposed || !project || !descriptor || this.restartTimer || this.restartInFlight) return;
+        if (this.disposed || !project || !descriptor || this.restartTimer || this.restartInFlight || this.restartExhausted) return;
+        if (isFatalJdtLsFailure('', this.lastExitCode)) {
+            this.markFatalFailure(`JDT LS exited with code ${this.lastExitCode}`);
+            return;
+        }
         if (this.restartAttempts >= JDT_LS_MAX_AUTO_RESTARTS) {
-            this.logger.error(`JDT LS automatic restart limit reached (${JDT_LS_MAX_AUTO_RESTARTS}); manual restart required`);
+            this.restartExhausted = true;
+            if (!this.fatalFailureLogged) {
+                this.fatalFailureLogged = true;
+                this.logger.error(`JDT LS automatic restart limit reached (${JDT_LS_MAX_AUTO_RESTARTS}); manual restart required`);
+            }
             return;
         }
         const attempt = ++this.restartAttempts;
@@ -449,6 +519,41 @@ export function extractWorkspaceDataDir(descriptor: JdtLsLaunchDescriptor): stri
         }
     }
     return undefined;
+}
+
+/**
+ * Extract JAVA_HOME from the agent's launch descriptor env allowlist
+ * (or from the command path). Used so the Theia backend spawns JDT LS
+ * with the host JRE the agent selected (JDK 21+), not process JAVA_HOME.
+ */
+export function extractJavaHome(descriptor: JdtLsLaunchDescriptor): string | undefined {
+    if (Array.isArray(descriptor.envAllowlist)) {
+        for (const entry of descriptor.envAllowlist) {
+            if (entry.startsWith('JAVA_HOME=')) {
+                const value = entry.slice('JAVA_HOME='.length).trim();
+                if (value) return value;
+            }
+        }
+    }
+    const command = String(descriptor.command || '');
+    if (command) {
+        const normalized = command.replace(/\\/g, '/');
+        const m = /^(.*)\/bin\/java(?:\.exe)?$/i.exec(normalized);
+        if (m && m[1]) {
+            return m[1];
+        }
+    }
+    return undefined;
+}
+
+/** Exit 13 + JavaSE 21 capability failures are non-retryable. */
+export function isFatalJdtLsFailure(message: string, exitCode?: number | null): boolean {
+    if (exitCode === 13) return true;
+    const msg = String(message || '');
+    return /requires a JDK\/JRE 21/i.test(msg)
+        || /osgi\.ee.*JavaSE.*21/i.test(msg)
+        || /Require-Capability:.*JavaSE.*21/i.test(msg)
+        || /application.*org\.eclipse\.jdt\.ls\.core\.id1.*not found/i.test(msg);
 }
 
 /** Convert an absolute filesystem path to a file:// URI. */

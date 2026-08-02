@@ -14,6 +14,7 @@ import { JdtLsManager, JdtLsEvent, JdtLsState, JdtLsDistribution } from './jdt-l
 import {
   LSPPublishDiagnosticsParams,
   LSPCompletionList,
+  LSPCompletionItem,
   LSPLocation,
   LSPLocationLink,
   LSPHover,
@@ -80,17 +81,17 @@ export class JdtLsService implements JdtLsBackendService {
 
   /** Inspect the install without starting it. Returns
    *  `{ ok: true, dist }` or `{ ok: false, reason }`.
-   *  `home` (from the agent's launch descriptor) wins over
-   *  the KAIRO_JDT_LS_HOME env fallback. */
-  inspect(home?: string): { ok: true; dist: JdtLsDistribution } | { ok: false; reason: string } {
-    const r = JdtLsManager.resolveDistribution({ home });
+   *  `home` / `jreHome` (from the agent's launch descriptor) win over
+   *  the KAIRO_JDT_LS_HOME / JAVA_HOME env fallbacks. */
+  inspect(home?: string, jreHome?: string): { ok: true; dist: JdtLsDistribution } | { ok: false; reason: string } {
+    const r = JdtLsManager.resolveDistribution({ home, jreHome });
     if ('kind' in r) {
       return { ok: false, reason: r.message };
     }
     return { ok: true, dist: r };
   }
 
-  async start(opts: { rootUri: string; workspaceDataDir: string; sourceLevel?: string; home?: string }): Promise<void> {
+  async start(opts: { rootUri: string; workspaceDataDir: string; sourceLevel?: string; home?: string; jreHome?: string }): Promise<void> {
     if (!this.manager) {
       this.manager = new JdtLsManager(this.logger);
       this.subscription = this.manager.onEvent(e => this.handleManagerEvent(e));
@@ -123,6 +124,13 @@ export class JdtLsService implements JdtLsBackendService {
       return { isIncomplete: false, items: [] };
     }
     return this.manager.completion(p);
+  }
+
+  async resolveCompletion(item: LSPCompletionItem): Promise<LSPCompletionItem> {
+    if (!this.manager) {
+      return item;
+    }
+    return this.manager.resolveCompletion(item);
   }
 
   async definition(p: { uri: string; line: number; character: number }): Promise<LSPLocation | LSPLocation[] | null> {
@@ -275,8 +283,8 @@ export class JdtLsService implements JdtLsBackendService {
 
   // ---- JdtLsBackendService (JSON-RPC surface) -----------------
 
-  async $start(opts: { rootUri: string; workspaceDataDir: string; sourceLevel?: string; home?: string }): Promise<{ ok: true } | { ok: false; reason: string }> {
-    const inspect = this.inspect(opts.home);
+  async $start(opts: { rootUri: string; workspaceDataDir: string; sourceLevel?: string; home?: string; jreHome?: string }): Promise<{ ok: true } | { ok: false; reason: string }> {
+    const inspect = this.inspect(opts.home, opts.jreHome);
     if (!inspect.ok) {
       return { ok: false, reason: inspect.reason };
     }
@@ -318,6 +326,10 @@ export class JdtLsService implements JdtLsBackendService {
 
   async $completion(p: { uri: string; line: number; character: number; triggerKind?: 1 | 2 | 3; triggerCharacter?: string }): Promise<LSPCompletionList> {
     return this.completion(p);
+  }
+
+  async $resolveCompletion(item: LSPCompletionItem): Promise<LSPCompletionItem> {
+    return this.resolveCompletion(item);
   }
 
   async $definition(p: { uri: string; line: number; character: number }): Promise<LSPLocation | LSPLocation[] | null> {

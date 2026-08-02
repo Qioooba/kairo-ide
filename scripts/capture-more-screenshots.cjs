@@ -26,7 +26,7 @@ const OUTPUT_DIR = process.argv[2] || path.join(__dirname, '..', 'docs', 'screen
     }, { agentUrl, agentSecret });
   }
 
-  await page.goto('http://127.0.0.1:3001', { waitUntil: 'networkidle', timeout: 60000 });
+  await page.goto('http://127.0.0.1:18301', { waitUntil: 'networkidle', timeout: 60000 });
   await page.waitForTimeout(5000);
 
   const screenshot = async (name) => {
@@ -53,11 +53,9 @@ const OUTPUT_DIR = process.argv[2] || path.join(__dirname, '..', 'docs', 'screen
 
   // 1. Expanded file tree
   try {
-    await page.click('text=LEGACY-SAMPLE');
+    await page.click('.theia-TreeNodeSegmentGrow:text-is("src")');
     await page.waitForTimeout(500);
-    await page.click('text=src');
-    await page.waitForTimeout(500);
-    await page.click('text=main');
+    await page.click('.theia-TreeNodeSegmentGrow:text-is("main")');
     await page.waitForTimeout(500);
     await screenshot('13-expanded-tree.png');
   } catch (e) {
@@ -90,7 +88,7 @@ const OUTPUT_DIR = process.argv[2] || path.join(__dirname, '..', 'docs', 'screen
 
   // 5. Performance Dashboard
   try {
-    await openKairoSubmenuItem('View', 'Performance Dashboard');
+    await openKairoSubmenuItem('View', 'Performance');
     await screenshot('17-performance-dashboard.png');
   } catch (e) {
     console.log('Performance Dashboard failed:', e.message);

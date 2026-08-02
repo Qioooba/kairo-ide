@@ -23,7 +23,7 @@ import * as fs from 'fs';
 import * as http from 'http';
 import { findFreePort } from '@kairo/protocol';
 import { randomBytes } from 'crypto';
-import { detectJDK17Plus, showJDKSetupDialog } from './jdk-check';
+import { detectHostJDK, JDT_LS_MIN_JDK_MAJOR, applyHostJDKEnv, showJDKSetupDialog } from './jdk-check';
 
 let agentProcess: ChildProcess | null = null;
 let agentPort: number = 0;
@@ -653,7 +653,7 @@ function buildMenuTemplate(): MenuItemConstructorOptions[] {
         { type: 'separator' },
         { label: 'Preferences', ...action('preferences:open') },
         { type: 'separator' },
-        { label: 'Close Tab', accelerator: 'CmdOrCtrl+W', ...action('core.close.tab') },
+        { label: 'Close Tab', accelerator: process.platform === 'darwin' ? 'Cmd+W' : 'Ctrl+F4', ...action('core.close.tab') },
         { label: 'Close All Tabs', ...action('core.close.all.tabs') },
         { type: 'separator' },
         { label: 'Exit', accelerator: process.platform === 'darwin' ? 'Cmd+Q' : 'Alt+F4', role: 'quit' },
@@ -672,7 +672,8 @@ function buildMenuTemplate(): MenuItemConstructorOptions[] {
         { label: 'Paste', accelerator: 'CmdOrCtrl+V', ...action('core.paste') },
         { type: 'separator' },
         { label: 'Find', accelerator: 'CmdOrCtrl+F', ...action('core.find') },
-        { label: 'Replace', accelerator: 'CmdOrCtrl+H', ...action('core.replace') },
+        // IDEA: Replace = Ctrl/Cmd+R (NOT Ctrl+H — that is Type Hierarchy)
+        { label: 'Replace', accelerator: 'CmdOrCtrl+R', ...action('core.replace') },
         { type: 'separator' },
         { label: 'Select All', accelerator: 'CmdOrCtrl+A', ...action('core.selectAll') },
       ],
@@ -729,7 +730,8 @@ function buildMenuTemplate(): MenuItemConstructorOptions[] {
         { label: 'Back', ...action('workbench.action.navigateBack') },
         { label: 'Forward', ...action('workbench.action.navigateForward') },
         { type: 'separator' },
-        { label: 'Go to File...', accelerator: 'CmdOrCtrl+P', ...action('workbench.action.quickOpen') },
+        // IDEA: Go to File = Ctrl+Shift+N / Cmd+Shift+O (NOT Ctrl+P — that is Parameter Info)
+        { label: 'Go to File...', accelerator: process.platform === 'darwin' ? 'Cmd+Shift+O' : 'Ctrl+Shift+N', ...action('kairo.find.file') },
         { label: 'Go to Line...', ...action('workbench.action.gotoLine') },
         { label: 'Go to Symbol...', ...action('workbench.action.gotoSymbol') },
       ],
@@ -1095,6 +1097,19 @@ if (!gotLock) {
     // Set the app version so the preload script can expose it.
     process.env.KAIRO_APP_VERSION = app.getVersion();
 
+    // Isolate Theia config from the shared ~/.theia directory so each
+    // --user-data-dir (QA trains, multi-profile) keeps its own
+    // recentworkspace.json. Without this, Electron instances reopen the
+    // globally most-recent folder and builds hit the wrong project root.
+    if (!process.env.THEIA_CONFIG_DIR) {
+      process.env.THEIA_CONFIG_DIR = path.join(app.getPath('userData'), 'theia-config');
+    }
+    try {
+      fs.mkdirSync(process.env.THEIA_CONFIG_DIR, { recursive: true });
+    } catch {
+      /* ignore */
+    }
+
     // Now that the app is ready we can use app.getPath('userData')
     // to set up the log file for packaged builds.
     ensureFileLogger();
@@ -1105,19 +1120,22 @@ if (!gotLock) {
       console.warn(`[kairo] startup warning: ${w}`);
     }
 
-    // ── JDK 17+ pre-check ─────────────────────────────────────
-    // In packaged builds, bundled resources (tomcat6, jdtls) live
-    // under process.resourcesPath/bundled/. The Go agent also
-    // checks bundled/jdk17/ for a pre-extracted JDK.
+    // ── Host JDK (unified) ────────────────────────────────────
+    // Prefer one JDK 21+ install for both the IDE host and JDT LS.
+    // Fall back to JDK 17+ when 21 is unavailable (language features
+    // stay limited until a 21+ runtime is configured).
     const bundledDir = app.isPackaged
       ? path.join(process.resourcesPath, 'bundled')
       : undefined;
 
-    const jdkResult = detectJDK17Plus(bundledDir);
+    let jdkResult = detectHostJDK(bundledDir);
     if (jdkResult.found) {
-      console.log(`[kairo] JDK ${jdkResult.version} detected at ${jdkResult.javaPath}`);
-      if (!process.env.KAIRO_JDK_HOME && jdkResult.javaHome) {
-        process.env.KAIRO_JDK_HOME = jdkResult.javaHome;
+      applyHostJDKEnv(jdkResult);
+      console.log(`[kairo] Host JDK ${jdkResult.version} at ${jdkResult.javaHome}`);
+      if ((jdkResult.major ?? 0) < JDT_LS_MIN_JDK_MAJOR) {
+        console.warn(
+          `[kairo] Host JDK is below ${JDT_LS_MIN_JDK_MAJOR}; JDT LS needs JDK ${JDT_LS_MIN_JDK_MAJOR}+ — set KAIRO_JDT_LS_JRE`,
+        );
       }
     } else {
       console.warn('[kairo] No JDK 17+ detected, showing setup dialog');
@@ -1126,10 +1144,10 @@ if (!gotLock) {
         app.quit();
         return;
       }
-      // Re-detect after user may have set KAIRO_JDK_HOME.
-      const retry = detectJDK17Plus(bundledDir);
-      if (retry.found) {
-        console.log(`[kairo] JDK ${retry.version} configured at ${retry.javaPath}`);
+      jdkResult = detectHostJDK(bundledDir);
+      if (jdkResult.found) {
+        applyHostJDKEnv(jdkResult);
+        console.log(`[kairo] Host JDK ${jdkResult.version} configured at ${jdkResult.javaHome}`);
       } else {
         console.warn('[kairo] Proceeding without JDK 17+ — Java language features will be limited');
       }

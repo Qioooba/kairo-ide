@@ -23,6 +23,9 @@ import { FindActionModel } from './find-action-model';
 import { FindActionWidget } from './find-action-widget';
 import { FindActionContribution } from './find-action-contribution';
 import { SearchScopeModel } from './search-scope-model';
+import { FileIndexService } from './file-index-service';
+import { SearchResultsWidget } from './search-results-widget';
+import { SearchResultsContribution } from './search-results-contribution';
 
 export { KairoSearchCancelledError, KairoSearchService } from './search-service';
 export type { SearchOptions } from './search-service';
@@ -65,12 +68,19 @@ export { FindActionContribution } from './find-action-contribution';
 export type { FindActionItem, FindActionState, FindActionListener } from './find-action-model';
 export { SearchScopeModel, SCOPE_OPTIONS, GROUP_MODE_OPTIONS } from './search-scope-model';
 export type { SearchScope, GroupMode, SearchFilter, SearchHistoryEntry, SearchScopeOption, GroupModeOption } from './search-scope-model';
+export { FileIndexService } from './file-index-service';
+export { parseFileMask, mergeGlobs, normalizeMaskToken } from './file-mask';
+export type { ParsedFileMask } from './file-mask';
+export { SearchResultsWidget, SearchResultsPanel } from './search-results-widget';
+export { SearchResultsContribution } from './search-results-contribution';
+export { sameLineContext, multiLineContext } from './search-result-utils';
 
 export function bindSearchExtension(bind: interfaces.Bind): void {
   bind(KairoSearchService).toSelf().inSingletonScope();
   bind(KairoSearchSessionModel).toSelf().inSingletonScope();
   bind(SearchStreamService).toSelf().inSingletonScope();
   bind(SearchScopeModel).toSelf().inSingletonScope();
+  bind(FileIndexService).toSelf().inSingletonScope();
   bind(SearchCenterWidget).toSelf();
   bind(WidgetFactory).toDynamicValue(context => ({
     id: SearchCenterWidget.ID,
@@ -83,6 +93,12 @@ export function bindSearchExtension(bind: interfaces.Bind): void {
   // invoked and the shortcut fell through to Theia's built-in search.
   // Bind it explicitly so the Search Center opens from the shortcut.
   bind(FrontendApplicationContribution).toService(SearchCenterContribution);
+  bind(SearchResultsWidget).toSelf();
+  bind(WidgetFactory).toDynamicValue(context => ({
+    id: SearchResultsWidget.ID,
+    createWidget: () => context.container.get(SearchResultsWidget),
+  })).inSingletonScope();
+  bindViewContribution(bind, SearchResultsContribution);
   bind(SearchEverywhereModel).toSelf().inSingletonScope();
   bind(SearchEverywhereFilesProvider).toSelf().inSingletonScope();
   bind(SearchEverywhereJavaProvider).toSelf().inSingletonScope();

@@ -373,15 +373,21 @@ Build failed`
 	if len(diags) == 0 {
 		t.Fatal("expected at least one diagnostic")
 	}
-	// At minimum, the BUILD FAILED line should be captured
 	hasBuildFailed := false
+	hasFileLine := false
 	for _, d := range diags {
-		if strings.Contains(d.Message, "BUILD FAILED") {
+		if strings.Contains(d.Message, "BUILD FAILED") || strings.Contains(strings.ToLower(d.Message), "build failed") {
 			hasBuildFailed = true
+		}
+		if d.Line == 10 && strings.Contains(d.File, "File.java") && strings.Contains(d.Message, "cannot find symbol") {
+			hasFileLine = true
 		}
 	}
 	if !hasBuildFailed {
 		t.Errorf("expected BUILD FAILED diagnostic, got: %+v", diags)
+	}
+	if !hasFileLine {
+		t.Errorf("expected javac file:line diagnostic, got: %+v", diags)
 	}
 }
 

@@ -409,6 +409,7 @@ func (s *Server) routes() {
 	s.router.HandleFunc("/api/v1/servers/", s.handleServerSub)
 	// Search
 	s.router.HandleFunc("/api/v1/search", s.handleSearch)
+	s.router.HandleFunc("/api/v1/search/files", s.handleSearchFiles)
 	s.router.HandleFunc("/api/v1/search/stream", s.handleSearchStream)
 	// Encoding
 	s.router.HandleFunc("/api/v1/encoding/detect", s.handleEncodingDetect)

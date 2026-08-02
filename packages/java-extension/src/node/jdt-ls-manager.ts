@@ -29,7 +29,7 @@
 // process.env so it works in a packaged desktop build as
 // well as in a dev shell.
 
-import { spawn, ChildProcess, SpawnOptions } from 'child_process';
+import { spawn, spawnSync, ChildProcess, SpawnOptions } from 'child_process';
 import { existsSync, readdirSync, statSync } from 'fs';
 import { join, resolve } from 'path';
 import { Readable, Writable } from 'stream';
@@ -48,6 +48,7 @@ import {
   LSPLocation,
   LSPLocationLink,
   LSPCompletionList,
+  LSPCompletionItem,
   LSPHover,
   LSPSignatureHelp,
   LSPDocumentSymbolResult,
@@ -220,28 +221,14 @@ export class JdtLsManager implements Disposable {
     // we pick the best match.
     const configDir = pickConfigDir(homeAbs);
 
-    // Resolve a JRE. We prefer the explicit override, then
-    // JAVA_HOME, then `java` on PATH.
-    const jre = opts.jreHome ?? process.env.KAIRO_JDT_LS_JRE ?? process.env.JAVA_HOME;
-    if (!jre) {
+    // Resolve a host JRE 21+. Skip stale KAIRO_JRE17_HOME / JAVA_HOME
+    // when they point at JDK 17 (JDT LS 1.55 needs osgi.ee JavaSE 21).
+    const javaBin = resolveHostJre21(opts.jreHome);
+    if (!javaBin) {
       return {
         kind: 'env',
         message:
-          'JDT LS needs a JRE. Set KAIRO_JDT_LS_JRE or JAVA_HOME to a JDK 17 install (host JRE; the project source level stays on its configured level).',
-      };
-    }
-    const jreAbs = resolve(jre);
-    if (!existsSync(jreAbs)) {
-      return {
-        kind: 'env',
-        message: `JRE path does not exist: ${jreAbs}`,
-      };
-    }
-    const javaBin = process.platform === 'win32' ? join(jreAbs, 'bin', 'java.exe') : join(jreAbs, 'bin', 'java');
-    if (!existsSync(javaBin)) {
-      return {
-        kind: 'env',
-        message: `JRE at ${jreAbs} does not contain a java executable (${javaBin}).`,
+          'JDT LS needs a host JRE 21+. Set KAIRO_JDT_LS_JRE to a JDK 21+ install; project JAVA_HOME may stay on 17.',
       };
     }
 
@@ -259,14 +246,14 @@ export class JdtLsManager implements Disposable {
    * be resolved; the caller should catch and report the
    * `{ kind, message }` error to the UI.
    */
-  async start(opts: { rootUri: string; workspaceDataDir: string; sourceLevel?: string; home?: string }): Promise<void> {
+  async start(opts: { rootUri: string; workspaceDataDir: string; sourceLevel?: string; home?: string; jreHome?: string }): Promise<void> {
     if (this.state === 'starting' || this.state === 'initializing' || this.state === 'ready' || this.state === 'stopping' || this.stopPromise) {
       throw new Error(`JDT LS already in state ${this.state}`);
     }
-    // opts.home (derived from the Go agent's launch descriptor)
-    // wins over the KAIRO_JDT_LS_HOME env fallback inside
+    // opts.home / opts.jreHome (from the Go agent's launch descriptor)
+    // win over KAIRO_JDT_LS_HOME / JAVA_HOME env fallbacks inside
     // resolveDistribution.
-    const dist = JdtLsManager.resolveDistribution({ home: opts.home });
+    const dist = JdtLsManager.resolveDistribution({ home: opts.home, jreHome: opts.jreHome });
     if ('kind' in dist) {
       this.setState('failed');
       throw new Error(dist.message);
@@ -364,6 +351,17 @@ export class JdtLsManager implements Disposable {
     this.connection.onRequest('window/workDoneProgress/create', () => null);
     this.connection.onRequest('client/registerCapability', () => null);
     this.connection.onRequest('client/unregisterCapability', () => null);
+    // JDT LS asks for workspace/configuration after initialize when we
+    // advertise workspace.configuration. Without a handler the jsonrpc
+    // layer emits "Unhandled method workspace/configuration" and the
+    // browser client used to permanently poison the RPC channel.
+    this.connection.onRequest(
+      'workspace/configuration',
+      (params: { items?: Array<{ section?: string; scopeUri?: string }> }) => {
+        const items = params?.items ?? [];
+        return items.map(item => this.resolveConfigurationSection(item.section));
+      },
+    );
     this.connection.onNotification('$/progress', (params: LSPProgressParams) => {
       this.fire({ kind: 'progress', params });
     });
@@ -393,10 +391,11 @@ export class JdtLsManager implements Disposable {
             completion: {
               dynamicRegistration: true,
               completionItem: {
-                snippetSupport: false,
+                snippetSupport: true,
                 commitCharactersSupport: true,
                 documentationFormat: ['markdown', 'plaintext'],
                 deprecatedSupport: true,
+                resolveSupport: { properties: ['documentation', 'detail', 'additionalTextEdits'] },
               },
               contextSupport: true,
             },
@@ -432,22 +431,7 @@ export class JdtLsManager implements Disposable {
             generateDelegateMethodsPromptSupport: true,
           },
           settings: {
-            java: {
-              completion: { enabled: true, guessMethodArguments: true },
-              import: { enabled: true },
-              format: { enabled: true },
-              references: { includeDecompiledSources: true },
-              signatureHelp: { enabled: true },
-              implementationsCodeLens: { enabled: true },
-              configuration: {
-                checkProjectSettingsExclusions: false,
-                updateBuildConfiguration: 'interactive',
-              },
-              // KAIRO-PERF: trace disabled in production to reduce excessive
-              // JDT LS logging. Set KAIRO_JDT_TRACE=verbose to re-enable
-              // for debugging language server issues.
-              trace: { server: process.env.KAIRO_JDT_TRACE === 'verbose' ? 'verbose' : 'off' },
-            },
+            java: this.javaSettings(),
           },
         },
         trace: process.env.KAIRO_JDT_TRACE === 'verbose' ? 'verbose' : 'off',
@@ -457,6 +441,11 @@ export class JdtLsManager implements Disposable {
       // Acknowledge — the LSP spec requires a `initialized`
       // notification before any other request.
       this.connection.sendNotification('initialized', {});
+      // Push settings again so preferences that JDT only reads via
+      // workspace/configuration (e.g. source method symbols) stick.
+      this.connection.sendNotification('workspace/didChangeConfiguration', {
+        settings: { java: this.javaSettings() },
+      });
       this.setState('ready');
       this.fire({ kind: 'initialized', result });
       this.logger?.info(`[JDT LS] ready: ${result.serverInfo?.name ?? 'unknown'} ${result.serverInfo?.version ?? ''}`);
@@ -473,10 +462,52 @@ export class JdtLsManager implements Disposable {
     }
   }
 
+  /** Default JDT LS `java.*` settings sent on initialize / configuration. */
+  protected javaSettings(): Record<string, unknown> {
+    return {
+      completion: { enabled: true, guessMethodArguments: true },
+      import: { enabled: true },
+      format: { enabled: true },
+      references: { includeDecompiledSources: true },
+      signatureHelp: { enabled: true },
+      implementationsCodeLens: { enabled: true },
+      // IDEA-like Find Symbol needs source methods in workspace/symbol.
+      symbols: { includeSourceMethodDeclarations: true },
+      configuration: {
+        checkProjectSettingsExclusions: false,
+        updateBuildConfiguration: 'interactive',
+      },
+      trace: { server: process.env.KAIRO_JDT_TRACE === 'verbose' ? 'verbose' : 'off' },
+    };
+  }
+
+  /** Resolve one `workspace/configuration` section (e.g. `java` or `java.symbols`). */
+  protected resolveConfigurationSection(section: string | undefined): unknown {
+    const java = this.javaSettings();
+    if (!section || section === 'java') {
+      return java;
+    }
+    if (section.startsWith('java.')) {
+      const parts = section.slice('java.'.length).split('.');
+      let cur: unknown = java;
+      for (const part of parts) {
+        if (!cur || typeof cur !== 'object' || !(part in (cur as Record<string, unknown>))) {
+          return null;
+        }
+        cur = (cur as Record<string, unknown>)[part];
+      }
+      return cur;
+    }
+    return null;
+  }
+
   /** Send `textDocument/didOpen` for a new file. */
   didOpen(params: { uri: string; languageId: string; version: number; text: string }): void {
     if (!this.connection || this.state !== 'ready') {
-      throw new Error(`JDT LS not ready (state=${this.state})`);
+      // Document sync callers fire didOpen as soon as a buffer opens;
+      // during JDT startup that is expected. No-op like didClose so a
+      // concurrent open cannot poison the browser RPC channel.
+      return;
     }
     this.connection.sendNotification('textDocument/didOpen', {
       textDocument: {
@@ -490,7 +521,7 @@ export class JdtLsManager implements Disposable {
 
   didChange(params: { uri: string; version: number; changes: { text: string; rangeLength?: number }[] }): void {
     if (!this.connection || this.state !== 'ready') {
-      throw new Error(`JDT LS not ready (state=${this.state})`);
+      return;
     }
     this.connection.sendNotification('textDocument/didChange', {
       textDocument: { uri: params.uri, version: params.version },
@@ -523,6 +554,14 @@ export class JdtLsManager implements Disposable {
     });
     this.logger?.info(`[JDT LS] completion result items=${list?.items?.length ?? -1} uri=${params.uri} pos=${params.line}:${params.character}`);
     return list;
+  }
+
+  /** Drive the LSP `completionItem/resolve` request. */
+  async resolveCompletion(item: LSPCompletionItem): Promise<LSPCompletionItem> {
+    if (!this.connection || this.state !== 'ready') {
+      throw new Error(`JDT LS not ready (state=${this.state})`);
+    }
+    return this.sendRequestWithTimeout<LSPCompletionItem>('completionItem/resolve', item);
   }
 
   /** Drive the LSP `textDocument/definition` request. */
@@ -954,6 +993,107 @@ export class JdtLsManager implements Disposable {
     this.process = undefined;
     this.setState(toState);
   }
+}
+
+/** Minimum host JRE major for JDT LS 1.55 (osgi.ee JavaSE 21). */
+const JDT_LS_MIN_JRE_MAJOR = 21;
+
+/**
+ * Pick a JDK/JRE home that can actually spawn JDT LS.
+ * Priority mirrors runtime-agent/internal/jdtls/jre.go:
+ * explicit opts → KAIRO_JDT_LS_JRE → KAIRO_JRE17_HOME (if 21+) →
+ * KAIRO_JDK_HOME / JAVA_HOME (if 21+) → common install paths.
+ */
+function resolveHostJre21(explicit?: string): string | undefined {
+  const javaExe = process.platform === 'win32' ? 'java.exe' : 'java';
+  const tryHome = (home: string | undefined): string | undefined => {
+    if (!home || !String(home).trim()) return undefined;
+    const homeAbs = resolve(home.trim());
+    if (!existsSync(homeAbs)) return undefined;
+    const bin = join(homeAbs, 'bin', javaExe);
+    if (!existsSync(bin)) return undefined;
+    const major = probeJavaMajor(bin);
+    if (major === undefined || major < JDT_LS_MIN_JRE_MAJOR) return undefined;
+    return bin;
+  };
+
+  const fromExplicit = tryHome(explicit);
+  if (fromExplicit) return fromExplicit;
+  for (const envName of ['KAIRO_JDT_LS_JRE', 'KAIRO_JRE17_HOME', 'KAIRO_JDK_HOME', 'JAVA_HOME']) {
+    const hit = tryHome(process.env[envName]);
+    if (hit) return hit;
+  }
+
+  for (const bin of commonJdtLsJreBins(javaExe)) {
+    if (!existsSync(bin)) continue;
+    const major = probeJavaMajor(bin);
+    if (major !== undefined && major >= JDT_LS_MIN_JRE_MAJOR) return bin;
+  }
+  return undefined;
+}
+
+function probeJavaMajor(javaBin: string): number | undefined {
+  try {
+    const r = spawnSync(javaBin, ['-version'], {
+      encoding: 'utf8',
+      timeout: 5_000,
+      windowsHide: true,
+    });
+    const text = `${r.stdout || ''}${r.stderr || ''}${r.error ? String(r.error.message) : ''}`;
+    const m = /version\s+"([^"]+)"/.exec(text);
+    if (m) return parseJavaMajor(m[1]);
+  } catch {
+    /* ignore */
+  }
+  return undefined;
+}
+
+function parseJavaMajor(version: string): number {
+  if (version.startsWith('1.')) {
+    const parts = version.split('.');
+    return Number.parseInt(parts[1] || '0', 10) || 0;
+  }
+  return Number.parseInt(version.split('.')[0] || '0', 10) || 0;
+}
+
+function commonJdtLsJreBins(javaExe: string): string[] {
+  if (process.platform === 'win32') {
+    const roots = [
+      'C:\\Program Files\\Eclipse Adoptium',
+      'C:\\Program Files\\Java',
+      'C:\\Program Files\\Microsoft',
+      'E:\\Tools',
+    ];
+    const out: string[] = [];
+    for (const root of roots) {
+      if (!existsSync(root)) continue;
+      try {
+        for (const name of readdirSync(root)) {
+          const lower = name.toLowerCase();
+          if (lower.includes('jdk-8') || lower.includes('jdk-11') || lower.includes('jdk-17') || lower === 'jdk17') {
+            continue;
+          }
+          if (!(lower.includes('jdk') || lower.includes('jre') || lower.includes('temurin') || lower.includes('openjdk'))) {
+            continue;
+          }
+          out.push(join(root, name, 'bin', javaExe));
+        }
+      } catch { /* ignore */ }
+    }
+    return out;
+  }
+  if (process.platform === 'darwin') {
+    return [
+      `/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home/bin/${javaExe}`,
+      `/Library/Java/JavaVirtualMachines/jdk-21.jdk/Contents/Home/bin/${javaExe}`,
+      `/opt/homebrew/opt/openjdk@21/bin/${javaExe}`,
+    ];
+  }
+  return [
+    `/usr/lib/jvm/java-21-openjdk/bin/${javaExe}`,
+    `/usr/lib/jvm/java-21-openjdk-amd64/bin/${javaExe}`,
+    `/usr/lib/jvm/temurin-21-jdk/bin/${javaExe}`,
+  ];
 }
 
 /** Pick the best config dir for this OS. JDT LS ships

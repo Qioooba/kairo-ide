@@ -47,6 +47,8 @@ const {
   JavaLanguageServerLifecycle,
   extractWorkspaceDataDir,
   extractJdtLsHome,
+  extractJavaHome,
+  isFatalJdtLsFailure,
   pathToFileUri,
 } = require('../../lib/browser/java-ls-lifecycle');
 
@@ -100,6 +102,10 @@ function makeMocks(descriptor) {
       },
       onState(listener) {
         listeners.state = listener;
+        return DISPOSABLE;
+      },
+      onLog(listener) {
+        listeners.log = listener;
         return DISPOSABLE;
       },
     },
@@ -190,6 +196,7 @@ test('project change runs prepare -> descriptor -> client.start in order', async
     rootUri: 'file:///repo/proj',
     workspaceDataDir: '/data/ws1_p1',
     home: '/jdtls-home',
+    jreHome: '/jre17',
   });
   assert.deepEqual(mocks.logs.error, []);
   svc.dispose();
@@ -387,6 +394,39 @@ test('dispose cancels recovery and requests bounded backend stop', async () => {
 
   assert.equal(mocks.calls.filter(c => c.kind === 'start').length, 1);
   assert.equal(mocks.calls.filter(c => c.kind === 'stop').length, 1);
+});
+
+test('exit code 13 is treated as fatal and does not restart-spam', async () => {
+  const mocks = makeMocks(DESCRIPTOR);
+  const svc = makeLifecycle(mocks);
+  svc.restartDelayMs = () => 0;
+
+  mocks.listeners.project({ workspaceId: 'ws1', projectId: 'p1' });
+  await flush();
+  mocks.listeners.log({ level: 'stdout', line: '[exit] code=13 signal=' });
+  mocks.crash();
+  await new Promise(resolve => setTimeout(resolve, 5));
+  await flush();
+  // Duplicate crash/context must not spawn more starts or spam the limit log.
+  mocks.crash();
+  mocks.listeners.context({ workspaceId: 'ws1' });
+  await flush();
+
+  assert.equal(mocks.calls.filter(c => c.kind === 'start').length, 1);
+  assert.ok(mocks.logs.error.some(line => /fatal failure/i.test(line)));
+  assert.equal(mocks.logs.error.filter(line => /restart limit reached/.test(line)).length, 0);
+  svc.dispose();
+});
+
+test('extractJavaHome prefers envAllowlist JAVA_HOME then command path', () => {
+  assert.equal(extractJavaHome(DESCRIPTOR), '/jre17');
+  assert.equal(
+    extractJavaHome({ command: '/opt/jdk21/bin/java', args: [], workingDir: '/r', envAllowlist: [] }),
+    '/opt/jdk21',
+  );
+  assert.equal(isFatalJdtLsFailure('', 13), true);
+  assert.equal(isFatalJdtLsFailure('requires a JDK/JRE 21+ host runtime'), true);
+  assert.equal(isFatalJdtLsFailure('connection got disposed', null), false);
 });
 
 test('start failure is logged, not thrown', async () => {

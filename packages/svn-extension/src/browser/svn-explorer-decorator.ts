@@ -5,10 +5,11 @@ import { Emitter, Event, MaybePromise } from '@theia/core/lib/common';
 import { WidgetDecoration } from '@theia/core/lib/browser/widget-decoration';
 import { SvnService } from './svn-service';
 import { SvnFileStatus } from './svn-types';
+import { toWcRelativeFromUri } from './svn-path-utils';
 
 interface FileNode extends TreeNode {
   uri?: string | { path?: { toString(): string }; toString(): string };
-  fileStat?: { resource?: { path?: { toString(): string } } };
+  fileStat?: { resource?: { path?: { toString(): string }; toString(): string } };
 }
 
 const STATUS_COLORS: Record<SvnFileStatus, string> = {
@@ -84,25 +85,19 @@ export class SvnExplorerDecorator implements TreeDecorator {
       const filePath = this.getFilePath(node);
       if (!filePath) continue;
 
-      let relative: string | undefined;
-      if (filePath.startsWith('file://')) {
-        relative = decodeURIComponent(filePath.replace('file://', ''));
-        if (relative.startsWith(wcRoot)) {
-          relative = relative.substring(wcRoot.length + 1).replace(/\\/g, '/');
-        } else {
-          continue;
-        }
-      } else if (filePath.startsWith(wcRoot)) {
-        relative = filePath.substring(wcRoot.length + 1).replace(/\\/g, '/');
-      } else if (!filePath.startsWith('/')) {
-        relative = filePath.replace(/\\/g, '/');
-      } else {
-        continue;
-      }
+      const relative = toWcRelativeFromUri(filePath, wcRoot);
+      if (relative === undefined) continue;
 
       let status: SvnFileStatus | undefined;
       if (statusMap.has(relative)) {
         status = statusMap.get(relative);
+      } else if (relative === '') {
+        for (const [, s] of statusMap) {
+          if (s !== SvnFileStatus.Ignored && s !== SvnFileStatus.Unversioned) {
+            status = SvnFileStatus.Modified;
+            break;
+          }
+        }
       } else {
         for (const [p] of statusMap) {
           if (p.startsWith(relative + '/')) {
@@ -141,13 +136,14 @@ export class SvnExplorerDecorator implements TreeDecorator {
     const n = node as FileNode;
     if (n.uri) {
       if (typeof n.uri === 'string') return n.uri;
+      if (typeof n.uri.toString === 'function') return n.uri.toString();
       if (n.uri.path) return n.uri.path.toString();
-      if (n.uri.toString) return n.uri.toString();
     }
-    if (n.fileStat?.resource?.path) {
-      return n.fileStat.resource.path.toString();
+    if (n.fileStat?.resource) {
+      if (typeof n.fileStat.resource.toString === 'function') return n.fileStat.resource.toString();
+      if (n.fileStat.resource.path) return n.fileStat.resource.path.toString();
     }
-    if (n.id) {
+    if (n.id && (n.id.startsWith('file:') || n.id.includes('/') || n.id.includes('\\'))) {
       return n.id;
     }
     return undefined;

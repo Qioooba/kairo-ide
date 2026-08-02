@@ -5,7 +5,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 (async () => {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
-  await page.goto('http://127.0.0.1:3001', { waitUntil: 'domcontentloaded' });
+  await page.goto('http://127.0.0.1:18301', { waitUntil: 'domcontentloaded' });
   await sleep(4000);
   try {
     const trust = page.locator('button:has-text("Yes, I trust")').first();

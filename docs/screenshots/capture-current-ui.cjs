@@ -1,12 +1,15 @@
 /**
  * Temporary script to capture current Kairo IDE UI screenshots for analysis.
- * Runs against the already-started browser mode on http://127.0.0.1:3001.
+ * Runs against the already-started browser mode on http://127.0.0.1:18301.
+ * Theia Browser listens on :18301 (see tests/e2e/playwright.config.ts).
+ * Override with env CAPTURE_URL, e.g.:
+ *   $env:CAPTURE_URL="http://127.0.0.1:18301"; node docs/screenshots/capture-current-ui.cjs
  */
 const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
 
-const BASE_URL = 'http://127.0.0.1:3001';
+const BASE_URL = process.env.CAPTURE_URL || 'http://127.0.0.1:18301';
 const OUT_DIR = path.join(__dirname, 'current-ui');
 
 if (!fs.existsSync(OUT_DIR)) {

@@ -10063,13 +10063,46 @@ p.kairo-empty {
     height: 100%;
 }
 
-.kairo-java-hierarchy-header,
-.kairo-java-references-summary {
+.kairo-java-hierarchy-header {
     display: flex;
     align-items: center;
     gap: 8px;
     padding: 8px 12px;
     border-bottom: 1px solid var(--kairo-border);
+}
+
+.kairo-java-references-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--kairo-border);
+}
+
+.kairo-java-references-filter {
+  min-width: 160px;
+  flex: 1 1 180px;
+  max-width: 320px;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--theia-input-border, var(--theia-dropdown-border, transparent));
+  border-radius: 3px;
+  background: var(--theia-input-background);
+  color: var(--theia-input-foreground);
+  font-size: 12px;
+}
+
+.kairo-java-references-filter:focus {
+  outline: 1px solid var(--theia-focusBorder);
+  outline-offset: -1px;
+}
+
+.kairo-java-references-filter-empty {
+  padding: 12px 16px;
+  color: var(--theia-descriptionForeground);
+  font-size: 12px;
 }
 
 .kairo-java-hierarchy-loading,
@@ -11083,6 +11116,37 @@ p.kairo-empty {
 @keyframes pulse {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.5; }
+}
+
+/* JSP injected-Java regions — kind-specific tint + left rail.
+   Clearer than IDEA's single injected-fragment shade. */
+.monaco-editor .kairo-jsp-scriptlet-line {
+    background-color: rgba(104, 151, 187, 0.10);
+    border-left: 3px solid rgba(104, 151, 187, 0.75);
+    box-sizing: border-box;
+}
+.monaco-editor .kairo-jsp-expr-line {
+    background-color: rgba(106, 135, 89, 0.10);
+    border-left: 3px solid rgba(106, 135, 89, 0.75);
+    box-sizing: border-box;
+}
+.monaco-editor .kairo-jsp-decl-line {
+    background-color: rgba(187, 181, 41, 0.09);
+    border-left: 3px solid rgba(187, 181, 41, 0.70);
+    box-sizing: border-box;
+}
+
+/* IDEA Darcula does not rainbow-color brackets. Neutralize Monaco's
+   bracket-pair colorization classes so (){} stay default foreground. */
+.monaco-editor .bracket-highlighting-0,
+.monaco-editor .bracket-highlighting-1,
+.monaco-editor .bracket-highlighting-2,
+.monaco-editor .bracket-highlighting-3,
+.monaco-editor .bracket-highlighting-4,
+.monaco-editor .bracket-highlighting-5 {
+    color: inherit !important;
+    font-weight: inherit !important;
+    font-style: inherit !important;
 }
 
 

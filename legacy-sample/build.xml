@@ -38,6 +38,7 @@
            source="${kairo.java.target}"
            target="${kairo.java.target}"
            encoding="UTF-8"
+           debug="true"
            classpathref="classpath">
       <compilerarg value="-Xlint:all"/>
     </javac>

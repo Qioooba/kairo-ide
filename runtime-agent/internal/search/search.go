@@ -12,8 +12,10 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -76,6 +78,8 @@ type Options struct {
 	PreviewReplace  string   // if set, also return replacement preview
 	ProjectEncoding encoding.ID
 	EncodingAliases encoding.Aliases
+	// Workers overrides the parallel reader count. 0 = auto (NumCPU, clamped).
+	Workers int
 	// Cancel is checked periodically; if it returns Done, walk aborts.
 	Cancel context.Context
 }
@@ -99,12 +103,27 @@ type Result struct {
 	ElapsedMs    int64         `json:"elapsedMs"`
 	ErroredFiles []ErroredFile `json:"erroredFiles"`
 	allDecoders  map[string]func() ([]byte, error)
+	mu           sync.Mutex
 }
 
 // ErroredFile records a file we could not read.
 type ErroredFile struct {
 	File   string `json:"file"`
 	Reason string `json:"reason"`
+}
+
+// FileEntry is a workspace-relative file path for filename search.
+type FileEntry struct {
+	Path string `json:"path"`
+	Name string `json:"name"`
+}
+
+// ListOptions configures a filename listing walk.
+type ListOptions struct {
+	Include  []string
+	Exclude  []string
+	MaxFiles int
+	Cancel   context.Context
 }
 
 // Search walks root and returns matches.
@@ -179,7 +198,7 @@ func SearchStreaming(ctx context.Context, root string, opts Options, callback fu
 	inc := compileGlobs(opts.Include)
 	exc := compileGlobs(opts.Exclude)
 
-	matchCh := make(chan Match, 100)
+	matchCh := make(chan Match, 256)
 	walkErrCh := make(chan error, 1)
 
 	go func() {
@@ -225,6 +244,77 @@ func SearchStreaming(ctx context.Context, root string, opts Options, callback fu
 	}
 }
 
+// ListFiles walks root and returns relative file paths (for Find File / Search Everywhere).
+// Uses a single-threaded metadata walk — no file content reads — which is much
+// cheaper than content search on 4K-random-read-bound disks.
+func ListFiles(root string, opts ListOptions) ([]FileEntry, error) {
+	if root == "" {
+		return nil, errors.New("root is empty")
+	}
+	if opts.MaxFiles == 0 {
+		opts.MaxFiles = 50_000
+	}
+	if opts.Cancel == nil {
+		opts.Cancel = context.Background()
+	}
+	inc := compileGlobs(opts.Include)
+	exc := compileGlobs(opts.Exclude)
+	out := make([]FileEntry, 0, 1024)
+
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
+		if err := opts.Cancel.Err(); err != nil {
+			return err
+		}
+		if walkErr != nil {
+			if path == root {
+				return walkErr
+			}
+			if d != nil && d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		rel, relErr := filepath.Rel(root, path)
+		if relErr != nil {
+			return nil
+		}
+		if rel == "." {
+			return nil
+		}
+		relSlash := filepath.ToSlash(rel)
+		if d.IsDir() {
+			if isExcludedDir(relSlash) {
+				return filepath.SkipDir
+			}
+			if exc != nil && exc.matchAny(relSlash) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if len(out) >= opts.MaxFiles {
+			return filepath.SkipAll
+		}
+		if inc != nil && !inc.matchAny(relSlash) {
+			return nil
+		}
+		if exc != nil && exc.matchAny(relSlash) {
+			return nil
+		}
+		if isLikelyBinary(path) {
+			return nil
+		}
+		out = append(out, FileEntry{Path: relSlash, Name: filepath.Base(relSlash)})
+		return nil
+	})
+	if err != nil && !errors.Is(err, filepath.SkipAll) {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, err
+		}
+		return nil, fmt.Errorf("list files: %w", err)
+	}
+	return out, nil
+}
+
 // streamCollector implements a match collector that sends to a channel.
 type streamCollector struct {
 	ch  chan<- Match
@@ -243,66 +333,149 @@ type matchSink interface {
 	addMatch(m Match)
 }
 
+type fileJob struct {
+	abs string
+	rel string
+}
+
 // walkAndCollect walks the filesystem and collects matches into the sink.
+// Metadata walk is single-threaded; content reads use a worker pool so
+// 4K-random-I/O-bound disks can keep multiple opens in flight.
 func walkAndCollect(root string, matcher *compiledMatcher, inc, exc *globSet, opts Options, sink matchSink) error {
-	matchedCount := 0
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
+	workers := opts.Workers
+	if workers <= 0 {
+		workers = runtime.NumCPU()
+		if workers < 4 {
+			workers = 4
+		}
+		if workers > 16 {
+			workers = 16
+		}
+	}
+
+	jobs := make(chan fileJob, workers*8)
+	var matchedCount atomic.Int64
+	var stop atomic.Bool
+	var walkErr atomic.Value // error
+	var wg sync.WaitGroup
+
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for job := range jobs {
+				if stop.Load() {
+					continue
+				}
+				if err := opts.Cancel.Err(); err != nil {
+					walkErr.Store(err)
+					stop.Store(true)
+					continue
+				}
+				if matchedCount.Load() >= int64(opts.MaxResults) {
+					stop.Store(true)
+					continue
+				}
+				local := int(matchedCount.Load())
+				_ = searchFileToSink(job.abs, job.rel, root, matcher, opts, sink, &local, &matchedCount, opts.MaxResults, &stop)
+			}
+		}()
+	}
+
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, wErr error) error {
 		if err := opts.Cancel.Err(); err != nil {
 			return err
 		}
-		if walkErr != nil {
+		if stop.Load() {
+			return filepath.SkipAll
+		}
+		if wErr != nil {
 			if path == root {
-				return walkErr
+				return wErr
 			}
 			if d != nil && d.IsDir() {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		rel, _ := filepath.Rel(root, path)
+		rel, relErr := filepath.Rel(root, path)
+		if relErr != nil {
+			return nil
+		}
 		if rel == "." {
+			// Allow searching a single file passed as root.
+			if !d.IsDir() {
+				relSlash := filepath.Base(path)
+				select {
+				case jobs <- fileJob{abs: path, rel: relSlash}:
+				case <-opts.Cancel.Done():
+					return opts.Cancel.Err()
+				}
+			}
 			return nil
 		}
+		relSlash := filepath.ToSlash(rel)
 		if d.IsDir() {
-			if isExcludedDir(rel) {
+			if isExcludedDir(relSlash) {
 				return filepath.SkipDir
 			}
-			if exc != nil && exc.matchAny(rel) {
+			if exc != nil && exc.matchAny(relSlash) {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		if inc != nil && !inc.matchAny(rel) {
+		if inc != nil && !inc.matchAny(relSlash) {
 			return nil
 		}
-		if exc != nil && exc.matchAny(rel) {
+		if exc != nil && exc.matchAny(relSlash) {
 			return nil
 		}
 		if isLikelyBinary(path) {
 			return nil
 		}
-		if matchedCount >= opts.MaxResults {
+		if matchedCount.Load() >= int64(opts.MaxResults) {
+			stop.Store(true)
 			return filepath.SkipAll
 		}
-		if err := searchFileToSink(path, rel, root, matcher, opts, sink, &matchedCount); err != nil {
-			return err
+		select {
+		case jobs <- fileJob{abs: path, rel: relSlash}:
+			return nil
+		case <-opts.Cancel.Done():
+			return opts.Cancel.Err()
 		}
-		return nil
 	})
-	return err
+
+	close(jobs)
+	wg.Wait()
+
+	if err != nil && !errors.Is(err, filepath.SkipAll) {
+		return err
+	}
+	if v := walkErr.Load(); v != nil {
+		return v.(error)
+	}
+	if err := opts.Cancel.Err(); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (r *Result) addMatch(m Match) {
+	r.mu.Lock()
 	r.Matches = append(r.Matches, m)
 	r.TotalMatches++
+	r.mu.Unlock()
 }
 
 func (r *Result) recordError(path string, err error) {
+	r.mu.Lock()
 	r.ErroredFiles = append(r.ErroredFiles, ErroredFile{File: path, Reason: err.Error()})
+	r.mu.Unlock()
 }
 
 func isExcludedDir(rel string) bool {
-	return excludedDirSet[filepath.Base(rel)]
+	base := filepath.Base(rel)
+	return excludedDirSet[base]
 }
 
 // isLikelyBinary returns true if the file has a known binary
@@ -355,7 +528,19 @@ func buildMatcher(opts Options) (*compiledMatcher, error) {
 }
 
 // searchFileToSink reads a file, detects encoding, and sends matches to the sink.
-func searchFileToSink(absPath, rel, root string, m *compiledMatcher, opts Options, sink matchSink, matchedCount *int) error {
+func searchFileToSink(
+	absPath, rel, root string,
+	m *compiledMatcher,
+	opts Options,
+	sink matchSink,
+	_ *int,
+	matchedCount *atomic.Int64,
+	maxResults int,
+	stop *atomic.Bool,
+) error {
+	if stop != nil && stop.Load() {
+		return nil
+	}
 	if err := opts.Cancel.Err(); err != nil {
 		return err
 	}
@@ -383,13 +568,27 @@ func searchFileToSink(absPath, rel, root string, m *compiledMatcher, opts Option
 		scannerBufPool.Put(bufPtr)
 	}()
 
+	emit := func(match Match) bool {
+		if matchedCount != nil {
+			n := matchedCount.Add(1)
+			if n > int64(maxResults) {
+				matchedCount.Add(-1)
+				if stop != nil {
+					stop.Store(true)
+				}
+				return false
+			}
+		}
+		sink.addMatch(match)
+		return true
+	}
+
 	if detID == encoding.UTF8 || detID == encoding.UTF8BOM {
-		return scanUTF8ToSink(scanner, rel, m, opts, sink, matchedCount)
+		return scanUTF8ToSink(scanner, rel, m, opts, emit)
 	}
 	if err := opts.Cancel.Err(); err != nil {
 		return err
 	}
-	// For non-UTF8, re-read the file content from the already-seeked position.
 	data, err := readAllContext(opts.Cancel, f)
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
@@ -407,7 +606,7 @@ func searchFileToSink(absPath, rel, root string, m *compiledMatcher, opts Option
 	if err := opts.Cancel.Err(); err != nil {
 		return err
 	}
-	return scanBytesToSink(decoded, rel, m, opts, sink, matchedCount)
+	return scanBytesToSink(decoded, rel, m, opts, emit)
 }
 
 // readAllContext bounds cancellation latency for large/non-UTF files to one
@@ -438,70 +637,129 @@ func readAllContext(ctx context.Context, reader io.Reader) ([]byte, error) {
 	}
 }
 
-func scanUTF8ToSink(scanner *bufio.Scanner, rel string, m *compiledMatcher, opts Options, sink matchSink, matchedCount *int) error {
-	line := 0
-	for {
-		if err := opts.Cancel.Err(); err != nil {
-			return err
-		}
+type emitFn func(Match) bool
+
+func scanUTF8ToSink(scanner *bufio.Scanner, rel string, m *compiledMatcher, opts Options, emit emitFn) error {
+	return scanWithContext(func() ([]byte, bool) {
 		if !scanner.Scan() {
-			break
+			return nil, false
 		}
-		line++
+		// Copy bytes — scanner reuses the buffer on the next Scan.
 		b := scanner.Bytes()
-		matches := m.re.FindAllIndex(b, -1)
-		if err := opts.Cancel.Err(); err != nil {
-			return err
-		}
-		for _, idx := range matches {
-			sink.addMatch(buildMatchBytes(rel, line, idx[0], idx[1], b, m, opts))
-			*matchedCount++
-		}
-	}
-	return nil
+		cp := make([]byte, len(b))
+		copy(cp, b)
+		return cp, true
+	}, rel, m, opts, emit)
 }
 
-func scanBytesToSink(data []byte, rel string, m *compiledMatcher, opts Options, sink matchSink, matchedCount *int) error {
+func scanBytesToSink(data []byte, rel string, m *compiledMatcher, opts Options, emit emitFn) error {
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	const maxLine = 4 * 1024 * 1024
 	bufPtr := scannerBufPool.Get().(*[]byte)
 	scanner.Buffer(*bufPtr, maxLine)
 	defer scannerBufPool.Put(bufPtr)
+	return scanWithContext(func() ([]byte, bool) {
+		if !scanner.Scan() {
+			return nil, false
+		}
+		b := scanner.Bytes()
+		cp := make([]byte, len(b))
+		copy(cp, b)
+		return cp, true
+	}, rel, m, opts, emit)
+}
+
+func scanWithContext(next func() ([]byte, bool), rel string, m *compiledMatcher, opts Options, emit emitFn) error {
+	contextLines := opts.ContextLines
+	if contextLines < 0 {
+		contextLines = 0
+	}
+	beforeRing := make([]string, 0, contextLines)
+	type pending struct {
+		match Match
+		need  int
+	}
+	var pendingAfter []pending
 	line := 0
+
+	flushPending := func(lineText string) {
+		if len(pendingAfter) == 0 {
+			return
+		}
+		still := pendingAfter[:0]
+		for _, p := range pendingAfter {
+			p.match.ContextAfter = p.match.ContextAfter + "\n" + lineText
+			p.need--
+			if p.need <= 0 {
+				if !emit(p.match) {
+					pendingAfter = nil
+					return
+				}
+			} else {
+				still = append(still, p)
+			}
+		}
+		pendingAfter = still
+	}
+
 	for {
 		if err := opts.Cancel.Err(); err != nil {
 			return err
 		}
-		if !scanner.Scan() {
+		b, ok := next()
+		if !ok {
 			break
 		}
 		line++
-		b := scanner.Bytes()
-		matches := m.re.FindAllIndex(b, -1)
-		if err := opts.Cancel.Err(); err != nil {
-			return err
+		lineText := string(b)
+		if contextLines > 0 {
+			flushPending(lineText)
 		}
+
+		matches := m.re.FindAllIndex(b, -1)
 		for _, idx := range matches {
-			sink.addMatch(buildMatchBytes(rel, line, idx[0], idx[1], b, m, opts))
-			*matchedCount++
+			match := buildMatchBytes(rel, line, idx[0], idx[1], b, m, opts)
+			if contextLines > 0 && len(beforeRing) > 0 {
+				match.ContextBefore = strings.Join(beforeRing, "\n") + "\n" + match.ContextBefore
+			}
+			if contextLines > 0 {
+				pendingAfter = append(pendingAfter, pending{match: match, need: contextLines})
+			} else {
+				if !emit(match) {
+					return nil
+				}
+			}
+		}
+
+		if contextLines > 0 {
+			beforeRing = append(beforeRing, lineText)
+			if len(beforeRing) > contextLines {
+				beforeRing = beforeRing[1:]
+			}
+		}
+	}
+
+	for _, p := range pendingAfter {
+		if !emit(p.match) {
+			return nil
 		}
 	}
 	return nil
 }
 
 func buildMatchBytes(rel string, line, start, end int, b []byte, m *compiledMatcher, opts Options) Match {
-	// IDEs expect a rune-based column, but FindAllIndex
-	// returns byte offsets. Convert bytes-to-runes for the prefix
-	// so non-ASCII text gets the right column.
 	col := utf8.RuneCount(b[:start]) + 1
-	before := ""
-	after := ""
-	if opts.ContextLines > 0 {
-		// The caller is responsible for filling context. We
-		// pass empty here and let the API layer add it.
-		_ = before
-		_ = after
+	// Same-line context (IDEA / VS Code style preview).
+	before := string(b[:start])
+	after := string(b[end:])
+	const maxSide = 120
+	if len(before) > maxSide {
+		before = "…" + before[len(before)-maxSide:]
 	}
+	if len(after) > maxSide {
+		after = after[:maxSide] + "…"
+	}
+	_ = opts
 	match := Match{
 		File:          rel,
 		Line:          line,
@@ -519,69 +777,4 @@ func buildMatchBytes(rel string, line, start, end int, b []byte, m *compiledMatc
 // buildMatch is kept for backward compatibility with existing callers.
 func buildMatch(rel string, line, start, end int, s string, m *compiledMatcher, opts Options) Match {
 	return buildMatchBytes(rel, line, start, end, []byte(s), m, opts)
-}
-
-// globSet is a small wrapper around a list of compiled globs.
-type globSet struct{ globs []*regexp.Regexp }
-
-func compileGlobs(patterns []string) *globSet {
-	if len(patterns) == 0 {
-		return nil
-	}
-	out := &globSet{}
-	for _, p := range patterns {
-		re := globToRegexp(p)
-		if re != nil {
-			out.globs = append(out.globs, re)
-		}
-	}
-	return out
-}
-
-func (g *globSet) matchAny(s string) bool {
-	if g == nil {
-		return false
-	}
-	for _, re := range g.globs {
-		if re.MatchString(s) {
-			return true
-		}
-	}
-	return false
-}
-
-// globToRegexp compiles a glob pattern into a regular expression.
-// Only `*`, `**`, `?` and `.` carry glob semantics; every other
-// regex metacharacter (+, (, ), [, ], {, }, |, ^, $, \) is escaped
-// via regexp.QuoteMeta so it matches literally. Without escaping,
-// `file(1).txt` would compile as a regex group and silently match
-// (or fail to compile, dropping the glob entirely).
-func globToRegexp(p string) *regexp.Regexp {
-	var b strings.Builder
-	b.WriteString("^")
-	for i := 0; i < len(p); i++ {
-		switch p[i] {
-		case '*':
-			if i+1 < len(p) && p[i+1] == '*' {
-				b.WriteString(".*")
-				i++
-			} else {
-				b.WriteString("[^/]*")
-			}
-		case '?':
-			b.WriteString("[^/]")
-		default:
-			// QuoteMeta is a no-op for non-metacharacters, so we
-			// can run it byte-by-byte; for multibyte UTF-8 bytes
-			// the result is still valid because QuoteMeta preserves
-			// them as-is.
-			b.WriteString(regexp.QuoteMeta(string(p[i])))
-		}
-	}
-	b.WriteString("$")
-	re, err := regexp.Compile(b.String())
-	if err != nil {
-		return nil
-	}
-	return re
 }

@@ -560,7 +560,8 @@ export class DebugMultiModuleWidget extends ReactWidget {
         this.title.closable = true;
         this.updateTitle();
         this.toDispose.push(this.i18n.onDidChangeLanguage(() => this.updateTitle()));
-        this.addClass('kairo-widget kairo-debug-multimodule-widget');
+        this.addClass('kairo-widget');
+        this.addClass('kairo-debug-multimodule-widget');
         this.update();
     }
 

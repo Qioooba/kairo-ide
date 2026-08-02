@@ -76,9 +76,22 @@ Useful flags:
 | 6 | `searchKairo` | Type "Kairo" in palette |
 | 7 | `revealServers` | Execute `kairo.view.servers` command |
 | 8 | `typeInEditor` | Click Monaco editor, type a comment line |
-| 9 | `openSettings` | Ctrl+, |
-| 10 | `toggleTheme` | Open "Color Theme" picker |
-| 11 | `captureFullScreen` | Full-page screenshot |
+| 9 | `javaCompletionSmoke` | Open `CompletionDemo.java` (if present), type `sou` + Ctrl+Space, screenshot suggest |
+| 10 | `openSettings` | Ctrl+, |
+| 11 | `toggleTheme` | Open "Color Theme" picker |
+| 12 | `captureFullScreen` | Full-page screenshot |
+
+### Completion-focused run
+
+```powershell
+# Against running Theia browser (default :18301)
+node tests/e2e-windows/completion-real.cjs
+
+# Against packaged desktop
+node tests/e2e-windows/completion-real.cjs --exe "G:\spaces\kairo-ide\apps\desktop\dist\run\Kairo.exe"
+```
+
+Screenshots land in `docs/screenshots/windows-e2e/completion/`; JSON report in `artifacts/e2e-windows/completion-report.json`.
 
 ## Outputs
 

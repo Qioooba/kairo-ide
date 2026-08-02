@@ -226,7 +226,8 @@ func (c *Compiler) Compile(ctx context.Context, req Request) (*Result, error) {
 		if req.OutputDir != "" {
 			args = append(args, "-d", req.OutputDir)
 		}
-		args = append(args, "-Xlint:all")
+		// Always emit LocalVariableTable so JDWP/DAP can show locals (req/name/this).
+		args = append(args, "-g", "-Xlint:all")
 		if shouldUseJavacArgFile(args, req.Sources) {
 			argFile, err := writeJavacArgFile(req.ProjectRoot, req.Sources)
 			if err != nil {

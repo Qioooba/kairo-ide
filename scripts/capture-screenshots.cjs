@@ -52,7 +52,7 @@ const OUTPUT_DIR = process.argv[2] || path.join(__dirname, '..', 'docs', 'screen
     console.error('[pageerror]', err.message);
   });
 
-  const port = process.env.KAIRO_PORT || '3001';
+  const port = process.env.KAIRO_PORT || '18301';
   const url = `http://127.0.0.1:${port}`;
   console.log(`Navigating to ${url} ...`);
   await page.goto(url, { waitUntil: 'networkidle', timeout: 60000 });
@@ -124,9 +124,17 @@ const OUTPUT_DIR = process.argv[2] || path.join(__dirname, '..', 'docs', 'screen
     console.log('File menu failed:', e.message);
   }
 
-  // 4. Open Run Configurations
+  // 4. Open Run Configurations (via command palette)
   try {
-    await page.click('text=Open Run Configurations');
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(200);
+    await page.keyboard.press('Control+Shift+P');
+    await page.waitForTimeout(600);
+    const input = page.locator('.quick-input-widget .quick-input-box input');
+    await input.waitFor({ state: 'visible', timeout: 5000 });
+    await input.fill('Kairo: Manage Run Configurations');
+    await page.waitForTimeout(800);
+    await page.keyboard.press('Enter');
     await page.waitForTimeout(2000);
     await screenshot('04-run-configurations.png');
   } catch (e) {
@@ -205,9 +213,17 @@ const OUTPUT_DIR = process.argv[2] || path.join(__dirname, '..', 'docs', 'screen
     console.log('Preferences failed:', e.message);
   }
 
-  // 11. New Project dialog
+  // 11. New Project dialog (import wizard)
   try {
-    await page.click('text=New Project', { timeout: 5000 });
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(200);
+    await page.keyboard.press('Control+Shift+P');
+    await page.waitForTimeout(600);
+    const palInput = page.locator('.quick-input-widget .quick-input-box input');
+    await palInput.waitFor({ state: 'visible', timeout: 5000 });
+    await palInput.fill('Kairo: Import Project');
+    await page.waitForTimeout(800);
+    await page.keyboard.press('Enter');
     await page.waitForTimeout(2000);
     await screenshot('11-new-project-dialog.png');
     await page.keyboard.press('Escape');

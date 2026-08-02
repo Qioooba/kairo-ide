@@ -111,7 +111,8 @@ export function probeKairoJavaDebugAdapter(
   if (bridgeJar) {
     const hostJava = resolved?.hostJava !== undefined ? resolved.hostJava ?? undefined : resolveHostJava(env);
     if (hostJava && isAbsolute(hostJava) && !hostJava.includes('\0') && isExecutableFn(hostJava)) {
-      return { available: true, command: hostJava, args: ['-jar', bridgeJar, '127.0.0.1', '8000'] };
+      // Host/port are appended by provideDebugAdapterExecutable from the attach config.
+      return { available: true, command: hostJava, args: ['-jar', bridgeJar] };
     }
   }
 

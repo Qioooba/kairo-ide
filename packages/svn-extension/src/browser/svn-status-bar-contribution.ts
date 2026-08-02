@@ -97,11 +97,15 @@ Click for quick actions.`,
       execute: () => void;
     }
     const items: SvnQuickPickItem[] = [
-      { label: '$(cloud-download) Update Project', execute: () => { void this.svnStore.update().catch(e => console.error('Update failed:', e)); } },
-      { label: '$(check) Commit...', execute: () => { void this.commandRegistry.executeCommand('svn.commit'); } },
+      { label: '$(cloud-download) Update Project…', execute: () => { void this.commandRegistry.executeCommand('svn.update'); } },
+      { label: '$(check) Commit…', execute: () => { void this.commandRegistry.executeCommand('svn.commit'); } },
       { label: '$(history) Show History', execute: () => { void this.commandRegistry.executeCommand('svn.showHistory'); } },
+      { label: '$(git-merge) Merge…', execute: () => { void this.commandRegistry.executeCommand('svn.merge'); } },
+      { label: '$(git-branch) Branch / Tag…', execute: () => { void this.commandRegistry.executeCommand('svn.branchTag'); } },
+      { label: '$(arrow-swap) Switch…', execute: () => { void this.commandRegistry.executeCommand('svn.switch'); } },
+      { label: '$(warning) Resolve Conflicts…', execute: () => { void this.commandRegistry.executeCommand('svn.resolve'); } },
       { label: '$(refresh) Refresh Status', execute: () => { void this.svnStore.refresh(); } },
-      { label: '$(repo) Checkout...', execute: () => { void this.commandRegistry.executeCommand('svn.checkout'); } },
+      { label: '$(desktop-download) Checkout…', execute: () => { void this.commandRegistry.executeCommand('svn.checkout'); } },
       { label: '$(repo) Browse Repository', execute: () => { void this.commandRegistry.executeCommand('svn.browseRepo'); } },
     ];
 

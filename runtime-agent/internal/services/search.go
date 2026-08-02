@@ -88,3 +88,50 @@ func (m *memSearcher) Search(ctx context.Context, payload json.RawMessage) (json
 	}
 	return json.Marshal(r)
 }
+
+func (m *memSearcher) ListFiles(ctx context.Context, payload json.RawMessage) (json.RawMessage, error) {
+	var req struct {
+		WorkspaceID string   `json:"workspaceId"`
+		RootPath    string   `json:"rootPath"`
+		Include     []string `json:"include"`
+		Exclude     []string `json:"exclude"`
+		MaxFiles    int      `json:"maxFiles"`
+	}
+	if err := json.Unmarshal(payload, &req); err != nil {
+		return nil, err
+	}
+	root := req.RootPath
+	if root == "" && req.WorkspaceID != "" {
+		if m != nil && m.workspaces != nil {
+			if ws, err := m.workspaces.Get(req.WorkspaceID); err == nil {
+				root = ws.RootPath
+			}
+		}
+		if root == "" {
+			root = req.WorkspaceID
+		}
+	}
+	if root == "" {
+		return nil, fmt.Errorf("rootPath or workspaceId is required")
+	}
+	if m != nil && m.sandbox != nil {
+		authorized, err := m.sandbox.AuthorizeReadAbs(root)
+		if err != nil {
+			return nil, err
+		}
+		root = authorized
+	}
+	files, err := search.ListFiles(root, search.ListOptions{
+		Include:  req.Include,
+		Exclude:  req.Exclude,
+		MaxFiles: req.MaxFiles,
+		Cancel:   ctx,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(struct {
+		Files []search.FileEntry `json:"files"`
+		Total int                `json:"total"`
+	}{Files: files, Total: len(files)})
+}

@@ -931,6 +931,11 @@ func (s *contextSearchStub) Search(ctx context.Context, _ json.RawMessage) (json
 	return nil, ctx.Err()
 }
 
+func (s *contextSearchStub) ListFiles(ctx context.Context, _ json.RawMessage) (json.RawMessage, error) {
+	s.seen = ctx.Err()
+	return nil, ctx.Err()
+}
+
 // fakeWorkspaceStore is a minimal in-memory WorkspaceStore for handler tests.
 type fakeWorkspaceStore struct {
 	workspaces []WorkspaceRecord

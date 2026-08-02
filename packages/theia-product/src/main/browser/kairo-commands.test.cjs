@@ -19,7 +19,7 @@ const assert = require('node:assert');
 const { Container } = require('inversify');
 
 // Theia core symbols and classes
-const { ApplicationShell, WidgetManager } = require('@theia/core/lib/browser');
+const { ApplicationShell, WidgetManager, OpenerService } = require('@theia/core/lib/browser');
 const { CommandRegistry, CommandService, MessageService } = require('@theia/core/lib/common');
 
 // Kairo extension symbols
@@ -65,13 +65,38 @@ function createMockRuntimeConnectionService() {
     callLog: calls,
     onStatusChange: () => () => {},
     subscribeEvents: () => () => {},
-    request: (endpoint, payload) => {
-      calls.push({ endpoint, payload });
+    baseUrl: () => 'http://127.0.0.1:18101',
+    bootstrapFromTheiaConfig: async () => true,
+    invalidateEndpoints: () => {},
+    disconnectEvents: () => {},
+    openEvents: () => {},
+    request: (endpoint, payload, opts) => {
+      calls.push({ endpoint, payload, opts });
+      const ep = String(endpoint || '');
+      if (ep.includes('GET /api/v1/builds/{buildId}') || /GET \/api\/v1\/builds\/.+/.test(ep)) {
+        const id = (opts && opts.pathParams && opts.pathParams.buildId) || 'mock-result';
+        return Promise.resolve({ id, state: 'succeeded', diagnostics: [] });
+      }
+      if (ep === 'GET /api/v1/builds') {
+        return Promise.resolve([]);
+      }
       return Promise.resolve({ id: 'mock-result', state: 'success' });
     },
     workspace: () => 'mock-ws',
   };
 }
+
+// Health probe used by ensureRuntimeAgentHealthy during kairo.server.start
+const _origFetch = global.fetch;
+global.fetch = async (url, init) => {
+  if (String(url).includes('/api/v1/health')) {
+    return { ok: true, status: 200, json: async () => ({ status: 'ok' }) };
+  }
+  if (typeof _origFetch === 'function') {
+    return _origFetch(url, init);
+  }
+  return { ok: false, status: 404, json: async () => ({}) };
+};
 
 function createMockKairoServerService() {
   const calls = [];
@@ -163,6 +188,10 @@ function buildContainer() {
   container.bind(HotDeployService).toConstantValue({
     updateApplication: async () => {},
     reloadContext: async () => {},
+  });
+  container.bind(OpenerService).toConstantValue({
+    getOpeners: async () => [],
+    getOpener: async () => ({ open: async () => undefined }),
   });
   // KairoViewsContribution injects InversifyJS's `Container` so the
   // safeContribution-fallback no-op (KairoNoopContribution) and the

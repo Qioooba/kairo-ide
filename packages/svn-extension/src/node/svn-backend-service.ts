@@ -37,6 +37,7 @@ import {
   parseLogXml,
   parseBlameXml,
 } from '../browser/svn-parser';
+import { toWcRelativePath } from '../browser/svn-path-utils';
 
 const execFileAsync = promisify(execFile);
 
@@ -242,15 +243,25 @@ export class SvnBackendServiceImpl implements SvnBackendService {
   // Low-level WC helpers
   // ---------------------------------------------------------------------------
 
+  /** Normalize Theia/Posix-style Windows paths like "/G:/foo" → "G:/foo". */
+  protected normalizeFsPath(cwd: string): string {
+    if (!cwd) return cwd;
+    let p = cwd.replace(/\\/g, '/');
+    if (/^\/[a-zA-Z]:/.test(p)) {
+      p = p.substring(1);
+    }
+    return path.resolve(p);
+  }
+
   async $isWcRoot(cwd: string): Promise<boolean> {
     try {
-      const svnDir = path.join(cwd, '.svn');
+      const svnDir = path.join(this.normalizeFsPath(cwd), '.svn');
       return fs.existsSync(svnDir) && fs.statSync(svnDir).isDirectory();
     } catch { return false; }
   }
 
   async $findWcRoot(cwd: string): Promise<string | undefined> {
-    let current = path.resolve(cwd);
+    let current = this.normalizeFsPath(cwd);
     const { root } = path.parse(current);
     while (current !== root) {
       const svnDir = path.join(current, '.svn');
@@ -447,16 +458,29 @@ export class SvnBackendServiceImpl implements SvnBackendService {
     } catch { return undefined; }
   }
 
-  async $getStatus(cwd: string): Promise<SvnStatus[]> {
+  async $getStatus(cwd: string, update = false): Promise<SvnStatus[]> {
     try {
-      return await this.execXml(['status'], cwd, parseStatusXml);
+      // --no-ignore so Ignored Files appear in the Changes view (IDEA parity).
+      // -u shows incoming repos-status for the Incoming tab.
+      const args = update
+        ? ['status', '--no-ignore', '-u']
+        : ['status', '--no-ignore'];
+      const list = await this.execXml(args, cwd, parseStatusXml);
+      // Windows SVN returns absolute paths in status XML; normalize to
+      // WC-relative forward-slash paths so UI / decorators can match.
+      return list.map(entry => ({
+        ...entry,
+        path: toWcRelativePath(entry.path, cwd),
+      }));
     } catch { return []; }
   }
 
   async $getFileStatus(cwd: string, relPath: string): Promise<SvnStatus | undefined> {
     try {
-      const list = await this.execXml(['status', relPath], cwd, parseStatusXml);
-      return list[0];
+      const list = await this.execXml(['status', '--no-ignore', relPath], cwd, parseStatusXml);
+      const entry = list[0];
+      if (!entry) return undefined;
+      return { ...entry, path: toWcRelativePath(entry.path, cwd) };
     } catch { return undefined; }
   }
 
@@ -510,28 +534,36 @@ export class SvnBackendServiceImpl implements SvnBackendService {
   }
 
   async $ignore(cwd: string, patterns: string[]): Promise<CommandResult> {
-    // Appends patterns to svn:ignore on the directory of each pattern (or cwd)
-    // Simpler approach: use `svn propset svn:ignore` with combined list per dir
+    // patterns: basenames or WC-relative paths. Group by parent directory.
     const byDir = new Map<string, string[]>();
     for (const p of patterns) {
-      const dir = path.dirname(p.startsWith('.') || p.startsWith('/') ? p : path.join(cwd, p));
-      const base = path.basename(p);
+      const normalized = p.replace(/\\/g, '/');
+      const hasSlash = normalized.includes('/');
+      const dir = hasSlash
+        ? path.resolve(cwd, path.dirname(normalized))
+        : path.resolve(cwd);
+      const base = path.basename(normalized);
       const list = byDir.get(dir) || [];
-      list.push(base);
+      if (!list.includes(base)) list.push(base);
       byDir.set(dir, list);
     }
     let lastResult: CommandResult = { stdout: '', stderr: '', exitCode: 0 };
     for (const [dir, list] of byDir.entries()) {
-      // Fetch existing ignore list
       let existing = '';
       try {
-        const r = await this.$exec(['propget', 'svn:ignore', dir], dir, 'read');
+        const r = await this.$exec(['propget', 'svn:ignore', dir], cwd, 'read');
         existing = r.stdout;
       } catch { existing = ''; }
-      const combined = existing
-        ? existing + '\n' + list.join('\n')
-        : list.join('\n');
-      lastResult = await this.$exec(['propset', 'svn:ignore', combined, dir], dir, 'write');
+      const existingLines = existing.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+      const merged = [...existingLines];
+      for (const item of list) {
+        if (!merged.includes(item)) merged.push(item);
+      }
+      lastResult = await this.$exec(
+        ['propset', 'svn:ignore', merged.join('\n'), dir],
+        cwd,
+        'write',
+      );
     }
     return lastResult;
   }
@@ -553,7 +585,8 @@ export class SvnBackendServiceImpl implements SvnBackendService {
 
   async $annotate(cwd: string, relPath: string, revision?: string): Promise<SvnAnnotation[]> {
     try {
-      const args = ['blame', '--xml'];
+      // execXml appends --xml; do not pass it here (would duplicate the flag).
+      const args = ['blame'];
       if (revision) args.push('-r', revision);
       args.push(relPath);
       return await this.execXml(args, cwd, parseBlameXml);
@@ -573,12 +606,15 @@ export class SvnBackendServiceImpl implements SvnBackendService {
   }
 
   async $checkout(url: string, target: string, revision?: string): Promise<CommandResult> {
+    const resolved = path.resolve(target);
+    const parent = path.dirname(resolved);
     try {
-      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.mkdirSync(parent, { recursive: true });
     } catch { /* ignore */ }
-    const args = ['checkout', url, target];
+    const args = ['checkout', url, resolved];
     if (revision) args.push('-r', revision);
-    return this.$exec(args, target, 'write');
+    // cwd must exist; target itself may not exist yet before checkout.
+    return this.$exec(args, parent, 'write');
   }
 
   async $getFileAtRevision(cwd: string, relPath: string, revision: string | number): Promise<CommandResult> {

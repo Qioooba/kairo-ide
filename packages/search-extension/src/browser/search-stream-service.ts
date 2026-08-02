@@ -91,6 +91,7 @@ export class SearchStreamService {
       }
       ws.send(JSON.stringify({
         workspaceId: opts.workspaceId,
+        rootPath: opts.rootPath,
         query: opts.query ?? '',
         isRegex: opts.isRegex ?? false,
         caseSensitive: opts.caseSensitive ?? false,

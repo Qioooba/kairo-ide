@@ -31,6 +31,7 @@ import { JdtLsState } from '../node/jdt-ls-manager';
 import {
   LSPPublishDiagnosticsParams,
   LSPCompletionList,
+  LSPCompletionItem,
   LSPLocation,
   LSPLocationLink,
   LSPHover,
@@ -141,9 +142,11 @@ export class JavaLanguageClient implements JdtLsFrontendClient, Disposable {
       try {
         this.rpcProxy = this.connectionProvider.createProxy<JdtLsBackendService>(JdtLsBackendPath, this);
       } catch (err) {
-        this.rpcProxy = undefined;
         const msg = String(err);
-        if (msg.includes('connection') || msg.includes('WebSocket') || msg.includes('disposed')) {
+        // Theia allows only one channel per path. If we dropped our
+        // proxy reference while the channel is still open (e.g. after
+        // a stop/restart), recreate will throw — do NOT poison RPC.
+        if (msg.includes('already open') || msg.includes('connection') || msg.includes('WebSocket') || msg.includes('disposed')) {
           this.logger.warn(`[JavaLanguageClient] backend proxy not ready yet: ${msg.slice(0, 150)}`);
         } else {
           this.logger.warn(`[JavaLanguageClient] backend proxy unavailable: ${msg.slice(0, 150)}`);
@@ -162,12 +165,33 @@ export class JavaLanguageClient implements JdtLsFrontendClient, Disposable {
       || msg.includes('connection is disposed')
       || msg.includes('WebSocket is not open')
       || msg.includes('connection closing')
-      || msg.includes('Pending response rejected');
+      || msg.includes('Pending response rejected')
+      || msg.includes('already open');
+  }
+
+  /**
+   * Lifecycle "not ready yet" is expected while JDT LS starts.
+   * It must NOT poison the RPC channel — otherwise every later
+   * Find Class / Symbol / completion call falls back to an empty
+   * in-process stub forever.
+   */
+  protected isLifecycleNotReadyError(err: unknown): boolean {
+    const msg = String(err);
+    return msg.includes('JDT LS not ready')
+      || /state=(uninitialized|starting|initializing|stopping|stopped)/i.test(msg);
+  }
+
+  /** LSP methods we advertise but haven't wired yet must not kill RPC. */
+  protected isUnhandledLspMethodError(err: unknown): boolean {
+    const msg = String(err);
+    return msg.includes('Unhandled method')
+      || msg.includes('Method not found') && msg.includes('workspace/configuration');
   }
 
   /** Check if an error indicates the backend method is not available. */
   protected isPermanentRpcFailure(err: unknown): boolean {
     const msg = String(err);
+    if (this.isUnhandledLspMethodError(err)) return false;
     return msg.includes('method not found')
       || msg.includes('Method not found')
       || msg.includes('Internal error') && msg.includes('no handler');
@@ -175,8 +199,18 @@ export class JavaLanguageClient implements JdtLsFrontendClient, Disposable {
 
   /** Mark the RPC path broken (backend has no handler) and fall back. */
   protected markRpcFailed(err: unknown): void {
+    if (this.isLifecycleNotReadyError(err)) {
+      this.logger.info(`[JavaLanguageClient] backend not ready yet (keeping RPC): ${String(err).slice(0, 200)}`);
+      return;
+    }
+    if (this.isUnhandledLspMethodError(err)) {
+      this.logger.warn(`[JavaLanguageClient] unhandled LSP method (keeping RPC): ${String(err).slice(0, 200)}`);
+      return;
+    }
     if (this.isTransientConnectionError(err)) {
-      this.rpcProxy = undefined;
+      // Keep rpcProxy: Theia channels are one-per-path. Clearing the
+      // reference then calling createProxy again throws "already open"
+      // and used to permanently poison Find Class / Symbol.
       this.logger.warn(`[JavaLanguageClient] backend RPC connection transient error (will retry on next call): ${String(err).slice(0, 200)}`);
       return;
     }
@@ -207,9 +241,10 @@ export class JavaLanguageClient implements JdtLsFrontendClient, Disposable {
       } catch (err) {
         lastErr = err;
         if (this.isPermanentRpcFailure(err)) break;
-        if (!this.isTransientConnectionError(err) || attempt >= retries) break;
+        const retryable = this.isTransientConnectionError(err) || this.isLifecycleNotReadyError(err);
+        if (!retryable || attempt >= retries) break;
         const delay = Math.min(baseDelay * (2 ** attempt), 5000);
-        this.logger.info(`[JavaLanguageClient] RPC transient error, retrying in ${delay}ms (attempt ${attempt + 1}/${retries})`);
+        this.logger.info(`[JavaLanguageClient] RPC transient/not-ready error, retrying in ${delay}ms (attempt ${attempt + 1}/${retries})`);
         await new Promise(r => setTimeout(r, delay));
       }
     }
@@ -225,14 +260,14 @@ export class JavaLanguageClient implements JdtLsFrontendClient, Disposable {
    * agent's launch descriptor; when present it wins over
    * the KAIRO_JDT_LS_HOME env fallback in the backend.
    */
-  async start(opts: { rootUri: string; workspaceDataDir: string; sourceLevel?: string; home?: string }): Promise<{ ok: true } | { ok: false; reason: string }> {
+  async start(opts: { rootUri: string; workspaceDataDir: string; sourceLevel?: string; home?: string; jreHome?: string }): Promise<{ ok: true } | { ok: false; reason: string }> {
     return this.withRetry(
       () => this.proxy()!.$start(opts),
       async () => {
         if (!this.backend) {
           return { ok: false, reason: 'Backend service not available' };
         }
-        const inspect = this.backend.inspect(opts.home);
+        const inspect = this.backend.inspect(opts.home, opts.jreHome);
         if (!inspect.ok) {
           this.logger.warn(`[JavaLanguageClient] cannot start: ${inspect.reason}`);
           return { ok: false, reason: inspect.reason };
@@ -283,6 +318,40 @@ export class JavaLanguageClient implements JdtLsFrontendClient, Disposable {
     );
   }
 
+  /**
+   * Non-blocking state probe for interactive suggest.
+   * Never waits on RPC reconnect retries — Monaco hides other
+   * providers (Live Templates / Hippie) behind "Loading…" until
+   * every completion provider settles.
+   */
+  async fetchStateQuick(): Promise<JdtLsState> {
+    const proxy = this.proxy();
+    if (proxy) {
+      try {
+        const s = await Promise.race([
+          proxy.$state(),
+          new Promise<null>(resolve => setTimeout(() => resolve(null), 200)),
+        ]);
+        if (s) {
+          this.lastKnownState = s;
+          return s;
+        }
+      } catch (err) {
+        this.markRpcFailed(err);
+      }
+    }
+    if (this.backend) {
+      try {
+        const s = this.backend.state();
+        this.lastKnownState = s;
+        return s;
+      } catch {
+        // fall through
+      }
+    }
+    return this.lastKnownState;
+  }
+
   didOpen(p: { uri: string; languageId: string; version: number; text: string }): void {
     const proxy = this.proxy();
     if (proxy) {
@@ -311,15 +380,57 @@ export class JavaLanguageClient implements JdtLsFrontendClient, Disposable {
   }
 
   async completion(p: { uri: string; line: number; character: number; triggerKind?: 1 | 2 | 3; triggerCharacter?: string }): Promise<LSPCompletionList> {
+    // Soft timeout for interactive suggest. Must stay under JavaCompletionProvider's
+    // COMPLETION_BUDGET_MS so Monaco leaves "Loading…". Do NOT fall through to a
+    // second backend.completion() after timeout — that can hang up to 30s (JDT LS
+    // request timeout) and keeps the widget stuck (A3 3.1).
+    const COMPLETION_RPC_MS = 4_500;
+    const emptyIncomplete = (): LSPCompletionList => ({ isIncomplete: true, items: [] });
+    const withSoftTimeout = (work: Promise<LSPCompletionList>, label: string) =>
+      Promise.race([
+        work,
+        new Promise<LSPCompletionList>((_, reject) => {
+          setTimeout(() => reject(new Error(`${label} timeout`)), COMPLETION_RPC_MS);
+        }),
+      ]);
+
     const proxy = this.proxy();
     if (proxy) {
       try {
-        return await proxy.$completion(p);
+        return await withSoftTimeout(proxy.$completion(p), 'completion RPC');
+      } catch (err) {
+        if (/completion RPC timeout/i.test(String(err))) {
+          this.logger.warn('[JavaLanguageClient] completion soft-timeout (keeping RPC; provider will fallback)');
+          // Signal provider via throw so it uses IntelliSense fallback immediately.
+          throw err;
+        }
+        this.markRpcFailed(err);
+      }
+    }
+    if (this.backend) {
+      try {
+        return await withSoftTimeout(
+          Promise.resolve(this.backend.completion(p)),
+          'completion backend',
+        );
+      } catch (err) {
+        this.logger.warn(`[JavaLanguageClient] completion backend soft-timeout/fail: ${String(err).slice(0, 160)}`);
+        return emptyIncomplete();
+      }
+    }
+    return emptyIncomplete();
+  }
+
+  async resolveCompletion(item: LSPCompletionItem): Promise<LSPCompletionItem> {
+    const proxy = this.proxy();
+    if (proxy) {
+      try {
+        return await proxy.$resolveCompletion(item);
       } catch (err) {
         this.markRpcFailed(err);
       }
     }
-    return this.backend?.completion(p) ?? { isIncomplete: false, items: [] };
+    return this.backend?.resolveCompletion?.(item) ?? item;
   }
 
   async definition(p: { uri: string; line: number; character: number }): Promise<LSPLocation | LSPLocation[] | null> {
@@ -458,16 +569,19 @@ export class JavaLanguageClient implements JdtLsFrontendClient, Disposable {
     arg: Parameters<JdtLsBackendService[K]>[0],
     fallback: () => ReturnType<JdtLsBackendService[K]>,
   ): Promise<Awaited<ReturnType<JdtLsBackendService[K]>>> {
-    const proxy = this.proxy();
-    if (proxy) {
-      try {
+    return await this.withRetry(
+      async () => {
+        const proxy = this.proxy();
+        if (!proxy) {
+          throw new Error('RPC proxy not available');
+        }
         const fn = proxy[method] as (value: typeof arg) => ReturnType<JdtLsBackendService[K]>;
-        return await fn.call(proxy, arg) as Awaited<ReturnType<JdtLsBackendService[K]>>;
-      } catch (err) {
-        this.markRpcFailed(err);
-      }
-    }
-    return await fallback() as Awaited<ReturnType<JdtLsBackendService[K]>>;
+        return await fn.call(proxy, arg);
+      },
+      async () => await fallback(),
+      4,
+      750,
+    ) as Awaited<ReturnType<JdtLsBackendService[K]>>;
   }
 
   /**
@@ -490,6 +604,7 @@ export class JavaLanguageClient implements JdtLsFrontendClient, Disposable {
   // --- JdtLsFrontendClient (called from backend) ---
 
   onStateEvent(state: JdtLsState): void {
+    this.updateConnectionStatus(state);
     this.onStateEmitter.fire(state);
   }
 

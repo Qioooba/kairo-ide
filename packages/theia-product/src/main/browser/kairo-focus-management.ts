@@ -114,30 +114,17 @@ export class KairoFocusManagement implements FrontendApplicationContribution, Co
   }
 
   registerKeybindings(keybindings: KeybindingRegistry): void {
+    // IDEA: Escape focuses the editor / hides active tool window.
+    // Do NOT bind Shift+F6 (Rename), Ctrl/Cmd+J, Ctrl/Cmd+`, or Ctrl/Cmd+0 —
+    // those are VS Code leftovers that steal IDEA chords.
     keybindings.registerKeybinding({
       command: KairoFocusCommands.FOCUS_EDITOR.id,
       keybinding: 'escape',
       when: '!editorFocus',
     });
     keybindings.registerKeybinding({
-      command: KairoFocusCommands.FOCUS_SIDEBAR.id,
-      keybinding: 'ctrlcmd+0',
-    });
-    keybindings.registerKeybinding({
-      command: KairoFocusCommands.FOCUS_BOTTOM_PANEL.id,
-      keybinding: 'ctrlcmd+j',
-    });
-    keybindings.registerKeybinding({
-      command: KairoFocusCommands.FOCUS_TERMINAL.id,
-      keybinding: 'ctrlcmd+`',
-    });
-    keybindings.registerKeybinding({
       command: KairoFocusCommands.FOCUS_NEXT_PANEL.id,
       keybinding: 'f6',
-    });
-    keybindings.registerKeybinding({
-      command: KairoFocusCommands.FOCUS_PREVIOUS_PANEL.id,
-      keybinding: 'shift+f6',
     });
   }
 

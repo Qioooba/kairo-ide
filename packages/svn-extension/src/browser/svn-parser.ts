@@ -122,6 +122,100 @@ function _ensureArray<T>(val: T | T[] | undefined): T[] {
   return Array.isArray(val) ? val : [val];
 }
 
+function parseStatusEntry(entry: SimpleXmlElement, changelistName?: string): SvnStatusEntry | undefined {
+  const wcStatus = getChild(entry, 'wc-status');
+  if (!wcStatus) return undefined;
+
+  const item = getAttr(wcStatus, 'item') || 'none';
+  const props = getAttr(wcStatus, 'props') || 'none';
+  const revisionStr = getAttr(wcStatus, 'revision');
+  const revision = revisionStr ? parseInt(revisionStr, 10) : undefined;
+  // Prefer explicit changelist group name (SVN puts changelist files under
+  // <changelist name="...">); fall back to rare attribute on wc-status.
+  const changelist = changelistName || getAttr(wcStatus, 'changelist');
+  const copied = getAttr(wcStatus, 'copied') === 'true';
+  const switched = getAttr(wcStatus, 'switched') === 'true';
+
+  let lastChangedRevision: number | undefined;
+  let lastChangedAuthor: string | undefined;
+  let lastChangedDate: Date | undefined;
+  let reposRootUrl: string | undefined;
+  let reposUuid: string | undefined;
+  let switchedUrl: string | undefined;
+  let isLocked = false;
+  let lockOwner: string | undefined;
+  let lockComment: string | undefined;
+  let treeConflict = false;
+  let conflictOld: string | undefined;
+  let conflictNew: string | undefined;
+  let conflictWorking: string | undefined;
+
+  const commit = getChild(wcStatus, 'commit');
+  if (commit) {
+    const cr = getAttr(commit, 'revision');
+    lastChangedRevision = cr ? parseInt(cr, 10) : undefined;
+    lastChangedAuthor = getChildText(commit, 'author');
+    const dateStr = getChildText(commit, 'date');
+    if (dateStr) lastChangedDate = new Date(dateStr);
+  }
+
+  const repos = getChild(entry, 'repos');
+  if (repos) {
+    reposRootUrl = getChildText(repos, 'root');
+    reposUuid = getChildText(repos, 'uuid');
+  }
+
+  if (switched) {
+    switchedUrl = getChildText(entry, 'url');
+  }
+
+  const lock = getChild(entry, 'lock') || getChild(wcStatus, 'lock');
+  if (lock) {
+    isLocked = true;
+    lockOwner = getChildText(lock, 'owner');
+    lockComment = getChildText(lock, 'comment');
+  }
+
+  if (getAttr(wcStatus, 'tree-conflicted') === 'true') {
+    treeConflict = true;
+  }
+
+  const conflict = getChild(wcStatus, 'conflict');
+  if (conflict) {
+    conflictOld = getChildText(conflict, 'prev-base-file') || getChildText(conflict, 'old-file');
+    conflictNew = getChildText(conflict, 'prev-wc-file') || getChildText(conflict, 'new-file');
+    conflictWorking = getChildText(conflict, 'cur-base-file') || getChildText(conflict, 'working-file');
+  }
+
+  return {
+    path: getAttr(entry, 'path') || '',
+    status: mapSvnItemStatus(item),
+    props: props !== 'none' ? mapSvnItemStatus(props) : undefined,
+    reposStatus: (() => {
+      const repos = getChild(entry, 'repos-status');
+      if (!repos) return undefined;
+      const reposItem = getAttr(repos, 'item');
+      return reposItem && reposItem !== 'none' ? mapSvnItemStatus(reposItem) : undefined;
+    })(),
+    revision,
+    lastChangedRevision,
+    lastChangedAuthor,
+    lastChangedDate,
+    reposRootUrl,
+    reposUuid,
+    switchedUrl,
+    changelist,
+    isCopied: copied,
+    isLocked,
+    lockOwner,
+    lockComment,
+    treeConflict,
+    conflictOld,
+    conflictNew,
+    conflictWorking,
+  };
+}
+
 export function parseStatusXml(xml: string): SvnStatusEntry[] {
   const result: SvnStatusEntry[] = [];
   try {
@@ -131,93 +225,21 @@ export function parseStatusXml(xml: string): SvnStatusEntry[] {
     const statusElem = getChild(obj, 'status');
     if (!statusElem) return result;
 
-    const targets = getChildren(statusElem, 'target');
-    for (const target of targets) {
-      const entries = getChildren(target, 'entry');
-      for (const entry of entries) {
-        const wcStatus = getChild(entry, 'wc-status');
-        if (!wcStatus) continue;
+    // Default (no changelist) entries live under <target>
+    for (const target of getChildren(statusElem, 'target')) {
+      for (const entry of getChildren(target, 'entry')) {
+        const parsed = parseStatusEntry(entry);
+        if (parsed) result.push(parsed);
+      }
+    }
 
-        const item = getAttr(wcStatus, 'item') || 'none';
-        const props = getAttr(wcStatus, 'props') || 'none';
-        const revisionStr = getAttr(wcStatus, 'revision');
-        const revision = revisionStr ? parseInt(revisionStr, 10) : undefined;
-        const changelist = getAttr(wcStatus, 'changelist');
-        const copied = getAttr(wcStatus, 'copied') === 'true';
-        const switched = getAttr(wcStatus, 'switched') === 'true';
-
-        let lastChangedRevision: number | undefined;
-        let lastChangedAuthor: string | undefined;
-        let lastChangedDate: Date | undefined;
-        let reposRootUrl: string | undefined;
-        let reposUuid: string | undefined;
-        let switchedUrl: string | undefined;
-        let isLocked = false;
-        let lockOwner: string | undefined;
-        let lockComment: string | undefined;
-        let treeConflict = false;
-        let conflictOld: string | undefined;
-        let conflictNew: string | undefined;
-        let conflictWorking: string | undefined;
-
-        const commit = getChild(wcStatus, 'commit');
-        if (commit) {
-          const cr = getAttr(commit, 'revision');
-          lastChangedRevision = cr ? parseInt(cr, 10) : undefined;
-          lastChangedAuthor = getChildText(commit, 'author');
-          const dateStr = getChildText(commit, 'date');
-          if (dateStr) lastChangedDate = new Date(dateStr);
-        }
-
-        const repos = getChild(entry, 'repos');
-        if (repos) {
-          reposRootUrl = getChildText(repos, 'root');
-          reposUuid = getChildText(repos, 'uuid');
-        }
-
-        if (switched) {
-          switchedUrl = getChildText(entry, 'url');
-        }
-
-        const lock = getChild(entry, 'lock') || getChild(wcStatus, 'lock');
-        if (lock) {
-          isLocked = true;
-          lockOwner = getChildText(lock, 'owner');
-          lockComment = getChildText(lock, 'comment');
-        }
-
-        if (getAttr(wcStatus, 'tree-conflicted') === 'true') {
-          treeConflict = true;
-        }
-
-        const conflict = getChild(wcStatus, 'conflict');
-        if (conflict) {
-          conflictOld = getChildText(conflict, 'prev-base-file') || getChildText(conflict, 'old-file');
-          conflictNew = getChildText(conflict, 'prev-wc-file') || getChildText(conflict, 'new-file');
-          conflictWorking = getChildText(conflict, 'cur-base-file') || getChildText(conflict, 'working-file');
-        }
-
-        result.push({
-          path: getAttr(entry, 'path') || '',
-          status: mapSvnItemStatus(item),
-          props: props !== 'none' ? mapSvnItemStatus(props) : undefined,
-          revision,
-          lastChangedRevision,
-          lastChangedAuthor,
-          lastChangedDate,
-          reposRootUrl,
-          reposUuid,
-          switchedUrl,
-          changelist,
-          isCopied: copied,
-          isLocked,
-          lockOwner,
-          lockComment,
-          treeConflict,
-          conflictOld,
-          conflictNew,
-          conflictWorking,
-        });
+    // Named changelist entries live under <changelist name="..."> and are
+    // NOT duplicated under <target>. Without this, they silently vanish.
+    for (const cl of getChildren(statusElem, 'changelist')) {
+      const clName = getAttr(cl, 'name') || '';
+      for (const entry of getChildren(cl, 'entry')) {
+        const parsed = parseStatusEntry(entry, clName);
+        if (parsed) result.push(parsed);
       }
     }
   } catch (e) {

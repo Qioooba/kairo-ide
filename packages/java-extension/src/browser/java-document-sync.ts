@@ -104,6 +104,14 @@ export class JavaDocumentSyncContribution implements FrontendApplicationContribu
     this.subs.push(...modelSubs);
   }
 
+  /**
+   * Flush pending document changes before language features
+   * (completion / hover) so JDT LS sees the latest buffer.
+   */
+  flushPending(uri?: string): void {
+    this.sync?.flushPending(uri);
+  }
+
   dispose(): void {
     for (const d of this.subs) {
       d.dispose();

@@ -400,6 +400,63 @@ describe('RPC proxy fallback', () => {
     // After failure, even if RPC is available, we stay in fallback
     assert.equal(handler.getProxy(), undefined);
   });
+
+  test('JDT LS not ready must not permanently poison RPC', () => {
+    function isLifecycleNotReadyError(err) {
+      const msg = String(err);
+      return msg.includes('JDT LS not ready')
+        || /state=(uninitialized|starting|initializing|stopping|stopped)/i.test(msg);
+    }
+    function isTransientConnectionError(err) {
+      const msg = String(err);
+      return msg.includes('Pending response rejected') || msg.includes('already open');
+    }
+    function markRpcFailed(state, err) {
+      if (isLifecycleNotReadyError(err)) return state;
+      if (isTransientConnectionError(err)) return state; // keep rpcProxy
+      return { ...state, rpcFailed: true, rpcProxy: undefined };
+    }
+    const before = { rpcFailed: false, rpcProxy: { ok: true } };
+    const after = markRpcFailed(before, new Error('JDT LS not ready (state=initializing)'));
+    assert.equal(after.rpcFailed, false, 'rpcFailed must stay false');
+    assert.ok(after.rpcProxy, 'rpcProxy must be kept');
+  });
+
+  test('transient dispose must keep rpcProxy (avoid channel already-open)', () => {
+    function isTransientConnectionError(err) {
+      const msg = String(err);
+      return msg.includes('Pending response rejected')
+        || msg.includes('already open')
+        || msg.includes('connection got disposed');
+    }
+    function markRpcFailed(state, err) {
+      if (isTransientConnectionError(err)) return state;
+      return { ...state, rpcFailed: true, rpcProxy: undefined };
+    }
+    const before = { rpcFailed: false, rpcProxy: { ok: true } };
+    const after = markRpcFailed(before, new Error('Pending response rejected since connection got disposed'));
+    assert.equal(after.rpcFailed, false);
+    assert.ok(after.rpcProxy, 'must keep channel proxy');
+  });
+
+  test('method-not-found still permanently fails RPC', () => {
+    function isLifecycleNotReadyError(err) {
+      const msg = String(err);
+      return msg.includes('JDT LS not ready');
+    }
+    function isTransientConnectionError(err) {
+      return String(err).includes('Pending response rejected');
+    }
+    function markRpcFailed(state, err) {
+      if (isLifecycleNotReadyError(err)) return state;
+      if (isTransientConnectionError(err)) return state;
+      return { ...state, rpcFailed: true, rpcProxy: undefined };
+    }
+    const before = { rpcFailed: false, rpcProxy: { ok: true } };
+    const after = markRpcFailed(before, new Error('method not found: $workspaceSymbols'));
+    assert.equal(after.rpcFailed, true);
+    assert.equal(after.rpcProxy, undefined);
+  });
 });
 
 // ------------------------------------------------------------------

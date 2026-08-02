@@ -597,12 +597,20 @@ func TestManager_BuildLaunchDescriptor_NoJRE(t *testing.T) {
 	dir := t.TempDir()
 	m := New(dir, dir, "", false, "", log.New("test"))
 	t.Setenv("KAIRO_JRE17_HOME", "")
+	t.Setenv("KAIRO_JDT_LS_JRE", "")
+	t.Setenv("KAIRO_JDK_HOME", "")
+	t.Setenv("JAVA_HOME", "")
+	t.Setenv("KAIRO_JDTLS_ASSUME_JRE_MAJOR", "")
+	t.Setenv("KAIRO_BUNDLED_DIR", "")
+	orig := commonJDTLSJREPathsFn
+	commonJDTLSJREPathsFn = func(string) []string { return nil }
+	t.Cleanup(func() { commonJDTLSJREPathsFn = orig })
 	_, err := m.BuildLaunchDescriptor(dir)
 	if err == nil {
 		t.Fatal("expected error without JRE")
 	}
-	if !strings.Contains(err.Error(), "JRE 17") {
-		t.Fatalf("error %q should mention JRE 17", err.Error())
+	if !strings.Contains(err.Error(), "JDK/JRE 21") && !strings.Contains(err.Error(), "JRE 21") {
+		t.Fatalf("error %q should mention JDK/JRE 21", err.Error())
 	}
 }
 
@@ -621,6 +629,7 @@ func TestManager_BuildLaunchDescriptor_NoInstall(t *testing.T) {
 	m := New(dir, dir, "", false, "", log.New("test"))
 	// Use a real JDK path so the JRE check passes
 	t.Setenv("KAIRO_JRE17_HOME", dir)
+	t.Setenv("KAIRO_JDTLS_ASSUME_JRE_MAJOR", "21")
 	// Create a fake java binary
 	binDir := filepath.Join(dir, "bin")
 	if err := os.MkdirAll(binDir, 0o755); err != nil {
@@ -673,6 +682,7 @@ func TestManager_BuildLaunchDescriptor_WithInstall(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(binDir, javaName), []byte("fake"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	t.Setenv("KAIRO_JDTLS_ASSUME_JRE_MAJOR", "21")
 	m.SetJREPath(jreDir)
 	m.SetWorkspace("test-ws")
 	desc, err := m.BuildLaunchDescriptor(dataDir)

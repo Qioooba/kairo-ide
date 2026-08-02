@@ -51,6 +51,9 @@ function resolveExe() {
     return customExe;
   }
   const candidates = [
+    path.join(repoRoot, 'apps', 'desktop', 'dist', 'run', 'Kairo.exe'),
+    path.join(repoRoot, 'apps', 'desktop', 'dist', 'win-unpacked', 'Kairo.exe'),
+    path.join(repoRoot, 'dist', 'win-unpacked', 'Kairo.exe'),
     path.join(repoRoot, 'dist', 'win-unpacked', 'Kairo IDE.exe'),
     path.join(repoRoot, 'apps', 'desktop', 'dist', 'win-unpacked', 'Kairo IDE.exe'),
   ];
@@ -143,10 +146,10 @@ async function ensureCmdReg(page) {
   // Try multiple times with increasing waits (up to ~20s total)
   for (let attempt = 0; attempt < 15; attempt++) {
     const found = await page.evaluate(() => {
-      // Method 1: Direct window.theia reference
+      // Method 0: window.theia.container (exposed by packaged desktop builds)
       let container = window.theia?.container;
 
-      // Method 2: Look for container on the application shell element
+      // Method 1: Look for container on the application shell element
       if (!container || !container._bindingDictionary?._map) {
         const shell = document.querySelector('.theia-ApplicationShell, .theia-container, [data-theia-shell]');
         if (shell) {
@@ -156,7 +159,7 @@ async function ensureCmdReg(page) {
         }
       }
 
-      // Method 3: Scan all elements for the container
+      // Method 2: Scan all elements for the container
       if (!container || !container._bindingDictionary?._map) {
         const all = document.querySelectorAll('*');
         for (const el of all) {
@@ -171,29 +174,34 @@ async function ensureCmdReg(page) {
       if (!container || !container._bindingDictionary?._map) return false;
       const map = container._bindingDictionary._map;
 
-      // Strategy 1: Look for Symbol(CommandService) specifically
+      // Prefer Symbol(CommandService) / CommandRegistry by name — avoid
+      // false positives like ConnectionCloseService that happen to expose
+      // similarly named methods after minification.
       for (const [key, binding] of map.entries()) {
-        if (typeof key === 'symbol' && key.toString() === 'Symbol(CommandService)') {
-          try {
-            const svc = container.get(key);
-            if (svc && typeof svc.getAllCommands === 'function'
-                && typeof svc.registerCommand === 'function'
-                && typeof svc.executeCommand === 'function') {
-              window.__kairoCmdReg = svc;
-              return true;
-            }
-          } catch (_) {}
-        }
+        const keyStr = String(key);
+        if (!/Command/i.test(keyStr)) continue;
+        try {
+          const svc = container.get(key);
+          if (svc && typeof svc.getAllCommands === 'function'
+              && typeof svc.registerCommand === 'function'
+              && typeof svc.executeCommand === 'function'
+              && typeof svc.getCommand === 'function') {
+            window.__kairoCmdReg = svc;
+            return true;
+          }
+        } catch (_) {}
       }
 
-      // Strategy 2: Iterate ALL bindings looking for CommandRegistry-like object
+      // Fallback: iterate ALL bindings looking for CommandRegistry-like object
       for (const [key, binding] of map.entries()) {
         try {
           const svc = container.get(key);
           if (svc && typeof svc === 'object'
               && typeof svc.getAllCommands === 'function'
               && typeof svc.registerCommand === 'function'
-              && typeof svc.executeCommand === 'function') {
+              && typeof svc.executeCommand === 'function'
+              && typeof svc.getCommand === 'function'
+              && Array.isArray(svc.commands)) {
             window.__kairoCmdReg = svc;
             return true;
           }
@@ -288,17 +296,16 @@ async function assertCommand(page, searchFor, errorMsg) {
 
 async function searchCommandPalette(page, text) {
   // Open the command palette and type the search; return the list of
-  // visible command labels. Uses openCommandPalette() so we never
-  // mistake the settings quick open for the palette.
+  // visible command labels. Preserve Theia's leading ">" so we stay
+  // in command mode (wiping it yields zero hits).
   await openCommandPalette(page);
   const input = await page.$('.quick-input-widget input[type="text"]');
   if (!input) return [];
-  await page.keyboard.press('Control+A');
-  await page.keyboard.press('Delete');
-  await input.type(text, { delay: 50 });
+  await input.fill('>');
+  await input.type(text, { delay: 40 });
   await sleep(1200);
-  const matches = await page.$$eval('.monaco-list .monaco-list-row, .quick-input-list .monaco-list-row', els =>
-    els.map(e => e.textContent || ''));
+  const matches = await page.$$eval('.quick-input-widget .monaco-list-row', els =>
+    els.map(e => e.getAttribute('aria-label') || e.textContent || ''));
   await page.keyboard.press('Escape');
   await sleep(200);
   return matches;
@@ -307,7 +314,7 @@ async function searchCommandPalette(page, text) {
 async function findByTitle(page, titleRe) {
   const found = await page.evaluate((pattern) => {
     const re = new RegExp(pattern.src, pattern.flags);
-    const sel = '.p-TabBar-tab, [role="tab"], .theia-TabBar-tab, [title]';
+    const sel = '.lm-TabBar-tab, .p-TabBar-tab, [role="tab"], .theia-TabBar-tab, [title]';
     const all = Array.from(document.querySelectorAll(sel));
     for (const el of all) {
       const t = el.getAttribute('title') || el.getAttribute('aria-label') || '';
@@ -384,16 +391,16 @@ async function section_01_env(page) {
 }
 
 async function section_02_installer(page) {
-  // §2 NSIS Installer — we already have win-unpacked; the installer is built but the
-  // test target is the installed app. Verify install structure.
+  // §2 NSIS Installer — verify install/unpack structure next to the
+  // executable under test (not a hard-coded dist/win-unpacked path).
+  const exePath = resolveExe();
+  const exeDir = path.dirname(exePath);
   await runTest(2, '2.1', 'EXE file exists at expected path', 'P0', async () => {
-    if (!fs.existsSync(resolveExe())) throw new Error('EXE not found');
+    if (!fs.existsSync(exePath)) throw new Error('EXE not found');
   });
   await runTest(2, '2.2', 'Required bundled resources present', 'P0', async () => {
-    // Check the resources dir contains bin/, bundled/
-    const winUnpacked = path.join(repoRoot, 'dist', 'win-unpacked');
-    const binDir = path.join(winUnpacked, 'resources', 'bin');
-    if (!fs.existsSync(binDir)) throw new Error('resources/bin/ missing');
+    const binDir = path.join(exeDir, 'resources', 'bin');
+    if (!fs.existsSync(binDir)) throw new Error(`resources/bin/ missing under ${exeDir}`);
     const entries = fs.readdirSync(binDir);
     if (!entries.some(f => f.startsWith('kairo-runtime'))) throw new Error('kairo-runtime binary missing');
   });
@@ -401,7 +408,8 @@ async function section_02_installer(page) {
     // Verified during asar inspection in the driver
   });
   await runTest(2, '2.4', 'App.asar exists and is non-empty', 'P0', async () => {
-    const asarPath = path.join(repoRoot, 'dist', 'win-unpacked', 'resources', 'app.asar');
+    const asarPath = path.join(exeDir, 'resources', 'app.asar');
+    if (!fs.existsSync(asarPath)) throw new Error(`app.asar missing under ${exeDir}`);
     const stat = fs.statSync(asarPath);
     if (stat.size < 1_000_000) throw new Error(`app.asar too small: ${stat.size} bytes`);
   });
@@ -567,17 +575,15 @@ async function section_06_window_basics(page) {
 }
 
 async function section_07_activity_bar(page) {
-  // §7 Activity bar icons
-  // Theia 1.73 Phosphor.js selectors + Kairo's own contributions.
+  // §7 Activity bar icons — Theia 1.73 uses Lumino (.lm-TabBar-tab).
   const items = await page.evaluate(() => {
-    // Try the official Theia app-left first, then the Phosphor left tabbar,
-    // then fall back to any tablist.
     const sel = [
+      '.theia-app-left .lm-TabBar-tab',
+      '.lm-TabBar.theia-app-left .lm-TabBar-tab',
+      '.lm-TabBar.theia-app-sides .lm-TabBar-tab',
       '.theia-app-left .p-TabBar-tab',
       '.p-TabBar.theia-app-left-tabbar .p-TabBar-tab',
       '.theia-app-left [role="tab"]',
-      '.theia-app-left li[title]',
-      '.theia-app-left .p-TabBar-tab',
     ].join(',');
     const tabs = Array.from(document.querySelectorAll(sel));
     return tabs.map(el => el.getAttribute('title') || el.getAttribute('aria-label') || el.textContent.trim());
@@ -585,23 +591,16 @@ async function section_07_activity_bar(page) {
   log(`Activity bar items: ${JSON.stringify(items)}`);
 
   const expected = [
-    { name: /Explorer/i, id: '7.1', priority: 'P0' },
-    { name: /Search/i, id: '7.2', priority: 'P0' },
-    { name: /SCM|Git|Source/i, id: '7.3', priority: 'P1' },
-    { name: /Debug|Run/i, id: '7.4', priority: 'P0' },
-    { name: /Testing|Test/i, id: '7.5', priority: 'P1' },
+    { name: /Explorer|资源管理器/i, id: '7.1', priority: 'P0' },
+    { name: /Search|搜索/i, id: '7.2', priority: 'P0' },
+    { name: /SCM|Git|Source|源代码管理|版本控制/i, id: '7.3', priority: 'P1' },
+    { name: /Debug|Run|运行和调试|调试/i, id: '7.4', priority: 'P0' },
+    { name: /Testing|Test|测试/i, id: '7.5', priority: 'P1' },
     { name: /SVN/i, id: '7.6', priority: 'P1' },
-    // Kairo-specific views are opened via commands (Show Servers, Show Builds, etc.)
-    // Verify them via command registry instead of activity bar icons
   ];
 
-  // Section 7 as a whole passes if we can find at least the
-  // Kairo-specific icons (Server/Build/Deploy). Theia stock icons
-  // (Explorer/Search/...) may not always be present depending on
-  // enabled extensions, so they degrade to P1/P2.
   for (const e of expected) {
     await runTest(7, e.id, `Activity bar icon: ${e.name.source}`, e.priority, async () => {
-      // P0 Kairo icons must exist. Standard Theia icons are nice-to-have.
       if (items.some(t => e.name.test(t))) return;
       throw new Error(`Activity bar icon matching ${e.name} not found. Found: ${JSON.stringify(items)}`);
     });
@@ -611,32 +610,32 @@ async function section_07_activity_bar(page) {
 async function section_08_menus(page) {
   // §8 Menus — test by opening command palette and searching for commands
   const menuTests = [
-    { name: 'File: New File', search: 'New File', id: '8.1', priority: 'P0' },
-    { name: 'File: Open File', search: ['Open File', 'file-search'], id: '8.2', priority: 'P0' },
-    { name: 'File: Save', search: 'Save', id: '8.3', priority: 'P0' },
-    { name: 'Kairo: Import Project', search: 'Import Project', id: '8.4', priority: 'P0' },
-    { name: 'Kairo: Select Project', search: 'Select Project', id: '8.5', priority: 'P0' },
-    { name: 'Edit: Undo', search: 'Undo', id: '8.6', priority: 'P0' },
-    { name: 'Edit: Redo', search: 'Redo', id: '8.7', priority: 'P0' },
-    { name: 'Edit: Find', search: 'Find', id: '8.8', priority: 'P0' },
-    { name: 'Edit: Replace', search: 'Replace', id: '8.9', priority: 'P0' },
-    { name: 'Edit: Find in Files', search: 'Find in Files', id: '8.10', priority: 'P0' },
-    { name: 'View: Command Palette', search: ['Commands', 'Command Palette'], id: '8.11', priority: 'P0' },
-    { name: 'View: Explorer', search: 'Explorer', id: '8.12', priority: 'P0' },
-    { name: 'View: Search', search: 'Search', id: '8.13', priority: 'P0' },
-    { name: 'View: Problems', search: 'Problems', id: '8.14', priority: 'P0' },
-    { name: 'View: Terminal', search: 'Terminal', id: '8.15', priority: 'P0' },
-    { name: 'Go: Go to File', search: ['Go to File', 'Open File', 'file-search'], id: '8.16', priority: 'P0' },
-    { name: 'Kairo: Import Project', search: 'Import Project', id: '8.17', priority: 'P0' },
-    { name: 'Kairo: Select Project', search: 'Select Project', id: '8.18', priority: 'P0' },
-    { name: 'Kairo: Build', search: 'Build', id: '8.19', priority: 'P0' },
-    { name: 'Kairo: Clean Build', search: 'Clean Build', id: '8.20', priority: 'P0' },
-    { name: 'Kairo: Start Server', search: 'Start Server', id: '8.21', priority: 'P0' },
-    { name: 'Kairo: Stop Server', search: 'Stop Server', id: '8.22', priority: 'P0' },
-    { name: 'Kairo: Start Server (Debug)', search: 'Debug', id: '8.23', priority: 'P0' },
-    { name: 'Kairo: Restart Server', search: 'Restart Server', id: '8.24', priority: 'P0' },
-    { name: 'Kairo: Open Application', search: 'Open Application', id: '8.25', priority: 'P0' },
-    { name: 'Kairo: Scan Project', search: 'Scan', id: '8.26', priority: 'P0' },
+    { name: 'File: New File', search: ['New File', '新建文件'], id: '8.1', priority: 'P0' },
+    { name: 'File: Open File', search: ['Open File', '打开文件', 'file-search'], id: '8.2', priority: 'P0' },
+    { name: 'File: Save', search: ['Save', '保存'], id: '8.3', priority: 'P0' },
+    { name: 'Kairo: Import Project', search: ['Import Project', '导入项目', 'kairo.project.import'], id: '8.4', priority: 'P0' },
+    { name: 'Kairo: Select Project', search: ['Select Project', '选择项目', 'kairo.project.select'], id: '8.5', priority: 'P0' },
+    { name: 'Edit: Undo', search: ['Undo', '撤销'], id: '8.6', priority: 'P0' },
+    { name: 'Edit: Redo', search: ['Redo', '重做'], id: '8.7', priority: 'P0' },
+    { name: 'Edit: Find', search: ['Find', '查找'], id: '8.8', priority: 'P0' },
+    { name: 'Edit: Replace', search: ['Replace', '替换'], id: '8.9', priority: 'P0' },
+    { name: 'Edit: Find in Files', search: ['Find in Files', '在文件中查找'], id: '8.10', priority: 'P0' },
+    { name: 'View: Command Palette', search: ['Commands', 'Command Palette', '命令面板'], id: '8.11', priority: 'P0' },
+    { name: 'View: Explorer', search: ['Explorer', '资源管理器'], id: '8.12', priority: 'P0' },
+    { name: 'View: Search', search: ['Search', '搜索'], id: '8.13', priority: 'P0' },
+    { name: 'View: Problems', search: ['Problems', '问题'], id: '8.14', priority: 'P0' },
+    { name: 'View: Terminal', search: ['Terminal', '终端'], id: '8.15', priority: 'P0' },
+    { name: 'Go: Go to File', search: ['Go to File', 'Open File', '转到文件', 'file-search'], id: '8.16', priority: 'P0' },
+    { name: 'Kairo: Import Project', search: ['Import Project', '导入项目', 'kairo.project.import'], id: '8.17', priority: 'P0' },
+    { name: 'Kairo: Select Project', search: ['Select Project', '选择项目', 'kairo.project.select'], id: '8.18', priority: 'P0' },
+    { name: 'Kairo: Build', search: ['Kairo: Build', '构建', 'kairo.build'], id: '8.19', priority: 'P0' },
+    { name: 'Kairo: Clean Build', search: ['Clean Build', '清理构建', 'kairo.cleanBuild'], id: '8.20', priority: 'P0' },
+    { name: 'Kairo: Start Server', search: ['Start Server', '启动服务器', 'kairo.server.start'], id: '8.21', priority: 'P0' },
+    { name: 'Kairo: Stop Server', search: ['Stop Server', '停止服务器', 'kairo.server.stop'], id: '8.22', priority: 'P0' },
+    { name: 'Kairo: Start Server (Debug)', search: ['Start Server (Debug)', '调试', 'kairo.server.debug'], id: '8.23', priority: 'P0' },
+    { name: 'Kairo: Restart Server', search: ['Restart Server', '重启服务器', 'kairo.server.restart'], id: '8.24', priority: 'P0' },
+    { name: 'Kairo: Open Application', search: ['Open Application', '打开应用', 'kairo.app.open'], id: '8.25', priority: 'P0' },
+    { name: 'Kairo: Scan Project', search: ['Scan Project', '扫描', 'kairo.project.scan'], id: '8.26', priority: 'P0' },
     { name: 'Kairo: SQL Console', search: 'SQL Console', id: '8.27', priority: 'P0' },
     { name: 'Kairo: Remote Development', search: 'Remote', id: '8.28', priority: 'P0' },
     { name: 'Kairo: Performance', search: 'Performance', id: '8.29', priority: 'P1' },
@@ -857,20 +856,44 @@ async function section_17_encoding(page) {
 }
 
 async function section_18_global_search(page) {
-  await runTest(18, '18.1', 'Ctrl+Shift+F opens global search', 'P0', async () => {
+  await runTest(18, '18.1', 'Ctrl+Shift+F opens Kairo Search Center', 'P0', async () => {
+    await page.keyboard.press('Escape');
+    await sleep(300);
     await page.keyboard.press('Control+Shift+F');
     await sleep(1500);
     await shot(page, '18-global-search');
     const has = await page.evaluate(() => {
-      return !!document.querySelector('.search-in-workspace, [id*="search"], .theia-search-container');
+      return !!document.querySelector('[data-testid="search-center-modal"], .kairo-search-modal');
     });
-    if (!has) throw new Error('Global search not visible after Ctrl+Shift+F');
+    if (!has) throw new Error('Kairo Search Center not visible after Ctrl+Shift+F');
   });
-  await runTest(18, '18.2', 'Search panel has input field', 'P0', async () => {
+  await runTest(18, '18.2', 'Search Center has query input', 'P0', async () => {
     const has = await page.evaluate(() => {
-      return !!document.querySelector('.search-in-workspace input[type="text"], [id*="search"] input, .theia-search-container input');
+      return !!document.querySelector('[data-testid="search-query"]');
     });
-    if (!has) throw new Error('No search input field found');
+    if (!has) throw new Error('No search-query input found in Search Center');
+  });
+  await runTest(18, '18.3', 'File mask + submit returns results UI', 'P1', async () => {
+    await page.evaluate(() => {
+      const input = document.querySelector('[data-testid="search-query"]');
+      const mask = document.querySelector('[data-testid="filter-file-types"]');
+      if (input) {
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+        setter.call(input, 'Hello');
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      if (mask) {
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+        setter.call(mask, '*.java');
+        mask.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    });
+    const form = await page.$('[data-testid="search-form"]');
+    if (form) {
+      await form.evaluate(el => el.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    }
+    await sleep(2500);
+    await shot(page, '18-search-results');
   });
 }
 
@@ -1674,14 +1697,15 @@ function generateReport() {
   // "Import Project" wizard that auto-opens on first launch).
   // Without this, the window title is "Kairo IDE - Import
   // Project - ...", and the test for "title is Kairo IDE" fails.
+  // Theia 1.73 uses Lumino (.lm-TabBar-tab).
   try {
     const closed = await currentPage.evaluate(() => {
-      const tabs = Array.from(document.querySelectorAll('.theia-tabbar-tab, .p-TabBar-tab'));
+      const tabs = Array.from(document.querySelectorAll('.lm-TabBar-tab, .theia-tabbar-tab, .p-TabBar-tab'));
       let n = 0;
       for (const t of tabs) {
         const lbl = (t.getAttribute('title') || t.textContent || '').trim();
-        if (/Import Project|Select Project|Welcome/i.test(lbl)) {
-          const closeBtn = t.querySelector('.theia-tabbar-tab-close, .p-TabBar-tabClose');
+        if (/Import Project|导入项目|Welcome|欢迎/i.test(lbl)) {
+          const closeBtn = t.querySelector('.lm-TabBar-tabCloseIcon, .theia-tabbar-tab-close, .p-TabBar-tabCloseIcon, .p-TabBar-tabClose');
           if (closeBtn) { closeBtn.click(); n++; }
         }
       }

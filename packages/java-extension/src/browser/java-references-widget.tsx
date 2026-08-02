@@ -31,6 +31,7 @@ interface ReferencesWidgetState {
   groups: ReferenceGroup[];
   loading: boolean;
   error: string | null;
+  filter: string;
 }
 
 interface ReferencesGroupComponentProps {
@@ -90,10 +91,11 @@ interface ReferencesWidgetComponentProps {
   state: ReferencesWidgetState;
   onToggleGroup: (idx: number) => void;
   onNavigate: (item: ReferenceItem) => void;
+  onFilterChange: (value: string) => void;
   i18n: KairoI18nService;
 }
 
-const ReferencesWidgetComponent: React.FC<ReferencesWidgetComponentProps> = ({ state, onToggleGroup, onNavigate, i18n }) => {
+const ReferencesWidgetComponent: React.FC<ReferencesWidgetComponentProps> = ({ state, onToggleGroup, onNavigate, onFilterChange, i18n }) => {
   const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
 
   if (state.loading) {
@@ -128,23 +130,54 @@ const ReferencesWidgetComponent: React.FC<ReferencesWidgetComponentProps> = ({ s
     );
   }
 
+  const filter = state.filter.trim().toLowerCase();
+  const visibleGroups = state.groups
+    .map(group => {
+      if (!filter) return group;
+      const fileHit = `${group.fileName} ${group.filePath}`.toLowerCase().includes(filter);
+      const refs = fileHit
+        ? group.references
+        : group.references.filter(ref => ref.preview.toLowerCase().includes(filter) || String(ref.line + 1).includes(filter));
+      if (refs.length === 0) return null;
+      return { ...group, references: refs };
+    })
+    .filter((g): g is ReferenceGroup => g !== null);
+
   const totalUsages = state.groups.reduce((acc, g) => acc + g.references.length, 0);
+  const visibleUsages = visibleGroups.reduce((acc, g) => acc + g.references.length, 0);
 
   return (
     <div className="kairo-widget-body kairo-java-references-container">
       <div className="kairo-widget-header kairo-java-references-summary">
-        <span>{t('widget.java.references.resultSummary', { count: totalUsages, symbolName: state.symbolName })}</span>
+        <span>
+          {filter
+            ? t('widget.java.references.filteredSummary', { visible: visibleUsages, count: totalUsages, symbolName: state.symbolName })
+            : t('widget.java.references.resultSummary', { count: totalUsages, symbolName: state.symbolName })}
+        </span>
+        <input
+          className="kairo-java-references-filter"
+          type="search"
+          value={state.filter}
+          placeholder={t('widget.java.references.filterPlaceholder')}
+          aria-label={t('widget.java.references.filterPlaceholder')}
+          onChange={e => onFilterChange(e.target.value)}
+        />
       </div>
       <div className="kairo-java-references-list">
-        {state.groups.map((group, idx) => (
-          <ReferencesGroupComponent
-            key={group.uri}
-            group={group}
-            onToggleExpand={() => onToggleGroup(idx)}
-            onNavigate={onNavigate}
-            i18n={i18n}
-          />
-        ))}
+        {visibleGroups.length === 0 ? (
+          <div className="kairo-java-references-filter-empty">{t('widget.java.references.filterEmpty')}</div>
+        ) : visibleGroups.map((group, idx) => {
+          const originalIdx = state.groups.findIndex(g => g.uri === group.uri);
+          return (
+            <ReferencesGroupComponent
+              key={group.uri}
+              group={group}
+              onToggleExpand={() => onToggleGroup(originalIdx >= 0 ? originalIdx : idx)}
+              onNavigate={onNavigate}
+              i18n={i18n}
+            />
+          );
+        })}
       </div>
     </div>
   );
@@ -172,6 +205,7 @@ export class JavaReferencesWidget extends ReactWidget {
     groups: [],
     loading: false,
     error: null,
+    filter: '',
   };
 
   constructor() {
@@ -179,7 +213,8 @@ export class JavaReferencesWidget extends ReactWidget {
     this.id = JavaReferencesWidget.ID;
     this.title.iconClass = 'codicon codicon-search';
     this.title.closable = true;
-    this.addClass('kairo-widget kairo-java-references-widget');
+    this.addClass('kairo-widget');
+    this.addClass('kairo-java-references-widget');
   }
 
   @postConstruct()
@@ -207,6 +242,7 @@ export class JavaReferencesWidget extends ReactWidget {
       groups: [],
       loading: true,
       error: null,
+      filter: '',
     };
     this.updateTitle();
     this.update();
@@ -231,6 +267,7 @@ export class JavaReferencesWidget extends ReactWidget {
         groups,
         loading: false,
         error: null,
+        filter: '',
       };
       this.title.label = this.t('widget.java.references.titleWithCount', { name, count: references.length });
       this.update();
@@ -311,6 +348,11 @@ export class JavaReferencesWidget extends ReactWidget {
     this.update();
   }
 
+  protected setFilter(filter: string): void {
+    this.widgetState = { ...this.widgetState, filter };
+    this.update();
+  }
+
   protected async navigateTo(item: ReferenceItem): Promise<void> {
     await this.editorManager.open(new URI(item.uri), {
       mode: 'activate',
@@ -328,6 +370,7 @@ export class JavaReferencesWidget extends ReactWidget {
         state={this.widgetState}
         onToggleGroup={idx => this.toggleGroup(idx)}
         onNavigate={item => this.navigateTo(item)}
+        onFilterChange={value => this.setFilter(value)}
         i18n={this.i18n}
       />
     );

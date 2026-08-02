@@ -33,7 +33,8 @@ export class HotSwapWidget extends ReactWidget {
     this.id = KAIRO_HOTSWAP_WIDGET_ID;
     this.title.iconClass = 'codicon codicon-debug-restart';
     this.title.closable = true;
-    this.addClass('kairo-widget kairo-java-hotswap-widget');
+    this.addClass('kairo-widget');
+    this.addClass('kairo-java-hotswap-widget');
   }
 
   @postConstruct()

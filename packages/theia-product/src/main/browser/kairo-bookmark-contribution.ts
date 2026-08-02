@@ -31,6 +31,15 @@ export namespace KairoBookmarkCommands {
         id: 'kairo.bookmark.list',
         label: 'Kairo: Show Bookmarks',
     };
+    /** Alias for IDEA keymap Shift+F11 (`kairo.bookmark.show`). */
+    export const SHOW: Command = {
+        id: 'kairo.bookmark.show',
+        label: 'Kairo: Show Bookmarks',
+    };
+    export const TOGGLE_MNEMONIC: Command = {
+        id: 'kairo.bookmark.toggleMnemonic',
+        label: 'Kairo: Toggle Mnemonic Bookmark',
+    };
     export const CLEAR: Command = {
         id: 'kairo.bookmark.clear',
         label: 'Kairo: Clear All Bookmarks',
@@ -140,6 +149,16 @@ export class KairoBookmarkContribution implements FrontendApplicationContributio
         });
         registry.registerCommand(KairoBookmarkCommands.LIST, {
             execute: () => this.showBookmarkList(),
+        });
+        registry.registerCommand(KairoBookmarkCommands.SHOW, {
+            execute: () => this.showBookmarkList(),
+        });
+        registry.registerCommand(KairoBookmarkCommands.TOGGLE_MNEMONIC, {
+            execute: async () => {
+                // Mnemonic: set numbered bookmark 1 at caret (IDEA Ctrl+F11 approx).
+                await this.setNumberedBookmark(1);
+            },
+            isEnabled: () => this.hasActiveEditor(),
         });
         registry.registerCommand(KairoBookmarkCommands.CLEAR, {
             execute: () => this.bookmarkService.clearAllBookmarks(),

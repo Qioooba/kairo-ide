@@ -1396,6 +1396,7 @@ func TestManager_BuildLaunchDescriptor_DefaultWorkspace(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(binDir, javaName), []byte("fake"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	t.Setenv("KAIRO_JDTLS_ASSUME_JRE_MAJOR", "21")
 	m.SetJREPath(jreDir)
 	// Don't set workspace - should use default
 	desc, err := m.BuildLaunchDescriptor(dataDir)

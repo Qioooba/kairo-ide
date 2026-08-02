@@ -184,69 +184,66 @@ test.describe('SHARD-07: 搜索 + Git/SVN + 编码检测', () => {
 
   test('TEST-0703: 全局文件搜索 (Ctrl+Shift+F)', async ({ page }) => {
     await test.step('1. 按Ctrl+Shift+F打开Search Center', async () => {
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(300);
       await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Shift+F' : 'Control+Shift+F');
-      await page.waitForTimeout(1500);
+      await expect(page.locator('[data-testid="search-center-modal"]')).toBeVisible({ timeout: 10_000 });
       await page.screenshot({ path: `${SCREENSHOT_DIR}/TEST-0703/01-search-center.png` });
     });
 
     await test.step('2. 输入"Hello"搜索', async () => {
-      // In Theia search view, focus the search box and type
-      const searchInput = page.locator('.search-view .theia-input, .search-box input, input[placeholder*="Search"]').first();
-      if (await searchInput.count() > 0 && await searchInput.isVisible().catch(() => false)) {
-        await searchInput.click();
-        await searchInput.fill('Hello');
-      } else {
-        // Fallback: type directly (search view may have focus)
-        await page.keyboard.type('Hello', { delay: 30 });
-      }
+      const searchInput = page.locator('[data-testid="search-query"]');
+      await searchInput.waitFor({ state: 'visible', timeout: 5_000 });
+      await searchInput.click();
+      await searchInput.fill('Hello');
       await page.keyboard.press('Enter');
-      await page.waitForTimeout(2000);
+      await page.waitForSelector('[data-testid="search-result"]', { timeout: 20_000 });
       await page.screenshot({ path: `${SCREENSHOT_DIR}/TEST-0703/02-search-results.png` });
     });
 
-    await test.step('3. 点击结果文件', async () => {
-      const resultFile = page.locator('.search-result .file, .resultTree .fileNode, [class*="search-result"] >> text=.java').first();
-      if (await resultFile.count() > 0 && await resultFile.isVisible().catch(() => false)) {
-        await resultFile.click();
-        await page.waitForTimeout(1000);
+    await test.step('3. 点击结果文件分组', async () => {
+      const group = page.locator('[data-testid="search-group"]').first();
+      if (await group.count() > 0) {
+        await group.click();
+        await page.waitForTimeout(300);
       }
       await page.screenshot({ path: `${SCREENSHOT_DIR}/TEST-0703/03-file-expanded.png` });
     });
 
-    await test.step('4. 点击具体匹配行', async () => {
-      const matchLine = page.locator('.search-result .match, .resultLine, [class*="result-line"], .monaco-highlighted-label').first();
-      if (await matchLine.count() > 0 && await matchLine.isVisible().catch(() => false)) {
-        await matchLine.click();
-        await page.waitForTimeout(1000);
-      }
+    await test.step('4. 点击匹配行（弹窗保持打开）', async () => {
+      const matchLine = page.locator('[data-testid="search-result"]').first();
+      await matchLine.click();
+      await page.waitForTimeout(500);
+      await expect(page.locator('[data-testid="search-center-modal"]')).toBeVisible();
       await page.screenshot({ path: `${SCREENSHOT_DIR}/TEST-0703/04-line-navigated.png` });
     });
 
-    await test.step('5. 检查结果预览', async () => {
+    await test.step('5. 钉到 Find 工具窗口', async () => {
+      const pin = page.locator('[data-testid="open-find-window"]');
+      if (await pin.count() > 0) {
+        await pin.click();
+        await page.waitForTimeout(800);
+        await expect(page.locator('[data-testid="search-results-panel"]')).toBeVisible({ timeout: 8_000 });
+      }
       await page.screenshot({ path: `${SCREENSHOT_DIR}/TEST-0703/05-result-preview.png` });
     });
   });
 
   test('TEST-0704: 全局搜索替换', async ({ page }) => {
-    await test.step('1. 全局搜索后打开替换模式', async () => {
-      await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Shift+F' : 'Control+Shift+F');
-      await page.waitForTimeout(1000);
-      const searchInput = page.locator('.search-input, input[placeholder*="Search"]').first();
-      if (await searchInput.count() > 0) {
-        await searchInput.fill('Hello');
-        await page.keyboard.press('Enter');
-        await page.waitForTimeout(2000);
-      }
-      const toggleReplaceBtn = page.locator('[title*="Toggle Replace"], [class*="toggle-replace"]').first();
-      if (await toggleReplaceBtn.count() > 0) {
-        await toggleReplaceBtn.click();
-        await page.waitForTimeout(500);
-      }
+    await test.step('1. Ctrl+Shift+R 打开替换模式', async () => {
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(300);
+      await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Shift+R' : 'Control+Shift+R');
+      await expect(page.locator('[data-testid="search-center-modal"]')).toBeVisible({ timeout: 10_000 });
+      const searchInput = page.locator('[data-testid="search-query"]');
+      await searchInput.fill('Hello');
+      await page.keyboard.press('Enter');
+      await page.waitForTimeout(2000);
       await page.screenshot({ path: `${SCREENSHOT_DIR}/TEST-0704/01-replace-mode.png` });
     });
 
     await test.step('2. 输入替换文本', async () => {
-      const replaceInput = page.locator('.replace-input, input[placeholder*="Replace"]').first();
+      const replaceInput = page.locator('[data-testid="replace-text"]');
       if (await replaceInput.count() > 0) {
         await replaceInput.fill('Hi');
         await page.waitForTimeout(500);
@@ -254,76 +251,58 @@ test.describe('SHARD-07: 搜索 + Git/SVN + 编码检测', () => {
       await page.screenshot({ path: `${SCREENSHOT_DIR}/TEST-0704/02-replace-entered.png` });
     });
 
-    await test.step('3. 点击Preview预览差异', async () => {
-      const previewBtn = page.locator('[title*="Preview"], button:has-text("Preview")').first();
-      if (await previewBtn.count() > 0) {
-        await previewBtn.click();
-        await page.waitForTimeout(1000);
+    await test.step('3. 文件掩码 *.java', async () => {
+      const mask = page.locator('[data-testid="filter-file-types"]');
+      if (await mask.count() > 0) {
+        await mask.fill('*.java');
       }
       await page.screenshot({ path: `${SCREENSHOT_DIR}/TEST-0704/03-preview-diff.png` });
     });
 
-    await test.step('4. 点击Replace All替换全部', async () => {
-      const replaceAllBtn = page.locator('[title*="Replace All"], button:has-text("All")').first();
-      if (await replaceAllBtn.count() > 0) {
+    await test.step('4. Replace All（若可用）', async () => {
+      const replaceAllBtn = page.locator('button:has-text("Replace all"), button:has-text("全部替换")').first();
+      if (await replaceAllBtn.count() > 0 && await replaceAllBtn.isEnabled().catch(() => false)) {
         await replaceAllBtn.click();
         await page.waitForTimeout(1000);
       }
       await page.screenshot({ path: `${SCREENSHOT_DIR}/TEST-0704/04-replaced-all.png` });
     });
 
-    await test.step('5. 打开文件验证', async () => {
-      await openFileViaQuickOpen(page, 'HelloServlet.java');
-      await page.waitForTimeout(1000);
+    await test.step('5. Escape 关闭弹窗', async () => {
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(300);
       await page.screenshot({ path: `${SCREENSHOT_DIR}/TEST-0704/05-verified.png` });
     });
   });
 
   test('TEST-0705: 搜索包含/排除过滤', async ({ page }) => {
     await test.step('1. 打开全局搜索', async () => {
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(300);
       await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Shift+F' : 'Control+Shift+F');
-      await page.waitForTimeout(1500);
+      await expect(page.locator('[data-testid="search-center-modal"]')).toBeVisible({ timeout: 10_000 });
       await page.screenshot({ path: `${SCREENSHOT_DIR}/TEST-0705/00-search-opened.png` });
     });
 
-    await test.step('2. 在files to include输入*.java', async () => {
-      // Theia search view: include/exclude inputs are toggleable
-      // First look for "...(includes)" button or "files to include" input
-      const toggleIncludesBtn = page.locator('.codicon-list-tree, [title*="include"], [title*="Include"], .more').first();
-      if (await toggleIncludesBtn.count() > 0 && await toggleIncludesBtn.isVisible().catch(() => false)) {
-        await toggleIncludesBtn.click();
-        await page.waitForTimeout(500);
-      }
-      const includeInput = page.locator('input[placeholder*="include" i], input[placeholder*="files to include" i], .search-include input, .theia-input').first();
-      if (await includeInput.count() > 0 && await includeInput.isVisible().catch(() => false)) {
-        await includeInput.click();
-        await includeInput.fill('*.java');
-        await page.waitForTimeout(500);
-      }
-      await page.screenshot({ path: `${SCREENSHOT_DIR}/TEST-0705/01-include-filter.png` });
-    });
-
-    await test.step('3. 在files to exclude输入*.jsp', async () => {
-      const excludeInput = page.locator('input[placeholder*="exclude" i], input[placeholder*="files to exclude" i], .search-exclude input').first();
-      if (await excludeInput.count() > 0 && await excludeInput.isVisible().catch(() => false)) {
-        await excludeInput.click();
-        await excludeInput.fill('*.jsp');
-        await page.waitForTimeout(500);
-      }
-      await page.screenshot({ path: `${SCREENSHOT_DIR}/TEST-0705/02-exclude-filter.png` });
-    });
-
-    await test.step('4. 执行搜索验证', async () => {
-      const searchInput = page.locator('.search-view .theia-input, .search-box input, input[placeholder*="Search"]').first();
-      if (await searchInput.count() > 0 && await searchInput.isVisible().catch(() => false)) {
-        await searchInput.click();
-        await searchInput.fill('Hello');
-      } else {
-        await page.keyboard.type('Hello', { delay: 30 });
-      }
+    await test.step('2. 文件掩码 *.java', async () => {
+      const mask = page.locator('[data-testid="filter-file-types"]');
+      await mask.fill('*.java');
+      await page.locator('[data-testid="search-query"]').fill('Hello');
       await page.keyboard.press('Enter');
       await page.waitForTimeout(2000);
-      await page.screenshot({ path: `${SCREENSHOT_DIR}/TEST-0705/03-filtered-results.png` });
+      await page.screenshot({ path: `${SCREENSHOT_DIR}/TEST-0705/01-include-java.png` });
+    });
+
+    await test.step('3. 高级排除选项', async () => {
+      const advanced = page.locator('[data-testid="toggle-advanced"]');
+      if (await advanced.count() > 0) {
+        await advanced.click();
+        const exclude = page.locator('[data-testid="filter-exclude"]');
+        if (await exclude.count() > 0) {
+          await exclude.fill('**/generated/**');
+        }
+      }
+      await page.screenshot({ path: `${SCREENSHOT_DIR}/TEST-0705/02-exclude.png` });
     });
   });
 

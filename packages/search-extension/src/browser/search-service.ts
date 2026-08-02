@@ -38,6 +38,7 @@ export class KairoSearchService {
     try {
       return await this.runtime.request('POST /api/v1/search', {
         workspaceId: opts.workspaceId,
+        rootPath: opts.rootPath,
         query: opts.query ?? '',
         isRegex: opts.isRegex ?? false,
         caseSensitive: opts.caseSensitive ?? false,

@@ -160,13 +160,22 @@ export class ProjectStructureDialog extends ReactDialog<void> {
             const config = configs.find(c => c.id === project.projectId);
 
             if (config) {
-                next.sourceLevel = config.java.compiler.sourceLevel;
-                next.targetLevel = config.java.compiler.targetLevel;
-                next.encoding = config.encoding.default;
-                next.selectedJdkId = config.java.compiler.toolchainId || 'auto';
+                const compiler = config.java?.compiler;
+                if (compiler) {
+                    if (compiler.sourceLevel) {
+                        next.sourceLevel = compiler.sourceLevel as SourceLevel;
+                    }
+                    if (compiler.targetLevel) {
+                        next.targetLevel = compiler.targetLevel as SourceLevel;
+                    }
+                    next.selectedJdkId = compiler.toolchainId || 'auto';
+                }
+                if (config.encoding?.default) {
+                    next.encoding = config.encoding.default;
+                }
                 next.sourceDirs = [
-                    ...(config.sourceLayout.src || []).map(p => ({ path: p, isTest: false })),
-                    ...(config.sourceLayout.testSrc || []).map(p => ({ path: p, isTest: true })),
+                    ...(config.sourceLayout?.src || []).map(p => ({ path: p, isTest: false })),
+                    ...(config.sourceLayout?.testSrc || []).map(p => ({ path: p, isTest: true })),
                 ];
             }
 
@@ -210,7 +219,11 @@ export class ProjectStructureDialog extends ReactDialog<void> {
             this.state = { ...this.state, ...next };
             this.update();
         } catch (err) {
-            this.setState({ loading: false, error: err instanceof Error ? err.message : String(err) });
+            const raw = err instanceof Error ? err.message : String(err);
+            const friendly = /Cannot read prop|undefined|TypeError/i.test(raw)
+                ? this.t('widget.projectStructure.messages.loadError')
+                : raw;
+            this.setState({ loading: false, error: friendly });
         }
     }
 
@@ -549,21 +562,21 @@ export class ProjectStructureDialog extends ReactDialog<void> {
 
             const updated: ProjectConfig = existing ? {
                 ...existing,
-                encoding: { ...existing.encoding, default: this.state.encoding },
+                encoding: { ...(existing.encoding || { default: this.state.encoding }), default: this.state.encoding },
                 java: {
-                    ...existing.java,
+                    ...(existing.java || {}),
                     compiler: {
-                        ...existing.java.compiler,
+                        ...(existing.java?.compiler || {}),
                         sourceLevel: this.state.sourceLevel,
                         targetLevel: this.state.targetLevel,
                         toolchainId: compilerRef.toolchainId,
                         fingerprint: compilerRef.fingerprint,
                         label: compilerRef.label,
                     },
-                    languageServer: { ...existing.java.languageServer, ...compilerRef },
-                    runtime: { ...existing.java.runtime, ...compilerRef },
+                    languageServer: { ...(existing.java?.languageServer || {}), ...compilerRef },
+                    runtime: { ...(existing.java?.runtime || {}), ...compilerRef },
                 },
-                sourceLayout: { ...existing.sourceLayout, src: srcDirs, testSrc: testDirs },
+                sourceLayout: { ...(existing.sourceLayout || {}), src: srcDirs, testSrc: testDirs },
             } : {
                 schemaVersion: 1 as const,
                 id: project.projectId,

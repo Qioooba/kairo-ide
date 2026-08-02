@@ -3,6 +3,7 @@ import URI from '@theia/core/lib/common/uri';
 import { FileService } from '@theia/filesystem/lib/browser/file-service';
 import { WorkspaceContextService } from '@kairo/runtime-extension';
 import { fuzzyScore } from './search-everywhere-model';
+import { FileIndexService } from './file-index-service';
 
 export interface FindFileItem {
   id: string;
@@ -22,7 +23,7 @@ export interface FindFileState {
 
 export type FindFileListener = (state: FindFileState) => void;
 
-const CACHE_TTL_MS = 5_000;
+const CACHE_TTL_MS = 15_000;
 const PATH_WEIGHTS: Record<string, number> = {
   'src': 3,
   'lib': 2,
@@ -47,6 +48,7 @@ function pathWeight(relativePath: string): number {
 export class FindFileModel {
   @inject(FileService) protected readonly files!: FileService;
   @inject(WorkspaceContextService) protected readonly workspace!: WorkspaceContextService;
+  @inject(FileIndexService) protected readonly fileIndex!: FileIndexService;
 
   protected state: FindFileState = { status: 'idle', query: '', items: [], selectedIndex: 0 };
   protected readonly listeners = new Set<FindFileListener>();
@@ -84,10 +86,14 @@ export class FindFileModel {
       if (controller.signal.aborted || generation !== this.generation) return this.state;
 
       const scored = allFiles
-        .map(item => ({ ...item, score: fuzzyScore(trimmed, item.label) }))
+        .map(item => {
+          const nameScore = fuzzyScore(trimmed, item.label);
+          const pathScore = fuzzyScore(trimmed, item.detail);
+          const score = Math.max(nameScore ?? -Infinity, pathScore !== undefined ? pathScore - 500 : -Infinity);
+          return { ...item, score: Number.isFinite(score) ? score : undefined };
+        })
         .filter((item): item is FindFileItem & { score: number } => item.score !== undefined)
         .sort((a, b) => {
-          // Path-weighted: boost files in important directories
           const pwA = pathWeight(a.detail);
           const pwB = pathWeight(b.detail);
           const scoreDiff = (b.score + pwB * 100) - (a.score + pwA * 100);
@@ -123,6 +129,34 @@ export class FindFileModel {
     }
     const context = this.workspace.requireContext();
     const root = URI.fromFilePath(context.workspaceRoot);
+
+    try {
+      const entries = await this.fileIndex.listFiles({
+        workspaceId: context.workspaceId,
+        maxFiles: 50_000,
+        signal,
+      });
+      if (signal.aborted) return [];
+      const results = entries.map(entry => {
+        const uri = root.resolve(entry.path);
+        return {
+          id: `file:${uri}`,
+          label: entry.name,
+          detail: entry.path,
+          uri: uri.toString(),
+          score: 0,
+        };
+      });
+      this.fileCache = results;
+      this.cacheTimestamp = Date.now();
+      return results;
+    } catch {
+      // Fallback to FileService BFS when Agent is unavailable.
+      return this.buildFileListViaFileService(root, signal);
+    }
+  }
+
+  protected async buildFileListViaFileService(root: URI, signal: AbortSignal): Promise<FindFileItem[]> {
     const results: FindFileItem[] = [];
     const queue: URI[] = [root];
     let visited = 0;

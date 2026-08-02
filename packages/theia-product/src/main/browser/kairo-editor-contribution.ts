@@ -22,7 +22,6 @@ import {
 } from '@theia/core/lib/browser';
 import { CommandContribution, CommandRegistry, MenuContribution, MenuModelRegistry } from '@theia/core/lib/common';
 import { KeybindingContribution, KeybindingRegistry } from '@theia/core/lib/browser/keybinding';
-import { isOSX } from '@theia/core/lib/common/os';
 import { PreferenceService, PreferenceScope } from '@theia/core/lib/common/preferences';
 import { EditorManager, EditorWidget } from '@theia/editor/lib/browser';
 import { StatusBar, StatusBarAlignment } from '@theia/core/lib/browser';
@@ -233,9 +232,10 @@ export class KairoEditorContribution implements FrontendApplicationContribution,
   }
 
   registerKeybindings(keybindings: KeybindingRegistry): void {
+    // IDEA Organize Imports: Ctrl+Alt+O / ⌃⌥O. Never ⌘⌥O (Go to Symbol on Mac).
     keybindings.registerKeybinding({
       command: 'kairo.organizeImports',
-      keybinding: isOSX ? 'alt+cmd+o' : 'ctrl+alt+o',
+      keybinding: 'ctrl+alt+o',
     });
   }
 

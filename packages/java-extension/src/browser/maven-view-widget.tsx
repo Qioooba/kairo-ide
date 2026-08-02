@@ -24,7 +24,8 @@ export class MavenViewWidget extends ReactWidget {
         this.id = MavenViewWidget.ID;
         this.title.closable = true;
         this.title.iconClass = 'codicon codicon-package';
-        this.addClass('kairo-widget kairo-maven-view');
+        this.addClass('kairo-widget');
+        this.addClass('kairo-maven-view');
     }
 
     @postConstruct()

@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// Unit tests for JavaCompletionProvider — adapt functions and
-// fallback completion/definition logic.
-//
-// Tests the pure logic without importing the heavy Theia
-// inversify dependency chain.
+// Unit tests for JavaCompletionProvider — fallback logic and
+// empty-LS trust behaviour (duplicated pure helpers where the
+// inversify class cannot be constructed headless).
 //
 // Run with: pnpm --filter @kairo/java-extension test
 
@@ -13,30 +11,13 @@
 const { test, describe } = require('node:test');
 const assert = require('node:assert/strict');
 
-// ------------------------------------------------------------------
-// adaptLspCompletion — convert LSP completion item to provider format
-// ------------------------------------------------------------------
+const {
+  adaptLspCompletion,
+  adaptIntelliSenseCompletion,
+  filterSmartCompletions,
+} = require('../../lib/browser/java-completion-adapter');
 
-function adaptLspCompletion(it) {
-  let doc;
-  if (typeof it.documentation === 'string') {
-    doc = it.documentation;
-  } else if (it.documentation && typeof it.documentation === 'object') {
-    doc = it.documentation.value;
-  }
-  return {
-    label: it.label,
-    kind: it.kind,
-    detail: it.detail,
-    documentation: doc,
-    sortText: it.sortText,
-    filterText: it.filterText,
-    insertText: it.insertText ?? it.label,
-    isDeprecated: (it.tags || []).includes(1),
-  };
-}
-
-describe('adaptLspCompletion', () => {
+describe('adaptLspCompletion (provider surface)', () => {
   test('converts basic LSP completion item', () => {
     const item = adaptLspCompletion({
       label: 'String',
@@ -55,10 +36,7 @@ describe('adaptLspCompletion', () => {
   });
 
   test('falls back to label for insertText when undefined', () => {
-    const item = adaptLspCompletion({
-      label: 'String',
-      kind: 7,
-    });
+    const item = adaptLspCompletion({ label: 'String', kind: 7 });
     assert.equal(item.insertText, 'String');
   });
 
@@ -81,56 +59,25 @@ describe('adaptLspCompletion', () => {
   });
 
   test('detects deprecated tag', () => {
-    const item = adaptLspCompletion({
-      label: 'oldMethod',
-      kind: 2,
-      tags: [1],
-    });
+    const item = adaptLspCompletion({ label: 'oldMethod', kind: 2, tags: [1] });
     assert.equal(item.isDeprecated, true);
   });
 
   test('not deprecated when tags is empty', () => {
-    const item = adaptLspCompletion({
-      label: 'newMethod',
-      kind: 2,
-      tags: [],
-    });
+    const item = adaptLspCompletion({ label: 'newMethod', kind: 2, tags: [] });
     assert.equal(item.isDeprecated, false);
   });
 
   test('not deprecated when tags is undefined', () => {
-    const item = adaptLspCompletion({
-      label: 'method',
-      kind: 2,
-    });
+    const item = adaptLspCompletion({ label: 'method', kind: 2 });
     assert.equal(item.isDeprecated, false);
   });
 
   test('handles documentation as undefined', () => {
-    const item = adaptLspCompletion({
-      label: 'String',
-      kind: 7,
-    });
+    const item = adaptLspCompletion({ label: 'String', kind: 7 });
     assert.equal(item.documentation, undefined);
   });
 });
-
-// ------------------------------------------------------------------
-// adaptIntelliSenseCompletion — convert fallback item to provider format
-// ------------------------------------------------------------------
-
-function adaptIntelliSenseCompletion(it) {
-  return {
-    label: it.label,
-    kind: it.kind,
-    detail: it.detail,
-    documentation: it.documentation,
-    sortText: it.sortText,
-    filterText: it.filterText,
-    insertText: it.insertText,
-    isDeprecated: it.isDeprecated,
-  };
-}
 
 describe('adaptIntelliSenseCompletion', () => {
   test('converts intellisense completion item', () => {
@@ -163,6 +110,7 @@ describe('adaptIntelliSenseCompletion', () => {
     });
     assert.equal(item.insertText, 'System.out.println(${1});');
     assert.equal(item.kind, 15);
+    assert.equal(item.insertTextFormat, 2);
   });
 
   test('handles deprecated flag', () => {
@@ -186,10 +134,6 @@ describe('adaptIntelliSenseCompletion', () => {
   });
 });
 
-// ------------------------------------------------------------------
-// Fallback completion logic
-// ------------------------------------------------------------------
-
 function fallbackCompletions(sourceCache, intellisense, uri, line, character, triggerCharacter) {
   const source = sourceCache.get(uri);
   if (!source) {
@@ -200,6 +144,22 @@ function fallbackCompletions(sourceCache, intellisense, uri, line, character, tr
     isIncomplete: result.isIncomplete,
     items: result.items.map(adaptIntelliSenseCompletion),
   };
+}
+
+/** Mirrors provideCompletions: trust empty LS, fallback only when not ready / error. */
+async function provideCompletions(client, sourceCache, intellisense, req) {
+  const state = await (client.fetchStateQuick || client.fetchState)();
+  if (state !== 'ready') {
+    return fallbackCompletions(sourceCache, intellisense, req.uri, req.line, req.character, req.triggerCharacter);
+  }
+  try {
+    const list = await client.completion(req);
+    const items = list.items.map(adaptLspCompletion);
+    const response = { isIncomplete: list.isIncomplete, items };
+    return req.smart ? { isIncomplete: response.isIncomplete, items: filterSmartCompletions(items) } : response;
+  } catch (err) {
+    return fallbackCompletions(sourceCache, intellisense, req.uri, req.line, req.character, req.triggerCharacter);
+  }
 }
 
 describe('fallbackCompletions', () => {
@@ -263,9 +223,84 @@ describe('fallbackCompletions', () => {
   });
 });
 
-// ------------------------------------------------------------------
-// Fallback definition logic
-// ------------------------------------------------------------------
+describe('provideCompletions empty-LS trust', () => {
+  test('does not fallback when LS returns empty list', async () => {
+    const client = {
+      fetchState: async () => 'ready',
+      fetchStateQuick: async () => 'ready',
+      completion: async () => ({ isIncomplete: false, items: [] }),
+    };
+    const sourceCache = new Map([['file:///T.java', 'class T {}']]);
+    const intellisense = {
+      provideCompletions: () => ({
+        isIncomplete: false,
+        items: [{ label: 'public', kind: 14, insertText: 'public' }],
+      }),
+    };
+    const result = await provideCompletions(client, sourceCache, intellisense, {
+      uri: 'file:///T.java', line: 0, character: 0,
+    });
+    assert.equal(result.items.length, 0);
+  });
+
+  test('falls back when LS is not ready', async () => {
+    const client = {
+      fetchState: async () => 'starting',
+      fetchStateQuick: async () => 'starting',
+      completion: async () => ({ isIncomplete: false, items: [] }),
+    };
+    const sourceCache = new Map([['file:///T.java', 'class T {}']]);
+    const intellisense = {
+      provideCompletions: () => ({
+        isIncomplete: false,
+        items: [{ label: 'public', kind: 14, insertText: 'public' }],
+      }),
+    };
+    const result = await provideCompletions(client, sourceCache, intellisense, {
+      uri: 'file:///T.java', line: 0, character: 0,
+    });
+    assert.equal(result.items.length, 1);
+    assert.equal(result.items[0].label, 'public');
+  });
+
+  test('falls back when LS throws', async () => {
+    const client = {
+      fetchState: async () => 'ready',
+      fetchStateQuick: async () => 'ready',
+      completion: async () => { throw new Error('timeout'); },
+    };
+    const sourceCache = new Map([['file:///T.java', 'class T {}']]);
+    const intellisense = {
+      provideCompletions: () => ({
+        isIncomplete: false,
+        items: [{ label: 'class', kind: 14, insertText: 'class' }],
+      }),
+    };
+    const result = await provideCompletions(client, sourceCache, intellisense, {
+      uri: 'file:///T.java', line: 0, character: 0,
+    });
+    assert.equal(result.items[0].label, 'class');
+  });
+
+  test('smart mode filters LS results', async () => {
+    const client = {
+      fetchState: async () => 'ready',
+      fetchStateQuick: async () => 'ready',
+      completion: async () => ({
+        isIncomplete: false,
+        items: [
+          { label: 'public', kind: 14, insertText: 'public' },
+          { label: 'String', kind: 7, insertText: 'String' },
+        ],
+      }),
+    };
+    const result = await provideCompletions(client, new Map(), { provideCompletions: () => ({ items: [] }) }, {
+      uri: 'file:///T.java', line: 0, character: 0, smart: true,
+    });
+    assert.equal(result.items.length, 1);
+    assert.equal(result.items[0].label, 'String');
+  });
+});
 
 function fallbackDefinition(sourceCache, intellisense, uri, line, character) {
   const source = sourceCache.get(uri);
@@ -282,9 +317,7 @@ function fallbackDefinition(sourceCache, intellisense, uri, line, character) {
 describe('fallbackDefinition', () => {
   test('returns empty when no source cached', () => {
     const sourceCache = new Map();
-    const intellisense = {
-      provideDefinition: () => [],
-    };
+    const intellisense = { provideDefinition: () => [] };
     const result = fallbackDefinition(sourceCache, intellisense, 'file:///Test.java', 0, 0);
     assert.deepEqual(result, []);
   });
@@ -318,10 +351,6 @@ describe('fallbackDefinition', () => {
   });
 });
 
-// ------------------------------------------------------------------
-// Source cache management
-// ------------------------------------------------------------------
-
 describe('sourceCache', () => {
   test('cacheSource stores source text', () => {
     const cache = new Map();
@@ -343,10 +372,6 @@ describe('sourceCache', () => {
     assert.equal(cache.get('file:///Test.java'), 'new content');
   });
 });
-
-// ------------------------------------------------------------------
-// whenReady pattern (used by various providers)
-// ------------------------------------------------------------------
 
 async function whenReady(client, empty, request) {
   if (await client.fetchState() !== 'ready') {
@@ -385,10 +410,6 @@ describe('whenReady', () => {
   });
 });
 
-// ------------------------------------------------------------------
-// Completion response types
-// ------------------------------------------------------------------
-
 describe('JavaCompletionResponse types', () => {
   test('JavaCompletionResponseItem has all optional fields', () => {
     const item = {
@@ -417,10 +438,6 @@ describe('JavaCompletionResponse types', () => {
   });
 });
 
-// ------------------------------------------------------------------
-// JavaDefinitionResponse types
-// ------------------------------------------------------------------
-
 describe('JavaDefinitionResponse types', () => {
   test('JavaDefinitionResponse has uri and range', () => {
     const def = {
@@ -438,10 +455,6 @@ describe('JavaDefinitionResponse types', () => {
   });
 });
 
-// ------------------------------------------------------------------
-// JavaCompletionRequest types
-// ------------------------------------------------------------------
-
 describe('JavaCompletionRequest types', () => {
   test('JavaCompletionRequest has required and optional fields', () => {
     const req = {
@@ -450,12 +463,14 @@ describe('JavaCompletionRequest types', () => {
       character: 5,
       triggerKind: 2,
       triggerCharacter: '.',
+      smart: true,
     };
     assert.equal(req.uri, 'file:///Test.java');
     assert.equal(req.line, 10);
     assert.equal(req.character, 5);
     assert.equal(req.triggerKind, 2);
     assert.equal(req.triggerCharacter, '.');
+    assert.equal(req.smart, true);
   });
 
   test('JavaCompletionRequest with minimal fields', () => {

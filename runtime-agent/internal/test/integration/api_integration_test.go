@@ -169,6 +169,15 @@ func (f *fakeSearcher) Search(ctx context.Context, payload json.RawMessage) (jso
 	})
 }
 
+func (f *fakeSearcher) ListFiles(ctx context.Context, payload json.RawMessage) (json.RawMessage, error) {
+	return json.Marshal(map[string]any{
+		"files": []map[string]any{
+			{"path": "src/main/java/HelloServlet.java", "name": "HelloServlet.java"},
+		},
+		"total": 1,
+	})
+}
+
 // ----------- server setup -----------
 
 type integrationTestServer struct {

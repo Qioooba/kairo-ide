@@ -11,18 +11,31 @@
 // monaco is imported as a module, never via window.monaco.
 
 import * as monaco from '@theia/monaco-editor-core';
-import { FrontendApplicationContribution } from '@theia/core/lib/browser';
+import { FrontendApplicationContribution, QuickInputService } from '@theia/core/lib/browser';
 import { injectable, inject, optional } from '@theia/core/shared/inversify';
 import { Disposable } from '@theia/core/lib/common/disposable';
+import { CommandContribution, CommandRegistry, CommandService } from '@theia/core/lib/common/command';
+import { MessageService } from '@theia/core/lib/common/message-service';
+import { MenuContribution, MenuModelRegistry } from '@theia/core/lib/common/menu';
+import { EDITOR_CONTEXT_MENU } from '@theia/editor/lib/browser/editor-menu';
 import { FileService } from '@theia/filesystem/lib/browser/file-service';
-import { CommandService } from '@theia/core/lib/common/command';
 import { WorkspaceService } from '@theia/workspace/lib/browser';
 import { JAVA_LANGUAGE_ID } from '../common/java-common';
 import { JAVA_MONARCH } from './java-monarch';
 import { JavaLanguageClient } from './java-language-client';
 import { JdtClassFileFsProvider } from './jdt-fs-provider';
-import { JavaCompletionProvider, JavaCompletionResponseItem, JavaDefinitionResponse } from './java-completion-provider';
+import { JavaCompletionProvider, JavaDefinitionResponse } from './java-completion-provider';
+import type { JavaCompletionResponseItem } from './java-completion-adapter';
+import { INSERT_AS_SNIPPET, looksLikeSnippet } from './java-completion-adapter';
 import { registerJavaLiveTemplates } from './java-live-templates';
+import { computeCompleteStatement } from './java-complete-statement';
+import { SURROUND_TEMPLATES, computeSurroundEdit, findSurroundTemplate } from './java-surround-with';
+import { computeUnwrapEdit } from './java-unwrap';
+import { globalRecentCompletions } from './java-recent-completions';
+import { JavaUserLiveTemplatesService } from './java-user-templates';
+import { cycleHippieCompletion, registerHippieCompletion } from './java-hippie-completion';
+import { JavaDocumentSyncContribution } from './java-document-sync';
+import { JavaRefactoring } from './java-refactoring';
 import { JavaRunService } from './java-run-service';
 import { JAVA_RUN_COMMANDS } from './java-run-protocol';
 import type {
@@ -43,8 +56,29 @@ import type {
   LSPDocumentHighlight,
 } from '../common/lsp-protocol';
 
+/** Set by Smart Completion command; consumed by the next provideCompletionItems.
+ * Repeated Ctrl+Shift+Space cycles filter strictness (IDEA-like). */
+let pendingSmartCompletion = false;
+let smartCompletionCycle = 0;
+
+export function requestSmartCompletion(): void {
+  pendingSmartCompletion = true;
+  smartCompletionCycle = (smartCompletionCycle + 1) % 3;
+}
+
+export function consumeSmartCompletionFlag(): boolean {
+  const value = pendingSmartCompletion;
+  pendingSmartCompletion = false;
+  return value;
+}
+
+/** 0 = expected-type filter, 1 = methods/fields only, 2 = all (re-ranked). */
+export function consumeSmartCompletionCycle(): number {
+  return smartCompletionCycle;
+}
+
 @injectable()
-export class JavaMonacoRegistrationContribution implements FrontendApplicationContribution, Disposable {
+export class JavaMonacoRegistrationContribution implements FrontendApplicationContribution, CommandContribution, MenuContribution, Disposable {
   @inject(JavaCompletionProvider)
   protected readonly provider!: JavaCompletionProvider;
   @inject(JavaLanguageClient)
@@ -53,12 +87,22 @@ export class JavaMonacoRegistrationContribution implements FrontendApplicationCo
   protected readonly jdtFs!: JdtClassFileFsProvider;
   @inject(FileService)
   protected readonly fileService!: FileService;
+  @inject(JavaDocumentSyncContribution) @optional()
+  protected readonly documentSync?: JavaDocumentSyncContribution;
   @inject(JavaRunService) @optional()
   protected readonly javaRunService?: JavaRunService;
   @inject(CommandService) @optional()
   protected readonly commandService?: CommandService;
   @inject(WorkspaceService) @optional()
   protected readonly workspaceService?: WorkspaceService;
+  @inject(QuickInputService) @optional()
+  protected readonly quickInput?: QuickInputService;
+  @inject(JavaUserLiveTemplatesService) @optional()
+  protected readonly userTemplates?: JavaUserLiveTemplatesService;
+  @inject(JavaRefactoring) @optional()
+  protected readonly refactoring?: JavaRefactoring;
+  @inject(MessageService) @optional()
+  protected readonly messages?: MessageService;
 
   protected subs: Disposable[] = [];
 
@@ -135,23 +179,34 @@ export class JavaMonacoRegistrationContribution implements FrontendApplicationCo
       }),
     );
 
-    this.subs.push(registerJavaLiveTemplates(JAVA_LANGUAGE_ID));
+    this.subs.push(registerJavaLiveTemplates(JAVA_LANGUAGE_ID, {
+      getExtraTemplates: () => this.userTemplates?.list() ?? [],
+    }));
+    void this.userTemplates?.ensureLoaded();
+    this.subs.push(registerHippieCompletion(JAVA_LANGUAGE_ID));
+    this.subs.push(registerHippieCompletion('jsp'));
     this.subs.push(
       monaco.languages.registerCompletionItemProvider(JAVA_LANGUAGE_ID, {
-        triggerCharacters: ['.', '@', '#', '*', ' '],
+        triggerCharacters: ['.', '@', '#', '*'],
         provideCompletionItems: async (model, position, context, token) => {
           if (token.isCancellationRequested) return { suggestions: [] };
+          const uri = model.uri.toString();
+          this.documentSync?.flushPending(uri);
+          const smart = consumeSmartCompletionFlag();
+          const smartCycle = smart ? consumeSmartCompletionCycle() : 0;
           const response = await this.provider.provideCompletions({
-            uri: model.uri.toString(),
+            uri,
             // Monaco positions are 1-based; the provider speaks
             // 0-based LSP positions.
             line: position.lineNumber - 1,
             character: position.column - 1,
             triggerKind: context.triggerKind + 1 as 1 | 2 | 3,
             triggerCharacter: context.triggerCharacter,
+            smart,
+            smartCycle,
           });
           if (token.isCancellationRequested) return { suggestions: [] };
-          console.info(`[kairo-java] monaco provideCompletionItems lang=${model.getLanguageId()} items=${response.items.length}`);
+          console.info(`[kairo-java] monaco provideCompletionItems lang=${model.getLanguageId()} items=${response.items.length} smart=${smart}`);
           const word = model.getWordUntilPosition(position);
           const range = new monaco.Range(
             position.lineNumber,
@@ -160,9 +215,63 @@ export class JavaMonacoRegistrationContribution implements FrontendApplicationCo
             word.endColumn,
           );
           return {
-            suggestions: response.items.map(item => adaptCompletionItem(item, range)),
-            incomplete: response.isIncomplete,
+            suggestions: response.items.map(item => {
+              const rank = globalRecentCompletions.rank(item.label);
+              const boosted = {
+                ...item,
+                sortText: globalRecentCompletions.boostSortText(item.label, item.sortText),
+                preselect: item.preselect === true || rank === 0,
+              };
+              return adaptCompletionItem(boosted, range);
+            }),
+            // Never keep the widget on "Loading…" after we already have
+            // a definitive (possibly empty / fallback) list.
+            incomplete: false,
           };
+        },
+        resolveCompletionItem: async (item, token) => {
+          if (token.isCancellationRequested) return item;
+          const raw = item as MonacoCompletionItemWithData;
+          if (raw._kairoData === undefined && !raw._kairoNeedsResolve) {
+            return item;
+          }
+          const resolved = await this.provider.resolveCompletion({
+            label: typeof item.label === 'string' ? item.label : item.label.label,
+            kind: undefined,
+            detail: typeof item.detail === 'string' ? item.detail : undefined,
+            documentation: typeof item.documentation === 'string'
+              ? item.documentation
+              : item.documentation && 'value' in item.documentation
+                ? item.documentation.value
+                : undefined,
+            sortText: item.sortText,
+            filterText: item.filterText,
+            insertText: typeof item.insertText === 'string' ? item.insertText : undefined,
+            insertTextFormat: item.insertTextRules === monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet
+              ? INSERT_AS_SNIPPET
+              : undefined,
+            data: raw._kairoData,
+            additionalTextEdits: undefined,
+            textEdit: undefined,
+            commitCharacters: item.commitCharacters,
+            command: undefined,
+          });
+          if (token.isCancellationRequested) return item;
+          let wordRange: monaco.Range;
+          if (item.range instanceof monaco.Range) {
+            wordRange = item.range;
+          } else if (item.range && typeof item.range === 'object') {
+            const ranges = item.range as { insert?: monaco.IRange; insertText?: monaco.IRange; inserting?: monaco.IRange };
+            const r = ranges.insert ?? ranges.inserting ?? ranges.insertText;
+            if (r) {
+              wordRange = new monaco.Range(r.startLineNumber, r.startColumn, r.endLineNumber, r.endColumn);
+            } else {
+              wordRange = new monaco.Range(1, 1, 1, 1);
+            }
+          } else {
+            wordRange = new monaco.Range(1, 1, 1, 1);
+          }
+          return adaptCompletionItem(resolved, wordRange);
         },
       }),
       monaco.languages.registerDefinitionProvider(JAVA_LANGUAGE_ID, {
@@ -341,12 +450,488 @@ export class JavaMonacoRegistrationContribution implements FrontendApplicationCo
     this.ensureJavaQuickSuggestions();
   }
 
+  registerCommands(registry: CommandRegistry): void {
+    registry.registerCommand(
+      { id: 'kairo.java.smartCompletion', label: 'Smart Type Completion', category: 'Java' },
+      {
+        execute: async () => {
+          requestSmartCompletion();
+          if (this.commandService) {
+            await this.commandService.executeCommand('editor.action.triggerSuggest');
+          }
+        },
+      },
+    );
+    registry.registerCommand(
+      { id: 'editor.action.completeStatement', label: 'Complete Statement', category: 'Java' },
+      {
+        execute: () => this.executeCompleteStatement(),
+      },
+    );
+    registry.registerCommand(
+      { id: 'editor.action.surroundWith', label: 'Surround With…', category: 'Java' },
+      {
+        execute: () => this.executeSurroundWith(),
+      },
+    );
+    registry.registerCommand(
+      { id: 'editor.action.unwrap', label: 'Unwrap', category: 'Java' },
+      {
+        execute: () => this.executeUnwrap(),
+      },
+    );
+    registry.registerCommand(
+      { id: 'kairo.java.liveTemplates.add', label: 'Add Live Template...', category: 'Java' },
+      {
+        execute: () => this.executeAddLiveTemplate(),
+      },
+    );
+    registry.registerCommand(
+      { id: 'kairo.java.liveTemplates.manage', label: 'Manage Live Templates...', category: 'Java' },
+      {
+        execute: () => this.executeManageLiveTemplates(),
+      },
+    );
+    registry.registerCommand(
+      { id: 'editor.action.hippieCompletion', label: 'Hippie Completion', category: 'Java' },
+      {
+        execute: () => {
+          cycleHippieCompletion(false);
+        },
+      },
+    );
+    registry.registerCommand(
+      { id: 'editor.action.hippieCompletionBackward', label: 'Hippie Completion (Backward)', category: 'Java' },
+      {
+        execute: () => {
+          cycleHippieCompletion(true);
+        },
+      },
+    );
+    // IDEA keymap IDs (kairo-idea-windows-keymap) — wire to JavaRefactoring / codeActions.
+    registry.registerCommand(
+      { id: 'editor.action.extractMethod', label: 'Extract Method…', category: 'Java' },
+      { execute: () => this.executeRefactor('extractMethod') },
+    );
+    registry.registerCommand(
+      { id: 'editor.action.extractVariable', label: 'Extract Variable…', category: 'Java' },
+      { execute: () => this.executeRefactor('extractVariable') },
+    );
+    registry.registerCommand(
+      { id: 'editor.action.extractConstant', label: 'Extract Constant…', category: 'Java' },
+      { execute: () => this.executeRefactor('extractConstant') },
+    );
+    registry.registerCommand(
+      { id: 'editor.action.extractField', label: 'Extract Field…', category: 'Java' },
+      { execute: () => this.executeRefactor('extractField') },
+    );
+    registry.registerCommand(
+      { id: 'editor.action.changeSignature', label: 'Change Signature…', category: 'Java' },
+      { execute: () => this.executeRefactor('changeSignature') },
+    );
+    registry.registerCommand(
+      { id: 'editor.action.generator.generate', label: 'Generate…', category: 'Java' },
+      { execute: () => this.executeGenerateMenu() },
+    );
+    registry.registerCommand(
+      { id: 'editor.action.overrideMethod', label: 'Override Methods…', category: 'Java' },
+      { execute: () => this.executeSourceAction('source.overrideMethods', 'Override Methods') },
+    );
+    registry.registerCommand(
+      { id: 'editor.action.implementMethods', label: 'Implement Methods…', category: 'Java' },
+      { execute: () => this.executeSourceAction('source.overrideMethods', 'Implement Methods') },
+    );
+    // JDT LS completion items often fire this after accept for auto-import.
+    this.subs.push(
+      monaco.editor.registerCommand('java.apply.workspaceEdit', (_accessor, ...args: unknown[]) => {
+        const edit = args[0] as LSPWorkspaceEdit | undefined;
+        if (edit) {
+          applyLspWorkspaceEditToOpenEditors(edit);
+        }
+      }),
+    );
+    this.subs.push(
+      monaco.editor.registerCommand('kairo.java.completionAccepted', async (_accessor, ...args: unknown[]) => {
+        const label = String(args[0] ?? '');
+        const kind = typeof args[1] === 'number' ? args[1] : undefined;
+        if (label) {
+          globalRecentCompletions.record(label, kind);
+        }
+        const original = args[2] as { id: string; title?: string; arguments?: unknown[] } | undefined;
+        if (!original?.id) {
+          return;
+        }
+        if (original.id === 'java.apply.workspaceEdit' && original.arguments?.[0]) {
+          applyLspWorkspaceEditToOpenEditors(original.arguments[0] as LSPWorkspaceEdit);
+          return;
+        }
+        if (this.commandService) {
+          await this.commandService.executeCommand(original.id, ...(original.arguments ?? []));
+        }
+      }),
+    );
+  }
+
+  registerMenus(menus: MenuModelRegistry): void {
+    const path = EDITOR_CONTEXT_MENU.concat('2_modification', 'kairo.java.completion');
+    const actions: Array<{ commandId: string; label: string; order: string }> = [
+      { commandId: 'editor.action.completeStatement', label: 'Complete Statement', order: '1' },
+      { commandId: 'kairo.java.smartCompletion', label: 'Smart Type Completion', order: '2' },
+      { commandId: 'editor.action.surroundWith', label: 'Surround With…', order: '3' },
+      { commandId: 'editor.action.unwrap', label: 'Unwrap', order: '4' },
+      { commandId: 'editor.action.hippieCompletion', label: 'Hippie Completion', order: '5' },
+      { commandId: 'kairo.java.liveTemplates.manage', label: 'Manage Live Templates…', order: '6' },
+    ];
+    for (const action of actions) {
+      try {
+        menus.registerMenuAction(path, action);
+      } catch {
+        // menu path may already exist from other contributions
+      }
+    }
+  }
+
+  protected executeCompleteStatement(): void {
+    const editor = monaco.editor.getEditors().find(e => e.hasTextFocus()) ?? monaco.editor.getEditors()[0];
+    const model = editor?.getModel();
+    const position = editor?.getPosition();
+    if (!editor || !model || !position) {
+      return;
+    }
+    const langId = model.getLanguageId();
+    if (langId !== JAVA_LANGUAGE_ID && langId !== 'jsp') {
+      return;
+    }
+    const lines = model.getLinesContent();
+    const edit = computeCompleteStatement({
+      lines,
+      line: position.lineNumber - 1,
+      character: position.column - 1,
+    });
+    if (!edit) {
+      return;
+    }
+    const ops: monaco.editor.IIdentifiedSingleEditOperation[] = [
+      {
+        range: new monaco.Range(edit.line + 1, 1, edit.line + 1, model.getLineMaxColumn(edit.line + 1)),
+        text: edit.text,
+      },
+    ];
+    if (edit.insertAfter?.length) {
+      const insertText = '\n' + edit.insertAfter.join('\n');
+      ops.push({
+        range: new monaco.Range(edit.line + 1, model.getLineMaxColumn(edit.line + 1), edit.line + 1, model.getLineMaxColumn(edit.line + 1)),
+        text: '', // placeholder — replaced below after first edit applies via single compound
+      });
+      // Apply as one edit: replace line + append following lines
+      ops.length = 0;
+      const full = edit.text + (edit.insertAfter.length ? '\n' + edit.insertAfter.join('\n') : '');
+      ops.push({
+        range: new monaco.Range(edit.line + 1, 1, edit.line + 1, model.getLineMaxColumn(edit.line + 1)),
+        text: full,
+      });
+    }
+    editor.pushUndoStop();
+    editor.executeEdits('kairo.completeStatement', ops);
+    editor.setPosition({ lineNumber: edit.cursorLine + 1, column: edit.cursorCharacter + 1 });
+    editor.revealPositionInCenterIfOutsideViewport(editor.getPosition()!);
+    editor.pushUndoStop();
+    editor.focus();
+  }
+
+  protected async executeSurroundWith(): Promise<void> {
+    const editor = monaco.editor.getEditors().find(e => e.hasTextFocus()) ?? monaco.editor.getEditors()[0];
+    const model = editor?.getModel();
+    const selection = editor?.getSelection();
+    if (!editor || !model || !selection) {
+      return;
+    }
+    const langId = model.getLanguageId();
+    if (langId !== JAVA_LANGUAGE_ID && langId !== 'jsp') {
+      return;
+    }
+
+    let templateId: string | undefined;
+    if (this.quickInput) {
+      const picked = await this.quickInput.showQuickPick(
+        SURROUND_TEMPLATES.map(t => ({
+          label: t.label,
+          description: t.detail,
+        })),
+        { placeholder: 'Surround with…', matchOnDescription: true },
+      );
+      if (picked?.label) {
+        templateId = findSurroundTemplate(picked.label)?.id;
+      }
+    } else {
+      // Headless / no QuickInput — default to try/catch
+      templateId = 'try';
+    }
+    if (!templateId) {
+      return;
+    }
+    const template = findSurroundTemplate(templateId);
+    if (!template) {
+      return;
+    }
+
+    const edit = computeSurroundEdit(
+      {
+        lines: model.getLinesContent(),
+        startLine: selection.startLineNumber - 1,
+        startCharacter: selection.startColumn - 1,
+        endLine: selection.endLineNumber - 1,
+        endCharacter: selection.endColumn - 1,
+      },
+      template,
+    );
+
+    editor.pushUndoStop();
+    editor.executeEdits('kairo.surroundWith', [
+      {
+        range: new monaco.Range(
+          edit.startLine + 1,
+          edit.startCharacter + 1,
+          edit.endLine + 1,
+          edit.endCharacter + 1,
+        ),
+        text: '',
+      },
+    ]);
+    // Re-select emptied range and insert as snippet so Tab cycles placeholders.
+    editor.setSelection(new monaco.Selection(
+      edit.startLine + 1,
+      edit.startCharacter + 1,
+      edit.startLine + 1,
+      edit.startCharacter + 1,
+    ));
+    insertSnippet(editor, edit.text);
+    editor.pushUndoStop();
+    editor.focus();
+  }
+
+  protected executeUnwrap(): void {
+    const editor = monaco.editor.getEditors().find(e => e.hasTextFocus()) ?? monaco.editor.getEditors()[0];
+    const model = editor?.getModel();
+    const position = editor?.getPosition();
+    if (!editor || !model || !position) {
+      return;
+    }
+    const langId = model.getLanguageId();
+    if (langId !== JAVA_LANGUAGE_ID && langId !== 'jsp') {
+      return;
+    }
+    const edit = computeUnwrapEdit({
+      lines: model.getLinesContent(),
+      line: position.lineNumber - 1,
+      character: position.column - 1,
+    });
+    if (!edit) {
+      return;
+    }
+    editor.pushUndoStop();
+    editor.executeEdits('kairo.unwrap', [
+      {
+        range: new monaco.Range(
+          edit.startLine + 1,
+          edit.startCharacter + 1,
+          edit.endLine + 1,
+          edit.endCharacter + 1,
+        ),
+        text: edit.text,
+      },
+    ]);
+    editor.setPosition({ lineNumber: edit.cursorLine + 1, column: edit.cursorCharacter + 1 });
+    editor.pushUndoStop();
+    editor.focus();
+  }
+
+  /** Active Java editor URI + selection as 0-based LSP range. */
+  protected getActiveJavaSelection(): { uri: string; range: LSPRange } | undefined {
+    const editor = monaco.editor.getEditors().find(e => e.hasTextFocus()) ?? monaco.editor.getEditors()[0];
+    const model = editor?.getModel();
+    const selection = editor?.getSelection();
+    if (!editor || !model || !selection) {
+      return undefined;
+    }
+    if (model.getLanguageId() !== JAVA_LANGUAGE_ID) {
+      return undefined;
+    }
+    return {
+      uri: model.uri.toString(),
+      range: {
+        start: { line: selection.startLineNumber - 1, character: selection.startColumn - 1 },
+        end: { line: selection.endLineNumber - 1, character: selection.endColumn - 1 },
+      },
+    };
+  }
+
+  protected async executeRefactor(kind: string): Promise<void> {
+    if (!this.refactoring) {
+      this.messages?.warn('Java refactoring service unavailable.');
+      return;
+    }
+    const sel = this.getActiveJavaSelection();
+    if (!sel) {
+      this.messages?.info('Place the caret in a Java editor first.');
+      return;
+    }
+    const result = await this.refactoring.refactor(sel.uri, sel.range, kind);
+    if (result.success && result.edit) {
+      applyLspWorkspaceEditToOpenEditors(result.edit);
+      this.messages?.info(result.message);
+    } else {
+      this.messages?.warn(result.message || `No ${kind} refactoring available.`);
+    }
+  }
+
+  protected async executeSourceAction(onlyKind: string, label: string): Promise<void> {
+    const sel = this.getActiveJavaSelection();
+    if (!sel) {
+      this.messages?.info('Place the caret in a Java editor first.');
+      return;
+    }
+    if (await this.client.fetchState() !== 'ready') {
+      this.messages?.warn('JDT Language Server is not ready.');
+      return;
+    }
+    try {
+      const actions = await this.client.codeActions({
+        uri: sel.uri,
+        range: sel.range,
+        diagnostics: [],
+        only: [onlyKind],
+      });
+      const withEdit = (actions ?? []).find(a => !('command' in a) && (a as LSPCodeAction).edit) as LSPCodeAction | undefined;
+      if (withEdit?.edit) {
+        applyLspWorkspaceEditToOpenEditors(withEdit.edit);
+        this.messages?.info(`${label} applied.`);
+        return;
+      }
+      // Prefer interactive command if JDT returned one (prompt UI).
+      const withCmd = (actions ?? []).find(a => 'command' in a) as { command: string; arguments?: unknown[] } | undefined;
+      if (withCmd?.command && this.commandService) {
+        await this.commandService.executeCommand(withCmd.command, ...(withCmd.arguments ?? []));
+        return;
+      }
+      this.messages?.warn(`No ${label} action available at this location.`);
+    } catch (err) {
+      this.messages?.error(`${label} failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  protected async executeGenerateMenu(): Promise<void> {
+    const options: Array<{ label: string; kind: string }> = [
+      { label: 'Getter and Setter…', kind: 'source.generate.accessors' },
+      { label: 'Constructor…', kind: 'source.generate.constructors' },
+      { label: 'toString()…', kind: 'source.generate.toString' },
+      { label: 'hashCode() and equals()…', kind: 'source.generate.hashCodeEquals' },
+      { label: 'Delegate Methods…', kind: 'source.generate.delegateMethods' },
+      { label: 'Override Methods…', kind: 'source.overrideMethods' },
+      { label: 'Implement Methods…', kind: 'source.overrideMethods' },
+    ];
+    let kind = options[0].kind;
+    let label = options[0].label;
+    if (this.quickInput) {
+      const picked = await this.quickInput.showQuickPick(
+        options.map(o => ({ label: o.label })),
+        { placeholder: 'Generate…' },
+      );
+      if (!picked?.label) {
+        return;
+      }
+      const match = options.find(o => o.label === picked.label);
+      if (!match) {
+        return;
+      }
+      kind = match.kind;
+      label = match.label;
+    }
+    await this.executeSourceAction(kind, label.replace(/…$/, ''));
+  }
+
+  protected async executeAddLiveTemplate(): Promise<void> {
+    if (!this.quickInput) {
+      console.warn('[kairo-java] QuickInput unavailable for Add Live Template');
+      return;
+    }
+    if (!this.userTemplates) {
+      console.warn('[kairo-java] JavaUserLiveTemplatesService not bound; cannot persist templates');
+      return;
+    }
+    await this.userTemplates.ensureLoaded();
+    const prefix = await this.quickInput.input({
+      prompt: 'Abbreviation (e.g. mysout)',
+      placeHolder: 'prefix',
+    });
+    if (!prefix?.trim()) return;
+    const body = await this.quickInput.input({
+      prompt: 'Template body (use ${1:name} tabstops)',
+      placeHolder: 'System.out.println(${1});',
+    });
+    if (body === undefined) return;
+    await this.userTemplates.upsert({
+      prefix: prefix.trim(),
+      label: prefix.trim(),
+      insertText: body,
+      detail: 'User template',
+      category: 'User',
+    });
+  }
+
+  protected async executeManageLiveTemplates(): Promise<void> {
+    if (!this.quickInput) {
+      console.warn('[kairo-java] QuickInput unavailable for Manage Live Templates');
+      return;
+    }
+    if (!this.userTemplates) {
+      console.warn('[kairo-java] JavaUserLiveTemplatesService not bound; cannot manage templates');
+      await this.quickInput.showQuickPick(
+        [{ label: 'User Live Templates service unavailable', description: 'StorageService / DI missing' }],
+        { placeholder: 'Manage Live Templates' },
+      );
+      return;
+    }
+    await this.userTemplates.ensureLoaded();
+    const items = this.userTemplates.list();
+    if (items.length === 0) {
+      await this.executeAddLiveTemplate();
+      return;
+    }
+    const picked = await this.quickInput.showQuickPick(
+      [
+        { label: '$(add) Add new template...', description: 'create' },
+        ...items.map(t => ({
+          label: t.prefix,
+          description: t.detail,
+          detail: t.insertText.slice(0, 80),
+        })),
+      ],
+      { placeholder: 'Manage Live Templates — select to delete, or add new' },
+    );
+    if (!picked) return;
+    if (picked.description === 'create' || picked.label.includes('Add new')) {
+      await this.executeAddLiveTemplate();
+      return;
+    }
+    const confirm = await this.quickInput.showQuickPick(
+      [
+        { label: 'Delete', description: picked.label },
+        { label: 'Cancel' },
+      ],
+      { placeholder: `Delete template "${picked.label}"?` },
+    );
+    if (confirm?.label === 'Delete') {
+      await this.userTemplates.remove(picked.label);
+    }
+  }
+
   protected ensureJavaQuickSuggestions(): void {
     const applyJavaOptions = (editor: monaco.editor.ICodeEditor): void => {
       const model = editor.getModel();
       if (!model) return;
       const langId = model.getLanguageId();
-      if (langId !== JAVA_LANGUAGE_ID) return;
+      if (langId !== JAVA_LANGUAGE_ID && langId !== 'jsp') return;
       console.log('[KAIRO-JAVA-DEBUG] Applying Java editor options for quick suggestions');
       editor.updateOptions({
         quickSuggestions: {
@@ -356,10 +941,23 @@ export class JavaMonacoRegistrationContribution implements FrontendApplicationCo
         },
         suggestOnTriggerCharacters: true,
         quickSuggestionsDelay: 10,
+        acceptSuggestionOnCommitCharacter: true,
+        acceptSuggestionOnEnter: 'on',
+        tabCompletion: 'on',
+        snippetSuggestions: 'top',
         suggest: {
           localityBonus: true,
           snippetsPreventQuickSuggestions: false,
           showWords: false,
+          shareSuggestSelections: true,
+          filterGraceful: true,
+          showIcons: true,
+          showInlineDetails: true,
+          insertMode: 'insert',
+          selectionMode: 'always',
+          matchOnWordStartOnly: false,
+          preview: true,
+          previewMode: 'subwordSmart',
         },
       });
     };
@@ -470,18 +1068,173 @@ export class JavaMonacoRegistrationContribution implements FrontendApplicationCo
 
 function adaptCompletionItem(
   item: JavaCompletionResponseItem,
-  range: monaco.Range,
+  defaultRange: monaco.Range,
 ): monaco.languages.CompletionItem {
-  return {
-    label: item.label,
+  const insertText = item.insertText ?? item.label;
+  const asSnippet = item.insertTextFormat === INSERT_AS_SNIPPET || looksLikeSnippet(insertText);
+  let range: monaco.Range | monaco.languages.CompletionItemRanges = defaultRange;
+  let finalInsert = insertText;
+
+  if (item.textEdit) {
+    const r = item.textEdit.range;
+    range = new monaco.Range(
+      r.start.line + 1,
+      r.start.character + 1,
+      r.end.line + 1,
+      r.end.character + 1,
+    );
+    finalInsert = item.textEdit.newText;
+  } else if (item.insertRange && item.replaceRange) {
+    range = {
+      insert: new monaco.Range(
+        item.insertRange.start.line + 1,
+        item.insertRange.start.character + 1,
+        item.insertRange.end.line + 1,
+        item.insertRange.end.character + 1,
+      ),
+      replace: new monaco.Range(
+        item.replaceRange.start.line + 1,
+        item.replaceRange.start.character + 1,
+        item.replaceRange.end.line + 1,
+        item.replaceRange.end.character + 1,
+      ),
+    };
+  }
+
+  const label: string | monaco.languages.CompletionItemLabel =
+    item.labelDetail || item.labelDescription
+      ? {
+          label: item.label,
+          detail: item.labelDetail,
+          description: item.labelDescription,
+        }
+      : item.label;
+
+  const suggestion: MonacoCompletionItemWithData = {
+    label,
     kind: toMonacoCompletionItemKind(item.kind),
     detail: item.detail,
     documentation: item.documentation,
     sortText: item.sortText,
     filterText: item.filterText,
-    insertText: item.insertText ?? item.label,
+    insertText: finalInsert,
     range,
+    commitCharacters: item.commitCharacters,
+    additionalTextEdits: item.additionalTextEdits?.map(edit => ({
+      range: new monaco.Range(
+        edit.range.start.line + 1,
+        edit.range.start.character + 1,
+        edit.range.end.line + 1,
+        edit.range.end.character + 1,
+      ),
+      text: edit.newText,
+    })),
+    tags: item.isDeprecated ? [monaco.languages.CompletionItemTag.Deprecated] : undefined,
+    preselect: item.preselect,
+    command: {
+      id: 'kairo.java.completionAccepted',
+      title: 'Record completion',
+      arguments: [
+        item.label,
+        item.kind,
+        item.command
+          ? { id: item.command.command, title: item.command.title, arguments: item.command.arguments }
+          : undefined,
+      ],
+    },
   };
+
+  if (asSnippet) {
+    suggestion.insertTextRules = monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet;
+  }
+  if (item.data !== undefined) {
+    suggestion._kairoData = item.data;
+    suggestion._kairoNeedsResolve = true;
+  }
+
+  return suggestion;
+}
+
+interface MonacoCompletionItemWithData extends monaco.languages.CompletionItem {
+  _kairoData?: unknown;
+  _kairoNeedsResolve?: boolean;
+}
+
+export { adaptCompletionItem };
+
+/** Insert a TextMate-style snippet at the current caret via Monaco's snippet controller. */
+function insertSnippet(editor: monaco.editor.ICodeEditor, snippet: string): void {
+  const contribution = editor.getContribution('snippetController2') as {
+    insert?: (template: string) => void;
+  } | null;
+  if (contribution?.insert) {
+    contribution.insert(snippet);
+    return;
+  }
+  const pos = editor.getPosition();
+  if (!pos) {
+    return;
+  }
+  const plain = snippet
+    .replace(/\$\{\d+:([^}]*)\}/g, '$1')
+    .replace(/\$\{\d+\}/g, '')
+    .replace(/\$\d+/g, '')
+    .replace(/\$0/g, '');
+  editor.executeEdits('kairo.snippetFallback', [
+    {
+      range: new monaco.Range(pos.lineNumber, pos.column, pos.lineNumber, pos.column),
+      text: plain,
+    },
+  ]);
+}
+
+function applyLspWorkspaceEditToOpenEditors(edit: LSPWorkspaceEdit): void {
+  const changes = edit.changes ?? {};
+  for (const [uri, textEdits] of Object.entries(changes)) {
+    const model = monaco.editor.getModel(monaco.Uri.parse(uri));
+    if (!model || !textEdits?.length) {
+      continue;
+    }
+    const operations = textEdits.map(te => ({
+      range: new monaco.Range(
+        te.range.start.line + 1,
+        te.range.start.character + 1,
+        te.range.end.line + 1,
+        te.range.end.character + 1,
+      ),
+      text: te.newText,
+    }));
+    operations.sort((a, b) => {
+      if (b.range.startLineNumber !== a.range.startLineNumber) {
+        return b.range.startLineNumber - a.range.startLineNumber;
+      }
+      return b.range.startColumn - a.range.startColumn;
+    });
+    model.pushEditOperations([], operations, () => null);
+  }
+  if (edit.documentChanges) {
+    for (const change of edit.documentChanges) {
+      if ('kind' in change) continue;
+      const model = monaco.editor.getModel(monaco.Uri.parse(change.textDocument.uri));
+      if (!model) continue;
+      const operations = change.edits.map(te => ({
+        range: new monaco.Range(
+          te.range.start.line + 1,
+          te.range.start.character + 1,
+          te.range.end.line + 1,
+          te.range.end.character + 1,
+        ),
+        text: te.newText,
+      }));
+      operations.sort((a, b) => {
+        if (b.range.startLineNumber !== a.range.startLineNumber) {
+          return b.range.startLineNumber - a.range.startLineNumber;
+        }
+        return b.range.startColumn - a.range.startColumn;
+      });
+      model.pushEditOperations([], operations, () => null);
+    }
+  }
 }
 
 function adaptDefinition(def: JavaDefinitionResponse): monaco.languages.Location {

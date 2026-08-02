@@ -1,6 +1,7 @@
 package api
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -13,6 +14,7 @@ import (
 )
 
 // searchWSUpgrader is a WebSocket upgrader for streaming search.
+// Origin policy matches the events upgrader (loopback + file://).
 var searchWSUpgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
 		origin := r.Header.Get("Origin")
@@ -20,8 +22,11 @@ var searchWSUpgrader = websocket.Upgrader{
 			return true
 		}
 		if strings.HasPrefix(origin, "http://localhost") ||
+			strings.HasPrefix(origin, "https://localhost") ||
 			strings.HasPrefix(origin, "http://127.0.0.1") ||
-			strings.HasPrefix(origin, "http://[::1]") {
+			strings.HasPrefix(origin, "https://127.0.0.1") ||
+			strings.HasPrefix(origin, "http://[::1]") ||
+			strings.HasPrefix(origin, "https://[::1]") {
 			return true
 		}
 		if strings.HasPrefix(origin, "file://") {
@@ -34,10 +39,42 @@ var searchWSUpgrader = websocket.Upgrader{
 }
 
 // handleSearchStream upgrades the request to a WebSocket and performs
-// streaming search. The client sends a JSON search request as the first
-// message, and the server responds with SearchStreamEvent batches.
+// streaming search. Auth matches /api/v1/events: when the agent has a
+// secret, the browser must offer Sec-WebSocket-Protocol:
+//
+//	["kairo-secret-v1", "<secret>"]
+//
+// and the server echoes the secret as the selected subprotocol so the
+// handshake completes. Without that echo, Chromium rejects the upgrade
+// (observed in desktop as "WebSocket connection error").
 func (s *Server) handleSearchStream(w http.ResponseWriter, r *http.Request) {
-	conn, err := searchWSUpgrader.Upgrade(w, r, nil)
+	responseHeader := http.Header{}
+	if s.secret != "" {
+		offered := parseSubprotocols(r.Header.Get("Sec-WebSocket-Protocol"))
+		var presented string
+		for i, p := range offered {
+			if p == WebSocketSubprotocol {
+				if i+1 < len(offered) {
+					presented = offered[i+1]
+				}
+				break
+			}
+			if eq := strings.SplitN(p, "=", 2); len(eq) == 2 && eq[0] == WebSocketSubprotocol {
+				presented = eq[1]
+				break
+			}
+		}
+		if presented == "" || subtle.ConstantTimeCompare([]byte(presented), []byte(s.secret)) != 1 {
+			writeError(w, "", "", protocol.KairoError{
+				Code:    protocol.ErrUnauthenticated,
+				Message: "missing or invalid WebSocket subprotocol",
+			})
+			return
+		}
+		responseHeader.Set("Sec-WebSocket-Protocol", presented)
+	}
+
+	conn, err := searchWSUpgrader.Upgrade(w, r, responseHeader)
 	if err != nil {
 		return
 	}

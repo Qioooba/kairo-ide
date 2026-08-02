@@ -26,7 +26,16 @@ export type {
   JavaIntelliSenseDefinition,
   JavaIntelliSenseDiagnostic,
 } from './java-intellisense-provider';
-export { JavaMonacoRegistrationContribution } from './java-monaco-registration';
+export { JavaMonacoRegistrationContribution, adaptCompletionItem } from './java-monaco-registration';
+export { registerJavaLiveTemplates } from './java-live-templates';
+export { globalRecentCompletions } from './java-recent-completions';
+export { JavaUserLiveTemplatesService } from './java-user-templates';
+export type { JavaLiveTemplatesOptions } from './java-live-templates';
+export { computeCompleteStatement } from './java-complete-statement';
+export { SURROUND_TEMPLATES, computeSurroundEdit, findSurroundTemplate } from './java-surround-with';
+export type { SurroundTemplate } from './java-surround-with';
+export { computeUnwrapEdit } from './java-unwrap';
+export { JAVA_MONARCH } from './java-monarch';
 export { JdtClassFileFsProvider } from './jdt-fs-provider';
 export { JavaClassDecompilerContribution } from './java-class-decompiler';
 export { JavaDocumentSyncContribution } from './java-document-sync';
@@ -56,6 +65,15 @@ export type { HierarchyMode } from './java-hierarchy-widget';
 // ── IDEA-style Navigation ────────────────────────────────────────
 export { JavaNavigationContribution, JavaNavigationCommands } from './java-navigation-contribution';
 export { JavaReferencesWidget } from './java-references-widget';
+export {
+  prepareUsages,
+  sortUsages,
+  buildUsagePickEntries,
+  filterUsages,
+  fileNameFromUri,
+  relativePathFromUri,
+} from './java-show-usages';
+export type { PreparedUsage, UsagePickEntry } from './java-show-usages';
 
 // ── Debug services (P2-DBG-02) ───────────────────────────────────
 export { JavaExceptionBreakpointService, JAVA_EXCEPTION_FILTERS } from './java-debug-exception-breakpoints';
@@ -101,7 +119,7 @@ export { JavaRunCommandContribution, JavaRunMenuContribution, JavaRunCommands } 
 export type { RunJavaParams, RunJavaResult, JavaClassInfo, JavaMethodInfo } from './java-run-protocol';
 
 import { interfaces } from '@theia/core/shared/inversify';
-import { FrontendApplicationContribution } from '@theia/core/lib/browser';
+import { FrontendApplicationContribution, WidgetFactory } from '@theia/core/lib/browser';
 import { CommandContribution, MenuContribution } from '@theia/core/lib/common';
 import { KeybindingContribution } from '@theia/core/lib/browser/keybinding';
 import { PreferenceContribution } from '@theia/core/lib/common/preferences';
@@ -113,6 +131,7 @@ import { JavaLanguageClient } from './java-language-client';
 import { JavaCompletionProvider } from './java-completion-provider';
 import { JavaIntelliSenseProvider } from './java-intellisense-provider';
 import { JavaMonacoRegistrationContribution } from './java-monaco-registration';
+import { JavaUserLiveTemplatesService } from './java-user-templates';
 import { JdtClassFileFsProvider } from './jdt-fs-provider';
 import { JavaClassDecompilerContribution } from './java-class-decompiler';
 import { JavaDocumentSyncContribution } from './java-document-sync';
@@ -160,12 +179,15 @@ export function bindJavaLanguageClientContribution(bind: interfaces.Bind): void 
     bind(JavaLanguageClient).toSelf().inSingletonScope();
     bind(JavaCompletionProvider).toSelf().inSingletonScope();
     bind(JavaIntelliSenseProvider).toSelf().inSingletonScope();
+    bind(JavaUserLiveTemplatesService).toSelf().inSingletonScope();
     bind(JavaMonacoRegistrationContribution).toSelf().inSingletonScope();
     bind(JdtClassFileFsProvider).toSelf().inSingletonScope();
     bind(JavaClassDecompilerContribution).toSelf().inSingletonScope();
     // Registers the Java completion + definition providers with
     // Monaco at application start.
     bind(FrontendApplicationContribution).toService(JavaMonacoRegistrationContribution);
+    bind(CommandContribution).toService(JavaMonacoRegistrationContribution);
+    bind(MenuContribution).toService(JavaMonacoRegistrationContribution);
     // Decompiles standalone .class files opened from disk and
     // ensures jdt:// library classes get Java highlighting.
     bind(FrontendApplicationContribution).toService(JavaClassDecompilerContribution);
@@ -205,6 +227,10 @@ export function bindJavaLanguageClientContribution(bind: interfaces.Bind): void 
 
     // ── Find Usages / References Panel ────────────────────────────
     bind(JavaReferencesWidget).toSelf();
+    bind(WidgetFactory).toDynamicValue(ctx => ({
+      id: JavaReferencesWidget.ID,
+      createWidget: () => ctx.container.get(JavaReferencesWidget),
+    })).inSingletonScope();
 
     // ── IDEA-style Navigation ─────────────────────────────────────
     bind(JavaNavigationContribution).toSelf().inSingletonScope();

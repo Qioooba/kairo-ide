@@ -1,6 +1,6 @@
 # Kairo IDE 未来路线图
 
-> 最后更新: 2026-08-01 (Session 29 — Phase S E2E 全量回归复跑与修复)
+> 最后更新: 2026-08-01 (Session 30 — 回归截图更新与截图脚本修复)
 
 ## 近期（Phase 1+ 收尾）— 进度 99%
 
@@ -24,8 +24,17 @@
 - ✅ Wave 13 多模块调试
 - ✅ Wave 14 企业合规性套件
 - ✅ 核心流程 E2E 验证（core-e2e 11/11 全绿，windows-e2e 13/13 全绿，standalone-smoke 5/5）
+- ✅ 回归截图更新（`docs/screenshots/current-ui/` 已按最新 UI 重捕；截图脚本端口统一 :18301；13-run-menu.png 修复生成）
 - ⬜ 真实遗留项目 E2E 验证 (需 Java 6 + Tomcat 6 真实环境)
 - ⬜ Windows 10 真实环境完整验证
+
+## 本次会话成果 (2026-08-01 Session 30 — 回归截图更新与截图脚本修复)
+
+- 🟢 截图脚本端口统一 :3001 → :18301（capture-current-ui / capture-screenshots / capture-more-screenshots / verify-* / probe-* 共 9 个脚本）
+- 🟢 历史遗留 `13-run-menu.png` 修复：probe 验证 Lumino v2 菜单 DOM，选择器 `.lm-MenuBar-item:has-text("Run")` + `.lm-Menu` 有效，截图成功生成（16KB）
+- 🟢 补充脚本选择器修复：13-expanded-tree（大小写 + 节点展开）、17-performance-dashboard（`Kairo: Show Performance`）、04/11（命令面板路径）
+- 🟢 重新捕获全部回归截图：capture-current-ui 14/14、capture-more 8/8、capture-screenshots 12/12、verify-* 语言切换/activity-bar 全部成功
+- 🟢 环境栈验证：Runtime Agent 127.0.0.1:18080 + Theia Browser 127.0.0.1:18301 全流程可用
 
 ## 本次会话成果 (2026-08-01 Session 29 — Phase S E2E 全量回归复跑与修复)
 

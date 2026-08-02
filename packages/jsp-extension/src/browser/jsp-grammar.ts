@@ -10,7 +10,7 @@ import * as monaco from '@theia/monaco-editor-core';
 import { FrontendApplicationContribution } from '@theia/core/lib/browser';
 import { injectable, inject, interfaces } from '@theia/core/shared/inversify';
 import { Disposable, DisposableCollection } from '@theia/core/lib/common/disposable';
-import { JavaCompletionProvider, JavaLanguageClient } from '@kairo/java-extension';
+import { JavaCompletionProvider, JavaLanguageClient, JAVA_LANGUAGE_ID, JAVA_MONARCH, registerJavaLiveTemplates } from '@kairo/java-extension';
 import { JSP_LANGUAGE_ID, JSP_MONARCH } from './jsp-monarch';
 import { registerJspNavigation } from './jsp-navigation';
 import { registerJspFindUsages } from './jsp-find-usages';
@@ -23,8 +23,9 @@ import { registerElExpressionProviders } from './el-expression-provider';
 import { registerElNavigation } from './el-navigation';
 import { registerXmlStructureView } from './xml-structure-view';
 import { registerJspScriptletProviders } from './jsp-scriptlet-provider';
-import { registerJspScriptletJavaCompletion } from './jsp-scriptlet-java-completion';
+import { analyzeCursorContext, registerJspScriptletJavaCompletion } from './jsp-scriptlet-java-completion';
 import { registerJspScriptletDiagnostics } from './jsp-scriptlet-diagnostics';
+import { registerJspScriptletBackgrounds } from './jsp-scriptlet-background';
 import { TldCompletionProvider, registerJspTldCompletion } from './jsp-tld-completion';
 import { TldParser } from './tld-parser';
 import { WebXmlCompletionProvider } from './webxml-completion';
@@ -35,6 +36,19 @@ import { registerPropertiesLanguage } from './properties-language';
 export { JSP_LANGUAGE_ID, JSP_MONARCH } from './jsp-monarch';
 
 export function registerJspLanguage(): void {
+  // Embedded Java inside scriptlets needs language id `java` + Monarch.
+  // Register defensively so JSP highlighting works even if the Java
+  // contribution starts later (or fails to bind in a minimal shell).
+  if (!monaco.languages.getLanguages().some(l => l.id === JAVA_LANGUAGE_ID)) {
+    monaco.languages.register({
+      id: JAVA_LANGUAGE_ID,
+      extensions: ['.java'],
+      aliases: ['Java', 'java'],
+      mimetypes: ['text/x-java-source', 'text/x-java'],
+    });
+  }
+  monaco.languages.setMonarchTokensProvider(JAVA_LANGUAGE_ID, JAVA_MONARCH as monaco.languages.IMonarchLanguage);
+
   if (!monaco.languages.getLanguages().some(l => l.id === JSP_LANGUAGE_ID)) {
     monaco.languages.register({
       id: JSP_LANGUAGE_ID,
@@ -43,6 +57,45 @@ export function registerJspLanguage(): void {
     });
   }
   monaco.languages.setMonarchTokensProvider(JSP_LANGUAGE_ID, JSP_MONARCH as monaco.languages.IMonarchLanguage);
+  monaco.languages.setLanguageConfiguration(JSP_LANGUAGE_ID, {
+    comments: { blockComment: ['<!--', '-->'] },
+    brackets: [
+      ['<!--', '-->'],
+      ['<%', '%>'],
+      ['<%!', '%>'],
+      ['<%=', '%>'],
+      ['<%@', '%>'],
+      ['${', '}'],
+      ['#{', '}'],
+      ['<', '>'],
+      ['{', '}'],
+      ['[', ']'],
+      ['(', ')'],
+    ],
+    autoClosingPairs: [
+      { open: '<!--', close: '-->' },
+      { open: '"', close: '"' },
+      { open: "'", close: "'" },
+      { open: '{', close: '}' },
+      { open: '[', close: ']' },
+      { open: '(', close: ')' },
+      { open: '${', close: '}' },
+    ],
+    surroundingPairs: [
+      { open: '"', close: '"' },
+      { open: "'", close: "'" },
+      { open: '{', close: '}' },
+      { open: '[', close: ']' },
+      { open: '(', close: ')' },
+      { open: '<', close: '>' },
+    ],
+    folding: {
+      markers: {
+        start: new RegExp('^\\s*<!--\\s*#?region\\b'),
+        end: new RegExp('^\\s*<!--\\s*#?endregion\\b'),
+      },
+    },
+  });
 }
 
 /**
@@ -80,8 +133,19 @@ export class KairoJspLanguageContribution implements FrontendApplicationContribu
     this.subs.push(registerElNavigation());
     this.subs.push(registerXmlStructureView());
     this.subs.push(registerJspScriptletProviders(this.javaProvider));
-    this.subs.push(registerJspScriptletJavaCompletion(this.javaProvider));
+    this.subs.push(registerJspScriptletJavaCompletion(this.javaProvider, this.javaClient));
+    this.subs.push(registerJavaLiveTemplates(JSP_LANGUAGE_ID, {
+      shouldProvide: (model, position) => {
+        const ctx = analyzeCursorContext(
+          model.getValue(),
+          position.lineNumber - 1,
+          position.column - 1,
+        );
+        return ctx.insideJavaBlock;
+      },
+    }));
     this.subs.push(registerJspScriptletDiagnostics(this.javaClient));
+    this.subs.push(registerJspScriptletBackgrounds());
     this.subs.push(Disposable.create(() => registerJspServletNavigation().dispose()));
     this.subs.push(registerJspDebugCodeLens());
     this.subs.push(registerJspBreakpointCommand());

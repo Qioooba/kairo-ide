@@ -12,9 +12,10 @@
 //   * didOpen is only sent once the client reports 'ready';
 //     documents opened earlier are buffered and flushed when
 //     the state transitions to 'ready'.
-//   * didChange is debounced (default 300 ms) and sends the
+//   * didChange is debounced (default 100 ms) and sends the
 //     full document text (the manager's LSP connection does
-//     not negotiate incremental sync).
+//     not negotiate incremental sync). Call flushPending()
+//     before completion so the LS sees the latest buffer.
 //   * didClose is sent only for documents whose didOpen was
 //     actually delivered.
 //   * All client calls are guarded: failures are logged via
@@ -53,7 +54,7 @@ interface TrackedDocument {
   timer: ReturnType<typeof setTimeout> | undefined;
 }
 
-export const JAVA_DOCUMENT_SYNC_DEBOUNCE_MS = 300;
+export const JAVA_DOCUMENT_SYNC_DEBOUNCE_MS = 100;
 
 export class JavaDocumentSync {
   private readonly docs = new Map<string, TrackedDocument>();
@@ -152,6 +153,30 @@ export class JavaDocumentSync {
   /** Number of tracked documents (test/diagnostics hook). */
   get size(): number {
     return this.docs.size;
+  }
+
+  /**
+   * Immediately flush any pending debounced didChange for one
+   * URI (or all tracked URIs). Call before completion / hover
+   * so the language server is not answering against a stale buffer.
+   */
+  flushPending(uri?: string): void {
+    if (uri) {
+      const doc = this.docs.get(uri);
+      if (doc?.timer) {
+        clearTimeout(doc.timer);
+        doc.timer = undefined;
+        this.flushChange(uri);
+      }
+      return;
+    }
+    for (const [trackedUri, doc] of this.docs) {
+      if (doc.timer) {
+        clearTimeout(doc.timer);
+        doc.timer = undefined;
+        this.flushChange(trackedUri);
+      }
+    }
   }
 
   dispose(): void {

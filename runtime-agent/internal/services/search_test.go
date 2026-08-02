@@ -167,6 +167,39 @@ func TestMemSearcher_Search_NoResults(t *testing.T) {
 	}
 }
 
+func TestMemSearcher_ListFiles(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a.java"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "b.txt"), []byte("y"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	m := &memSearcher{}
+	payload, _ := json.Marshal(map[string]interface{}{
+		"rootPath": dir,
+		"include":  []string{"*.java"},
+	})
+	result, err := m.ListFiles(context.Background(), payload)
+	if err != nil {
+		t.Fatalf("ListFiles failed: %v", err)
+	}
+	var resp struct {
+		Files []struct {
+			Path string `json:"path"`
+			Name string `json:"name"`
+		} `json:"files"`
+		Total int `json:"total"`
+	}
+	if err := json.Unmarshal(result, &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Total != 1 || resp.Files[0].Name != "a.java" {
+		t.Fatalf("resp=%+v", resp)
+	}
+}
+
 type stubWorkspaceResolver struct {
 	root string
 	err  bool

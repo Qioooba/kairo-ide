@@ -35,7 +35,10 @@ export type JDKDialogChoice = 'continue' | 'quit';
 
 // ─── Constants ──────────────────────────────────────────────────
 
+/** Minimum JDK for general IDE host features (debug bridge, etc.). */
 const MIN_JDK_MAJOR = 17;
+/** Minimum JDK for hosting the pinned JDT LS 1.55 distribution. */
+export const JDT_LS_MIN_JDK_MAJOR = 21;
 
 const javaExe = process.platform === 'win32' ? 'java.exe' : 'java';
 
@@ -181,51 +184,69 @@ export function parseMajorVersion(version: string): number {
 // ─── Detection ──────────────────────────────────────────────────
 
 /**
- * Detect a JDK 17+ installation, following the same priority as
- * the Go Runtime Agent's jdkmanager.Detect().
+ * Scan candidates for a JDK whose major version is >= minMajor.
+ * Explicit env homes are tried first (when they satisfy minMajor),
+ * then bundled layouts, PATH, and common install locations.
  */
-export function detectJDK17Plus(bundledDir?: string): JDKDetectionResult {
+function detectJDKAtLeast(minMajor: number, bundledDir?: string): JDKDetectionResult {
   const searchedPaths: string[] = [];
 
   function tryPath(candidate: string): JDKDetectionResult | null {
     searchedPaths.push(candidate);
     const result = probeJavaVersion(candidate);
-    if (result.found) return result;
+    if (result.found && (result.major ?? 0) >= minMajor) return result;
     return null;
   }
 
-  // 1. KAIRO_JDK_HOME
-  const kairoJdkHome = process.env.KAIRO_JDK_HOME;
-  if (kairoJdkHome) {
-    const r = tryPath(path.join(kairoJdkHome, 'bin', javaExe));
+  function tryHome(home: string | undefined): JDKDetectionResult | null {
+    if (!home) return null;
+    return tryPath(path.join(home, 'bin', javaExe));
+  }
+
+  // Dedicated JDT host override (only meaningful when seeking 21+).
+  if (minMajor >= JDT_LS_MIN_JDK_MAJOR) {
+    for (const envName of ['KAIRO_JDT_LS_JRE', 'KAIRO_JRE17_HOME']) {
+      const r = tryHome(process.env[envName]);
+      if (r) return { ...r, searchedPaths };
+    }
+  }
+
+  // Explicit host JDK (accepted when it already meets minMajor).
+  {
+    const r = tryHome(process.env.KAIRO_JDK_HOME);
     if (r) return { ...r, searchedPaths };
   }
 
-  // 2. bundled/jdk17/
   if (bundledDir) {
-    const r = tryPath(path.join(bundledDir, 'jdk17', 'bin', javaExe));
+    if (minMajor >= JDT_LS_MIN_JDK_MAJOR) {
+      const r21 = tryPath(path.join(bundledDir, 'jdk21', 'bin', javaExe));
+      if (r21) return { ...r21, searchedPaths };
+    }
+    const r17 = tryPath(path.join(bundledDir, 'jdk17', 'bin', javaExe));
+    if (r17) return { ...r17, searchedPaths };
+  }
+
+  // Prefer a 21+ install from common paths before settling on JAVA_HOME=17.
+  if (minMajor >= JDT_LS_MIN_JDK_MAJOR) {
+    for (const p of commonJDKPaths()) {
+      const r = tryPath(p);
+      if (r) return { ...r, searchedPaths };
+    }
+  }
+
+  {
+    const r = tryHome(process.env.JAVA_HOME);
     if (r) return { ...r, searchedPaths };
   }
 
-  // 3. JAVA_HOME
-  const javaHome = process.env.JAVA_HOME;
-  if (javaHome) {
-    const r = tryPath(path.join(javaHome, 'bin', javaExe));
-    if (r) return { ...r, searchedPaths };
-  }
-
-  // 4. PATH
   if (process.platform === 'win32') {
-    // On Windows, `where java` returns the first match.
     try {
       const whereResult = execSync('where java', { encoding: 'utf-8', timeout: 5_000 });
-      const lines = whereResult.trim().split(/\r?\n/);
-      for (const line of lines) {
+      for (const line of whereResult.trim().split(/\r?\n/)) {
         const trimmed = line.trim();
-        if (trimmed) {
-          const r = tryPath(trimmed);
-          if (r) return { ...r, searchedPaths };
-        }
+        if (!trimmed) continue;
+        const r = tryPath(trimmed);
+        if (r) return { ...r, searchedPaths };
       }
     } catch { /* java not on PATH */ }
   } else {
@@ -238,13 +259,47 @@ export function detectJDK17Plus(bundledDir?: string): JDKDetectionResult {
     } catch { /* java not on PATH */ }
   }
 
-  // 5. Common install locations
   for (const p of commonJDKPaths()) {
     const r = tryPath(p);
     if (r) return { ...r, searchedPaths };
   }
 
   return { found: false, searchedPaths };
+}
+
+/**
+ * Unified host JDK for the IDE: prefer JDK 21+ (covers JDT LS 1.55
+ * and the debug bridge). Fall back to JDK 17+ when 21 is absent so
+ * basic Java tooling still works.
+ */
+export function detectHostJDK(bundledDir?: string): JDKDetectionResult {
+  const jdk21 = detectJDKAtLeast(JDT_LS_MIN_JDK_MAJOR, bundledDir);
+  if (jdk21.found) return jdk21;
+  return detectJDKAtLeast(MIN_JDK_MAJOR, bundledDir);
+}
+
+/** @deprecated Prefer detectHostJDK — kept for existing unit tests. */
+export function detectJDK17Plus(bundledDir?: string): JDKDetectionResult {
+  return detectJDKAtLeast(MIN_JDK_MAJOR, bundledDir);
+}
+
+/** @deprecated Prefer detectHostJDK — kept for call-site compatibility. */
+export function detectJDK21Plus(bundledDir?: string): JDKDetectionResult {
+  return detectJDKAtLeast(JDT_LS_MIN_JDK_MAJOR, bundledDir);
+}
+
+/**
+ * Point the canonical host env vars at one JDK home.
+ * When major >= 21, JDT LS and the IDE host share the same install.
+ */
+export function applyHostJDKEnv(result: JDKDetectionResult): void {
+  if (!result.found || !result.javaHome) return;
+  process.env.KAIRO_JDK_HOME = result.javaHome;
+  if ((result.major ?? 0) >= JDT_LS_MIN_JDK_MAJOR) {
+    process.env.KAIRO_JDT_LS_JRE = result.javaHome;
+    // Keep the legacy alias in sync so older scripts/agents still work.
+    process.env.KAIRO_JRE17_HOME = result.javaHome;
+  }
 }
 
 // ─── Dialog ─────────────────────────────────────────────────────
@@ -261,9 +316,9 @@ export async function showJDKSetupDialog(
     .join('\n');
 
   const message = [
-    'Kairo IDE 需要 JDK 17 或更高版本来运行 Java 语言服务和调试器。',
+    'Kairo IDE 需要 JDK 17+（推荐 JDK 21+，JDT 语言服务依赖 21）。',
     '',
-    '当前系统未检测到 JDK 17+。',
+    '当前系统未检测到可用的主机 JDK。',
     '',
     '已搜索以下位置：',
     searchedInfo || '  (无)',
@@ -275,7 +330,7 @@ export async function showJDKSetupDialog(
   const choice = await dialog.showMessageBox({
     type: 'warning',
     title: 'Kairo IDE — JDK 环境检测',
-    message: '未检测到 JDK 17+',
+    message: '未检测到主机 JDK',
     detail: message,
     buttons: ['手动选择 JDK', '暂时跳过', '退出'],
     defaultId: 0,

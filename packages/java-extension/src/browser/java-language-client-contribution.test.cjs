@@ -10,7 +10,7 @@ test('JDT client defaults avoid expensive legacy-workspace features', () => {
   const contribution = new KairoJavaLanguageClientContribution();
   const opts = contribution.initializationOptions;
   const java = opts.settings.java;
-  assert.equal(java.completion.guessMethodArguments, false);
+  assert.equal(java.completion.guessMethodArguments, true);
   assert.equal(java.references.includeDecompiledSources, false);
   assert.equal(java.implementationsCodeLens.enabled, false);
   assert.equal(java.trace.server, 'off');
@@ -47,7 +47,7 @@ test('completionProvider: has resolveProvider and triggerCharacters', () => {
   const contribution = new KairoJavaLanguageClientContribution();
   const provider = contribution.completionProvider;
   assert.equal(provider.resolveProvider, true);
-  assert.deepEqual(provider.triggerCharacters, ['.', '@', '#', '*', ' ']);
+  assert.deepEqual(provider.triggerCharacters, ['.', '@', '#', '*']);
 });
 
 test('definitionProvider: returns true', () => {

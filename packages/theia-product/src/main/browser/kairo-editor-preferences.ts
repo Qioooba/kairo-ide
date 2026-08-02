@@ -36,6 +36,13 @@ export const kairoEditorPreferenceSchema: PreferenceSchema = {
       minimum: 0,
       description: 'Controls the delay in milliseconds after which an editor with unsaved changes is saved automatically. Only applies when editor.autoSave is set to afterDelay.',
     },
+    // Override Theia's default (true). IDEA Darcula does not rainbow-color
+    // brackets; matching that keeps Java/JSP highlighting closer to IDEA.
+    'editor.bracketPairColorization.enabled': {
+      type: 'boolean',
+      default: false,
+      description: 'Controls whether bracket pair colorization is enabled. Disabled by default to match IntelliJ IDEA Darcula.',
+    },
   },
 };
 

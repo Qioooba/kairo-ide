@@ -608,12 +608,13 @@ export class SvnContribution
       keybinding: 'ctrlcmd+h',
       when: 'svnActive && editorTextFocus',
     });
-    // Alternate bindings (no editor focus) for use from the file
-    // explorer / project tree context.
+    // Alternate bindings for explorer / project tree. Exclude Java editor
+    // focus so IDEA Ctrl+Alt+H Call Hierarchy (kairo-idea-windows-keymap)
+    // wins in .java files (KAIRO-QA-A7-001).
     registry.registerKeybinding({
       command: SvnCommands.SHOW_HISTORY.id,
       keybinding: 'ctrlcmd+alt+h',
-      when: 'svnActive',
+      when: 'svnActive && !(editorTextFocus && editorLangId == java)',
     });
   }
 

@@ -7,6 +7,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -332,20 +334,56 @@ func (b *AntBuildXML) resolveDeps(name string, visited map[string]bool, order *[
 	return nil
 }
 
-// parseAntDiagnostics parses Ant build output for error messages.
+// antJavacLineRE matches Ant/javac diagnostic lines, optionally prefixed with [javac].
+var antJavacLineRE = regexp.MustCompile(`(?i)^(?:\[javac\]\s*)?(.+?):(\d+):(?:\s*(\d+):)?\s*(error|warning|错误|警告)[:：]\s*(.*)$`)
+
+// parseAntDiagnostics parses Ant build output for error messages with file/line when present.
 func parseAntDiagnostics(output, projectRoot string) []domain.BuildDiagnostic {
 	var diags []domain.BuildDiagnostic
+	seen := make(map[string]struct{})
 	lines := strings.Split(output, "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
-		// Match Ant error patterns like:
-		// [javac] /path/to/File.java:10: error: message
-		// BUILD FAILED
+		if m := antJavacLineRE.FindStringSubmatch(line); m != nil {
+			file := m[1]
+			if !filepath.IsAbs(file) && projectRoot != "" {
+				file = filepath.Join(projectRoot, file)
+			}
+			ln, _ := strconv.Atoi(m[2])
+			col, _ := strconv.Atoi(m[3])
+			if col == 0 {
+				col = 1
+			}
+			sev := strings.ToLower(m[4])
+			if sev == "错误" {
+				sev = "error"
+			} else if sev == "警告" {
+				sev = "warning"
+			}
+			key := file + ":" + m[2] + ":" + m[5]
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			diags = append(diags, domain.BuildDiagnostic{
+				File:     file,
+				Line:     ln,
+				Column:   col,
+				Severity: sev,
+				Message:  m[5],
+			})
+			continue
+		}
 		lower := strings.ToLower(line)
-		if strings.Contains(lower, "error") || strings.Contains(lower, "build failed") {
+		if strings.Contains(lower, "build failed") {
+			key := "build-failed:" + line
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
 			diags = append(diags, domain.BuildDiagnostic{
 				File:     projectRoot,
 				Line:     0,

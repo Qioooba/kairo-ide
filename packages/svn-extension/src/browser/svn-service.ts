@@ -272,12 +272,26 @@ export class SvnService implements SvnFrontendClient {
       const entries = await this.requireProxy().$getStatus(this.activeWcRoot);
       this.cachedStatus = entries;
       this.onDidChangeStatusEmitter.fire(entries);
-      if (!this.wcInfo) {
-        this.wcInfo = await this.getWcInfo(this.activeWcRoot) || undefined;
-      }
+      // Always refresh WC info so revision / URL stay current after update/commit.
+      this.wcInfo = await this.getWcInfo(this.activeWcRoot) || undefined;
       return entries;
     } catch (_e) {
       return this.cachedStatus;
+    }
+  }
+
+  /** Incoming changes from the repository (`svn status -u`). */
+  async getIncomingStatus(): Promise<SvnStatusEntry[]> {
+    if (!this.activeWcRoot) return [];
+    try {
+      const entries = await this.requireProxy().$getStatus(this.activeWcRoot, true);
+      return entries.filter(e =>
+        !!e.reposStatus &&
+        e.reposStatus !== SvnFileStatus.Normal &&
+        e.reposStatus !== SvnFileStatus.None,
+      );
+    } catch {
+      return [];
     }
   }
 

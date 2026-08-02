@@ -99,144 +99,267 @@ const fail = (m) => { console.error(`[${stamp()}] FAIL  ${m}`); process.exit(1);
 const steps = {
   async boot(page, ctx) {
     log('boot: waiting for Theia shell (Theia 1.73 uses #theia-statusBar)');
-    // Theia 1.73 IDs (camelCase): theia-statusBar, theia-ApplicationShell.
-    // We give the renderer a generous timeout because the Go agent +
-    // Theia backend can take 10-30s to come up on first run.
     await page.waitForSelector('#theia-statusBar', { timeout: 90_000 });
-    // Monaco editor is only mounted once a file is opened. The
-    // Kairo shell shows the activity bar + status bar but no
-    // editor area until the user picks a file. So we do NOT
-    // wait for `.monaco-editor` here — `typeInEditor` opens a
-    // sample file first, then writes into it.
     await page.waitForSelector('#theia-ApplicationShell', { timeout: 30_000 }).catch(() => {});
-    // Give Theia a beat to finish mounting its contributions and
-    // for the Kairo runtime-status indicator to settle.
     await sleep(2_000);
+    // Workspace Trust may appear after shell ready; dismiss so file open works.
+    await dismissTrustDialog(page);
     await shot(page, '01-boot-shell', ctx);
   },
 
   async activityBar(page, ctx) {
     log('activityBar: probing items');
-    // Theia 1.73 left activity bar uses Phosphor.js:
-    //   <ul class="p-TabBar theia-app-left-tabbar" role="tablist">
-    //     <li class="p-TabBar-tab" title="Explorer" role="tab">
-    //       <a><span class="action-label" /></a>
-    //     </li>
-    //   </ul>
+    // Theia 1.73 uses Lumino (.lm-TabBar-tab). Older Phosphor
+    // (.p-TabBar-tab) selectors match nothing in current builds.
     const items = await page.evaluate(() => {
-      const tabs = Array.from(document.querySelectorAll('.theia-app-left .p-TabBar-tab, .p-TabBar.theia-app-left-tabbar .p-TabBar-tab'));
-      return tabs.map(el => {
-        const label = el.querySelector('.action-label');
-        return {
-          title: el.getAttribute('title') || el.getAttribute('aria-label') || '',
-          labelText: (label && (label.getAttribute('aria-label') || label.textContent)) || '',
-          cls: el.className,
-        };
-      });
+      const sels = [
+        '.theia-app-left .lm-TabBar-tab',
+        '.lm-TabBar.theia-app-left .lm-TabBar-tab',
+        '.lm-TabBar.theia-app-sides .lm-TabBar-tab',
+        '.theia-app-left .p-TabBar-tab',
+        '.p-TabBar.theia-app-left-tabbar .p-TabBar-tab',
+      ];
+      const seen = new Set();
+      const out = [];
+      for (const sel of sels) {
+        for (const el of document.querySelectorAll(sel)) {
+          if (seen.has(el)) continue;
+          seen.add(el);
+          const label = el.querySelector('.action-label');
+          out.push({
+            title: el.getAttribute('title') || el.getAttribute('aria-label') || '',
+            labelText: (label && (label.getAttribute('aria-label') || label.textContent)) || '',
+            cls: el.className,
+          });
+        }
+      }
+      return out;
     });
     log(`activityBar: found ${items.length} candidate item(s)`);
     for (const i of items) {
-      if (i.title) log(`   - title="${i.title}" label="${i.labelText}"`);
+      if (i.title || i.labelText) log(`   - title="${i.title}" label="${i.labelText}"`);
     }
+    if (items.length === 0) warn('activityBar: no tabs found (expected .lm-TabBar-tab)');
     await shot(page, '02-activity-bar', ctx);
   },
 
   async openExplorer(page, ctx) {
     log('openExplorer: clicking Explorer (real left-bar icon)');
-    const explorer = await findByTitle(page, /Explorer/i);
+    const explorer = await findByTitle(page, /Explorer|资源管理器/i);
     if (explorer) {
       await explorer.click();
     } else {
-      warn('openExplorer: Explorer tab not found, falling back to command');
-      await page.keyboard.press('F1');
-      await page.waitForSelector('.quick-input-widget input[type="text"]', { timeout: 10_000 });
-      await page.fill('.quick-input-widget input[type="text"]', 'Explorer: Focus');
-      await page.keyboard.press('Enter');
+      warn('openExplorer: Explorer tab not found, falling back to Ctrl+Shift+E');
+      await page.keyboard.press('Control+Shift+E');
+      await sleep(500);
     }
     await sleep(1_000);
     await shot(page, '03-explorer-open', ctx);
   },
 
   async openCommandPalette(page, ctx) {
-    log('openCommandPalette: F1');
-    await page.keyboard.press('F1');
+    log('openCommandPalette: Ctrl+Shift+P');
+    await page.keyboard.press('Escape');
+    await sleep(200);
+    await page.keyboard.press('Control+Shift+P');
     await page.waitForSelector('.quick-input-widget input[type="text"]', { timeout: 10_000 });
     await sleep(300);
     await shot(page, '04-command-palette', ctx);
   },
 
   async searchKairo(page, ctx) {
-    log('searchKairo: type "Kairo" in command palette');
-    const input = await page.$('.quick-input-widget input[type="text"]');
+    log('searchKairo: type "Kairo" in command palette (keep ">" prefix)');
+    let input = await page.$('.quick-input-widget input[type="text"]');
+    if (!input) {
+      await page.keyboard.press('Control+Shift+P');
+      await page.waitForSelector('.quick-input-widget input[type="text"]', { timeout: 10_000 });
+      input = await page.$('.quick-input-widget input[type="text"]');
+    }
     if (!input) { warn('searchKairo: no input'); return; }
-    await input.fill('');
-    await input.type('Kairo', { delay: 30 });
-    await sleep(700);
+    // Theia command palette uses a leading ">". Wiping it switches
+    // the widget out of command mode and yields zero Kairo hits.
+    await input.click();
+    const cur = await input.inputValue();
+    if (!cur.startsWith('>')) {
+      await input.fill('>');
+    } else {
+      // Select everything after ">" and replace.
+      await page.keyboard.press('End');
+      await page.keyboard.press('Control+Shift+Home');
+      // Re-type from scratch with prefix preserved:
+      await input.fill('>');
+    }
+    await input.type('Kairo', { delay: 40 });
+    await sleep(1000);
     await shot(page, '05-kairo-commands', ctx);
-    const hits = await page.$$eval('.monaco-list .monaco-list-row', (els) =>
-      els.map(e => e.textContent?.trim() || ''));
+    const hits = await page.$$eval(
+      '.quick-input-widget .monaco-list-row',
+      (els) => els.map(e => (e.getAttribute('aria-label') || e.textContent || '').trim()).filter(Boolean)
+    );
     log(`searchKairo: ${hits.length} matching command(s)`);
-    for (const h of hits.slice(0, 5)) log('   - ' + h);
+    for (const h of hits.slice(0, 8)) log('   - ' + h);
+    if (hits.length === 0) {
+      warn('searchKairo: no Kairo commands visible in palette');
+    }
   },
 
   async revealServers(page, ctx) {
-    log('revealServers: dismiss palette, then call kairo.view.servers');
+    log('revealServers: open Servers via command palette');
     await page.keyboard.press('Escape');
     await sleep(300);
-    const ok = await page.evaluate(() => {
-      const w = window;
-      if (w.theia?.commands?.executeCommand) {
-        return w.theia.commands.executeCommand('kairo.view.servers');
-      }
-      return null;
+    await page.keyboard.press('Control+Shift+P');
+    await page.waitForSelector('.quick-input-widget input[type="text"]', { timeout: 10_000 });
+    const input = await page.$('.quick-input-widget input[type="text"]');
+    await input.fill('>');
+    await input.type('Show Servers', { delay: 30 });
+    await sleep(800);
+    const hit = await page.evaluate(() => {
+      const rows = Array.from(document.querySelectorAll('.quick-input-widget .monaco-list-row'));
+      return rows.some(r => /Show Servers|显示服务器|Servers/i.test(r.getAttribute('aria-label') || r.textContent || ''));
     });
-    if (ok === null) warn('revealServers: theia.commands not exposed');
+    if (hit) {
+      await page.keyboard.press('Enter');
+      log('revealServers: executed Show Servers');
+    } else {
+      // Fallback Chinese / alternate label
+      await input.fill('>');
+      await input.type('显示服务器', { delay: 30 });
+      await sleep(800);
+      const hitZh = await page.evaluate(() => {
+        const rows = Array.from(document.querySelectorAll('.quick-input-widget .monaco-list-row'));
+        return rows.some(r => /服务器|Servers/i.test(r.getAttribute('aria-label') || r.textContent || ''));
+      });
+      if (hitZh) {
+        await page.keyboard.press('Enter');
+      } else {
+        warn('revealServers: Show Servers command not found in palette');
+        await page.keyboard.press('Escape');
+      }
+    }
     await sleep(1_200);
     await shot(page, '06-kairo-servers-view', ctx);
   },
 
   async typeInEditor(page, ctx) {
-    log('typeInEditor: open a sample file in editor and type into it');
-    // Try a few ways to get an editor focused. Theia 1.73 doesn't
-    // open a file by default — the workspace is empty. We'll use
-    // the command palette to open README.md (likely present in
-    // the repo root mounted as a workspace folder) and then type.
-    await page.keyboard.press('F1');
+    log('typeInEditor: open README.md via Ctrl+P and type into it');
+    await page.keyboard.press('Escape');
+    await sleep(200);
+    // Close Servers / other side panels that may steal focus.
+    await page.keyboard.press('Escape');
+    await dismissTrustDialog(page, 2_000);
+    await page.keyboard.press('Control+P');
     await page.waitForSelector('.quick-input-widget input[type="text"]', { timeout: 10_000 });
     let input = await page.$('.quick-input-widget input[type="text"]');
-    await input.fill('');
-    await input.type('Open File', { delay: 30 });
-    await sleep(500);
-    // Pick the first suggestion (likely "File: Open File...").
-    await page.keyboard.press('Enter');
-    await sleep(800);
-    // A second quick-input appears for the path. Type the path.
-    input = await page.$('.quick-input-widget input[type="text"]');
     if (!input) {
-      warn('typeInEditor: no path input after Open File');
-      await page.keyboard.press('Escape');
+      warn('typeInEditor: no quick-open input');
       return;
     }
     await input.fill('');
-    await input.type('package.json', { delay: 20 });
-    await sleep(300);
-    await page.keyboard.press('Enter');
-    // Wait for Monaco.
+    await input.type('README.md', { delay: 25 });
+    // Poll for quick-open hits — indexer can take several seconds on cold start.
+    let matched = false;
+    for (let i = 0; i < 30; i++) {
+      matched = await page.evaluate(() => {
+        const rows = Array.from(document.querySelectorAll('.quick-input-widget .monaco-list-row'));
+        return rows.some(r => /README\.md/i.test(r.getAttribute('aria-label') || r.textContent || ''));
+      });
+      if (matched) break;
+      await sleep(500);
+    }
+    if (!matched) {
+      warn('typeInEditor: README.md not in quick-open results; trying Explorer click fallback');
+      await page.keyboard.press('Escape');
+      const opened = await page.evaluate(() => {
+        const nodes = Array.from(document.querySelectorAll('.theia-TreeNode, .theia-TreeNodeSegment'));
+        const hit = nodes.find(n => /README\.md/i.test(n.textContent || ''));
+        if (hit) { hit.dispatchEvent(new MouseEvent('dblclick', { bubbles: true })); return true; }
+        return false;
+      });
+      if (!opened) {
+        warn('typeInEditor: Explorer fallback failed');
+        await shot(page, '07-editor-typed', ctx);
+        return;
+      }
+    } else {
+      await page.keyboard.press('Enter');
+    }
     try {
       await page.waitForSelector('.monaco-editor', { timeout: 30_000 });
     } catch {
-      warn('typeInEditor: Monaco did not appear after opening package.json');
+      warn('typeInEditor: Monaco did not appear after opening README.md');
+      await shot(page, '07-editor-typed', ctx);
+      return;
     }
-    // Focus editor and type.
-    const ta = await page.$('.monaco-editor textarea');
-    if (!ta) { warn('typeInEditor: no Monaco textarea'); await shot(page, '07-editor-typed', ctx); return; }
-    await ta.click();
+    // Focus via evaluate — Playwright click often times out when Monaco
+    // overlay layers intercept pointer events.
+    const focused = await page.evaluate(() => {
+      const ta = document.querySelector('.monaco-editor textarea.inputarea, .monaco-editor textarea');
+      if (!ta) return false;
+      ta.focus();
+      return document.activeElement === ta || !!ta;
+    });
+    if (!focused) {
+      warn('typeInEditor: no Monaco textarea');
+      await shot(page, '07-editor-typed', ctx);
+      return;
+    }
     await sleep(200);
-    await page.keyboard.press('End');
+    await page.keyboard.press('Control+End');
     await page.keyboard.press('Enter');
     await page.keyboard.type('// Kairo E2E: typed by automation at ' + new Date().toISOString(), { delay: 12 });
     await sleep(400);
     await shot(page, '07-editor-typed', ctx);
+  },
+
+  async javaCompletionSmoke(page, ctx) {
+    log('javaCompletionSmoke: open CompletionDemo.java + Ctrl+Space');
+    await page.keyboard.press('Escape');
+    await sleep(200);
+    await page.keyboard.press('Control+P');
+    await page.waitForSelector('.quick-input-widget input[type="text"]', { timeout: 10_000 }).catch(() => {});
+    const input = await page.$('.quick-input-widget input[type="text"]');
+    if (!input) {
+      warn('javaCompletionSmoke: no quick-open');
+      return;
+    }
+    await input.fill('');
+    await input.type('CompletionDemo.java', { delay: 20 });
+    let matched = false;
+    for (let i = 0; i < 20; i++) {
+      matched = await page.evaluate(() => {
+        const rows = Array.from(document.querySelectorAll('.quick-input-widget .monaco-list-row'));
+        return rows.some(r => /CompletionDemo\.java/i.test(r.getAttribute('aria-label') || r.textContent || ''));
+      });
+      if (matched) break;
+      await sleep(400);
+    }
+    if (!matched) {
+      warn('javaCompletionSmoke: CompletionDemo.java not found (workspace may lack fixture)');
+      await page.keyboard.press('Escape');
+      return;
+    }
+    await page.keyboard.press('Enter');
+    await page.waitForSelector('.monaco-editor', { timeout: 30_000 }).catch(() => {});
+    await sleep(800);
+    await page.evaluate(() => {
+      const ta = document.querySelector('.monaco-editor textarea.inputarea, .monaco-editor textarea');
+      if (ta) ta.focus();
+    });
+    await page.keyboard.press('Control+End');
+    await page.keyboard.press('Enter');
+    await page.keyboard.type('sou', { delay: 40 });
+    await page.keyboard.press('Control+Space');
+    await sleep(1200);
+    const sug = await page.evaluate(() => {
+      const w = document.querySelector('.suggest-widget');
+      if (!w) return { visible: false, count: 0 };
+      const style = getComputedStyle(w);
+      const visible = style.display !== 'none' && w.offsetParent !== null;
+      return { visible, count: w.querySelectorAll('.monaco-list-row').length };
+    });
+    log(`javaCompletionSmoke: suggest visible=${sug.visible} count=${sug.count}`);
+    await shot(page, '11-java-suggest', ctx);
+    await page.keyboard.press('Escape');
   },
 
   async openSettings(page, ctx) {
@@ -296,22 +419,17 @@ const steps = {
 // ─── Helpers ──────────────────────────────────────────────────
 
 async function findByTitle(page, title, scope) {
-  // Theia 1.73 uses Phosphor.js for the activity bar. Tabs are
-  // <li class="p-TabBar-tab" title="..."> with an <a> child.
-  // Match by exact title or regex. We resolve the match inside
-  // the page via page.evaluate (not element.evaluate) so the
-  // filter fn closes over the pattern cleanly.
+  // Theia 1.73 uses Lumino TabBar (.lm-TabBar-tab). Keep Phosphor
+  // fallbacks for older builds.
   const result = await page.evaluate(({ titleRe, scopeSel }) => {
     const root = scopeSel ? document.querySelector(scopeSel) : document;
     if (!root) return null;
     const re = new RegExp(titleRe.source, titleRe.flags);
-    const sel = '.p-TabBar-tab, [role="tab"], .theia-TabBar-tab, .action-label';
+    const sel = '.lm-TabBar-tab, .p-TabBar-tab, [role="tab"], .theia-TabBar-tab, .action-label';
     const candidates = Array.from(root.querySelectorAll(sel));
     for (const el of candidates) {
       const t = el.getAttribute('title') || el.getAttribute('aria-label') || '';
       if (re.test(t)) {
-        // Return a selector that uniquely locates the element so
-        // we can re-select it from the page handle.
         return {
           outerHTML: el.outerHTML.slice(0, 200),
           tag: el.tagName,
@@ -327,10 +445,9 @@ async function findByTitle(page, title, scope) {
     scopeSel: scope || '',
   });
   if (!result) return null;
-  // Re-select the matched element by its index into the same query.
   return page.evaluateHandle(({ index, n, scopeSel }) => {
     const root = scopeSel ? document.querySelector(scopeSel) : document;
-    const sel = '.p-TabBar-tab, [role="tab"], .theia-TabBar-tab, .action-label';
+    const sel = '.lm-TabBar-tab, .p-TabBar-tab, [role="tab"], .theia-TabBar-tab, .action-label';
     const all = Array.from(root.querySelectorAll(sel));
     return all[index] || null;
   }, { index: result.index, n: result.n, scopeSel: scope || '' });
@@ -350,6 +467,29 @@ async function shot(page, name, ctx) {
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
+/** Dismiss Theia Workspace Trust dialog if it appears (non-throwing). */
+async function dismissTrustDialog(page, timeoutMs = 8_000) {
+  try {
+    const dialog = page.locator('.dialogBlock, .workspace-trust-dialog');
+    await dialog.first().waitFor({ state: 'visible', timeout: timeoutMs });
+  } catch {
+    return;
+  }
+  try {
+    const yesBtn = page.locator('button:has-text("Yes, I trust"), button:has-text("信任"), button:has-text("Yes")').first();
+    if (await yesBtn.count()) {
+      await yesBtn.click({ timeout: 3_000 });
+    }
+  } catch {
+    /* already gone */
+  }
+  await page.waitForSelector('.dialogBlock, .workspace-trust-dialog', {
+    state: 'detached',
+    timeout: 5_000,
+  }).catch(() => {});
+  await sleep(300);
+}
+
 // ─── Step ordering ────────────────────────────────────────────
 
 const stepOrder = [
@@ -361,6 +501,7 @@ const stepOrder = [
   'searchKairo',
   'revealServers',
   'typeInEditor',
+  'javaCompletionSmoke',
   'openSettings',
   'toggleTheme',
   'captureFullScreen',
@@ -468,6 +609,32 @@ if (wantList) {
     }
   });
   page.on('pageerror', e => consoleErrors.push(`[pageerror] ${e.message}`));
+  // Auto-dismiss JS dialogs (Workspace Trust, confirm-on-quit, etc.).
+  // Must swallow ProtocolError — dialogs can vanish before accept() lands.
+  page.on('dialog', async (dialog) => {
+    log(`dialog ${dialog.type()}: "${String(dialog.message() || '').slice(0, 80)}"`);
+    try { await dialog.accept(); } catch (_) { /* already gone */ }
+  });
+
+  // Dismiss auto-opened Import/Welcome tabs so later steps hit a clean shell.
+  try {
+    const closed = await page.evaluate(() => {
+      const tabs = Array.from(document.querySelectorAll('.p-TabBar-tab, .theia-tabbar-tab'));
+      let n = 0;
+      for (const t of tabs) {
+        const lbl = (t.getAttribute('title') || t.textContent || '').trim();
+        if (/Import Project|导入项目|Welcome|欢迎/i.test(lbl)) {
+          const closeBtn = t.querySelector('.p-TabBar-tabCloseIcon, .theia-tabbar-tab-close, .p-TabBar-tabClose');
+          if (closeBtn) { closeBtn.click(); n++; }
+        }
+      }
+      return n;
+    });
+    if (closed > 0) log(`closed ${closed} leftover welcome/import tab(s)`);
+    await sleep(800);
+  } catch (e) {
+    warn(`tab cleanup: ${e.message}`);
+  }
 
   let failed = false;
   const wantSmoke = flag('smoke');

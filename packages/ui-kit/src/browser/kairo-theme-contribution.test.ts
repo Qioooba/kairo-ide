@@ -176,24 +176,40 @@ test('KAIRO_IDEA_MONACO_THEME has annotation token (#BBB529)', () => {
   assert.match(contributionSource, /KAIRO_IDEA_MONACO_THEME[\s\S]*token: 'annotation', foreground: 'BBB529'/m);
 });
 
-test('KAIRO_IDEA_MONACO_THEME has constant token (#CC7832) — literals match keywords', () => {
-  assert.match(contributionSource, /KAIRO_IDEA_MONACO_THEME[\s\S]*token: 'constant', foreground: 'CC7832'/m);
+test('KAIRO_IDEA_MONACO_THEME has method token (#FFC66D)', () => {
+  assert.match(contributionSource, /KAIRO_IDEA_MONACO_THEME[\s\S]*token: 'method', foreground: 'FFC66D'/m);
+});
+
+test('KAIRO_IDEA_MONACO_THEME has constant.language token (#CC7832) — literals match keywords', () => {
+  assert.match(contributionSource, /KAIRO_IDEA_MONACO_THEME[\s\S]*token: 'constant\.language', foreground: 'CC7832'/m);
 });
 
 test('KAIRO_IDEA_MONACO_THEME has Javadoc comment token (#629755)', () => {
   assert.match(contributionSource, /KAIRO_IDEA_MONACO_THEME[\s\S]*token: 'comment\.doc', foreground: '629755'/m);
 });
 
+test('KAIRO_IDEA_MONACO_THEME has Javadoc tag token (#8A653B)', () => {
+  assert.match(contributionSource, /KAIRO_IDEA_MONACO_THEME[\s\S]*token: 'keyword\.doc', foreground: '8A653B'/m);
+});
+
 test('KAIRO_IDEA_MONACO_THEME has string.escape token (#CC7832)', () => {
   assert.match(contributionSource, /KAIRO_IDEA_MONACO_THEME[\s\S]*token: 'string\.escape', foreground: 'CC7832'/m);
 });
 
-test('KAIRO_IDEA_MONACO_THEME type.identifier is default text (#A9B7C6) — no special type color', () => {
-  assert.match(contributionSource, /KAIRO_IDEA_MONACO_THEME[\s\S]*token: 'type\.identifier', foreground: 'A9B7C6'/m);
+test('KAIRO_IDEA_MONACO_THEME type.identifier is lavender (#B5B6E3) — heuristic class color', () => {
+  assert.match(contributionSource, /KAIRO_IDEA_MONACO_THEME[\s\S]*token: 'type\.identifier', foreground: 'B5B6E3'/m);
 });
 
 test('KAIRO_IDEA_MONACO_THEME HTML tags are gold (#E8BF6A) — IDEA signature for markup', () => {
   assert.match(contributionSource, /KAIRO_IDEA_MONACO_THEME[\s\S]*token: 'tag', foreground: 'E8BF6A'/m);
+});
+
+test('KAIRO_IDEA_MONACO_THEME JSP delimiters are magenta (#D896FF)', () => {
+  assert.match(contributionSource, /KAIRO_IDEA_MONACO_THEME[\s\S]*token: 'tag\.jsp-scriptlet', foreground: 'D896FF'/m);
+});
+
+test('KAIRO_IDEA_MONACO_THEME JSTL tags are blue (#79B8FF)', () => {
+  assert.match(contributionSource, /KAIRO_IDEA_MONACO_THEME[\s\S]*token: 'tag\.jsp-jstl', foreground: '79B8FF'/m);
 });
 
 test('KAIRO_IDEA_MONACO_THEME has JSP tag tokens', () => {
@@ -218,4 +234,7 @@ test('kairo-theme-contribution.ts defines kairo-idea-dark Monaco theme', () => {
 test('kairo-theme-contribution.ts registers KairoIDEATheme', () => {
   assert.match(contributionSource, /import.*KairoIDEATheme/);
   assert.match(contributionSource, /register\(KairoIDEATheme\)/);
+});
+test('kairo-theme-contribution.ts defaults to Kairo IDEA Dark', () => {
+  assert.match(contributionSource, /setCurrentTheme\(KairoIDEATheme\.id\)/);
 });

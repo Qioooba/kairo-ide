@@ -9,7 +9,7 @@
     "build": "tsc -p tsconfig.json",
     "clean": "rm -rf lib",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "test": "node --test src/browser/svn-parser.test.cjs src/browser/svn-detector.test.cjs"
+    "test": "node --test src/browser/svn-parser.test.cjs src/browser/svn-detector.test.cjs src/node/svn-backend.integration.test.cjs"
   },
   "dependencies": {
     "@kairo/i18n": "workspace:*"

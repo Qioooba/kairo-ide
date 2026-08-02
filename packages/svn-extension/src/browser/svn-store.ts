@@ -1,7 +1,7 @@
 import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
 import { Emitter, Event } from '@theia/core/lib/common/event';
 import { SvnService, SvnStatusEntry, SvnCommitInfo, SvnFileStatus } from './svn-service';
-import { SvnWorkingCopyInfo } from './svn-types';
+import { SvnWorkingCopyInfo, SvnResolveChoice } from './svn-types';
 
 export interface SvnChangesState {
   available: boolean;
@@ -18,6 +18,8 @@ export interface SvnChangesState {
   missingFiles: SvnStatusEntry[];
   lockedFiles: SvnStatusEntry[];
   replacedFiles: SvnStatusEntry[];
+  /** Named changelists → entries (IDEA Local Changes grouping). */
+  changelists: Record<string, SvnStatusEntry[]>;
   selectedFiles: Set<string>;
   commitMessage: string;
   loading: boolean;
@@ -45,6 +47,7 @@ export class SvnStore {
     missingFiles: [],
     lockedFiles: [],
     replacedFiles: [],
+    changelists: {},
     selectedFiles: new Set(),
     commitMessage: '',
     loading: false,
@@ -61,20 +64,24 @@ export class SvnStore {
   protected readonly onHistoryRequestEmitter = new Emitter<{ file?: string }>();
   readonly onHistoryRequest: Event<{ file?: string }> = this.onHistoryRequestEmitter.event;
 
+  protected readonly onFocusCommitEmitter = new Emitter<void>();
+  readonly onFocusCommit: Event<void> = this.onFocusCommitEmitter.event;
+
   @postConstruct()
   protected init(): void {
-    this.svnService.onDidChangeStatus(() => this.refresh());
+    // Status events only re-apply the cache — never re-fetch (avoids loops).
+    this.svnService.onDidChangeStatus(() => this.applyFromCache());
     this.svnService.onSvnAvailabilityChange((available) => {
       this.state = { ...this.state, available };
       this.onDidChangeEmitter.fire(this.state);
     });
     this.svnService.onDidCommitSuccess(() => {
       this.state = { ...this.state, isCommitting: false, commitMessage: '', selectedFiles: new Set() };
-      this.refresh();
+      this.applyFromCache();
     });
     this.svnService.onDidUpdateComplete(() => {
       this.state = { ...this.state, isUpdating: false };
-      this.refresh();
+      this.applyFromCache();
     });
 
     this.state.available = this.svnService.isSvnAvailable();
@@ -102,6 +109,7 @@ export class SvnStore {
         missingFiles: [],
         lockedFiles: [],
         replacedFiles: [],
+        changelists: {},
         selectedFiles: new Set(),
       };
       this.onDidChangeEmitter.fire(this.state);
@@ -110,29 +118,64 @@ export class SvnStore {
     await this.refresh();
   }
 
+  /** Force a fresh `svn status` round-trip, then update UI state. */
   async refresh(): Promise<void> {
     this.state = { ...this.state, loading: true, error: undefined };
     this.onDidChangeEmitter.fire(this.state);
 
     try {
+      await this.svnService.refreshStatus({ ignoreCache: true });
+      this.applyFromCache();
+    } catch (err) {
+      this.state = {
+        ...this.state,
+        loading: false,
+        error: err instanceof Error ? err.message : String(err),
+      };
+      this.onDidChangeEmitter.fire(this.state);
+    }
+  }
+
+  protected applyFromCache(): void {
+    try {
       const status = this.svnService.getCachedStatus();
       const wcInfo = this.svnService.getWcInfoCache();
 
-      const modifiedFiles = status.filter(s => s.status === SvnFileStatus.Modified);
-      const addedFiles = status.filter(s => s.status === SvnFileStatus.Added);
-      const deletedFiles = status.filter(s => s.status === SvnFileStatus.Deleted);
-      const unversionedFiles = status.filter(s => s.status === SvnFileStatus.Unversioned);
+      const changelists: Record<string, SvnStatusEntry[]> = {};
+      const defaultBucket: SvnStatusEntry[] = [];
+
+      for (const entry of status) {
+        if (entry.changelist) {
+          if (!changelists[entry.changelist]) changelists[entry.changelist] = [];
+          changelists[entry.changelist].push(entry);
+        } else {
+          defaultBucket.push(entry);
+        }
+      }
+
+      const modifiedFiles = defaultBucket.filter(s => s.status === SvnFileStatus.Modified);
+      const addedFiles = defaultBucket.filter(s => s.status === SvnFileStatus.Added);
+      const deletedFiles = defaultBucket.filter(s => s.status === SvnFileStatus.Deleted);
+      const unversionedFiles = defaultBucket.filter(s => s.status === SvnFileStatus.Unversioned);
       const conflictedFiles = status.filter(s => s.status === SvnFileStatus.Conflict);
-      const ignoredFiles = status.filter(s => s.status === SvnFileStatus.Ignored);
-      const missingFiles = status.filter(s => s.status === SvnFileStatus.Missing);
+      const ignoredFiles = defaultBucket.filter(s => s.status === SvnFileStatus.Ignored);
+      const missingFiles = defaultBucket.filter(s => s.status === SvnFileStatus.Missing);
       const lockedFiles = status.filter(s => s.isLocked);
-      const replacedFiles = status.filter(s => s.status === SvnFileStatus.Replaced);
+      const replacedFiles = defaultBucket.filter(s => s.status === SvnFileStatus.Replaced);
 
       const allChanges = [
         ...modifiedFiles,
         ...addedFiles,
         ...deletedFiles,
         ...conflictedFiles,
+        ...replacedFiles,
+        ...missingFiles,
+        ...Object.values(changelists).flat().filter(s =>
+          s.status === SvnFileStatus.Modified ||
+          s.status === SvnFileStatus.Added ||
+          s.status === SvnFileStatus.Deleted ||
+          s.status === SvnFileStatus.Replaced,
+        ),
       ];
       const newSelected = new Set<string>();
       for (const f of allChanges) {
@@ -162,8 +205,10 @@ export class SvnStore {
         missingFiles,
         lockedFiles,
         replacedFiles,
+        changelists,
         selectedFiles: newSelected,
         loading: false,
+        error: undefined,
       };
     } catch (err) {
       this.state = {
@@ -192,6 +237,9 @@ export class SvnStore {
       ...this.state.modifiedFiles,
       ...this.state.addedFiles,
       ...this.state.deletedFiles,
+      ...this.state.replacedFiles,
+      ...this.state.missingFiles,
+      ...Object.values(this.state.changelists).flat(),
     ]) {
       newSelected.add(f.path);
     }
@@ -209,12 +257,19 @@ export class SvnStore {
     this.onDidChangeEmitter.fire(this.state);
   }
 
+  focusCommit(): void {
+    this.onFocusCommitEmitter.fire();
+  }
+
   requestDiff(file: string): void {
     this.onDiffRequestEmitter.fire({ file });
+    // Route through SvnService so SvnContribution opens the Diff widget.
+    this.svnService.requestDiff(file);
   }
 
   requestHistory(file?: string): void {
     this.onHistoryRequestEmitter.fire({ file });
+    if (file) this.svnService.requestHistory(file);
   }
 
   async commitSelected(): Promise<SvnCommitInfo> {
@@ -278,12 +333,28 @@ export class SvnStore {
     await this.refresh();
   }
 
+  async resolveConflicts(paths: string[], accept: SvnResolveChoice): Promise<void> {
+    for (const p of paths) {
+      await this.svnService.resolve(p, { accept });
+    }
+    await this.refresh();
+  }
+
   getTotalChanges(): number {
+    const changelistChanges = Object.values(this.state.changelists).flat().filter(s =>
+      s.status === SvnFileStatus.Modified ||
+      s.status === SvnFileStatus.Added ||
+      s.status === SvnFileStatus.Deleted ||
+      s.status === SvnFileStatus.Replaced ||
+      s.status === SvnFileStatus.Conflict,
+    ).length;
     return (
       this.state.modifiedFiles.length +
       this.state.addedFiles.length +
       this.state.deletedFiles.length +
-      this.state.conflictedFiles.length
+      this.state.conflictedFiles.length +
+      this.state.replacedFiles.length +
+      changelistChanges
     );
   }
 

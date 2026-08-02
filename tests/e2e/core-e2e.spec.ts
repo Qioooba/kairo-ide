@@ -336,6 +336,27 @@ test.describe('E2E-03: Search → Preview → Replace → Undo', () => {
       const count = await resultItems.count();
       console.log(`  Search results: ${count} items`);
       expect(count, 'Search results should contain matches').toBeGreaterThan(0);
+      // IDEA: dialog stays open after interacting with a result.
+      await resultItems.first().click();
+      await expect(page.locator('[data-testid="search-center-modal"]')).toBeVisible();
+    });
+
+    await test.step('4b. Open in Find tool window', async () => {
+      const pin = page.locator('[data-testid="open-find-window"]');
+      await expect(pin).toBeVisible({ timeout: 5_000 });
+      await pin.click();
+      await expect(page.locator('[data-testid="search-results-panel"]')).toBeVisible({ timeout: 8_000 });
+      console.log('  Find tool window opened');
+    });
+
+    // Re-open Search Center for replace flow (pin closes the modal).
+    await test.step('4c. Re-open Search Center for replace', async () => {
+      await page.keyboard.press('Control+Shift+f');
+      await expect(page.locator('[data-testid="search-center-modal"]')).toBeVisible({ timeout: 10_000 });
+      const searchInput = page.locator('[data-testid="search-query"]');
+      await searchInput.fill('Hello');
+      await page.keyboard.press('Enter');
+      await page.waitForSelector('[data-testid="search-result"]', { timeout: 20_000 });
     });
 
     // ------------------------------------------------------------------

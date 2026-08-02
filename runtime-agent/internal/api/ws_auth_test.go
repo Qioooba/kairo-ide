@@ -147,6 +147,60 @@ func TestWSAuth_Roundtrip_RejectsBadSecret(t *testing.T) {
 	}
 }
 
+// dialSearchStreamWS dials /api/v1/search/stream with the given
+// subprotocols — same auth contract as /api/v1/events.
+func dialSearchStreamWS(t *testing.T, ts *httptest.Server, subprotocols []string) (*websocket.Conn, *http.Response, error) {
+	t.Helper()
+	u, err := url.Parse(ts.URL)
+	if err != nil {
+		t.Fatalf("parse url: %v", err)
+	}
+	u.Scheme = "ws"
+	u.Path = "/api/v1/search/stream"
+
+	dialer := *websocket.DefaultDialer
+	dialer.Subprotocols = subprotocols
+	dialer.HandshakeTimeout = 3 * time.Second
+
+	return dialer.Dial(u.String(), nil)
+}
+
+// TestSearchStreamWSAuth_Roundtrip_WithSecret guards the
+// desktop regression where search WS failed with
+// "WebSocket connection error" because the upgrader did not
+// echo Sec-WebSocket-Protocol when the client offered
+// kairo-secret-v1 + secret.
+func TestSearchStreamWSAuth_Roundtrip_WithSecret(t *testing.T) {
+	ts := newWSAuthTestServer(t, "topsecret")
+
+	conn, resp, err := dialSearchStreamWS(t, ts, []string{WebSocketSubprotocol, "topsecret"})
+	if err != nil {
+		t.Fatalf("dial search/stream: %v (status=%v)", err, resp)
+	}
+	defer conn.Close()
+
+	if got := resp.Header.Get("Sec-WebSocket-Protocol"); got != "topsecret" {
+		t.Errorf("Sec-WebSocket-Protocol response = %q, want topsecret", got)
+	}
+	if got := conn.Subprotocol(); got != "topsecret" {
+		t.Errorf("conn.Subprotocol() = %q, want topsecret", got)
+	}
+}
+
+// TestSearchStreamWSAuth_RejectsBadSecret asserts 401 when
+// the offered secret does not match.
+func TestSearchStreamWSAuth_RejectsBadSecret(t *testing.T) {
+	ts := newWSAuthTestServer(t, "topsecret")
+
+	req, _ := http.NewRequest(http.MethodGet, "/api/v1/search/stream", nil)
+	req.Header.Set("Sec-WebSocket-Protocol", WebSocketSubprotocol+", wrongsecret")
+	rr := httptest.NewRecorder()
+	ts.Config.Handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("bad-secret status = %d, want 401, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
 // TestWSAuth_RejectsMissingEventBus reproduces the original
 // P0-8 root cause: EventBus is nil, the handler returns 500,
 // and the browser-side WebSocket times out waiting for the

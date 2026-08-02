@@ -1,0 +1,613 @@
+/* Kairo SVN dialogs — cleaner, airier layout than IDEA Commit/Update sheets. */
+
+.kairo-svn-dlg.dialogBlock {
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.35), 0 0 0 1px color-mix(in srgb, var(--theia-focusBorder) 35%, transparent);
+}
+
+.kairo-svn-dlg .dialogTitle {
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  padding: 14px 18px 12px;
+  border-bottom: 1px solid var(--theia-editorWidget-border, var(--theia-dropdown-border));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--theia-button-background) 8%, var(--theia-editor-background)) 0%,
+    var(--theia-editor-background) 100%
+  );
+}
+
+.kairo-svn-dlg .dialogContent {
+  padding: 0 !important;
+  overflow: hidden;
+  background: var(--theia-editor-background);
+}
+
+.kairo-svn-dlg-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 520px;
+  max-height: min(78vh, 820px);
+  width: min(1120px, 92vw);
+  font-size: 13px;
+  color: var(--theia-foreground);
+}
+
+.kairo-svn-dlg-shell.compact {
+  min-height: 360px;
+  width: min(640px, 92vw);
+}
+
+.kairo-svn-dlg-main {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.kairo-svn-dlg-pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.kairo-svn-dlg-pane.files {
+  width: 340px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--theia-editorWidget-border, var(--theia-dropdown-border));
+  background: var(--theia-sideBar-background);
+}
+
+.kairo-svn-dlg-pane.diff {
+  flex: 1;
+  background: var(--theia-editor-background);
+}
+
+.kairo-svn-dlg-pane-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--theia-descriptionForeground);
+  border-bottom: 1px solid var(--theia-editorWidget-border, var(--theia-dropdown-border));
+}
+
+.kairo-svn-dlg-pane-header .count {
+  margin-left: auto;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--theia-button-background) 18%, transparent);
+  color: var(--theia-foreground);
+}
+
+.kairo-svn-dlg-toolbar {
+  display: flex;
+  gap: 6px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--theia-editorWidget-border, var(--theia-dropdown-border));
+}
+
+.kairo-svn-dlg-toolbar .theia-button {
+  padding: 3px 10px;
+  font-size: 12px;
+}
+
+.kairo-svn-dlg-file-list {
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  overflow: auto;
+  flex: 1;
+}
+
+.kairo-svn-dlg-file-group {
+  margin: 8px 6px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--theia-descriptionForeground);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.kairo-svn-dlg-file-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+.kairo-svn-dlg-file-item:hover {
+  background: var(--theia-list-hoverBackground);
+}
+
+.kairo-svn-dlg-file-item.active {
+  background: color-mix(in srgb, var(--theia-button-background) 16%, transparent);
+  border-color: color-mix(in srgb, var(--theia-button-background) 40%, transparent);
+}
+
+.kairo-svn-dlg-file-item input {
+  margin: 0;
+}
+
+.kairo-svn-dlg-file-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kairo-svn-dlg-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  font-family: var(--theia-ui-font-family);
+}
+
+.kairo-svn-dlg-badge.M { color: #c27d0e; background: color-mix(in srgb, #fbbc04 18%, transparent); }
+.kairo-svn-dlg-badge.A { color: #1f8a5c; background: color-mix(in srgb, #3dcc91 18%, transparent); }
+.kairo-svn-dlg-badge.D { color: #c0394a; background: color-mix(in srgb, #f04757 18%, transparent); }
+.kairo-svn-dlg-badge.C { color: #c0394a; background: color-mix(in srgb, #f04757 22%, transparent); }
+.kairo-svn-dlg-badge.R { color: #2f6fed; background: color-mix(in srgb, #4a9eff 18%, transparent); }
+.kairo-svn-dlg-badge.\? { color: var(--theia-descriptionForeground); background: color-mix(in srgb, var(--theia-descriptionForeground) 12%, transparent); }
+.kairo-svn-dlg-badge.U { color: #2f6fed; background: color-mix(in srgb, #4a9eff 18%, transparent); }
+
+.kairo-svn-dlg-diff {
+  flex: 1;
+  overflow: auto;
+  margin: 0;
+  padding: 12px 14px;
+  font-family: var(--theia-monospace-font-family, Consolas, 'Courier New', monospace);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre;
+  background: var(--theia-editor-background);
+}
+
+.kairo-svn-dlg-diff-line {
+  display: block;
+  padding: 0 8px;
+  margin: 0 -8px;
+  border-radius: 2px;
+}
+
+.kairo-svn-dlg-diff-line.add {
+  background: color-mix(in srgb, #3dcc91 16%, transparent);
+  color: color-mix(in srgb, #3dcc91 55%, var(--theia-foreground));
+}
+
+.kairo-svn-dlg-diff-line.del {
+  background: color-mix(in srgb, #f04757 14%, transparent);
+  color: color-mix(in srgb, #f04757 50%, var(--theia-foreground));
+}
+
+.kairo-svn-dlg-diff-line.hunk {
+  color: var(--theia-descriptionForeground);
+  background: color-mix(in srgb, var(--theia-button-background) 8%, transparent);
+}
+
+.kairo-svn-dlg-diff-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 100%;
+  color: var(--theia-descriptionForeground);
+}
+
+.kairo-svn-dlg-diff-empty .codicon {
+  font-size: 28px;
+  opacity: 0.55;
+}
+
+.kairo-svn-dlg-bottom {
+  border-top: 1px solid var(--theia-editorWidget-border, var(--theia-dropdown-border));
+  background: color-mix(in srgb, var(--theia-sideBar-background) 70%, var(--theia-editor-background));
+  padding: 12px 16px 0;
+}
+
+.kairo-svn-dlg-message-row {
+  display: grid;
+  grid-template-columns: 1fr 220px;
+  gap: 14px;
+}
+
+.kairo-svn-dlg-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--theia-descriptionForeground);
+  margin-bottom: 6px;
+}
+
+.kairo-svn-dlg-message {
+  width: 100%;
+  min-height: 88px;
+  resize: vertical;
+  box-sizing: border-box;
+  border-radius: 8px;
+  border: 1px solid var(--theia-input-border);
+  background: var(--theia-input-background);
+  color: var(--theia-input-foreground);
+  padding: 10px 12px;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.kairo-svn-dlg-message:focus {
+  outline: none;
+  border-color: var(--theia-focusBorder);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--theia-focusBorder) 28%, transparent);
+}
+
+.kairo-svn-dlg-options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 0 0;
+}
+
+.kairo-svn-dlg-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.kairo-svn-dlg-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--theia-descriptionForeground);
+}
+
+.kairo-svn-dlg-meta .chars.warn {
+  color: var(--theia-editorWarning-foreground, #fbbc04);
+}
+
+.kairo-svn-dlg-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px 14px;
+}
+
+.kairo-svn-dlg-footer .spacer {
+  flex: 1;
+}
+
+.kairo-svn-dlg-footer .theia-button.main,
+.kairo-svn-dlg-footer .theia-button.primary {
+  min-width: 110px;
+  font-weight: 600;
+}
+
+.kairo-svn-dlg-error {
+  margin: 0 16px 8px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--theia-errorForeground) 12%, transparent);
+  color: var(--theia-errorForeground);
+  font-size: 12px;
+}
+
+.kairo-svn-dlg-form {
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  flex: 1;
+  overflow: auto;
+}
+
+.kairo-svn-dlg-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.kairo-svn-dlg-field .theia-input,
+.kairo-svn-dlg-field .theia-select,
+.kairo-svn-dlg-field select,
+.kairo-svn-dlg-field input[type="text"] {
+  width: 100%;
+  box-sizing: border-box;
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+
+.kairo-svn-dlg-hint {
+  font-size: 12px;
+  color: var(--theia-descriptionForeground);
+  line-height: 1.4;
+}
+
+.kairo-svn-dlg-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 24px 20px;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+}
+
+.kairo-svn-dlg-progress .codicon {
+  font-size: 32px;
+  color: var(--theia-button-background);
+}
+
+.kairo-svn-dlg-summary {
+  padding: 16px 20px;
+  flex: 1;
+  overflow: auto;
+}
+
+.kairo-svn-dlg-summary h3 {
+  margin: 0 0 10px;
+  font-size: 15px;
+}
+
+.kairo-svn-dlg-summary ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.kairo-svn-dlg-tri {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 0;
+  flex: 1;
+  min-height: 0;
+}
+
+.kairo-svn-dlg-tri-pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border-right: 1px solid var(--theia-editorWidget-border, var(--theia-dropdown-border));
+}
+
+.kairo-svn-dlg-tri-pane:last-child {
+  border-right: none;
+}
+
+.kairo-svn-dlg-tri-pane.mine .kairo-svn-dlg-pane-header {
+  color: color-mix(in srgb, #3dcc91 70%, var(--theia-foreground));
+}
+
+.kairo-svn-dlg-tri-pane.theirs .kairo-svn-dlg-pane-header {
+  color: color-mix(in srgb, #4a9eff 70%, var(--theia-foreground));
+}
+
+.kairo-svn-dlg-tri-pane.merged .kairo-svn-dlg-pane-header {
+  color: color-mix(in srgb, #fbbc04 70%, var(--theia-foreground));
+}
+
+.kairo-svn-dlg-code {
+  flex: 1;
+  width: 100%;
+  box-sizing: border-box;
+  border: none;
+  resize: none;
+  padding: 10px 12px;
+  font-family: var(--theia-monospace-font-family, Consolas, monospace);
+  font-size: 12px;
+  line-height: 1.5;
+  background: var(--theia-editor-background);
+  color: var(--theia-editor-foreground);
+}
+
+.kairo-svn-dlg-code:focus {
+  outline: none;
+}
+
+.kairo-svn-dlg-code[readonly] {
+  opacity: 0.92;
+}
+
+.kairo-svn-dlg-repo-path {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--theia-editorWidget-border, var(--theia-dropdown-border));
+  background: var(--theia-sideBar-background);
+  font-family: var(--theia-monospace-font-family, Consolas, monospace);
+  font-size: 12px;
+}
+
+.kairo-svn-dlg-repo-path input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  color: var(--theia-foreground);
+  font: inherit;
+}
+
+.kairo-svn-dlg-repo-list {
+  list-style: none;
+  margin: 0;
+  padding: 8px;
+  overflow: auto;
+  flex: 1;
+}
+
+.kairo-svn-dlg-repo-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.kairo-svn-dlg-repo-item:hover,
+.kairo-svn-dlg-repo-item.selected {
+  background: var(--theia-list-hoverBackground);
+}
+
+.kairo-svn-dlg-repo-item.selected {
+  background: color-mix(in srgb, var(--theia-button-background) 16%, transparent);
+}
+
+.kairo-svn-dlg-repo-meta {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--theia-descriptionForeground);
+}
+
+/* Segmented control — clearer than IDEA radio rows */
+.kairo-svn-dlg-segmented {
+  display: inline-flex;
+  align-items: stretch;
+  padding: 3px;
+  gap: 2px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--theia-sideBar-background) 80%, var(--theia-editor-background));
+  border: 1px solid var(--theia-editorWidget-border, var(--theia-dropdown-border));
+  align-self: flex-start;
+}
+
+.kairo-svn-dlg-seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  background: transparent;
+  color: var(--theia-descriptionForeground);
+  padding: 7px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.kairo-svn-dlg-seg:hover {
+  color: var(--theia-foreground);
+  background: color-mix(in srgb, var(--theia-list-hoverBackground) 80%, transparent);
+}
+
+.kairo-svn-dlg-seg.active {
+  color: var(--theia-button-foreground, #fff);
+  background: var(--theia-button-background);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+}
+
+.kairo-svn-dlg-preview {
+  border-radius: 10px;
+  border: 1px solid var(--theia-editorWidget-border, var(--theia-dropdown-border));
+  background: color-mix(in srgb, var(--theia-button-background) 6%, var(--theia-editor-background));
+  padding: 12px 14px;
+}
+
+.kairo-svn-dlg-preview-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--theia-descriptionForeground);
+  margin-bottom: 8px;
+}
+
+.kairo-svn-dlg-preview-row {
+  display: grid;
+  grid-template-columns: 88px 1fr;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 12px;
+}
+
+.kairo-svn-dlg-preview-row .lbl {
+  color: var(--theia-descriptionForeground);
+}
+
+.kairo-svn-dlg-preview-row .val {
+  font-family: var(--theia-monospace-font-family, Consolas, monospace);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kairo-svn-dlg-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.kairo-svn-dlg-chip {
+  border: 1px solid var(--theia-editorWidget-border, var(--theia-dropdown-border));
+  background: var(--theia-input-background);
+  color: var(--theia-foreground);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.kairo-svn-dlg-chip:hover {
+  border-color: var(--theia-focusBorder);
+  background: color-mix(in srgb, var(--theia-button-background) 12%, transparent);
+}
+
+.kairo-svn-dlg-field-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+.kairo-svn-dlg-success {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: color-mix(in srgb, #3dcc91 14%, transparent);
+  color: color-mix(in srgb, #3dcc91 40%, var(--theia-foreground));
+  font-size: 12px;
+}
+
+.kairo-svn-dlg-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 8px 12px 0;
+  border-bottom: 1px solid var(--theia-editorWidget-border, var(--theia-dropdown-border));
+}
+
+.kairo-svn-dlg .theia-button.main:not(:disabled) {
+  transition: transform 0.08s ease, filter 0.12s ease;
+}
+
+.kairo-svn-dlg .theia-button.main:not(:disabled):hover {
+  filter: brightness(1.06);
+}
+
+.kairo-svn-dlg .theia-button.main:not(:disabled):active {
+  transform: translateY(1px);
+}
+
+body.theia-light .kairo-svn-dlg.dialogBlock {
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.16), 0 0 0 1px rgba(15, 23, 42, 0.06);
+}

@@ -4,7 +4,7 @@ import { Message } from '@theia/core/shared/@lumino/messaging';
 import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
 import { FileDialogService } from '@theia/filesystem/lib/browser/file-dialog';
 import { WorkspaceService } from '@theia/workspace/lib/browser';
-import URI from '@theia/core/lib/common/uri';
+import { FileUri } from '@theia/core/lib/common/file-uri';
 import { KairoProjectService } from './project-service';
 import { ActiveProjectService } from './active-project-service';
 import { RuntimeConnectionService } from '@kairo/runtime-extension';
@@ -662,7 +662,10 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
                                     if (importedSummary) {
                                         console.log('[kairo] Open Project Folder clicked', { projectId: importedSummary.projectId, root: importedSummary.root });
                                         try {
-                                            await workspaceService.open(new URI(importedSummary.root));
+                                            // Theia open handlers require a file:// URI.
+                                            // Bare Windows paths like "G:/foo" have no scheme
+                                            // and fail with "Could not find a handler…".
+                                            await workspaceService.open(FileUri.create(importedSummary.root));
                                         } catch (err) {
                                             console.error('[kairo] Failed to open workspace:', err);
                                             onClose();

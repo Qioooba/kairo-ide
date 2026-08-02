@@ -27,6 +27,8 @@ export interface SvnStatusEntry {
   path: string;
   status: SvnFileStatus;
   props?: SvnFileStatus;
+  /** Remote/incoming status from `svn status -u` (repos-status). */
+  reposStatus?: SvnFileStatus;
   revision?: number;
   lastChangedRevision?: number;
   lastChangedAuthor?: string;
@@ -75,7 +77,13 @@ export interface SvnCredential {
   password: string;
 }
 
-export type SvnResolveChoice = 'mine-full' | 'theirs-full' | 'working' | 'base';
+export type SvnResolveChoice =
+  | 'mine-full'
+  | 'theirs-full'
+  | 'working'
+  | 'base'
+  | 'mine-conflict'
+  | 'theirs-conflict';
 
 export interface SvnCommitInfo {
   revision: number;

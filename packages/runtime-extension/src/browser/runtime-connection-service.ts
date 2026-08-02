@@ -140,33 +140,91 @@ export class RuntimeConnectionService {
 
   @postConstruct()
   protected init(): void {
-    if (!this.config.baseUrl) {
-      // Read config from preload script (available before page loads).
-      // Primary API: window.__kairo (desktop preload per Wave 5 spec).
-      const kairo = (window as unknown as KairoWindow).__kairo;
-      if (kairo && typeof kairo.agentBaseUrl === 'string') {
-        const secret = typeof kairo.getSecret === 'function' ? kairo.getSecret() : '';
-        this.initialize(kairo.agentBaseUrl, secret);
-      } else {
-        // Backward-compat: window.kairoConfig (older preload versions).
-        const kairoCfg = (window as unknown as KairoWindow).kairoConfig;
-        if (kairoCfg && kairoCfg.agentUrl) {
-          this.initialize(kairoCfg.agentUrl, kairoCfg.agentSecret ?? '');
-        } else {
-          // KAIRO-RC-WEB-015: the browser build has no preload to
-          // inject the agent URL, so it used to hard-default to
-          // 127.0.0.1:18080. Allow an explicit override via the
-          // ?kairoAgent= query parameter (localhost dev/QA tool —
-          // it only ever talks to a local agent). Preload/desktop
-          // channels above keep priority.
-          const fromQuery = typeof window.location?.search === 'string'
-            ? new URLSearchParams(window.location.search).get('kairoAgent')
-            : null;
-          const injected = (globalThis as unknown as { __KAIRO_DEFAULT_RUNTIME_URL__?: string }).__KAIRO_DEFAULT_RUNTIME_URL__;
-          this.config = { baseUrl: fromQuery ?? injected ?? DEFAULT_RUNTIME_BASE_URL };
-        }
-      }
+    const fromWindow = this.tryInitFromWindow();
+    if (!fromWindow) {
+      // Browser mode: Theia often serves index.html via sendFile, so the
+      // HTML <script> inject may never run. Fetch same-origin config from
+      // the Theia backend (KAIRO-QA-002), then discover endpoints.
+      // After late bootstrap, reopen EventStream so status bar is not stuck
+      // on a pre-config WS that opened with empty URL/secret (KAIRO-QA-004).
+      void this.bootstrapFromTheiaConfig().finally(() => {
+        this.eagerFetchEndpoints();
+        this.refreshEventStreamAfterConfig();
+      });
+      return;
     }
+    this.eagerFetchEndpoints();
+  }
+
+  /**
+   * Apply agent URL/secret from Electron preload / injected globals.
+   * @returns true when a concrete agent URL was applied.
+   */
+  protected tryInitFromWindow(): boolean {
+    if (this.config.baseUrl) {
+      return true;
+    }
+    const kairo = (window as unknown as KairoWindow).__kairo;
+    if (kairo && typeof kairo.agentBaseUrl === 'string' && kairo.agentBaseUrl) {
+      const secret = typeof kairo.getSecret === 'function' ? kairo.getSecret() : '';
+      this.initialize(kairo.agentBaseUrl, secret);
+      return true;
+    }
+    const kairoCfg = (window as unknown as KairoWindow).kairoConfig;
+    if (kairoCfg && kairoCfg.agentUrl) {
+      this.initialize(kairoCfg.agentUrl, kairoCfg.agentSecret ?? '');
+      return true;
+    }
+    // KAIRO-RC-WEB-015: allow ?kairoAgent= override; otherwise leave
+    // baseUrl empty until bootstrapFromTheiaConfig / DEFAULT fallback.
+    const fromQuery = typeof window.location?.search === 'string'
+      ? new URLSearchParams(window.location.search).get('kairoAgent')
+      : null;
+    const injected = (globalThis as unknown as { __KAIRO_DEFAULT_RUNTIME_URL__?: string }).__KAIRO_DEFAULT_RUNTIME_URL__;
+    if (fromQuery || injected) {
+      this.config = { baseUrl: fromQuery ?? injected ?? '' };
+      return !!this.config.baseUrl;
+    }
+    return false;
+  }
+
+  /**
+   * Load agent URL/secret from Theia backend JSON endpoint.
+   * Safe to call on reconnect when the agent was restarted with a new secret.
+   */
+  async bootstrapFromTheiaConfig(): Promise<boolean> {
+    try {
+      const res = await fetch('/kairo-agent-config.json', {
+        method: 'GET',
+        credentials: 'same-origin',
+        cache: 'no-store',
+        headers: { Accept: 'application/json' },
+      });
+      if (!res.ok) {
+        if (!this.config.baseUrl) {
+          this.config = { baseUrl: DEFAULT_RUNTIME_BASE_URL };
+        }
+        return false;
+      }
+      const body = await res.json() as { agentUrl?: string; agentSecret?: string };
+      if (body?.agentUrl) {
+        this.initialize(body.agentUrl, body.agentSecret ?? '');
+        this.invalidateEndpoints();
+        return true;
+      }
+      if (!this.config.baseUrl) {
+        this.config = { baseUrl: DEFAULT_RUNTIME_BASE_URL };
+      }
+      return false;
+    } catch {
+      if (!this.config.baseUrl) {
+        this.config = { baseUrl: DEFAULT_RUNTIME_BASE_URL };
+      }
+      return false;
+    }
+  }
+
+  protected eagerFetchEndpoints(): void {
     // Eagerly resolve the dynamic host:port the agent is actually
     // bound to. Without this, the first ensureEventStream() call
     // (which fires when a view subscribes to events) uses
@@ -178,7 +236,13 @@ export class RuntimeConnectionService {
     // resolution is fire-and-forget here so the UI mounts without
     // waiting, but the cache is populated by the time
     // subscribeEvents() is invoked a few hundred ms later.
-    this.fetchEndpoints().catch((err) => {
+    this.fetchEndpoints()
+      .then(() => {
+        // Endpoints (esp. events host:port) may differ from baseUrl —
+        // reopen WS so status bar reflects a real agent connection.
+        this.refreshEventStreamAfterConfig();
+      })
+      .catch((err) => {
       // Logged but not rethrown — the fallback path is still
       // functional if the endpoint discovery call fails (e.g.
       // the agent is unreachable at startup, comes up later).
@@ -195,10 +259,38 @@ export class RuntimeConnectionService {
 
   /** Initialize the runtime with the agent URL and secret. */
   initialize(agentUrl: string, agentSecret: string): void {
+    const prevUrl = this.config.baseUrl;
+    const prevSecret = this.agentSecret() ?? '';
     this.config = {
       baseUrl: agentUrl,
       agentSecret: agentSecret,
     };
+    // Late browser bootstrap (or reconnect with new secret) must not leave
+    // a stale EventStream opened against empty/wrong URL (KAIRO-QA-004).
+    if (prevUrl !== agentUrl || prevSecret !== agentSecret) {
+      this.invalidateEndpoints();
+      this.refreshEventStreamAfterConfig();
+    }
+  }
+
+  /**
+   * Close any existing EventStream and reopen when there are subscribers.
+   * Safe no-op when baseUrl is empty or nobody is listening yet.
+   */
+  protected refreshEventStreamAfterConfig(): void {
+    if (!this.config.baseUrl) {
+      return;
+    }
+    if (this.internalEventStream) {
+      this.closeEventStream();
+    }
+    if (this.workspaceId && this.subscribers.size > 0) {
+      this.ensureEventStream();
+    } else if (this.subscribers.size > 0) {
+      // Subscribers may have attached before workspaceId was set — still
+      // open so status transitions to connecting/open for the status bar.
+      this.ensureEventStream();
+    }
   }
 
   configure(cfg: KairoRuntimeConfig): void {
@@ -569,6 +661,9 @@ export class RuntimeConnectionService {
   /** Ensure the single shared EventStream exists and is
    * wired up for multi-subscriber dispatch. */
   private ensureEventStream(): void {
+    if (!this.config.baseUrl) {
+      return;
+    }
     if (this.internalEventStream && this.internalEventStream.status() !== 'closed') {
       return;
     }

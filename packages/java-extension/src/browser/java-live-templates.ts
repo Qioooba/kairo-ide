@@ -68,6 +68,27 @@ const TEMPLATES: TemplateDef[] = [
     detail: 'Print variable value to standard error',
     category: 'Output',
   },
+  {
+    prefix: 'soutp',
+    label: 'soutp',
+    insertText: 'System.out.println("${1:message}");',
+    detail: 'Print string message',
+    category: 'Output',
+  },
+  {
+    prefix: 'soutm',
+    label: 'soutm',
+    insertText: 'System.out.println("${1:$METHOD_NAME$}");',
+    detail: 'Print method name placeholder',
+    category: 'Output',
+  },
+  {
+    prefix: 'souf',
+    label: 'souf',
+    insertText: 'System.out.printf("${1:%s}%n", ${2:value});',
+    detail: 'Printf to standard output',
+    category: 'Output',
+  },
 
   // ===== Main & Constants =====
   {
@@ -108,6 +129,20 @@ const TEMPLATES: TemplateDef[] = [
     category: 'Loops',
   },
   {
+    prefix: 'iter',
+    label: 'iter',
+    insertText: 'for (${1:Type} ${2:item} : ${3:collection}) {\n\t${0}\n}',
+    detail: 'Iterate over collection (IDEA iter)',
+    category: 'Loops',
+  },
+  {
+    prefix: 'itin',
+    label: 'itin',
+    insertText: 'for (java.util.Iterator<${1:Type}> ${2:it} = ${3:collection}.iterator(); ${2:it}.hasNext(); ) {\n\t${1:Type} ${4:next} = ${2:it}.next();\n\t${0}\n}',
+    detail: 'Iterate with Iterator (IDEA itin)',
+    category: 'Loops',
+  },
+  {
     prefix: 'foreach',
     label: 'foreach',
     insertText: 'for (${1:Type} ${2:item} : ${3:collection}) {\n\t${4}\n}',
@@ -142,19 +177,18 @@ const TEMPLATES: TemplateDef[] = [
     detail: 'For loop with inclusive range',
     category: 'Loops',
   },
-
   // ===== Conditionals =====
   {
     prefix: 'ifn',
     label: 'ifn',
-    insertText: 'if (${1:condition} == null) {\n\t${2}\n}',
+    insertText: 'if (${1:var} == null) {\n\t${2}\n}',
     detail: 'If null check',
     category: 'Conditionals',
   },
   {
     prefix: 'inn',
     label: 'inn',
-    insertText: 'if (${1:condition} != null) {\n\t${2}\n}',
+    insertText: 'if (${1:var} != null) {\n\t${2}\n}',
     detail: 'If not null check',
     category: 'Conditionals',
   },
@@ -709,22 +743,216 @@ const TEMPLATES: TemplateDef[] = [
   },
 ];
 
+/** IDEA-style postfix completions: `expr.sout` → `System.out.println(expr);` */
+export interface PostfixTemplateDef {
+  postfix: string;
+  detail: string;
+  /** Build snippet insert text; `$EXPR$` is replaced with the matched expression. */
+  build: (expr: string) => string;
+}
+
+export const POSTFIX_TEMPLATES: PostfixTemplateDef[] = [
+  { postfix: 'sout', detail: 'Print expression', build: e => `System.out.println(${e});` },
+  { postfix: 'soutv', detail: 'Print expression with label', build: e => `System.out.println("${e} = " + ${e});` },
+  { postfix: 'serr', detail: 'Print expression to stderr', build: e => `System.err.println(${e});` },
+  { postfix: 'var', detail: 'Introduce variable', build: e => `\${1:Type} \${2:name} = ${e};` },
+  { postfix: 'val', detail: 'Introduce final variable', build: e => `final \${1:Type} \${2:name} = ${e};` },
+  { postfix: 'field', detail: 'Introduce field', build: e => `\${1:Type} \${2:name} = ${e};` },
+  { postfix: 'nn', detail: 'Check not null', build: e => `if (${e} != null) {\n\t$0\n}` },
+  { postfix: 'null', detail: 'Check null', build: e => `if (${e} == null) {\n\t$0\n}` },
+  { postfix: 'not', detail: 'Negate boolean', build: e => `!(${e})` },
+  { postfix: 'notnull', detail: 'Require non-null', build: e => `Objects.requireNonNull(${e});` },
+  { postfix: 'cast', detail: 'Cast expression', build: e => `((\${1:Type}) ${e})` },
+  { postfix: 'par', detail: 'Parenthesize', build: e => `(${e})` },
+  { postfix: 'if', detail: 'If statement', build: e => `if (${e}) {\n\t$0\n}` },
+  { postfix: 'while', detail: 'While loop', build: e => `while (${e}) {\n\t$0\n}` },
+  { postfix: 'return', detail: 'Return expression', build: e => `return ${e};` },
+  { postfix: 'throw', detail: 'Throw expression', build: e => `throw ${e};` },
+  { postfix: 'try', detail: 'Try-catch expression', build: e => `try {\n\t\${1:${e}}\n} catch (\${2:Exception} \${3:e}) {\n\t\${3:e}.printStackTrace();\n}` },
+  { postfix: 'lambda', detail: 'Lambda from expression', build: e => `() -> ${e}` },
+  { postfix: 'switch', detail: 'Switch on expression', build: e => `switch (${e}) {\n\tcase \${1:value}:\n\t\t$0\n\t\tbreak;\n\tdefault:\n\t\tbreak;\n}` },
+  { postfix: 'assert', detail: 'Assert expression', build: e => `assert ${e} : "\${1:message}";` },
+  { postfix: 'synch', detail: 'Synchronized block', build: e => `synchronized (${e}) {\n\t$0\n}` },
+  { postfix: 'for', detail: 'For-each loop', build: e => `for (\${1:Type} \${2:item} : ${e}) {\n\t$0\n}` },
+  { postfix: 'fori', detail: 'Indexed for loop', build: e => `for (int \${1:i} = 0; \${1:i} < ${e}.size(); \${1:i}++) {\n\t$0\n}` },
+  { postfix: 'stream', detail: 'Call .stream()', build: e => `${e}.stream()` },
+  { postfix: 'toList', detail: 'Collect to List', build: e => `${e}.stream().collect(java.util.stream.Collectors.toList())` },
+  { postfix: 'new', detail: 'New instance', build: e => `new ${e}($0)` },
+  { postfix: 'opt', detail: 'Optional.ofNullable', build: e => `Optional.ofNullable(${e})` },
+  { postfix: 'orElse', detail: 'Optional.orElse', build: e => `${e}.orElse(\${1:null})` },
+  { postfix: 'isempty', detail: 'Check empty', build: e => `if (${e} == null || ${e}.isEmpty()) {\n\t$0\n}` },
+  { postfix: 'inst', detail: 'instanceof check', build: e => `if (${e} instanceof \${1:Type}) {\n\t\${1:Type} \${2:name} = (\${1:Type}) ${e};\n\t$0\n}` },
+  { postfix: 'format', detail: 'String.format', build: e => `String.format(\${1:"%s"}, ${e})` },
+  { postfix: 'reqnonnull', detail: 'Objects.requireNonNull', build: e => `Objects.requireNonNull(${e})` },
+];
+
+export interface PostfixMatch {
+  expression: string;
+  postfix: string;
+  /** 1-based start column of the expression (inclusive). */
+  expressionStartColumn: number;
+}
+
+const POSTFIX_STOP = new Set('=;,{}?:&|!<>+-*/%^~'.split(''));
+
+/**
+ * Walk backward from a trailing `.postfix` to find the expression start,
+ * respecting (), [], <> nesting and skipping simple string/char literals.
+ * Handles `new Foo().sout` and `list.get(0).nn`.
+ */
+export function matchPostfix(linePrefix: string): PostfixMatch | undefined {
+  const trailing = linePrefix.match(/\.(\w*)$/);
+  if (!trailing) {
+    return undefined;
+  }
+  const postfix = trailing[1];
+  const dotIndex = linePrefix.length - trailing[0].length; // index of '.'
+  if (dotIndex <= 0) {
+    return undefined;
+  }
+
+  let i = dotIndex - 1;
+  // Skip spaces between expr and `.` — IDEA allows `foo .sout` rarely, we allow none;
+  // but allow spaces inside already-parsed calls via walker.
+  while (i >= 0 && /\s/.test(linePrefix[i])) {
+    i--;
+  }
+  if (i < 0) {
+    return undefined;
+  }
+
+  let parens = 0;
+  let brackets = 0;
+  let angles = 0;
+  let inSingle = false;
+  let inDouble = false;
+  let escape = false;
+
+  for (; i >= 0; i--) {
+    const ch = linePrefix[i];
+    if (escape) {
+      escape = false;
+      continue;
+    }
+    if (ch === '\\' && (inSingle || inDouble)) {
+      escape = true;
+      continue;
+    }
+    if (!inDouble && ch === "'") {
+      inSingle = !inSingle;
+      continue;
+    }
+    if (!inSingle && ch === '"') {
+      inDouble = !inDouble;
+      continue;
+    }
+    if (inSingle || inDouble) {
+      continue;
+    }
+
+    if (ch === ')') {
+      parens++;
+      continue;
+    }
+    if (ch === '(') {
+      if (parens === 0) {
+        break;
+      }
+      parens--;
+      continue;
+    }
+    if (ch === ']') {
+      brackets++;
+      continue;
+    }
+    if (ch === '[') {
+      if (brackets === 0) {
+        break;
+      }
+      brackets--;
+      continue;
+    }
+    if (ch === '>') {
+      angles++;
+      continue;
+    }
+    if (ch === '<') {
+      if (angles === 0) {
+        // comparison, stop
+        break;
+      }
+      angles--;
+      continue;
+    }
+
+    if (parens === 0 && brackets === 0 && angles === 0) {
+      if (POSTFIX_STOP.has(ch)) {
+        break;
+      }
+      // Stop before keywords like `return foo.sout` → expression is `foo`
+      if (/\s/.test(ch)) {
+        // allow `new Foo()` — look ahead for `new`
+        const before = linePrefix.slice(0, i).replace(/\s+$/, '');
+        if (/\bnew$/.test(before)) {
+          // include `new `
+          const newIdx = before.lastIndexOf('new');
+          i = newIdx - 1;
+          break;
+        }
+        break;
+      }
+    }
+  }
+
+  const exprStart = i + 1;
+  let expression = linePrefix.slice(exprStart, dotIndex).trim();
+  if (!expression || expression.endsWith('.')) {
+    return undefined;
+  }
+  // Reject bare package-looking tokens with no call/member when postfix empty? Allow.
+  const expressionStartColumn = exprStart + 1; // 1-based
+  return { expression, postfix, expressionStartColumn };
+}
+
+export interface JavaLiveTemplatesOptions {
+  /** When provided, completions are only offered if this returns true. */
+  shouldProvide?: (model: monaco.editor.ITextModel, position: monaco.Position) => boolean;
+  /** Extra / user templates merged at query time (user prefixes override built-ins). */
+  getExtraTemplates?: () => Array<{
+    prefix: string;
+    label: string;
+    insertText: string;
+    detail?: string;
+    category?: string;
+  }>;
+}
+
 /**
  * Register Java live-template completion items.
  *
  * Uses a separate provider from the JDT LS completion provider
  * so snippet completions are offered even when the language
  * server is not yet ready or returns an empty list.
+ * Also offers IDEA-style postfix templates (`obj.sout`).
  */
-export function registerJavaLiveTemplates(languageId: string): Disposable {
+export function registerJavaLiveTemplates(
+  languageId: string,
+  options?: JavaLiveTemplatesOptions,
+): Disposable {
   console.log(`[KAIRO-JAVA-DEBUG] registerJavaLiveTemplates() called for language: ${languageId}`);
   return monaco.languages.registerCompletionItemProvider(languageId, {
+    triggerCharacters: ['.'],
     provideCompletionItems: (model, position, _context, _token) => {
       try {
+        if (options?.shouldProvide && !options.shouldProvide(model, position)) {
+          return { suggestions: [] };
+        }
         console.log(`[KAIRO-JAVA-DEBUG] Live template provideCompletionItems called! lang=${model.getLanguageId()}, pos=${position.lineNumber}:${position.column}`);
         const word = model.getWordUntilPosition(position);
         const prefix = word.word;
         const startColumn = word.startColumn;
+        const lineContent = model.getLineContent(position.lineNumber);
+        const linePrefix = lineContent.substring(0, position.column - 1);
 
         console.log(`[KAIRO-JAVA-DEBUG] word="${prefix}", startColumn=${startColumn}, endColumn=${word.endColumn}`);
 
@@ -735,25 +963,67 @@ export function registerJavaLiveTemplates(languageId: string): Disposable {
           position.column,
         );
 
-        if (!prefix) {
-          console.log('[KAIRO-JAVA-DEBUG] Empty prefix, returning all templates');
-          return {
-            suggestions: TEMPLATES.map(tpl => ({
-              label: tpl.label,
+        const suggestions: monaco.languages.CompletionItem[] = [];
+
+        // Postfix: expr.sout → System.out.println(expr);
+        const postfixMatch = matchPostfix(linePrefix);
+        if (postfixMatch) {
+          const lower = postfixMatch.postfix.toLowerCase();
+          for (const tpl of POSTFIX_TEMPLATES) {
+            if (!tpl.postfix.startsWith(lower)) {
+              continue;
+            }
+            const fullRange = new monaco.Range(
+              position.lineNumber,
+              postfixMatch.expressionStartColumn,
+              position.lineNumber,
+              position.column,
+            );
+            suggestions.push({
+              label: `${postfixMatch.expression}.${tpl.postfix}`,
               kind: monaco.languages.CompletionItemKind.Snippet,
-              detail: tpl.detail,
-              insertText: tpl.insertText,
+              detail: `[Postfix] ${tpl.detail}`,
+              documentation: `Wrap \`${postfixMatch.expression}\` — ${tpl.detail}`,
+              insertText: tpl.build(postfixMatch.expression),
               insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-              filterText: tpl.prefix,
-              range: replaceRange,
-              sortText: '1' + tpl.prefix,
-            })),
-          };
+              filterText: `${postfixMatch.expression}.${tpl.postfix}`,
+              range: fullRange,
+              sortText: '0' + tpl.postfix,
+            });
+          }
         }
 
+        // Avoid flooding the suggest widget with every live template on
+        // empty prefix (IDEA only shows them after abbreviation input).
+        if (!prefix) {
+          return { suggestions };
+        }
+
+        // Require at least 2 characters unless exact short classics (sout, if, …)
         const lowerPrefix = prefix.toLowerCase();
+        if (lowerPrefix.length < 2 && !['if'].includes(lowerPrefix)) {
+          return { suggestions };
+        }
+
         const matches: { tpl: TemplateDef; score: number }[] = [];
+        const extras = options?.getExtraTemplates?.() ?? [];
+        const byPrefix = new Map<string, TemplateDef>();
         for (const tpl of TEMPLATES) {
+          if (languageId === 'java' && (tpl.category === 'JSP' || tpl.category === 'XML')) {
+            continue;
+          }
+          byPrefix.set(tpl.prefix, tpl);
+        }
+        for (const tpl of extras) {
+          byPrefix.set(tpl.prefix, {
+            prefix: tpl.prefix,
+            label: tpl.label,
+            insertText: tpl.insertText,
+            detail: tpl.detail ?? 'User template',
+            category: tpl.category ?? 'User',
+          });
+        }
+        for (const tpl of byPrefix.values()) {
           if (tpl.prefix.startsWith(lowerPrefix)) {
             const score = tpl.prefix === lowerPrefix ? 0 : tpl.prefix.length;
             matches.push({ tpl, score });
@@ -762,19 +1032,21 @@ export function registerJavaLiveTemplates(languageId: string): Disposable {
 
         matches.sort((a, b) => a.score - b.score || a.tpl.prefix.localeCompare(b.tpl.prefix));
 
-        console.log(`[KAIRO-JAVA-DEBUG] prefix="${prefix}", matches=${matches.length}`);
+        console.log(`[KAIRO-JAVA-DEBUG] prefix="${prefix}", matches=${matches.length}, postfix=${suggestions.length}`);
 
-        const suggestions = matches.map(({ tpl }) => ({
-          label: tpl.label,
-          kind: monaco.languages.CompletionItemKind.Snippet,
-          detail: tpl.detail,
-          documentation: tpl.category ? `[${tpl.category}] ${tpl.detail}` : tpl.detail,
-          insertText: tpl.insertText,
-          insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-          filterText: tpl.prefix,
-          range: replaceRange,
-          sortText: '0' + tpl.prefix,
-        }));
+        for (const { tpl } of matches) {
+          suggestions.push({
+            label: tpl.label,
+            kind: monaco.languages.CompletionItemKind.Snippet,
+            detail: tpl.detail,
+            documentation: tpl.category ? `[${tpl.category}] ${tpl.detail}` : tpl.detail,
+            insertText: tpl.insertText,
+            insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+            filterText: tpl.prefix,
+            range: replaceRange,
+            sortText: '0' + tpl.prefix,
+          });
+        }
 
         console.log(`[KAIRO-JAVA-DEBUG] Returning ${suggestions.length} suggestions`);
         return { suggestions };

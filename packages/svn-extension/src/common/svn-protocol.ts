@@ -37,8 +37,8 @@ export interface SvnBackendService {
   $findWcRoot(cwd: string): Promise<string | undefined>;
   /** Get `svn info` for a directory. */
   $getWcInfo(cwd: string): Promise<SvnInfo | undefined>;
-  /** Run `svn status` and parse the XML output. */
-  $getStatus(cwd: string): Promise<SvnStatus[]>;
+  /** Run `svn status` and parse the XML output. Pass update=true for incoming (`-u`). */
+  $getStatus(cwd: string, update?: boolean): Promise<SvnStatus[]>;
   /** Run `svn status` for a single path. */
   $getFileStatus(cwd: string, relPath: string): Promise<SvnStatus | undefined>;
   /** Commit selected files with a message. */

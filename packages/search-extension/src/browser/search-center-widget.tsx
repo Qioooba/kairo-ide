@@ -2,7 +2,9 @@ import * as React from 'react';
 import { inject, injectable, postConstruct } from '@theia/core/shared/inversify';
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import type { Message } from '@theia/core/shared/@lumino/messaging';
+import { ApplicationShell, WidgetManager } from '@theia/core/lib/browser';
 import { EditorManager } from '@theia/editor/lib/browser/editor-manager';
+import URI from '@theia/core/lib/common/uri';
 import type { SearchMatch } from '@kairo/protocol';
 import { WorkspaceContextService } from '@kairo/runtime-extension';
 import { KairoI18nService } from '@kairo/i18n';
@@ -10,8 +12,15 @@ import { KairoSearchSessionModel, type SearchSessionState } from './search-sessi
 import { SearchReplaceService, type ReplaceApplyResult, type ReplacePlan } from './search-replace-service';
 import { resolveWorkspaceMatchUri } from './search-path';
 import { SearchScopeModel, type SearchScope, SCOPE_OPTIONS } from './search-scope-model';
+import { parseFileMask, mergeGlobs } from './file-mask';
+import { groupMatchesByFile, sameLineContext, multiLineContext } from './search-result-utils';
+import { SearchResultsWidget } from './search-results-widget';
 import { VirtualList } from '@kairo/ui-kit';
 import './search-center.css';
+
+export { parseFileMask, mergeGlobs, normalizeMaskToken } from './file-mask';
+export { groupMatchesByFile, sameLineContext, multiLineContext } from './search-result-utils';
+export type { SearchResultGroup } from './search-result-utils';
 
 export interface SearchCenterQuery {
   query: string;
@@ -20,6 +29,9 @@ export interface SearchCenterQuery {
   wholeWord: boolean;
   include?: string[];
   exclude?: string[];
+  /** Absolute directory or file to scope the search. */
+  rootPath?: string;
+  scope?: SearchScope;
 }
 
 export interface SearchCenterProps {
@@ -35,31 +47,20 @@ export interface SearchCenterProps {
   isStreaming?: boolean;
   scopeModel?: SearchScopeModel;
   onClose: () => void;
+  onOpenInFindWindow?: () => void;
   mode?: 'search' | 'replace';
+  initialQuery?: string;
   i18n: KairoI18nService;
-}
-
-export interface SearchResultGroup {
-  file: string;
-  matches: readonly SearchMatch[];
-}
-
-export function groupMatchesByFile(matches: readonly SearchMatch[]): SearchResultGroup[] {
-  const groups = new Map<string, SearchMatch[]>();
-  for (const match of matches) {
-    const group = groups.get(match.file);
-    if (group) {
-      group.push(match);
-    } else {
-      groups.set(match.file, [match]);
-    }
-  }
-  return [...groups].map(([file, grouped]) => ({ file, matches: grouped }));
 }
 
 export function parseGlobInput(value: string): string[] | undefined {
   const values = [...new Set(value.split(',').map(item => item.trim()).filter(Boolean))];
   return values.length > 0 ? values : undefined;
+}
+
+/** @deprecated Prefer parseFileMask for IDEA-style masks. */
+export function parseFileTypesInput(value: string): ReturnType<typeof parseFileMask> {
+  return parseFileMask(value);
 }
 
 interface FlatSearchItem {
@@ -84,12 +85,13 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
   isStreaming,
   scopeModel,
   onClose,
+  onOpenInFindWindow,
   mode = 'search',
+  initialQuery = '',
   i18n,
 }) => {
   const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
-  const [query, setQuery] = React.useState('');
-  const [include, setInclude] = React.useState('');
+  const [query, setQuery] = React.useState(initialQuery);
   const [exclude, setExclude] = React.useState('');
   const [isRegex, setRegex] = React.useState(false);
   const [caseSensitive, setCaseSensitive] = React.useState(false);
@@ -106,8 +108,19 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
   const [collapsedFiles, setCollapsedFiles] = React.useState<Set<string>>(new Set());
   const [showPreview, setShowPreview] = React.useState(true);
   const [currentMode, setCurrentMode] = React.useState<'search' | 'replace'>(mode);
+  const [showAdvanced, setShowAdvanced] = React.useState(false);
   const containerRef = React.useRef<HTMLDivElement>(null);
   const inputRef = React.useRef<HTMLInputElement>(null);
+
+  React.useEffect(() => {
+    setCurrentMode(mode);
+  }, [mode]);
+
+  React.useEffect(() => {
+    if (initialQuery) {
+      setQuery(initialQuery);
+    }
+  }, [initialQuery]);
 
   const matches = state.matches;
   const groups = React.useMemo(() => groupMatchesByFile(matches), [matches]);
@@ -224,14 +237,17 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
     setSubmissionError(undefined);
     scopeModel?.setScope(scope);
     scopeModel?.setFileTypes(fileTypes);
+    const mask = parseFileMask(fileTypes);
+    const excludeExtra = parseGlobInput(exclude);
     try {
       await onSearch({
         query: query.trim(),
         isRegex,
         caseSensitive,
         wholeWord,
-        include: parseGlobInput(include),
-        exclude: parseGlobInput(exclude),
+        include: mask.include,
+        exclude: mergeGlobs(mask.exclude, excludeExtra),
+        scope,
       });
     } catch (error) {
       setSubmissionError(error instanceof Error ? error : new Error(String(error)));
@@ -297,11 +313,15 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
       event.preventDefault();
       const item = flatItems[selectedIndex];
       if (item?.kind === 'match' && item.match) {
-        if (event.ctrlKey || event.metaKey) {
+        // IDEA Find: Enter opens and keeps dialog; Shift+Enter opens and closes.
+        // Ctrl/Cmd+Enter opens with preserveFocus (preview-friendly).
+        if (event.shiftKey) {
+          void openSelected(item.match);
+          onClose();
+        } else if (event.ctrlKey || event.metaKey) {
           void openSelected(item.match, true);
         } else {
           void openSelected(item.match);
-          onClose();
         }
       } else if (item?.kind === 'header' && item.file) {
         toggleFileCollapse(item.file);
@@ -331,8 +351,7 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
     if (!showPreview || !selectedMatch) {
       return undefined;
     }
-    const beforeLines = selectedMatch.contextBefore ? selectedMatch.contextBefore.split('\n') : [];
-    const afterLines = selectedMatch.contextAfter ? selectedMatch.contextAfter.split('\n') : [];
+    const { beforeLines, afterLines, sameBefore, sameAfter } = multiLineContext(selectedMatch);
     const contextBefore = beforeLines.slice(-3);
     const contextAfter = afterLines.slice(0, 3);
 
@@ -368,9 +387,9 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
           <div className="kairo-search-preview-current">
             <span className="kairo-search-preview-lineno-current">{selectedMatch.line}</span>
             <span className="kairo-search-preview-code">
-              {beforeLines[beforeLines.length - 1] || ''}
+              {sameBefore}
               <mark>{selectedMatch.matchText}</mark>
-              {afterLines[0] || ''}
+              {sameAfter}
             </span>
           </div>
           {contextAfter.length > 0 && (
@@ -533,6 +552,7 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
                   placeholder={t('widget.search.center.placeholder.fileTypes')}
                   aria-label={t('widget.search.center.ariaLabel.fileTypes')}
                   data-testid="filter-file-types"
+                  title={t('widget.search.center.placeholder.fileTypesHint')}
                 />
               </div>
               <select
@@ -546,6 +566,15 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
                   <option key={option.value} value={option.value}>{option.label}</option>
                 ))}
               </select>
+              <button
+                type="button"
+                className={`kairo-search-filter-btn${showAdvanced ? ' is-active' : ''}`}
+                onClick={() => setShowAdvanced(!showAdvanced)}
+                title={t('widget.search.center.advanced.toggle')}
+                data-testid="toggle-advanced"
+              >
+                <span className="codicon codicon-ellipsis" aria-hidden="true" />
+              </button>
               <button
                 type="submit"
                 className="kairo-search-submit"
@@ -595,6 +624,21 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
                 </button>
               )}
             </div>
+            {showAdvanced && (
+              <div className="kairo-search-options-row kairo-search-advanced-row">
+                <div className="kairo-search-file-mask kairo-search-exclude-mask">
+                  <span className="codicon codicon-exclude" aria-hidden="true" />
+                  <input
+                    className="kairo-search-mask-input"
+                    value={exclude}
+                    onChange={event => setExclude(event.target.value)}
+                    placeholder={t('widget.search.center.placeholder.exclude')}
+                    aria-label={t('widget.search.center.ariaLabel.exclude')}
+                    data-testid="filter-exclude"
+                  />
+                </div>
+              </div>
+            )}
           </form>
         </div>
 
@@ -608,9 +652,6 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
               onSelectIndex={(index) => {
                 if (flatItems[index]?.kind === 'match') {
                   setSelectedIndex(index);
-                  if (flatItems[index].match) {
-                    void openSelected(flatItems[index].match!, true);
-                  }
                 }
               }}
               className="kairo-search-results"
@@ -634,6 +675,7 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
                   );
                 }
                 const match = item.match!;
+                const { before, after } = sameLineContext(match);
                 return (
                   <button
                     type="button"
@@ -642,18 +684,24 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
                     className={`kairo-search-result-item${isSelected ? ' is-selected' : ''}`}
                     onMouseEnter={() => {
                       setSelectedIndex(item.flatIndex);
+                    }}
+                    onClick={() => {
+                      setSelectedIndex(item.flatIndex);
+                      // Open with preserveFocus so Find dialog stays mounted (IDEA).
                       void openSelected(match, true);
                     }}
-                    onClick={() => void openSelected(match)}
+                    onDoubleClick={() => {
+                      void openSelected(match);
+                      onClose();
+                    }}
                     onFocus={() => {
                       setSelectedIndex(item.flatIndex);
-                      void openSelected(match, true);
                     }}
                     data-testid="search-result"
                   >
                     <span className="kairo-search-result-lineno">{match.line}</span>
                     <span className="kairo-search-result-preview">
-                      {match.contextBefore}<mark>{match.matchText}</mark>{match.contextAfter}
+                      {before}<mark>{match.matchText}</mark>{after}
                     </span>
                   </button>
                 );
@@ -663,8 +711,12 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
                   const item = flatItems[selectedIndex];
                   if (item?.kind === 'match' && item.match) {
                     event.preventDefault();
-                    void openSelected(item.match);
-                    onClose();
+                    if (event.shiftKey) {
+                      void openSelected(item.match);
+                      onClose();
+                    } else {
+                      void openSelected(item.match);
+                    }
                   } else if (item?.kind === 'header' && item.file) {
                     event.preventDefault();
                     toggleFileCollapse(item.file);
@@ -704,6 +756,18 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
             {isStreaming && matches.length > 0 && t('widget.search.center.stats.streaming')}
           </span>
           <div className="kairo-search-actions">
+            {onOpenInFindWindow && matches.length > 0 && (
+              <button
+                type="button"
+                className="kairo-search-footer-btn"
+                onClick={() => onOpenInFindWindow()}
+                data-testid="open-find-window"
+                title={t('widget.search.center.openInFindWindow')}
+              >
+                <span className="codicon codicon-window" aria-hidden="true" />
+                {t('widget.search.center.openInFindWindow')}
+              </button>
+            )}
             {state.status === 'loading' && (
               <button type="button" className="kairo-search-footer-btn" onClick={onCancel} data-testid="search-cancel">
                 {t('widget.search.center.cancel')}
@@ -734,11 +798,38 @@ export class SearchCenterWidget extends ReactWidget {
   @inject(SearchReplaceService) protected readonly replaceService!: SearchReplaceService;
   @inject(SearchScopeModel) protected readonly scopeModel!: SearchScopeModel;
   @inject(KairoI18nService) protected readonly i18n!: KairoI18nService;
+  @inject(ApplicationShell) protected readonly shell!: ApplicationShell;
+  @inject(WidgetManager) protected readonly widgetManager!: WidgetManager;
 
   protected state: SearchSessionState = {
     status: 'idle', requestId: 0, matches: [], totalMatches: 0, truncated: false, erroredFiles: [],
   };
   protected unsubscribe: (() => void) | undefined;
+  protected mode: 'search' | 'replace' = 'search';
+  protected initialQuery = '';
+
+  setMode(mode: 'search' | 'replace'): void {
+    this.mode = mode;
+    this.update();
+  }
+
+  /** Prefill from editor selection (IDEA: Find in Path uses selected text). */
+  captureEditorSelection(): void {
+    const text = readEditorSelection(this.editorManager);
+    if (text && text.length <= 500 && !text.includes('\n')) {
+      this.initialQuery = text;
+      this.update();
+    }
+  }
+
+  async openInFindWindow(): Promise<void> {
+    const widget = await this.widgetManager.getOrCreateWidget(SearchResultsWidget.ID) as SearchResultsWidget;
+    if (!widget.isAttached) {
+      this.shell.addWidget(widget, { area: 'bottom', rank: 150 });
+    }
+    this.shell.activateWidget(widget.id);
+    this.close();
+  }
 
   constructor() {
     super();
@@ -780,7 +871,72 @@ export class SearchCenterWidget extends ReactWidget {
 
   protected async search(query: SearchCenterQuery): Promise<void> {
     const context = this.workspaceContext.requireContext();
-    await this.model.searchStream({ ...query, workspaceId: context.workspaceId });
+    const scoped = this.resolveScope(query, context.workspaceRoot);
+    await this.model.searchStream({
+      ...scoped,
+      workspaceId: context.workspaceId,
+      rootPath: context.workspaceRoot,
+      contextLines: 2,
+    });
+    this.scopeModel.addToHistory({
+      query: scoped.query,
+      isRegex: scoped.isRegex,
+      caseSensitive: scoped.caseSensitive,
+      wholeWord: scoped.wholeWord,
+      scope: scoped.scope ?? 'project',
+      timestamp: Date.now(),
+    });
+  }
+
+  /**
+   * Map IDEA-style scope to rootPath / include filters.
+   * Directory / current-file use the active editor URI when available.
+   *
+   * Include globs are OR'd on the agent. Scope therefore must narrow the
+   * include list (replace / expand), not merge with `*.java` — otherwise
+   * `current-file` + `*.java` still matches every Java file.
+   */
+  protected resolveScope(query: SearchCenterQuery, workspaceRoot: string): SearchCenterQuery {
+    const scope = query.scope ?? this.scopeModel.currentFilter.scope;
+    const editorUri = this.editorManager.currentEditor?.editor?.uri;
+    const fsPath = editorUri ? URIToFsPath(editorUri) : undefined;
+
+    if (scope === 'current-file' || scope === 'selection') {
+      if (fsPath) {
+        const relative = toWorkspaceRelative(workspaceRoot, fsPath);
+        if (relative) {
+          const file = relative.replace(/\\/g, '/');
+          return {
+            ...query,
+            scope,
+            include: [file],
+          };
+        }
+      }
+    }
+
+    if ((scope === 'directory' || scope === 'module') && fsPath) {
+      const dir = fsPath.replace(/[\\/][^\\/]+$/, '');
+      const relativeDir = toWorkspaceRelative(workspaceRoot, dir);
+      if (relativeDir) {
+        const base = relativeDir.replace(/\\/g, '/');
+        const masks = query.include?.length ? query.include : ['*'];
+        const include = masks.map(mask => {
+          const m = mask.replace(/\\/g, '/');
+          if (m.includes('/')) {
+            return m;
+          }
+          return `${base}/**/${m}`;
+        });
+        return {
+          ...query,
+          scope,
+          include,
+        };
+      }
+    }
+
+    return { ...query, scope };
   }
 
   protected async openMatch(match: SearchMatch, preserveFocus?: boolean): Promise<void> {
@@ -807,7 +963,52 @@ export class SearchCenterWidget extends ReactWidget {
       isStreaming={streamState?.status === 'streaming'}
       scopeModel={this.scopeModel}
       onClose={() => this.close()}
+      onOpenInFindWindow={() => void this.openInFindWindow()}
+      mode={this.mode}
+      initialQuery={this.initialQuery}
       i18n={this.i18n}
     />;
   }
+}
+
+function readEditorSelection(editorManager: EditorManager): string {
+  try {
+    const editor = editorManager.currentEditor?.editor as { document?: { getText?: (range: unknown) => string }; selection?: unknown } | undefined;
+    if (!editor?.document?.getText || !editor.selection) {
+      return '';
+    }
+    return editor.document.getText(editor.selection) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+function URIToFsPath(uri: URI): string {
+  try {
+    return uri.path.fsPath();
+  } catch {
+    const raw = uri.toString(true);
+    if (raw.startsWith('file:///')) {
+      const path = decodeURIComponent(raw.slice('file:///'.length));
+      return /^[A-Za-z]:/.test(path) ? path : `/${path}`;
+    }
+    if (raw.startsWith('file://')) {
+      return decodeURIComponent(raw.slice('file://'.length));
+    }
+    return uri.path.toString();
+  }
+}
+
+function toWorkspaceRelative(workspaceRoot: string, absPath: string): string | undefined {
+  const root = workspaceRoot.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+  const full = absPath.replace(/\\/g, '/');
+  const fullLower = full.toLowerCase();
+  if (fullLower === root) {
+    return '';
+  }
+  if (fullLower.startsWith(root + '/')) {
+    return full.slice(root.length + 1);
+  }
+  // Windows drive-letter case / separator tolerance already handled via lowercasing.
+  return undefined;
 }

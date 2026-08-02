@@ -329,6 +329,7 @@ func TestManager_BuildLaunchDescriptor_RelativeWorkspace(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(binDir, javaName), []byte("fake"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	t.Setenv("KAIRO_JDTLS_ASSUME_JRE_MAJOR", "21")
 	m.SetJREPath(jreDir)
 	// Set a relative workspace (should be made absolute)
 	m.SetWorkspace("relative-ws")
@@ -707,6 +708,7 @@ func TestManager_BuildLaunchDescriptor_JREPathFromEnv(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("KAIRO_JRE17_HOME", jreDir)
+	t.Setenv("KAIRO_JDTLS_ASSUME_JRE_MAJOR", "21")
 	// Don't set JREPath via SetJREPath — should fall back to env
 	desc, err := m.BuildLaunchDescriptor(dataDir)
 	if err != nil {

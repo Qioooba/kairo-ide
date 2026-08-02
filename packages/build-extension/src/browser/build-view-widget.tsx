@@ -2,6 +2,8 @@ import * as React from 'react';
 import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import { CommandService } from '@theia/core/lib/common';
+import { OpenerService, open } from '@theia/core/lib/browser/opener-service';
+import URI from '@theia/core/lib/common/uri';
 import { KairoI18nService } from '@kairo/i18n';
 import { BuildStore, BuildRun, BuildDiagnostic, ConnectionState } from './build-store';
 
@@ -25,13 +27,25 @@ function severityIconClass(severity: BuildDiagnostic['severity']): string {
     }
 }
 
+function diagnosticToUri(file: string): URI {
+    const normalized = file.replace(/\\/g, '/');
+    if (/^[a-zA-Z]:\//.test(normalized) || normalized.startsWith('/')) {
+        return new URI(`file:///${normalized.replace(/^\/+/, '')}`);
+    }
+    if (normalized.startsWith('file:')) {
+        return new URI(normalized);
+    }
+    return new URI(normalized);
+}
+
 interface BuildViewProps {
     store: BuildStore;
     commandService: CommandService;
+    openerService: OpenerService;
     i18n: KairoI18nService;
 }
 
-const BuildViewComponent: React.FC<BuildViewProps> = ({ store, commandService, i18n }) => {
+const BuildViewComponent: React.FC<BuildViewProps> = ({ store, commandService, openerService, i18n }) => {
     const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
     const [, forceUpdate] = React.useReducer(x => x + 1, 0);
     const [builds, setBuilds] = React.useState<BuildRun[]>(store.getBuilds());
@@ -72,6 +86,15 @@ const BuildViewComponent: React.FC<BuildViewProps> = ({ store, commandService, i
         } finally {
             setCancelling(false);
         }
+    };
+
+    const openDiagnostic = (d: BuildDiagnostic) => {
+        const uri = diagnosticToUri(d.file);
+        const line = Math.max(0, (d.line || 1) - 1);
+        const character = Math.max(0, (d.column || 1) - 1);
+        void open(openerService, uri, {
+            selection: { start: { line, character }, end: { line, character } },
+        });
     };
 
     const buildStateLabel = (state: BuildRun['state'] | 'idle' | 'disconnected'): string => {
@@ -203,7 +226,18 @@ const BuildViewComponent: React.FC<BuildViewProps> = ({ store, commandService, i
                             <li
                                 key={`${d.file}:${d.line}:${d.column}:${i}`}
                                 className={`kairo-diagnostic kairo-diagnostic-${d.severity}`}
-                                data-testid={`diagnostic-${d.severity}`}
+                                data-testid={d.severity === 'error' ? 'build-error' : `diagnostic-${d.severity}`}
+                                role="button"
+                                tabIndex={0}
+                                style={{ cursor: 'pointer' }}
+                                onClick={() => openDiagnostic(d)}
+                                onKeyDown={e => {
+                                    if (e.key === 'Enter' || e.key === ' ') {
+                                        e.preventDefault();
+                                        openDiagnostic(d);
+                                    }
+                                }}
+                                title={`${d.file}:${d.line}:${d.column}`}
                             >
                                 <span className={`kairo-diagnostic-icon codicon ${severityIconClass(d.severity)}`} aria-hidden="true" />
                                 <span className="kairo-diagnostic-location">
@@ -250,6 +284,7 @@ export class BuildViewWidget extends ReactWidget {
 
     @inject(BuildStore) protected readonly buildStore!: BuildStore;
     @inject(CommandService) protected readonly commandService!: CommandService;
+    @inject(OpenerService) protected readonly openerService!: OpenerService;
     @inject(KairoI18nService) protected readonly i18n!: KairoI18nService;
 
     constructor() {
@@ -275,6 +310,7 @@ export class BuildViewWidget extends ReactWidget {
         return React.createElement(BuildViewComponent, {
             store: this.buildStore,
             commandService: this.commandService,
+            openerService: this.openerService,
             i18n: this.i18n,
         });
     }

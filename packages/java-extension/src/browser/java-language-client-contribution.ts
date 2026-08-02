@@ -55,7 +55,7 @@ export class KairoJavaLanguageClientContribution {
                 java: {
                     completion: {
                         enabled: true,
-                        guessMethodArguments: false,
+                        guessMethodArguments: true,
                         favoriteStaticMembers: [
                             'org.junit.Assert.*',
                             'org.junit.Assume.*',
@@ -81,6 +81,9 @@ export class KairoJavaLanguageClientContribution {
                     },
                     implementationsCodeLens: {
                         enabled: false,
+                    },
+                    symbols: {
+                        includeSourceMethodDeclarations: true,
                     },
                     configuration: {
                         checkProjectSettingsExclusions: false,
@@ -113,7 +116,7 @@ export class KairoJavaLanguageClientContribution {
     } {
         return {
             resolveProvider: true,
-            triggerCharacters: ['.', '@', '#', '*', ' '],
+            triggerCharacters: ['.', '@', '#', '*'],
         };
     }
 

@@ -103,6 +103,23 @@
 | Stage All | `Ctrl+Shift+a a` | `Cmd+Shift+a a` | `git.stageAll` |
 | Commit | `Ctrl+Enter` | `Cmd+Enter` | `git.commit` |
 
+## Java 补全 / 编辑 (IDEA 对齐)
+
+| 功能 | Windows/Linux | macOS | 命令 ID |
+|------|--------------|------|--------|
+| Code Completion | `Ctrl+Space` | `Ctrl+Space` | `editor.action.triggerSuggest` |
+| Smart Type Completion | `Ctrl+Shift+Space` | `Ctrl+Shift+Space` | `kairo.java.smartCompletion` |
+| Complete Statement | `Ctrl+Shift+Enter` | `Cmd+Shift+Enter` | `editor.action.completeStatement` |
+| Parameter Info | `Ctrl+P` | `Cmd+P` | `editor.action.triggerParameterHints` |
+| Surround With | `Ctrl+Alt+T` | `Cmd+Alt+T` | `editor.action.surroundWith` |
+| Unwrap | `Ctrl+Shift+Delete` | `Cmd+Shift+Delete` | `editor.action.unwrap` |
+| Hippie Completion | `Alt+/` | `Alt+/` | `editor.action.hippieCompletion` |
+| Hippie Backward | `Alt+Shift+/` | `Alt+Shift+/` | `editor.action.hippieCompletionBackward` |
+| Manage Live Templates | `Ctrl+Alt+Shift+J` | `Cmd+Alt+J` | `kairo.java.liveTemplates.manage` |
+| Add Live Template | — | — | `kairo.java.liveTemplates.add` |
+
+Postfix 示例：`expr.sout` / `.var` / `.nn` / `.for` / `.opt` / `.lambda` / `.try` / `.par`
+
 ## Java 重构 (Refactoring)
 
 | 功能 | Windows/Linux | macOS | 命令 ID |
@@ -117,4 +134,5 @@
 |------|--------------|------|--------|
 | Open Workspace | `Ctrl+o` | `Cmd+o` | `workspace:open` |
 | Open File | `Ctrl+o` | `Cmd+o` | `workspace:openFile` |
+| Keyboard Cheat Sheet | `Ctrl+Shift+K` | `Cmd+Shift+K` | `kairo.shortcuts.cheatsheet` |
 

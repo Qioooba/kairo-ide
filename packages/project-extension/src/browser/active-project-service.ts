@@ -2,9 +2,9 @@ import { injectable, inject, postConstruct } from '@theia/core/shared/inversify'
 import { Emitter, Event } from '@theia/core/lib/common/event';
 import { Disposable } from '@theia/core/lib/common/disposable';
 import { StorageService } from '@theia/core/lib/browser/storage-service';
-import { WorkspaceContextService } from '@kairo/runtime-extension';
+import { WorkspaceContextService, type KairoProjectYaml, type WorkspaceContext } from '@kairo/runtime-extension';
 import { RuntimeConnectionService } from '@kairo/runtime-extension';
-import type { ProjectConfig } from '@kairo/protocol';
+import type { EncodingId, ProjectConfig, ProjectImportConfirmRequest } from '@kairo/protocol';
 
 export interface ProjectInfo {
     workspaceId: string;
@@ -60,13 +60,9 @@ export class ActiveProjectService {
                     return;
                 }
 
-                // KAIRO-RC-WEB-029: if .kairo/project.yaml was just read
-                // and we have not yet selected a project for this
-                // workspace, surface the detected values to the UI so
-                // the user does not have to re-run the import wizard
-                // every time the workspace loads. Backend-driven
-                // projects always win when the agent is reachable.
-                const _yaml = this.workspaceContext.detectedProject;
+                // KAIRO-RC-WEB-029: backend-driven projects win when the
+                // agent catalog has entries; otherwise we fall back to
+                // on-disk .kairo/project.yaml (see tryAutoBindFromYaml).
                 try {
                     // KAIRO-RC-WEB-2026-07-25-12: filter projects by the
                     // current workspace — without the workspaceId the
@@ -90,6 +86,14 @@ export class ActiveProjectService {
                         // Only clear if no project was just selected
                         // and no project is already active.
                         if (this.currentProject && this.currentProject.workspaceId === ctx.workspaceId) {
+                            return;
+                        }
+                        // KAIRO-RC-WEB-029: auto-bind from on-disk
+                        // .kairo/project.yaml so opening a legacy folder
+                        // does not leave the status bar on
+                        // "Project: (no workspace)".
+                        const fromYaml = await this.tryAutoBindFromYaml(ctx, myGeneration);
+                        if (fromYaml || myGeneration !== this.generation) {
                             return;
                         }
                         this.currentProject = undefined;
@@ -157,9 +161,11 @@ export class ActiveProjectService {
                         this.onDidChangeProjectEmitter.fire(undefined);
                     }
                 } catch {
-                    // Backend not available. Only clear if no project was
-                    // just selected.
+                    // Backend not available. Prefer on-disk yaml so the
+                    // status bar still reflects the opened project.
                     if (myGeneration !== this.generation) return;
+                    const fromYaml = await this.tryAutoBindFromYaml(ctx, myGeneration, /*register*/ false);
+                    if (fromYaml || myGeneration !== this.generation) return;
                     this.currentProject = undefined;
                     this.onDidChangeProjectEmitter.fire(undefined);
                 }
@@ -167,6 +173,194 @@ export class ActiveProjectService {
                 this.inflightListeners--;
             }
         });
+    }
+
+    /**
+     * KAIRO-RC-WEB-029: when the agent catalog has no project for this
+     * workspace but `.kairo/project.yaml` was detected, register (or
+     * locally surface) that project so Build/Run/status-bar work without
+     * forcing the user through the import wizard again.
+     */
+    protected async tryAutoBindFromYaml(
+        ctx: WorkspaceContext,
+        myGeneration: number,
+        register = true,
+    ): Promise<boolean> {
+        const yaml = this.workspaceContext.detectedProject;
+        if (!yaml?.name) {
+            return false;
+        }
+        const projectInfo = this.projectInfoFromYaml(ctx, yaml);
+        if (register) {
+            try {
+                // Prefer an already-registered project with the same root
+                // to avoid a noisy 409 Conflict on every cold start.
+                const existing = await this.findExistingProject(ctx, yaml, projectInfo.root);
+                if (myGeneration !== this.generation) return true;
+                if (existing) {
+                    const info: ProjectInfo = {
+                        workspaceId: ctx.workspaceId,
+                        projectId: existing.id,
+                        name: existing.name || yaml.name,
+                        root: existing.rootPath || projectInfo.root,
+                        encoding: yaml.encoding,
+                    };
+                    this.currentProject = info;
+                    await this.storageService.setData(
+                        `${LAST_PROJECT_KEY}:${ctx.workspaceId}`,
+                        info.projectId,
+                    );
+                    this.onDidChangeProjectEmitter.fire(info);
+                    return true;
+                }
+                const saved = await this.registerYamlProject(ctx, yaml, projectInfo.root);
+                if (myGeneration !== this.generation) return true;
+                if (saved) {
+                    const info: ProjectInfo = {
+                        workspaceId: ctx.workspaceId,
+                        projectId: saved.id,
+                        name: saved.name || yaml.name,
+                        root: saved.rootPath || projectInfo.root,
+                        encoding: yaml.encoding,
+                    };
+                    this.currentProject = info;
+                    await this.storageService.setData(
+                        `${LAST_PROJECT_KEY}:${ctx.workspaceId}`,
+                        info.projectId,
+                    );
+                    this.onDidChangeProjectEmitter.fire(info);
+                    return true;
+                }
+            } catch {
+                // Fall through to local-only bind.
+            }
+        }
+        if (myGeneration !== this.generation) return true;
+        this.currentProject = projectInfo;
+        this.onDidChangeProjectEmitter.fire(projectInfo);
+        return true;
+    }
+
+    protected async findExistingProject(
+        ctx: WorkspaceContext,
+        yaml: KairoProjectYaml,
+        rootPath: string,
+    ): Promise<{ id: string; name: string; rootPath: string } | undefined> {
+        const pick = (projects: ProjectConfig[]) => {
+            const norm = (s: string) => s.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+            const want = norm(rootPath);
+            return projects.find(p => {
+                const root = (p as unknown as { rootPath?: string }).rootPath || '';
+                return p.name === yaml.name
+                    || norm(root) === want
+                    || p.id === this.projectInfoFromYaml(ctx, yaml).projectId;
+            });
+        };
+        try {
+            let projects = await this.runtime.request(
+                'GET /api/v1/projects',
+                undefined,
+                { query: { workspaceId: ctx.workspaceId } },
+            ) as ProjectConfig[];
+            let hit = pick(projects);
+            if (!hit) {
+                projects = await this.runtime.request('GET /api/v1/projects', undefined) as ProjectConfig[];
+                hit = pick(projects);
+            }
+            if (!hit) return undefined;
+            return {
+                id: hit.id,
+                name: hit.name,
+                rootPath: (hit as unknown as { rootPath?: string }).rootPath || rootPath,
+            };
+        } catch {
+            return undefined;
+        }
+    }
+
+    protected projectInfoFromYaml(ctx: WorkspaceContext, yaml: KairoProjectYaml): ProjectInfo {
+        const root = !yaml.root || yaml.root === '.'
+            ? ctx.workspaceRoot
+            : `${ctx.workspaceRoot.replace(/[/\\]+$/, '')}/${yaml.root}`.replace(/\\/g, '/');
+        const projectId = (yaml.name || 'project')
+            .toLowerCase()
+            .replace(/[^a-z0-9_.-]+/g, '-')
+            .replace(/^-+|-+$/g, '') || 'project';
+        return {
+            workspaceId: ctx.workspaceId,
+            projectId,
+            name: yaml.name || projectId,
+            root,
+            encoding: yaml.encoding,
+        };
+    }
+
+    protected async registerYamlProject(
+        ctx: WorkspaceContext,
+        yaml: KairoProjectYaml,
+        rootPath: string,
+    ): Promise<{ id: string; name: string; rootPath: string } | undefined> {
+        const level = (yaml.sourceLevel || '1.6') as ProjectImportConfirmRequest['sourceVersion'];
+        const target = (yaml.targetLevel || level) as ProjectImportConfirmRequest['targetVersion'];
+        const encoding = (yaml.encoding || 'gbk') as EncodingId;
+        const buildTool: ProjectImportConfirmRequest['buildTool'] =
+            yaml.buildTool === 'javac' ? 'javac' : 'ant';
+        const params: ProjectImportConfirmRequest = {
+            workspaceId: ctx.workspaceId,
+            rootPath,
+            name: yaml.name || 'project',
+            sourceDirs: yaml.sourceRoots?.length ? yaml.sourceRoots : ['src'],
+            webRoot: yaml.webappDir || 'WebRoot',
+            libDirs: yaml.libraryDirs?.length ? yaml.libraryDirs : ['lib'],
+            buildScript: yaml.buildFile || 'build.xml',
+            defaultEncoding: encoding,
+            jdkVersion: level,
+            sourceVersion: level,
+            targetVersion: target,
+            outputDir: yaml.outputDir || 'build/classes',
+            buildTool,
+            contextPath: yaml.contextPath || '/',
+        };
+        try {
+            const saved = await this.runtime.request(
+                'POST /api/v1/projects/import',
+                params,
+                { timeoutMs: 15_000, noRetry: true },
+            ) as { id: string; name: string; rootPath: string };
+            return saved;
+        } catch (err) {
+            // Already imported (409) — re-list and pick by name/root.
+            // Prefer workspace-scoped list; fall back to global catalog
+            // when the project was registered under a prior workspace id.
+            const msg = err instanceof Error ? err.message : String(err);
+            const code = (err as { code?: string })?.code || '';
+            if (!/409|already exists|conflict/i.test(`${msg} ${code}`)) {
+                throw err;
+            }
+            const pick = (projects: ProjectConfig[]) => projects.find(p => {
+                const root = (p as unknown as { rootPath?: string }).rootPath || '';
+                const norm = (s: string) => s.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+                return p.name === yaml.name
+                    || norm(root) === norm(rootPath)
+                    || p.id === this.projectInfoFromYaml(ctx, yaml).projectId;
+            });
+            let projects = await this.runtime.request(
+                'GET /api/v1/projects',
+                undefined,
+                { query: { workspaceId: ctx.workspaceId } },
+            ) as ProjectConfig[];
+            let hit = pick(projects);
+            if (!hit) {
+                projects = await this.runtime.request('GET /api/v1/projects', undefined) as ProjectConfig[];
+                hit = pick(projects);
+            }
+            if (!hit) return undefined;
+            return {
+                id: hit.id,
+                name: hit.name,
+                rootPath: (hit as unknown as { rootPath?: string }).rootPath || rootPath,
+            };
+        }
     }
 
     dispose(): void {

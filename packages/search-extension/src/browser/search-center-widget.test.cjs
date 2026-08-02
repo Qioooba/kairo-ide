@@ -219,7 +219,24 @@ test('submits query and filter toggles', async () => {
       wholeWord: true,
       include: undefined,
       exclude: undefined,
+      scope: 'project',
     }]);
+  } finally {
+    view.unmount();
+  }
+});
+
+test('submits IDEA file mask as include/exclude globs', async () => {
+  const submitted = [];
+  const view = mount(state('idle'), { onSearch: query => submitted.push(query) });
+  try {
+    setInput(view.container.querySelector('[data-testid="search-query"]'), 'needle');
+    setInput(view.container.querySelector('[data-testid="filter-file-types"]'), '*.java, !*.min.js, xml');
+    await act(async () => {
+      view.container.querySelector('[data-testid="search-form"]').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+    });
+    assert.deepStrictEqual(submitted[0].include, ['*.java', '*.xml']);
+    assert.deepStrictEqual(submitted[0].exclude, ['*.min.js']);
   } finally {
     view.unmount();
   }
@@ -249,5 +266,52 @@ test('open failures are caught and rendered instead of becoming unhandled reject
     assert.match(view.container.querySelector('[data-testid="search-error"]').textContent, /Unsafe search result path/);
   } finally {
     view.unmount();
+  }
+});
+
+test('Enter opens a match but keeps the IDEA-style dialog open', async () => {
+  const match = { file: 'src/A.java', line: 4, column: 2, matchText: 'needle', contextBefore: 'a ', contextAfter: ' b' };
+  let closed = 0;
+  const opened = [];
+  const view = mount(state('results', { matches: [match], totalMatches: 1 }), {
+    onOpen: m => opened.push(m),
+    onClose: () => { closed++; },
+  });
+  try {
+    const modal = view.container.querySelector('[data-testid="search-center-modal"]');
+    act(() => {
+      modal.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    });
+    assert.strictEqual(opened.length, 1);
+    assert.strictEqual(closed, 0, 'Enter must not close the Find dialog (IDEA behavior)');
+  } finally {
+    view.unmount();
+  }
+});
+
+test('Open in Find Window footer button is wired', async () => {
+  const match = { file: 'src/A.java', line: 1, column: 1, matchText: 'x', contextBefore: '', contextAfter: '' };
+  let pinned = 0;
+  const container = document.createElement('div');
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  const props = {
+    state: state('results', { matches: [match], totalMatches: 1 }),
+    onSearch: () => undefined,
+    onCancel: () => undefined,
+    onOpen: () => undefined,
+    onClose: () => undefined,
+    onOpenInFindWindow: () => { pinned++; },
+    i18n: mockI18n(),
+  };
+  act(() => root.render(React.createElement(SearchCenterComponent, props)));
+  try {
+    const btn = container.querySelector('[data-testid="open-find-window"]');
+    assert.ok(btn, 'Open in Find Window button should render when results exist');
+    act(() => btn.click());
+    assert.strictEqual(pinned, 1);
+  } finally {
+    act(() => root.unmount());
+    container.remove();
   }
 });

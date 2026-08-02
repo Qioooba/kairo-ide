@@ -6,11 +6,12 @@
  * (KAIRO-RC-WEB-251 — flow-02 screenshot showed "Plain Text" in
  * the status bar and word-based fallback completions).
  *
- * The grammar is a compact Monarch set covering Java 8-21
- * constructs: comments, javadoc, annotations, strings (incl.
- * text blocks), chars, numbers, keywords, and capitalized type
- * names. It follows the JSP pattern (jsp-grammar.ts): pure data
- * here, DI contribution in java-monaco-registration.ts.
+ * Heuristic scopes (no JDT LS required) beat IDEA's plain syntax
+ * when the language server is down:
+ *   - method calls before '(' → method (#FFC66D)
+ *   - Capitalized names → type
+ *   - UPPER_SNAKE → constant (fields/enums)
+ *   - true/false/null → constant.language (keyword orange)
  */
 
 export const JAVA_MONARCH: object = {
@@ -44,12 +45,31 @@ export const JAVA_MONARCH: object = {
   digits: /\d+(_+\d+)*/,
   octaldigits: /[0-7]+(_+[0-7]+)*/,
   binarydigits: /[0-1]+(_+[0-1]+)*/,
-  hexdigits: /[[0-9a-fA-F]+(_+[0-9a-fA-F]+)*/,
+  hexdigits: /[0-9a-fA-F]+(_+[0-9a-fA-F]+)*/,
 
   tokenizer: {
     root: [
-      // annotations
-      [/@\s*[A-Za-z_$][\w$]*/, 'annotation'],
+      // annotations (@Override, @org.foo.Bar)
+      [/@\s*[a-zA-Z_$][\w$.]*/, 'annotation'],
+
+      // Method / constructor call: Name(  — before keyword check so
+      // `if (` stays a keyword via the non-lookahead path below.
+      [
+        /[a-zA-Z_$][\w$]*(?=\s*\()/,
+        {
+          cases: {
+            '@keywords': 'keyword',
+            '@literals': 'constant.language',
+            '@default': 'method',
+          },
+        },
+      ],
+
+      // UPPER_SNAKE constants / enum-like fields (SERIAL_VERSION, HTTP_OK)
+      [/\b[A-Z][A-Z0-9_]{1,}\b/, 'constant'],
+
+      // Capitalized type / class names (HttpServlet, String, List)
+      [/\b[A-Z][\w$]*\b/, 'type'],
 
       // identifiers and keywords
       [
@@ -57,7 +77,7 @@ export const JAVA_MONARCH: object = {
         {
           cases: {
             '@keywords': 'keyword',
-            '@literals': 'constant',
+            '@literals': 'constant.language',
             '@default': 'identifier',
           },
         },
@@ -88,11 +108,10 @@ export const JAVA_MONARCH: object = {
       [/(@digits)[fFdD]/, 'number.float'],
       [/(@digits)[lL]?/, 'number'],
 
-      // strings
+      // strings / chars
       [/"""/, { token: 'string', next: '@textblock' }],
       [/"/, { token: 'string.quote', next: '@string' }],
-      [/'[^\\']'/, 'string'],
-      [/'[^\\']/, 'string'],
+      [/'/, { token: 'string.quote', next: '@string_char' }],
     ],
 
     whitespace: [
@@ -109,9 +128,11 @@ export const JAVA_MONARCH: object = {
     ],
 
     javadoc: [
-      [/[^/*]+/, 'comment.doc'],
+      [/@\s*[a-zA-Z]+/, 'keyword.doc'],
+      [/\{@[^}]+\}/, 'keyword.doc'],
+      [/[^/*@{]+/, 'comment.doc'],
       [/\*\//, { token: 'comment.doc', next: '@pop' }],
-      [/[/*]/, 'comment.doc'],
+      [/[/*@{]/, 'comment.doc'],
     ],
 
     string: [
@@ -121,8 +142,17 @@ export const JAVA_MONARCH: object = {
       [/"/, { token: 'string.quote', next: '@pop' }],
     ],
 
+    string_char: [
+      [/@escapes/, 'string.escape'],
+      [/\\./, 'string.escape.invalid'],
+      [/[^\\']/, 'string'],
+      [/'/, { token: 'string.quote', next: '@pop' }],
+    ],
+
     textblock: [
       [/[^\\"]+/, 'string'],
+      [/@escapes/, 'string.escape'],
+      [/\\./, 'string.escape.invalid'],
       [/"""/, { token: 'string', next: '@pop' }],
       [/"/, 'string'],
     ],

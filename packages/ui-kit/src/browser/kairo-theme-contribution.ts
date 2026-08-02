@@ -25,13 +25,33 @@ export const KAIRO_MONACO_THEME: monaco.editor.IStandaloneThemeData = {
     rules: [
         // Syntax tokens — mirrored from KairoDarkTheme's editor palette
         { token: 'comment', foreground: '7a7e85', fontStyle: 'italic' },
+        { token: 'comment.doc', foreground: '6a9955' },
+        { token: 'keyword.doc', foreground: 'c586c0' },
         { token: 'keyword', foreground: 'c586c0' },
         { token: 'string', foreground: 'ce9178' },
+        { token: 'string.quote', foreground: 'ce9178' },
+        { token: 'string.escape', foreground: 'd7ba7d' },
         { token: 'number', foreground: 'b5cea8' },
+        { token: 'number.float', foreground: 'b5cea8' },
+        { token: 'number.hex', foreground: 'b5cea8' },
         { token: 'type', foreground: '4ec9b0' },
+        { token: 'method', foreground: 'dcdcaa' },
         { token: 'identifier', foreground: 'dfe1e5' },
+        { token: 'constant', foreground: '4fc1ff' },
+        { token: 'constant.language', foreground: '569cd6' },
+        { token: 'predefined', foreground: '4fc1ff' },
+        { token: 'annotation', foreground: 'dcdcaa' },
         { token: 'delimiter', foreground: 'a9adb3' },
+        { token: 'operator', foreground: 'd4d4d4' },
         { token: 'tag', foreground: '569cd6' },
+        { token: 'tag.jsp-directive', foreground: '569cd6' },
+        { token: 'tag.jsp-decl', foreground: '569cd6' },
+        { token: 'tag.jsp-expr', foreground: '569cd6' },
+        { token: 'tag.jsp-scriptlet', foreground: '569cd6' },
+        { token: 'tag.jsp-jstl', foreground: '569cd6' },
+        { token: 'tag.jsp-taglib', foreground: '569cd6' },
+        { token: 'metatag', foreground: '808080' },
+        { token: 'metatag.el', foreground: 'b5cea8' },
         { token: 'attribute.name', foreground: '9cdcfe' },
         { token: 'attribute.value', foreground: 'ce9178' },
     ],
@@ -59,56 +79,52 @@ export const KAIRO_MONACO_THEME: monaco.editor.IStandaloneThemeData = {
     },
 };
 
-/** Monaco editor theme for IntelliJ IDEA-style syntax highlighting.
- * Syntax token colors mirror IntelliJ IDEA Darcula:
- *   - Keywords: orange (#CC7832) — the most recognizable IDEA trait
- *   - Strings: green (#6A8759)
- *   - Numbers: blue (#6897BB)
- *   - Comments: gray (#808080), not italic
- *   - Annotations: yellow-green (#BBB529)
- *   - Tags: gold (#E8BF6A)
- *   - Types: default text color (#A9B7C6)
- * Editor chrome colors are shared with KairoDarkTheme for visual consistency. */
+/** Monaco editor theme for IntelliJ IDEA-style syntax highlighting —
+ * then enhanced for Java Web scanability (methods / types / JSTL /
+ * scriptlet kinds) so JSP files are easier to read than stock Darcula. */
 export const KAIRO_IDEA_MONACO_THEME: monaco.editor.IStandaloneThemeData = {
     base: 'vs-dark',
     inherit: true,
     rules: [
-        // --- Comments: gray (IDEA does not italicize comments) ---
+        // --- Comments ---
         { token: 'comment', foreground: '808080' },
         { token: 'comment.doc', foreground: '629755' },
+        { token: 'keyword.doc', foreground: '8A653B' },
 
-        // --- Keywords: orange — the most recognizable IDEA trait ---
+        // --- Keywords / language literals ---
         { token: 'keyword', foreground: 'CC7832' },
+        { token: 'constant.language', foreground: 'CC7832' },
 
-        // --- Strings: green ---
+        // --- Strings ---
         { token: 'string', foreground: '6A8759' },
         { token: 'string.quote', foreground: '6A8759' },
         { token: 'string.escape', foreground: 'CC7832' },
+        { token: 'string.escape.invalid', foreground: 'FF6B68' },
 
-        // --- Numbers: blue ---
+        // --- Numbers ---
         { token: 'number', foreground: '6897BB' },
         { token: 'number.float', foreground: '6897BB' },
         { token: 'number.hex', foreground: '6897BB' },
+        { token: 'number.octal', foreground: '6897BB' },
+        { token: 'number.binary', foreground: '6897BB' },
 
-        // --- Types & identifiers: default light-gray (IDEA basic syntax
-        //     does not color type names; semantic highlighting is a
-        //     separate language-server feature) ---
-        { token: 'type', foreground: 'A9B7C6' },
-        { token: 'type.identifier', foreground: 'A9B7C6' },
+        // --- Heuristic semantic (usable without JDT LS) ---
+        { token: 'type', foreground: 'B5B6E3' },
+        { token: 'type.identifier', foreground: 'B5B6E3' },
+        { token: 'method', foreground: 'FFC66D' },
         { token: 'identifier', foreground: 'A9B7C6' },
-
-        // --- Constants (true/false/null/undefined in JS/TS/etc.):
-        //     orange, matching keywords (IDEA colors literals as keywords) ---
-        { token: 'constant', foreground: 'CC7832' },
-        { token: 'constant.language', foreground: 'CC7832' },
+        // UPPER_SNAKE fields / enums
+        { token: 'constant', foreground: '9876AA' },
         { token: 'constant.character', foreground: '6A8759' },
+        // EL / JSP implicit objects
+        { token: 'predefined', foreground: '9876AA' },
 
-        // --- Annotations: yellow-olive (IDEA Darcula signature) ---
+        // --- Annotations ---
         { token: 'annotation', foreground: 'BBB529' },
 
-        // --- Operators & delimiters: default light-gray ---
+        // --- Operators & delimiters ---
         { token: 'delimiter', foreground: 'A9B7C6' },
-        { token: 'delimiter.angle', foreground: 'E8BF6A' },
+        { token: 'delimiter.angle', foreground: 'A9B7C6' },
         { token: 'delimiter.bracket', foreground: 'A9B7C6' },
         { token: 'delimiter.square', foreground: 'A9B7C6' },
         { token: 'delimiter.parenthesis', foreground: 'A9B7C6' },
@@ -116,34 +132,28 @@ export const KAIRO_IDEA_MONACO_THEME: monaco.editor.IStandaloneThemeData = {
         { token: 'delimiter.html', foreground: 'E8BF6A' },
         { token: 'operator', foreground: 'A9B7C6' },
 
-        // --- Override VSCode-inherited support/predefined colors to
-        //     match IDEA's "everything-else-is-default" philosophy ---
         { token: 'support', foreground: 'A9B7C6' },
-        { token: 'support.class', foreground: 'A9B7C6' },
-        { token: 'support.type', foreground: 'A9B7C6' },
-        { token: 'support.function', foreground: 'A9B7C6' },
-        { token: 'predefined', foreground: 'A9B7C6' },
+        { token: 'support.class', foreground: 'B5B6E3' },
+        { token: 'support.type', foreground: 'B5B6E3' },
+        { token: 'support.function', foreground: 'FFC66D' },
 
-        // --- HTML / JSP tags: gold ---
+        // --- Markup: HTML gold; JSP delimiters magenta; JSTL cyan-gold ---
         { token: 'tag', foreground: 'E8BF6A' },
-        { token: 'tag.jsp-directive', foreground: 'E8BF6A' },
-        { token: 'tag.jsp-decl', foreground: 'E8BF6A' },
-        { token: 'tag.jsp-expr', foreground: 'E8BF6A' },
-        { token: 'tag.jsp-scriptlet', foreground: 'E8BF6A' },
-        { token: 'tag.jsp-jstl', foreground: 'E8BF6A' },
-        { token: 'tag.jsp-taglib', foreground: 'E8BF6A' },
+        { token: 'tag.jsp-directive', foreground: 'D896FF' },
+        { token: 'tag.jsp-decl', foreground: 'D896FF' },
+        { token: 'tag.jsp-expr', foreground: 'D896FF' },
+        { token: 'tag.jsp-scriptlet', foreground: 'D896FF' },
+        { token: 'tag.jsp-jstl', foreground: '79B8FF' },
+        { token: 'tag.jsp-taglib', foreground: '79B8FF' },
 
-        // --- Metatags: gray for DOCTYPE/XML declarations, gold for delimiters ---
         { token: 'metatag', foreground: '808080' },
-        { token: 'metatag.delimiter', foreground: 'E8BF6A' },
+        { token: 'metatag.delimiter', foreground: 'D896FF' },
         { token: 'metatag.el', foreground: '6897BB' },
 
-        // --- HTML attributes ---
         { token: 'attribute.name', foreground: 'BABABA' },
         { token: 'attribute.value', foreground: '6A8759' },
     ],
     colors: {
-        // Editor chrome — shared with KairoDarkTheme for visual consistency
         'editor.background': '#1e1f22',
         'editor.foreground': '#A9B7C6',
         'editor.lineHighlightBackground': '#252629',
@@ -212,7 +222,23 @@ export class KairoThemeContribution implements FrontendApplicationContribution, 
         monaco.editor.defineTheme('kairo-idea-dark', KAIRO_IDEA_MONACO_THEME);
         this.themeService.register(KairoDarkTheme);
         this.themeService.register(KairoIDEATheme);
-        this.themeService.setCurrentTheme(KairoDarkTheme.id);
+        // Default to IDEA Darcula-style tokens — Kairo targets Java Web
+        // developers coming from IntelliJ. Users can still switch to
+        // "Kairo Dark" (VS Code-ish) via Color Theme.
+        this.themeService.setCurrentTheme(KairoIDEATheme.id);
+
+        // IDEA Darcula does not rainbow-color brackets. Preference schema
+        // default is false, but existing user settings may still have
+        // Theia's true — force the editor options to match IDEA.
+        const disableRainbowBrackets = (): void => {
+            for (const ed of monaco.editor.getEditors()) {
+                ed.updateOptions({ bracketPairColorization: { enabled: false } });
+            }
+        };
+        disableRainbowBrackets();
+        monaco.editor.onDidCreateEditor(ed => {
+            ed.updateOptions({ bracketPairColorization: { enabled: false } });
+        });
 
         // Theia 1.73 caches `WidgetManager.factories` lazily on the
         // first access, and the cache lives in `_cachedFactories`

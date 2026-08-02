@@ -1,16 +1,14 @@
 /**
  * Kairo Agent Config — backend contribution.
  *
- * Injects the Go Runtime Agent's URL and secret into the frontend
- * HTML so that BOTH the Electron shell (via preload) AND regular
- * browsers can connect to the agent. Without this middleware,
- * regular browsers cannot discover the agent's dynamic port and
- * secret — they would fall back to the hardcoded default port
- * 18080, which is rarely where the agent actually listens.
+ * Exposes the Go Runtime Agent's URL and secret to the browser frontend.
  *
- * The middleware intercepts every HTML response and injects a
- * <script> tag that sets `window.__kairo` (the same shape the
- * Electron preload script exposes) before any other script runs.
+ * Two channels (both always registered when env is set):
+ *   1. GET /kairo-agent-config.json — reliable same-origin fetch. Theia serves
+ *      index.html via express.static/sendFile, so patching res.send alone often
+ *      misses the HTML document (KAIRO-QA-002 root cause in browser mode).
+ *   2. Best-effort HTML <script> injection into responses that use res.send /
+ *      res.end with an HTML string containing </head> (Electron / some paths).
  *
  * Env vars read:
  *   KAIRO_AGENT_URL    — e.g. http://127.0.0.1:18080
@@ -19,7 +17,7 @@
 
 import { injectable } from '@theia/core/shared/inversify';
 import { BackendApplicationContribution } from '@theia/core/lib/node/backend-application';
-import type { Express } from 'express';
+import type { Express, Request, Response, NextFunction } from 'express';
 
 @injectable()
 export class KairoAgentConfigContribution implements BackendApplicationContribution {
@@ -27,9 +25,14 @@ export class KairoAgentConfigContribution implements BackendApplicationContribut
     const agentUrl = process.env.KAIRO_AGENT_URL || '';
     const agentSecret = process.env.KAIRO_AGENT_SECRET || '';
 
+    // Always expose the endpoint so the frontend can discover whether an
+    // agent was configured for this Theia process (empty url = not set).
+    app.get('/kairo-agent-config.json', (_req: Request, res: Response) => {
+      res.setHeader('Cache-Control', 'no-store');
+      res.json({ agentUrl, agentSecret });
+    });
+
     if (!agentUrl) {
-      // No agent URL configured — this is fine for dev/test where
-      // the frontend falls back to the default port.
       return;
     }
 
@@ -51,15 +54,43 @@ export class KairoAgentConfigContribution implements BackendApplicationContribut
 
     const injectTag = `<script>${scriptContent}</script></head>`;
 
-    // Intercept HTML responses and inject the config script.
-    app.use((req, res, next) => {
-      const originalSend = res.send.bind(res);
-      res.send = function (body?: unknown): any {
-        if (typeof body === 'string' && body.includes('</head>')) {
-          body = body.replace('</head>', injectTag);
+    const maybeInject = (body: unknown): unknown => {
+      if (typeof body === 'string' && body.includes('</head>') && !body.includes('window.__kairo')) {
+        return body.replace('</head>', injectTag);
+      }
+      if (Buffer.isBuffer(body)) {
+        const text = body.toString('utf8');
+        if (text.includes('</head>') && !text.includes('window.__kairo')) {
+          return Buffer.from(text.replace('</head>', injectTag), 'utf8');
         }
-        return originalSend(body);
+      }
+      return body;
+    };
+
+    // Best-effort: intercept res.send / res.end for in-memory HTML.
+    // Static sendFile paths are covered by /kairo-agent-config.json instead.
+    app.use((_req: Request, res: Response, next: NextFunction) => {
+      const originalSend = res.send.bind(res);
+      const originalEnd = res.end.bind(res);
+
+      res.send = function (body?: unknown): Response {
+        return originalSend(maybeInject(body) as any);
       };
+
+      (res as Response & { end: (...args: any[]) => any }).end = function (
+        chunk?: unknown,
+        encoding?: unknown,
+        cb?: unknown,
+      ): Response {
+        if (typeof chunk === 'string' || Buffer.isBuffer(chunk)) {
+          chunk = maybeInject(chunk);
+        }
+        if (typeof encoding === 'function') {
+          return originalEnd(chunk as any, encoding as any);
+        }
+        return originalEnd(chunk as any, encoding as any, cb as any);
+      };
+
       next();
     });
   }

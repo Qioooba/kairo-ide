@@ -60,9 +60,10 @@ type ToolchainRegistry interface {
 	Import(path, label string) (json.RawMessage, error)
 }
 
-// Searcher runs full-text search.
+// Searcher runs full-text search and filename listing.
 type Searcher interface {
 	Search(ctx context.Context, payload json.RawMessage) (json.RawMessage, error)
+	ListFiles(ctx context.Context, payload json.RawMessage) (json.RawMessage, error)
 }
 
 // Encoder runs encoding detect/recode/validate.

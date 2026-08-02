@@ -101,3 +101,11 @@ describe('Search Extension — Search Scope Model Exports (source check)', () =>
     assert.match(source, /GROUP_MODE_OPTIONS/);
   });
 });
+describe('Search Extension — Find Tool Window Exports (source check)', () => {
+  it('index.ts exports SearchResultsWidget, FileIndexService, parseFileMask', () => {
+    const source = fs.readFileSync(path.join(srcDir, 'index.ts'), 'utf8');
+    assert.match(source, /SearchResultsWidget/);
+    assert.match(source, /FileIndexService/);
+    assert.match(source, /parseFileMask/);
+  });
+});

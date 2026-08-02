@@ -5,18 +5,20 @@
  * Provides:
  *   - Go to Type Definition (Ctrl+Shift+B / ⌘⇧B)
  *   - Go to Super Method/Class (Ctrl+U / ⌘U)
- *   - Find Usages (Alt+F7 / ⌥F7)
+ *   - Find Usages (Alt+F7 / ⌥F7) — bottom panel
+ *   - Show Usages (Ctrl+Alt+F7 / ⌥⌘F7) — filterable popup with live preview
  *   - Editor context menu "Go To" submenu
  *   - Keybindings for Call/Type Hierarchy
  */
 
-import { injectable, inject } from '@theia/core/shared/inversify';
+import { injectable, inject, optional } from '@theia/core/shared/inversify';
 import {
   Command,
   CommandContribution,
   CommandRegistry,
   MenuContribution,
   MenuModelRegistry,
+  MessageService,
 } from '@theia/core/lib/common';
 import URI from '@theia/core/lib/common/uri';
 import { KeybindingContribution, KeybindingRegistry } from '@theia/core/lib/browser/keybinding';
@@ -25,12 +27,25 @@ import { EDITOR_CONTEXT_MENU } from '@theia/editor/lib/browser/editor-menu';
 import { MonacoEditor } from '@theia/monaco/lib/browser/monaco-editor';
 import * as monaco from '@theia/monaco-editor-core';
 import { isOSX } from '@theia/core/lib/common/os';
+import {
+  ApplicationShell,
+  QuickInputService,
+  QuickPickItem,
+  QuickPickSeparator,
+  WidgetManager,
+} from '@theia/core/lib/browser';
+import { WorkspaceService } from '@theia/workspace/lib/browser';
 import { JavaLanguageClient } from './java-language-client';
 import { JavaHierarchyCommands } from './java-hierarchy-contribution';
-import { ApplicationShell, WidgetManager } from '@theia/core/lib/browser';
-import { JavaHierarchyWidget } from './java-hierarchy-widget';
 import { JavaReferencesWidget } from './java-references-widget';
 import { LSPLocation, LSPLocationLink } from '../common/lsp-protocol';
+import {
+  buildUsagePickEntries,
+  prepareUsages,
+  resolveIdentifierOnLine,
+  type PreparedUsage,
+  type UsagePickItemShape,
+} from './java-show-usages';
 
 export namespace JavaNavigationCommands {
   export const GO_TO_TYPE_DEFINITION: Command = {
@@ -48,6 +63,13 @@ export namespace JavaNavigationCommands {
   export const FIND_USAGES: Command = {
     id: 'kairo.java.findUsages',
     label: 'Find Usages...',
+    category: 'Java',
+  };
+
+  /** IDEA Ctrl+Alt+F7 — floating picker to jump to a usage. */
+  export const SHOW_USAGES: Command = {
+    id: 'kairo.java.showUsages',
+    label: 'Show Usages',
     category: 'Java',
   };
 
@@ -88,6 +110,10 @@ export namespace JavaNavigationCommands {
   };
 }
 
+interface UsageQuickPickItem extends QuickPickItem {
+  usage: PreparedUsage;
+}
+
 export namespace JavaNavigationMenus {
   export const GO_TO_SUBMENU = [...EDITOR_CONTEXT_MENU, '1_navigation', '1_goTo'];
 }
@@ -106,6 +132,18 @@ export class JavaNavigationContribution implements CommandContribution, MenuCont
   @inject(ApplicationShell)
   protected readonly shell!: ApplicationShell;
 
+  @inject(QuickInputService)
+  @optional()
+  protected readonly quickInput?: QuickInputService;
+
+  @inject(MessageService)
+  @optional()
+  protected readonly messages?: MessageService;
+
+  @inject(WorkspaceService)
+  @optional()
+  protected readonly workspaceService?: WorkspaceService;
+
   registerCommands(registry: CommandRegistry): void {
     registry.registerCommand(JavaNavigationCommands.GO_TO_TYPE_DEFINITION, {
       execute: () => this.executeGoToTypeDefinition(),
@@ -121,6 +159,12 @@ export class JavaNavigationContribution implements CommandContribution, MenuCont
 
     registry.registerCommand(JavaNavigationCommands.FIND_USAGES, {
       execute: () => this.executeFindUsages(),
+      isVisible: () => this.isJavaEditorActive(),
+      isEnabled: () => this.isJavaEditorActive(),
+    });
+
+    registry.registerCommand(JavaNavigationCommands.SHOW_USAGES, {
+      execute: () => this.executeShowUsages(),
       isVisible: () => this.isJavaEditorActive(),
       isEnabled: () => this.isJavaEditorActive(),
     });
@@ -157,6 +201,12 @@ export class JavaNavigationContribution implements CommandContribution, MenuCont
       commandId: JavaNavigationCommands.GO_TO_SUPER_METHOD.id,
       label: 'Super Method',
       order: '4',
+    });
+
+    menus.registerMenuAction(JavaNavigationMenus.GO_TO_SUBMENU, {
+      commandId: JavaNavigationCommands.SHOW_USAGES.id,
+      label: 'Show Usages',
+      order: '5',
     });
 
     menus.registerMenuAction(JavaNavigationMenus.GO_TO_SUBMENU, {
@@ -205,7 +255,13 @@ export class JavaNavigationContribution implements CommandContribution, MenuCont
 
     registry.registerKeybinding({
       command: JavaNavigationCommands.FIND_USAGES.id,
-      keybinding: isOSX ? 'alt+f7' : 'alt+f7',
+      keybinding: 'alt+f7',
+      when: 'editorTextFocus && editorLangId == java',
+    });
+
+    registry.registerKeybinding({
+      command: JavaNavigationCommands.SHOW_USAGES.id,
+      keybinding: isOSX ? 'alt+meta+f7' : 'ctrl+alt+f7',
       when: 'editorTextFocus && editorLangId == java',
     });
 
@@ -303,37 +359,241 @@ export class JavaNavigationContribution implements CommandContribution, MenuCont
   }
 
   protected async executeFindUsages(): Promise<void> {
-    const editor = this.getCurrentMonacoEditor();
-    if (!editor) return;
-
-    const model = editor.getModel();
-    const position = editor.getPosition();
-    if (!model || !position) return;
-
-    const uri = model.uri.toString();
-    const line = position.lineNumber - 1;
-    const character = position.column - 1;
-
-    let symbolName: string | undefined;
-    try {
-      const word = model.getWordAtPosition(position);
-      symbolName = word?.word;
-    } catch {
-      // ignore
-    }
+    const ctx = this.getUsageContext();
+    if (!ctx) return;
 
     try {
       const widget = await this.widgetManager.getOrCreateWidget(JavaReferencesWidget.ID) as JavaReferencesWidget;
       try {
         this.shell.addWidget(widget, { area: 'bottom' });
-      } catch (_e) {
+      } catch {
         // Already attached
       }
       this.shell.activateWidget(widget.id);
-      await widget.findUsages(uri, line, character, symbolName);
+      await widget.findUsages(ctx.uri, ctx.line, ctx.character, ctx.symbolName);
     } catch (err) {
       console.warn('[kairo-java] Find Usages failed:', err);
+      this.messages?.error(`Find Usages failed: ${String(err)}`);
     }
+  }
+
+  /**
+   * Show Usages popup (IDEA Ctrl+Alt+F7) — filterable QuickPick with:
+   *   - file-grouped separators + usage counts
+   *   - declaration tagging
+   *   - current-file usages first
+   *   - live preview while arrowing through results
+   *   - single result jumps immediately
+   *   - custom button to open the full Find Usages panel
+   */
+  protected async executeShowUsages(): Promise<void> {
+    const ctx = this.getUsageContext();
+    if (!ctx) return;
+
+    try {
+      const [references, definitionResult] = await Promise.all([
+        this.client.references({
+          uri: ctx.uri,
+          line: ctx.line,
+          character: ctx.character,
+          includeDeclaration: true,
+        }),
+        this.client.definition({ uri: ctx.uri, line: ctx.line, character: ctx.character }).catch(() => undefined),
+      ]);
+
+      if (!references || references.length === 0) {
+        const name = ctx.symbolName ?? 'symbol';
+        this.messages?.info(`No usages found for '${name}'`);
+        // Still open the Find Usages panel so the empty state is visible
+        // (toast alone is easy to miss).
+        await this.executeFindUsages();
+        return;
+      }
+
+      const declarations = this.normalizeDefinitionLocations(definitionResult);
+      const workspaceRoot = this.getWorkspaceRoot();
+      const usages = prepareUsages({
+        references,
+        declarations,
+        currentUri: ctx.uri,
+        workspaceRoot,
+        getPreview: (uri, line) => this.getLinePreview(uri, line),
+      });
+
+      if (usages.length === 1) {
+        await this.navigateToUsage(usages[0], 'activate');
+        return;
+      }
+
+      if (!this.quickInput) {
+        // Headless / no QuickInput — fall back to the Find Usages panel.
+        await this.executeFindUsages();
+        return;
+      }
+
+      const symbolLabel = ctx.symbolName ?? 'symbol';
+      const entries = buildUsagePickEntries(usages, {
+        declaration: 'declaration',
+        usage: 'usage',
+        fileGroup: (fileName, count) => `${fileName} (${count})`,
+      });
+
+      const items: Array<UsageQuickPickItem | QuickPickSeparator> = entries.map(entry => {
+        if (entry.type === 'separator') {
+          return { type: 'separator', label: entry.label };
+        }
+        const item = entry as UsagePickItemShape;
+        return {
+          type: 'item' as const,
+          id: item.id,
+          label: item.label,
+          description: `${item.description} · ${item.usage.relativePath}`,
+          detail: item.detail,
+          iconClasses: item.iconClasses,
+          usage: item.usage,
+        };
+      });
+
+      let openPanelRequested = false;
+      const picked = await this.quickInput.showQuickPick(items, {
+        title: `Usages of ${symbolLabel} — ${usages.length}`,
+        placeholder: `Filter usages of ${symbolLabel}…`,
+        matchOnDescription: true,
+        matchOnDetail: true,
+        ignoreFocusOut: true,
+        runIfSingle: true,
+        customButton: true,
+        customLabel: 'Find Usages Panel',
+        customHover: 'Open the full Find Usages tool window (Alt+F7)',
+        onDidCustom: () => {
+          openPanelRequested = true;
+          this.quickInput?.hide();
+        },
+        onDidChangeActive: (_qp, activeItems) => {
+          const active = activeItems[0] as UsageQuickPickItem | undefined;
+          if (active?.usage) {
+            void this.navigateToUsage(active.usage, 'reveal');
+          }
+        },
+      });
+
+      if (openPanelRequested) {
+        await this.executeFindUsages();
+        return;
+      }
+
+      if (picked && 'usage' in picked && picked.usage) {
+        await this.navigateToUsage(picked.usage, 'activate');
+      }
+    } catch (err) {
+      console.warn('[kairo-java] Show Usages failed:', err);
+      this.messages?.error(`Show Usages failed: ${String(err)}`);
+    }
+  }
+
+  protected getUsageContext(): { uri: string; line: number; character: number; symbolName?: string } | undefined {
+    const editor = this.getCurrentMonacoEditor();
+    if (!editor) return undefined;
+
+    const model = editor.getModel();
+    const position = editor.getPosition();
+    if (!model || !position) return undefined;
+
+    const snapped = this.resolveSymbolAtPosition(model, position);
+    if (!snapped) {
+      this.messages?.info('Place the caret on a class, method, or field name');
+      return undefined;
+    }
+
+    // Keep caret on the identifier so subsequent actions stay consistent.
+    try {
+      editor.setPosition({ lineNumber: snapped.line + 1, column: snapped.character + 1 });
+    } catch {
+      // ignore
+    }
+
+    return {
+      uri: model.uri.toString(),
+      line: snapped.line,
+      character: snapped.character,
+      symbolName: snapped.symbolName,
+    };
+  }
+
+  /**
+   * Resolve the Java identifier under (or immediately left of) the caret.
+   * Avoids empty reference results when the caret sits on `{`, `;`, or whitespace.
+   */
+  protected resolveSymbolAtPosition(
+    model: monaco.editor.ITextModel,
+    position: monaco.Position,
+  ): { line: number; character: number; symbolName: string } | undefined {
+    try {
+      const word = model.getWordAtPosition(position);
+      if (word && /^[A-Za-z_$]/.test(word.word)) {
+        return {
+          line: position.lineNumber - 1,
+          character: word.startColumn - 1,
+          symbolName: word.word,
+        };
+      }
+    } catch {
+      // fall through to line scan
+    }
+
+    try {
+      const text = model.getLineContent(position.lineNumber);
+      const hit = resolveIdentifierOnLine(text, position.column - 1);
+      if (!hit) return undefined;
+      return {
+        line: position.lineNumber - 1,
+        character: hit.character,
+        symbolName: hit.symbolName,
+      };
+    } catch {
+      return undefined;
+    }
+  }
+
+  protected getWorkspaceRoot(): string | undefined {
+    const root = this.workspaceService?.tryGetRoots()?.[0] as { resource?: { toString(): string }; uri?: string } | undefined;
+    return root?.resource?.toString() ?? root?.uri;
+  }
+
+  protected normalizeDefinitionLocations(
+    result: LSPLocation | LSPLocation[] | LSPLocationLink | LSPLocationLink[] | null | undefined,
+  ): LSPLocation[] {
+    if (!result) return [];
+    const list = Array.isArray(result) ? result : [result];
+    return list.map(loc => {
+      if (loc && typeof loc === 'object' && 'targetUri' in loc) {
+        return { uri: loc.targetUri, range: loc.targetSelectionRange };
+      }
+      return loc as LSPLocation;
+    });
+  }
+
+  protected getLinePreview(uri: string, line: number): string {
+    try {
+      const model = monaco.editor.getModel(monaco.Uri.parse(uri));
+      if (model) {
+        return model.getLineContent(line + 1).trim().substring(0, 200);
+      }
+    } catch {
+      // ignore
+    }
+    return `Line ${line + 1}`;
+  }
+
+  protected async navigateToUsage(usage: PreparedUsage, mode: 'activate' | 'reveal'): Promise<void> {
+    await this.editorManager.open(new URI(usage.uri), {
+      mode,
+      selection: {
+        start: { line: usage.line + 1, character: usage.character + 1 },
+        end: { line: usage.endLine + 1, character: usage.endCharacter + 1 },
+      },
+      revealOption: 'centerIfOutsideViewport',
+    });
   }
 
   protected executeFileStructure(): void {

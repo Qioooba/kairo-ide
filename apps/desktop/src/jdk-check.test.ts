@@ -8,7 +8,7 @@
 
 import * as assert from 'node:assert';
 import { describe, it } from 'node:test';
-import { parseMajorVersion, probeJavaVersion, detectJDK17Plus } from './jdk-check';
+import { parseMajorVersion, probeJavaVersion, detectJDK17Plus, detectHostJDK, applyHostJDKEnv, JDT_LS_MIN_JDK_MAJOR } from './jdk-check';
 
 // ─── parseMajorVersion ──────────────────────────────────────────
 
@@ -104,6 +104,70 @@ describe('probeJavaVersion', () => {
   });
 });
 
+describe('detectHostJDK', () => {
+  it('prefers a JDK 21+ install when available on the machine', () => {
+    const result = detectHostJDK();
+    assert.strictEqual(typeof result.found, 'boolean');
+    if (!result.found) return;
+    // On this developer machine Temurin 21 is installed; when present
+    // the unified detector should surface major >= 21.
+    if ((result.major ?? 0) >= JDT_LS_MIN_JDK_MAJOR) {
+      assert.ok((result.major as number) >= JDT_LS_MIN_JDK_MAJOR);
+    }
+  });
+});
+
+describe('applyHostJDKEnv', () => {
+  it('sets KAIRO_JDK_HOME and KAIRO_JDT_LS_JRE for JDK 21+', () => {
+    const prev = {
+      KAIRO_JDK_HOME: process.env.KAIRO_JDK_HOME,
+      KAIRO_JDT_LS_JRE: process.env.KAIRO_JDT_LS_JRE,
+      KAIRO_JRE17_HOME: process.env.KAIRO_JRE17_HOME,
+    };
+    try {
+      applyHostJDKEnv({
+        found: true,
+        javaHome: 'C:\\fake\\jdk-21',
+        major: 21,
+        version: '21.0.0',
+      });
+      assert.strictEqual(process.env.KAIRO_JDK_HOME, 'C:\\fake\\jdk-21');
+      assert.strictEqual(process.env.KAIRO_JDT_LS_JRE, 'C:\\fake\\jdk-21');
+      assert.strictEqual(process.env.KAIRO_JRE17_HOME, 'C:\\fake\\jdk-21');
+    } finally {
+      for (const [k, v] of Object.entries(prev)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
+  });
+
+  it('does not claim JDT LS env when only JDK 17 is available', () => {
+    const prev = {
+      KAIRO_JDK_HOME: process.env.KAIRO_JDK_HOME,
+      KAIRO_JDT_LS_JRE: process.env.KAIRO_JDT_LS_JRE,
+      KAIRO_JRE17_HOME: process.env.KAIRO_JRE17_HOME,
+    };
+    delete process.env.KAIRO_JDT_LS_JRE;
+    delete process.env.KAIRO_JRE17_HOME;
+    try {
+      applyHostJDKEnv({
+        found: true,
+        javaHome: 'C:\\fake\\jdk-17',
+        major: 17,
+        version: '17.0.0',
+      });
+      assert.strictEqual(process.env.KAIRO_JDK_HOME, 'C:\\fake\\jdk-17');
+      assert.strictEqual(process.env.KAIRO_JDT_LS_JRE, undefined);
+    } finally {
+      for (const [k, v] of Object.entries(prev)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
+  });
+});
+
 // ─── detectJDK17Plus ────────────────────────────────────────────
 
 describe('detectJDK17Plus', () => {
@@ -187,6 +251,67 @@ describe('detectJDK17Plus', () => {
         process.env.KAIRO_JDK_HOME = prevKairo;
       } else {
         delete process.env.KAIRO_JDK_HOME;
+      }
+    }
+  });
+});
+describe('detectHostJDK', () => {
+  it('prefers a JDK 21+ install when available on the machine', () => {
+    const result = detectHostJDK();
+    assert.strictEqual(typeof result.found, 'boolean');
+    if (!result.found) return;
+    if ((result.major ?? 0) >= JDT_LS_MIN_JDK_MAJOR) {
+      assert.ok((result.major as number) >= JDT_LS_MIN_JDK_MAJOR);
+    }
+  });
+});
+
+describe('applyHostJDKEnv', () => {
+  it('sets KAIRO_JDK_HOME and KAIRO_JDT_LS_JRE for JDK 21+', () => {
+    const prev = {
+      KAIRO_JDK_HOME: process.env.KAIRO_JDK_HOME,
+      KAIRO_JDT_LS_JRE: process.env.KAIRO_JDT_LS_JRE,
+      KAIRO_JRE17_HOME: process.env.KAIRO_JRE17_HOME,
+    };
+    try {
+      applyHostJDKEnv({
+        found: true,
+        javaHome: 'C:\\fake\\jdk-21',
+        major: 21,
+        version: '21.0.0',
+      });
+      assert.strictEqual(process.env.KAIRO_JDK_HOME, 'C:\\fake\\jdk-21');
+      assert.strictEqual(process.env.KAIRO_JDT_LS_JRE, 'C:\\fake\\jdk-21');
+      assert.strictEqual(process.env.KAIRO_JRE17_HOME, 'C:\\fake\\jdk-21');
+    } finally {
+      for (const [k, v] of Object.entries(prev)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
+  });
+
+  it('does not claim JDT LS env when only JDK 17 is available', () => {
+    const prev = {
+      KAIRO_JDK_HOME: process.env.KAIRO_JDK_HOME,
+      KAIRO_JDT_LS_JRE: process.env.KAIRO_JDT_LS_JRE,
+      KAIRO_JRE17_HOME: process.env.KAIRO_JRE17_HOME,
+    };
+    delete process.env.KAIRO_JDT_LS_JRE;
+    delete process.env.KAIRO_JRE17_HOME;
+    try {
+      applyHostJDKEnv({
+        found: true,
+        javaHome: 'C:\\fake\\jdk-17',
+        major: 17,
+        version: '17.0.0',
+      });
+      assert.strictEqual(process.env.KAIRO_JDK_HOME, 'C:\\fake\\jdk-17');
+      assert.strictEqual(process.env.KAIRO_JDT_LS_JRE, undefined);
+    } finally {
+      for (const [k, v] of Object.entries(prev)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
       }
     }
   });

@@ -5,8 +5,54 @@
   overflow: hidden;
 }
 
-/* Backdrop */
-.kairo-search-backdrop {
+.kairo-search-advanced-row {
+  margin-top: 6px;
+}
+
+.kairo-search-exclude-mask {
+  flex: 1;
+}
+
+/* ===== Docked Find tool window (bottom) ===== */
+.kairo-search-results-widget {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 120px;
+  background: var(--theia-editor-background);
+}
+
+.kairo-find-tool-window {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  font-size: 12px;
+}
+
+.kairo-find-tool-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--theia-panel-border, #454545);
+  background: var(--theia-sideBar-background, #252526);
+  flex-shrink: 0;
+}
+
+.kairo-find-tool-title {
+  font-weight: 600;
+  color: var(--theia-foreground);
+}
+
+.kairo-find-tool-stats {
+  color: var(--theia-descriptionForeground, #858585);
+  margin-left: auto;
+}
+
+.kairo-find-tool-list {
+  flex: 1;
+  min-height: 0;
+}
   position: fixed;
   inset: 0;
   background: var(--kairo-overlay-background, rgba(0, 0, 0, 0.4));

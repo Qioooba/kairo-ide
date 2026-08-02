@@ -13,7 +13,15 @@ import { Disposable } from '@theia/core/lib/common/disposable';
 import { Emitter, Event } from '@theia/core/lib/common/event';
 import { JavaLanguageClient } from './java-language-client';
 import { JavaIntelliSenseProvider } from './java-intellisense-provider';
-import type { JavaIntelliSenseCompletionItem } from './java-intellisense-provider';
+import {
+  adaptIntelliSenseCompletion,
+  adaptLspCompletion,
+  extractTypeHintFromParameterLabel,
+  filterSmartCompletions,
+  mergeResolvedCompletion,
+  type JavaCompletionResponse,
+  type JavaCompletionResponseItem,
+} from './java-completion-adapter';
 import {
   LSPCompletionItem,
   LSPPublishDiagnosticsParams,
@@ -33,29 +41,18 @@ import {
   LSPDocumentHighlight,
 } from '../common/lsp-protocol';
 
+export type { JavaCompletionResponse, JavaCompletionResponseItem } from './java-completion-adapter';
+
 export interface JavaCompletionRequest {
   uri: string;
   line: number;
   character: number;
   triggerKind?: 1 | 2 | 3;
   triggerCharacter?: string;
-}
-
-export interface JavaCompletionResponseItem {
-  label: string;
-  kind: number | undefined;
-  detail: string | undefined;
-  documentation: string | undefined;
-  sortText: string | undefined;
-  filterText: string | undefined;
-  insertText: string | undefined;
-  isDeprecated?: boolean;
-  score?: number;
-}
-
-export interface JavaCompletionResponse {
-  isIncomplete: boolean;
-  items: JavaCompletionResponseItem[];
+  /** IDEA-like Smart Type Completion (Ctrl+Shift+Space). */
+  smart?: boolean;
+  /** 0=type filter, 1=members only, 2=all re-ranked — cycles on repeat. */
+  smartCycle?: number;
 }
 
 export interface JavaDefinitionResponse {
@@ -104,33 +101,128 @@ export class JavaCompletionProvider {
    * `JavaCompletionProviderRegistration`).
    *
    * When JDT LS is ready, completions come from the LS.
-   * When the LS is not ready, a fallback IntelliSense
-   * provider supplies keyword, type, snippet, variable,
-   * method, and import completions.
+   * Empty LS results are trusted (no keyword fallback) so
+   * real "no candidates" contexts stay quiet — matching IDEA.
+   * When the LS is not ready or the request fails, a fallback
+   * IntelliSense provider supplies keyword/type/snippet items.
    */
   async provideCompletions(req: JavaCompletionRequest): Promise<JavaCompletionResponse> {
-    // fetchState() prefers the backend RPC proxy — the sync
-    // client.state() reads the in-process service, which is
-    // permanently 'uninitialized' in the web product and made
-    // every provider short-circuit (KAIRO-RC-WEB-251).
-    if (await this.client.fetchState() !== 'ready') {
+    // Interactive suggest must not wait forever on RPC reconnect retries —
+    // otherwise Monaco keeps the widget on "Loading…" and hides
+    // already-ready Live Templates / Hippie results. Soft budget also caps
+    // JDT indexing stalls (A3 3.1).
+    const COMPLETION_BUDGET_MS = 5_000;
+    const run = async (): Promise<JavaCompletionResponse> => {
+      // Prefer quick state for suggest; avoids 3s+ reconnect loops.
+      const state = await this.client.fetchStateQuick();
+      if (state !== 'ready') {
+        return this.maybeSmart(this.fallbackCompletions(req), req);
+      }
+      try {
+        const list = await this.client.completion(req);
+        this.logger.info(`[JavaCompletionProvider] completion: ${list.items.length} items from client`);
+        if (list.items.length === 0) {
+          // Incomplete/empty after soft-timeout or cold index — offer local fallback
+          // so "Sys" still yields System instead of a blank/Loading widget.
+          const fallback = this.fallbackCompletions(req);
+          if (fallback.items.length > 0) {
+            return this.maybeSmart({
+              isIncomplete: !!list.isIncomplete,
+              items: fallback.items,
+            }, req);
+          }
+        }
+        const items = list.items.map(adaptLspCompletion);
+        return this.maybeSmart({ isIncomplete: !!list.isIncomplete, items }, req);
+      } catch (err) {
+        this.logger.warn(`[JavaCompletionProvider] completion failed: ${String(err)}`);
+        return this.maybeSmart(this.fallbackCompletions(req), req);
+      }
+    };
+
+    try {
+      return await Promise.race([
+        run(),
+        new Promise<JavaCompletionResponse>(resolve => {
+          setTimeout(() => {
+            this.logger.warn('[JavaCompletionProvider] completion budget exceeded — using fallback');
+            resolve(this.fallbackCompletions(req));
+          }, COMPLETION_BUDGET_MS);
+        }),
+      ]);
+    } catch (err) {
+      this.logger.warn(`[JavaCompletionProvider] completion error: ${String(err)}`);
       return this.fallbackCompletions(req);
+    }
+  }
+
+  /** Resolve lazy completion details (docs / additionalTextEdits). */
+  async resolveCompletion(item: JavaCompletionResponseItem): Promise<JavaCompletionResponseItem> {
+    if (item.data === undefined || item.data === null) {
+      return item;
+    }
+    if (await this.client.fetchStateQuick() !== 'ready') {
+      return item;
     }
     try {
-      const list = await this.client.completion(req);
-      if (list.items.length === 0) {
-        // LS returned empty — try fallback
-        return this.fallbackCompletions(req);
-      }
-      this.logger.info(`[JavaCompletionProvider] completion: ${list.items.length} items from client`);
-      return {
-        isIncomplete: list.isIncomplete,
-        items: list.items.map(adaptLspCompletion),
+      const partial: LSPCompletionItem = {
+        label: item.label,
+        kind: item.kind,
+        detail: item.detail,
+        documentation: item.documentation,
+        sortText: item.sortText,
+        filterText: item.filterText,
+        insertText: item.insertText,
+        insertTextFormat: item.insertTextFormat,
+        textEdit: item.textEdit,
+        additionalTextEdits: item.additionalTextEdits,
+        commitCharacters: item.commitCharacters,
+        command: item.command,
+        data: item.data,
       };
+      const resolved = await this.client.resolveCompletion(partial);
+      return mergeResolvedCompletion(item, resolved);
     } catch (err) {
-      this.logger.warn(`[JavaCompletionProvider] completion failed: ${String(err)}`);
-      return this.fallbackCompletions(req);
+      this.logger.warn(`[JavaCompletionProvider] resolveCompletion failed: ${String(err)}`);
+      return item;
     }
+  }
+
+  private async maybeSmart(response: JavaCompletionResponse, req: JavaCompletionRequest): Promise<JavaCompletionResponse> {
+    if (!req.smart) {
+      return response;
+    }
+    let expectedType: string | undefined;
+    try {
+      const help = await Promise.race([
+        this.client.signatureHelp({
+          uri: req.uri,
+          line: req.line,
+          character: req.character,
+          triggerKind: 1,
+        }),
+        new Promise<null>(resolve => setTimeout(() => resolve(null), 400)),
+      ]);
+      if (help && help.signatures.length > 0) {
+        const sigIndex = help.activeSignature ?? 0;
+        const sig = help.signatures[sigIndex];
+        const paramIndex = help.activeParameter ?? sig?.activeParameter ?? 0;
+        const param = sig?.parameters?.[paramIndex];
+        let paramLabel: string | undefined;
+        if (typeof param?.label === 'string') {
+          paramLabel = param.label;
+        } else if (Array.isArray(param?.label) && typeof sig?.label === 'string') {
+          paramLabel = sig.label.slice(param.label[0], param.label[1]);
+        }
+        expectedType = extractTypeHintFromParameterLabel(paramLabel);
+      }
+    } catch {
+      // signature help is best-effort for smart ranking
+    }
+    return {
+      isIncomplete: false,
+      items: filterSmartCompletions(response.items, expectedType, req.smartCycle ?? 0),
+    };
   }
 
   /** Fallback completions using the IntelliSense provider. */
@@ -269,38 +361,6 @@ export class JavaCompletionProvider {
     this.subs = [];
     this.onDiagnosticsEmitter.dispose();
   }
-}
-
-function adaptLspCompletion(it: LSPCompletionItem): JavaCompletionResponseItem {
-  let doc: string | undefined;
-  if (typeof it.documentation === 'string') {
-    doc = it.documentation;
-  } else if (it.documentation && typeof it.documentation === 'object') {
-    doc = it.documentation.value;
-  }
-  return {
-    label: it.label,
-    kind: it.kind,
-    detail: it.detail,
-    documentation: doc,
-    sortText: it.sortText,
-    filterText: it.filterText,
-    insertText: it.insertText ?? it.label,
-    isDeprecated: (it as { tags?: number[] }).tags?.includes(1) ?? false,
-  };
-}
-
-function adaptIntelliSenseCompletion(it: JavaIntelliSenseCompletionItem): JavaCompletionResponseItem {
-  return {
-    label: it.label,
-    kind: it.kind,
-    detail: it.detail,
-    documentation: it.documentation,
-    sortText: it.sortText,
-    filterText: it.filterText,
-    insertText: it.insertText,
-    isDeprecated: it.isDeprecated,
-  };
 }
 
 // Type alias used to avoid pulling in the full LSPCompletionItem

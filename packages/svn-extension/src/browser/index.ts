@@ -31,3 +31,15 @@ export { SvnAnnotateDecorator } from './svn-annotate-decorator';
 export { SvnStatusBarContribution } from './svn-status-bar-contribution';
 export { SvnPreferenceContribution } from './svn-preferences';
 export { SvnContribution, SvnCommands, bindSvnExtension } from './svn-contribution';
+export { SvnCommitDialog } from './svn-commit-dialog';
+export { SvnUpdateDialog } from './svn-update-dialog';
+export { SvnConflictDialog } from './svn-conflict-dialog';
+export { SvnRepositoryDialog } from './svn-repository-dialog';
+export {
+  SvnBranchTagDialog,
+  SvnSwitchDialog,
+  SvnMergeDialog,
+  SvnCheckoutDialog,
+  SvnImportExportDialog,
+} from './svn-ops-dialogs';
+export { SvnInfoDialog } from './svn-info-dialog';

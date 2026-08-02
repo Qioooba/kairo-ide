@@ -116,6 +116,7 @@ export class JspDebugBreakpointMapper {
     }
 
     this.config.enabled = enabled;
+    setJspDebugCodeLensEnabled(enabled);
     await this.storage.setData(JSP_DEBUG_CONFIG_KEY, this.config);
     this.onDidChangeConfigEmitter.fire({ ...this.config });
   }
@@ -310,9 +311,11 @@ export class JspDebugBreakpointMapper {
       const data = await this.storage.getData<JspDebugConfig>(JSP_DEBUG_CONFIG_KEY);
       if (data) {
         this.config = data;
+        setJspDebugCodeLensEnabled(!!data.enabled);
       }
     } catch {
       this.config = { enabled: false };
+      setJspDebugCodeLensEnabled(false);
     }
   }
 }
@@ -320,11 +323,23 @@ export class JspDebugBreakpointMapper {
 // ── CodeLens provider for JSP debug breakpoints ─────────────────
 
 /**
- * Register a CodeLens provider that shows "Set Breakpoint" / "Toggle Breakpoint"
- * on JSP scriptlet, expression, and declaration lines.
+ * Runtime opt-in for JSP breakpoint CodeLenses. Matches the
+ * documented default of `kairo.jsp.debugBreakpoints` (off).
+ * `JspDebugBreakpointMapper.setEnabled` flips this so CodeLens
+ * stays quiet until the user explicitly enables the experiment.
+ */
+let jspDebugCodeLensEnabled = false;
+
+export function setJspDebugCodeLensEnabled(enabled: boolean): void {
+  jspDebugCodeLensEnabled = enabled;
+}
+
+/**
+ * Register a CodeLens provider that shows "Toggle Breakpoint"
+ * on JSP scriptlet / expression / declaration lines.
  *
- * When clicked, it maps the JSP line to the generated Servlet Java line
- * and shows a notification.
+ * Gated behind the experimental flag — without the gate every
+ * Java line sprouts a CodeLens and drowns syntax highlighting.
  */
 export function registerJspDebugCodeLens(): monaco.IDisposable {
   const javaParser = new JspJavaParser();
@@ -334,7 +349,7 @@ export function registerJspDebugCodeLens(): monaco.IDisposable {
       model: monaco.editor.ITextModel,
       token: monaco.CancellationToken,
     ): Promise<monaco.languages.CodeLensList> => {
-      if (token.isCancellationRequested) {
+      if (token.isCancellationRequested || !jspDebugCodeLensEnabled) {
         return { lenses: [], dispose: () => undefined };
       }
 
