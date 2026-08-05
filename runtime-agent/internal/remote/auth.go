@@ -1,3 +1,5 @@
+//go:build remote
+
 // Package remote implements security authentication enhancements
 // for Phase 3+ remote Linux agent functionality.
 //

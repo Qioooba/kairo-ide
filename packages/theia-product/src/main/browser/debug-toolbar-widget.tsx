@@ -11,9 +11,8 @@ import * as React from 'react';
 import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import { Emitter, Event } from '@theia/core/lib/common/event';
-import { DebugSessionManager } from '@theia/debug/lib/browser/debug-session-manager';
 import { KairoI18nService } from '@kairo/i18n';
-import { KairoJavaDebugService, type KairoJavaDebugState } from './kairo-java-debug-service';
+import { type KairoJavaDebugState } from './kairo-java-debug-service';
 import { KairoDebugSessionService } from './kairo-debug-session-service';
 
 export const KAIRO_DEBUG_TOOLBAR_FACTORY_ID = 'kairo-debug-toolbar';
@@ -196,12 +195,6 @@ const ToolbarView: React.FC<ToolbarViewProps> = ({
 export class KairoDebugToolbarWidget extends ReactWidget {
     static readonly ID = KAIRO_DEBUG_TOOLBAR_FACTORY_ID;
 
-    @inject(DebugSessionManager)
-    protected readonly sessionManager!: DebugSessionManager;
-
-    @inject(KairoJavaDebugService)
-    protected readonly javaDebug!: KairoJavaDebugService;
-
     @inject(KairoDebugSessionService)
     protected readonly debugSessionService!: KairoDebugSessionService;
 
@@ -232,10 +225,10 @@ export class KairoDebugToolbarWidget extends ReactWidget {
         this.title.iconClass = 'codicon codicon-debug-alt';
         this.title.closable = true;
         this.addClass('kairo-widget');
-        this.update();
+        this.refreshFromSession();
 
         this.toDispose.push(this.i18n.onDidChangeLanguage(() => this.updateTitle()));
-        this.debugSessionService.onDidChangeState(() => this.update());
+        this.debugSessionService.onDidChangeState(() => this.refreshFromSession());
     }
 
     protected updateTitle(): void {
@@ -244,7 +237,7 @@ export class KairoDebugToolbarWidget extends ReactWidget {
     }
 
     protected onAfterShow(): void {
-        this.update();
+        this.refreshFromSession();
     }
 
     protected render(): React.ReactNode {
@@ -260,7 +253,8 @@ export class KairoDebugToolbarWidget extends ReactWidget {
         });
     }
 
-    update(): void {
+    /** Recompute button enablement from the current debug session. */
+    protected refreshFromSession(): void {
         const sessionState = this.debugSessionService.currentState;
         const debugState = sessionState.debugState;
         const isSuspended = sessionState.isSuspended;
@@ -344,10 +338,8 @@ export class KairoDebugToolbarWidget extends ReactWidget {
 
     async restart(): Promise<void> {
         try {
-            await this.javaDebug.stop();
-            // Re-attach would need the original target info; for now
-            // stop is a clean teardown — user can re-debug from toolbar.
-            this.update();
+            await this.debugSessionService.restart();
+            this.refreshFromSession();
         } catch (error) {
             this.setState({
                 buttons: this.state.buttons,
@@ -360,7 +352,7 @@ export class KairoDebugToolbarWidget extends ReactWidget {
     protected setState(partial: Partial<ToolbarState>): void {
         this.state = { ...this.state, ...partial };
         this.onStateChangeEmitter.fire(this.state);
-        this.update();
+        super.update();
     }
 }
 

@@ -448,11 +448,17 @@ export function encodeLspMessage(message: unknown): Buffer {
  * language client.
  */
 export class LSPMessageParser {
-  private buffer: Buffer = Buffer.alloc(0);
+  /** Pending raw chunks; coalesced with a single concat when parsing. */
+  private chunks: Buffer[] = [];
+  private bufferedBytes = 0;
 
   /** Push a chunk of raw bytes; return any complete messages. */
   push(chunk: Buffer): unknown[] {
-    this.buffer = Buffer.concat([this.buffer, chunk]);
+    if (chunk.length === 0) {
+      return [];
+    }
+    this.chunks.push(chunk);
+    this.bufferedBytes += chunk.length;
     const out: unknown[] = [];
     while (true) {
       const msg = this.tryParseOne();
@@ -466,20 +472,35 @@ export class LSPMessageParser {
 
   /** Pending bytes still buffered (for diagnostics). */
   pendingBytes(): number {
-    return this.buffer.length;
+    return this.bufferedBytes;
   }
 
   /** Drop any buffered state — used after a fatal framing error. */
   reset(): void {
-    this.buffer = Buffer.alloc(0);
+    this.chunks = [];
+    this.bufferedBytes = 0;
+  }
+
+  /** Coalesce pending chunks into one buffer (at most one concat). */
+  private coalesce(): Buffer {
+    if (this.chunks.length === 0) {
+      return Buffer.alloc(0);
+    }
+    if (this.chunks.length === 1) {
+      return this.chunks[0];
+    }
+    const merged = Buffer.concat(this.chunks, this.bufferedBytes);
+    this.chunks = [merged];
+    return merged;
   }
 
   private tryParseOne(): unknown | undefined {
-    const headerEnd = this.buffer.indexOf('\r\n\r\n');
+    const buffer = this.coalesce();
+    const headerEnd = buffer.indexOf('\r\n\r\n');
     if (headerEnd < 0) {
       return undefined;
     }
-    const headerStr = this.buffer.slice(0, headerEnd).toString('ascii');
+    const headerStr = buffer.slice(0, headerEnd).toString('ascii');
     // Match signed integers so we can reject negatives
     // with a clear error rather than as a "missing
     // header".
@@ -492,11 +513,13 @@ export class LSPMessageParser {
       throw new Error(`LSP: invalid Content-Length ${lengthMatch[1]}`);
     }
     const totalLength = headerEnd + 4 + contentLength;
-    if (this.buffer.length < totalLength) {
+    if (buffer.length < totalLength) {
       return undefined;
     }
-    const body = this.buffer.slice(headerEnd + 4, totalLength);
-    this.buffer = this.buffer.slice(totalLength);
+    const body = buffer.slice(headerEnd + 4, totalLength);
+    const remaining = buffer.slice(totalLength);
+    this.chunks = remaining.length > 0 ? [remaining] : [];
+    this.bufferedBytes = remaining.length;
     return JSON.parse(body.toString('utf-8'));
   }
 }

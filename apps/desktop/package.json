@@ -7,15 +7,16 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "prebuild": "node scripts/build-agent.js && node scripts/copy-browser-artifacts.js && node scripts/copy-bundled.js",
-    "build:mac": "tsc -p tsconfig.json && electron-builder --mac",
-    "build:win": "pnpm --filter @kairo/browser build && pwsh -ExecutionPolicy Bypass -File ../../scripts/prepare-bundled.ps1 -Strict -BundledRoot apps/desktop/bundled && node scripts/build-agent.js && node scripts/copy-browser-artifacts.js --strict && tsc -p tsconfig.json && electron-builder --win",
-    "build:linux": "tsc -p tsconfig.json && electron-builder --linux",
-    "build:all": "tsc -p tsconfig.json && electron-builder --mac --win --linux",
+    "build:mac": "tsc -p tsconfig.json && electron-builder --mac --config electron-builder.yml",
+    "build:win": "pnpm --filter @kairo/browser build && pwsh -ExecutionPolicy Bypass -File ../../scripts/prepare-bundled.ps1 -Strict -BundledRoot apps/desktop/bundled && node scripts/build-agent.js && node scripts/copy-browser-artifacts.js --strict && tsc -p tsconfig.json && electron-builder --win --config electron-builder.yml",
+    "build:win:release": "pnpm --filter @kairo/browser build && pwsh -ExecutionPolicy Bypass -File ../../scripts/prepare-bundled.ps1 -Strict -BundledRoot apps/desktop/bundled && node scripts/build-agent.js && node scripts/copy-browser-artifacts.js --strict && tsc -p tsconfig.json && pwsh -Command \"$env:KAIRO_REQUIRE_SIGNING='1'; electron-builder --win --config electron-builder.yml\"",
+    "build:linux": "tsc -p tsconfig.json && electron-builder --linux --config electron-builder.yml",
+    "build:all": "tsc -p tsconfig.json && electron-builder --mac --win --linux --config electron-builder.yml",
     "prestart": "node scripts/copy-browser-artifacts.js",
     "start": "electron lib/main.js",
     "copy:browser": "node scripts/copy-browser-artifacts.js",
-    "test": "node --require ts-node/register --require source-map-support/register --test src/process-manager.test.ts",
-    "test:unit": "node --require ts-node/register --require source-map-support/register --test src/process-manager.test.ts",
+    "test": "node --require ts-node/register --require source-map-support/register --test src/process-manager.test.ts src/child-lifecycle.test.ts src/theia-port-discover.test.ts src/agent-state.test.ts",
+    "test:unit": "node --require ts-node/register --require source-map-support/register --test src/process-manager.test.ts src/child-lifecycle.test.ts src/theia-port-discover.test.ts src/agent-state.test.ts",
     "lint": "tsc -p tsconfig.json --noEmit",
     "clean": "rm -rf lib dist"
   },
@@ -33,84 +34,5 @@
     "electron": "39.8.7",
     "electron-builder": "25.1.8",
     "typescript": "5.5.4"
-  },
-  "build": {
-    "appId": "com.kairo.ide",
-    "productName": "Kairo",
-    "executableName": "Kairo",
-    "directories": {
-      "output": "dist"
-    },
-    "npmRebuild": false,
-    "files": [
-      "lib/main.js",
-      "lib/preload.js",
-      "lib/process-manager.js",
-      "lib/jdk-check.js",
-      "lib/frontend/**/*",
-      "lib/backend/**/*",
-      "package.json",
-      "!lib/**/*.map",
-      "!lib/**/*.test.js"
-    ],
-    "extraResources": [
-      {
-        "from": "../../runtime-agent/bin/kairo-runtime.exe",
-        "to": "bin/kairo-runtime.exe"
-      },
-      {
-        "from": "bundled/tomcat6",
-        "to": "bundled/tomcat6",
-        "filter": ["**/*"]
-      },
-      {
-        "from": "bundled/jdtls",
-        "to": "bundled/jdtls",
-        "filter": ["**/*"]
-      }
-    ],
-    "mac": {
-      "category": "public.app-category.developer-tools",
-      "target": ["dmg", "zip"],
-      "extraResources": [
-        {
-          "from": "../../runtime-agent/bin/kairo-runtime",
-          "to": "bin/kairo-runtime"
-        },
-        {
-          "from": "bundled/tomcat6",
-          "to": "bundled/tomcat6",
-          "filter": ["**/*"]
-        },
-        {
-          "from": "bundled/jdtls",
-          "to": "bundled/jdtls",
-          "filter": ["**/*"]
-        }
-      ]
-    },
-    "win": {
-      "target": ["nsis", "zip"]
-    },
-    "publish": null,
-    "linux": {
-      "target": ["AppImage", "zip"],
-      "extraResources": [
-        {
-          "from": "../../runtime-agent/bin/kairo-runtime",
-          "to": "bin/kairo-runtime"
-        },
-        {
-          "from": "bundled/tomcat6",
-          "to": "bundled/tomcat6",
-          "filter": ["**/*"]
-        },
-        {
-          "from": "bundled/jdtls",
-          "to": "bundled/jdtls",
-          "filter": ["**/*"]
-        }
-      ]
-    }
   }
 }

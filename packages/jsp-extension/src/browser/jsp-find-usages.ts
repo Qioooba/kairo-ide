@@ -18,11 +18,11 @@
 
 import * as monaco from '@theia/monaco-editor-core';
 import URI from '@theia/core/lib/common/uri';
-import { injectable, inject } from '@theia/core/shared/inversify';
 import { FileService } from '@theia/filesystem/lib/browser/file-service';
 import { WorkspaceService } from '@theia/workspace/lib/browser/workspace-service';
 import { JSP_LANGUAGE_ID } from './jsp-monarch';
 import { JspJavaParser } from './jsp-java-nav';
+import type { JspNavServices } from './jsp-nav-services';
 import { parseWebXml, type ServletMapping as _ServletMapping } from './webxml-parser';
 
 /** Timeout for each search phase. */
@@ -79,15 +79,13 @@ export interface JspFindUsagesResult {
  * for the JSP language and also as a ReferenceProvider for Java
  * (to catch servlet-class → web.xml references).
  */
-@injectable()
 export class JspFindUsagesProvider {
-  @inject(FileService)
-  protected readonly fileService!: FileService;
-
-  @inject(WorkspaceService)
-  protected readonly workspaceService!: WorkspaceService;
-
   private readonly javaParser = new JspJavaParser();
+
+  constructor(
+    protected readonly fileService: FileService,
+    protected readonly workspaceService: WorkspaceService,
+  ) {}
 
   /**
    * Find all usages of a Java class name across JSP and Java files.
@@ -409,8 +407,8 @@ export class JspFindUsagesProvider {
  * Register the JSP Find Usages reference provider with Monaco.
  * Returns a Disposable for cleanup.
  */
-export function registerJspFindUsages(): monaco.IDisposable {
-  const provider = new JspFindUsagesProvider();
+export function registerJspFindUsages(services: JspNavServices): monaco.IDisposable {
+  const provider = new JspFindUsagesProvider(services.fileService, services.workspaceService);
 
   const disposables: monaco.IDisposable[] = [];
 

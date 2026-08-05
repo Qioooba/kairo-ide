@@ -172,7 +172,7 @@ const KairoProblems: React.FC<KairoProblemsProps> = ({ openerService, editorMana
       setEntries(all);
       setFileSuggestions([...new Set(all.map(e => e.file))].sort());
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load markers.');
+      setError(err instanceof Error ? err.message : t('widget.problems.loadFailed'));
     } finally {
       setLoading(false);
     }
@@ -188,12 +188,11 @@ const KairoProblems: React.FC<KairoProblemsProps> = ({ openerService, editorMana
   React.useEffect(() => {
     const checkDisabled = () => {
       const editor = editorManager.currentEditor;
-      // Only show disabled hint when there is literally no editor open
       setDisabled(!editor && entries.length === 0);
     };
     checkDisabled();
-    const interval = setInterval(checkDisabled, 2000);
-    return () => clearInterval(interval);
+    const disposable = editorManager.onCurrentEditorChanged(() => checkDisabled());
+    return () => disposable.dispose();
   }, [editorManager, entries.length]);
 
   const updateFilter = (partial: Partial<FilterState>) => {
@@ -265,30 +264,20 @@ const KairoProblems: React.FC<KairoProblemsProps> = ({ openerService, editorMana
     handleClick(filtered[newIndex]);
   };
 
-  // Keyboard navigation
+  // Keyboard navigation — only when Problems widget is focused so F8
+  // does not steal debug stepOver / stepOut (TP-P2-10).
+  const rootRef = React.useRef<HTMLDivElement>(null);
   React.useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'F8') {
-        if (!e.shiftKey) {
-          e.preventDefault();
-          navigateToProblem('next');
-        }
-      } else if (e.key === 'F8' && e.shiftKey) {
-        // Shift+F8 is handled below
-      }
+      if (e.key !== 'F8') return;
+      const root = rootRef.current;
+      if (!root || !root.contains(document.activeElement)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      navigateToProblem(e.shiftKey ? 'prev' : 'next');
     };
-    const shiftHandler = (e: KeyboardEvent) => {
-      if (e.key === 'F8' && e.shiftKey) {
-        e.preventDefault();
-        navigateToProblem('prev');
-      }
-    };
-    window.addEventListener('keydown', handler);
-    window.addEventListener('keydown', shiftHandler);
-    return () => {
-      window.removeEventListener('keydown', handler);
-      window.removeEventListener('keydown', shiftHandler);
-    };
+    window.addEventListener('keydown', handler, true);
+    return () => window.removeEventListener('keydown', handler, true);
   }, [filtered, selectedIndex]);
 
   const counts = React.useMemo(() => {
@@ -301,7 +290,12 @@ const KairoProblems: React.FC<KairoProblemsProps> = ({ openerService, editorMana
   const typeFilterOptions: TypeFilter[] = ['All', 'Java', 'Ant', 'XML', 'JSP', 'Encoding'];
 
   return (
-    <div className={`kairo-widget kairo-problems-widget${disabled ? ' kairo-problems-disabled' : ''}`} aria-busy={loading}>
+    <div
+      ref={rootRef}
+      tabIndex={0}
+      className={`kairo-widget kairo-problems-widget${disabled ? ' kairo-problems-disabled' : ''}`}
+      aria-busy={loading}
+    >
       {/* Loading State */}
       {loading && (
         <div className="kairo-loading" role="status" aria-label={t('widget.problems.loading')}>
@@ -514,8 +508,9 @@ export class KairoProblemsWidget extends ReactWidget {
   constructor() {
     super();
     this.id = KAIRO_PROBLEMS_FACTORY_ID;
-    this.title.label = '问题';
-    this.title.caption = 'Kairo 问题面板';
+    // Leave empty until @postConstruct — avoids a Chinese flash before i18n (TP-P3-6).
+    this.title.label = '';
+    this.title.caption = '';
     this.title.iconClass = 'codicon codicon-warning';
     this.title.closable = true;
     this.addClass('kairo-widget');

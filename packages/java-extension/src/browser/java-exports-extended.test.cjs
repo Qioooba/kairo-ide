@@ -96,9 +96,11 @@ describe('Java Extension — Debug Exports (source check)', () => {
     assert.match(source, /JavaDebugCompatCheck/);
   });
 
-  it('index.ts exports multi-module debug and hotswap', () => {
+  it('index.ts exports hotswap widget and service (multi-module debug mock removed)', () => {
     const source = fs.readFileSync(path.join(srcDir, 'index.ts'), 'utf8');
-    assert.match(source, /MultiModuleDebugManager/);
+    assert.doesNotMatch(source, /MultiModuleDebugManager/);
     assert.match(source, /JavaHotSwapService/);
+    assert.match(source, /HotSwapWidget/);
+    assert.match(source, /KAIRO_HOTSWAP_WIDGET_ID/);
   });
 });

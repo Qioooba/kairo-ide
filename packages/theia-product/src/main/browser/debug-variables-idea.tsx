@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { KairoI18nService } from '@kairo/i18n';
 import { KairoDebugSessionService } from './kairo-debug-session-service';
+import { getIconColor, getValueStyle } from './debug-value-classify';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                               */
@@ -278,25 +279,6 @@ export const IDEAVariablesTree: React.FC<IDEAVariablesTreeProps> = ({ sessionSer
 /*  Helpers                                                             */
 /* ------------------------------------------------------------------ */
 
-function getValueStyle(value: string): { cls: string; style: React.CSSProperties } {
-    if (value === 'null' || value === 'undefined') {
-        return { cls: 'null', style: { color: 'var(--theia-debugTokenExpression-string, #c0c0c0)' } };
-    }
-    if (/^".*"$/.test(value) || /^'.*'$/.test(value)) {
-        return { cls: 'string', style: { color: 'var(--theia-debugTokenExpression-string, #6a8759)' } };
-    }
-    if (/^-?\d/.test(value) || value === 'true' || value === 'false') {
-        return { cls: 'number', style: { color: 'var(--theia-debugTokenExpression-number, #6897bb)' } };
-    }
-    if (value.startsWith('{') || value.startsWith('[')) {
-        return { cls: 'object', style: { color: 'var(--theia-debugTokenExpression-value, #a9b7c6)' } };
-    }
-    if (value.includes('Exception') || value.includes('Error')) {
-        return { cls: 'error', style: { color: 'var(--theia-errorForeground)' } };
-    }
-    return { cls: '', style: { color: 'var(--theia-debugTokenExpression-value, #a9b7c6)' } };
-}
-
 function getIcon(type: string | undefined, value: string, hasChildren: boolean, expanded: boolean): string {
     if (value === 'null' || value === 'undefined') return 'codicon-symbol-null';
     if (/^".*"$/.test(value)) return 'codicon-symbol-string';
@@ -305,11 +287,4 @@ function getIcon(type: string | undefined, value: string, hasChildren: boolean, 
     if (type?.includes('[]') || type?.includes('Array') || value.startsWith('[')) return 'codicon-symbol-array';
     if (value.startsWith('{') || hasChildren) return expanded ? 'codicon-folder-opened' : 'codicon-symbol-class';
     return 'codicon-symbol-variable';
-}
-
-function getIconColor(type: string | undefined, value: string): string {
-    if (value === 'null' || value === 'undefined') return 'var(--theia-debugTokenExpression-string, #c0c0c0)';
-    if (/^".*"$/.test(value)) return 'var(--theia-debugTokenExpression-string, #6a8759)';
-    if (/^-?\d/.test(value) || value === 'true' || value === 'false') return 'var(--theia-debugTokenExpression-number, #6897bb)';
-    return 'var(--theia-symbolIcon-foreground, #b5b6e3)';
 }

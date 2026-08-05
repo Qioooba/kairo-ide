@@ -19,7 +19,10 @@ export interface BuildDiagnostic {
     file: string;
     line: number;
     column: number;
+    endLine?: number;
+    endColumn?: number;
     severity: 'error' | 'warning' | 'info';
+    code?: string;
     message: string;
 }
 
@@ -47,7 +50,10 @@ export function mapBuildResult(b: BuildResult, workspaceId: string): BuildRun {
             file: d.file,
             line: d.line,
             column: d.column,
+            endLine: d.endLine,
+            endColumn: d.endColumn,
             severity: d.severity === 'hint' ? 'info' : d.severity,
+            code: d.code,
             message: d.message,
         })),
     };
@@ -86,6 +92,8 @@ export class BuildStore {
     private eventsUnsubscribe?: () => void;
     private statusUnsubscribe?: () => void;
     private contextUnsubscribe?: { dispose(): void };
+    /** BD-P2-1: only the latest bootstrap may apply snapshot / subscribe. */
+    private bootstrapGeneration = 0;
 
     @postConstruct()
     protected init(): void {
@@ -123,8 +131,6 @@ export class BuildStore {
         // tearing down the previous event subscription first.
         this.contextUnsubscribe = this.workspaceContext.onDidChangeContext(ctx => {
             if (ctx) {
-                this.eventsUnsubscribe?.();
-                this.eventsUnsubscribe = undefined;
                 void this.bootstrap();
             }
         });
@@ -135,37 +141,82 @@ export class BuildStore {
     }
 
     protected async bootstrap(): Promise<void> {
+        // BD-P2-1: bump generation so older in-flight bootstraps bail out
+        // instead of overwriting the newer subscription (leak + duplicate events).
+        const generation = ++this.bootstrapGeneration;
+        const previousUnsub = this.eventsUnsubscribe;
+        this.eventsUnsubscribe = undefined;
+        previousUnsub?.();
+
         // Load initial snapshot
         const ctx = this.workspaceContext.context;
         if (ctx) {
             try {
                 const builds = await this.runtime.request('GET /api/v1/builds', undefined) as BuildResult[];
+                if (generation !== this.bootstrapGeneration) return;
                 if (Array.isArray(builds)) {
                     this.builds = builds.map(b => mapBuildResult(b, ctx.workspaceId));
                     this.onDidChangeEmitter.fire(this.getBuilds());
                     this.setConnectionState(this.builds.length === 0 ? 'empty' : 'connected');
                 }
             } catch {
+                if (generation !== this.bootstrapGeneration) return;
                 // Agent not reachable yet — store stays empty, UI shows "no builds".
                 this.setConnectionState('disconnected');
             }
         }
 
+        if (generation !== this.bootstrapGeneration) return;
+
         // Subscribe to events
         if (ctx) {
-            this.eventsUnsubscribe = this.runtime.subscribeEvents(ctx.workspaceId, (event: WsEvent) => {
+            const unsub = this.runtime.subscribeEvents(ctx.workspaceId, (event: WsEvent) => {
                 if (event.type === 'build.progress') {
                     const state = event.state as string;
                     const mappedState = state === 'success' ? 'succeeded' as const
                         : state === 'failure' ? 'failed' as const
                         : state === 'queued' ? 'pending' as const
                         : state;
+                    const known = this.builds.some(b => b.id === event.buildId);
+                    const terminal = state === 'success' || state === 'failure' || state === 'cancelled';
+                    // BD-P1-17: unknown build ids are a no-op in updateBuild —
+                    // refetch so externally-started builds appear. Also refetch
+                    // on terminal progress so diagnostics/summary are complete.
+                    if (!known || terminal) {
+                        void this.fetchAndUpsertBuild(event.buildId, ctx.workspaceId);
+                        return;
+                    }
                     this.updateBuild(event.buildId, {
                         state: mappedState as BuildRun['state'],
-                        endTime: (state === 'success' || state === 'failure' || state === 'cancelled') ? new Date().toISOString() : undefined,
+                        endTime: terminal ? new Date().toISOString() : undefined,
                     });
                 }
             });
+            if (generation !== this.bootstrapGeneration) {
+                unsub();
+                return;
+            }
+            this.eventsUnsubscribe = unsub;
+        }
+    }
+
+    /** GET /builds/{id} and upsert into the local history (BD-P1-17). */
+    protected async fetchAndUpsertBuild(buildId: string, workspaceId: string): Promise<void> {
+        try {
+            const result = await this.runtime.request(
+                'GET /api/v1/builds/{buildId}',
+                undefined,
+                { pathParams: { buildId } },
+            ) as BuildResult;
+            const mapped = mapBuildResult(result, workspaceId);
+            const exists = this.builds.some(b => b.id === buildId);
+            this.builds = exists
+                ? this.builds.map(b => b.id === buildId ? mapped : b)
+                : [...this.builds, mapped].slice(-200);
+            this.onDidChangeEmitter.fire(this.getBuilds());
+            this.setConnectionState(this.builds.length === 0 ? 'empty' : 'connected');
+        } catch {
+            // Agent may have already GC'd the build; leave local state alone.
         }
     }
 
@@ -229,7 +280,9 @@ export class BuildStore {
     }
 
     dispose(): void {
+        this.bootstrapGeneration++;
         this.eventsUnsubscribe?.();
+        this.eventsUnsubscribe = undefined;
         this.statusUnsubscribe?.();
         this.contextUnsubscribe?.dispose();
         this.onDidChangeEmitter.dispose();

@@ -51,7 +51,8 @@ export class KairoSettingsService {
       this.preferences.onPreferenceChanged(e => {
         this.onDidChangeEmitter.fire({
           key: e.preferenceName,
-          value: undefined, // PreferenceChange omits newValue for performance
+          // PreferenceChangeImpl omits newValue; read the effective value instead.
+          value: this.preferences.get(e.preferenceName),
           scope: e.scope === PreferenceScope.Workspace ? 'project' : 'user',
         });
       });
@@ -72,8 +73,10 @@ export class KairoSettingsService {
    * then falling back to user settings via the PreferenceService.
    */
   get<T>(key: string, defaultValue: T): T {
-    if (key in this.projectSettings) {
-      return this.projectSettings[key] as T;
+    const value = this.projectSettings[key];
+    // TP-P1-10: explicit null means "use default", not an override.
+    if (value !== undefined && value !== null) {
+      return value as T;
     }
     return this.preferences.get<T>(key, defaultValue, this.projectSettingsUri?.toString());
   }
@@ -116,7 +119,8 @@ export class KairoSettingsService {
    * Check if a key has a project-level override.
    */
   isProjectOverride(key: string): boolean {
-    return key in this.projectSettings;
+    const value = this.projectSettings[key];
+    return value !== undefined && value !== null;
   }
 
   protected async loadProjectSettings(): Promise<void> {

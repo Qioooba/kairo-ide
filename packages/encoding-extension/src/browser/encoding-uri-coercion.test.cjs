@@ -130,10 +130,15 @@ test('teardown', () => {
 test('applyProjectEncoding registers a folder-level override with normalized encoding (KAIRO-RC-WEB-206)', () => {
   const svc = Object.create(KairoEncodingServiceImpl.prototype);
   svc.cache = new Map();
+  svc.projectOverrideDisposable = undefined;
+  svc.directoryOverrideDisposables = [];
   svc.onDidChangeEncodingEmitter = new (require('@theia/core/lib/common/event').Emitter)();
   const overrides = [];
   svc.encodingRegistry = {
-    registerOverride: o => overrides.push(o),
+    registerOverride: o => {
+      overrides.push(o);
+      return { dispose() { const i = overrides.indexOf(o); if (i >= 0) overrides.splice(i, 1); } };
+    },
   };
   const monacoStyleUri = {
     scheme: 'file',
@@ -145,6 +150,77 @@ test('applyProjectEncoding registers a folder-level override with normalized enc
   assert.strictEqual(overrides[0].encoding, 'gbk', 'encoding normalized');
   assert.strictEqual(typeof overrides[0].parent.isEqualOrParent, 'function', 'parent coerced to a real Theia URI');
   assert.strictEqual(overrides[0].parent.toString(), 'file:///tmp/legacy-sample');
+});
+
+test('clearProjectScopedOverrides disposes project/dir overrides (BD-P1-10)', () => {
+  const svc = Object.create(KairoEncodingServiceImpl.prototype);
+  svc.cache = new Map([['file:///tmp/a.jsp', 'gbk']]);
+  let projectDisposed = false;
+  let dirDisposed = false;
+  svc.projectOverrideDisposable = { dispose() { projectDisposed = true; } };
+  svc.directoryOverrideDisposables = [{ dispose() { dirDisposed = true; } }];
+  svc.clearProjectScopedOverrides();
+  assert.ok(projectDisposed);
+  assert.ok(dirDisposed);
+  assert.strictEqual(svc.projectOverrideDisposable, undefined);
+  assert.strictEqual(svc.directoryOverrideDisposables.length, 0);
+  assert.strictEqual(svc.cache.size, 0, 'cache invalidated on project switch');
+});
+
+test('getEncodingFor / setEncodingFor use Kairo ids in cache (BD-P1-7/8)', () => {
+  const svc = Object.create(KairoEncodingServiceImpl.prototype);
+  svc.cache = new Map();
+  svc.overrideDisposables = new Map();
+  svc.onDidChangeEncodingEmitter = new (require('@theia/core/lib/common/event').Emitter)();
+  const overrides = [];
+  svc.encodingRegistry = {
+    getEncodingForResource: () => 'utf8', // Theia id from registry
+    registerOverride: o => {
+      overrides.push(o);
+      return { dispose() {} };
+    },
+  };
+  const URI = require('@theia/core/lib/common/uri').default;
+  const uri = new URI('file:///tmp/a.jsp');
+  assert.strictEqual(svc.getEncodingFor(uri), 'utf-8', 'Theia utf8 → Kairo utf-8');
+  const result = svc.setEncodingFor(uri, 'utf-8');
+  assert.strictEqual(result.encoding, 'utf-8');
+  assert.strictEqual(overrides[0].encoding, 'utf8', 'registry gets Theia id');
+  assert.strictEqual(svc.cache.get(uri.toString()), 'utf-8', 'cache stores Kairo id');
+  // "Already using" comparison must succeed across domains
+  const { sameEncodingId } = require('../../lib/browser/encoding-utils');
+  assert.ok(sameEncodingId(svc.getEncodingFor(uri), 'utf8'));
+});
+
+test('invalidateEncodingCache drops per-URI entry (BD-P1-7)', () => {
+  const svc = Object.create(KairoEncodingServiceImpl.prototype);
+  svc.cache = new Map([['file:///tmp/a.jsp', 'gbk']]);
+  svc.onDidChangeEncodingEmitter = new (require('@theia/core/lib/common/event').Emitter)();
+  svc.asTheiaUri = u => u;
+  svc.encodingRegistry = { getEncodingForResource: () => 'gbk' };
+  const URI = require('@theia/core/lib/common/uri').default;
+  const uri = new URI('file:///tmp/a.jsp');
+  assert.ok(svc.invalidateEncodingCache(uri));
+  assert.strictEqual(svc.cache.size, 0);
+});
+
+test('encoding cache contribution watches external file changes (BD-P1-7)', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const src = fs.readFileSync(path.join(__dirname, 'encoding-cache-contribution.ts'), 'utf8');
+  assert.match(src, /onDidFilesChange/);
+  assert.match(src, /invalidateEncodingCache/);
+  assert.match(src, /FileChangeType\.UPDATED/);
+});
+
+test('encoding tab decorator decorates every open editor tab (BD-P2-13)', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const src = fs.readFileSync(path.join(__dirname, 'encoding-tab-decorator.ts'), 'utf8');
+  assert.match(src, /Navigatable\.is/);
+  assert.match(src, /getResourceUri/);
+  assert.doesNotMatch(src, /title\.owner !== editor/);
+  assert.doesNotMatch(src, /currentEditor/);
 });
 
 const { KairoSafeEncodingService, UnrepresentableEncodingError } = require('../../lib/browser/safe-encoding-service');

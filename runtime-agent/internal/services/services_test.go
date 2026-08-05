@@ -2,6 +2,7 @@ package services
 
 import (
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -828,10 +829,33 @@ func TestJDTLSService_Status(t *testing.T) {
 
 func TestDiskAuthenticator_Logout_Success(t *testing.T) {
 	a := newDiskAuthenticator(t.TempDir(), log.New("test"))
+	os.Unsetenv("KAIRO_AUTH_USER")
+	os.Unsetenv("KAIRO_AUTH_PASSWORD")
+	os.Unsetenv("KAIRO_SECRET")
+	os.Setenv("KAIRO_LOCAL_SECRET", "logout-ok")
+	defer os.Unsetenv("KAIRO_LOCAL_SECRET")
+
+	payload, _ := json.Marshal(map[string]string{
+		"username": "admin",
+		"password": "logout-ok",
+	})
+	resp, err := a.Login(payload, nil)
+	if err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+	var result map[string]any
+	json.Unmarshal(resp, &result)
+	token := result["sessionToken"].(string)
+
+	req := httptest.NewRequest(http.MethodPost, "/logout", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
-	err := a.Logout(nil, rec)
+	err = a.Logout(req, rec)
 	if err != nil {
 		t.Errorf("Logout: %v", err)
+	}
+	if err := a.ValidateSession(token); err == nil {
+		t.Fatal("expected session invalidated")
 	}
 }
 
@@ -911,6 +935,7 @@ func TestMemEncoder_ResolveWrite_NilEncoder(t *testing.T) {
 func TestDiskAuthenticator_Login_UserAuthNoPasswordHash(t *testing.T) {
 	a := newDiskAuthenticator(t.TempDir(), log.New("test"))
 	os.Unsetenv("KAIRO_SECRET")
+	os.Unsetenv("KAIRO_LOCAL_SECRET")
 	os.Setenv("KAIRO_AUTH_USER", "admin")
 	os.Unsetenv("KAIRO_AUTH_PASSWORD")
 	defer os.Unsetenv("KAIRO_AUTH_USER")
@@ -919,14 +944,9 @@ func TestDiskAuthenticator_Login_UserAuthNoPasswordHash(t *testing.T) {
 		"username": "admin",
 		"password": "any-password",
 	})
-	resp, err := a.Login(payload, nil)
-	if err != nil {
-		t.Fatalf("Login with user auth but no password hash: %v", err)
-	}
-	var result map[string]any
-	json.Unmarshal(resp, &result)
-	if result["sessionToken"] == nil {
-		t.Error("sessionToken should be generated")
+	_, err := a.Login(payload, nil)
+	if err == nil {
+		t.Fatal("Login with user auth but no password hash should fail")
 	}
 }
 

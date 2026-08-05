@@ -43,6 +43,22 @@ export const kairoEditorPreferenceSchema: PreferenceSchema = {
       default: false,
       description: 'Controls whether bracket pair colorization is enabled. Disabled by default to match IntelliJ IDEA Darcula.',
     },
+    // Very long JSP/HTML lines and large files: Monaco defaults stop tokenization
+    // at 20k chars/line and rendering at 10k lines — too low for legacy JSP.
+    'editor.maxTokenizationLineLength': {
+      type: 'integer',
+      default: 200_000,
+      minimum: 1_000,
+      maximum: 2_000_000,
+      description: 'Lines longer than this are not syntax-highlighted. Raised for large JSP/Java files.',
+    },
+    'editor.stopRenderingLineAfter': {
+      type: 'integer',
+      default: -1,
+      minimum: -1,
+      maximum: 1_000_000,
+      description: 'Disable the line after which the editor stops rendering (-1 = unlimited).',
+    },
   },
 };
 

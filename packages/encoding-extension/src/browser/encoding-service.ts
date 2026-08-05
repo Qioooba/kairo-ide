@@ -32,6 +32,7 @@
 
 import { injectable, inject } from '@theia/core/shared/inversify';
 import URI from '@theia/core/lib/common/uri';
+import { FileUri } from '@theia/core/lib/common/file-uri';
 import { EncodingRegistry } from '@theia/core/lib/browser/encoding-registry';
 import { FileService } from '@theia/filesystem/lib/browser/file-service';
 import { MessageService } from '@theia/core/lib/common';
@@ -45,11 +46,22 @@ import type {
 } from '@kairo/protocol';
 import {
   KAIRO_ENCODING_OPTIONS,
-  normalizeEncodingLabel,
   toTheiaEncodingId,
+  toKairoEncodingId,
+  toGoEncodingId,
+  sameEncodingId,
 } from './encoding-utils';
 
-export { KAIRO_ENCODING_OPTIONS, SUPPORTS_ENCODER, normalizeEncodingLabel, toTheiaEncodingId } from './encoding-utils';
+export {
+  KAIRO_ENCODING_OPTIONS,
+  SUPPORTS_ENCODER,
+  normalizeEncodingLabel,
+  toTheiaEncodingId,
+  toKairoEncodingId,
+  toGoEncodingId,
+  fromTheiaEncodingId,
+  sameEncodingId,
+} from './encoding-utils';
 
 export const KairoEncodingService = Symbol('KairoEncodingService');
 
@@ -60,6 +72,7 @@ export interface DetectArgs {
 }
 
 export interface SetEncodingResult {
+  /** Kairo canonical encoding id. */
   encoding: string;
   /** True if the encoding was newly registered (vs. preserved). */
   changed: boolean;
@@ -87,10 +100,10 @@ export class KairoEncodingServiceImpl {
 
   /**
    * In-memory cache of "this URI is currently displayed as
-   * <encoding>" so the status bar can render the value
-   * synchronously without re-running detect. The agent
-   * remains the source of truth on disk; this cache only
-   * exists to keep the UI snappy.
+   * <Kairo encoding id>" so the status bar can render the value
+   * synchronously without re-running detect. Keys are always
+   * Theia URI strings; values are always Kairo canonical ids
+   * (BD-P1-7). The agent remains the source of truth on disk.
    */
   protected cache = new Map<string, string>();
 
@@ -113,7 +126,9 @@ export class KairoEncodingServiceImpl {
     };
     try {
       const r = await this.runtime.request('POST /api/v1/encoding/detect', payload);
-      this.cache.set(args.file, r.encoding);
+      // Cache under URI key with Kairo id (never raw fs-path / Theia id).
+      const cacheKey = FileUri.create(args.file).toString();
+      this.cache.set(cacheKey, toKairoEncodingId(r.encoding));
       return r;
     } catch (err) {
       if (err instanceof KairoError) throw err;
@@ -129,6 +144,7 @@ export class KairoEncodingServiceImpl {
    * Recode a file in place. Used by "Save with Encoding" and
    * by the bulk tools (project-wide re-encode). The user
    * must explicitly ask — we never recode on plain save.
+   * `from` / `to` are converted to Go canonical ids at the wire.
    */
   async recode(args: {
     workspaceId: string;
@@ -140,8 +156,8 @@ export class KairoEncodingServiceImpl {
     const payload: EncodingRecodeRequest = {
       workspaceId: args.workspaceId,
       file: args.file,
-      from: args.from,
-      to: args.to,
+      from: toGoEncodingId(args.from),
+      to: toGoEncodingId(args.to),
       eol: args.eol,
     };
     try {
@@ -174,8 +190,8 @@ export class KairoEncodingServiceImpl {
   }
 
   /**
-   * Registered override disposables keyed by URI string. A URI
-   * must have AT MOST ONE per-file override: the registry's
+   * Registered per-file override disposables keyed by URI string.
+   * A URI must have AT MOST ONE per-file override: the registry's
    * exact-match pass returns the first registration, so a second
    * "Save with Encoding" on the same file would keep writing the
    * OLD encoding while the UI claims the new one (flow-03 live
@@ -184,44 +200,82 @@ export class KairoEncodingServiceImpl {
   protected overrideDisposables = new Map<string, { dispose(): void }>();
 
   /**
+   * Project-root and directory-level override disposables (BD-P1-10).
+   * Must be retained and disposed on project switch — otherwise
+   * overrides accumulate forever and shadow newer projects.
+   */
+  protected projectOverrideDisposable: { dispose(): void } | undefined;
+  protected directoryOverrideDisposables: { dispose(): void }[] = [];
+
+  /** Drop project/directory overrides and invalidate the cache. */
+  clearProjectScopedOverrides(): void {
+    this.projectOverrideDisposable?.dispose();
+    this.projectOverrideDisposable = undefined;
+    for (const d of this.directoryOverrideDisposables) {
+      d.dispose();
+    }
+    this.directoryOverrideDisposables = [];
+    this.cache.clear();
+  }
+
+  /**
    * Register a per-URI encoding override with Theia's
    * EncodingRegistry and update the local cache. This is the
    * single point where "this file uses X" is recorded.
+   * `encoding` may be Kairo or Theia; cache always stores Kairo.
    */
   setEncodingFor(uri: URI, encoding: string): SetEncodingResult {
-    if (!KAIRO_ENCODING_OPTIONS.includes(encoding) && !encoding.match(/^[a-z0-9-]+$/i)) {
+    const kairo = toKairoEncodingId(encoding);
+    if (!KAIRO_ENCODING_OPTIONS.includes(kairo) && !kairo.match(/^[a-z0-9-]+$/i)) {
       throw new KairoError({ code: 'invalid_request', message: `unknown encoding: ${encoding}` });
     }
     // Store Theia encoding ids in the registry — Kairo display
     // labels like 'utf-8' crash Theia's encoding status bar
     // (SUPPORTED_ENCODINGS lookup, KAIRO-RC-WEB-260).
-    const theiaEncoding = toTheiaEncodingId(encoding);
+    const theiaEncoding = toTheiaEncodingId(kairo);
     const theiaUri = this.asTheiaUri(uri);
     const key = theiaUri.toString();
-    const prev = this.encodingRegistry.getEncodingForResource(theiaUri);
+    const prev = toKairoEncodingId(this.encodingRegistry.getEncodingForResource(theiaUri));
     this.overrideDisposables.get(key)?.dispose();
     this.overrideDisposables.set(key, this.encodingRegistry.registerOverride({
       parent: theiaUri,
       encoding: theiaEncoding,
     }));
-    this.cache.set(key, theiaEncoding);
-    this.onDidChangeEncodingEmitter.fire(theiaEncoding);
-    return { encoding: theiaEncoding, changed: prev !== theiaEncoding };
+    this.cache.set(key, kairo);
+    this.onDidChangeEncodingEmitter.fire(kairo);
+    return { encoding: kairo, changed: !sameEncodingId(prev, kairo) };
   }
 
   /**
-   * Synchronous encoding lookup. Theia resolves via
-   * EncodingRegistry which already accounts for the
-   * registered override; this is the value the status bar
-   * and save override should trust.
+   * Synchronous encoding lookup. Returns a Kairo canonical id
+   * so UI comparisons (pickEncoding / "Already using X") work
+   * against KAIRO_ENCODING_OPTIONS (BD-P1-7 / BD-P1-8).
    */
   getEncodingFor(uri: URI): string {
     const theiaUri = this.asTheiaUri(uri);
-    const cached = this.cache.get(theiaUri.toString());
+    const key = theiaUri.toString();
+    const cached = this.cache.get(key);
     if (cached) return cached;
-    const v = this.encodingRegistry.getEncodingForResource(theiaUri);
-    this.cache.set(theiaUri.toString(), v);
+    const v = toKairoEncodingId(this.encodingRegistry.getEncodingForResource(theiaUri));
+    this.cache.set(key, v);
     return v;
+  }
+
+  /**
+   * Drop the cached encoding for one URI (BD-P1-7). The next
+   * {@link getEncodingFor} re-reads the registry. Fires
+   * {@link onDidChangeEncoding} when an entry was removed so tab /
+   * status-bar UI refresh.
+   */
+  invalidateEncodingCache(uri: URI): boolean {
+    const key = this.asTheiaUri(uri).toString();
+    if (!this.cache.delete(key)) {
+      return false;
+    }
+    this.onDidChangeEncodingEmitter.fire(
+      toKairoEncodingId(this.encodingRegistry.getEncodingForResource(new URI(key))),
+    );
+    return true;
   }
 
   /**
@@ -232,12 +286,15 @@ export class KairoEncodingServiceImpl {
    * explicit per-file overrides were ever registered).
    */
   applyProjectEncoding(rootUri: URI, encoding: string): void {
-    const normalized = toTheiaEncodingId(normalizeEncodingLabel(encoding.toLowerCase()));
-    this.encodingRegistry.registerOverride({
+    const kairo = toKairoEncodingId(encoding);
+    const theia = toTheiaEncodingId(kairo);
+    this.projectOverrideDisposable?.dispose();
+    this.projectOverrideDisposable = this.encodingRegistry.registerOverride({
       parent: this.asTheiaUri(rootUri),
-      encoding: normalized,
+      encoding: theia,
     });
-    this.onDidChangeEncodingEmitter.fire(normalized);
+    this.cache.clear();
+    this.onDidChangeEncodingEmitter.fire(kairo);
   }
 
   /**
@@ -245,23 +302,32 @@ export class KairoEncodingServiceImpl {
    * Each override maps a directory path (relative to project root)
    * to an encoding. Registered as folder-level overrides so files
    * under each directory open with the correct encoding.
+   * Previous directory overrides are disposed first (BD-P1-10).
    */
   applyDirectoryEncodingOverrides(
     rootUri: URI,
     overrides: Record<string, string>,
   ): void {
+    for (const d of this.directoryOverrideDisposables) {
+      d.dispose();
+    }
+    this.directoryOverrideDisposables = [];
     const theiaRoot = this.asTheiaUri(rootUri);
     for (const [dirPath, encoding] of Object.entries(overrides)) {
-      if (!KAIRO_ENCODING_OPTIONS.includes(encoding) && !encoding.match(/^[a-z0-9-]+$/i)) {
+      const kairo = toKairoEncodingId(encoding);
+      if (!KAIRO_ENCODING_OPTIONS.includes(kairo) && !kairo.match(/^[a-z0-9-]+$/i)) {
         continue;
       }
-      const normalized = toTheiaEncodingId(normalizeEncodingLabel(encoding.toLowerCase()));
+      const theia = toTheiaEncodingId(kairo);
       const dirUri = theiaRoot.resolve(dirPath.endsWith('/') ? dirPath : dirPath + '/');
-      this.encodingRegistry.registerOverride({
-        parent: dirUri,
-        encoding: normalized,
-      });
+      this.directoryOverrideDisposables.push(
+        this.encodingRegistry.registerOverride({
+          parent: dirUri,
+          encoding: theia,
+        }),
+      );
     }
+    this.cache.clear();
   }
 
   /**
@@ -273,10 +339,11 @@ export class KairoEncodingServiceImpl {
    * editor so the model is built from the new text.
    */
   async readWithEncoding(uri: URI, encoding: string): Promise<string> {
+    const kairo = toKairoEncodingId(encoding);
     const c = await this.fileService.read(uri, {
-      encoding: normalizeEncodingLabel(encoding),
+      encoding: toTheiaEncodingId(kairo),
     });
-    this.cache.set(uri.toString(), encoding);
+    this.cache.set(this.asTheiaUri(uri).toString(), kairo);
     return c.value;
   }
 
@@ -287,11 +354,12 @@ export class KairoEncodingServiceImpl {
    * and refuse to mark the model as not dirty.
    */
   async writeWithEncoding(uri: URI, text: string, encoding: string): Promise<void> {
+    const kairo = toKairoEncodingId(encoding);
     await this.fileService.write(uri, text, {
-      encoding: normalizeEncodingLabel(encoding),
+      encoding: toTheiaEncodingId(kairo),
       overwriteEncoding: true,
     });
-    this.cache.set(uri.toString(), encoding);
+    this.cache.set(this.asTheiaUri(uri).toString(), kairo);
   }
 
   /**
@@ -306,15 +374,16 @@ export class KairoEncodingServiceImpl {
    * GBK, ISO-8859-1, or any other non-UTF-8 encoding (V-025).
    */
   async validateEncoding(text: string, targetEncoding: string): Promise<{ valid: boolean; error?: string }> {
+      const kairo = toKairoEncodingId(targetEncoding);
       // Fast path: UTF-8 is always valid
-      if (targetEncoding === 'UTF-8' || targetEncoding === 'utf-8' || targetEncoding === 'utf-8-bom') {
+      if (kairo === 'utf-8' || kairo === 'utf-8-bom') {
           return { valid: true };
       }
-      // Call Go Agent for server-side validation
+      // Call Go Agent for server-side validation (Go canonical id)
       try {
           const result = await this.runtime.request('POST /api/v1/encoding/validate', {
               text,
-              encoding: targetEncoding,
+              encoding: toGoEncodingId(kairo),
           });
           return { valid: result.valid, error: result.error };
       } catch (err) {

@@ -2,8 +2,23 @@ import { injectable, postConstruct } from '@theia/core/shared/inversify';
 import { Emitter, Event } from '@theia/core/lib/common/event';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { normalizeFsPath, parsePorcelainStatusZ } from './git-path-utils';
 
 const execFileAsync = promisify(execFile);
+
+/** Force C locale so ahead/behind and commit summaries stay machine-parseable. */
+function gitEnv(): NodeJS.ProcessEnv {
+  return {
+    ...(typeof process !== 'undefined' ? process.env : {}),
+    LANG: 'C',
+    LC_ALL: 'C',
+    LANGUAGE: 'C',
+  };
+}
+
+function gitOpts(cwd: string, extra?: { maxBuffer?: number }): { cwd: string; env: NodeJS.ProcessEnv; maxBuffer?: number } {
+  return { cwd, env: gitEnv(), ...extra };
+}
 
 export interface GitFileStatus {
   /** Relative path from repo root */
@@ -45,6 +60,12 @@ export interface GitDiffResult {
   staged: boolean;
 }
 
+export interface GitCommitOptions {
+  amend?: boolean;
+  signoff?: boolean;
+  noVerify?: boolean;
+}
+
 export interface GitCommitResult {
   hash: string;
   message: string;
@@ -67,10 +88,11 @@ export class GitService {
     return this.cachedStatus;
   }
   protected pollingTimer: ReturnType<typeof setInterval> | undefined;
+  protected refreshInFlight = false;
 
   @postConstruct()
   protected init(): void {
-    this.pollingTimer = setInterval(() => this.refreshStatus(), 3000);
+    this.pollingTimer = setInterval(() => { void this.refreshStatus(); }, 3000);
   }
 
   dispose(): void {
@@ -79,19 +101,20 @@ export class GitService {
       this.pollingTimer = undefined;
     }
     this.onDidChangeStatusEmitter.dispose();
+    this.onDidChangeEmitter.dispose();
   }
 
   async findRepoRoot(cwd: string): Promise<string | undefined> {
     try {
-      const { stdout } = await execFileAsync('git', ['rev-parse', '--show-toplevel'], { cwd });
-      return stdout.trim();
+      const { stdout } = await execFileAsync('git', ['rev-parse', '--show-toplevel'], gitOpts(cwd));
+      return normalizeFsPath(stdout.trim());
     } catch {
       return undefined;
     }
   }
 
   setRepoRoot(root: string): void {
-    this.repoRoot = root;
+    this.repoRoot = normalizeFsPath(root);
     this.refreshStatus();
   }
 
@@ -100,78 +123,45 @@ export class GitService {
   }
 
   protected async refreshStatus(): Promise<void> {
-    if (!this.repoRoot) return;
+    if (!this.repoRoot || this.refreshInFlight) return;
+    this.refreshInFlight = true;
     try {
       const result = await this.getStatus();
       this.cachedStatus = result;
       this.onDidChangeStatusEmitter.fire(result);
     } catch {
       // Silently ignore - repo might not be initialized or git not available
+    } finally {
+      this.refreshInFlight = false;
     }
   }
 
   async getStatus(): Promise<GitStatusResult> {
     if (!this.repoRoot) return { branch: '', files: [], ahead: 0, behind: 0 };
 
-    const opts = { cwd: this.repoRoot };
+    const opts = gitOpts(this.repoRoot);
 
     const [branchResult, statusResult] = await Promise.allSettled([
       execFileAsync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], opts),
-      execFileAsync('git', ['status', '--porcelain', '-b'], opts),
+      // -z: NUL-terminated, unquoted paths (avoids core.quotepath octal escapes)
+      execFileAsync('git', ['status', '--porcelain', '-b', '-z'], opts),
     ]);
 
     let branch = '';
     let ahead = 0;
     let behind = 0;
-    const files: GitFileStatus[] = [];
+    let files: GitFileStatus[] = [];
 
     if (branchResult.status === 'fulfilled') {
       branch = branchResult.value.stdout.trim();
     }
 
     if (statusResult.status === 'fulfilled') {
-      const lines = statusResult.value.stdout.trim().split('\n');
-      for (const line of lines) {
-        if (!line) continue;
-        if (line.startsWith('## ')) {
-          const branchLine = line.substring(3);
-          const spaceIdx = branchLine.indexOf(' ');
-          if (spaceIdx > 0) {
-            branch = branchLine.substring(0, spaceIdx).split('...')[0];
-            const info = branchLine.substring(spaceIdx + 1);
-            const aheadMatch = info.match(/ahead\s+(\d+)/);
-            const behindMatch = info.match(/behind\s+(\d+)/);
-            if (aheadMatch) ahead = parseInt(aheadMatch[1], 10);
-            if (behindMatch) behind = parseInt(behindMatch[1], 10);
-          } else {
-            branch = branchLine.split('...')[0];
-          }
-          continue;
-        }
-        if (line.length >= 3) {
-          const xy = line.substring(0, 2);
-          const rest = line.substring(3);
-          const staged = xy[0] !== ' ';
-          const statusChar = xy.trim() || ' ';
-          if (xy.includes('R') || xy.includes('C')) {
-            const arrowIdx = rest.indexOf(' -> ');
-            if (arrowIdx > 0) {
-              files.push({
-                status: statusChar,
-                path: rest.substring(arrowIdx + 4),
-                origPath: rest.substring(0, arrowIdx),
-                staged,
-              });
-              continue;
-            }
-          }
-          files.push({
-            status: statusChar,
-            path: rest,
-            staged,
-          });
-        }
-      }
+      const parsed = parsePorcelainStatusZ(statusResult.value.stdout);
+      if (parsed.branch) branch = parsed.branch;
+      ahead = parsed.ahead;
+      behind = parsed.behind;
+      files = parsed.files;
     }
 
     return { branch, files, ahead, behind };
@@ -185,7 +175,7 @@ export class GitService {
       const { stdout } = await execFileAsync(
         'git',
         ['log', `--max-count=${maxCount}`, `--format=${format}`, '-z'],
-        { cwd: this.repoRoot, maxBuffer: 10 * 1024 * 1024 },
+        gitOpts(this.repoRoot, { maxBuffer: 10 * 1024 * 1024 }),
       );
       const parts = stdout.split('\0').filter(Boolean);
       const commits: GitCommit[] = [];
@@ -212,7 +202,7 @@ export class GitService {
       const { stdout } = await execFileAsync(
         'git',
         ['log', '-1', hash, `--format=${format}`, '-z'],
-        { cwd: this.repoRoot, maxBuffer: 10 * 1024 * 1024 },
+        gitOpts(this.repoRoot, { maxBuffer: 10 * 1024 * 1024 }),
       );
       const parts = stdout.split('\0').filter(Boolean);
       if (parts.length >= 5) {
@@ -236,8 +226,8 @@ export class GitService {
     try {
       const { stdout } = await execFileAsync(
         'git',
-        ['blame', '--line-porcelain', filePath],
-        { cwd: this.repoRoot, maxBuffer: 10 * 1024 * 1024 },
+        ['blame', '--line-porcelain', '--', filePath],
+        gitOpts(this.repoRoot, { maxBuffer: 10 * 1024 * 1024 }),
       );
       const lines = stdout.split('\n');
       const result: GitBlameLine[] = [];
@@ -276,7 +266,8 @@ export class GitService {
 
   getFileStatus(filePath: string): GitFileStatus | undefined {
     if (!this.cachedStatus) return undefined;
-    return this.cachedStatus.files.find(f => f.path === filePath);
+    const normalized = filePath.replace(/\\/g, '/');
+    return this.cachedStatus.files.find(f => f.path === filePath || f.path === normalized);
   }
 
   async getDiff(file: string, staged: boolean = false): Promise<GitDiffResult> {
@@ -285,7 +276,7 @@ export class GitService {
     if (staged) args.push('--cached');
     args.push('--', file);
     try {
-      const { stdout } = await execFileAsync('git', args, { cwd: this.repoRoot });
+      const { stdout } = await execFileAsync('git', args, gitOpts(this.repoRoot));
       return { file, diff: stdout, staged };
     } catch {
       return { file, diff: '', staged };
@@ -293,42 +284,62 @@ export class GitService {
   }
 
   async stageFiles(files: string[]): Promise<void> {
-    if (!this.repoRoot) return;
-    await execFileAsync('git', ['add', ...files], { cwd: this.repoRoot });
+    if (!this.repoRoot || files.length === 0) return;
+    await execFileAsync('git', ['add', '--', ...files], gitOpts(this.repoRoot));
     this.refreshStatus();
     this.onDidChangeEmitter.fire();
   }
 
   async unstageFiles(files: string[]): Promise<void> {
-    if (!this.repoRoot) return;
-    await execFileAsync('git', ['reset', 'HEAD', '--', ...files], { cwd: this.repoRoot });
+    if (!this.repoRoot || files.length === 0) return;
+    await execFileAsync('git', ['reset', 'HEAD', '--', ...files], gitOpts(this.repoRoot));
     this.refreshStatus();
     this.onDidChangeEmitter.fire();
   }
 
   async stageAll(): Promise<void> {
     if (!this.repoRoot) return;
-    await execFileAsync('git', ['add', '-A'], { cwd: this.repoRoot });
+    await execFileAsync('git', ['add', '-A'], gitOpts(this.repoRoot));
     this.refreshStatus();
     this.onDidChangeEmitter.fire();
   }
 
   async unstageAll(): Promise<void> {
     if (!this.repoRoot) return;
-    await execFileAsync('git', ['reset', 'HEAD'], { cwd: this.repoRoot });
+    await execFileAsync('git', ['reset', 'HEAD'], gitOpts(this.repoRoot));
     this.refreshStatus();
     this.onDidChangeEmitter.fire();
   }
 
-  async commit(message: string, amend: boolean = false): Promise<GitCommitResult> {
+  async commit(message: string, amendOrOptions: boolean | GitCommitOptions = false): Promise<GitCommitResult> {
     if (!this.repoRoot) throw new Error('No repo root');
+    const options: GitCommitOptions = typeof amendOrOptions === 'boolean'
+      ? { amend: amendOrOptions }
+      : amendOrOptions;
     const args = ['commit', '-m', message];
-    if (amend) args.push('--amend');
-    const { stdout } = await execFileAsync('git', args, { cwd: this.repoRoot });
-    const hashMatch = stdout.match(/\[[\w-]+ ([a-f0-9]+)\]/);
-    const hash = hashMatch ? hashMatch[1] : '';
-    const changedMatch = stdout.match(/(\d+) files? changed/);
-    const filesChanged = changedMatch ? parseInt(changedMatch[1], 10) : 0;
+    if (options.amend) args.push('--amend');
+    if (options.signoff) args.push('--signoff');
+    if (options.noVerify) args.push('--no-verify');
+    const { stdout } = await execFileAsync('git', args, gitOpts(this.repoRoot));
+    let hash = '';
+    try {
+      const head = await execFileAsync('git', ['rev-parse', '--short', 'HEAD'], gitOpts(this.repoRoot));
+      hash = head.stdout.trim();
+    } catch {
+      // leave empty
+    }
+    let filesChanged = 0;
+    try {
+      const stat = await execFileAsync(
+        'git', ['diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD'],
+        gitOpts(this.repoRoot),
+      );
+      filesChanged = stat.stdout.trim().split('\n').filter(Boolean).length;
+    } catch {
+      // VC-P2-12: fall back to locale-dependent stdout only if diff-tree fails.
+      const changedMatch = stdout.match(/(\d+) files? changed/);
+      filesChanged = changedMatch ? parseInt(changedMatch[1], 10) : 0;
+    }
     this.refreshStatus();
     this.onDidChangeEmitter.fire();
     return { hash, message, filesChanged };

@@ -151,9 +151,9 @@ test('Windows package and smoke paths enforce strict preparation before copying 
   const ci = fs.readFileSync(path.join(__dirname, '..', '.github', 'workflows', 'ci.yml'), 'utf8');
   const windowsJob = ci.slice(ci.indexOf('desktop-smoke-windows:'), ci.indexOf('desktop-smoke-macos:'));
   assert.match(windowsJob, /prepare-bundled\.ps1 -Strict/);
-  assert.match(windowsJob, /run-with-timeout\.cjs 300 pnpm build/);
+  assert.match(windowsJob, /run-with-timeout\.cjs 900 pnpm build/);
   assert.ok(
-    windowsJob.indexOf('run-with-timeout.cjs 300 pnpm build') < windowsJob.indexOf('prepare-bundled.ps1 -Strict'),
+    windowsJob.indexOf('run-with-timeout.cjs 900 pnpm build') < windowsJob.indexOf('prepare-bundled.ps1 -Strict'),
     'strict Windows staging must be the final writer after the generic build/prebuild path'
   );
 });
@@ -180,13 +180,36 @@ test('PowerShell strict preparation uses isolated verified archives and always c
   assert.match(source, /finally \{[\s\S]*Remove-Item -Path \$temporaryRoot/);
 });
 
-test('timeout runner enforces the 300 second policy boundary', () => {
+test('timeout runner enforces the max-seconds policy boundary', () => {
   const runner = path.join(__dirname, 'run-with-timeout.cjs');
-  const result = spawnSync(process.execPath, [runner, '301', process.execPath, '-e', 'process.exit(0)'], {
+  const { MAX_TIMEOUT_SECONDS } = require('./run-with-timeout.cjs');
+  const result = spawnSync(process.execPath, [runner, String(MAX_TIMEOUT_SECONDS + 1), process.execPath, '-e', 'process.exit(0)'], {
     encoding: 'utf8', timeout: 5_000
   });
   assert.equal(result.status, 2);
-  assert.match(result.stderr, /1 to 300 seconds/);
+  assert.match(result.stderr, new RegExp(`1 to ${MAX_TIMEOUT_SECONDS} seconds`));
+});
+
+test('timeout runner accepts KAIRO_TIMEOUT_MS when CLI seconds omitted', () => {
+  const runner = path.join(__dirname, 'run-with-timeout.cjs');
+  const result = spawnSync(process.execPath, [runner, process.execPath, '-e', 'process.exit(0)'], {
+    encoding: 'utf8',
+    timeout: 5_000,
+    env: { ...process.env, KAIRO_TIMEOUT_MS: '2000' }
+  });
+  assert.equal(result.status, 0, result.stderr);
+});
+
+test('govulncheck is pinned to a release tag (not @latest)', () => {
+  const ci = fs.readFileSync(path.join(__dirname, '..', '.github', 'workflows', 'ci.yml'), 'utf8');
+  assert.match(ci, /go install golang\.org\/x\/vuln\/cmd\/govulncheck@v\d+\.\d+\.\d+/);
+  assert.doesNotMatch(ci, /govulncheck@latest/);
+});
+
+test('browser app does not globally disable workspace trust', () => {
+  const browser = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'apps', 'browser', 'package.json'), 'utf8'));
+  const prefs = browser.theia?.frontend?.config?.preferences ?? {};
+  assert.notEqual(prefs['security.workspace.trust.enabled'], false);
 });
 
 test('timeout runner terminates descendant processes', { timeout: 7_000 }, () => {
@@ -205,6 +228,44 @@ test('timeout runner terminates descendant processes', { timeout: 7_000 }, () =>
   assert.equal(result.status, 124, result.stderr);
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1_000);
   assert.equal(fs.existsSync(marker), false, 'a descendant survived the timeout process-group kill');
+});
+
+test('rejects cleartext HTTP archive URLs without opt-in', () => {
+  const env = {
+    ...process.env,
+    KAIRO_JDTLS_SHA256: '1'.repeat(64),
+    // Avoid PLACEHOLDER regex (matches /example/i).
+    KAIRO_JDTLS_ARCHIVE_URL: 'http://mirror.intranet.local/jdtls.tgz'
+  };
+  delete env.KAIRO_ALLOW_HTTP;
+  const result = spawnSync(process.execPath, [SCRIPT, '--id', 'jdtls-linux', '--check-config'], {
+    env, encoding: 'utf8', timeout: 5_000
+  });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /must use HTTPS|--allow-http|KAIRO_ALLOW_HTTP/);
+});
+
+test('allows cleartext HTTP when KAIRO_ALLOW_HTTP=1', () => {
+  const env = {
+    ...process.env,
+    KAIRO_JDTLS_SHA256: '1'.repeat(64),
+    KAIRO_JDTLS_ARCHIVE_URL: 'http://mirror.intranet.local/jdtls.tgz',
+    KAIRO_ALLOW_HTTP: '1'
+  };
+  const result = spawnSync(process.execPath, [SCRIPT, '--id', 'jdtls-linux', '--check-config'], {
+    env, encoding: 'utf8', timeout: 5_000
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /HTTP/);
+});
+
+test('desktop electron-builder config lives only in electron-builder.yml', () => {
+  const desktop = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'apps', 'desktop', 'package.json'), 'utf8'));
+  assert.equal(desktop.build, undefined, 'package.json must not duplicate electron-builder config (DK-P1-6)');
+  const yml = fs.readFileSync(path.join(__dirname, '..', 'apps', 'desktop', 'electron-builder.yml'), 'utf8');
+  assert.match(yml, /afterPack:\s*\.\/scripts\/after-pack\.cjs/);
+  assert.match(yml, /lib\/tomcat-check\.js/);
+  assert.match(yml, /executableName:\s*Kairo/);
 });
 
 test('Windows taskkill watchdog forces exit 124 when taskkill hangs', async () => {

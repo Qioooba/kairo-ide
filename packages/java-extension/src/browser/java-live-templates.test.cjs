@@ -262,6 +262,15 @@ test('postfix templates cover IDEA favorites', () => {
   }
 });
 
+test('postfix insertText escapes $ and } in expressions', () => {
+  const { escapeSnippetText } = require('../../lib/browser/java-live-templates');
+  assert.strictEqual(escapeSnippetText('$foo'), '\\$foo');
+  assert.strictEqual(escapeSnippetText('${x}'), '\\${x\\}');
+  assert.strictEqual(escapeSnippetText('a$b}c'), 'a\\$b\\}c');
+  const tpl = POSTFIX_TEMPLATES.find(t => t.postfix === 'sout');
+  assert.strictEqual(tpl.build(escapeSnippetText('$x')), 'System.out.println(\\$x);');
+});
+
 test('teardown', () => {
   disableJSDOM();
 });

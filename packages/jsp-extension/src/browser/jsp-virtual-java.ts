@@ -11,6 +11,9 @@ export const JSP_VIRTUAL_METHOD_WRAPPER_LINES = 11;
 /** Lines before user content in class-body (declaration) wrappers. */
 export const JSP_VIRTUAL_CLASS_WRAPPER_LINES = 10;
 
+/** Prefix prepended to expression bodies inside the virtual method. */
+export const JSP_EXPRESSION_PREFIX = 'Object __expr = ';
+
 export type JspVirtualKind = 'scriptlet' | 'expression' | 'declaration';
 
 export function virtualUriForBlock(jspUri: string, blockIndex: number): string {
@@ -49,6 +52,11 @@ const IMPLICIT_FIELDS = [
 /**
  * Build a virtual Java compilation unit wrapping scriptlet content
  * so JDT LS can offer completions for implicits + user code.
+ *
+ * Expression bodies keep their original whitespace/newlines so
+ * offset→position mapping stays aligned with the JSP source.
+ * Only a trailing semicolon (and trailing whitespace) is stripped
+ * before we append our own terminating `;`.
  */
 export function buildVirtualJavaFile(blockContent: string, kind: JspVirtualKind = 'scriptlet'): string {
   if (kind === 'declaration') {
@@ -61,7 +69,7 @@ export function buildVirtualJavaFile(blockContent: string, kind: JspVirtualKind 
   }
   // scriptlet + expression: put code inside a method body
   const body = kind === 'expression'
-    ? `Object __expr = ${blockContent.trim().replace(/;?\s*$/, '')};`
+    ? `${JSP_EXPRESSION_PREFIX}${blockContent.replace(/;?\s*$/, '')};`
     : blockContent;
   return [
     'class _JspVirtual {',
@@ -93,9 +101,41 @@ export function mapOffsetToVirtualPosition(
   const lineInBlock = parts.length - 1;
   const character = parts[parts.length - 1]?.length ?? 0;
   if (kind === 'expression') {
-    // Expression is rewritten as `Object __expr = <content>;` on one wrapper line.
-    const prefix = 'Object __expr = ';
-    return { line: wrapperLines, character: prefix.length + character };
+    // Expression is rewritten as `Object __expr = <content>;` —
+    // prefix only applies on the first content line; later lines
+    // keep their original column (multi-line expressions).
+    if (lineInBlock === 0) {
+      return { line: wrapperLines, character: JSP_EXPRESSION_PREFIX.length + character };
+    }
+    return { line: wrapperLines + lineInBlock, character };
   }
   return { line: wrapperLines + lineInBlock, character };
+}
+
+/**
+ * Map a 0-based line/character inside the virtual Java file back to
+ * an offset relative to the start of the JSP block content.
+ * Returns null when the position falls outside user content
+ * (wrapper lines / trailing braces).
+ */
+export function mapVirtualPositionToBlockOffset(
+  blockContent: string,
+  virtualLine: number,
+  virtualCharacter: number,
+  kind: JspVirtualKind = 'scriptlet',
+): { lineInBlock: number; characterInBlock: number } | null {
+  const wrapperLines = virtualWrapperLineCount(kind);
+  const lineInBlock = virtualLine - wrapperLines;
+  if (lineInBlock < 0) {
+    return null;
+  }
+  const lines = blockContent.split('\n');
+  if (lineInBlock >= lines.length) {
+    return null;
+  }
+  let characterInBlock = virtualCharacter;
+  if (kind === 'expression' && lineInBlock === 0) {
+    characterInBlock = Math.max(0, virtualCharacter - JSP_EXPRESSION_PREFIX.length);
+  }
+  return { lineInBlock, characterInBlock };
 }

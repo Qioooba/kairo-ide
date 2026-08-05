@@ -4,6 +4,7 @@
  */
 
 import { injectable, inject } from '@theia/core/shared/inversify';
+import { RuntimeConnectionService, KairoError } from '@kairo/runtime-extension';
 import { SqlConnectionService } from './sql-connection-service';
 
 export interface SqlQueryResult {
@@ -77,6 +78,9 @@ export class SqlExecutionService {
   @inject(SqlConnectionService)
   protected readonly connectionService!: SqlConnectionService;
 
+  @inject(RuntimeConnectionService)
+  protected readonly runtime!: RuntimeConnectionService;
+
   private history: SqlHistoryEntry[] = [];
   private abortControllers: Map<string, AbortController> = new Map();
 
@@ -86,62 +90,57 @@ export class SqlExecutionService {
     const timeoutMs = request.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
     const abortController = new AbortController();
-    const requestId = `sql-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+    const requestId = `sql-${crypto.randomUUID()}`;
     this.abortControllers.set(requestId, abortController);
-
-    const timeoutId = setTimeout(() => {
-      abortController.abort();
-    }, timeoutMs);
 
     const startTime = Date.now();
 
     try {
-      const response = await fetch('/api/v1/sql/execute', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          requestId,
+      const payload = await this.runtime.request(
+        'POST /api/v1/sql/execute',
+        {
           connectionId: request.connectionId,
           sql: request.sql,
           maxRows,
-        }),
-        signal: abortController.signal,
-      });
+        },
+        {
+          signal: abortController.signal,
+          timeoutMs,
+          noRetry: true,
+        },
+      );
 
-      clearTimeout(timeoutId);
       const executionTimeMs = Date.now() - startTime;
-
-      const data: SqlExecuteResponse = await response.json();
-
-      if (!response.ok || !data.ok) {
-        const error: SqlError = {
-          message: data.error?.message || `SQL execution failed with status ${response.status}`,
-          oracleErrorCode: data.error?.details?.oracleErrorCode,
-          sqlState: data.error?.details?.sqlState,
-          position: data.error?.details?.position,
-        };
-        this.addHistory(request.connectionId, request.sql, executionTimeMs, false, error.message);
-        throw this.formatOracleError(error);
-      }
-
-      const payload = data.payload!;
       const result: SqlQueryResult = {
         columns: payload.columns,
         rows: payload.rows,
         rowCount: payload.rowCount,
         totalRows: payload.totalRows,
-        executionTimeMs,
+        executionTimeMs: payload.executionTimeMs ?? executionTimeMs,
         truncated: payload.truncated,
       };
-      this.addHistory(request.connectionId, request.sql, executionTimeMs, true, undefined, payload.rowCount);
+      this.addHistory(request.connectionId, request.sql, result.executionTimeMs, true, undefined, payload.rowCount);
       return result;
     } catch (err: unknown) {
-      clearTimeout(timeoutId);
       const executionTimeMs = Date.now() - startTime;
 
       if (err instanceof DOMException && err.name === 'AbortError') {
         const error: SqlError = {
           message: `Query timed out after ${timeoutMs}ms`,
+        };
+        this.addHistory(request.connectionId, request.sql, executionTimeMs, false, error.message);
+        throw this.formatOracleError(error);
+      }
+
+      if (err instanceof KairoError) {
+        const details = (err.details && typeof err.details === 'object')
+          ? err.details as { oracleErrorCode?: string; sqlState?: string; position?: number }
+          : undefined;
+        const error: SqlError = {
+          message: err.message,
+          oracleErrorCode: details?.oracleErrorCode,
+          sqlState: details?.sqlState,
+          position: details?.position,
         };
         this.addHistory(request.connectionId, request.sql, executionTimeMs, false, error.message);
         throw this.formatOracleError(error);
@@ -188,7 +187,7 @@ export class SqlExecutionService {
     rowCount?: number,
   ): void {
     const entry: SqlHistoryEntry = {
-      id: `hist-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
+      id: `hist-${crypto.randomUUID()}`,
       sql,
       connectionId,
       executedAt: new Date().toISOString(),
@@ -420,9 +419,14 @@ export class SqlExecutionService {
   }
 
   private escapeCsvField(field: string): string {
-    if (field.includes(',') || field.includes('"') || field.includes('\n') || field.includes('\r')) {
-      return `"${field.replace(/"/g, '""')}"`;
+    // VC-P2-10: neutralize Excel formula injection for cells starting with =+-@
+    let safe = field;
+    if (/^[=+\-@]/.test(safe)) {
+      safe = `'${safe}`;
     }
-    return field;
+    if (safe.includes(',') || safe.includes('"') || safe.includes('\n') || safe.includes('\r') || safe !== field) {
+      return `"${safe.replace(/"/g, '""')}"`;
+    }
+    return safe;
   }
 }

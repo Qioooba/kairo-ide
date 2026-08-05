@@ -22,19 +22,23 @@ import * as assert from 'node:assert';
 import AdmZip from 'adm-zip';
 
 // Import our modules under test
-import { installFromVsix, uninstallExtension, setExtensionEnabled, loadExtensionManifest, saveExtensionManifest } from '../src/node/kairo-extension-installer';
+import { installFromVsix, uninstallExtension, setExtensionEnabled, loadExtensionManifest, saveExtensionManifest, resolveSafeZipEntryPath } from '../src/node/kairo-extension-installer';
 import { scanInstalledExtensions } from '../src/node/kairo-extension-scanner';
-import { isAllowlisted } from '../src/node/kairo-allowlist';
+import { isAllowlisted, addToAllowlist, removeFromAllowlist } from '../src/node/kairo-allowlist';
 import {
   KAIRO_EXTENSIONS_DIR_NAME,
   KAIRO_EXTENSIONS_SUBDIR,
   KAIRO_EXTENSIONS_MANIFEST,
+  InstallErrorCode,
 } from '../src/common/kairo-extension-model';
 
 const TEST_EXTENSION_ID = 'kairo-test.java-properties';
 const TEST_EXTENSION_VERSION = '1.0.0';
 const FIXTURES_DIR = path.join(__dirname, 'fixtures', 'sample-extension');
 const TMP_DIR = path.join(os.tmpdir(), 'kairo-plugin-test-' + Date.now());
+
+// Allowlist mutations require an explicit opt-in (VC-P3-7).
+process.env.KAIRO_ALLOWLIST_MUTABLE = '1';
 
 // Create a minimal .vsix from the fixture
 function createTestVsix(): string {
@@ -90,6 +94,9 @@ describe('VS Code Extension Installation', () => {
       originalManifest = fs.readFileSync(manifestPath, 'utf-8');
     }
 
+    // Strict allowlist requires the test extension to be allowlisted (VC-P0-2).
+    addToAllowlist({ id: TEST_EXTENSION_ID, reason: 'Unit test fixture' });
+
     // Create the test .vsix
     vsixPath = createTestVsix();
     console.log(`Test .vsix created: ${vsixPath}`);
@@ -100,6 +107,10 @@ describe('VS Code Extension Installation', () => {
     try {
       uninstallExtension(TEST_EXTENSION_ID);
     } catch { /* ok if not installed */ }
+
+    try {
+      removeFromAllowlist(TEST_EXTENSION_ID);
+    } catch { /* ok */ }
 
     // Restore original manifest
     if (originalManifest) {
@@ -311,5 +322,49 @@ describe('Allowlist', () => {
   it('rejects unknown extensions', () => {
     assert.strictEqual(isAllowlisted('unknown.publisher.ext'), false);
     assert.strictEqual(isAllowlisted('completely.random'), false);
+  });
+});
+describe('Zip Slip protection (VC-P0-1)', () => {
+  const target = path.join(os.tmpdir(), 'kairo-zipslip-target-' + Date.now());
+
+  it('accepts safe relative paths', () => {
+    const resolved = resolveSafeZipEntryPath(target, 'syntaxes/lang.json');
+    assert.ok(resolved.startsWith(path.resolve(target) + path.sep));
+  });
+
+  it('rejects path traversal', () => {
+    assert.throws(() => resolveSafeZipEntryPath(target, '../../outside.txt'), /Zip Slip/);
+    assert.throws(() => resolveSafeZipEntryPath(target, 'foo/../../../etc/passwd'), /Zip Slip/);
+  });
+
+  it('rejects absolute paths', () => {
+    assert.throws(() => resolveSafeZipEntryPath(target, '/etc/passwd'), /absolute|Zip Slip|Invalid/i);
+    if (process.platform === 'win32') {
+      assert.throws(() => resolveSafeZipEntryPath(target, 'C:\\Windows\\system32\\evil.dll'), /absolute|Zip Slip/i);
+    }
+  });
+});
+
+describe('Strict allowlist install (VC-P0-2)', () => {
+  it('rejects non-allowlisted extension', () => {
+    const vsixPath = path.join(os.tmpdir(), 'kairo-not-allowlisted-' + Date.now() + '.vsix');
+    const zip = new AdmZip();
+    const pkg = {
+      name: 'evil-ext',
+      publisher: 'attacker',
+      version: '1.0.0',
+      engines: { vscode: '^1.73.0' },
+    };
+    zip.addFile('extension/package.json', Buffer.from(JSON.stringify(pkg), 'utf-8'));
+    zip.writeZip(vsixPath);
+    try {
+      const result = installFromVsix(vsixPath);
+      assert.strictEqual(result.success, false);
+      if (!result.success) {
+        assert.strictEqual(result.errorCode, InstallErrorCode.NOT_ALLOWLISTED);
+      }
+    } finally {
+      try { fs.unlinkSync(vsixPath); } catch { /* ok */ }
+    }
   });
 });

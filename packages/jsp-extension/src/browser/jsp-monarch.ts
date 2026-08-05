@@ -75,18 +75,21 @@ export const JSP_MONARCH: MonarchLanguage = {
 
     jspDeclaration: [
       [/%>/, { token: 'tag.jsp-decl', next: '@pop', nextEmbedded: '@pop' }],
-      [/[^%]+/, ''],
+      [/[^%\n]+/, ''],
       [/%/, ''],
+      [/\n/, 'tag.jsp-decl'],
     ],
     jspExpression: [
       [/%>/, { token: 'tag.jsp-expr', next: '@pop', nextEmbedded: '@pop' }],
-      [/[^%]+/, ''],
+      [/[^%\n]+/, ''],
       [/%/, ''],
+      [/\n/, 'tag.jsp-expr'],
     ],
     jspScriptlet: [
       [/%>/, { token: 'tag.jsp-scriptlet', next: '@pop', nextEmbedded: '@pop' }],
-      [/[^%]+/, ''],
+      [/[^%\n]+/, ''],
       [/%/, ''],
+      [/\n/, 'tag.jsp-scriptlet'],
     ],
 
     el: [

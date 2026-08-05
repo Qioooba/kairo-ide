@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -52,10 +53,28 @@ func (d *diskDeployer) load() {
 	}
 }
 
+const maxDeployHistory = 200
+
 func (d *diskDeployer) save() {
 	items := make([]*api.DeployResult, 0, len(d.items))
 	for _, r := range d.items {
 		items = append(items, r)
+	}
+	// GO-P2-11: trim like build history so items map does not grow unboundedly.
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].StartedAt.Before(items[j].StartedAt)
+	})
+	if len(items) > maxDeployHistory {
+		items = items[len(items)-maxDeployHistory:]
+	}
+	keep := make(map[string]struct{}, len(items))
+	for _, r := range items {
+		keep[r.ID] = struct{}{}
+	}
+	for id := range d.items {
+		if _, ok := keep[id]; !ok {
+			delete(d.items, id)
+		}
 	}
 	data, _ := json.MarshalIndent(items, "", "  ")
 	_ = atomicfile.WriteFile(filepath.Join(d.dir, "deployments.json"), data, 0o600)

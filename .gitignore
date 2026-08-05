@@ -213,3 +213,10 @@ test-import-*.cjs
 # Bundled binaries (built artifacts)
 bundled/kairo-jdi-bridge.jar
 bundled/tomcat6/tomcat6
+
+# Packaged Electron ASAR / extract scratch (DK-P3-1/4)
+*.asar
+*.asar.unpacked/
+app.asar.unpacked/
+artifacts/
+backend*.log

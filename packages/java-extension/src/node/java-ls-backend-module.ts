@@ -14,11 +14,12 @@
 
 import { ContainerModule } from '@theia/core/shared/inversify';
 import { ConnectionHandler, JsonRpcConnectionHandler } from '@theia/core/lib/common/messaging';
-import { JdtLsBackendPath, JdtLsFrontendClient } from '../common/java-ls-protocol';
+import { JdtLsBackendPath, JdtLsBackendService, JdtLsFrontendClient } from '../common/java-ls-protocol';
 import { JdtLsService } from './jdt-ls-service';
 
 export default new ContainerModule(bind => {
   bind(JdtLsService).toSelf().inSingletonScope();
+  bind(JdtLsBackendService).toService(JdtLsService);
   bind(ConnectionHandler).toDynamicValue(ctx =>
     new JsonRpcConnectionHandler<JdtLsFrontendClient>(JdtLsBackendPath, client => {
       const service = ctx.container.get(JdtLsService);

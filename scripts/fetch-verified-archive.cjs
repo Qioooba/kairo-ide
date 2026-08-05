@@ -87,8 +87,14 @@ function checkedUrl(raw, source) {
   } catch {
     fail(`${source} is not a valid URL or local file path`);
   }
-  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
-    fail(`${source} must use HTTP, HTTPS, or point to a local file (file:// or absolute path)`);
+  // DK-P1-8: force HTTPS unless explicit opt-in (flag or env).
+  const allowHttp = process.argv.includes('--allow-http') || process.env.KAIRO_ALLOW_HTTP === '1';
+  if (parsed.protocol === 'http:') {
+    if (!allowHttp) {
+      fail(`${source} must use HTTPS (pass --allow-http or set KAIRO_ALLOW_HTTP=1 to opt in to cleartext HTTP)`);
+    }
+  } else if (parsed.protocol !== 'https:') {
+    fail(`${source} must use HTTPS, or point to a local file (file:// or absolute path)`);
   }
   if (parsed.username || parsed.password) fail(`${source} must not contain credentials`);
   return { isLocal: false, url: parsed.toString(), localPath: null };

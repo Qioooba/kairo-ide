@@ -131,10 +131,16 @@ try {
   if (-not $agentProc.HasExited) { Stop-Process -Id $agentProc.Id -Force -ErrorAction SilentlyContinue }
   # Belt-and-braces: kill any java.exe or kairo-runtime.exe
   # that may have been spawned by the agent (Tomcat JVM, JDT LS).
-  foreach ($name in @("kairo-runtime", "java")) {
-    Get-Process -Name $name -ErrorAction SilentlyContinue | Where-Object {
-      $_.Path -like "*kairo*" -or $_.CommandLine -like "*kairo*"
-    } | Stop-Process -Force -ErrorAction SilentlyContinue
+  # Get-Process has no CommandLine; use Win32_Process for that filter.
+  foreach ($name in @("kairo-runtime.exe", "java.exe")) {
+    Get-CimInstance Win32_Process -Filter "Name = '$name'" -ErrorAction SilentlyContinue |
+      Where-Object {
+        $_.CommandLine -like '*kairo*' -or
+        $_.ExecutablePath -like '*kairo*'
+      } |
+      ForEach-Object {
+        Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+      }
   }
   Pop-Location
 }

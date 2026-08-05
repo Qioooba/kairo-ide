@@ -225,7 +225,8 @@ export class KairoRemoteAgentService {
     this.setStatus('connecting');
 
     const scheme = config.useTLS ? 'wss' : 'ws';
-    const url = `${scheme}://${config.host}:${config.port}/ws?token=${encodeURIComponent(config.token)}`;
+    // TP-P2-17: pass token via Sec-WebSocket-Protocol, not URL query (avoids access logs).
+    const url = `${scheme}://${config.host}:${config.port}/ws`;
 
     return new Promise<boolean>((resolve) => {
       let settled = false;
@@ -241,7 +242,7 @@ export class KairoRemoteAgentService {
       };
 
       try {
-        const ws = new WebSocket(url);
+        const ws = new WebSocket(url, [config.token]);
 
         // Connection timeout
         connectTimeoutId = setTimeout(() => {

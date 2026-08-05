@@ -134,7 +134,7 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
     const [webRoot, setWebRoot] = React.useState('WebRoot');
     const [libDirs, setLibDirs] = React.useState('lib');
     const [buildScript, setBuildScript] = React.useState('build.xml');
-    const [defaultEncoding, setDefaultEncoding] = React.useState('GBK');
+    const [defaultEncoding, setDefaultEncoding] = React.useState('gbk');
     const [jdkVersion, setJdkVersion] = React.useState('1.6');
     const [sourceVersion, setSourceVersion] = React.useState('1.6');
     const [targetVersion, setTargetVersion] = React.useState('1.6');
@@ -172,18 +172,12 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
         setScanError('');
         const normalizedPath = normalizePathForApi(path);
         try {
-            // KAIRO-RC-WEB-2026-07-25-06: the project being imported lives
-            // under a directory that is not necessarily the Theia startup
-            // workspace. The agent's import endpoint validates that the
-            // project root is inside the request's workspaceId, so we must
-            // register the selected project path as its own workspace before
-            // importing. This also sets the runtime workspaceId so the
-            // subsequent import call targets the right backend context.
-            const projectWorkspace = await projectService.openWorkspace(normalizedPath);
-            setWorkspaceId(projectWorkspace.id);
-
+            // BD-P1-14: do NOT openWorkspace during scan — that creates a
+            // backend workspace and switches global context with no rollback
+            // on cancel. Detect-only here; openWorkspace runs on confirm.
             const result = await projectService.detectProject(normalizedPath);
             setDetected(result);
+            setWorkspaceId('');
 
             const base = path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || 'project';
             setProjectName(base);
@@ -206,7 +200,7 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
         } finally {
             setScanning(false);
         }
-    }, [projectService, runtime, workspaceContext]);
+    }, [projectService]);
 
     const handleScanTypedPath = React.useCallback(async () => {
         const path = workspacePath.trim();
@@ -226,13 +220,15 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
             if (!trimmedName) {
                 throw new Error(t('widget.importWizard.nameRequired'));
             }
-            if (!workspaceId) {
-                throw new Error(t('widget.importWizard.noWorkspace'));
-            }
 
             const normalizedWorkspacePath = normalizePathForApi(workspacePath);
+            // BD-P1-14: create the backend workspace only on confirm.
+            const projectWorkspace = await projectService.openWorkspace(normalizedWorkspacePath, trimmedName);
+            const confirmedWorkspaceId = projectWorkspace.id;
+            setWorkspaceId(confirmedWorkspaceId);
+
             const params: ProjectImportConfirmRequest = {
-                workspaceId,
+                workspaceId: confirmedWorkspaceId,
                 rootPath: normalizedWorkspacePath,
                 name: trimmedName,
                 sourceDirs: sourceDirs.split(',').map(s => s.trim()).filter(s => s.length > 0),
@@ -250,45 +246,16 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
 
             const saved = await projectService.importProjectNew(params);
 
-            // KAIRO-RC-WEB-2026-07-25-04: temporary debug log to capture
-            // the exact import request payload for K4 debugging. Remove
-            // once SHARD-02 import path is green.
-            console.log('[kairo:import-debug] params:', JSON.stringify(params, null, 2));
-
-            // KAIRO-RC-WEB-2026-07-25-13: synchronise the WorkspaceContext
-            // to the new project's workspace. Without this, the
-            // ActiveProjectService's onDidChangeContext listener keeps
-            // firing with the Theia parent folder's workspaceId; that
-            // listener queries /api/v1/projects with the parent
-            // workspaceId, sees an empty list, and clears
-            // `currentProject` — the imported project lives in the
-            // wizard's freshly created workspace, not the parent. The
-            // status bar consequently stays on `(no workspace)` even
-            // though setProject() fired. Updating WorkspaceContext
-            // here re-issues the listener against the new workspace
-            // and the project is then discoverable.
-            //
-            // We do NOT call `runtime.setWorkspace(workspaceId)`
-            // directly: WorkspaceContextService.setWorkspace already
-            // forwards to the runtime. Calling it twice caused the
-            // EventStream to close+reopen, which fired the
-            // WorkspaceContextService status listener and re-ran
-            // syncFromRoots with the Theia parent folder's roots —
-            // which then re-fired onDidChangeContext with the OLD
-            // workspaceId and the ActiveProjectService listener
-            // cleared the just-selected project.
             const finalRootPath = saved.rootPath ? normalizePathForApi(saved.rootPath) : normalizedWorkspacePath;
-            if (workspaceId) {
-                try {
-                    await workspaceContext.setWorkspace(workspaceId, finalRootPath);
-                } catch (ctxErr) {
-                    console.warn('[kairo:import-debug] workspaceContext.setWorkspace failed:',
-                        ctxErr instanceof Error ? ctxErr.message : String(ctxErr));
-                }
+            try {
+                await workspaceContext.setWorkspace(confirmedWorkspaceId, finalRootPath);
+            } catch (ctxErr) {
+                console.warn('[kairo:import] workspaceContext.setWorkspace failed:',
+                    ctxErr instanceof Error ? ctxErr.message : String(ctxErr));
             }
 
             await activeProject.setProject({
-                workspaceId,
+                workspaceId: confirmedWorkspaceId,
                 projectId: saved.id,
                 name: saved.name,
                 root: finalRootPath,
@@ -308,7 +275,7 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
         } finally {
             setImporting(false);
         }
-    }, [projectService, activeProject, runtime, workspaceContext, workspaceId, workspacePath, projectName,
+    }, [projectService, activeProject, workspaceContext, workspacePath, projectName,
         sourceDirs, webRoot, libDirs, buildScript, defaultEncoding,
         jdkVersion, sourceVersion, targetVersion, outputDir, buildTool, contextPath, t]);
 
@@ -660,7 +627,6 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
                                 data-testid="open-project-btn"
                                 onClick={async () => {
                                     if (importedSummary) {
-                                        console.log('[kairo] Open Project Folder clicked', { projectId: importedSummary.projectId, root: importedSummary.root });
                                         try {
                                             // Theia open handlers require a file:// URI.
                                             // Bare Windows paths like "G:/foo" have no scheme

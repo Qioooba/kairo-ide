@@ -11,7 +11,6 @@ import {
   RUN_CONFIGURATION_VERSION,
   ok,
   err,
-  mapBuildState,
   type RequestEnvelope,
   type ResponseEnvelope,
   type ErrorEnvelope,
@@ -156,30 +155,6 @@ test('err() with empty string correlationId', () => {
 test('err() with empty object details', () => {
   const e = err('req-1', 'internal', 'error', { details: {} });
   assert.deepStrictEqual(e.error.details, {});
-});
-
-// ---- mapBuildState edge cases ----
-
-test('mapBuildState: empty string state', () => {
-  const d = mapBuildState('');
-  assert.strictEqual(d.label, '');
-  assert.strictEqual(d.icon, 'circle-outline');
-  assert.strictEqual(d.color, 'var(--theia-foreground)');
-});
-
-test('mapBuildState: very long state string', () => {
-  const longState = 'a'.repeat(500);
-  const d = mapBuildState(longState);
-  assert.strictEqual(d.label, longState);
-  assert.strictEqual(d.color, 'var(--theia-foreground)');
-});
-
-test('mapBuildState: state is case-sensitive', () => {
-  const d = mapBuildState('Running');
-  assert.strictEqual(d.label, 'Running');
-  // 'Running' (capital R) does NOT match 'running' case
-  assert.strictEqual(d.icon, 'circle-outline');
-  assert.strictEqual(d.color, 'var(--theia-foreground)');
 });
 
 // ---- PROTOCOL_VERSION compatibility ----

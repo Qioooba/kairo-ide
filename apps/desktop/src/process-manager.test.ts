@@ -22,15 +22,11 @@ function spawnShortLived(label: string): ChildProcess {
 
 // Helper: spawn a long-running process that we can kill.
 function spawnLongLived(label: string): ChildProcess {
-  const isWin = process.platform === 'win32';
-  // On Windows, use `timeout /t 60` which sleeps for 60s.
-  // On Unix, use `sleep 60`.
-  const proc = spawn(
-    isWin ? 'cmd.exe' : 'sleep',
-    isWin ? ['/c', 'timeout /t 60 /nobreak >nul'] : ['60'],
-    { stdio: 'ignore' }
-  );
-  return proc;
+  // Use Node itself — `timeout`/`sleep` via cmd.exe is unreliable on
+  // locked-down Windows (exits 1 immediately; breaks isPidAlive waits).
+  return spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
+    stdio: 'ignore',
+  });
 }
 
 describe('ProcessManager', () => {
@@ -43,13 +39,14 @@ describe('ProcessManager', () => {
   });
 
   afterEach(async () => {
-    // Force-kill any remaining processes.
+    // Force-kill any remaining processes (sync handle kill first).
     const all = pm.getAll();
     for (const info of all) {
       if (info.process && !info.process.killed) {
         try { info.process.kill('SIGKILL'); } catch { /* ignore */ }
       }
     }
+    await new Promise((r) => setTimeout(r, 100));
   });
 
   describe('registration', () => {
@@ -181,6 +178,55 @@ describe('ProcessManager', () => {
       assert.strictEqual(result.success, true);
       assert.strictEqual(result.wasZombie, false);
       assert.ok(result.exitCode !== null || result.exitSignal !== null);
+    });
+
+    it('should kill by PID when ChildProcess handle was cleared', { timeout: 15_000 }, async () => {
+      const proc = spawnLongLived('test-pid-only');
+      pm.register('test-pid-only', proc);
+      const pid = proc.pid!;
+      assert.ok(pid > 0);
+
+      // Simulate main.ts nulling the ChildProcess ref before escalation.
+      const info = pm.get('test-pid-only');
+      assert.ok(info);
+      info!.process = null;
+
+      const result = await pm.shutdownOne('test-pid-only', {
+        termTimeoutMs: 2_000,
+        killTimeoutMs: 3_000,
+      });
+
+      assert.strictEqual(result.success, true);
+      assert.strictEqual(isPidAlive(pid), false);
+    });
+
+    it('should not let a previous process exit clobber a re-registered label', async () => {
+      const first = spawnLongLived('test-rereg-1');
+      pm.register('agent', first);
+      const gen1 = pm.get('agent')!.generation;
+
+      const second = spawnLongLived('test-rereg-2');
+      pm.register('agent', second);
+      const gen2 = pm.get('agent')!.generation;
+      assert.notStrictEqual(gen1, gen2);
+      assert.strictEqual(pm.get('agent')?.pid, second.pid);
+
+      // Kill the first process; its exit must not mark the new registration exited.
+      await new Promise<void>((resolve) => {
+        first.on('exit', () => resolve());
+        first.kill('SIGKILL');
+      });
+      await new Promise((r) => setTimeout(r, 100));
+
+      const info = pm.get('agent');
+      assert.ok(info);
+      assert.strictEqual(info!.generation, gen2);
+      assert.strictEqual(info!.pid, second.pid);
+      // Still the live second process (exitCode uncleared).
+      assert.strictEqual(info!.exitCode, null);
+      assert.strictEqual(info!.process, second);
+
+      second.kill('SIGKILL');
     });
   });
 

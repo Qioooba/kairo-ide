@@ -263,14 +263,17 @@ export class KairoTelemetry {
   }
 
   protected generateSessionId(): string {
-    const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
-    let id = 's_';
-    const timestamp = Date.now().toString(36);
-    id += timestamp + '_';
-    for (let i = 0; i < 8; i++) {
-      id += chars[Math.floor(Math.random() * chars.length)];
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return `s_${crypto.randomUUID()}`;
     }
-    return id;
+    // Extremely old environments without Web Crypto — still avoid Math.random alone.
+    const timestamp = Date.now().toString(36);
+    const bytes = new Uint8Array(8);
+    if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+      crypto.getRandomValues(bytes);
+    }
+    const suffix = Array.from(bytes, b => (b % 36).toString(36)).join('');
+    return `s_${timestamp}_${suffix}`;
   }
 
   protected async sendToEndpoint(event: TelemetryEvent, endpoint: string): Promise<void> {

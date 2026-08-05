@@ -1,3 +1,5 @@
+//go:build remote
+
 // Package remote implements the Phase 3 Remote Agent server.
 //
 // It provides TLS 1.3 enforced HTTP + WebSocket server with:

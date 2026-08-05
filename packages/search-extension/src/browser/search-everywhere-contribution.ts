@@ -2,6 +2,7 @@ import { injectable } from '@theia/core/shared/inversify';
 import { AbstractViewContribution } from '@theia/core/lib/browser/shell/view-contribution';
 import type { FrontendApplication } from '@theia/core/lib/browser/frontend-application';
 import { SearchEverywhereWidget } from './search-everywhere-widget';
+import { openBodyOverlay } from './open-body-overlay';
 
 export class DoubleShiftDetector {
   protected lastShift = 0;
@@ -20,9 +21,24 @@ export class SearchEverywhereContribution extends AbstractViewContribution<Searc
   protected readonly keydown = (event: KeyboardEvent): void => {
     const target = event.target as HTMLElement | null;
     if (target?.closest('input, textarea, [contenteditable="true"]')) return;
-    if (this.detector.accept(event)) { event.preventDefault(); void this.openView({ activate: true }); }
+    if (this.detector.accept(event)) {
+      event.preventDefault();
+      void this.openView({ activate: true });
+    }
   };
-  constructor() { super({ widgetId: SearchEverywhereWidget.ID, widgetName: 'Kairo Search Everywhere', defaultWidgetOptions: { area: 'main' }, toggleCommandId: 'kairo.search.everywhere' }); }
+  constructor() {
+    super({
+      widgetId: SearchEverywhereWidget.ID,
+      widgetName: 'Kairo Search Everywhere',
+      defaultWidgetOptions: { area: 'main' },
+      toggleCommandId: 'kairo.search.everywhere',
+    });
+  }
+
+  override async openView(_args?: Partial<{ activate: boolean; reveal: boolean }>): Promise<SearchEverywhereWidget> {
+    return openBodyOverlay(this.widgetManager, SearchEverywhereWidget.ID) as Promise<SearchEverywhereWidget>;
+  }
+
   onStart(_app: FrontendApplication): void { window.addEventListener('keydown', this.keydown, true); }
   onStop(): void { window.removeEventListener('keydown', this.keydown, true); }
 }

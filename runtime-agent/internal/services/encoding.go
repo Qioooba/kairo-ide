@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sync"
 
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/atomicfile"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/encoding"
@@ -13,8 +14,9 @@ import (
 // ----------------- Encoder -----------------
 
 type memEncoder struct {
-	sandbox       *security.WorkspaceRoots
-	fileEncoding  map[string]string // path -> encoding ID, tracks detected encoding per file
+	sandbox      *security.WorkspaceRoots
+	mu           sync.Mutex
+	fileEncoding map[string]string // path -> encoding ID, tracks detected encoding per file
 }
 
 func (m *memEncoder) Detect(payload json.RawMessage) (json.RawMessage, error) {
@@ -45,10 +47,12 @@ func (m *memEncoder) Detect(payload json.RawMessage) (json.RawMessage, error) {
 	n, _ := f.Read(buf)
 	id, conf, hasBom, eol := encoding.Detect(buf[:n], encoding.UTF8, encoding.Aliases{})
 	// Cache the detected encoding for this file
+	m.mu.Lock()
 	if m.fileEncoding == nil {
 		m.fileEncoding = make(map[string]string)
 	}
 	m.fileEncoding[req.File] = id
+	m.mu.Unlock()
 	return json.Marshal(map[string]any{
 		"file":       req.File,
 		"encoding":   id,
@@ -65,6 +69,7 @@ func (m *memEncoder) Recode(payload json.RawMessage) (json.RawMessage, error) {
 		File        string `json:"file"`
 		From        string `json:"from"`
 		To          string `json:"to"`
+		Eol         string `json:"eol"`
 	}
 	if err := json.Unmarshal(payload, &req); err != nil {
 		return nil, err
@@ -84,6 +89,10 @@ func (m *memEncoder) Recode(payload json.RawMessage) (json.RawMessage, error) {
 	if err != nil {
 		return nil, err
 	}
+	// BD-P2-14: honor optional eol override from EncodingRecodeRequest.
+	if req.Eol != "" {
+		decoded = encoding.ConvertEOL(decoded, req.Eol)
+	}
 	encoded, err := encoding.Encode(decoded, req.To, encoding.Aliases{})
 	if err != nil {
 		return nil, err
@@ -98,10 +107,12 @@ func (m *memEncoder) Recode(payload json.RawMessage) (json.RawMessage, error) {
 		return nil, err
 	}
 	// Update the cached encoding for this file
+	m.mu.Lock()
 	if m.fileEncoding == nil {
 		m.fileEncoding = make(map[string]string)
 	}
 	m.fileEncoding[req.File] = req.To
+	m.mu.Unlock()
 	return json.Marshal(map[string]any{"ok": true, "bytes": len(encoded)})
 }
 
@@ -133,6 +144,8 @@ func (m *memEncoder) Validate(payload json.RawMessage) (json.RawMessage, error) 
 // GetEncoding returns the cached encoding for a file, or ""
 // if the file has not been detected yet.
 func (m *memEncoder) GetEncoding(file string) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.fileEncoding == nil {
 		return ""
 	}

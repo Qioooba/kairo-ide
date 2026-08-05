@@ -6,6 +6,8 @@ import (
 	"strconv"
 
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/api"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/build"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/jdkmanager"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/log"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/security"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/tomcat6"
@@ -78,6 +80,9 @@ func NewMemoryServices(cfg Config, sandbox *security.WorkspaceRoots) *api.Servic
 		JDTProjectGenerator:   newJDTProjectService(cfg.DataDir, cfg.BundledDir, cfg.Logger),
 		DataDir:               cfg.DataDir,
 		Orchestrator:          NewLaunchOrchestrator(buildEngine, deployer, serverRunner, cfg.DataDir, nil),
+		CustomBuild:           build.NewCustomBuildExecutor(nil),
+		JDKManager:            jdkmanager.NewManager(cfg.BundledDir),
+		Sandbox:               sandbox,
 		// EventBus is wired in cmd/kairo-runtime/main.go after
 		// bootstrap returns (we need the EventHub reference).
 		// Leaving it nil here is safe — handleEvents will return

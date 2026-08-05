@@ -1,6 +1,6 @@
 import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
 import { Emitter, Event } from '@theia/core/lib/common/event';
-import { GitService, GitFileStatus, GitStatusResult, GitCommitResult } from './git-service';
+import { GitService, GitFileStatus, GitStatusResult, GitCommitResult, GitCommitOptions } from './git-service';
 
 export interface GitChangesState {
     branch: string;
@@ -99,9 +99,9 @@ export class GitStore {
         await this.refresh();
     }
 
-    async commit(message: string, amend: boolean = false): Promise<GitCommitResult> {
+    async commit(message: string, amendOrOptions: boolean | GitCommitOptions = false): Promise<GitCommitResult> {
         try {
-            const result = await this.gitService.commit(message, amend);
+            const result = await this.gitService.commit(message, amendOrOptions);
             await this.refresh();
             return result;
         } catch (err) {

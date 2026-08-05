@@ -151,9 +151,8 @@ test('factory IDs: debug widget factory IDs are defined', () => {
     'KAIRO_DEBUG_TOOLBAR_FACTORY_ID',
     'KAIRO_DEBUG_CONSOLE_FACTORY_ID',
     'KAIRO_DEBUG_WATCH_FACTORY_ID',
-    'KAIRO_DEBUG_MODULE_SELECTOR_FACTORY_ID',
     'KAIRO_DEBUG_CONDITION_EDITOR_FACTORY_ID',
-    'KAIRO_DEBUG_HOTSWAP_STATUS_FACTORY_ID',
+    'KAIRO_JAVA_HOTSWAP_FACTORY_ID',
   ];
 
   for (const id of debugIds) {
@@ -409,15 +408,12 @@ test('frontend module: debug widgets are exported from compiled modules', () => 
   assert.equal(typeof KairoDebugWatchWidget, 'function');
 });
 
-test('frontend module: debug advanced widgets are exported from compiled modules', () => {
-  const { KairoDebugModuleSelectorWidget } = require('../../../lib/browser/debug-module-selector-widget');
-  assert.equal(typeof KairoDebugModuleSelectorWidget, 'function');
-
+test('frontend module: condition editor remains; empty-shell module/hotswap widgets removed', () => {
   const { KairoDebugConditionEditorWidget } = require('../../../lib/browser/debug-condition-editor-widget');
   assert.equal(typeof KairoDebugConditionEditorWidget, 'function');
 
-  const { KairoDebugHotSwapStatusWidget } = require('../../../lib/browser/debug-hotswap-status-widget');
-  assert.equal(typeof KairoDebugHotSwapStatusWidget, 'function');
+  assert.throws(() => require('../../../lib/browser/debug-module-selector-widget'), /Cannot find module/);
+  assert.throws(() => require('../../../lib/browser/debug-hotswap-status-widget'), /Cannot find module/);
 });
 
 // ------------------------------------------------------------------

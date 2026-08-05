@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { KairoI18nService } from '@kairo/i18n';
 import { KairoDebugSessionService } from './kairo-debug-session-service';
+import { classifyValue } from './debug-value-classify';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                               */
@@ -32,6 +33,57 @@ interface IDEAWatchesPanelProps {
     sessionService: KairoDebugSessionService;
     i18n: KairoI18nService;
     onNewWatch?: (expression: string) => void;
+    /** Workspace-scoped storage dimension to avoid cross-project watch bleed. */
+    workspaceKey?: string;
+}
+
+const WATCH_STORAGE_PREFIX = 'kairo-debug-watches';
+
+function watchStorageKey(workspaceKey?: string): string {
+    const dim = (workspaceKey || 'default').replace(/[^\w.-]+/g, '_');
+    return `${WATCH_STORAGE_PREFIX}:${dim}`;
+}
+
+function mapVariablesToChildren(vars: Array<{ name: string; value: string; type?: string; variablesReference?: number }>): WatchChild[] {
+    return vars.map(v => ({
+        name: v.name,
+        value: v.value,
+        type: v.type,
+        variablesReference: v.variablesReference,
+        childrenLoaded: false,
+        expanded: false,
+    }));
+}
+
+function updateChildTree(
+    children: WatchChild[] | undefined,
+    match: (c: WatchChild) => boolean,
+    updater: (c: WatchChild) => WatchChild,
+): WatchChild[] | undefined {
+    if (!children) return children;
+    let changed = false;
+    const next = children.map(c => {
+        if (match(c)) {
+            changed = true;
+            return updater(c);
+        }
+        if (c.children) {
+            const updatedKids = updateChildTree(c.children, match, updater);
+            if (updatedKids !== c.children) {
+                changed = true;
+                return { ...c, children: updatedKids };
+            }
+        }
+        return c;
+    });
+    return changed ? next : children;
+}
+
+function sameChild(a: WatchChild, b: WatchChild): boolean {
+    return a.name === b.name
+        && a.variablesReference === b.variablesReference
+        && a.value === b.value
+        && a.type === b.type;
 }
 
 /* ------------------------------------------------------------------ */
@@ -116,7 +168,7 @@ const WatchRow: React.FC<{
                 >
                     {entry.loading ? '…' : (entry.expanded ? '▾' : '▸')}
                 </span>
-                <span className="codicon codicon-watch" style={{ fontSize: 11, flexShrink: 0, color: 'var(--theia-debugIcon-watchForeground, #75beff)' }} />
+                <span className="codicon codicon-watch" style={{ fontSize: 11, flexShrink: 0, color: 'var(--theia-debugIcon-watchForeground)' }} />
                 <span className="kairo-debug-watch-name">
                     {entry.expression}
                 </span>
@@ -162,16 +214,17 @@ const WatchRow: React.FC<{
 /*  Watches Panel                                                       */
 /* ------------------------------------------------------------------ */
 
-export const IDEAWatchesPanel: React.FC<IDEAWatchesPanelProps> = ({ sessionService, i18n, onNewWatch }) => {
+export const IDEAWatchesPanel: React.FC<IDEAWatchesPanelProps> = ({ sessionService, i18n, onNewWatch, workspaceKey }) => {
     const t = React.useCallback((key: string) => i18n.t(key as any), [i18n]);
     const [entries, setEntries] = React.useState<WatchEntry[]>([]);
     const [selectedIndex, setSelectedIndex] = React.useState<number>(-1);
     const [adding, setAdding] = React.useState(false);
     const [newExpression, setNewExpression] = React.useState('');
     const inputRef = React.useRef<HTMLInputElement>(null);
+    const entriesRef = React.useRef(entries);
+    entriesRef.current = entries;
 
-    // Load watches from localStorage
-    const storageKey = 'kairo-debug-watches';
+    const storageKey = watchStorageKey(workspaceKey);
 
     const loadWatches = React.useCallback(() => {
         try {
@@ -179,11 +232,20 @@ export const IDEAWatchesPanel: React.FC<IDEAWatchesPanelProps> = ({ sessionServi
             if (saved) {
                 const exprs: string[] = JSON.parse(saved);
                 setEntries(exprs.map(e => ({ expression: e })));
+                return;
+            }
+            // One-time migrate from legacy unscoped key
+            const legacy = localStorage.getItem(WATCH_STORAGE_PREFIX);
+            if (legacy) {
+                const exprs: string[] = JSON.parse(legacy);
+                setEntries(exprs.map(e => ({ expression: e })));
+                localStorage.setItem(storageKey, legacy);
+                localStorage.removeItem(WATCH_STORAGE_PREFIX);
             }
         } catch {
             // ignore
         }
-    }, []);
+    }, [storageKey]);
 
     const saveWatches = React.useCallback((exprs: string[]) => {
         try {
@@ -191,17 +253,18 @@ export const IDEAWatchesPanel: React.FC<IDEAWatchesPanelProps> = ({ sessionServi
         } catch {
             // ignore
         }
-    }, []);
+    }, [storageKey]);
 
     const evaluateAll = React.useCallback(async () => {
+        const current = entriesRef.current;
         if (!sessionService.isSuspended) {
             setEntries(e => e.map(en => ({ ...en, result: undefined, error: undefined, loading: false })));
             return;
         }
         setEntries(e => e.map(en => ({ ...en, loading: true })));
         const updated = await Promise.all(
-            entries.map(async (entry) => {
-                if (!entry.expression.trim()) return entry;
+            current.map(async (entry) => {
+                if (!entry.expression.trim()) return { ...entry, loading: false };
                 const result = await sessionService.evaluate(entry.expression, undefined, 'watch');
                 return {
                     ...entry,
@@ -217,77 +280,92 @@ export const IDEAWatchesPanel: React.FC<IDEAWatchesPanelProps> = ({ sessionServi
             })
         );
         setEntries(updated);
-    }, [entries, sessionService]);
+    }, [sessionService]);
 
     const addWatch = React.useCallback((expression: string) => {
         const expr = expression.trim();
         if (!expr) return;
-        if (entries.some(e => e.expression === expr)) return;
-        const newEntry: WatchEntry = { expression: expr };
-        setEntries(prev => [...prev, newEntry]);
-        saveWatches([...entries.map(e => e.expression), expr]);
+        setEntries(prev => {
+            if (prev.some(e => e.expression === expr)) return prev;
+            const next = [...prev, { expression: expr }];
+            saveWatches(next.map(e => e.expression));
+            return next;
+        });
         setNewExpression('');
         setAdding(false);
-    }, [entries, saveWatches]);
+        onNewWatch?.(expr);
+    }, [saveWatches, onNewWatch]);
 
     const removeWatch = React.useCallback((idx: number) => {
-        const newEntries = entries.filter((_, i) => i !== idx);
-        setEntries(newEntries);
-        saveWatches(newEntries.map(e => e.expression));
+        setEntries(prev => {
+            const next = prev.filter((_, i) => i !== idx);
+            saveWatches(next.map(e => e.expression));
+            return next;
+        });
         setSelectedIndex(-1);
-    }, [entries, saveWatches]);
+    }, [saveWatches]);
 
     const editWatch = React.useCallback((idx: number) => {
+        const entry = entriesRef.current[idx];
+        if (!entry) return;
         setSelectedIndex(idx);
-        setNewExpression(entries[idx].expression);
+        setNewExpression(entry.expression);
         setAdding(true);
-    }, [entries]);
+    }, []);
 
     const toggleEntry = React.useCallback(async (idx: number) => {
-        const entry = entries[idx];
+        const entry = entriesRef.current[idx];
         if (!entry) return;
         const newExpanded = !entry.expanded;
-        entry.expanded = newExpanded;
+
         if (newExpanded && !entry.childrenLoaded && entry.variablesReference && entry.variablesReference > 0) {
-            setEntries([...entries]);
+            setEntries(prev => prev.map((e, i) => i === idx ? { ...e, expanded: true } : e));
             try {
                 const vars = await sessionService.getVariables(entry.variablesReference);
-                entry.children = vars.map(v => ({
-                    name: v.name,
-                    value: v.value,
-                    type: v.type,
-                    variablesReference: v.variablesReference,
-                    childrenLoaded: false,
-                    expanded: false,
-                }));
-                entry.childrenLoaded = true;
+                const children = mapVariablesToChildren(vars);
+                setEntries(prev => prev.map((e, i) => i === idx
+                    ? { ...e, expanded: true, children, childrenLoaded: true }
+                    : e));
             } catch {
-                // ignore
+                setEntries(prev => prev.map((e, i) => i === idx ? { ...e, expanded: true } : e));
             }
+            return;
         }
-        setEntries([...entries]);
-    }, [entries, sessionService]);
+
+        setEntries(prev => prev.map((e, i) => i === idx ? { ...e, expanded: newExpanded } : e));
+    }, [sessionService]);
 
     const toggleChild = React.useCallback(async (child: WatchChild) => {
         const newExpanded = !child.expanded;
-        child.expanded = newExpanded;
+        const match = (c: WatchChild) => sameChild(c, child);
+
         if (newExpanded && !child.childrenLoaded && child.variablesReference && child.variablesReference > 0) {
+            setEntries(prev => prev.map(entry => ({
+                ...entry,
+                children: updateChildTree(entry.children, match, c => ({ ...c, expanded: true })),
+            })));
             try {
                 const vars = await sessionService.getVariables(child.variablesReference);
-                child.children = vars.map(v => ({
-                    name: v.name,
-                    value: v.value,
-                    type: v.type,
-                    variablesReference: v.variablesReference,
-                    childrenLoaded: false,
-                    expanded: false,
-                }));
-                child.childrenLoaded = true;
+                const kids = mapVariablesToChildren(vars);
+                setEntries(prev => prev.map(entry => ({
+                    ...entry,
+                    children: updateChildTree(entry.children, match, c => ({
+                        ...c,
+                        expanded: true,
+                        children: kids,
+                        childrenLoaded: true,
+                    })),
+                })));
             } catch {
                 // ignore
             }
+            return;
         }
-        setEntries(e => [...e]);
+
+        setEntries(prev => prev.map(entry => ({
+            ...entry,
+            children: updateChildTree(entry.children, match, c => ({ ...c, expanded: newExpanded })),
+        })));
     }, [sessionService]);
 
     React.useEffect(() => {
@@ -295,10 +373,10 @@ export const IDEAWatchesPanel: React.FC<IDEAWatchesPanelProps> = ({ sessionServi
     }, [loadWatches]);
 
     React.useEffect(() => {
-        evaluateAll();
+        void evaluateAll();
         const disposable = sessionService.onDidChangeState(state => {
             if (state.isSuspended) {
-                setTimeout(evaluateAll, 100);
+                setTimeout(() => void evaluateAll(), 100);
             }
         });
         return () => disposable.dispose();
@@ -343,10 +421,10 @@ export const IDEAWatchesPanel: React.FC<IDEAWatchesPanelProps> = ({ sessionServi
                         entry={entry}
                         isSelected={idx === selectedIndex}
                         onSelect={() => setSelectedIndex(idx)}
-                        onToggle={() => toggleEntry(idx)}
+                        onToggle={() => void toggleEntry(idx)}
                         onRemove={() => removeWatch(idx)}
                         onEdit={() => editWatch(idx)}
-                        onToggleChild={toggleChild}
+                        onToggleChild={child => void toggleChild(child)}
                         sessionService={sessionService}
                         removeTitle={t('widget.debug.watch.removeAria')}
                     />
@@ -381,12 +459,3 @@ export const IDEAWatchesPanel: React.FC<IDEAWatchesPanelProps> = ({ sessionServi
         </div>
     );
 };
-
-function classifyValue(value: string): string {
-    if (value === 'null' || value === 'undefined') return 'null';
-    if (/^".*"$/.test(value) || /^'.*'$/.test(value)) return 'string';
-    if (/^-?\d/.test(value) || value === 'true' || value === 'false') return 'number';
-    if (value.startsWith('{') || value.startsWith('[')) return 'object';
-    if (value.includes('Exception') || value.includes('Error')) return 'error';
-    return '';
-}

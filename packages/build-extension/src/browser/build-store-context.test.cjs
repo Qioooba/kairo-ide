@@ -117,6 +117,15 @@ describe('BuildStore — N-032 Context Bootstrap', () => {
     assert.strictEqual(build.state, 'succeeded');
     assert.strictEqual(build.endTime, 't1');
   });
+
+  it('source uses bootstrap generation to discard stale bootstraps (BD-P2-1)', () => {
+    const fs = require('node:fs');
+    const path = require('node:path');
+    const source = fs.readFileSync(path.join(__dirname, 'build-store.ts'), 'utf8');
+    assert.match(source, /bootstrapGeneration/);
+    assert.match(source, /const generation = \+\+this\.bootstrapGeneration/);
+    assert.match(source, /if \(generation !== this\.bootstrapGeneration\) return/);
+  });
 });
 
 // ============================================================================

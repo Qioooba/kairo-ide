@@ -162,6 +162,20 @@ const EL_OPERATORS: Array<{ label: string; insertText: string; detail: string }>
   { label: 'false', insertText: 'false', detail: '布尔值 false' },
 ];
 
+/** Map a 0-based absolute content offset to 1-based line/column. */
+function offsetToLineColumn(content: string, offset: number): { line: number; column: number } {
+  let line = 1;
+  let lineStart = 0;
+  const clamped = Math.max(0, Math.min(offset, content.length));
+  for (let i = 0; i < clamped; i++) {
+    if (content[i] === '\n') {
+      line++;
+      lineStart = i + 1;
+    }
+  }
+  return { line, column: clamped - lineStart + 1 };
+}
+
 /**
  * Find the EL expression that contains the given position.
  * Returns the expression range and content, or null if not in an EL expression.
@@ -203,12 +217,14 @@ export function findElExpressionAt(
       const elContent = content.substring(match.start + 2, match.end - 1); // strip ${ and }
       const elOffset = offset - match.start - 2;
 
+      const startPos = offsetToLineColumn(content, match.start);
+      const endPos = offsetToLineColumn(content, match.end);
       return {
         range: {
-          startLineNumber: line + 1,
-          startColumn: match.start - (offset - column) + 1,
-          endLineNumber: line + 1,
-          endColumn: match.end - (offset - column) + 1,
+          startLineNumber: startPos.line,
+          startColumn: startPos.column,
+          endLineNumber: endPos.line,
+          endColumn: endPos.column,
         },
         content: elContent,
         prefix: elContent.substring(0, Math.max(0, elOffset)),
@@ -241,14 +257,17 @@ export function parseElPrefix(prefix: string): { root: string; path: string; las
   return { root, path: trimmed.substring(root.length), lastPart };
 }
 
-/** Create a completion item with a default range placeholder. */
-function ci(partial: Partial<monaco.languages.CompletionItem> & {
-  label: string;
-  kind: monaco.languages.CompletionItemKind;
-  insertText: string;
-}): monaco.languages.CompletionItem {
+/** Create a completion item with a word-range for replacement. */
+function ci(
+  range: monaco.IRange,
+  partial: Partial<monaco.languages.CompletionItem> & {
+    label: string;
+    kind: monaco.languages.CompletionItemKind;
+    insertText: string;
+  },
+): monaco.languages.CompletionItem {
   return {
-    range: { startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 1 },
+    range,
     ...partial,
   } as monaco.languages.CompletionItem;
 }
@@ -272,13 +291,20 @@ export class ElExpressionCompletionProvider implements monaco.languages.Completi
 
     const prefix = elInfo.prefix.trim();
     const parsed = parseElPrefix(prefix);
+    const word = model.getWordUntilPosition(position);
+    const range = new monaco.Range(
+      position.lineNumber,
+      word.startColumn,
+      position.lineNumber,
+      word.endColumn,
+    );
     const suggestions: monaco.languages.CompletionItem[] = [];
 
     // ── Phase 1: Root level — suggest implicit objects ─────────
     if (!parsed.path || parsed.path === '') {
       for (const [name, info] of Object.entries(EL_IMPLICIT_OBJECTS)) {
         if (parsed.root === '' || name.startsWith(parsed.root)) {
-          suggestions.push(ci({
+          suggestions.push(ci(range, {
             label: name,
             kind: monaco.languages.CompletionItemKind.Variable,
             detail: info.type,
@@ -292,7 +318,7 @@ export class ElExpressionCompletionProvider implements monaco.languages.Completi
       // Also suggest EL operators when at root level
       if (parsed.root === '') {
         for (const op of EL_OPERATORS) {
-          suggestions.push(ci({
+          suggestions.push(ci(range, {
             label: op.label,
             kind: monaco.languages.CompletionItemKind.Keyword,
             detail: op.detail,
@@ -311,7 +337,7 @@ export class ElExpressionCompletionProvider implements monaco.languages.Completi
         // Known implicit object with known properties
         for (const [propName, propInfo] of Object.entries(implicitInfo.properties)) {
           if (parsed.lastPart === '' || propName.startsWith(parsed.lastPart)) {
-            suggestions.push(ci({
+            suggestions.push(ci(range, {
               label: propName,
               kind: monaco.languages.CompletionItemKind.Property,
               detail: propInfo.type,
@@ -328,7 +354,7 @@ export class ElExpressionCompletionProvider implements monaco.languages.Completi
         if (parsed.lastPart === '' || propName.startsWith(parsed.lastPart)) {
           // Avoid duplicates if already added from implicit object properties
           if (!suggestions.some(s => (typeof s.label === 'string' ? s.label : s.label.label) === propName)) {
-            suggestions.push(ci({
+            suggestions.push(ci(range, {
               label: propName,
               kind: monaco.languages.CompletionItemKind.Property,
               detail: propInfo.type,
@@ -351,13 +377,13 @@ export class ElExpressionCompletionProvider implements monaco.languages.Completi
         { label: 'getClass()', insertText: 'getClass()', detail: 'java.lang.Class', desc: '获取类对象。' },
       ];
       for (const ms of methodSnippets) {
-        suggestions.push(ci({
+        suggestions.push(ci(range, {
           label: ms.label,
           kind: monaco.languages.CompletionItemKind.Method,
           detail: ms.detail,
           documentation: ms.desc,
           insertText: ms.insertText,
-          insertTextRules: ms.insertText.includes('${') ? monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet : undefined,
+          insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
           sortText: '2' + ms.label,
         }));
       }

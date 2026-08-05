@@ -1,5 +1,6 @@
 import { inject, injectable } from '@theia/core/shared/inversify';
 import { Emitter, Event } from '@theia/core/lib/common/event';
+import { CommandService } from '@theia/core/lib/common/command';
 import { RuntimeConnectionService } from '@kairo/runtime-extension';
 import {
   RUN_CONFIGURATION_SCHEMA_VERSION,
@@ -97,6 +98,7 @@ export class KairoRunConfigurationService {
   @inject(ActiveProjectService) protected readonly activeProject!: ActiveProjectService;
   @inject(KairoServerService) protected readonly servers!: KairoServerService;
   @inject(KairoJavaDebugService) protected readonly javaDebug!: KairoJavaDebugService;
+  @inject(CommandService) protected readonly commands!: CommandService;
   protected state: RunConfigurationViewState = {
     document: emptyRunConfigurationDocument(), loading: false, submitting: false, validationIssues: [],
   };
@@ -171,6 +173,7 @@ export class KairoRunConfigurationService {
     this.setState({ submitting: true, operation: 'launch', error: undefined, portDiagnostics: undefined, validationIssues: [] });
     let server: ServerInstance | undefined;
     try {
+      await this.saveAll();
       const project = await this.activeProject.requireProject();
       if (project.workspaceId !== workspaceId || project.projectId !== configuration.projectId) {
         throw new Error(`Select project ${configuration.projectId} before launching this configuration`);
@@ -184,7 +187,6 @@ export class KairoRunConfigurationService {
         { mode: configuration.mode },
         { pathParams: { workspaceId, configurationId: configuration.id }, timeoutMs: 45_000, noRetry: true },
       );
-      this.servers.adopt(server);
       if (configuration.mode === 'debug') {
         const port = server.ports?.debug;
         if (!port) throw new Error('Runtime launched Debug without a verified JDWP port');
@@ -192,10 +194,12 @@ export class KairoRunConfigurationService {
           serverId: server.id, projectId: project.projectId, projectName: project.name, projectRoot: project.root, port,
         });
       }
+      this.servers.adopt(server);
       return server;
     } catch (error) {
       if (server && configuration.mode === 'debug') {
         try { await this.servers.stop(server.id, false); } catch { /* preserve attach failure */ }
+        try { this.servers.forget(server.id); } catch { /* store may already be clean */ }
       }
       const msg = errorMessage(error);
       // Check if the error looks like a port occupation issue
@@ -219,8 +223,11 @@ export class KairoRunConfigurationService {
   }
 
   protected async saveAll(): Promise<void> {
-    // This is a simplified version - in production, iterate all dirty editors
-    // For now, rely on the fact that Theia auto-saves before debug
+    try {
+      await this.commands.executeCommand('core.saveAll');
+    } catch {
+      // Best-effort: continue launch even if saveAll is unavailable in tests.
+    }
   }
 
   /**
@@ -237,6 +244,7 @@ export class KairoRunConfigurationService {
     this.setState({ submitting: true, operation: 'launch', error: undefined, portDiagnostics: undefined, validationIssues: [] });
     let server: ServerInstance | undefined;
     try {
+      await this.saveAll();
       const project = await this.activeProject.requireProject();
       if (project.workspaceId !== workspaceId || project.projectId !== configuration.projectId) {
         throw new Error(`Select project ${configuration.projectId} before launching this configuration`);
@@ -254,7 +262,6 @@ export class KairoRunConfigurationService {
         { mode: 'debug', suspend: true },
         { pathParams: { workspaceId, configurationId: configuration.id }, timeoutMs: 60_000, noRetry: true },
       );
-      this.servers.adopt(server);
 
       // Step 5: Wait for JDWP port to be ready
       const debugPort = server.ports?.debug;
@@ -271,10 +278,12 @@ export class KairoRunConfigurationService {
         port: debugPort,
       });
 
+      this.servers.adopt(server);
       return server;
     } catch (error) {
       if (server) {
         try { await this.servers.stop(server.id, false); } catch { /* preserve attach failure */ }
+        try { this.servers.forget(server.id); } catch { /* store may already be clean */ }
       }
       const msg = errorMessage(error);
       this.setState({ error: msg });

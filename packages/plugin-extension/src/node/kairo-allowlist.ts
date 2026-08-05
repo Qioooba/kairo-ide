@@ -31,7 +31,7 @@ export function loadAllowlist(): Allowlist {
   ensureAllowlistDir();
 
   if (!fs.existsSync(allowlistPath)) {
-    saveAllowlist(DEFAULT_ALLOWLIST);
+    saveAllowlist(DEFAULT_ALLOWLIST, { bootstrap: true });
     return DEFAULT_ALLOWLIST;
   }
 
@@ -43,16 +43,24 @@ export function loadAllowlist(): Allowlist {
     }
     return parsed;
   } catch {
-    // If the file is corrupt, rewrite with defaults
-    saveAllowlist(DEFAULT_ALLOWLIST);
+    // Corrupt file: rewrite defaults only when mutation is explicitly allowed.
+    if (process.env.KAIRO_ALLOWLIST_MUTABLE === '1') {
+      saveAllowlist(DEFAULT_ALLOWLIST, { bootstrap: true });
+      return DEFAULT_ALLOWLIST;
+    }
     return DEFAULT_ALLOWLIST;
   }
 }
 
 /**
  * Save the allowlist to disk.
+ * Requires KAIRO_ALLOWLIST_MUTABLE=1 unless options.bootstrap is set for
+ * first-time default materialization (VC-P3-7).
  */
-export function saveAllowlist(allowlist: Allowlist): void {
+export function saveAllowlist(allowlist: Allowlist, options?: { bootstrap?: boolean }): void {
+  if (!options?.bootstrap) {
+    assertAllowlistMutable();
+  }
   const allowlistPath = getAllowlistPath();
   ensureAllowlistDir();
   fs.writeFileSync(allowlistPath, JSON.stringify(allowlist, null, 2), 'utf-8');
@@ -76,8 +84,11 @@ export function getAllowlistEntry(extensionId: string): AllowlistEntry | undefin
 
 /**
  * Add an entry to the allowlist.
+ * Requires KAIRO_ALLOWLIST_MUTABLE=1 so packaged installs cannot rewrite
+ * the trust root via this API (VC-P3-7). Tests set the env var.
  */
 export function addToAllowlist(entry: AllowlistEntry): void {
+  assertAllowlistMutable();
   const allowlist = loadAllowlist();
   const existing = allowlist.entries.findIndex(e => e.id === entry.id);
   if (existing >= 0) {
@@ -91,9 +102,20 @@ export function addToAllowlist(entry: AllowlistEntry): void {
 
 /**
  * Remove an entry from the allowlist.
+ * Requires KAIRO_ALLOWLIST_MUTABLE=1 (see addToAllowlist).
  */
 export function removeFromAllowlist(extensionId: string): void {
+  assertAllowlistMutable();
   const allowlist = loadAllowlist();
   const newEntries = allowlist.entries.filter(e => e.id !== extensionId);
   saveAllowlist({ ...allowlist, entries: newEntries });
+}
+
+function assertAllowlistMutable(): void {
+  if (process.env.KAIRO_ALLOWLIST_MUTABLE === '1') {
+    return;
+  }
+  throw new Error(
+    'Allowlist mutation disabled. Set KAIRO_ALLOWLIST_MUTABLE=1 to enable add/remove.',
+  );
 }

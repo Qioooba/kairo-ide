@@ -1,10 +1,11 @@
+//go:build unwired
+
 package api
 
 import (
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -16,12 +17,12 @@ import (
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/transport/events"
 )
 
-// APIHandler is the typed HTTP boundary for the Kairo runtime agent.
-// Every handler follows the pattern:
+// APIHandler is an UNWIRED typed HTTP boundary kept for unit tests only (GO-P3-2).
+// Production traffic uses services.Server.routes() + NewMemoryServices — NewAPIHandler
+// is never registered in cmd/kairo-runtime. Do not add production routes here without
+// deleting the duplicate memory-services path first.
 //
-//	decode -> validate -> use case -> error mapping -> writeEnvelope
-//
-// No json.RawMessage, no s.Services.*, no NewMemoryServices.
+// Pattern (when wired): decode -> validate -> use case -> error mapping -> writeEnvelope.
 type APIHandler struct {
 	workspaceRepo domain.WorkspaceRepository
 	projectRepo   domain.ProjectRepository
@@ -602,10 +603,7 @@ func (h *APIHandler) HandleEvents(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-ctx.Done():
 			return
-		case evt, ok := <-ch:
-			if !ok {
-				return
-			}
+		case evt := <-ch:
 			data, _ := json.Marshal(evt)
 			fmt.Fprintf(w, "data: %s\n\n", data)
 			flusher.Flush()
@@ -635,72 +633,4 @@ func (h *APIHandler) HandleToolchains(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeOK(w, env, toolchains)
-}
-
-// decodeEnvelopePayload decodes the envelope and extracts the typed payload.
-func decodeEnvelopePayload[T any](r *http.Request, env *protocol.RequestEnvelope, dst *T) error {
-	if r.Method == http.MethodGet || r.Method == http.MethodDelete {
-		env.RequestID = r.Header.Get("X-Kairo-Request-Id")
-		if env.RequestID == "" {
-			env.RequestID = newRequestID()
-		}
-		env.CorrelationID = r.Header.Get("X-Kairo-Correlation-Id")
-		env.WorkspaceID = r.Header.Get("X-Kairo-Workspace-Id")
-		return fmt.Errorf("no body for %s request", r.Method)
-	}
-	// Read body once
-	body, err := decodeBodyBytes(r)
-	if err != nil {
-		return err
-	}
-	// Try to decode envelope first
-	if err := json.Unmarshal(body, env); err != nil {
-		return fmt.Errorf("decode envelope: %w", err)
-	}
-	if env.RequestID == "" {
-		env.RequestID = r.Header.Get("X-Kairo-Request-Id")
-	}
-	if env.CorrelationID == "" {
-		env.CorrelationID = r.Header.Get("X-Kairo-Correlation-Id")
-	}
-	// Extract payload from envelope, or use body as payload
-	payload := extractPayloadBytes(body)
-	if err := json.Unmarshal(payload, dst); err != nil {
-		return fmt.Errorf("decode payload: %w", err)
-	}
-	return nil
-}
-
-// writeJSONMeta is a helper to ensure status is set before writing error.
-func writeJSONMeta(w http.ResponseWriter, status int) {
-	// The status is already set by writeError; this is a no-op
-	// included for clarity in the handler pattern.
-	_ = status
-}
-
-// decodeBodyBytes reads the request body into a byte slice.
-func decodeBodyBytes(r *http.Request) ([]byte, error) {
-	if r.Body == nil {
-		return nil, fmt.Errorf("empty body")
-	}
-	defer r.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(r.Body, 16*1024*1024))
-	if err != nil {
-		return nil, fmt.Errorf("read body: %w", err)
-	}
-	return body, nil
-}
-
-// extractPayloadBytes extracts the payload from a JSON body.
-// If the body has a "payload" key, it returns that value.
-// Otherwise, it returns the entire body.
-func extractPayloadBytes(body []byte) json.RawMessage {
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(body, &raw); err != nil {
-		return body
-	}
-	if p, ok := raw["payload"]; ok {
-		return p
-	}
-	return body
 }

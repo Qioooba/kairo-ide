@@ -4,7 +4,8 @@
 # the Theia backend and opens the default browser.
 #
 # If the agent is already running (detected via agent-state.json),
-# the browser mode reuses it — no duplicate agent is started.
+# the browser mode reuses it when KAIRO_LOCAL_SECRET matches — secret
+# is never read from the state file (S1).
 #
 # Usage:
 #   .\scripts\start-browser.ps1
@@ -42,9 +43,23 @@ if (Test-Path $statePath) {
             try {
                 $response = Invoke-WebRequest -Uri $healthUrl -TimeoutSec 2 -UseBasicParsing
                 if ($response.StatusCode -eq 200) {
-                    $agentUrl = "http://127.0.0.1:$($state.port)"
-                    $agentSecret = $state.secret
-                    Write-Host "[OK] Reusing existing agent on port $($state.port) (pid $($state.pid))" -ForegroundColor Green
+                    $reuseSecret = $env:KAIRO_LOCAL_SECRET
+                    if (-not $reuseSecret) {
+                        Write-Host "[WARN] Agent running on port $($state.port) but KAIRO_LOCAL_SECRET unset — cannot reuse without auth secret" -ForegroundColor Yellow
+                    } else {
+                        # Verify the env secret matches the running agent.
+                        try {
+                            $authUrl = "http://127.0.0.1:$($state.port)/api/v1/toolchains"
+                            $auth = Invoke-WebRequest -Uri $authUrl -Headers @{ 'X-Kairo-Secret' = $reuseSecret } -TimeoutSec 2 -UseBasicParsing
+                            if ($auth.StatusCode -eq 200) {
+                                $agentUrl = "http://127.0.0.1:$($state.port)"
+                                $agentSecret = $reuseSecret
+                                Write-Host "[OK] Reusing existing agent on port $($state.port) (pid $($state.pid))" -ForegroundColor Green
+                            }
+                        } catch {
+                            Write-Host "[WARN] Agent on port $($state.port) rejected KAIRO_LOCAL_SECRET — will start a new one" -ForegroundColor Yellow
+                        }
+                    }
                 }
             } catch {
                 Write-Host "[WARN] Agent state file found but agent is not healthy, will start a new one" -ForegroundColor Yellow
@@ -76,15 +91,17 @@ if (-not $agentUrl) {
 
     $agentSecret = -join ((48..57) + (97..102) | Get-Random -Count 64 | ForEach-Object { [char]$_ })
 
+    # Pass secret via env so it never appears in process listings.
+    $env:KAIRO_LOCAL_SECRET = $agentSecret
+
     $agentArgs = @(
         "--bind", "127.0.0.1",
         "--port", $AgentPort,
-        "--secret", $agentSecret,
         "--data-dir", $DataDir,
         "--log-level", "info"
     )
 
-    # Start agent in background.
+    # Start agent in background (inherit KAIRO_LOCAL_SECRET from this process).
     $agentProcess = Start-Process -FilePath $agentBinary -ArgumentList $agentArgs -PassThru -WindowStyle Hidden
 
     # Wait for agent to be healthy.

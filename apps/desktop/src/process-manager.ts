@@ -38,6 +38,8 @@ export interface ProcessInfo {
   termCount: number;
   /** Whether a SIGKILL / taskkill /F was sent. */
   killSent: boolean;
+  /** Monotonic generation so a prior process's exit cannot clobber a respawn. */
+  generation: number;
 }
 
 export interface ShutdownOptions {
@@ -71,6 +73,7 @@ const DEFAULT_SHUTDOWN: Required<ShutdownOptions> = {
 export class ProcessManager {
   private processes: Map<string, ProcessInfo> = new Map();
   private onDiagnostic?: (message: string) => void;
+  private nextGeneration = 1;
 
   constructor(onDiagnostic?: (message: string) => void) {
     this.onDiagnostic = onDiagnostic;
@@ -87,8 +90,11 @@ export class ProcessManager {
   /**
    * Register a spawned child process for lifecycle tracking.
    * Call this immediately after spawn().
+   * Re-registering the same label replaces the previous entry; the old
+   * process's exit handler will not clobber the new registration.
    */
   register(label: string, proc: ChildProcess): void {
+    const generation = this.nextGeneration++;
     const info: ProcessInfo = {
       label,
       process: proc,
@@ -99,12 +105,15 @@ export class ProcessManager {
       shutdownRequested: false,
       termCount: 0,
       killSent: false,
+      generation,
     };
 
     // Listen for exit to capture exit code/signal.
+    // Match on generation so a respawn under the same label is not marked
+    // exited by the previous process's exit event.
     proc.on('exit', (code, signal) => {
       const existing = this.processes.get(label);
-      if (existing) {
+      if (existing && existing.generation === generation) {
         existing.exitCode = code;
         existing.exitSignal = signal;
         existing.process = null;
@@ -143,6 +152,7 @@ export class ProcessManager {
       shutdownRequested: false,
       termCount: 0,
       killSent: false,
+      generation: this.nextGeneration++,
     };
     this.processes.set(label, info);
     this.log(`registered ${label} by PID=${pid}`);
@@ -214,8 +224,32 @@ export class ProcessManager {
 
     info.shutdownRequested = true;
 
-    // Already exited — nothing to do.
-    if (info.exitCode !== null || info.exitSignal !== null || info.process === null) {
+    // Already exited with a recorded code/signal — nothing to do.
+    if (info.exitCode !== null || info.exitSignal !== null) {
+      return {
+        label,
+        success: true,
+        exitCode: info.exitCode,
+        exitSignal: info.exitSignal,
+        wasZombie: false,
+      };
+    }
+
+    // No handle and no PID — nothing to kill.
+    if (info.process === null && info.pid === null) {
+      return {
+        label,
+        success: true,
+        exitCode: info.exitCode,
+        exitSignal: info.exitSignal,
+        wasZombie: false,
+      };
+    }
+
+    // PID still set but handle already cleared (e.g. registerByPid, or
+    // main cleared its ChildProcess ref) — confirm liveness via OS.
+    if (info.process === null && info.pid !== null && !isPidAlive(info.pid)) {
+      info.exitCode = 0;
       return {
         label,
         success: true,
@@ -236,8 +270,14 @@ export class ProcessManager {
       if (process.platform === 'win32' && pid !== null) {
         // Windows: taskkill without /F first (graceful)
         await this.taskkill(pid, false);
-      } else {
+      } else if (proc) {
         proc.kill('SIGTERM');
+      } else if (pid !== null) {
+        try {
+          process.kill(-pid, 'SIGTERM');
+        } catch {
+          process.kill(pid, 'SIGTERM');
+        }
       }
     } catch (err: any) {
       this.log(`${label}: SIGTERM failed: ${err.message}`);
@@ -263,15 +303,19 @@ export class ProcessManager {
       if (process.platform === 'win32' && pid !== null) {
         // Windows: taskkill /T /F (force kill process tree)
         await this.taskkill(pid, true);
-      } else {
-        // Unix: kill process group
+      } else if (pid !== null) {
+        // Unix: kill process group, fall back to the ChildProcess handle.
         try {
-          if (pid !== null) {
-            process.kill(-pid, 'SIGKILL');
-          }
+          process.kill(-pid, 'SIGKILL');
         } catch {
-          proc.kill('SIGKILL');
+          if (proc) {
+            proc.kill('SIGKILL');
+          } else {
+            process.kill(pid, 'SIGKILL');
+          }
         }
+      } else if (proc) {
+        proc.kill('SIGKILL');
       }
     } catch (err: any) {
       this.log(`${label}: SIGKILL failed: ${err.message}`);
@@ -335,15 +379,32 @@ export class ProcessManager {
 
   // ── Helpers ────────────────────────────────────────────────
 
-  /** Wait for a process to exit, polling every 200ms. */
+  /** Wait for a process to exit, polling every 50ms. */
   private waitForExit(label: string, timeoutMs: number): Promise<boolean> {
     const start = Date.now();
     return new Promise((resolve) => {
       const check = () => {
         const info = this.processes.get(label);
-        if (!info || info.exitCode !== null || info.exitSignal !== null || info.process === null) {
+        if (!info) {
           resolve(true);
           return;
+        }
+        if (info.exitCode !== null || info.exitSignal !== null) {
+          resolve(true);
+          return;
+        }
+        // ChildProcess exit handler clears `process` and records exitCode.
+        // If only the handle is gone but a PID remains (registerByPid /
+        // cleared ref), confirm via OS so SIGTERM→SIGKILL escalation still works.
+        if (info.process === null) {
+          if (info.pid === null || !isPidAlive(info.pid)) {
+            if (info.exitCode === null && info.exitSignal === null) {
+              info.exitCode = 0;
+            }
+            resolve(true);
+            return;
+          }
+          // PID still alive — keep waiting for escalation / OS death.
         }
         if (Date.now() - start >= timeoutMs) {
           resolve(false);

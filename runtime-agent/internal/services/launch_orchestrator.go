@@ -198,11 +198,11 @@ func (o *launchOrchestrator) executeDeploy(ctx context.Context, config api.Launc
 
 func (o *launchOrchestrator) executeExplodedDeploy(ctx context.Context, config api.LaunchOrchestratorConfig) error {
 	cfg := config.Configuration
-	artifact := config.ArtifactPath
-	policy := pathpolicy.NewDefaultPathPolicy()
 
-	// Validate artifact is within project root.
-	resolved, err := policy.ResolveWithin(config.ProjectRoot, filepath.ToSlash(artifact))
+	// ArtifactPath is often already absolute (resolved by the run-config
+	// handler). pathpolicy.ResolveWithin only accepts relative paths, so
+	// validate with Abs + Rel instead.
+	resolved, err := resolveArtifactWithinRoot(config.ProjectRoot, config.ArtifactPath)
 	if err != nil {
 		return fmt.Errorf("artifact path safety check failed: %w", err)
 	}
@@ -252,10 +252,8 @@ func (o *launchOrchestrator) executeExplodedDeploy(ctx context.Context, config a
 func (o *launchOrchestrator) executeWARDeploy(ctx context.Context, config api.LaunchOrchestratorConfig) error {
 	cfg := config.Configuration
 	artifact := config.ArtifactPath
-	policy := pathpolicy.NewDefaultPathPolicy()
 
-	// Validate artifact is within project root.
-	resolved, err := policy.ResolveWithin(config.ProjectRoot, filepath.ToSlash(artifact))
+	resolved, err := resolveArtifactWithinRoot(config.ProjectRoot, artifact)
 	if err != nil {
 		return fmt.Errorf("artifact path safety check failed: %w", err)
 	}
@@ -267,7 +265,7 @@ func (o *launchOrchestrator) executeWARDeploy(ctx context.Context, config api.La
 	if !info.Mode().IsRegular() {
 		return fmt.Errorf("artifact is not a regular file for WAR deploy")
 	}
-	if !strings.HasSuffix(strings.ToLower(artifact), ".war") {
+	if !strings.HasSuffix(strings.ToLower(resolved), ".war") {
 		return fmt.Errorf("artifact must be a .war file")
 	}
 
@@ -318,6 +316,41 @@ func (o *launchOrchestrator) executeRun(ctx context.Context, config api.LaunchOr
 		return nil, fmt.Errorf("start server: %w", err)
 	}
 	return server, nil
+}
+
+// resolveArtifactWithinRoot ensures artifact is under projectRoot.
+// Accepts absolute or relative artifact paths (production passes absolute
+// paths already resolved by the run-config handler).
+func resolveArtifactWithinRoot(projectRoot, artifact string) (string, error) {
+	if artifact == "" {
+		return "", pathpolicy.ErrEmptyPath
+	}
+	root, err := filepath.Abs(projectRoot)
+	if err != nil {
+		return "", err
+	}
+	root = filepath.Clean(root)
+
+	var candidate string
+	if filepath.IsAbs(artifact) {
+		candidate = artifact
+	} else {
+		candidate = filepath.Join(root, filepath.FromSlash(artifact))
+	}
+	abs, err := filepath.Abs(candidate)
+	if err != nil {
+		return "", err
+	}
+	abs = filepath.Clean(abs)
+
+	rel, err := filepath.Rel(root, abs)
+	if err != nil {
+		return "", pathpolicy.ErrOutsideRoot
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return "", pathpolicy.ErrOutsideRoot
+	}
+	return abs, nil
 }
 
 // copyFile copies a file from src to dst preserving permissions.

@@ -14,11 +14,11 @@
 
 import * as monaco from '@theia/monaco-editor-core';
 import URI from '@theia/core/lib/common/uri';
-import { injectable, inject } from '@theia/core/shared/inversify';
 import { FileService } from '@theia/filesystem/lib/browser/file-service';
 import { WorkspaceService } from '@theia/workspace/lib/browser/workspace-service';
 import { JSP_LANGUAGE_ID } from './jsp-monarch';
 import { parseWebXml, type WebXml } from './webxml-parser';
+import type { JspNavServices } from './jsp-nav-services';
 
 /** Common Java source roots in legacy web projects. */
 const SRC_ROOTS = [
@@ -167,13 +167,11 @@ function isInsideElement(
   return endCloseIdx !== -1;
 }
 
-@injectable()
 export class JspServletNavigationProvider implements monaco.languages.DefinitionProvider {
-  @inject(FileService)
-  protected readonly fileService!: FileService;
-
-  @inject(WorkspaceService)
-  protected readonly workspaceService!: WorkspaceService;
+  constructor(
+    protected readonly fileService: FileService,
+    protected readonly workspaceService: WorkspaceService,
+  ) {}
 
   async provideDefinition(
     model: monaco.editor.ITextModel,
@@ -313,10 +311,11 @@ export class JspServletNavigationProvider implements monaco.languages.Definition
  * When user Ctrl+Clicks on form action="/xxx" or href="/xxx" in a JSP file,
  * navigates to the matching servlet's Java class or the JSP file.
  */
-export function registerJspServletNavigation(): monaco.IDisposable {
+export function registerJspServletNavigation(services: JspNavServices): monaco.IDisposable {
+  const provider = new JspServletNavigationProvider(services.fileService, services.workspaceService);
   return monaco.languages.registerDefinitionProvider(
     JSP_LANGUAGE_ID,
-    new JspServletNavigationProvider(),
+    provider,
   );
 }
 
@@ -327,8 +326,8 @@ export function registerJspServletNavigation(): monaco.IDisposable {
  *  - <jsp-file> → navigates to the JSP file
  *  - <servlet-name> → navigates to the servlet class or JSP file
  */
-export function registerWebXmlClassNavigation(): monaco.IDisposable {
-  const provider = new JspServletNavigationProvider();
+export function registerWebXmlClassNavigation(services: JspNavServices): monaco.IDisposable {
+  const provider = new JspServletNavigationProvider(services.fileService, services.workspaceService);
 
   return monaco.languages.registerDefinitionProvider('xml', {
     provideDefinition: async (

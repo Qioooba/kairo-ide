@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/security"
 	"github.com/gorilla/websocket"
 )
 
@@ -28,21 +29,7 @@ const (
 )
 
 var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool {
-		origin := r.Header.Get("Origin")
-		if origin == "" {
-			return true // same-origin requests have no Origin header
-		}
-		if strings.HasPrefix(origin, "http://localhost") ||
-			strings.HasPrefix(origin, "http://127.0.0.1") ||
-			strings.HasPrefix(origin, "http://[::1]") {
-			return true
-		}
-		if strings.HasPrefix(origin, "file://") {
-			return true
-		}
-		return false
-	},
+	CheckOrigin:       security.IsSafeWebSocketOrigin,
 	ReadBufferSize:    1024,
 	WriteBufferSize:   1024,
 	Subprotocols:      []string{AuthSecretSubprotocol},
@@ -108,10 +95,17 @@ func (h *EventHub) Serve(w http.ResponseWriter, r *http.Request) {
 	ch, unsubscribe := h.Subscribe(workspaceID, "", afterSequence)
 	defer unsubscribe()
 
-	for event := range ch {
-		conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-		if err := conn.WriteJSON(event); err != nil {
+	// Unsubscribe does not close the data channel (avoids send-on-closed
+	// races). Exit via ctx cancellation or a write error.
+	for {
+		select {
+		case <-ctx.Done():
 			return
+		case event := <-ch:
+			conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			if err := conn.WriteJSON(event); err != nil {
+				return
+			}
 		}
 	}
 }
@@ -177,18 +171,19 @@ func (h *EventHub) ServeWS(w http.ResponseWriter, r *http.Request, secretValidat
 	ch, unsubscribe := h.Subscribe(workspaceID, "", afterSequence)
 	defer unsubscribe()
 
-	for event := range ch {
-		conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-		if err := conn.WriteJSON(event); err != nil {
+	// Unsubscribe does not close the data channel (avoids send-on-closed
+	// races). Exit via ctx cancellation or a write error.
+	for {
+		select {
+		case <-ctx.Done():
 			return
+		case event := <-ch:
+			conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			if err := conn.WriteJSON(event); err != nil {
+				return
+			}
 		}
 	}
-}
-
-// ServeWSCompat is a backward-compatible WebSocket handler that does not
-// require authentication. Only use for localhost development.
-func (h *EventHub) ServeWSCompat(w http.ResponseWriter, r *http.Request) {
-	h.ServeWS(w, r, func(credential string) bool { return true })
 }
 
 // authenticateRequest checks the request for valid auth credentials.

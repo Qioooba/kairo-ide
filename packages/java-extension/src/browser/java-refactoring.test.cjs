@@ -295,6 +295,86 @@ test('extractMethod applies custom method name', async () => {
   assert.match(ed[0].newText, /doWork/);
 });
 
+test('extractMethod renames placeholder in declaration and call-site edits', async () => {
+  const edit = {
+    changes: {
+      'file:///repo/src/Main.java': [
+        {
+          range: { start: { line: 10, character: 0 }, end: { line: 12, character: 1 } },
+          newText: 'private void extractedMethod() {\n    doSomething();\n}',
+        },
+        {
+          range: { start: { line: 5, character: 8 }, end: { line: 5, character: 20 } },
+          newText: 'extractedMethod()',
+        },
+      ],
+      'file:///repo/src/Other.java': [{
+        range: { start: { line: 3, character: 4 }, end: { line: 3, character: 20 } },
+        newText: 'main.extractedMethod();',
+      }],
+    },
+  };
+  const logger = makeLogger();
+  const client = makeClient({
+    codeActions: async () => [{
+      title: 'Extract method',
+      kind: 'refactor.extract.method',
+      edit,
+    }],
+  });
+  const refactoring = new JavaRefactoring();
+  refactoring.logger = logger;
+  refactoring.client = client;
+
+  const result = await refactoring.extractMethod(URI, LSP_RANGE, 'doWork');
+  assert.equal(result.success, true);
+  const mainEdits = result.edit.changes['file:///repo/src/Main.java'];
+  assert.match(mainEdits[0].newText, /doWork/);
+  assert.match(mainEdits[1].newText, /doWork\(\)/);
+  assert.doesNotMatch(mainEdits[0].newText, /extractedMethod/);
+  assert.doesNotMatch(mainEdits[1].newText, /extractedMethod/);
+  const otherEdits = result.edit.changes['file:///repo/src/Other.java'];
+  assert.match(otherEdits[0].newText, /doWork/);
+  assert.doesNotMatch(otherEdits[0].newText, /extractedMethod/);
+});
+
+test('extractMethod renames placeholder across documentChanges edits', async () => {
+  const edit = {
+    documentChanges: [{
+      textDocument: { uri: 'file:///repo/src/Main.java', version: 2 },
+      edits: [
+        {
+          range: { start: { line: 10, character: 0 }, end: { line: 12, character: 1 } },
+          newText: 'private void extractedMethod() {\n    doSomething();\n}',
+        },
+        {
+          range: { start: { line: 5, character: 8 }, end: { line: 5, character: 20 } },
+          newText: 'extractedMethod()',
+        },
+      ],
+    }],
+  };
+  const logger = makeLogger();
+  const client = makeClient({
+    codeActions: async () => [{
+      title: 'Extract method',
+      kind: 'refactor.extract.method',
+      edit,
+    }],
+  });
+  const refactoring = new JavaRefactoring();
+  refactoring.logger = logger;
+  refactoring.client = client;
+
+  const result = await refactoring.extractMethod(URI, LSP_RANGE, 'compute');
+  assert.equal(result.success, true);
+  const edits = result.edit.documentChanges[0].edits;
+  assert.match(edits[0].newText, /compute/);
+  assert.match(edits[1].newText, /compute\(\)/);
+  assert.doesNotMatch(edits[0].newText, /extractedMethod/);
+  assert.doesNotMatch(edits[1].newText, /extractedMethod/);
+});
+
 test('extractMethod without custom name keeps placeholder', async () => {
   const edit = {
     changes: {

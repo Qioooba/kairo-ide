@@ -67,12 +67,20 @@ func (s *Server) handleWorkspaces(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		abs, err := filepath.Abs(rootPath)
+		abs, err := canonicalizeAbsPath(rootPath)
 		if err != nil {
 			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: err.Error()})
 			return
 		}
-		ws, err := s.Services.WorkspaceStore.Open(filepath.Clean(abs), p.Name)
+		if info, statErr := os.Stat(abs); statErr != nil || !info.IsDir() {
+			msg := "workspace root must be an accessible directory"
+			if statErr != nil {
+				msg = statErr.Error()
+			}
+			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrForbidden, Message: msg})
+			return
+		}
+		ws, err := s.Services.WorkspaceStore.Open(abs, p.Name)
 		if err != nil {
 			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrForbidden, Message: err.Error()})
 			return
@@ -278,9 +286,13 @@ func (s *Server) handleProjectDetect(w http.ResponseWriter, r *http.Request) {
 		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: "rootPath required"})
 		return
 	}
-	abs, err := filepath.Abs(p.RootPath)
+	abs, err := canonicalizeAbsPath(p.RootPath)
 	if err != nil {
 		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: err.Error()})
+		return
+	}
+	abs, ok := s.authorizeAbsPathBootstrap(w, env, abs)
+	if !ok {
 		return
 	}
 	detected, err := scanWorkspace(abs)
@@ -598,6 +610,10 @@ func (s *Server) handleBuilds(w http.ResponseWriter, r *http.Request) {
 			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: readErr.Error()})
 			return
 		}
+		if status, cached, ok := s.lookupIdempotent(env.RequestID); ok {
+			replayIdempotent(w, status, cached)
+			return
+		}
 		var req BuildRequest
 		if err := decodeStrictBuildRequest(extractPayload(body), &req); err != nil {
 			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: err.Error()})
@@ -655,7 +671,7 @@ func (s *Server) handleBuilds(w http.ResponseWriter, r *http.Request) {
 			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrCompileFailed, Message: err.Error()})
 			return
 		}
-		writeOK(w, env, res)
+		writeIdempotentOK(s, w, env, res)
 	default:
 		writeError(w, "", "", protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: "GET or POST only"})
 	}
@@ -727,6 +743,10 @@ func (s *Server) handleDeployments(w http.ResponseWriter, r *http.Request) {
 			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInternal, Message: "Deployer not configured"})
 			return
 		}
+		if status, cached, ok := s.lookupIdempotent(env.RequestID); ok {
+			replayIdempotent(w, status, cached)
+			return
+		}
 		var req DeployRequest
 		if err := json.Unmarshal(extractPayload(body), &req); err != nil {
 			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: err.Error()})
@@ -747,7 +767,10 @@ func (s *Server) handleDeployments(w http.ResponseWriter, r *http.Request) {
 				req.What, req.Mode, req.Trigger = "static", "merge", "manual"
 				if resolver, ok := s.Services.ServerRunner.(interface{ DeploymentTarget(string) (string, error) }); ok {
 					req.Target, err = resolver.DeploymentTarget(req.ProjectID)
-					if err != nil { writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrConflict, Message: err.Error()}); return }
+					if err != nil {
+						writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrConflict, Message: err.Error()})
+						return
+					}
 				}
 			}
 			if req.Target == "" && s.Services.ServerRunner != nil && s.Services.ServerRunner.CatalinaHome() != "" {
@@ -763,7 +786,7 @@ func (s *Server) handleDeployments(w http.ResponseWriter, r *http.Request) {
 			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrDeployFailed, Message: err.Error()})
 			return
 		}
-		writeOK(w, env, res)
+		writeIdempotentOK(s, w, env, res)
 	default:
 		writeError(w, "", "", protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: "GET or POST only"})
 	}
@@ -946,6 +969,10 @@ func (s *Server) handleServers(w http.ResponseWriter, r *http.Request) {
 			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInternal, Message: "ServerRunner not configured"})
 			return
 		}
+		if status, cached, ok := s.lookupIdempotent(env.RequestID); ok {
+			replayIdempotent(w, status, cached)
+			return
+		}
 		var req StartServerRequest
 		if err := json.Unmarshal(extractPayload(body), &req); err != nil {
 			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: err.Error()})
@@ -971,7 +998,7 @@ func (s *Server) handleServers(w http.ResponseWriter, r *http.Request) {
 			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrProcessSpawnFailed, Message: err.Error()})
 			return
 		}
-		writeOK(w, env, srv)
+		writeIdempotentOK(s, w, env, srv)
 	default:
 		writeError(w, "", "", protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: "GET or POST only"})
 	}
@@ -1751,6 +1778,10 @@ func (s *Server) handleMavenDetect(w http.ResponseWriter, r *http.Request) {
 		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: err.Error()})
 		return
 	}
+	abs, ok := s.authorizeAbsPath(w, env, abs)
+	if !ok {
+		return
+	}
 	result, err := maven.Detect(abs)
 	if err != nil {
 		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrIOError, Message: err.Error()})
@@ -1776,6 +1807,10 @@ func (s *Server) handleMavenDependencies(w http.ResponseWriter, r *http.Request)
 	abs, err := filepath.Abs(rootPath)
 	if err != nil {
 		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: err.Error()})
+		return
+	}
+	abs, ok := s.authorizeAbsPath(w, env, abs)
+	if !ok {
 		return
 	}
 	offline := r.URL.Query().Get("offline") == "true"
@@ -1809,9 +1844,17 @@ func (s *Server) handleMavenRun(w http.ResponseWriter, r *http.Request) {
 		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: "task required"})
 		return
 	}
+	if !maven.IsAllowedTask(req.Task) {
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: "task not in allowed Maven lifecycle whitelist"})
+		return
+	}
 	abs, err := filepath.Abs(req.RootPath)
 	if err != nil {
 		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: err.Error()})
+		return
+	}
+	abs, ok := s.authorizeAbsPath(w, env, abs)
+	if !ok {
 		return
 	}
 	req.RootPath = abs
@@ -1821,6 +1864,56 @@ func (s *Server) handleMavenRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeOK(w, env, result)
+}
+
+// canonicalizeAbsPath resolves abs, cleans, and canonicalizes symlinks (GO-P2-2).
+func canonicalizeAbsPath(p string) (string, error) {
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return "", err
+	}
+	abs = filepath.Clean(abs)
+	real, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return abs, nil
+		}
+		return "", fmt.Errorf("canonicalize path: %w", err)
+	}
+	return filepath.Clean(real), nil
+}
+
+// authorizeAbsPath checks abs against the workspace sandbox (GO-P2-2).
+// When a sandbox is configured with no roots yet, the path is rejected —
+// open a workspace first so WorkspaceStore.Open registers an authorized root.
+// Nil sandbox skips authorization (unit tests).
+func (s *Server) authorizeAbsPath(w http.ResponseWriter, env protocol.RequestEnvelope, abs string) (string, bool) {
+	if s.Services == nil || s.Services.Sandbox == nil {
+		return abs, true
+	}
+	if len(s.Services.Sandbox.Roots()) == 0 {
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{
+			Code:    protocol.ErrPathForbidden,
+			Message: "no authorized workspace root; open a workspace before accessing project paths",
+		})
+		return "", false
+	}
+	authorized, err := s.Services.Sandbox.AuthorizeReadAbs(abs)
+	if err != nil {
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrPathForbidden, Message: err.Error()})
+		return "", false
+	}
+	return authorized, true
+}
+
+// authorizeAbsPathBootstrap allows paths before any workspace root exists
+// (project detect during first-open discovery). Once roots exist, behaves
+// like authorizeAbsPath.
+func (s *Server) authorizeAbsPathBootstrap(w http.ResponseWriter, env protocol.RequestEnvelope, abs string) (string, bool) {
+	if s.Services == nil || s.Services.Sandbox == nil || len(s.Services.Sandbox.Roots()) == 0 {
+		return abs, true
+	}
+	return s.authorizeAbsPath(w, env, abs)
 }
 
 // keep helpers used.

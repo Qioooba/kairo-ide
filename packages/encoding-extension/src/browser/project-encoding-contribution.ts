@@ -46,6 +46,9 @@ export class KairoProjectEncodingContribution implements FrontendApplicationCont
   protected apply(p: ProjectInfo | undefined): void {
     if (!p?.root) return;
     const rootUri = toProjectRootUri(p.root);
+    // BD-P1-10: drop previous project/dir overrides before registering
+    // new ones — otherwise switching projects leaves permanent residue.
+    this.encodingSvc.clearProjectScopedOverrides();
     if (p.encoding) {
       try {
         this.encodingSvc.applyProjectEncoding(rootUri, p.encoding);

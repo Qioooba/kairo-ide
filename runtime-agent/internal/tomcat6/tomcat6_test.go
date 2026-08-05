@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -920,6 +921,8 @@ func TestFindCatalinaHome_EnvVarInvalid(t *testing.T) {
 
 func TestFindCatalinaHome_BundledDir(t *testing.T) {
 	t.Setenv("KAIRO_TOMCAT6_HOME", "")
+	t.Setenv("KAIRO_DATA_DIR", t.TempDir())
+	t.Setenv("KAIRO_TOMCAT_CONFIG", "")
 	bundledDir := t.TempDir()
 	// Create the bundled tomcat6 directory structure
 	tomcatDir := filepath.Join(bundledDir, "tomcat6", "apache-tomcat-6.0.53")
@@ -937,6 +940,8 @@ func TestFindCatalinaHome_BundledDir(t *testing.T) {
 
 func TestFindCatalinaHome_ScanSubdirs(t *testing.T) {
 	t.Setenv("KAIRO_TOMCAT6_HOME", "")
+	t.Setenv("KAIRO_DATA_DIR", t.TempDir())
+	t.Setenv("KAIRO_TOMCAT_CONFIG", "")
 	bundledDir := t.TempDir()
 	tomcatDir := filepath.Join(bundledDir, "tomcat6")
 	os.MkdirAll(filepath.Join(tomcatDir, "custom-tomcat-6.0.53", "bin"), 0755)
@@ -956,10 +961,33 @@ func TestFindCatalinaHome_ScanSubdirs(t *testing.T) {
 
 func TestFindCatalinaHome_NotFound(t *testing.T) {
 	t.Setenv("KAIRO_TOMCAT6_HOME", "")
+	t.Setenv("KAIRO_DATA_DIR", t.TempDir())
+	t.Setenv("KAIRO_TOMCAT_CONFIG", filepath.Join(t.TempDir(), "missing-host-tomcat.json"))
 	bundledDir := t.TempDir()
 	_, err := FindCatalinaHome(bundledDir)
 	if err == nil {
 		t.Error("Expected error when no Tomcat 6 found")
+	}
+}
+
+func TestFindCatalinaHome_Persisted(t *testing.T) {
+	t.Setenv("KAIRO_TOMCAT6_HOME", "")
+	home := createFakeCatalinaHome(t)
+	dataDir := t.TempDir()
+	cfgPath := filepath.Join(dataDir, "host-tomcat.json")
+	payload := []byte(`{"catalinaHome":` + strconv.Quote(home) + `}`)
+	if err := os.WriteFile(cfgPath, payload, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("KAIRO_DATA_DIR", dataDir)
+	t.Setenv("KAIRO_TOMCAT_CONFIG", "")
+
+	result, err := FindCatalinaHome("/nonexistent/bundled")
+	if err != nil {
+		t.Fatalf("FindCatalinaHome failed: %v", err)
+	}
+	if result != home {
+		t.Errorf("FindCatalinaHome = %q, want %q", result, home)
 	}
 }
 

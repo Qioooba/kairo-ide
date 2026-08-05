@@ -68,6 +68,16 @@ test('KairoError.isTransient: 5xx httpStatus is transient', () => {
   assert.strictEqual(err.isTransient(), true);
 });
 
+test('KairoError.isTransient: 501 Not Implemented is not transient', () => {
+  const err = new KairoError({ code: 'unsupported', message: 'x', httpStatus: 501 });
+  assert.strictEqual(err.isTransient(), false);
+});
+
+test('KairoError.isTransient: unsupported code is not transient', () => {
+  const err = new KairoError({ code: 'unsupported', message: 'x' });
+  assert.strictEqual(err.isTransient(), false);
+});
+
 test('KairoError.isTransient: 4xx httpStatus is not transient', () => {
   const err = new KairoError({ code: 'invalid_request', message: 'x', httpStatus: 400 });
   assert.strictEqual(err.isTransient(), false);

@@ -5,6 +5,7 @@ import { Emitter, Event, DisposableCollection } from '@theia/core/lib/common';
 import { Title, Widget } from '@theia/core/shared/@lumino/widgets';
 import { EditorManager } from '@theia/editor/lib/browser/editor-manager';
 import { GitService } from './git-service';
+import { toRepoRelativePath } from './git-path-utils';
 
 const STATUS_COLORS: Record<string, string> = {
   M: 'var(--theia-editorWarning-foreground)',
@@ -69,16 +70,8 @@ export class GitFileStatusDecorator implements TabBarDecorator {
     const repoRoot = this.gitService.getRepoRoot();
     if (!repoRoot) return [];
 
-    const uriStr = uri.toString();
-    let relativePath: string | undefined;
-    if (uriStr.startsWith('file://')) {
-      const filePath = decodeURIComponent(uriStr.replace('file://', ''));
-      if (filePath.startsWith(repoRoot)) {
-        relativePath = filePath.substring(repoRoot.length + 1);
-      }
-    }
-
-    if (!relativePath) return [];
+    const relativePath = toRepoRelativePath(uri.toString(), repoRoot);
+    if (relativePath === undefined) return [];
 
     const fileStatus = this.gitService.getFileStatus(relativePath);
     if (!fileStatus) return [];
@@ -91,7 +84,8 @@ export class GitFileStatusDecorator implements TabBarDecorator {
 
     return [{
       captionSuffixes: [{
-        data: ` ${label}`,
+        // Colored dot (same idea as explorer tailDecorations) — avoid M/A/? letters.
+        data: ' \u25CF',
         fontData: { color },
       }],
       tooltip: `Git: ${this.statusTooltip(status)}`,

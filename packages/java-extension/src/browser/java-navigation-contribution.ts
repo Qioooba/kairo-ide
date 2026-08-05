@@ -35,6 +35,7 @@ import {
   WidgetManager,
 } from '@theia/core/lib/browser';
 import { WorkspaceService } from '@theia/workspace/lib/browser';
+import { KairoI18nService, type KairoI18nKey } from '@kairo/i18n';
 import { JavaLanguageClient } from './java-language-client';
 import { JavaHierarchyCommands } from './java-hierarchy-contribution';
 import { JavaReferencesWidget } from './java-references-widget';
@@ -144,32 +145,75 @@ export class JavaNavigationContribution implements CommandContribution, MenuCont
   @optional()
   protected readonly workspaceService?: WorkspaceService;
 
+  @inject(KairoI18nService)
+  @optional()
+  protected readonly i18n?: KairoI18nService;
+
+  protected commandRegistry: CommandRegistry | undefined;
+
+  protected readonly commandI18nKeys: Record<string, KairoI18nKey> = {
+    [JavaNavigationCommands.GO_TO_TYPE_DEFINITION.id]: 'widget.java.command.goToTypeDefinition',
+    [JavaNavigationCommands.GO_TO_SUPER_METHOD.id]: 'widget.java.command.goToSuperMethod',
+    [JavaNavigationCommands.FIND_USAGES.id]: 'widget.java.command.findUsages',
+    [JavaNavigationCommands.SHOW_USAGES.id]: 'widget.java.command.showUsages',
+    [JavaNavigationCommands.FILE_STRUCTURE.id]: 'widget.java.command.fileStructure',
+  };
+
+  protected withLabel(cmd: Command): Command {
+    const key = this.commandI18nKeys[cmd.id];
+    if (!key || !this.i18n) {
+      return cmd;
+    }
+    const category = cmd.category === 'Java' ? this.i18n.t('widget.java.category') : cmd.category;
+    return { ...cmd, label: this.i18n.t(key), category };
+  }
+
+  protected refreshCommandLabels(): void {
+    if (!this.commandRegistry || !this.i18n || typeof this.commandRegistry.getCommand !== 'function') {
+      return;
+    }
+    const category = this.i18n.t('widget.java.category');
+    for (const [id, key] of Object.entries(this.commandI18nKeys)) {
+      const cmd = this.commandRegistry.getCommand(id);
+      if (cmd) {
+        cmd.label = this.i18n.t(key);
+        if (cmd.category === 'Java' || cmd.category === category) {
+          cmd.category = category;
+        }
+      }
+    }
+  }
+
   registerCommands(registry: CommandRegistry): void {
-    registry.registerCommand(JavaNavigationCommands.GO_TO_TYPE_DEFINITION, {
+    this.commandRegistry = registry;
+    this.refreshCommandLabels();
+    this.i18n?.onDidChangeLanguage(() => this.refreshCommandLabels());
+
+    registry.registerCommand(this.withLabel(JavaNavigationCommands.GO_TO_TYPE_DEFINITION), {
       execute: () => this.executeGoToTypeDefinition(),
       isVisible: () => this.isJavaEditorActive(),
       isEnabled: () => this.isJavaEditorActive(),
     });
 
-    registry.registerCommand(JavaNavigationCommands.GO_TO_SUPER_METHOD, {
+    registry.registerCommand(this.withLabel(JavaNavigationCommands.GO_TO_SUPER_METHOD), {
       execute: () => this.executeGoToSuperMethod(),
       isVisible: () => this.isJavaEditorActive(),
       isEnabled: () => this.isJavaEditorActive(),
     });
 
-    registry.registerCommand(JavaNavigationCommands.FIND_USAGES, {
+    registry.registerCommand(this.withLabel(JavaNavigationCommands.FIND_USAGES), {
       execute: () => this.executeFindUsages(),
       isVisible: () => this.isJavaEditorActive(),
       isEnabled: () => this.isJavaEditorActive(),
     });
 
-    registry.registerCommand(JavaNavigationCommands.SHOW_USAGES, {
+    registry.registerCommand(this.withLabel(JavaNavigationCommands.SHOW_USAGES), {
       execute: () => this.executeShowUsages(),
       isVisible: () => this.isJavaEditorActive(),
       isEnabled: () => this.isJavaEditorActive(),
     });
 
-    registry.registerCommand(JavaNavigationCommands.FILE_STRUCTURE, {
+    registry.registerCommand(this.withLabel(JavaNavigationCommands.FILE_STRUCTURE), {
       execute: () => this.executeFileStructure(),
       isVisible: () => this.isJavaEditorActive(),
       isEnabled: () => this.isJavaEditorActive(),
@@ -373,7 +417,7 @@ export class JavaNavigationContribution implements CommandContribution, MenuCont
       await widget.findUsages(ctx.uri, ctx.line, ctx.character, ctx.symbolName);
     } catch (err) {
       console.warn('[kairo-java] Find Usages failed:', err);
-      this.messages?.error(`Find Usages failed: ${String(err)}`);
+      this.messages?.error(this.i18n?.t('widget.java.command.findUsagesFailed', { msg: String(err) }) ?? `Find Usages failed: ${String(err)}`);
     }
   }
 
@@ -403,7 +447,7 @@ export class JavaNavigationContribution implements CommandContribution, MenuCont
 
       if (!references || references.length === 0) {
         const name = ctx.symbolName ?? 'symbol';
-        this.messages?.info(`No usages found for '${name}'`);
+        this.messages?.info(this.i18n?.t('widget.java.command.noUsagesFound', { name }) ?? `No usages found for '${name}'`);
         // Still open the Find Usages panel so the empty state is visible
         // (toast alone is easy to miss).
         await this.executeFindUsages();
@@ -487,7 +531,7 @@ export class JavaNavigationContribution implements CommandContribution, MenuCont
       }
     } catch (err) {
       console.warn('[kairo-java] Show Usages failed:', err);
-      this.messages?.error(`Show Usages failed: ${String(err)}`);
+      this.messages?.error(this.i18n?.t('widget.java.command.showUsagesFailed', { msg: String(err) }) ?? `Show Usages failed: ${String(err)}`);
     }
   }
 
@@ -501,7 +545,7 @@ export class JavaNavigationContribution implements CommandContribution, MenuCont
 
     const snapped = this.resolveSymbolAtPosition(model, position);
     if (!snapped) {
-      this.messages?.info('Place the caret on a class, method, or field name');
+      this.messages?.info(this.i18n?.t('widget.java.command.placeCaretOnSymbol') ?? 'Place the caret on a class, method, or field name');
       return undefined;
     }
 

@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/api/protocol"
-	"github.com/Qioooba/kairo-ide/runtime-agent/internal/app"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/domain"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/log"
 )
@@ -227,23 +226,6 @@ func BenchmarkToBuildResponseList(b *testing.B) {
 	}
 }
 
-func BenchmarkToDeploymentResponse(b *testing.B) {
-	result := &app.DeployResult{
-		ID:        "dep-1",
-		ProjectID: "proj-1",
-		BuildID:   "build-1",
-		State:     "completed",
-		Succeeded: 42,
-		Modified:  5,
-		Deleted:   0,
-		Bytes:     102400,
-		Error:     "",
-	}
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		ToDeploymentResponse(result)
-	}
-}
 
 // --- JSON Serialization benchmarks ---
 

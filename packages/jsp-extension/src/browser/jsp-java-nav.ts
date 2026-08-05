@@ -22,6 +22,79 @@ export interface JavaBlock {
 }
 
 /**
+ * Find the closing `%>` that ends a scriptlet, skipping matches
+ * that appear inside Java string/char literals or comments.
+ */
+export function findClosingScriptlet(content: string, from: number): number {
+  let inSingle = false;
+  let inDouble = false;
+  let inLineComment = false;
+  let inBlockComment = false;
+
+  for (let i = from; i < content.length - 1; i++) {
+    const c = content[i];
+    const n = content[i + 1];
+
+    if (inLineComment) {
+      if (c === '\n') {
+        inLineComment = false;
+      }
+      continue;
+    }
+    if (inBlockComment) {
+      if (c === '*' && n === '/') {
+        inBlockComment = false;
+        i++;
+      }
+      continue;
+    }
+    if (inSingle) {
+      if (c === '\\') {
+        i++;
+        continue;
+      }
+      if (c === "'") {
+        inSingle = false;
+      }
+      continue;
+    }
+    if (inDouble) {
+      if (c === '\\') {
+        i++;
+        continue;
+      }
+      if (c === '"') {
+        inDouble = false;
+      }
+      continue;
+    }
+
+    if (c === '/' && n === '/') {
+      inLineComment = true;
+      i++;
+      continue;
+    }
+    if (c === '/' && n === '*') {
+      inBlockComment = true;
+      i++;
+      continue;
+    }
+    if (c === "'") {
+      inSingle = true;
+      continue;
+    }
+    if (c === '"') {
+      inDouble = true;
+      continue;
+    }
+    if (c === '%' && n === '>') {
+      return i;
+    }
+  }
+  return -1;
+}
+
+/**
  * Lightweight JSP parser that extracts Java type references.
  * Pure functions — no I/O, no DI needed.
  */
@@ -51,28 +124,52 @@ export class JspJavaParser {
   /**
    * Find all Java code blocks in the JSP content.
    * Returns blocks sorted by start offset.
+   *
+   * Skips `<%-- --%>` comments, does not swallow whitespace after
+   * the opening tag (so offsets stay aligned with source), and
+   * ignores `%>` that appear inside Java strings/comments.
    */
   findJavaBlocks(content: string): JavaBlock[] {
     const blocks: JavaBlock[] = [];
+    let i = 0;
 
-    // Match each block type: <%! ... %>, <%= ... %>, <%@ ... %>, <% ... %>
-    const re = /<%\s*([!=@]?)\s*/g;
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(content)) !== null) {
-      const tagEnd = m.index + m[0].length;
-      const marker = m[1] || '';
+    while (i < content.length) {
+      const open = content.indexOf('<%', i);
+      if (open === -1) {
+        break;
+      }
 
-      // Find the closing %>
-      const closeIdx = content.indexOf('%>', tagEnd);
-      if (closeIdx === -1) continue;
+      // JSP comment: <%-- ... --%>
+      if (content.startsWith('<%--', open)) {
+        const closeComment = content.indexOf('--%>', open + 4);
+        if (closeComment === -1) {
+          break;
+        }
+        i = closeComment + 4;
+        continue;
+      }
 
-      let kind: JavaBlock['kind'];
-      if (marker === '!') kind = 'declaration';
-      else if (marker === '=') kind = 'expression';
-      else if (marker === '@') kind = 'directive';
-      else kind = 'scriptlet';
+      let kind: JavaBlock['kind'] = 'scriptlet';
+      let contentStart = open + 2;
+      const marker = content[open + 2];
+      if (marker === '!') {
+        kind = 'declaration';
+        contentStart = open + 3;
+      } else if (marker === '=') {
+        kind = 'expression';
+        contentStart = open + 3;
+      } else if (marker === '@') {
+        kind = 'directive';
+        contentStart = open + 3;
+      }
 
-      blocks.push({ start: tagEnd, end: closeIdx, kind });
+      const closeIdx = findClosingScriptlet(content, contentStart);
+      if (closeIdx === -1) {
+        break;
+      }
+
+      blocks.push({ start: contentStart, end: closeIdx, kind });
+      i = closeIdx + 2;
     }
 
     blocks.sort((a, b) => a.start - b.start);
@@ -122,6 +219,19 @@ export class JspJavaParser {
       offset += lines[i].length + 1; // +1 for \n
     }
     return offset + column;
+  }
+
+  /**
+   * Convert a 0-based offset to 0-based line/character.
+   */
+  offsetToPosition(content: string, offset: number): { line: number; character: number } {
+    const safe = Math.max(0, Math.min(offset, content.length));
+    const before = content.slice(0, safe);
+    const parts = before.split('\n');
+    return {
+      line: parts.length - 1,
+      character: parts[parts.length - 1]?.length ?? 0,
+    };
   }
 }
 

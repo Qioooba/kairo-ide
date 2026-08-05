@@ -1,19 +1,18 @@
 /**
  * Kairo SQL Service — client for the Go Agent SQL API endpoints.
  *
- * Communicates with the Runtime Agent at http://localhost:17890
- * to test database connections and execute SQL queries.
+ * Routes through RuntimeConnectionService (agent URL + secret + envelope).
+ * Do not use hardcoded localhost or naked fetch.
  */
 
 import { injectable, inject } from '@theia/core/shared/inversify';
 import { ILogger } from '@theia/core/lib/common/logger';
-
-export const SQL_AGENT_BASE = 'http://localhost:17890/api/v1/sql';
+import { RuntimeConnectionService, KairoError } from '@kairo/runtime-extension';
 
 /** SQL keywords that are rejected when preceded by `;` — basic SQL injection guard. */
 const DANGEROUS_KEYWORDS = /\b(DROP|DELETE|TRUNCATE|ALTER|CREATE)\b/i;
 
-/** Fetch timeout (ms). */
+/** Request timeout (ms). */
 const FETCH_TIMEOUT_MS = 30_000;
 
 /** Max retry count for transient errors. */
@@ -43,22 +42,20 @@ export interface SqlQueryResult {
 @injectable()
 export class KairoSqlService {
   @inject(ILogger) protected readonly logger!: ILogger;
+  @inject(RuntimeConnectionService) protected readonly runtime!: RuntimeConnectionService;
 
   /** Test a database connection configuration. */
   async testConnection(config: SqlConnectionConfig): Promise<{ success: boolean; message: string }> {
     try {
-      const response = await this.fetchWithTimeout(`${SQL_AGENT_BASE}/test-connection`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(config),
-      });
-      const data = await response.json();
-      if (!response.ok) {
-        const msg = `HTTP ${response.status}: ${data.error || data.message || 'Unknown error'}`;
-        this.logger.error(`[SQL] testConnection failed: ${msg}`);
-        return { success: false, message: msg };
-      }
-      return { success: data.success ?? true, message: data.message ?? 'Connection successful' };
+      const data = await this.runtime.request(
+        'POST /api/v1/sql/test-connection',
+        config,
+        { timeoutMs: FETCH_TIMEOUT_MS },
+      );
+      return {
+        success: Boolean((data as { success?: boolean }).success ?? true),
+        message: String((data as { message?: string }).message ?? 'Connection successful'),
+      };
     } catch (err) {
       const msg = this.formatError(err);
       this.logger.error(`[SQL] testConnection error: ${msg}`);
@@ -68,7 +65,6 @@ export class KairoSqlService {
 
   /** Execute a SQL query against a connected database. */
   async executeQuery(connectionId: string, sql: string, maxRows?: number): Promise<SqlQueryResult> {
-    // Basic SQL injection guard: reject multi-statement queries with dangerous keywords
     const validationError = this.validateSql(sql);
     if (validationError) {
       this.logger.error(`[SQL] executeQuery rejected: ${validationError}`);
@@ -88,7 +84,6 @@ export class KairoSqlService {
   /*  Internal                                                            */
   /* ------------------------------------------------------------------ */
 
-  /** Validate SQL query for basic injection patterns. */
   protected validateSql(sql: string): string | undefined {
     if (!sql || typeof sql !== 'string') {
       return 'Empty SQL query';
@@ -97,7 +92,6 @@ export class KairoSqlService {
     if (trimmed.length === 0) {
       return 'Empty SQL query';
     }
-    // Check for multi-statement with dangerous SQL keywords
     const statementParts = trimmed.split(';').filter(s => s.trim().length > 0);
     if (statementParts.length > 1) {
       for (let i = 1; i < statementParts.length; i++) {
@@ -109,7 +103,6 @@ export class KairoSqlService {
     return undefined;
   }
 
-  /** Execute with retry logic for transient errors. */
   protected async executeWithRetry(connectionId: string, sql: string, maxRows?: number): Promise<SqlQueryResult> {
     let lastError: SqlQueryResult | undefined;
 
@@ -120,42 +113,44 @@ export class KairoSqlService {
       }
 
       try {
-        const response = await this.fetchWithTimeout(`${SQL_AGENT_BASE}/execute`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ connectionId, sql, maxRows }),
+        const data = await this.runtime.request('POST /api/v1/sql/execute', {
+          connectionId,
+          sql,
+          maxRows,
+        }, {
+          timeoutMs: FETCH_TIMEOUT_MS,
+          noRetry: true,
         });
-        const data = await response.json();
-        if (!response.ok) {
-          const errorMsg = `HTTP ${response.status}: ${data.error || data.message || 'Unknown error'}`;
-          const result: SqlQueryResult = {
-            columns: [],
-            rows: [],
-            rowCount: 0,
-            executionTime: 0,
-            error: errorMsg,
-          };
-          // Only retry on server errors (5xx), not client errors (4xx)
-          if (response.status >= 500) {
-            lastError = result;
-            this.logger.warn(`[SQL] Server error (attempt ${attempt + 1}): ${errorMsg}`);
-            continue;
-          }
-          this.logger.error(`[SQL] Client error: ${errorMsg}`);
-          return result;
-        }
 
-        // Sanitize rows: convert null values to 'NULL' string
-        const rows = (data.rows ?? []).map((row: unknown[]) =>
-          (row ?? []).map((cell: unknown) => (cell === null || cell === undefined ? 'NULL' : cell)),
+        const payload = data as unknown as {
+          columns?: Array<{ name: string } | string>;
+          rows?: unknown[][] | Array<Record<string, unknown>>;
+          rowCount?: number;
+          executionTime?: number;
+          executionTimeMs?: number;
+          error?: string;
+        };
+
+        const columns = (payload.columns ?? []).map(c =>
+          typeof c === 'string' ? c : c.name,
         );
+        const rawRows = payload.rows ?? [];
+        const rows: unknown[][] = rawRows.map(row => {
+          if (Array.isArray(row)) {
+            return row.map(cell => (cell === null || cell === undefined ? 'NULL' : cell));
+          }
+          return columns.map(name => {
+            const cell = (row as Record<string, unknown>)[name];
+            return cell === null || cell === undefined ? 'NULL' : cell;
+          });
+        });
 
         return {
-          columns: data.columns ?? [],
+          columns,
           rows,
-          rowCount: data.rowCount ?? rows.length,
-          executionTime: data.executionTime ?? 0,
-          error: data.error,
+          rowCount: payload.rowCount ?? rows.length,
+          executionTime: payload.executionTime ?? payload.executionTimeMs ?? 0,
+          error: payload.error,
         };
       } catch (err) {
         const msg = this.formatError(err);
@@ -166,6 +161,11 @@ export class KairoSqlService {
           executionTime: 0,
           error: msg,
         };
+        // Don't retry clear unsupported / client errors.
+        if (err instanceof KairoError && (err.code === 'unsupported' || err.code === 'invalid_request')) {
+          this.logger.error(`[SQL] Non-retryable: ${msg}`);
+          return lastError;
+        }
         if (this.isTransientError(err)) {
           this.logger.warn(`[SQL] Transient error (attempt ${attempt + 1}): ${msg}`);
           continue;
@@ -178,50 +178,30 @@ export class KairoSqlService {
     return lastError!;
   }
 
-  /** Fetch with a configurable timeout using AbortController. */
-  protected async fetchWithTimeout(url: string, options: RequestInit): Promise<Response> {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-
-    try {
-      const response = await fetch(url, {
-        ...options,
-        signal: controller.signal,
-      });
-      return response;
-    } catch (err) {
-      if (err instanceof DOMException && err.name === 'AbortError') {
-        throw new Error(`Request timed out after ${FETCH_TIMEOUT_MS / 1000}s`);
-      }
-      throw err;
-    } finally {
-      clearTimeout(timeoutId);
-    }
-  }
-
-  /** Check if an error is transient (network/timeout) and should be retried. */
   protected isTransientError(err: unknown): boolean {
     if (err instanceof TypeError) {
-      // Network failures (fetch failed, DNS, etc.)
       return true;
     }
     if (err instanceof DOMException && err.name === 'AbortError') {
-      // Timeout
       return true;
+    }
+    if (err instanceof KairoError) {
+      return err.code === 'timeout' || err.code === 'io_error' || err.code === 'process_spawn_failed';
     }
     const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
     return msg.includes('timeout') || msg.includes('network') || msg.includes('econnrefused');
   }
 
-  /** Format an error into a human-readable message. */
   protected formatError(err: unknown): string {
+    if (err instanceof KairoError) {
+      return err.message || err.code;
+    }
     if (err instanceof Error) {
       return err.message;
     }
     return String(err);
   }
 
-  /** Delay helper. */
   protected delay(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
   }

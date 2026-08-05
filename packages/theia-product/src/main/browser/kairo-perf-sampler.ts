@@ -12,7 +12,13 @@ import { injectable, inject, postConstruct } from '@theia/core/shared/inversify'
 import { Emitter, Event } from '@theia/core/lib/common/event';
 import { ILogger } from '@theia/core/lib/common/logger';
 import { MessageService } from '@theia/core/lib/common/message-service';
+import { CommandContribution, CommandRegistry } from '@theia/core/lib/common/command';
 import { StatusBar, StatusBarAlignment } from '@theia/core/lib/browser';
+
+export const KAIRO_PERF_TOGGLE_GRAPH = {
+  id: 'kairo.perf.toggleGraph',
+  label: 'Kairo: Toggle Performance Graph',
+};
 
 /** Chrome's non-standard performance.memory API. */
 interface PerformanceMemory {
@@ -76,7 +82,7 @@ const DEFAULT_CONFIG: PerfSamplerConfig = {
 const MAX_SAMPLES = (30 * 60 * 1000) / 5000; // 360 samples for 30 min at 5s interval
 
 @injectable()
-export class KairoPerfSampler {
+export class KairoPerfSampler implements CommandContribution {
   @inject(ILogger) protected readonly logger!: ILogger;
   @inject(MessageService) protected readonly messages!: MessageService;
   @inject(StatusBar) protected readonly statusBar!: StatusBar;
@@ -114,7 +120,13 @@ export class KairoPerfSampler {
       tooltip: '性能监控已就绪。点击切换图表。',
       alignment: StatusBarAlignment.RIGHT,
       priority: 0,
-      command: 'kairo.perf.toggleGraph',
+      command: KAIRO_PERF_TOGGLE_GRAPH.id,
+    });
+  }
+
+  registerCommands(registry: CommandRegistry): void {
+    registry.registerCommand(KAIRO_PERF_TOGGLE_GRAPH, {
+      execute: () => this.toggleGraph(),
     });
   }
 
@@ -357,7 +369,7 @@ export class KairoPerfSampler {
       ].join('\n'),
       alignment: StatusBarAlignment.RIGHT,
       priority: 0,
-      command: 'kairo.perf.toggleGraph',
+      command: KAIRO_PERF_TOGGLE_GRAPH.id,
     });
   }
 }

@@ -68,12 +68,12 @@ export class RemoteSandboxService {
 
   /** Check if a path is allowed by the sandbox. */
   checkPath(path: string): SandboxCheckResult {
-    // Normalize path
+    // Normalize path (expand ~)
     const normalized = this.normalizePath(path);
 
-    // Check forbidden patterns
+    // Check forbidden patterns (after ~ expansion)
     for (const pattern of this.config.forbiddenPatterns) {
-      if (this.matchPattern(normalized, pattern)) {
+      if (this.matchPattern(normalized, this.normalizePath(pattern))) {
         return {
           allowed: false,
           reason: `Path matches forbidden pattern: ${pattern}`,
@@ -81,8 +81,9 @@ export class RemoteSandboxService {
       }
     }
 
-    // Check path traversal
-    if (normalized.includes('..')) {
+    // VC-P2-8: only reject path-segment ".." traversal, not names like foo..bar
+    const segments = normalized.split('/');
+    if (segments.some(seg => seg === '..')) {
       return {
         allowed: false,
         reason: 'Path traversal detected',
@@ -143,16 +144,22 @@ export class RemoteSandboxService {
   }
 
   private normalizePath(path: string): string {
-    // Remove trailing slashes, normalize separators
-    return path.replace(/\\/g, '/').replace(/\/+$/, '');
+    let p = path.replace(/\\/g, '/');
+    // Expand leading ~/ to a synthetic home marker so ~/.ssh matches.
+    if (p === '~' || p.startsWith('~/')) {
+      p = '/home/user' + p.slice(1);
+    }
+    return p.replace(/\/+$/, '');
   }
 
   private matchPattern(path: string, pattern: string): boolean {
-    // Simple glob matching
-    const regex = pattern
-      .replace(/\./g, '\\.')
+    // VC-P2-8: anchor the glob and drop the over-broad includes() fallback.
+    const escaped = pattern
+      .replace(/[.+^${}()|[\]\\]/g, '\\$&')
       .replace(/\*/g, '.*')
       .replace(/\?/g, '.');
-    return new RegExp(regex).test(path) || path.includes(pattern);
+    // Match as full path or as a path suffix / basename (e.g. "*.pem", ".env").
+    const anchored = new RegExp(`(?:^|/)${escaped}$`);
+    return anchored.test(path);
   }
 }

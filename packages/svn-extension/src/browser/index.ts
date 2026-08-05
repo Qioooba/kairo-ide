@@ -20,7 +20,6 @@ export type {
 export { SvnStore } from './svn-store';
 export type { SvnChangesState } from './svn-store';
 export { SvnDetector } from './svn-detector';
-export { SvnCommandQueue } from './svn-command-queue';
 export { SvnChangesWidget } from './svn-changes-widget';
 export { SvnHistoryWidget } from './svn-history-widget';
 export { SvnDiffWidget } from './svn-diff-widget';

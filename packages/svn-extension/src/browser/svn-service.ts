@@ -8,6 +8,7 @@
 import { injectable, inject, postConstruct, optional } from '@theia/core/shared/inversify';
 import { Emitter, Event } from '@theia/core/lib/common/event';
 import { ILogger } from '@theia/core/lib/common/logger';
+import { PreferenceService } from '@theia/core/lib/common/preferences';
 import { WebSocketConnectionProvider } from '@theia/core/lib/browser/messaging/ws-connection-provider';
 import * as path from 'node:path';
 import {
@@ -66,6 +67,10 @@ export class SvnService implements SvnFrontendClient {
   @optional()
   protected readonly directBackend?: SvnBackendService;
 
+  @inject(PreferenceService)
+  @optional()
+  protected readonly preferences?: PreferenceService;
+
   protected readonly onDidChangeStatusEmitter = new Emitter<SvnStatusEntry[]>();
   readonly onDidChangeStatus: Event<SvnStatusEntry[]> = this.onDidChangeStatusEmitter.event;
 
@@ -92,6 +97,26 @@ export class SvnService implements SvnFrontendClient {
     this.logger.debug('[svn] command event', event);
   }
 
+  /** Cancel one queued/running SVN command (VC-P3-2). */
+  async cancelCommand(commandId: string): Promise<boolean> {
+    try {
+      return await this.requireProxy().$cancel(commandId);
+    } catch (e) {
+      this.logger.warn(`[SvnService] cancel failed: ${String(e)}`);
+      return false;
+    }
+  }
+
+  /** Cancel all SVN commands for a WC (or every WC). */
+  async cancelAllCommands(cwd?: string): Promise<number> {
+    try {
+      return await this.requireProxy().$cancelAll(cwd);
+    } catch (e) {
+      this.logger.warn(`[SvnService] cancelAll failed: ${String(e)}`);
+      return 0;
+    }
+  }
+
   protected activeWcRoot: string | undefined;
   protected wcInfo: SvnInfo | undefined;
   protected cachedStatus: SvnStatusEntry[] = [];
@@ -107,6 +132,12 @@ export class SvnService implements SvnFrontendClient {
   @postConstruct()
   protected init(): void {
     this.detectSvn().catch(() => {/* ignore */});
+    this.preferences?.onPreferenceChanged(e => {
+      if (e.preferenceName === 'svn.path') {
+        this.cachedInstallation = undefined;
+        this.detectSvn().catch(() => {/* ignore */});
+      }
+    });
   }
 
   dispose(): void {
@@ -176,6 +207,23 @@ export class SvnService implements SvnFrontendClient {
         this.svnAvailable = false;
         return;
       }
+
+      // Honor Preferences > svn.path before auto-detection.
+      const customPath = (this.preferences?.get('svn.path', '') as string | undefined)?.trim();
+      if (customPath) {
+        const validated = await p.$validatePath(customPath);
+        if (validated) {
+          this.cachedInstallation = { ...validated, source: 'user-config' };
+          const wasAvailable = this.svnAvailable;
+          this.svnAvailable = true;
+          if (wasAvailable !== this.svnAvailable) {
+            this.onSvnAvailabilityChangeEmitter.fire(this.svnAvailable);
+          }
+          return;
+        }
+        this.logger.warn(`[SvnService] svn.path preference is invalid: ${customPath}`);
+      }
+
       const installation = await p.$detectSvn();
       this.cachedInstallation = installation || undefined;
       const wasAvailable = this.svnAvailable;
@@ -323,7 +371,9 @@ export class SvnService implements SvnFrontendClient {
     let revision = 0;
     let updatedFiles = 0;
     for (const line of stdout.split('\n')) {
-      const revMatch = line.match(/(?:At|Updated to) revision (\d+)/);
+      // LANG=C on backend; also accept "revision N" without English verbs.
+      const revMatch = line.match(/(?:At|Updated to)\s+revision\s+(\d+)/i)
+        || line.match(/\brevision\s+(\d+)\s*\.?$/i);
       if (revMatch) revision = parseInt(revMatch[1], 10);
       if (/^[ADUGRC]\s/.test(line.trim())) updatedFiles++;
     }
@@ -347,7 +397,8 @@ export class SvnService implements SvnFrontendClient {
     if (options?.changelist) args.push('--changelist', options.changelist);
     else args.push(...paths);
     const { stdout } = await this.requireProxy().$exec(args, this.activeWcRoot, 'write');
-    const revMatch = stdout.match(/Committed revision (\d+)/);
+    const revMatch = stdout.match(/Committed revision (\d+)/i)
+      || stdout.match(/\brevision\s+(\d+)\s*\.?/i);
     const revision = revMatch ? parseInt(revMatch[1], 10) : 0;
     const commitInfo: SvnCommitInfo = {
       revision,
@@ -482,7 +533,7 @@ export class SvnService implements SvnFrontendClient {
       // Try to attach content by catting the file through backend
       try {
         const { stdout } = await this.requireProxy().$exec(['cat', filePath], cwd, 'read');
-        const fileLines = stdout.split('\n');
+        const fileLines = stdout.split(/\r?\n/);
         lines = lines.map((ln, idx) => ({
           ...ln,
           line: idx + 1,
@@ -576,7 +627,8 @@ export class SvnService implements SvnFrontendClient {
     if (options?.message) args.push('-m', options.message);
     args.push(src, dst);
     const { stdout } = await this.requireProxy().$exec(args, cwd, 'write');
-    const revMatch = stdout.match(/Committed revision (\d+)/);
+    const revMatch = stdout.match(/Committed revision (\d+)/i)
+      || stdout.match(/\brevision\s+(\d+)\s*\.?/i);
     await this.refreshStatus({ ignoreCache: true });
     return {
       revision: revMatch ? parseInt(revMatch[1], 10) : 0,
@@ -609,7 +661,8 @@ export class SvnService implements SvnFrontendClient {
     if (message) args.push('-m', message);
     args.push(url);
     const { stdout } = await this.requireProxy().$exec(args, cwd, 'write');
-    const revMatch = stdout.match(/Committed revision (\d+)/);
+    const revMatch = stdout.match(/Committed revision (\d+)/i)
+      || stdout.match(/\brevision\s+(\d+)\s*\.?/i);
     return {
       revision: revMatch ? parseInt(revMatch[1], 10) : 0,
       author: this.credentials?.username || '',
@@ -683,7 +736,8 @@ export class SvnService implements SvnFrontendClient {
     if (message) args.push('-m', message);
     args.push(filePath, repoUrl);
     const { stdout } = await this.requireProxy().$exec(args, cwd, 'write');
-    const revMatch = stdout.match(/Committed revision (\d+)/);
+    const revMatch = stdout.match(/Committed revision (\d+)/i)
+      || stdout.match(/\brevision\s+(\d+)\s*\.?/i);
     return {
       revision: revMatch ? parseInt(revMatch[1], 10) : 0,
       author: this.credentials?.username || '',
@@ -709,7 +763,8 @@ export class SvnService implements SvnFrontendClient {
     if (message) args.push('-m', message);
     args.push(...urls);
     const { stdout } = await this.requireProxy().$exec(args, cwd, 'write');
-    const revMatch = stdout.match(/Committed revision (\d+)/);
+    const revMatch = stdout.match(/Committed revision (\d+)/i)
+      || stdout.match(/\brevision\s+(\d+)\s*\.?/i);
     return {
       revision: revMatch ? parseInt(revMatch[1], 10) : 0,
       author: this.credentials?.username || '',

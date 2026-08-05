@@ -99,7 +99,8 @@ export class SvnCommitDialog extends ReactDialog<'committed' | undefined> {
 
     const files = collectCommitFiles(this.svnStore);
     const selected = new Set(this.svnStore.getState().selectedFiles);
-    if (selected.size === 0) {
+    // Respect Changes-view deselect-all: do not auto-select everything again.
+    if (selected.size === 0 && !this.svnStore.shouldSuppressAutoSelect) {
       for (const f of files) {
         if (f.status !== SvnFileStatus.Unversioned) selected.add(f.path);
       }

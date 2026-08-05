@@ -28,6 +28,7 @@ const repoRoot = path.resolve(__dirname, '..', '..', '..');
 const src = path.join(repoRoot, 'bundled');
 const dst = path.join(__dirname, '..', 'bundled');
 const approvedDirectories = ['tomcat6', 'jdtls'];
+const approvedFiles = ['kairo-jdi-bridge.jar'];
 
 if (!fs.existsSync(src)) {
   console.log(`[copy-bundled] WARN: ${src} does not exist — runtime will fall back to first-run download`);
@@ -38,16 +39,23 @@ const entries = new Map(fs.readdirSync(src, { withFileTypes: true }).map(entry =
 const realDirs = approvedDirectories
   .map(name => entries.get(name))
   .filter(entry => entry?.isDirectory());
-if (realDirs.length === 0) {
+const realFiles = approvedFiles
+  .map(name => entries.get(name))
+  .filter(entry => entry?.isFile());
+if (realDirs.length === 0 && realFiles.length === 0) {
   console.log(`[copy-bundled] WARN: ${src} is empty — runtime will fall back to first-run download`);
   process.exit(0);
 }
 
 fs.mkdirSync(dst, { recursive: true });
-// Clean dst to avoid stale files.
-for (const e of fs.readdirSync(dst, { withFileTypes: true })) {
-  const p = path.join(dst, e.name);
-  fs.rmSync(p, { recursive: true, force: true });
+// Only refresh items we are about to copy from repo-root bundled/.
+// Leave other staged content intact (e.g. JDT LS prepared only under
+// apps/desktop/bundled when repo-root bundled/jdtls is absent).
+for (const dirent of [...realDirs, ...realFiles]) {
+  const p = path.join(dst, dirent.name);
+  if (fs.existsSync(p)) {
+    fs.rmSync(p, { recursive: true, force: true });
+  }
 }
 
 let copied = 0;
@@ -91,4 +99,17 @@ for (const dirent of realDirs) {
   copied += 1;
   console.log(`[copy-bundled] ${from} -> ${to}`);
 }
-console.log(`[copy-bundled] OK: ${copied} bundled dir(s) staged for packaging`);
+
+for (const fileEnt of realFiles) {
+  const from = path.join(src, fileEnt.name);
+  const to = path.join(dst, fileEnt.name);
+  fs.copyFileSync(from, to);
+  copied += 1;
+  console.log(`[copy-bundled] ${from} -> ${to}`);
+}
+
+if (!realFiles.some(f => f.name === 'kairo-jdi-bridge.jar')) {
+  console.log(`[copy-bundled] WARN: kairo-jdi-bridge.jar missing — Java Debug Adapter will be unavailable`);
+}
+
+console.log(`[copy-bundled] OK: ${copied} bundled item(s) staged for packaging`);

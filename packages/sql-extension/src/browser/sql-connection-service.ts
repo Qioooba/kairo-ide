@@ -1,11 +1,16 @@
 /**
  * SQL Connection Service — manages Oracle 11g connection configurations.
- * Stores connection configs securely, supports test connection and import/export.
+ *
+ * Connection metadata (host/port/user) is persisted via StorageService.
+ * Passwords are held in-memory and, when Electron safeStorage is available
+ * via window.kairoIPC, persisted as OS-keychain ciphertext. Plaintext
+ * password persistence is never used.
  */
 
 import { injectable, inject } from '@theia/core/shared/inversify';
 import { Emitter, Event } from '@theia/core/lib/common/event';
 import { StorageService } from '@theia/core/lib/browser';
+import { RuntimeConnectionService, KairoError } from '@kairo/runtime-extension';
 
 export interface SqlConnectionConfig {
   id: string;
@@ -51,13 +56,37 @@ export interface SqlTestConnectionResult {
 const CONNECTIONS_STORAGE_KEY = 'kairo.sql.connections';
 const PASSWORDS_PREFIX = 'kairo.sql.password.';
 
+/** Persisted shape when Electron safeStorage encrypts the password. */
+interface EncryptedPasswordBlob {
+  v: 1;
+  enc: string;
+}
+
+interface KairoSafeStorageIPC {
+  isSafeStorageAvailable?: () => Promise<boolean>;
+  encryptString?: (plaintext: string) => Promise<string>;
+  decryptString?: (ciphertextB64: string) => Promise<string>;
+}
+
+function getSafeStorageIPC(): KairoSafeStorageIPC | undefined {
+  if (typeof window === 'undefined') {
+    return undefined;
+  }
+  return (window as unknown as { kairoIPC?: KairoSafeStorageIPC }).kairoIPC;
+}
+
 @injectable()
 export class SqlConnectionService {
   @inject(StorageService)
   protected readonly storage!: StorageService;
 
+  @inject(RuntimeConnectionService)
+  protected readonly runtime!: RuntimeConnectionService;
+
   private connections: Map<string, SqlConnectionConfig> = new Map();
   private connectionStates: Map<string, SqlConnectionState> = new Map();
+  /** Session password cache — never written to disk as plaintext. */
+  private readonly passwordCache = new Map<string, string>();
 
   private readonly onConnectionsChangedEmitter = new Emitter<SqlConnectionConfig[]>();
   readonly onConnectionsChanged: Event<SqlConnectionConfig[]> = this.onConnectionsChangedEmitter.event;
@@ -79,6 +108,8 @@ export class SqlConnectionService {
               status: 'disconnected',
             });
           }
+          // Warm cache from encrypted storage when available; purge legacy plaintext.
+          await this.hydratePassword(config.id);
         }
       }
     } catch {
@@ -97,7 +128,7 @@ export class SqlConnectionService {
 
   /** Add a new connection configuration. */
   async addConnection(config: Omit<SqlConnectionConfig, 'id' | 'createdAt' | 'updatedAt'>, password: string): Promise<SqlConnectionConfig> {
-    const id = `conn-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+    const id = `conn-${crypto.randomUUID()}`;
     const now = new Date().toISOString();
     const fullConfig: SqlConnectionConfig = {
       ...config,
@@ -164,23 +195,79 @@ export class SqlConnectionService {
 
   /** Retrieve password for a connection. */
   async getPassword(config: SqlConnectionConfig): Promise<string | undefined> {
+    const cached = this.passwordCache.get(config.id);
+    if (cached !== undefined) {
+      return cached;
+    }
+    return this.hydratePassword(config.id);
+  }
+
+  private passwordStorageKey(id: string): string {
+    return `${PASSWORDS_PREFIX}${id}`;
+  }
+
+  private async hydratePassword(id: string): Promise<string | undefined> {
     try {
-      return await this.storage.getData<string>(`${PASSWORDS_PREFIX}${config.id}`);
+      const stored = await this.storage.getData<string | EncryptedPasswordBlob>(this.passwordStorageKey(id));
+      if (stored === undefined || stored === null) {
+        return undefined;
+      }
+      // Legacy plaintext string — migrate into memory and remove from disk.
+      if (typeof stored === 'string') {
+        this.passwordCache.set(id, stored);
+        await this.persistPassword(id, stored);
+        return stored;
+      }
+      if (typeof stored === 'object' && stored.v === 1 && typeof stored.enc === 'string') {
+        const ipc = getSafeStorageIPC();
+        if (!ipc?.decryptString) {
+          return undefined;
+        }
+        const plain = await ipc.decryptString(stored.enc);
+        this.passwordCache.set(id, plain);
+        return plain;
+      }
     } catch {
-      return undefined;
+      // Ignore storage/decrypt errors
+    }
+    return undefined;
+  }
+
+  private async persistPassword(id: string, password: string): Promise<void> {
+    const key = this.passwordStorageKey(id);
+    const ipc = getSafeStorageIPC();
+    try {
+      const available = ipc?.isSafeStorageAvailable ? await ipc.isSafeStorageAvailable() : false;
+      if (available && ipc?.encryptString) {
+        const enc = await ipc.encryptString(password);
+        const blob: EncryptedPasswordBlob = { v: 1, enc };
+        await this.storage.setData(key, blob);
+        return;
+      }
+    } catch {
+      // Fall through to memory-only
+    }
+    // No OS encryption: keep in memory only and remove any prior disk copy.
+    await this.removePasswordFromStorage(key);
+  }
+
+  private async removePasswordFromStorage(key: string): Promise<void> {
+    try {
+      // LocalStorageService deletes the key when data is undefined (VC-P0-4).
+      await this.storage.setData(key, undefined as unknown as string);
+    } catch {
+      // Ignore deletion errors
     }
   }
 
   private async savePassword(config: SqlConnectionConfig, password: string): Promise<void> {
-    await this.storage.setData(`${PASSWORDS_PREFIX}${config.id}`, password);
+    this.passwordCache.set(config.id, password);
+    await this.persistPassword(config.id, password);
   }
 
   private async deletePassword(config: SqlConnectionConfig): Promise<void> {
-    try {
-      await this.storage.setData(`${PASSWORDS_PREFIX}${config.id}`, undefined);
-    } catch {
-      // Ignore deletion errors
-    }
+    this.passwordCache.delete(config.id);
+    await this.removePasswordFromStorage(this.passwordStorageKey(config.id));
   }
 
   /** Test a connection without saving. */
@@ -216,10 +303,9 @@ export class SqlConnectionService {
 
   private async executeTestConnection(config: SqlConnectionConfig, password: string): Promise<SqlTestConnectionResult> {
     try {
-      const response = await fetch('/api/v1/sql/test-connection', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const payload = await this.runtime.request(
+        'POST /api/v1/sql/test-connection',
+        {
           host: config.host,
           port: config.port,
           sid: config.sid,
@@ -227,25 +313,36 @@ export class SqlConnectionService {
           useServiceName: config.useServiceName,
           username: config.username,
           password,
-        }),
-      });
-      const data = await response.json();
-      if (!response.ok || !data.ok) {
-        return {
-          success: false,
-          error: data.error?.message || `Connection test failed with status ${response.status}`,
-          oracleErrorCode: data.error?.details?.oracleErrorCode,
-        };
-      }
+        },
+        { noRetry: true },
+      );
       return {
         success: true,
-        oracleVersion: data.payload?.oracleVersion,
-        instanceName: data.payload?.instanceName,
+        oracleVersion: payload.oracleVersion,
+        instanceName: payload.instanceName,
       };
     } catch (err: unknown) {
+      if (err instanceof KairoError) {
+        const details = (err.details && typeof err.details === 'object')
+          ? err.details as { oracleErrorCode?: string }
+          : undefined;
+        return {
+          success: false,
+          error: err.message,
+          oracleErrorCode: details?.oracleErrorCode,
+        };
+      }
       const message = err instanceof Error ? err.message : 'Unknown error';
       return { success: false, error: message };
     }
+  }
+
+  private updateConnectionState(id: string, status: SqlConnectionStatus, oracleVersion?: string, error?: string): void {
+    const config = this.connections.get(id);
+    if (!config) return;
+    const state: SqlConnectionState = { config, status, oracleVersion, error };
+    this.connectionStates.set(id, state);
+    this.onConnectionStateChangedEmitter.fire(state);
   }
 
   /** Connect to a saved connection. */
@@ -262,14 +359,6 @@ export class SqlConnectionService {
     this.updateConnectionState(id, 'disconnected');
   }
 
-  private updateConnectionState(id: string, status: SqlConnectionStatus, oracleVersion?: string, error?: string): void {
-    const config = this.connections.get(id);
-    if (!config) return;
-    const state: SqlConnectionState = { config, status, oracleVersion, error };
-    this.connectionStates.set(id, state);
-    this.onConnectionStateChangedEmitter.fire(state);
-  }
-
   /** Export connection configs without passwords. */
   exportConnections(): SqlConnectionConfigExport[] {
     return Array.from(this.connections.values()).map((c) => ({
@@ -283,13 +372,24 @@ export class SqlConnectionService {
     }));
   }
 
-  /** Import connection configs (without passwords). */
-  async importConnections(configs: SqlConnectionConfigExport[]): Promise<number> {
+  /** Import connection configs (without passwords).
+   * VC-P1-8: skip entries that would be created with an empty password
+   * unless the caller explicitly opts in via `allowEmptyPassword`. */
+  async importConnections(
+    configs: SqlConnectionConfigExport[],
+    opts: { allowEmptyPassword?: boolean; passwords?: Record<string, string> } = {},
+  ): Promise<{ imported: number; skipped: number }> {
     let imported = 0;
+    let skipped = 0;
     for (const config of configs) {
-      await this.addConnection(config, '');
+      const password = opts.passwords?.[config.name ?? config.host] ?? opts.passwords?.[config.host] ?? '';
+      if (!password && !opts.allowEmptyPassword) {
+        skipped++;
+        continue;
+      }
+      await this.addConnection(config, password);
       imported++;
     }
-    return imported;
+    return { imported, skipped };
   }
 }

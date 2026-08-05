@@ -2,8 +2,8 @@ package events
 
 import (
 	"net/http"
-	"strings"
 
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/security"
 	"github.com/gorilla/websocket"
 )
 
@@ -30,22 +30,7 @@ type EventBusAdapter struct {
 // apply, but the adapter is allowed to publish the secret
 // as the selected subprotocol via the responseHeader.
 var wsUpgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool {
-		origin := r.Header.Get("Origin")
-		if origin == "" {
-			return true // Same-origin requests carry no Origin header.
-		}
-		if strings.HasPrefix(origin, "http://localhost") ||
-			strings.HasPrefix(origin, "http://127.0.0.1") ||
-			strings.HasPrefix(origin, "http://[::1]") {
-			return true
-		}
-		// file:// is the protocol used by Electron / desktop shells.
-		if strings.HasPrefix(origin, "file://") {
-			return true
-		}
-		return false
-	},
+	CheckOrigin:     security.IsSafeWebSocketOrigin,
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
 }
@@ -89,13 +74,17 @@ func (a *EventBusAdapter) Serve(w http.ResponseWriter, r *http.Request) {
 	_, ch, unsubscribe := a.Hub.SubscribeWithID(workspaceID, 0)
 	defer unsubscribe()
 
-	// Drain the channel into the WebSocket connection.
-	// Errors from WriteMessage end the goroutine. The
-	// browser will reconnect via the runtime-connection
-	// service's exponential backoff.
-	for ev := range ch {
-		if err := conn.WriteJSON(ev); err != nil {
+	ctx := r.Context()
+	// Unsubscribe does not close the data channel (avoids send-on-closed
+	// races). Exit via request context or a write error.
+	for {
+		select {
+		case <-ctx.Done():
 			return
+		case ev := <-ch:
+			if err := conn.WriteJSON(ev); err != nil {
+				return
+			}
 		}
 	}
 }

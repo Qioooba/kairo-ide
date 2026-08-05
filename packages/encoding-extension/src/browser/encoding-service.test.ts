@@ -276,3 +276,76 @@ test('toTheiaEncodingId maps every Kairo label to a Theia SUPPORTED_ENCODINGS id
   assert.strictEqual(toTheiaEncodingId('gbk'), 'gbk');
   assert.strictEqual(toTheiaEncodingId('GBK'), 'gbk');
 });
+
+// BD-P0-1: utf-8-bom must survive write/read via toTheiaEncodingId('utf8bom'),
+// not normalizeEncodingLabel which collapses it to utf-8 (silently drops BOM).
+test('toTheiaEncodingId preserves utf-8-bom as utf8bom (BD-P0-1)', async () => {
+  const { toTheiaEncodingId, normalizeEncodingLabel } = await import('./encoding-utils');
+  assert.strictEqual(toTheiaEncodingId('utf-8-bom'), 'utf8bom');
+  assert.strictEqual(normalizeEncodingLabel('utf-8-bom'), 'utf-8',
+    'normalizeEncodingLabel still strips BOM for TextDecoder labels');
+  // write/read paths must use toTheiaEncodingId, not normalizeEncodingLabel
+  assert.notStrictEqual(toTheiaEncodingId('utf-8-bom'), normalizeEncodingLabel('utf-8-bom'));
+});
+
+test('writeWithEncoding / readWithEncoding use toTheiaEncodingId (BD-P0-1)', async () => {
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const src = fs.readFileSync(path.join(__dirname, 'encoding-service.ts'), 'utf8');
+  assert.match(src, /encoding:\s*toTheiaEncodingId\(/,
+    'read/write must pass toTheiaEncodingId to FileService');
+  assert.doesNotMatch(
+    src,
+    /fileService\.(read|write)\([^)]*normalizeEncodingLabel/,
+    'FileService read/write must not use normalizeEncodingLabel (drops BOM)',
+  );
+});
+
+// =========================================================================
+// S3 EncodingIdent — Kairo ↔ Theia ↔ Go domain unification
+// =========================================================================
+
+test('toKairoEncodingId / toTheiaEncodingId / toGoEncodingId round-trip (S3)', async () => {
+  const {
+    toKairoEncodingId, toTheiaEncodingId, toGoEncodingId, sameEncodingId,
+  } = await import('./encoding-utils');
+
+  assert.strictEqual(toKairoEncodingId('utf8'), 'utf-8');
+  assert.strictEqual(toKairoEncodingId('utf8bom'), 'utf-8-bom');
+  assert.strictEqual(toKairoEncodingId('iso88591'), 'iso-8859-1');
+  assert.strictEqual(toKairoEncodingId('utf-8'), 'utf-8');
+  assert.strictEqual(toGoEncodingId('utf8'), 'utf-8');
+  assert.strictEqual(toGoEncodingId('utf8bom'), 'utf-8-bom');
+
+  // Idempotent Theia conversion
+  assert.strictEqual(toTheiaEncodingId('utf8'), 'utf8');
+  assert.strictEqual(toTheiaEncodingId('utf-8'), 'utf8');
+  assert.strictEqual(toTheiaEncodingId('utf8bom'), 'utf8bom');
+
+  assert.ok(sameEncodingId('utf-8', 'utf8'));
+  assert.ok(sameEncodingId('utf-8-bom', 'utf8bom'));
+  assert.ok(sameEncodingId('GBK', 'gbk'));
+  assert.ok(!sameEncodingId('utf-8', 'gbk'));
+  assert.ok(!sameEncodingId('utf-8', 'utf-8-bom'));
+});
+
+test('Convert command uses workspaceId, FileUri.fsPath, and Go ids (BD-P1-6)', async () => {
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const src = fs.readFileSync(path.join(__dirname, 'encoding-commands.ts'), 'utf8');
+  assert.doesNotMatch(src, /workspaceId:\s*['"]['"]/, 'must not hardcode empty workspaceId');
+  assert.match(src, /FileUri\.fsPath\(target\)/, 'must use OS fs path, not URI path.toString()');
+  assert.match(src, /toGoEncodingId\(current\)/, 'from must be Go-canonical');
+  assert.match(src, /toGoEncodingId\(picked\)/, 'to must be Go-canonical');
+  assert.match(src, /sameEncodingId\(picked,\s*current\)/, 'Already-using must compare same domain (BD-P1-8)');
+});
+
+test('encoding-service cache stores Kairo ids under URI keys (BD-P1-7)', async () => {
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const src = fs.readFileSync(path.join(__dirname, 'encoding-service.ts'), 'utf8');
+  assert.match(src, /toKairoEncodingId\(r\.encoding\)/, 'detect caches Kairo id');
+  assert.match(src, /FileUri\.create\(args\.file\)\.toString\(\)/, 'detect caches under URI key');
+  assert.match(src, /this\.cache\.set\(key,\s*kairo\)/, 'setEncodingFor caches Kairo id');
+  assert.match(src, /clearProjectScopedOverrides/, 'project overrides are releasable (BD-P1-10)');
+});

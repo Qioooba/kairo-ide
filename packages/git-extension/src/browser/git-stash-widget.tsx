@@ -79,6 +79,9 @@ const StashComponent: React.FC<StashWidgetProps> = ({ stashService, i18n }) => {
     };
 
     const handleDrop = async (ref?: string) => {
+        if (!confirm(t('widget.git.stash.dropConfirm'))) {
+            return;
+        }
         setError('');
         try {
             await stashService.drop(ref);
@@ -102,6 +105,9 @@ const StashComponent: React.FC<StashWidgetProps> = ({ stashService, i18n }) => {
     };
 
     const handleClear = async () => {
+        if (!confirm(t('widget.git.stash.clearConfirm'))) {
+            return;
+        }
         setError('');
         try {
             await stashService.clear();

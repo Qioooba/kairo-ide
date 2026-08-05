@@ -52,6 +52,22 @@ func (f *fakeJDTLS) Status() (json.RawMessage, error) {
 	})
 }
 
+func (f *fakeJDTLS) DistributionStatus() (json.RawMessage, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	version := f.version
+	if version == "" {
+		version = "1.55.0"
+	}
+	return json.Marshal(map[string]interface{}{
+		"installed":   true,
+		"version":     version,
+		"home":        "/fake/jdtls",
+		"launcherJar": "/fake/jdtls/plugins/launcher.jar",
+		"source":      "test",
+	})
+}
+
 func (f *fakeJDTLS) Prepare(ctx context.Context) (json.RawMessage, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -522,6 +538,44 @@ func TestSecretHeader_RequiredForProtectedRoutes(t *testing.T) {
 	srv.Handler().ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("audit with correct X-Kairo-Secret: status = %d, want 200, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestRequireAuth_SessionTokenEnforced verifies RequireAuth rejects
+// unprotected routes without a session when no secret is set, while
+// health remains public.
+func TestRequireAuth_SessionTokenEnforced(t *testing.T) {
+	logger := log.New("test").WithLevel(log.LevelWarn)
+	auditLog, err := audit.New(t.TempDir() + "/audit.log")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+
+	auth := &fakeAuth{}
+	srv := NewServer(&Services{Auth: auth}, logger, auditLog, "test-0.1.0", "")
+	srv.SetRequireAuth(true)
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/audit", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("audit without session under RequireAuth: status = %d, want 401", rr.Code)
+	}
+
+	rr = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/audit", nil)
+	req.Header.Set("Authorization", "Bearer session-ok")
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code == http.StatusUnauthorized {
+		t.Fatalf("audit with session should not be 401, body=%s", rr.Body.String())
+	}
+
+	rr = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/health", nil)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("health should remain public: status = %d", rr.Code)
 	}
 }
 
@@ -1005,6 +1059,12 @@ func (f *fakeAuth) Login(payload json.RawMessage, w http.ResponseWriter) (json.R
 	return json.Marshal(map[string]any{"token": "test-token", "user": "admin"})
 }
 func (f *fakeAuth) Logout(r *http.Request, w http.ResponseWriter) error { return nil }
+func (f *fakeAuth) ValidateSession(token string) error {
+	if token == "" {
+		return errors.New("session token required")
+	}
+	return nil
+}
 
 // TestHealth_RejectsNonGET tests that the health endpoint rejects non-GET methods.
 func TestHealth_RejectsNonGET(t *testing.T) {

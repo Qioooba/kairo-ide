@@ -73,6 +73,22 @@ func TestEOL(t *testing.T) {
 	}
 }
 
+func TestConvertEOL(t *testing.T) {
+	in := []byte("a\r\nb\nc\rd")
+	if got := ConvertEOL(in, "lf"); string(got) != "a\nb\nc\nd" {
+		t.Fatalf("lf: got %q", got)
+	}
+	if got := ConvertEOL(in, "crlf"); string(got) != "a\r\nb\r\nc\r\nd" {
+		t.Fatalf("crlf: got %q", got)
+	}
+	if got := ConvertEOL(in, "cr"); string(got) != "a\rb\rc\rd" {
+		t.Fatalf("cr: got %q", got)
+	}
+	if got := ConvertEOL(in, ""); string(got) != string(in) {
+		t.Fatalf("empty eol must be no-op: got %q", got)
+	}
+}
+
 func TestEncodeDecodeRoundTrip(t *testing.T) {
 	original := "你好，World!"
 	encoded, err := Encode([]byte(original), GBK, Aliases{})

@@ -57,9 +57,10 @@ const GitCommitComponent: React.FC<GitCommitProps> = ({ store, preCommitChecker,
 
         // Load template preferences
         templateService.loadTemplatePreferences();
-        setTemplates(templateService.getTemplates());
-        setSelectedTemplateIdx(templateService.getSelectedTemplate ?
-            templates.indexOf(templateService.getSelectedTemplate()) : 0);
+        const loaded = templateService.getTemplates();
+        setTemplates(loaded);
+        const selected = templateService.getSelectedTemplate?.();
+        setSelectedTemplateIdx(selected ? Math.max(0, loaded.indexOf(selected)) : 0);
 
         // Load suggestions
         templateService.loadRecentCommits().then(s => setSuggestions(s));
@@ -159,7 +160,7 @@ const GitCommitComponent: React.FC<GitCommitProps> = ({ store, preCommitChecker,
         setCommitResult('');
         setCommitResultType('success');
         try {
-            const result = await store.commit(message.trim(), amend);
+            const result = await store.commit(message.trim(), { amend, signoff, noVerify });
             setCommitResult(t('widget.git.commit.successWithHash', { hash: result.hash }));
             setCommitResultType('success');
             setMessage('');

@@ -274,6 +274,12 @@ function execFileWithTimeout(
         const child = execFile(command, args, {
             ...options,
             timeout: timeoutMs,
+            env: {
+                ...(typeof process !== 'undefined' ? process.env : {}),
+                LANG: 'C',
+                LC_ALL: 'C',
+                LANGUAGE: 'C',
+            },
         }, (error, stdout, stderr) => {
             if (error) {
                 reject(Object.assign(error, { stdout, stderr }));

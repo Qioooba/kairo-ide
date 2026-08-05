@@ -62,7 +62,7 @@ test('debug callstack widget file exists and exports correct class', () => {
   assert.match(widget, /KAIRO_DEBUG_CALLSTACK_FACTORY_ID/);
   assert.match(widget, /class KairoDebugCallStackWidget extends ReactWidget/);
   assert.match(widget, /DebugSessionManager/);
-  assert.match(widget, /OpenerService/);
+  assert.match(widget, /KairoDebugSessionService/);
 });
 
 test('debug breakpoints widget file exists and exports correct class', () => {
@@ -162,7 +162,7 @@ test('debug session service provides centralized session state', () => {
   const service = read('packages/theia-product/src/main/browser/kairo-debug-session-service.ts');
   assert.match(service, /KairoDebugSessionService/);
   assert.match(service, /class KairoDebugSessionService/);
-  assert.match(service, /onDidStateChange/);
+  assert.match(service, /onDidChangeState/);
   assert.match(service, /currentState/);
   assert.match(service, /currentSession/);
   assert.match(service, /refreshState\(\)/);
@@ -221,60 +221,27 @@ test('toolbar widget uses centralized session service', () => {
 
 // ── Phase 3+: New Debug Widget Tests ─────────────────────────────
 
-test('module selector widget factory ID is defined in kairo-factory-ids.ts', () => {
+test('java hotswap factory ID defined; empty-shell module/hotswap-status IDs removed', () => {
   const factoryIds = read('packages/theia-product/src/main/browser/kairo-factory-ids.ts');
-  assert.match(factoryIds, /KAIRO_DEBUG_MODULE_SELECTOR_FACTORY_ID/);
-  assert.match(factoryIds, /kairo-debug-module-selector/);
-});
-
-test('condition editor widget factory ID is defined in kairo-factory-ids.ts', () => {
-  const factoryIds = read('packages/theia-product/src/main/browser/kairo-factory-ids.ts');
+  assert.match(factoryIds, /KAIRO_JAVA_HOTSWAP_FACTORY_ID/);
+  assert.doesNotMatch(factoryIds, /KAIRO_DEBUG_MODULE_SELECTOR_FACTORY_ID/);
+  assert.doesNotMatch(factoryIds, /KAIRO_DEBUG_HOTSWAP_STATUS_FACTORY_ID/);
   assert.match(factoryIds, /KAIRO_DEBUG_CONDITION_EDITOR_FACTORY_ID/);
-  assert.match(factoryIds, /kairo-debug-condition-editor/);
 });
 
-test('hotswap status widget factory ID is defined in kairo-factory-ids.ts', () => {
-  const factoryIds = read('packages/theia-product/src/main/browser/kairo-factory-ids.ts');
-  assert.match(factoryIds, /KAIRO_DEBUG_HOTSWAP_STATUS_FACTORY_ID/);
-  assert.match(factoryIds, /kairo-debug-hotswap-status/);
-});
-
-test('new debug widgets are registered in the frontend module', () => {
+test('empty-shell module selector / hotswap status are not registered in frontend module', () => {
   const frontendModule = read('packages/theia-product/src/main/browser/kairo-product-frontend-module.ts');
-  assert.match(frontendModule, /KairoDebugModuleSelectorWidget/);
+  assert.doesNotMatch(frontendModule, /KairoDebugModuleSelectorWidget/);
+  assert.doesNotMatch(frontendModule, /KairoDebugHotSwapStatusWidget/);
   assert.match(frontendModule, /KairoDebugConditionEditorWidget/);
-  assert.match(frontendModule, /KairoDebugHotSwapStatusWidget/);
-  assert.match(frontendModule, /KAIRO_DEBUG_MODULE_SELECTOR_FACTORY_ID/);
   assert.match(frontendModule, /KAIRO_DEBUG_CONDITION_EDITOR_FACTORY_ID/);
-  assert.match(frontendModule, /KAIRO_DEBUG_HOTSWAP_STATUS_FACTORY_ID/);
 });
 
-test('module selector widget file exists and follows ReactWidget pattern', () => {
-  const widget = read('packages/theia-product/src/main/browser/debug-module-selector-widget.tsx');
-  assert.match(widget, /KairoDebugModuleSelectorWidget/);
-  assert.match(widget, /KAIRO_DEBUG_MODULE_SELECTOR_FACTORY_ID/);
-  assert.match(widget, /class KairoDebugModuleSelectorWidget extends ReactWidget/);
-  assert.match(widget, /@postConstruct\(\)/);
-  assert.match(widget, /protected render\(\)/);
-  assert.match(widget, /addClass\('kairo-widget'\)/);
-});
-
-test('module selector widget has toggle, select all, and deselect all', () => {
-  const widget = read('packages/theia-product/src/main/browser/debug-module-selector-widget.tsx');
-  assert.match(widget, /toggleModule/);
-  assert.match(widget, /selectAll/);
-  assert.match(widget, /deselectAll/);
-  assert.match(widget, /setModules/);
-  assert.match(widget, /ModuleInfo/);
-  assert.match(widget, /ModuleSelectorState/);
-});
-
-test('module selector widget has enabled/disabled state per module', () => {
-  const widget = read('packages/theia-product/src/main/browser/debug-module-selector-widget.tsx');
-  assert.match(widget, /m\.enabled/);
-  assert.match(widget, /allEnabled/);
-  assert.match(widget, /checkbox/);
-  assert.match(widget, /breakpointCount/);
+test('java hotswap widget is wired in java-extension frontend module', () => {
+  const javaModule = read('packages/java-extension/src/browser/index.ts');
+  assert.match(javaModule, /HotSwapWidget/);
+  assert.match(javaModule, /KAIRO_HOTSWAP_WIDGET_ID/);
+  assert.match(javaModule, /WidgetFactory/);
 });
 
 test('condition editor widget file exists and follows ReactWidget pattern', () => {
@@ -302,7 +269,10 @@ test('condition editor widget has expression validation', () => {
   assert.match(widget, /validateCondition/);
   assert.match(widget, /isValid/);
   assert.match(widget, /validationMessage/);
-  assert.match(widget, /Invalid expression syntax/);
+  assert.match(widget, /invalidExpression/);
+  // TP-P2-4: no length>0 fallback that accepts arbitrary non-empty strings
+  assert.doesNotMatch(widget, /condition\.trim\(\)\.length\s*>\s*0/);
+  assert.match(widget, /hasCompare|hasLogic|hasCallOrMember/);
 });
 
 test('condition editor widget has AND/OR/NOT operator support', () => {
@@ -318,93 +288,139 @@ test('condition editor widget has clear and apply buttons', () => {
   const widget = read('packages/theia-product/src/main/browser/debug-condition-editor-widget.tsx');
   assert.match(widget, /onClear/);
   assert.match(widget, /onApply/);
-  assert.match(widget, /Clear/);
-  assert.match(widget, /Apply/);
+  assert.match(widget, /conditionEditor\.clear/);
+  assert.match(widget, /conditionEditor\.apply/);
 });
 
 test('condition editor widget has thread filter input', () => {
   const widget = read('packages/theia-product/src/main/browser/debug-condition-editor-widget.tsx');
   assert.match(widget, /threadFilter/);
-  assert.match(widget, /Thread ID or Name Pattern/);
+  assert.match(widget, /conditionEditor\.threadLabel/);
 });
 
 test('condition editor widget has instance filter input', () => {
   const widget = read('packages/theia-product/src/main/browser/debug-condition-editor-widget.tsx');
   assert.match(widget, /instanceFilter/);
-  assert.match(widget, /Instance Filter/);
+  assert.match(widget, /conditionEditor\.instanceLabel/);
 });
 
 test('condition editor widget has stack depth filter inputs', () => {
   const widget = read('packages/theia-product/src/main/browser/debug-condition-editor-widget.tsx');
   assert.match(widget, /stackDepthMin/);
   assert.match(widget, /stackDepthMax/);
-  assert.match(widget, /Call Stack Depth Range/);
+  assert.match(widget, /conditionEditor\.stackLabel|stackDepth/);
 });
 
 test('condition editor widget has hit count filter', () => {
   const widget = read('packages/theia-product/src/main/browser/debug-condition-editor-widget.tsx');
   assert.match(widget, /hitCountMode/);
   assert.match(widget, /hitCountTarget/);
-  assert.match(widget, /Hit Count Condition/);
+  assert.match(widget, /conditionEditor\.hitCount|hitCount/);
 });
 
-test('hotswap status widget file exists and follows ReactWidget pattern', () => {
-  const widget = read('packages/theia-product/src/main/browser/debug-hotswap-status-widget.tsx');
-  assert.match(widget, /KairoDebugHotSwapStatusWidget/);
-  assert.match(widget, /KAIRO_DEBUG_HOTSWAP_STATUS_FACTORY_ID/);
-  assert.match(widget, /class KairoDebugHotSwapStatusWidget extends ReactWidget/);
-  assert.match(widget, /@postConstruct\(\)/);
-  assert.match(widget, /protected render\(\)/);
-  assert.match(widget, /addClass\('kairo-widget'\)/);
+test('debug console addEntry is immutable and capped (TP-P2-7)', () => {
+  const source = read('packages/theia-product/src/main/browser/debug-console-widget.tsx');
+  assert.match(source, /MAX_ENTRIES|MAX_CONSOLE_ENTRIES/);
+  assert.match(source, /slice\(-/);
+  assert.doesNotMatch(source, /this\.state\.entries\.push\(/);
 });
 
-test('hotswap status widget has all status types', () => {
-  const widget = read('packages/theia-product/src/main/browser/debug-hotswap-status-widget.tsx');
-  assert.match(widget, /HotSwapStatusType/);
-  assert.match(widget, /pending/);
-  assert.match(widget, /in_progress/);
-  assert.match(widget, /completed/);
-  assert.match(widget, /failed/);
-  assert.match(widget, /rolled_back/);
-  assert.match(widget, /not_supported/);
+test('debug console subscribes to DAP output events (TP-P2-20)', () => {
+  const source = read('packages/theia-product/src/main/browser/debug-console-widget.tsx');
+  assert.match(source, /session\.on\('output'/);
+  assert.match(source, /handleDapOutput/);
+  assert.match(source, /stderr/);
+  assert.match(source, /stdout/);
 });
 
-test('hotswap status widget has rollback and rollback all', () => {
-  const widget = read('packages/theia-product/src/main/browser/debug-hotswap-status-widget.tsx');
-  assert.match(widget, /onRollback/);
-  assert.match(widget, /onRollbackAll/);
-  assert.match(widget, /rollback\(/);
-  assert.match(widget, /rollbackAll\(/);
-  assert.match(widget, /Rollback All/);
+test('debug watches idea uses immutable updates and workspace storage (TP-P2-8/9)', () => {
+  const source = read('packages/theia-product/src/main/browser/debug-watches-idea.tsx');
+  assert.match(source, /workspaceKey/);
+  assert.match(source, /WATCH_STORAGE_PREFIX|kairo-debug-watches:/);
+  assert.match(source, /entriesRef/);
+  assert.match(source, /updateChildTree/);
+  assert.doesNotMatch(source, /entry\.children\s*=/);
+  assert.doesNotMatch(source, /child\.children\s*=/);
 });
 
-test('hotswap status widget has clear history', () => {
-  const widget = read('packages/theia-product/src/main/browser/debug-hotswap-status-widget.tsx');
-  assert.match(widget, /clearHistory\(\)/);
-  assert.match(widget, /onClear/);
+test('debug breakpoints Enable/Disable All uses per-breakpoint API (TP-P2-13)', () => {
+  const source = read('packages/theia-product/src/main/browser/debug-breakpoints-widget.tsx');
+  assert.match(source, /enableAllBreakpoints/);
+  assert.doesNotMatch(source, /breakpointsEnabled\s*=\s*!/);
 });
 
-test('hotswap status widget has addEntry method', () => {
-  const widget = read('packages/theia-product/src/main/browser/debug-hotswap-status-widget.tsx');
-  assert.match(widget, /addEntry\(/);
-  assert.match(widget, /className/);
-  assert.match(widget, /methodsChanged/);
-  assert.match(widget, /errorMessage/);
+test('debug inline values avoid == and full-file scans (TP-P2-14)', () => {
+  const source = read('packages/theia-product/src/main/browser/debug-inline-values.ts');
+  assert.match(source, /stripStringLiterals/);
+  assert.match(source, /collectScanLines/);
+  assert.match(source, /getVisibleRanges/);
+  assert.match(source, /=\(\?!=\)/);
 });
 
-test('hotswap status widget has canRedefine support', () => {
-  const widget = read('packages/theia-product/src/main/browser/debug-hotswap-status-widget.tsx');
-  assert.match(widget, /setCanRedefine/);
-  assert.match(widget, /canRedefine/);
-  assert.match(widget, /REDEFINE OK/);
-  assert.match(widget, /UNAVAILABLE/);
+test('debug collapsible section has aria keyboard support (TP-P3-7)', () => {
+  const source = read('packages/theia-product/src/main/browser/debug-collapsible-section.tsx');
+  assert.match(source, /aria-expanded/);
+  assert.match(source, /role="button"/);
+  assert.match(source, /tabIndex=\{0\}/);
+  assert.match(source, /Enter/);
 });
 
-test('hotswap status widget has status badge rendering', () => {
-  const widget = read('packages/theia-product/src/main/browser/debug-hotswap-status-widget.tsx');
-  assert.match(widget, /statusBadge/);
-  assert.match(widget, /codicon-pass/);
-  assert.match(widget, /codicon-error/);
-  assert.match(widget, /codicon-discard/);
-  assert.match(widget, /codicon-sync~spin/);
+test('callstack widget has no dead _mapStackTraceFrame (TP-P3-2)', () => {
+  const source = read('packages/theia-product/src/main/browser/debug-callstack-widget.tsx');
+  assert.doesNotMatch(source, /_mapStackTraceFrame/);
+});
+
+test('callstack widget uses focusFrame API for honest frame selection (TP-P1-4)', () => {
+  const callstack = read('packages/theia-product/src/main/browser/debug-callstack-widget.tsx');
+  const service = read('packages/theia-product/src/main/browser/kairo-debug-session-service.ts');
+  const framesIdea = read('packages/theia-product/src/main/browser/debug-frames-idea.tsx');
+
+  assert.match(service, /async focusFrame\(frameId: number\)/);
+  assert.match(service, /thread\.currentFrame = target/);
+  assert.match(service, /thread\.fetchFrames\(\)/);
+
+  assert.match(callstack, /debugSessionService\.focusFrame/);
+  assert.match(callstack, /thread\.fetchFrames\(\)/);
+  assert.doesNotMatch(callstack, /thread\.currentFrame\s*=/);
+  assert.match(callstack, /focused\.open\(/);
+
+  assert.match(framesIdea, /sessionService\.focusFrame/);
+  assert.doesNotMatch(framesIdea, /setCurrentFrameId\(frame\.id\)[\s\S]*onSelectFrame/);
+});
+
+test('run configurations delete uses ConfirmDialog (TP-P2-12)', () => {
+  const source = read('packages/theia-product/src/main/browser/kairo-run-configurations-widget.tsx');
+  assert.match(source, /ConfirmDialog/);
+  assert.doesNotMatch(source, /window\.confirm/);
+});
+
+test('local history render avoids innerHTML table (TP-P2-16)', () => {
+  const source = read('packages/theia-product/src/main/browser/kairo-local-history.ts');
+  assert.match(source, /replaceChildren|createElement\('table'\)/);
+  assert.doesNotMatch(source, /this\.node\.innerHTML\s*=\s*`[\s\S]*kairo-deployments-table/);
+});
+
+test('status bar avoids bare spaces and empty workspaceId (TP-P2-19)', () => {
+  const source = read('packages/theia-product/src/main/browser/kairo-status-bar-contribution.ts');
+  assert.doesNotMatch(source, /workspaceId:\s*''/);
+  assert.match(source, /workspaceContext\.context\?\.workspaceId/);
+  assert.match(source, /extras \?/);
+});
+
+test('debug hover/variables use theme CSS variables without Darcula hex (TP-P2-18)', () => {
+  const hover = read('packages/theia-product/src/main/browser/debug-hover-widget.tsx');
+  const vars = read('packages/theia-product/src/main/browser/debug-variables-idea.tsx');
+  assert.match(hover, /--theia-widget-shadow|--theia-editor-inactiveSelectionBackground/);
+  assert.doesNotMatch(vars, /#6a8759|#6897bb|#a9b7c6|#c0c0c0|#b5b6e3/);
+});
+
+test('browser keymap smartSelect avoids ctrl+w remap overlap (TP-P3-9)', () => {
+  const source = read('packages/theia-product/src/main/browser/kairo-idea-windows-keymap.ts');
+  assert.match(source, /smartSelect\.expand/);
+  assert.match(source, /alt\+shift\+w/);
+  // Remap table must not also claim ctrl+w (handled explicitly for smartSelect)
+  const remapBlock = source.match(/const BROWSER_CHROME_REMAPS[\s\S]*?\n\};/);
+  assert.ok(remapBlock, 'BROWSER_CHROME_REMAPS block present');
+  assert.doesNotMatch(remapBlock[0], /'ctrl\+w'/);
+  assert.match(source, /smartSelect\.expand[\s\S]*alt\+shift\+w|alt\+shift\+w[\s\S]*smartSelect\.expand/);
 });

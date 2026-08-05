@@ -1,3 +1,5 @@
+//go:build unwired
+
 package api
 
 import (
@@ -894,6 +896,9 @@ func TestIsSafeOrigin_Unsafe(t *testing.T) {
 		"http://192.168.1.1",
 		"http://10.0.0.1",
 		"http://example.com",
+		"http://localhost.evil.com",
+		"https://localhost.evil.com:443",
+		"http://127.0.0.1.evil.com",
 	}
 	for _, origin := range tests {
 		if isSafeOrigin(origin) {

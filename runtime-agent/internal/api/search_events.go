@@ -10,30 +10,15 @@ import (
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/api/protocol"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/encoding"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/search"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/security"
 	"github.com/gorilla/websocket"
 )
 
 // searchWSUpgrader is a WebSocket upgrader for streaming search.
-// Origin policy matches the events upgrader (loopback + file://).
+// Origin policy matches the events upgrader (exact loopback hostname / file://;
+// empty Origin only from loopback RemoteAddr).
 var searchWSUpgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool {
-		origin := r.Header.Get("Origin")
-		if origin == "" {
-			return true
-		}
-		if strings.HasPrefix(origin, "http://localhost") ||
-			strings.HasPrefix(origin, "https://localhost") ||
-			strings.HasPrefix(origin, "http://127.0.0.1") ||
-			strings.HasPrefix(origin, "https://127.0.0.1") ||
-			strings.HasPrefix(origin, "http://[::1]") ||
-			strings.HasPrefix(origin, "https://[::1]") {
-			return true
-		}
-		if strings.HasPrefix(origin, "file://") {
-			return true
-		}
-		return false
-	},
+	CheckOrigin:     security.IsSafeWebSocketOrigin,
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
 }
@@ -121,6 +106,15 @@ func (s *Server) handleSearchStream(w http.ResponseWriter, r *http.Request) {
 	if root == "" {
 		sendSearchError(conn, "rootPath or workspaceId is required")
 		return
+	}
+
+	if s.Services != nil && s.Services.Sandbox != nil {
+		authorized, authErr := s.Services.Sandbox.AuthorizeReadAbs(root)
+		if authErr != nil {
+			sendSearchError(conn, authErr.Error())
+			return
+		}
+		root = authorized
 	}
 
 	// Clear the read deadline for streaming.

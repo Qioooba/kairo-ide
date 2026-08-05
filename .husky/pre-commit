@@ -162,8 +162,8 @@ if command -v npx >/dev/null 2>&1; then
   if [ -n "$STAGED_JS_TS_FILES" ]; then
     echo "  Found $(echo "$STAGED_JS_TS_FILES" | wc -l | tr -d ' ') staged JS/TS file(s)"
 
-    # Run eslint on staged files only
-    echo "$STAGED_JS_TS_FILES" | while read -r file; do
+    # Run eslint on staged files only (for-loop so HAS_ERRORS is not lost in a subshell)
+    for file in $STAGED_JS_TS_FILES; do
       if [ -f "$REPO_ROOT/$file" ]; then
         npx eslint --max-warnings 0 "$REPO_ROOT/$file" 2>&1 || {
           echo "${RED}  Lint failed for $file${NC}"

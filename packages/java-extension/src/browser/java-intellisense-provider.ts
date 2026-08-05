@@ -212,7 +212,12 @@ const JAVA_COMMON_METHODS: { label: string; detail: string; insertText: string; 
   { label: 'getWriter', detail: 'PrintWriter getWriter()', insertText: 'getWriter()', doc: 'Returns a PrintWriter for sending character text.' },
 ];
 
-// Common code snippets
+// Common code snippets (fallback IntelliSense when JDT LS is down).
+// JV-P3-5: do not re-declare sout / psvm / fori (and other IDEA live-
+// template classics) here — they are owned by java-live-templates.ts
+// and registering both yields duplicate completion items.
+// Keep JAVA_SNIPPETS free of live-template overlaps (JV-P3-5):
+// foreach/while/dowhile/ifelse/switch/serr live in java-live-templates.ts.
 const JAVA_SNIPPETS: { label: string; detail: string; insertText: string; doc: string }[] = [
   {
     label: 'main', detail: 'main method', doc: 'Java application entry point.',
@@ -227,18 +232,6 @@ const JAVA_SNIPPETS: { label: string; detail: string; insertText: string; doc: s
     insertText: 'public interface ${1:InterfaceName} {\n\t${2}\n}',
   },
   {
-    label: 'fori', detail: 'for loop with index', doc: 'Indexed for loop.',
-    insertText: 'for (int ${1:i} = 0; ${1:i} < ${2:max}; ${1:i}++) {\n\t${3}\n}',
-  },
-  {
-    label: 'foreach', detail: 'enhanced for loop', doc: 'Enhanced for-each loop.',
-    insertText: 'for (${1:Type} ${2:item} : ${3:collection}) {\n\t${4}\n}',
-  },
-  {
-    label: 'ifelse', detail: 'if-else statement', doc: 'If-else conditional.',
-    insertText: 'if (${1:condition}) {\n\t${2}\n} else {\n\t${3}\n}',
-  },
-  {
     label: 'trycatch', detail: 'try-catch block', doc: 'Exception handling block.',
     insertText: 'try {\n\t${1}\n} catch (${2:Exception} ${3:e}) {\n\t${4}\n}',
   },
@@ -247,36 +240,12 @@ const JAVA_SNIPPETS: { label: string; detail: string; insertText: string; doc: s
     insertText: 'try {\n\t${1}\n} catch (${2:Exception} ${3:e}) {\n\t${4}\n} finally {\n\t${5}\n}',
   },
   {
-    label: 'sout', detail: 'System.out.println', doc: 'Print to standard output.',
-    insertText: 'System.out.println(${1});',
-  },
-  {
-    label: 'serr', detail: 'System.err.println', doc: 'Print to standard error.',
-    insertText: 'System.err.println(${1});',
-  },
-  {
-    label: 'psvm', detail: 'public static void main', doc: 'Main method shorthand.',
-    insertText: 'public static void main(String[] args) {\n\t${1}\n}',
-  },
-  {
     label: 'getset', detail: 'getter and setter', doc: 'Getter and setter for a field.',
     insertText: 'public ${1:Type} get${2:Name}() {\n\treturn ${3:field};\n}\n\npublic void set${2:Name}(${1:Type} ${3:field}) {\n\tthis.${3:field} = ${3:field};\n}',
   },
   {
     label: 'synchronized', detail: 'synchronized block', doc: 'Thread-safe synchronized block.',
     insertText: 'synchronized (${1:lock}) {\n\t${2}\n}',
-  },
-  {
-    label: 'while', detail: 'while loop', doc: 'While loop.',
-    insertText: 'while (${1:condition}) {\n\t${2}\n}',
-  },
-  {
-    label: 'dowhile', detail: 'do-while loop', doc: 'Do-while loop.',
-    insertText: 'do {\n\t${1}\n} while (${2:condition});',
-  },
-  {
-    label: 'switch', detail: 'switch statement', doc: 'Switch statement.',
-    insertText: 'switch (${1:key}) {\n\tcase ${2:value}:\n\t\t${3}\n\t\tbreak;\n\tdefault:\n\t\t${4}\n\t\tbreak;\n}',
   },
   {
     label: 'enum', detail: 'enum declaration', doc: 'Enum type declaration.',
@@ -314,6 +283,45 @@ export interface JavaIntelliSenseDiagnostic {
 export class JavaIntelliSenseProvider {
   @inject(ILogger)
   protected readonly logger!: ILogger;
+
+  /**
+   * Keyword + common-type completions without needing the full file body
+   * or JDT LS — used when the language server is down / project not built.
+   */
+  provideBasicCompletions(linePrefix: string): JavaIntelliSenseCompletionResult {
+    const wordStart = this.findWordStart(linePrefix);
+    const currentWord = linePrefix.substring(wordStart).toLowerCase();
+    const items: JavaIntelliSenseCompletionItem[] = [];
+
+    for (const kw of JAVA_KEYWORDS) {
+      if (this.matches(kw.label, currentWord)) {
+        items.push({
+          label: kw.label,
+          kind: CIK.Keyword,
+          detail: kw.detail,
+          documentation: kw.doc,
+          sortText: '1' + kw.label,
+          filterText: kw.label,
+          insertText: kw.label,
+        });
+      }
+    }
+    for (const t of JAVA_COMMON_TYPES) {
+      if (this.matches(t.label, currentWord)) {
+        items.push({
+          label: t.label,
+          kind: CIK.Class,
+          detail: t.detail,
+          documentation: t.doc,
+          sortText: '2' + t.label,
+          filterText: t.label,
+          insertText: t.label,
+        });
+      }
+    }
+
+    return { isIncomplete: false, items };
+  }
 
   /**
    * Provide fallback completions for Java files.

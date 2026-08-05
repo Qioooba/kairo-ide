@@ -10,12 +10,20 @@ import * as monaco from '@theia/monaco-editor-core';
 import { FrontendApplicationContribution } from '@theia/core/lib/browser';
 import { injectable, inject, interfaces } from '@theia/core/shared/inversify';
 import { Disposable, DisposableCollection } from '@theia/core/lib/common/disposable';
-import { JavaCompletionProvider, JavaLanguageClient, JAVA_LANGUAGE_ID, JAVA_MONARCH, registerJavaLiveTemplates } from '@kairo/java-extension';
+import { FileService } from '@theia/filesystem/lib/browser/file-service';
+import { WorkspaceService } from '@theia/workspace/lib/browser/workspace-service';
+import { EditorManager } from '@theia/editor/lib/browser';
+import { JavaCompletionProvider, JavaLanguageClient, JAVA_LANGUAGE_ID, JAVA_MONARCH, registerJavaLiveTemplates, applyKairoLanguageEditorDefaults } from '@kairo/java-extension';
 import { JSP_LANGUAGE_ID, JSP_MONARCH } from './jsp-monarch';
 import { registerJspNavigation } from './jsp-navigation';
 import { registerJspFindUsages } from './jsp-find-usages';
 import { registerJspServletNavigation } from './jsp-servlet-nav';
-import { registerJspDebugCodeLens, registerJspBreakpointCommand, registerJspBreakpointEditorOpener } from './jsp-debug-breakpoint';
+import {
+  JspDebugBreakpointMapper,
+  registerJspDebugCodeLens,
+  registerJspBreakpointCommand,
+  registerJspBreakpointEditorOpener,
+} from './jsp-debug-breakpoint';
 import { WebXmlNavigationContribution } from './webxml-navigation';
 import { XmlDtdValidator } from './xml-dtd-validator';
 import { registerXmlDtdCompletion } from './xml-dtd-completion';
@@ -119,18 +127,36 @@ export class KairoJspLanguageContribution implements FrontendApplicationContribu
   @inject(WebXmlCompletionProvider)
   protected readonly webxmlCompletionProvider!: WebXmlCompletionProvider;
 
+  @inject(FileService)
+  protected readonly fileService!: FileService;
+
+  @inject(WorkspaceService)
+  protected readonly workspaceService!: WorkspaceService;
+
+  @inject(EditorManager)
+  protected readonly editorManager!: EditorManager;
+
+  @inject(JspDebugBreakpointMapper)
+  protected readonly jspDebugMapper!: JspDebugBreakpointMapper;
+
   protected subs = new DisposableCollection();
 
+  protected navServices(): { fileService: FileService; workspaceService: WorkspaceService } {
+    return { fileService: this.fileService, workspaceService: this.workspaceService };
+  }
+
   onStart(): void {
+    applyKairoLanguageEditorDefaults();
     registerJspLanguage();
     registerXmlLanguage();
     registerJsonLanguage();
     registerPropertiesLanguage();
-    this.subs.push(Disposable.create(() => registerJspNavigation().dispose()));
-    this.subs.push(Disposable.create(() => registerJspFindUsages().dispose()));
+    const nav = this.navServices();
+    this.subs.push(registerJspNavigation(nav));
+    this.subs.push(registerJspFindUsages(nav));
     this.subs.push(registerXmlDtdCompletion());
     this.subs.push(registerElExpressionProviders());
-    this.subs.push(registerElNavigation());
+    this.subs.push(registerElNavigation(nav));
     this.subs.push(registerXmlStructureView());
     this.subs.push(registerJspScriptletProviders(this.javaProvider));
     this.subs.push(registerJspScriptletJavaCompletion(this.javaProvider, this.javaClient));
@@ -146,10 +172,10 @@ export class KairoJspLanguageContribution implements FrontendApplicationContribu
     }));
     this.subs.push(registerJspScriptletDiagnostics(this.javaClient));
     this.subs.push(registerJspScriptletBackgrounds());
-    this.subs.push(Disposable.create(() => registerJspServletNavigation().dispose()));
+    this.subs.push(registerJspServletNavigation(nav));
     this.subs.push(registerJspDebugCodeLens());
-    this.subs.push(registerJspBreakpointCommand());
-    this.subs.push(registerJspBreakpointEditorOpener());
+    this.subs.push(registerJspBreakpointCommand(this.jspDebugMapper));
+    this.subs.push(registerJspBreakpointEditorOpener(this.editorManager, this.fileService));
     this.subs.push(registerJspTldCompletion(this.tldProvider));
     this.subs.push(monaco.languages.registerCompletionItemProvider('xml', this.webxmlCompletionProvider));
   }
@@ -160,6 +186,7 @@ export function bindJspExtension(bind: interfaces.Bind): void {
   bind(FrontendApplicationContribution).toService(KairoJspLanguageContribution);
   bind(WebXmlNavigationContribution).toSelf().inSingletonScope();
   bind(FrontendApplicationContribution).toService(WebXmlNavigationContribution);
+  bind(JspDebugBreakpointMapper).toSelf().inSingletonScope();
   bind(XmlDtdValidator).toSelf().inSingletonScope();
   bind(FrontendApplicationContribution).toService(XmlDtdValidator);
   bind(TldCompletionProvider).toSelf().inSingletonScope();

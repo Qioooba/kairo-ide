@@ -9,6 +9,9 @@ import { Disposable, DisposableCollection } from '@theia/core/lib/common/disposa
 
 const WORD_RE = /[A-Za-z_$][\w$]*/g;
 
+/** Cap scanned candidates so we don't walk every open buffer forever (JV-P2-3). */
+const MAX_HIPPIE_CANDIDATES = 80;
+
 interface HippieState {
   modelId: string;
   prefix: string;
@@ -21,11 +24,21 @@ interface HippieState {
 
 let state: HippieState | null = null;
 
-function collectWords(prefix: string, excludeUri: string): string[] {
+/** Skip ephemeral JSP virtual documents when scanning other buffers. */
+const VIRTUAL_URI_PREFIXES = ['jsp-scriptlet:'];
+
+/**
+ * Collect matching words from open models.
+ * Prefers the current model (`currentUri`), then other open buffers.
+ * Skips {@link excludeUri} and virtual JSP scriptlet URIs.
+ * Stops once {@link MAX_HIPPIE_CANDIDATES} unique matches are found.
+ */
+function collectWords(prefix: string, currentUri: string, excludeUri?: string): string[] {
   const lower = prefix.toLowerCase();
   const seen = new Set<string>();
   const out: string[] = [];
-  for (const model of monaco.editor.getModels()) {
+
+  const addFrom = (model: monaco.editor.ITextModel): boolean => {
     const text = model.getValue();
     WORD_RE.lastIndex = 0;
     let m: RegExpExecArray | null;
@@ -36,12 +49,27 @@ function collectWords(prefix: string, excludeUri: string): string[] {
       if (seen.has(w)) continue;
       seen.add(w);
       out.push(w);
+      if (out.length >= MAX_HIPPIE_CANDIDATES) return true;
     }
+    return false;
+  };
+
+  const shouldSkip = (uri: string): boolean =>
+    uri === currentUri
+    || (!!excludeUri && uri === excludeUri)
+    || VIRTUAL_URI_PREFIXES.some(p => uri.startsWith(p));
+
+  const models = monaco.editor.getModels();
+  const current = models.find(m => m.uri.toString() === currentUri);
+  if (current && addFrom(current)) {
+    return out;
   }
-  // Prefer words from other files slightly less — keep insertion order
-  // but put exact editor-local matches first by scanning current model last.
-  void excludeUri;
-  return out.sort((a, b) => a.length - b.length || a.localeCompare(b));
+  for (const model of models) {
+    const uri = model.uri.toString();
+    if (shouldSkip(uri)) continue;
+    if (addFrom(model)) break;
+  }
+  return out;
 }
 
 /**
@@ -49,10 +77,13 @@ function collectWords(prefix: string, excludeUri: string): string[] {
  * @param reverse when true, cycle backwards (Alt+Shift+/)
  */
 export function cycleHippieCompletion(reverse = false): boolean {
-  const editor = monaco.editor.getEditors().find(e => e.hasTextFocus()) ?? monaco.editor.getEditors()[0];
-  const model = editor?.getModel();
-  const position = editor?.getPosition();
-  if (!editor || !model || !position) {
+  const editor = monaco.editor.getEditors().find(e => e.hasTextFocus());
+  if (!editor) {
+    return false;
+  }
+  const model = editor.getModel();
+  const position = editor.getPosition();
+  if (!model || !position) {
     return false;
   }
 

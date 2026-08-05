@@ -26,6 +26,7 @@ import { MonacoEditor } from '@theia/monaco/lib/browser/monaco-editor';
 import { MessageService } from '@theia/core/lib/common/message-service';
 import { isOSX } from '@theia/core/lib/common/os';
 import URI from '@theia/core/lib/common/uri';
+import { KairoI18nService } from '@kairo/i18n';
 
 /** Minimal Monaco editor API surface used by the navigation contribution. */
 interface MonacoNamespace {
@@ -128,6 +129,9 @@ export class KairoNavigationContribution implements CommandContribution, Keybind
   @inject(QuickInputService)
   protected readonly quickInput!: QuickInputService;
 
+  @inject(KairoI18nService)
+  protected readonly i18n!: KairoI18nService;
+
   /** Navigation back history stack. */
   protected backStack: NavEntry[] = [];
 
@@ -199,18 +203,18 @@ export class KairoNavigationContribution implements CommandContribution, Keybind
   private async goToLine(): Promise<void> {
     const editor = this.editorManager.currentEditor?.editor;
     if (!(editor instanceof MonacoEditor)) {
-      this.messages.warn('No active editor.');
+      this.messages.warn(this.i18n.t('widget.editor.noActiveEditor'));
       return;
     }
 
     const totalLines = editor.document.lineCount;
     const input = await this.quickInput.input({
-      prompt: `Go to line (1-${totalLines}):`,
-      placeHolder: `${totalLines} lines`,
+      prompt: this.i18n.t('navigation.goToLinePrompt', { totalLines }),
+      placeHolder: this.i18n.t('navigation.goToLinePlaceholder', { totalLines }),
       validateInput: async (val: string) => {
         const num = parseInt(val, 10);
         if (isNaN(num) || num < 1 || num > totalLines) {
-          return { content: `Enter a number between 1 and ${totalLines}`, severity: 1 };
+          return { content: this.i18n.t('navigation.goToLineValidation', { totalLines }), severity: 1 };
         }
         return undefined;
       },
@@ -234,7 +238,7 @@ export class KairoNavigationContribution implements CommandContribution, Keybind
   private async goToSymbolInFile(): Promise<void> {
     const editor = this.editorManager.currentEditor?.editor;
     if (!(editor instanceof MonacoEditor)) {
-      this.messages.warn('No active editor.');
+      this.messages.warn(this.i18n.t('widget.editor.noActiveEditor'));
       return;
     }
 
@@ -246,24 +250,24 @@ export class KairoNavigationContribution implements CommandContribution, Keybind
       // Use Monaco's document symbol providers via the editor's model
       const monaco = await this.getMonaco();
       if (!monaco) {
-        this.messages.info('Symbol navigation not available.');
+        this.messages.info(this.i18n.t('navigation.symbolNavigationNotAvailable'));
         return;
       }
 
       const providers = monaco.languages._documentSymbolProviders;
       if (!providers) {
-        this.messages.info('No symbol provider registered for this file type.');
+        this.messages.info(this.i18n.t('navigation.noSymbolProvider'));
         return;
       }
 
       const allSymbols: SymbolQuickPickItem[] = await this.getModelSymbols(model, monaco);
       if (allSymbols.length === 0) {
-        this.messages.info('No symbols found in this file.');
+        this.messages.info(this.i18n.t('navigation.noSymbolsInFile'));
         return;
       }
 
       const pick = await this.quickInput.showQuickPick(allSymbols, {
-        placeholder: 'Go to symbol in file...',
+        placeholder: this.i18n.t('navigation.goToSymbolPlaceholder'),
         matchOnDescription: true,
         matchOnDetail: true,
       });
@@ -275,7 +279,7 @@ export class KairoNavigationContribution implements CommandContribution, Keybind
         control.focus();
       }
     } catch {
-      this.messages.info('Could not retrieve symbols for this file.');
+      this.messages.info(this.i18n.t('navigation.couldNotRetrieveSymbols'));
     }
   }
 
@@ -432,7 +436,7 @@ export class KairoNavigationContribution implements CommandContribution, Keybind
   /** Navigate back in history. */
   private async navigateBack(): Promise<void> {
     if (this.backStack.length === 0) {
-      this.messages.info('No previous location.');
+      this.messages.info(this.i18n.t('navigation.noPreviousLocation'));
       return;
     }
 
@@ -449,7 +453,7 @@ export class KairoNavigationContribution implements CommandContribution, Keybind
   /** Navigate forward in history. */
   private async navigateForward(): Promise<void> {
     if (this.forwardStack.length === 0) {
-      this.messages.info('No forward location.');
+      this.messages.info(this.i18n.t('navigation.noForwardLocation'));
       return;
     }
 
@@ -489,7 +493,7 @@ export class KairoNavigationContribution implements CommandContribution, Keybind
   private async showRecentFiles(): Promise<void> {
     const editors = this.editorManager.all;
     if (editors.length === 0) {
-      this.messages.info('No recent files.');
+      this.messages.info(this.i18n.t('navigation.noRecentFiles'));
       return;
     }
 
@@ -505,7 +509,7 @@ export class KairoNavigationContribution implements CommandContribution, Keybind
     });
 
     const pick = await this.quickInput.showQuickPick(items, {
-      placeholder: 'Recent files...',
+      placeholder: this.i18n.t('navigation.recentFilesPlaceholder'),
       matchOnDescription: true,
     });
 
@@ -521,8 +525,8 @@ export class KairoNavigationContribution implements CommandContribution, Keybind
 
   private async goToType(): Promise<void> {
     const input = await this.quickInput.input({
-      prompt: 'Go to type:',
-      placeHolder: 'Type name...',
+      prompt: this.i18n.t('navigation.goToTypePrompt'),
+      placeHolder: this.i18n.t('navigation.goToTypePlaceholder'),
     });
 
     if (!input) return;
@@ -532,14 +536,14 @@ export class KairoNavigationContribution implements CommandContribution, Keybind
     try {
       const monaco = await this.getMonaco();
       if (!monaco) {
-        this.messages.warn('No workspace symbol provider available.');
+        this.messages.warn(this.i18n.t('navigation.noWorkspaceSymbolProvider'));
         return;
       }
 
       // Access internal workspace symbol providers
       const providers = monaco.languages._workspaceSymbolProviders;
       if (!providers || providers.length === 0) {
-        this.messages.warn('No workspace symbol provider available.');
+        this.messages.warn(this.i18n.t('navigation.noWorkspaceSymbolProvider'));
         return;
       }
 
@@ -558,7 +562,7 @@ export class KairoNavigationContribution implements CommandContribution, Keybind
       }
 
       if (allResults.length === 0) {
-        this.messages.info(`No types found matching "${input}".`);
+        this.messages.info(this.i18n.t('navigation.noTypesFound', { input }));
         return;
       }
 
@@ -573,7 +577,7 @@ export class KairoNavigationContribution implements CommandContribution, Keybind
         }));
 
       const pick = await this.quickInput.showQuickPick(items, {
-        placeholder: `Matching types for "${input}"...`,
+        placeholder: this.i18n.t('navigation.matchingTypesPlaceholder', { input }),
         matchOnDescription: true,
       });
 
@@ -593,7 +597,7 @@ export class KairoNavigationContribution implements CommandContribution, Keybind
         }
       }
     } catch {
-      this.messages.info(`Could not search for types matching "${input}".`);
+      this.messages.info(this.i18n.t('navigation.couldNotSearchTypes', { input }));
     }
   }
 }

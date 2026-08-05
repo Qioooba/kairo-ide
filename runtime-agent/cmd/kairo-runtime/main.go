@@ -30,7 +30,6 @@ import (
 // agent and reuse it instead of starting a duplicate.
 type agentState struct {
 	Port        int    `json:"port"`
-	Secret      string `json:"secret"`
 	PID         int    `json:"pid"`
 	BindAddress string `json:"bindAddress"`
 	StartedAt   string `json:"startedAt"`
@@ -43,8 +42,24 @@ func writeAgentState(dataDir string, st agentState) {
 		stdlog.Printf("WARN: failed to marshal agent state: %v", err)
 		return
 	}
-	if err := os.WriteFile(statePath, data, 0o644); err != nil {
+	// Owner-only (0600). Remove any prior file first so OpenFile's
+	// mode is applied — mode is ignored when truncating an existing
+	// file that may still be world-readable from older releases.
+	_ = os.Remove(statePath)
+	f, err := os.OpenFile(statePath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
 		stdlog.Printf("WARN: failed to write agent state file %s: %v", statePath, err)
+		return
+	}
+	_, writeErr := f.Write(data)
+	closeErr := f.Close()
+	if writeErr != nil {
+		stdlog.Printf("WARN: failed to write agent state file %s: %v", statePath, writeErr)
+		_ = os.Remove(statePath)
+		return
+	}
+	if closeErr != nil {
+		stdlog.Printf("WARN: failed to close agent state file %s: %v", statePath, closeErr)
 		return
 	}
 	stdlog.Printf("agent state written to %s (port=%d, pid=%d)", statePath, st.Port, st.PID)
@@ -179,17 +194,7 @@ func main() {
 	// limiting, which is what browser E2E runs use to avoid WebSocket
 	// and rapid API polling from being throttled.
 	srv.SetRateLimit(cfg.RateLimit)
-
-	// Wire the restart handler so POST /api/v1/runtime/restart
-	// can respawn this process. Executable is resolved lazily
-	// (os.Executable) inside api.Server.doRestart — by then
-	// any symlink/rename has settled, so the respawned process
-	// always points to the right binary.
-	srv.SetRestartConfig(api.RestartConfig{
-		Args:            originalArgs,
-		ShutdownTimeout: restartShutdownTimeout,
-		OnShutdown:      container.Shutdown,
-	})
+	srv.SetRequireAuth(cfg.RequireAuth)
 
 	// Remote mode is not available in this release. Only loopback
 	// addresses are allowed.
@@ -198,20 +203,36 @@ func main() {
 		stdlog.Fatalf("remote mode is not available in this release. Please bind to 127.0.0.1 only")
 	}
 
-	// Write agent state file so other processes (Desktop, Browser
-	// launcher) can discover and reuse this agent instance.
+	// Write agent state after bind so port 0 resolves to the real
+	// OS-assigned port (DK-P1-2). Desktop polls this file for discovery.
+	addr := fmt.Sprintf("%s:%d", cfg.BindAddress, cfg.Port)
+	ln, err := srv.Listen(addr)
+	if err != nil {
+		shutCtx, cancel := context.WithTimeout(context.Background(), restartShutdownTimeout)
+		defer cancel()
+		_ = container.Shutdown(shutCtx)
+		stdlog.Fatalf("listen: %v", err)
+	}
+	boundPort := srv.BoundPort()
 	writeAgentState(cfg.DataDir, agentState{
-		Port:        cfg.Port,
-		Secret:      cfg.Secret,
+		Port:        boundPort,
 		PID:         os.Getpid(),
 		BindAddress: cfg.BindAddress,
 		StartedAt:   time.Now().UTC().Format(time.RFC3339),
 	})
 	defer removeAgentState(cfg.DataDir)
 
-	addr := fmt.Sprintf("%s:%d", cfg.BindAddress, cfg.Port)
-	if err := srv.ListenAndServe(addr, cfg.TLSCert, cfg.TLSKey); err != nil {
-		// ListenAndServe returning != nil usually means the
+	// Wire restart after bind so --port 0 is replaced with the concrete
+	// OS-assigned port (otherwise /api/v1/runtime/restart would rebind
+	// a different ephemeral port).
+	srv.SetRestartConfig(api.RestartConfig{
+		Args:            withPinnedPort(originalArgs, boundPort),
+		ShutdownTimeout: restartShutdownTimeout,
+		OnShutdown:      container.Shutdown,
+	})
+
+	if err := srv.Serve(ln, cfg.TLSCert, cfg.TLSKey); err != nil {
+		// Serve returning != nil usually means the
 		// server stopped (e.g. port in use, TLS misconfigured).
 		// But http.ErrServerClosed is the normal return value
 		// after a graceful Shutdown — including the one
@@ -225,8 +246,8 @@ func main() {
 		if errors.Is(err, http.ErrServerClosed) {
 			return
 		}
-		// ListenAndServe returning != nil means the server
-		// stopped (e.g. port in use, TLS misconfigured).
+		// Serve returning != nil means the server
+		// stopped (e.g. TLS misconfigured).
 		// Make sure the container's resources are released
 		// before we exit.
 		shutCtx, cancel := context.WithTimeout(context.Background(), restartShutdownTimeout)
@@ -234,4 +255,23 @@ func main() {
 		_ = container.Shutdown(shutCtx)
 		stdlog.Fatalf("server error: %v", err)
 	}
+}
+
+// withPinnedPort rewrites --port in args to the concrete bound port.
+// Used after Listen so ephemeral (--port 0) restarts stay on the same port.
+func withPinnedPort(args []string, port int) []string {
+	out := make([]string, len(args))
+	copy(out, args)
+	portStr := fmt.Sprintf("%d", port)
+	for i := 0; i < len(out); i++ {
+		if out[i] == "--port" && i+1 < len(out) {
+			out[i+1] = portStr
+			return out
+		}
+		if len(out[i]) > 7 && out[i][:7] == "--port=" {
+			out[i] = "--port=" + portStr
+			return out
+		}
+	}
+	return append(out, "--port", portStr)
 }

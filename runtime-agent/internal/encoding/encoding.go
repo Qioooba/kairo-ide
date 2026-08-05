@@ -444,6 +444,51 @@ func stripBOM(b []byte, id ID) []byte {
 	return b
 }
 
+// ConvertEOL rewrites line endings in decoded (UTF-8) text to the
+// requested form. Empty or unknown eol leaves data unchanged.
+// Accepted values match protocol Eol: "lf" | "crlf" | "cr".
+func ConvertEOL(data []byte, eol string) []byte {
+	eol = strings.ToLower(strings.TrimSpace(eol))
+	var sep []byte
+	switch eol {
+	case "lf":
+		sep = []byte{'\n'}
+	case "crlf":
+		sep = []byte{'\r', '\n'}
+	case "cr":
+		sep = []byte{'\r'}
+	default:
+		return data
+	}
+	// Normalize all endings to LF first.
+	normalized := make([]byte, 0, len(data))
+	for i := 0; i < len(data); i++ {
+		switch data[i] {
+		case '\r':
+			if i+1 < len(data) && data[i+1] == '\n' {
+				i++
+			}
+			normalized = append(normalized, '\n')
+		default:
+			normalized = append(normalized, data[i])
+		}
+	}
+	if eol == "lf" {
+		return normalized
+	}
+	out := make([]byte, 0, len(normalized)+len(normalized)/8)
+	start := 0
+	for i := 0; i < len(normalized); i++ {
+		if normalized[i] == '\n' {
+			out = append(out, normalized[start:i]...)
+			out = append(out, sep...)
+			start = i + 1
+		}
+	}
+	out = append(out, normalized[start:]...)
+	return out
+}
+
 // PropertiesDecode converts an ISO-8859-1 bytes (with \uXXXX
 // escapes preserved) into UTF-8 for editor display. It does NOT
 // alter the on-disk bytes; only the in-memory view.

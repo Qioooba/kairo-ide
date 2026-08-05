@@ -25,6 +25,7 @@ export class KairoDebugHoverProvider implements FrontendApplicationContribution 
     protected readonly debugSession!: KairoDebugSessionService;
 
     protected currentWidget: DebugHoverWidgetInstance | null = null;
+    protected currentWidgetEditor: monaco.editor.ICodeEditor | null = null;
     protected disposables: monaco.IDisposable[] = [];
     protected evaluationPromise: Promise<void> | null = null;
 
@@ -174,16 +175,17 @@ export class KairoDebugHoverProvider implements FrontendApplicationContribution 
     }
 
     protected showWidget(editor: monaco.editor.ICodeEditor, position: monaco.Position, result: HoverValueResult): void {
-        if (this.currentWidget) {
-            this.currentWidget.dispose();
+        if (!this.currentWidget || this.currentWidgetEditor !== editor) {
+            this.currentWidget?.dispose();
+            this.currentWidget = createDebugHoverWidget(
+                editor,
+                this.debugSession,
+                (_expr: string) => {
+                    // Add to watches (not implemented yet)
+                },
+            );
+            this.currentWidgetEditor = editor;
         }
-        this.currentWidget = createDebugHoverWidget(
-            editor,
-            this.debugSession,
-            (_expr: string) => {
-                // Add to watches (not implemented yet)
-            },
-        );
 
         this.currentWidget.show(
             { lineNumber: position.lineNumber, column: position.column },
@@ -195,14 +197,17 @@ export class KairoDebugHoverProvider implements FrontendApplicationContribution 
         this.lastHoverWord = null;
         this.lastHoverPosition = null;
         if (this.currentWidget) {
-            this.currentWidget.dispose();
-            this.currentWidget = null;
+            this.currentWidget.hide();
         }
     }
 
     stop(): void {
         this.disposables.forEach(d => d.dispose());
         this.disposables = [];
-        this.hideWidget();
+        if (this.currentWidget) {
+            this.currentWidget.dispose();
+            this.currentWidget = null;
+            this.currentWidgetEditor = null;
+        }
     }
 }

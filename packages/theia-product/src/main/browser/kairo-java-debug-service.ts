@@ -31,6 +31,14 @@ export interface KairoJavaDebugStatus {
   message?: string;
 }
 
+/** Local mirrors of Theia DebugState — avoid importing DebugState (pulls Monaco). */
+const DAP_SESSION_STATE = {
+  Inactive: 0,
+  Initializing: 1,
+  Running: 2,
+  Stopped: 3,
+} as const;
+
 @injectable()
 export class KairoJavaDebugService {
   @inject(DebugService) protected readonly debugService!: DebugService;
@@ -47,16 +55,18 @@ export class KairoJavaDebugService {
 
   @postConstruct()
   protected init(): void {
-    this.sessions.onDidStopDebugSession(session => {
-      if (this.status.sessionId === session.id) {
-        this.update({ ...this.status, state: 'paused', message: 'Paused at a verified DAP stop event.' });
-      }
-    });
+    // Map DAP stopped/continued via session state transitions (DebugState.Stopped/Running).
     this.sessions.onDidChange(session => {
-      // Theia 1.73 DebugState.Running is 2. Do not import DebugState here:
-      // that browser module eagerly loads Monaco DOM code and breaks the
-      // browser-safe service boundary used by backend/unit tests.
-      if (session && this.status.sessionId === session.id && this.status.state === 'paused' && this.sessions.state === 2) {
+      if (!session || this.status.sessionId !== session.id) return;
+      if (this.status.state !== 'connected' && this.status.state !== 'paused') return;
+
+      const dapState = typeof (session as { state?: number }).state === 'number'
+        ? (session as { state: number }).state
+        : this.sessions.state;
+
+      if (dapState === DAP_SESSION_STATE.Stopped) {
+        this.update({ ...this.status, state: 'paused', message: 'Paused at a verified DAP stop event.' });
+      } else if (dapState === DAP_SESSION_STATE.Running && this.status.state === 'paused') {
         this.update({ ...this.status, state: 'connected', message: undefined });
       }
     });

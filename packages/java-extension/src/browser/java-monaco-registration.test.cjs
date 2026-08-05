@@ -302,15 +302,36 @@ test('adaptWorkspaceEdit converts documentChanges (text edits)', () => {
   assert.equal(result.edits[0].versionId, 3);
 });
 
-test('adaptWorkspaceEdit rejects resource operations (create/delete/rename)', () => {
-  const result = adaptWorkspaceEdit({
+test('adaptWorkspaceEdit converts resource operations (create/delete/rename)', () => {
+  const create = adaptWorkspaceEdit({
     documentChanges: [{
       kind: 'create',
       uri: 'file:///new.java',
     }],
   });
-  assert.equal(result.rejectReason, 'Rename requires unsupported file operation: create.');
-  assert.deepEqual(result.edits, []);
+  assert.equal(create.rejectReason, undefined);
+  assert.equal(create.edits.length, 1);
+  assert.ok(create.edits[0].newResource);
+
+  const del = adaptWorkspaceEdit({
+    documentChanges: [{
+      kind: 'delete',
+      uri: 'file:///old.java',
+    }],
+  });
+  assert.equal(del.edits.length, 1);
+  assert.ok(del.edits[0].oldResource);
+
+  const rename = adaptWorkspaceEdit({
+    documentChanges: [{
+      kind: 'rename',
+      oldUri: 'file:///a.java',
+      newUri: 'file:///b.java',
+    }],
+  });
+  assert.equal(rename.edits.length, 1);
+  assert.ok(rename.edits[0].oldResource);
+  assert.ok(rename.edits[0].newResource);
 });
 
 test('adaptWorkspaceEdit combines changes and documentChanges', () => {

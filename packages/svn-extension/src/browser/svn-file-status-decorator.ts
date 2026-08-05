@@ -104,7 +104,8 @@ export class SvnFileStatusDecorator implements TabBarDecorator {
 
     return [{
       captionSuffixes: [{
-        data: ` ${label}`,
+        // Colored dot (same idea as explorer) — avoid M/A/? letters on tabs.
+        data: ' \u25CF',
         fontData: { color },
       }],
       tooltip: `SVN: ${this.statusTooltip(status)}`,

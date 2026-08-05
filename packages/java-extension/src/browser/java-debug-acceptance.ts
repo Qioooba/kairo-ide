@@ -153,7 +153,7 @@ export class DebugAcceptanceRunner {
    * Returns a structured result with success/failure and timing data.
    */
   async runAcceptance(config: DebugAcceptanceConfig): Promise<DebugAcceptanceResult> {
-    const traceId = `dbg-accept-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const traceId = `dbg-accept-${typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}`}`;
     const startTime = Date.now();
     const stepTimeout = config.stepTimeoutMs ?? 30_000;
     const _totalTimeout = config.totalTimeoutMs ?? 120_000;

@@ -24,6 +24,7 @@ import { Message } from '@theia/core/shared/@lumino/messaging';
 import { KeybindingRegistry } from '@theia/core/lib/browser/keybinding';
 import { CommandRegistry } from '@theia/core/lib/common';
 import { DisposableCollection } from '@theia/core/lib/common/disposable';
+import { KairoI18nService } from '@kairo/i18n';
 
 /** Factory ID for the shortcuts widget. */
 export const KAIRO_SHORTCUTS_FACTORY_ID = 'kairo-shortcuts';
@@ -85,14 +86,15 @@ export class KairoShortcutsWidget extends BaseWidget {
   @inject(CommandRegistry)
   protected readonly commandRegistry!: CommandRegistry;
 
+  @inject(KairoI18nService)
+  protected readonly i18n!: KairoI18nService;
+
   protected readonly toDispose = new DisposableCollection();
   protected searchTerm = '';
 
   constructor() {
     super();
     this.id = KAIRO_SHORTCUTS_WIDGET_ID;
-    this.title.label = 'Keyboard Shortcuts';
-    this.title.caption = 'Keyboard Shortcuts Reference';
     this.title.closable = true;
     this.title.iconClass = 'fa fa-keyboard-o';
     this.addClass('kairo-shortcuts-widget');
@@ -101,7 +103,14 @@ export class KairoShortcutsWidget extends BaseWidget {
 
   @postConstruct()
   protected init(): void {
+    this.updateTitle();
+    this.toDispose.push(this.i18n.onDidChangeLanguage(() => this.updateTitle()));
     this.update();
+  }
+
+  protected updateTitle(): void {
+    this.title.label = this.i18n.t('widget.shortcuts.title');
+    this.title.caption = this.i18n.t('widget.shortcuts.caption');
   }
 
   protected override onAfterAttach(msg: Message): void {
@@ -146,13 +155,13 @@ export class KairoShortcutsWidget extends BaseWidget {
           <input
             className="kairo-shortcuts-search-input theia-input"
             type="text"
-            placeholder="搜索快捷键 (按命令名、快捷键或标签搜索)..."
+            placeholder={this.i18n.t('widget.cheatsheet.searchPlaceholderLong')}
             value={this.searchTerm}
             onChange={(e) => {
               this.searchTerm = (e.target as HTMLInputElement).value;
               this.update();
             }}
-            aria-label="搜索快捷键"
+            aria-label={this.i18n.t('widget.shortcuts.searchAria')}
             role="searchbox"
             style={{
               width: '100%',
@@ -165,8 +174,8 @@ export class KairoShortcutsWidget extends BaseWidget {
             }}
           />
           <div style={{ marginTop: '4px', fontSize: '12px', color: 'var(--theia-descriptionForeground)' }}>
-            {filtered.length} 个快捷键
-            {this.searchTerm && ` (共 ${allShortcuts.length} 个)`}
+            {this.i18n.t('widget.shortcuts.count', { filtered: filtered.length, total: allShortcuts.length })}
+            {this.searchTerm ? this.i18n.t('widget.shortcuts.countFiltered', { total: allShortcuts.length }) : ''}
           </div>
         </div>
 

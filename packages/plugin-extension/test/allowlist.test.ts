@@ -21,9 +21,12 @@ import { DEFAULT_ALLOWLIST, KAIRO_EXTENSIONS_DIR_NAME, KAIRO_ALLOWLIST_FILE } fr
 
 describe('Allowlist', () => {
   let originalAllowlist: string | null = null;
+  let previousMutable: string | undefined;
   const allowlistPath = path.join(os.homedir(), KAIRO_EXTENSIONS_DIR_NAME, KAIRO_ALLOWLIST_FILE);
 
   before(() => {
+    previousMutable = process.env.KAIRO_ALLOWLIST_MUTABLE;
+    process.env.KAIRO_ALLOWLIST_MUTABLE = '1';
     if (fs.existsSync(allowlistPath)) {
       originalAllowlist = fs.readFileSync(allowlistPath, 'utf-8');
     }
@@ -32,6 +35,11 @@ describe('Allowlist', () => {
   });
 
   after(() => {
+    if (previousMutable === undefined) {
+      delete process.env.KAIRO_ALLOWLIST_MUTABLE;
+    } else {
+      process.env.KAIRO_ALLOWLIST_MUTABLE = previousMutable;
+    }
     if (originalAllowlist) {
       fs.writeFileSync(allowlistPath, originalAllowlist, 'utf-8');
     } else {
@@ -84,11 +92,42 @@ describe('Allowlist', () => {
     assert.strictEqual(isAllowlisted('temp.add-test'), false);
   });
 
-  it('handles corrupted allowlist gracefully', () => {
+  it('rejects addToAllowlist when mutation is disabled', () => {
+    delete process.env.KAIRO_ALLOWLIST_MUTABLE;
+    assert.throws(
+      () => addToAllowlist({ id: 'blocked.ext', reason: 'should fail' }),
+      /Allowlist mutation disabled/,
+    );
+  });
+
+  it('rejects saveAllowlist when mutation is disabled', () => {
+    delete process.env.KAIRO_ALLOWLIST_MUTABLE;
+    assert.throws(
+      () => saveAllowlist(loadAllowlist()),
+      /Allowlist mutation disabled/,
+    );
+  });
+
+  it('handles corrupted allowlist without rewriting when mutation disabled', () => {
+    delete process.env.KAIRO_ALLOWLIST_MUTABLE;
     fs.writeFileSync(allowlistPath, 'not valid json', 'utf-8');
     const allowlist = loadAllowlist();
-    // Should fall back to defaults
     assert.strictEqual(allowlist.schemaVersion, 1);
     assert.ok(allowlist.entries.length >= 9);
+    const raw = fs.readFileSync(allowlistPath, 'utf-8');
+    assert.strictEqual(raw, 'not valid json');
+  });
+
+  after(() => {
+    if (previousMutable === undefined) {
+      delete process.env.KAIRO_ALLOWLIST_MUTABLE;
+    } else {
+      process.env.KAIRO_ALLOWLIST_MUTABLE = previousMutable;
+    }
+    if (originalAllowlist !== null) {
+      fs.writeFileSync(allowlistPath, originalAllowlist, 'utf-8');
+    } else if (fs.existsSync(allowlistPath)) {
+      // leave defaults written by tests
+    }
   });
 });

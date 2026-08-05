@@ -7,9 +7,9 @@
 //
 // In a single-process Theia (used in unit tests and
 // `theia-product`'s product-bindings), the JavaLanguageClient
-// and JdtLsService share the same Inversify container, so
-// we can call the backend service directly. In a real
-// remote scenario, the Theia messaging layer provides a
+// can inject an optional in-process `JdtLsBackendService`
+// (bound to the node JdtLsService). In a real remote
+// scenario, the Theia messaging layer provides a
 // JsonRpcProxy that bridges the two.
 //
 // Connection lifecycle:
@@ -26,8 +26,7 @@ import { Emitter, Event } from '@theia/core/lib/common/event';
 import { Disposable } from '@theia/core/lib/common/disposable';
 import { WebSocketConnectionProvider } from '@theia/core/lib/browser/messaging/ws-connection-provider';
 import { JdtLsBackendService, JdtLsFrontendClient, JdtLsBackendPath } from '../common/java-ls-protocol';
-import { JdtLsService } from '../node/jdt-ls-service';
-import { JdtLsState } from '../node/jdt-ls-manager';
+import type { JdtLsState } from '../common/jdt-ls-state';
 import {
   LSPPublishDiagnosticsParams,
   LSPCompletionList,
@@ -56,7 +55,7 @@ import {
 /** Connection status for the language client. */
 export type ClientConnectionStatus = 'connected' | 'disconnected' | 'reconnecting';
 
-/** Backend event forwarded from JDT LS. */
+/** Backend event forwarded from JDT LS (in-process optional path). */
 interface BackendEvent {
   kind: 'state' | 'log' | 'diagnostics' | 'message' | 'progress' | 'initialized' | 'exit';
   state?: JdtLsState;
@@ -66,14 +65,24 @@ interface BackendEvent {
   progress?: LSPProgressParams;
 }
 
+/** Optional in-process backend may also expose onEvent (unit / single-process). */
+type InProcessJdtLsBackend = JdtLsBackendService & {
+  onEvent?: Event<BackendEvent>;
+};
+
 @injectable()
 export class JavaLanguageClient implements JdtLsFrontendClient, Disposable {
   @inject(ILogger)
   protected readonly logger!: ILogger;
 
-  @inject(JdtLsService)
+  /**
+   * Optional in-process backend (single-process tests). Injected via the
+   * browser-safe `JdtLsBackendService` symbol — never value-import the
+   * node `JdtLsService` class (that pulls child_process into the bundle).
+   */
+  @inject(JdtLsBackendService)
   @optional()
-  protected readonly backend!: JdtLsService;
+  protected readonly backend!: InProcessJdtLsBackend;
 
   @inject(WebSocketConnectionProvider)
   @optional()
@@ -108,7 +117,7 @@ export class JavaLanguageClient implements JdtLsFrontendClient, Disposable {
   @postConstruct()
   protected init(): void {
     this.logger.info('[JavaLanguageClient] initialised');
-    if (this.backend) {
+    if (this.backend?.onEvent) {
       this.subs.push(
         this.backend.onEvent(e => this.forwardBackendEvent(e)),
       );
@@ -231,6 +240,10 @@ export class JavaLanguageClient implements JdtLsFrontendClient, Disposable {
       try {
         const proxy = this.proxy();
         if (!proxy) {
+          // Permanent RPC failure → fall back immediately (no 4–7.5s wait).
+          if (this.rpcFailed) {
+            return fallback();
+          }
           if (attempt >= retries) break;
           const delay = baseDelay * (attempt + 1);
           this.logger.info(`[JavaLanguageClient] RPC proxy not available, retrying in ${delay}ms (attempt ${attempt + 1}/${retries})`);
@@ -267,14 +280,8 @@ export class JavaLanguageClient implements JdtLsFrontendClient, Disposable {
         if (!this.backend) {
           return { ok: false, reason: 'Backend service not available' };
         }
-        const inspect = this.backend.inspect(opts.home, opts.jreHome);
-        if (!inspect.ok) {
-          this.logger.warn(`[JavaLanguageClient] cannot start: ${inspect.reason}`);
-          return { ok: false, reason: inspect.reason };
-        }
         try {
-          await this.backend.start(opts);
-          return { ok: true };
+          return await this.backend.$start(opts);
         } catch (err) {
           this.logger.error(`[JavaLanguageClient] start failed: ${String(err)}`);
           return { ok: false, reason: String(err) };
@@ -290,7 +297,7 @@ export class JavaLanguageClient implements JdtLsFrontendClient, Disposable {
       () => this.proxy()!.$stop(),
       async () => {
         if (this.backend) {
-          await this.backend.stop();
+          await this.backend.$stop();
         }
       },
     );
@@ -309,7 +316,7 @@ export class JavaLanguageClient implements JdtLsFrontendClient, Disposable {
       },
       async () => {
         if (this.backend) {
-          return this.backend.state();
+          return this.backend.$state();
         }
         return this.lastKnownState;
       },
@@ -342,7 +349,7 @@ export class JavaLanguageClient implements JdtLsFrontendClient, Disposable {
     }
     if (this.backend) {
       try {
-        const s = this.backend.state();
+        const s = await this.backend.$state();
         this.lastKnownState = s;
         return s;
       } catch {
@@ -358,7 +365,7 @@ export class JavaLanguageClient implements JdtLsFrontendClient, Disposable {
       proxy.$didOpen(p).catch(err => this.markRpcFailed(err));
       return;
     }
-    this.backend?.didOpen(p);
+    void this.backend?.$didOpen(p);
   }
 
   didChange(p: { uri: string; version: number; changes: { text: string; rangeLength?: number }[] }): void {
@@ -367,7 +374,7 @@ export class JavaLanguageClient implements JdtLsFrontendClient, Disposable {
       proxy.$didChange(p).catch(err => this.markRpcFailed(err));
       return;
     }
-    this.backend?.didChange(p);
+    void this.backend?.$didChange(p);
   }
 
   didClose(uri: string): void {
@@ -376,7 +383,7 @@ export class JavaLanguageClient implements JdtLsFrontendClient, Disposable {
       proxy.$didClose(uri).catch(err => this.markRpcFailed(err));
       return;
     }
-    this.backend?.didClose(uri);
+    void this.backend?.$didClose(uri);
   }
 
   async completion(p: { uri: string; line: number; character: number; triggerKind?: 1 | 2 | 3; triggerCharacter?: string }): Promise<LSPCompletionList> {
@@ -410,7 +417,7 @@ export class JavaLanguageClient implements JdtLsFrontendClient, Disposable {
     if (this.backend) {
       try {
         return await withSoftTimeout(
-          Promise.resolve(this.backend.completion(p)),
+          Promise.resolve(this.backend.$completion(p)),
           'completion backend',
         );
       } catch (err) {
@@ -430,7 +437,7 @@ export class JavaLanguageClient implements JdtLsFrontendClient, Disposable {
         this.markRpcFailed(err);
       }
     }
-    return this.backend?.resolveCompletion?.(item) ?? item;
+    return this.backend?.$resolveCompletion?.(item) ?? item;
   }
 
   async definition(p: { uri: string; line: number; character: number }): Promise<LSPLocation | LSPLocation[] | null> {
@@ -442,75 +449,75 @@ export class JavaLanguageClient implements JdtLsFrontendClient, Disposable {
         this.markRpcFailed(err);
       }
     }
-    return this.backend?.definition(p) ?? null;
+    return this.backend?.$definition(p) ?? null;
   }
 
   async implementation(p: { uri: string; line: number; character: number }): Promise<LSPLocation | LSPLocation[] | null> {
-    return this.callBackend('$implementation', p, () => this.backend?.implementation(p) ?? null);
+    return this.callBackend('$implementation', p, () => this.backend?.$implementation(p) ?? null);
   }
 
   async hover(p: { uri: string; line: number; character: number }): Promise<LSPHover | null> {
-    return this.callBackend('$hover', p, () => this.backend?.hover(p) ?? null);
+    return this.callBackend('$hover', p, () => this.backend?.$hover(p) ?? null);
   }
 
   async references(p: { uri: string; line: number; character: number; includeDeclaration: boolean }): Promise<LSPLocation[]> {
-    return this.callBackend('$references', p, () => this.backend?.references(p) ?? []);
+    return this.callBackend('$references', p, () => this.backend?.$references(p) ?? []);
   }
 
   async typeDefinition(p: { uri: string; line: number; character: number }): Promise<LSPLocation | LSPLocation[] | LSPLocationLink[] | null> {
-    return this.callBackend('$typeDefinition', p, () => this.backend?.typeDefinition(p) ?? null);
+    return this.callBackend('$typeDefinition', p, () => this.backend?.$typeDefinition(p) ?? null);
   }
 
   async documentHighlight(p: { uri: string; line: number; character: number }): Promise<LSPDocumentHighlight[]> {
-    return this.callBackend('$documentHighlight', p, () => this.backend?.documentHighlight(p) ?? []);
+    return this.callBackend('$documentHighlight', p, () => this.backend?.$documentHighlight(p) ?? []);
   }
 
   async signatureHelp(p: { uri: string; line: number; character: number; triggerKind?: 1 | 2 | 3; triggerCharacter?: string; isRetrigger?: boolean }): Promise<LSPSignatureHelp | null> {
-    return this.callBackend('$signatureHelp', p, () => this.backend?.signatureHelp(p) ?? null);
+    return this.callBackend('$signatureHelp', p, () => this.backend?.$signatureHelp(p) ?? null);
   }
 
   async documentSymbols(uri: string): Promise<LSPDocumentSymbolResult> {
-    return this.callBackend('$documentSymbols', uri, () => this.backend?.documentSymbols(uri) ?? []);
+    return this.callBackend('$documentSymbols', uri, () => this.backend?.$documentSymbols(uri) ?? []);
   }
 
   async workspaceSymbols(query: string): Promise<LSPWorkspaceSymbolResult> {
-    return this.callBackend('$workspaceSymbols', query, () => this.backend?.workspaceSymbols(query) ?? []);
+    return this.callBackend('$workspaceSymbols', query, () => this.backend?.$workspaceSymbols(query) ?? []);
   }
 
   async codeActions(p: { uri: string; range: LSPRange; diagnostics: LSPDiagnostic[]; only?: string[] }): Promise<LSPCodeActionResult> {
-    return this.callBackend('$codeActions', p, () => this.backend?.codeActions(p) ?? []);
+    return this.callBackend('$codeActions', p, () => this.backend?.$codeActions(p) ?? []);
   }
 
   async rename(p: { uri: string; line: number; character: number; newName: string }): Promise<LSPWorkspaceEdit | null> {
-    return this.callBackend('$rename', p, () => this.backend?.rename(p) ?? null);
+    return this.callBackend('$rename', p, () => this.backend?.$rename(p) ?? null);
   }
 
   async prepareCallHierarchy(p: { uri: string; line: number; character: number }): Promise<LSPCallHierarchyItem[]> {
-    return this.callBackend('$prepareCallHierarchy', p, () => this.backend?.prepareCallHierarchy(p) ?? []);
+    return this.callBackend('$prepareCallHierarchy', p, () => this.backend?.$prepareCallHierarchy(p) ?? []);
   }
 
   async incomingCalls(item: LSPCallHierarchyItem): Promise<LSPCallHierarchyIncomingCall[]> {
-    return this.callBackend('$incomingCalls', item, () => this.backend?.incomingCalls(item) ?? []);
+    return this.callBackend('$incomingCalls', item, () => this.backend?.$incomingCalls(item) ?? []);
   }
 
   async outgoingCalls(item: LSPCallHierarchyItem): Promise<LSPCallHierarchyOutgoingCall[]> {
-    return this.callBackend('$outgoingCalls', item, () => this.backend?.outgoingCalls(item) ?? []);
+    return this.callBackend('$outgoingCalls', item, () => this.backend?.$outgoingCalls(item) ?? []);
   }
 
   async prepareTypeHierarchy(p: { uri: string; line: number; character: number }): Promise<LSPTypeHierarchyItem[]> {
-    return this.callBackend('$prepareTypeHierarchy', p, () => this.backend?.prepareTypeHierarchy(p) ?? []);
+    return this.callBackend('$prepareTypeHierarchy', p, () => this.backend?.$prepareTypeHierarchy(p) ?? []);
   }
 
   async supertypes(item: LSPTypeHierarchyItem): Promise<LSPTypeHierarchyItem[]> {
-    return this.callBackend('$supertypes', item, () => this.backend?.supertypes(item) ?? []);
+    return this.callBackend('$supertypes', item, () => this.backend?.$supertypes(item) ?? []);
   }
 
   async subtypes(item: LSPTypeHierarchyItem): Promise<LSPTypeHierarchyItem[]> {
-    return this.callBackend('$subtypes', item, () => this.backend?.subtypes(item) ?? []);
+    return this.callBackend('$subtypes', item, () => this.backend?.$subtypes(item) ?? []);
   }
 
   async codeLens(uri: string): Promise<LSPCodeLens[]> {
-    return this.callBackend('$codeLens', uri, () => this.backend?.codeLens(uri) ?? []);
+    return this.callBackend('$codeLens', uri, () => this.backend?.$codeLens(uri) ?? []);
   }
 
   async formatting(uri: string, options?: { tabSize?: number; insertSpaces?: boolean }): Promise<LSPTextEdit[]> {
@@ -522,7 +529,7 @@ export class JavaLanguageClient implements JdtLsFrontendClient, Disposable {
         this.markRpcFailed(err);
       }
     }
-    return this.backend?.formatting(uri, options) ?? [];
+    return this.backend?.$formatting(uri, options) ?? [];
   }
 
   async rangeFormatting(uri: string, range: LSPRange, options?: { tabSize?: number; insertSpaces?: boolean }): Promise<LSPTextEdit[]> {
@@ -534,7 +541,7 @@ export class JavaLanguageClient implements JdtLsFrontendClient, Disposable {
         this.markRpcFailed(err);
       }
     }
-    return this.backend?.rangeFormatting(uri, range, options) ?? [];
+    return this.backend?.$rangeFormatting(uri, range, options) ?? [];
   }
 
   async inlayHint(uri: string, range?: LSPRange): Promise<LSPInlayHint[]> {
@@ -546,7 +553,7 @@ export class JavaLanguageClient implements JdtLsFrontendClient, Disposable {
         this.markRpcFailed(err);
       }
     }
-    return this.backend?.inlayHint(uri, range) ?? [];
+    return this.backend?.$inlayHint(uri, range) ?? [];
   }
 
   async buildWorkspace(force: boolean): Promise<void> {
@@ -559,7 +566,7 @@ export class JavaLanguageClient implements JdtLsFrontendClient, Disposable {
         this.markRpcFailed(err);
       }
     }
-    await this.backend?.buildWorkspace();
+    await this.backend?.$buildWorkspace(force);
   }
 
   /** Invoke one typed backend method through RPC, with the same
@@ -679,5 +686,6 @@ export class JavaLanguageClient implements JdtLsFrontendClient, Disposable {
     this.onStateEmitter.dispose();
     this.onLogEmitter.dispose();
     this.onProgressEmitter.dispose();
+    this.onConnectionStatusEmitter.dispose();
   }
 }

@@ -46,11 +46,19 @@ const (
 	maxMessageSize    = 64 * 1024 // 64KB
 )
 
+// subscriber holds a buffered event channel plus a done signal.
+// Unsubscribe closes done only — never the data channel — so Publish
+// can safely select without risking "send on closed channel".
+type subscriber struct {
+	ch   chan Event
+	done chan struct{}
+}
+
 // EventHub is a publish-subscribe event bus with history and sequence tracking.
 // Multiple subscribers per workspace are supported.
 type EventHub struct {
 	mu           sync.RWMutex
-	subscribers  map[string]map[string]chan Event // workspaceID → subscriberID → channel
+	subscribers  map[string]map[string]*subscriber // workspaceID → subscriberID → subscriber
 	sequence     atomic.Int64
 	history      []Event // ring buffer
 	historyHead  int     // index of oldest entry in ring buffer
@@ -68,7 +76,7 @@ func NewEventHub(maxHistory, maxSubBuffer int) *EventHub {
 		maxSubBuffer = defaultMaxSubBuf
 	}
 	return &EventHub{
-		subscribers:  make(map[string]map[string]chan Event),
+		subscribers:  make(map[string]map[string]*subscriber),
 		maxHistory:   maxHistory,
 		maxSubBuffer: maxSubBuffer,
 	}
@@ -85,6 +93,10 @@ func generateSubscriberID() string {
 // and subscriber. If subscriberID is empty, a random ID is generated.
 // Events after afterSequence are replayed from history before new events.
 // If history is insufficient to cover the gap, a snapshot.required event is sent.
+//
+// The data channel is never closed by unsubscribe (callers should stop reading
+// after calling the cancel func). A closed channel is only returned when the
+// hub is at max subscribers.
 func (h *EventHub) Subscribe(workspaceID, subscriberID string, afterSequence int64) (<-chan Event, func()) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -104,46 +116,57 @@ func (h *EventHub) Subscribe(workspaceID, subscriberID string, afterSequence int
 		subscriberID = generateSubscriberID()
 	}
 
-	ch := make(chan Event, h.maxSubBuffer)
+	sub := &subscriber{
+		ch:   make(chan Event, h.maxSubBuffer),
+		done: make(chan struct{}),
+	}
 
 	if h.subscribers[workspaceID] == nil {
-		h.subscribers[workspaceID] = make(map[string]chan Event)
+		h.subscribers[workspaceID] = make(map[string]*subscriber)
 	}
-	h.subscribers[workspaceID][subscriberID] = ch
+	h.subscribers[workspaceID][subscriberID] = sub
 
-	// Replay history after afterSequence
+	// Replay history after afterSequence synchronously under the lock
+	// so Publish cannot interleave live events ahead of history and
+	// break afterSequence resume semantics. trySend is non-blocking;
+	// a full buffer simply stops replay (same as the prior async path).
 	historyEvents, hasGap := h.getHistoryLocked(workspaceID, afterSequence)
 
-	// If there's a gap, send snapshot.required first
 	if hasGap {
-		go func() {
-			select {
-			case ch <- Event{
-				Type:        EventSnapshotRequired,
-				WorkspaceID: workspaceID,
-				Message:     "History gap detected, please re-sync snapshot",
-				Time:        time.Now(),
-			}:
-			default:
-			}
-		}()
+		trySend(sub, Event{
+			Type:        EventSnapshotRequired,
+			WorkspaceID: workspaceID,
+			Message:     "History gap detected, please re-sync snapshot",
+			Time:        time.Now(),
+		})
+	}
+	for _, e := range historyEvents {
+		if !trySend(sub, e) {
+			break
+		}
 	}
 
-	// Replay history events asynchronously
-	if len(historyEvents) > 0 {
-		go func() {
-			for _, e := range historyEvents {
-				select {
-				case ch <- e:
-				default:
-					return
-				}
-			}
-		}()
-	}
-
-	return ch, func() {
+	return sub.ch, func() {
 		h.unsubscribe(workspaceID, subscriberID)
+	}
+}
+
+// trySend delivers an event to a subscriber unless it has unsubscribed
+// (done closed) or its buffer is full. Returns false if the event was
+// not delivered (unsubscribed or full).
+func trySend(sub *subscriber, event Event) bool {
+	select {
+	case <-sub.done:
+		return false
+	default:
+	}
+	select {
+	case <-sub.done:
+		return false
+	case sub.ch <- event:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -154,18 +177,28 @@ func (h *EventHub) SubscribeWithID(workspaceID string, afterSequence int64) (str
 	return id, ch, cancel
 }
 
-// unsubscribe removes a subscriber and closes its channel.
+// unsubscribe removes a subscriber and closes its done signal.
+// The data channel is intentionally left open to avoid racing with Publish.
 func (h *EventHub) unsubscribe(workspaceID, subscriberID string) {
 	h.mu.Lock()
-	defer h.mu.Unlock()
-
+	var sub *subscriber
 	if subs, ok := h.subscribers[workspaceID]; ok {
-		if ch, ok := subs[subscriberID]; ok {
-			close(ch)
+		if s, ok := subs[subscriberID]; ok {
+			sub = s
 			delete(subs, subscriberID)
 		}
 		if len(subs) == 0 {
 			delete(h.subscribers, workspaceID)
+		}
+	}
+	h.mu.Unlock()
+
+	if sub != nil {
+		select {
+		case <-sub.done:
+			// already closed (double-unsubscribe)
+		default:
+			close(sub.done)
 		}
 	}
 }
@@ -199,28 +232,32 @@ func (h *EventHub) Publish(event Event) {
 
 	// Copy subscribers to avoid holding lock during send
 	workspaceSubs := h.subscribers[event.WorkspaceID]
-	var subs []chan Event
+	var subs []*subscriber
 	if len(workspaceSubs) > 0 {
-		subs = make([]chan Event, 0, len(workspaceSubs))
-		for _, ch := range workspaceSubs {
-			subs = append(subs, ch)
+		subs = make([]*subscriber, 0, len(workspaceSubs))
+		for _, s := range workspaceSubs {
+			subs = append(subs, s)
 		}
 	}
 	h.mu.Unlock()
 
-	// Send to all subscribers
-	for _, ch := range subs {
+	// Send to all subscribers (select on done so unsubscribe cannot panic)
+	for _, sub := range subs {
 		select {
-		case ch <- event:
+		case <-sub.done:
+			continue
+		case sub.ch <- event:
 		default:
 			// Channel full - slow consumer, send gap event
-			select {
-			case ch <- Event{
+			gap := Event{
 				Type:        EventGap,
 				WorkspaceID: event.WorkspaceID,
 				Message:     "Gap detected: events dropped due to slow consumer",
 				Time:        time.Now(),
-			}:
+			}
+			select {
+			case <-sub.done:
+			case sub.ch <- gap:
 			default:
 			}
 		}

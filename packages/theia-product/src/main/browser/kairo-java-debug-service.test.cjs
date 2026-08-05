@@ -22,7 +22,6 @@ function createService({ available = true, startError, destroyBeforeStart = fals
   const sessions = new Map();
   const started = createEvent();
   const destroyed = createEvent();
-  const stopped = createEvent();
   const changed = createEvent();
   service.debugService = {
     provideDebugConfigurations: async () => available
@@ -31,13 +30,12 @@ function createService({ available = true, startError, destroyBeforeStart = fals
   };
   service.sessions = {
     onDidStartDebugSession: started.event,
-    onDidStopDebugSession: stopped.event,
     onDidChange: changed.event,
     onDidDestroyDebugSession: destroyed.event,
     state: 2,
     async start(options) {
       if (startError) throw startError;
-      const session = { id: 'debug-1', configuration: options.configuration };
+      const session = { id: 'debug-1', configuration: options.configuration, state: 2 };
       sessions.set(session.id, session);
       queueMicrotask(() => {
         if (destroyBeforeStart) destroyed.fire(session);
@@ -49,7 +47,7 @@ function createService({ available = true, startError, destroyBeforeStart = fals
     async terminateSession(session) { sessions.delete(session.id); },
   };
   service.init();
-  service.testEvents = { started, stopped, changed, destroyed };
+  service.testEvents = { started, changed, destroyed };
   return service;
 }
 
@@ -114,9 +112,12 @@ test('hung DAP attach times out, terminates the created session, and fails close
 test('native DAP stop/resume events map to paused/connected without fabricating a hit', async () => {
   const service = createService();
   await service.attach(target);
-  const session = { id: 'debug-1', configuration: { type: 'kairo-java', __kairoServerId: 'srv-1' } };
-  service.testEvents.stopped.fire(session);
+  const session = { id: 'debug-1', configuration: { type: 'kairo-java', __kairoServerId: 'srv-1' }, state: 3 };
+  service.sessions.state = 3; // DebugState.Stopped
+  service.testEvents.changed.fire(session);
   assert.equal(service.currentStatus.state, 'paused');
+  session.state = 2;
+  service.sessions.state = 2; // DebugState.Running
   service.testEvents.changed.fire(session);
   assert.equal(service.currentStatus.state, 'connected');
 });

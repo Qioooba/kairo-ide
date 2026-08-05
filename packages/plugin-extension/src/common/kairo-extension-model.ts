@@ -73,6 +73,8 @@ export interface AllowlistEntry {
   readonly notes?: string;
   /** Optional: version range that has been verified */
   readonly verifiedVersionRange?: string;
+  /** Optional: SHA-256 hex digest of the approved .vsix file */
+  readonly sha256?: string;
 }
 
 /**

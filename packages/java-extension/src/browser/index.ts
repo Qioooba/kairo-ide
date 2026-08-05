@@ -6,7 +6,6 @@ export { AntClasspathService } from './ant-classpath-service';
 export type { AntClasspathAnalysis, AntResolveWarning, ClasspathInfo } from './ant-classpath-service';
 export { AntClasspathContribution } from './ant-classpath-contribution';
 export { MavenViewWidget } from './maven-view-widget';
-export { KairoJavaLanguageClientContribution } from './java-language-client-contribution';
 export {
   JavaLanguageServerLifecycle,
   extractWorkspaceDataDir,
@@ -36,6 +35,12 @@ export { SURROUND_TEMPLATES, computeSurroundEdit, findSurroundTemplate } from '.
 export type { SurroundTemplate } from './java-surround-with';
 export { computeUnwrapEdit } from './java-unwrap';
 export { JAVA_MONARCH } from './java-monarch';
+export {
+  applyKairoLanguageEditorDefaults,
+  scheduleProgressiveTokenization,
+  KAIRO_LANGUAGE_EDITOR_DEFAULTS,
+  KAIRO_SYNTAX_LANGUAGE_IDS,
+} from './monaco-tokenization-config';
 export { JdtClassFileFsProvider } from './jdt-fs-provider';
 export { JavaClassDecompilerContribution } from './java-class-decompiler';
 export { JavaDocumentSyncContribution } from './java-document-sync';
@@ -98,16 +103,13 @@ export type { CompatCheckItem, CompatCheckReport, CompatCheckConfig } from './ja
 // ── Override/Implementation Gutter (§7.3 P2-JAVA) ───────────────
 export { JavaOverrideGutter } from './java-override-gutter';
 
-// ── Multi-Module Debug (§8.3 P3-ADVDBG-04) ──────────────────────
-export { MultiModuleDebugManager } from './java-multi-module-debug';
-export type { DebugSession, DebugSessionConfig, DebugSessionState, DebugSessionList, MultiModuleDebugConfig } from './java-multi-module-debug';
-
 // ── Debug Launch Config (P1-DBG-01) ───────────────────────────────
 export { KairoJavaDebugLaunchConfigProvider, KAIRO_JAVA_DEBUG_TYPE as _KAIRO_JAVA_DEBUG_TYPE } from './java-debug-launch-config';
 
 // ── HotSwap Service (P3-ADVDBG-01) ─────────────────────────────────
 export { JavaHotSwapService } from './java-hotswap-service';
 export type { HotSwapHistoryEntry } from './java-hotswap-service';
+export { HotSwapWidget, KAIRO_HOTSWAP_WIDGET_ID } from './java-hotswap-widget';
 
 // ── JUnit Test Runner (P1-TEST-01) ─────────────────────────────────
 export { JavaJUnitRunner } from './java-junit-runner';
@@ -125,7 +127,6 @@ import { KeybindingContribution } from '@theia/core/lib/browser/keybinding';
 import { PreferenceContribution } from '@theia/core/lib/common/preferences';
 import { DebugContribution } from '@theia/debug/lib/browser/debug-contribution';
 import { DebugAdapterContribution } from '@theia/debug/lib/common/debug-model';
-import { KairoJavaLanguageClientContribution } from './java-language-client-contribution';
 import { JavaLanguageServerLifecycle } from './java-ls-lifecycle';
 import { JavaLanguageClient } from './java-language-client';
 import { JavaCompletionProvider } from './java-completion-provider';
@@ -153,9 +154,9 @@ import { DebugAcceptanceRunner } from './java-debug-acceptance';
 import { JavaSourceMismatchDetector } from './java-debug-source-mismatch';
 import { JavaDebugCompatCheck } from './java-debug-compat-check';
 import { JavaOverrideGutter } from './java-override-gutter';
-import { MultiModuleDebugManager } from './java-multi-module-debug';
 import { KairoJavaDebugLaunchConfigProvider } from './java-debug-launch-config';
 import { JavaHotSwapService } from './java-hotswap-service';
+import { HotSwapWidget, KAIRO_HOTSWAP_WIDGET_ID } from './java-hotswap-widget';
 import { JavaJUnitRunner } from './java-junit-runner';
 import { JavaSaveActionsService } from './java-save-actions';
 import { JavaPreferenceContribution } from './java-preference-schema';
@@ -167,7 +168,6 @@ import { JavaRunService } from './java-run-service';
 import { JavaRunCommandContribution, JavaRunMenuContribution } from './java-run-commands';
 
 export function bindJavaLanguageClientContribution(bind: interfaces.Bind): void {
-    bind(KairoJavaLanguageClientContribution).toSelf().inSingletonScope();
     bind(JavaLanguageServerLifecycle).toSelf().inSingletonScope();
     // Bound as a FrontendApplicationContribution so Theia
     // instantiates the lifecycle at startup — without this the
@@ -249,9 +249,6 @@ export function bindJavaLanguageClientContribution(bind: interfaces.Bind): void 
     bind(JavaOverrideGutter).toSelf().inSingletonScope();
     bind(FrontendApplicationContribution).toService(JavaOverrideGutter);
 
-    // ── Multi-Module Debug (§8.3 P3-ADVDBG-04) ──────────────────────
-    bind(MultiModuleDebugManager).toSelf().inSingletonScope();
-
     // ── Debug Launch Config Provider (P1-DBG-01) ─────────────────────
     bind(KairoJavaDebugLaunchConfigProvider).toSelf().inSingletonScope();
     bind(DebugAdapterContribution).toService(KairoJavaDebugLaunchConfigProvider);
@@ -259,6 +256,11 @@ export function bindJavaLanguageClientContribution(bind: interfaces.Bind): void 
     // ── HotSwap Service (P3-ADVDBG-01) ───────────────────────────────
     bind(JavaHotSwapService).toSelf().inSingletonScope();
     bind(FrontendApplicationContribution).toService(JavaHotSwapService);
+    bind(HotSwapWidget).toSelf();
+    bind(WidgetFactory).toDynamicValue(ctx => ({
+      id: KAIRO_HOTSWAP_WIDGET_ID,
+      createWidget: () => ctx.container.get(HotSwapWidget),
+    })).inSingletonScope();
 
     // ── JUnit Test Runner (P1-TEST-01) ───────────────────────────────
     bind(JavaJUnitRunner).toSelf().inSingletonScope();

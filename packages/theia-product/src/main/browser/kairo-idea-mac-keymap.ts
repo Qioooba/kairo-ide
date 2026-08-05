@@ -73,7 +73,8 @@ const IDEA_MAC_KEYBINDINGS: IDEAKeybinding[] = [
   { command: 'kairo.navigation.back', keybinding: 'cmd+[' },
   { command: 'kairo.navigation.forward', keybinding: 'cmd+]' },
   { command: 'kairo.navigation.recentFiles', keybinding: 'cmd+e' },
-  { command: 'kairo.navigation.recentLocations', keybinding: 'cmd+shift+e' },
+  // Map unimplemented alias to recentFiles (TP-P2-2)
+  { command: 'kairo.navigation.recentFiles', keybinding: 'cmd+shift+e' },
   { command: 'editor.action.jumpToBracket', keybinding: 'ctrl+shift+m', when: 'editorTextFocus' },
   { command: 'editor.action.revealDefinition', keybinding: 'f4', when: 'editorTextFocus' },
   { command: 'editor.action.typeHierarchy', keybinding: 'ctrl+h', when: 'editorTextFocus' },
@@ -99,7 +100,7 @@ const IDEA_MAC_KEYBINDINGS: IDEAKeybinding[] = [
   { command: 'workbench.action.debug.stepInto', keybinding: 'f7', when: 'inDebugMode' },
   { command: 'workbench.action.debug.stepOut', keybinding: 'shift+f8', when: 'inDebugMode' },
   { command: 'workbench.action.debug.continue', keybinding: 'cmd+alt+r', when: 'inDebugMode' },
-  { command: 'kairo.debug.runToCursor', keybinding: 'alt+f9', when: 'inDebugMode' },
+  { command: 'editor.debug.action.runToCursor', keybinding: 'alt+f9', when: 'inDebugMode' },
 
   // ── Refactoring ─────────────────────────────────────────────
   { command: 'editor.action.generator.generate', keybinding: 'cmd+n', when: 'editorTextFocus' },
@@ -164,9 +165,6 @@ export class KairoIDEAMacKeymapContribution implements CommandContribution, Keyb
       return;
     }
 
-    let registered = 0;
-    let skipped = 0;
-
     for (const binding of IDEA_MAC_KEYBINDINGS) {
       try {
         const keybindingConfig: { command: string; keybinding: string; when?: string } = {
@@ -177,12 +175,9 @@ export class KairoIDEAMacKeymapContribution implements CommandContribution, Keyb
           keybindingConfig.when = binding.when;
         }
         registry.registerKeybinding(keybindingConfig);
-        registered++;
-      } catch (err) {
-        skipped++;
+      } catch {
+        // skip invalid bindings
       }
     }
-
-    console.log(`[kairo] IDEA keymap (Mac): ${registered} registered, ${skipped} skipped`);
   }
 }

@@ -77,7 +77,10 @@ export const IDEAFramesPanel: React.FC<IDEAFramesPanelProps> = ({ sessionService
                 frame: f,
             }));
             setFrames(frameNodes);
-            if (frameNodes.length > 0) {
+            const focusedId = sessionService.currentFrameId;
+            if (focusedId !== undefined) {
+                setCurrentFrameId(focusedId);
+            } else if (frameNodes.length > 0) {
                 setCurrentFrameId(frameNodes[0].id);
             }
         } catch {
@@ -87,15 +90,19 @@ export const IDEAFramesPanel: React.FC<IDEAFramesPanelProps> = ({ sessionService
         }
     }, [sessionService]);
 
-    const handleSelectFrame = React.useCallback((frame: FrameNode) => {
-        setCurrentFrameId(frame.id);
+    const handleSelectFrame = React.useCallback(async (frame: FrameNode) => {
+        const focused = await sessionService.focusFrame(frame.id);
+        const effectiveFrameId = focused?.raw.id ?? sessionService.currentFrameId ?? frame.id;
+        setCurrentFrameId(effectiveFrameId);
         if (onSelectFrame) {
-            onSelectFrame(frame.frame);
+            onSelectFrame(focused ?? frame.frame);
         }
-        if (frame.source?.path && frame.line !== undefined && onNavigate) {
+        if (focused) {
+            void focused.open({ preview: true });
+        } else if (frame.source?.path && frame.line !== undefined && onNavigate) {
             onNavigate(frame.source.path, frame.line);
         }
-    }, [onSelectFrame, onNavigate]);
+    }, [onSelectFrame, onNavigate, sessionService]);
 
     React.useEffect(() => {
         if (sessionService.isSuspended) {
@@ -104,6 +111,9 @@ export const IDEAFramesPanel: React.FC<IDEAFramesPanelProps> = ({ sessionService
             setFrames([]);
         }
         const disposable = sessionService.onDidChangeState(state => {
+            if (state.currentFrameId !== undefined) {
+                setCurrentFrameId(state.currentFrameId);
+            }
             if (state.isSuspended) {
                 loadFrames();
             } else if (!state.hasSession) {

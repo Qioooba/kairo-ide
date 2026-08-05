@@ -16,7 +16,6 @@ import {
   RUN_CONFIGURATION_VERSION,
   ok,
   err,
-  mapBuildState,
   type RequestEnvelope,
   type KairoErrorCode,
 } from './index';
@@ -89,37 +88,6 @@ test('err() carries retryable and details when supplied', () => {
 test('err() propagates correlationId when supplied', () => {
   const e = err('req-7', 'timeout', 'slow', { correlationId: 'c-1' });
   assert.strictEqual(e.correlationId, 'c-1');
-});
-
-// ---- mapBuildState ---------------------------------------------------------
-
-test('mapBuildState: running returns success display', () => {
-  const d = mapBuildState('running');
-  assert.strictEqual(d.label, 'Running');
-  assert.strictEqual(d.color, 'var(--theia-successForeground)');
-});
-
-test('mapBuildState: failed returns error display', () => {
-  const d = mapBuildState('failed');
-  assert.strictEqual(d.label, 'Failed');
-  assert.strictEqual(d.color, 'var(--theia-errorForeground)');
-});
-
-test('mapBuildState: stopped returns disabled display', () => {
-  const d = mapBuildState('stopped');
-  assert.strictEqual(d.label, 'Stopped');
-  assert.strictEqual(d.color, 'var(--theia-disabledForeground)');
-});
-
-test('mapBuildState: unknown state falls through with default color', () => {
-  // The function MUST accept arbitrary strings because the wire
-  // schema includes 'queued', 'success', 'cancelled' etc. that
-  // are not specially handled. They must not throw.
-  for (const s of ['queued', 'success', 'cancelled', 'never-heard-of-it']) {
-    const d = mapBuildState(s);
-    assert.strictEqual(d.label, s);
-    assert.strictEqual(d.color, 'var(--theia-foreground)');
-  }
 });
 
 // ---- Type-level: assert KairoErrorCode is closed over the expected set ----

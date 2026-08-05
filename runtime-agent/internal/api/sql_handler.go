@@ -12,9 +12,12 @@ import (
 	"time"
 
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/api/protocol"
-	"github.com/Qioooba/kairo-ide/runtime-agent/internal/log"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/sql"
 )
+
+// sqlConnections registers configs after test-connection so execute
+// can resolve connectionId (Instant Client stub still fails honestly).
+var sqlConnections = sql.NewConnectionStore()
 
 // sqlExecuteRequest is the request body for POST /api/v1/sql/execute.
 type sqlExecuteRequest struct {
@@ -38,11 +41,13 @@ type sqlTestConnectionResponse struct {
 	Success       bool   `json:"success"`
 	OracleVersion string `json:"oracleVersion,omitempty"`
 	InstanceName  string `json:"instanceName,omitempty"`
+	ConnectionID  string `json:"connectionId,omitempty"`
 }
 
 // sqlErrorDetail provides structured Oracle error information.
 type sqlErrorDetail struct {
 	OracleErrorCode string `json:"oracleErrorCode,omitempty"`
+	ConnectionID    string `json:"connectionId,omitempty"`
 }
 
 // sqlTestConnectionRequest is the request body for POST /api/v1/sql/test-connection.
@@ -111,47 +116,53 @@ func (s *Server) handleSQLExecute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create a context with timeout for the query execution
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-	defer cancel()
-
-	// Build the connection config from the connection ID
-	// In production, this would look up the connection details from
-	// persistent storage, including the password.
-	cfg := sql.ConnectionConfig{
-		Host:     "localhost",
-		Port:     1521,
-		Username: "placeholder",
-		Password: "placeholder",
-		// Connection details would be loaded from storage
-	}
-
-	executor := sql.NewOracleExecutor(30 * time.Second)
-	result := executor.Execute(ctx, cfg, req.SQL, maxRows)
-
-	if result == nil {
+	cfg, ok := sqlConnections.Get(req.ConnectionID)
+	if !ok {
 		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{
-			Code:    protocol.ErrInternal,
-			Message: "query execution returned nil result",
+			Code:    protocol.ErrNotFound,
+			Message: "unknown connectionId; call POST /api/v1/sql/test-connection first to register",
+			Details: &sqlErrorDetail{ConnectionID: req.ConnectionID},
 		})
 		return
 	}
 
-	writeOK(w, env, protocol.ResponseEnvelope{
-		RequestID:     env.RequestID,
-		CorrelationID: env.CorrelationID,
-		OK:            true,
-		Payload: &sqlQueryResponse{
-			Columns:         result.Columns,
-			Rows:            result.Rows,
-			RowCount:        result.RowCount,
-			TotalRows:       result.TotalRows,
-			ExecutionTimeMs: result.ExecutionTimeMs,
-			Truncated:       result.Truncated,
-		},
-	})
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
 
-	_, _, _, _ = log.FromContext(ctx) // context handling for logging
+	executor := sql.NewOracleExecutor(30 * time.Second)
+	result := executor.Execute(ctx, cfg, req.SQL, maxRows)
+	if result == nil {
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{
+			Code:    protocol.ErrInternal,
+			Message: "SQL execute returned no result",
+		})
+		return
+	}
+	if result.Error != "" {
+		code := protocol.ErrUnsupported
+		if result.Error == sql.ErrOracleInstantClientMissing {
+			code = protocol.ErrUnsupported
+		}
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{
+			Code:    code,
+			Message: result.Error,
+			Details: &sqlErrorDetail{ConnectionID: req.ConnectionID},
+		})
+		return
+	}
+
+	rows := make([]map[string]interface{}, len(result.Rows))
+	for i, row := range result.Rows {
+		rows[i] = row
+	}
+	writeOK(w, env, &sqlQueryResponse{
+		Columns:         result.Columns,
+		Rows:            rows,
+		RowCount:        result.RowCount,
+		TotalRows:       result.TotalRows,
+		ExecutionTimeMs: result.ExecutionTimeMs,
+		Truncated:       result.Truncated,
+	})
 }
 
 // handleSQLTestConnection handles POST /api/v1/sql/test-connection.
@@ -204,6 +215,10 @@ func (s *Server) handleSQLTestConnection(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Register even when Instant Client is missing so later execute
+	// can resolve connectionId and return the same driver message.
+	connectionID := sqlConnections.Register(cfg)
+
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 
@@ -211,24 +226,21 @@ func (s *Server) handleSQLTestConnection(w http.ResponseWriter, r *http.Request)
 	testResult := executor.TestConnection(ctx, cfg)
 
 	if testResult.Success {
-		writeOK(w, env, protocol.ResponseEnvelope{
-			RequestID:     env.RequestID,
-			CorrelationID: env.CorrelationID,
-			OK:            true,
-			Payload: &sqlTestConnectionResponse{
-				Success:       true,
-				OracleVersion: testResult.OracleVersion,
-				InstanceName:  testResult.InstanceName,
-			},
+		writeOK(w, env, &sqlTestConnectionResponse{
+			Success:       true,
+			OracleVersion: testResult.OracleVersion,
+			InstanceName:  testResult.InstanceName,
+			ConnectionID:  connectionID,
 		})
 		return
 	}
 
 	writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{
-		Code:    protocol.ErrInternal,
+		Code:    protocol.ErrUnsupported,
 		Message: testResult.Error,
 		Details: &sqlErrorDetail{
 			OracleErrorCode: testResult.OracleErrorCode,
+			ConnectionID:    connectionID,
 		},
 	})
 }

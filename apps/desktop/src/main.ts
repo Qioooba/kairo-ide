@@ -2,37 +2,71 @@
  * Kairo IDE — desktop main process.
  *
  * On launch, this:
- *   1. Finds a free port and generates a local auth secret.
- *   2. Starts the Go Runtime Agent as a child process with
- *      dynamic port and secret.
- *   3. Starts the Theia backend as a child process, passing
- *      the agent URL and secret via environment variables.
- *   4. Opens an Electron BrowserWindow pointing at the local
+ *   1. Starts the Go Runtime Agent with `--port 0` (OS ephemeral bind)
+ *      and a local auth secret — agent writes the real port to
+ *      agent-state.json (avoids findFreePort TOCTOU).
+ *   2. Starts the Theia backend as a child process, passing
+ *      the agent URL via environment variables. The session secret
+ *      is passed to the Theia backend only in headless mode (served
+ *      via /kairo-agent-secret); the Electron window path relies on
+ *      preload getSecret instead.
+ *   3. Opens an Electron BrowserWindow pointing at the local
  *      Theia app. The preload script exposes the agent config
  *      via contextBridge before the page loads.
- *   5. Tears down the agent and Theia backend on quit.
+ *   4. Tears down the agent and Theia backend on quit.
  *
  * The agent is the security boundary; the BrowserWindow uses
  * contextIsolation with a preload script.
  */
 
-import { app, BrowserWindow, dialog, ipcMain, Menu, MenuItemConstructorOptions, session, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, MenuItemConstructorOptions, safeStorage, screen, session, shell } from 'electron';
 import { spawn, ChildProcess, exec } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as http from 'http';
-import { findFreePort } from '@kairo/protocol';
 import { randomBytes } from 'crypto';
-import { detectHostJDK, JDT_LS_MIN_JDK_MAJOR, applyHostJDKEnv, showJDKSetupDialog } from './jdk-check';
+import { detectHostJDK, JDT_LS_MIN_JDK_MAJOR, applyHostJDKEnv, showJDKSetupDialog, savePersistedJDKHome, getPersistedJDKConfigPath, loadPersistedJDKHome } from './jdk-check';
+import {
+  parseTheiaListenPort,
+  readTheiaPortFromEnv,
+  readTheiaPortFromStateFile,
+  theiaPortDiscoverTimeoutMessage,
+  writeTheiaStateFile,
+} from './theia-port-discover';
+import {
+  detectTomcatHome,
+  applyTomcatEnv,
+  savePersistedTomcatHome,
+  getPersistedTomcatConfigPath,
+  showTomcatSetupDialog,
+} from './tomcat-check';
+import { ChildLifecycle } from './child-lifecycle';
+import {
+  parseAgentStateJson,
+  resolveAgentSecretFromEnv,
+} from './agent-state';
 
 let agentProcess: ChildProcess | null = null;
 let agentPort: number = 0;
 let agentSecret: string = '';
-let agentStartedByUs = false; // true if we spawned the agent, false if reused
+/** true if we spawned the agent, false if reused — mirrored on childLifecycle. */
+let agentStartedByUs = false;
+let agentDataDir: string = '';
+let agentBundledDir: string | undefined;
+let agentRespawning = false;
 let theiaProcess: ChildProcess | null = null;
 let theiaPort: number = 0;
 let mainWindow: BrowserWindow | null = null;
 let isQuitting = false;
+let quitCleanupStarted = false;
+
+/** DK-P2-2/P2-3: single ProcessManager-backed lifecycle for agent/theia. */
+const childLifecycle = new ChildLifecycle((msg) => flog(msg));
+
+function setAgentStartedByUs(value: boolean): void {
+  agentStartedByUs = value;
+  childLifecycle.agentStartedByUs = value;
+}
 
 // ── Headless (browser-only) mode ─────────────────────────────
 // Activated in two ways:
@@ -245,53 +279,102 @@ function verifyAgentBinary(agentPath: string): void {
 
 // ─── Agent State File Discovery ───────────────────────────────
 
-interface AgentStateFile {
-  port: number;
-  secret: string;
-  pid: number;
-  bindAddress: string;
-  startedAt: string;
+/** GET with optional headers; resolves on response (body drained). */
+function httpGet(
+  url: string,
+  opts: { timeoutMs?: number; headers?: http.OutgoingHttpHeaders } = {},
+): Promise<{ statusCode: number }> {
+  const timeoutMs = opts.timeoutMs ?? 400;
+  return new Promise((resolve, reject) => {
+    const req = http.get(url, { timeout: timeoutMs, headers: opts.headers }, (res) => {
+      res.resume();
+      resolve({ statusCode: res.statusCode ?? 0 });
+    });
+    req.on('error', reject);
+    req.on('timeout', () => {
+      req.destroy();
+      reject(new Error('timeout'));
+    });
+  });
 }
 
 /**
  * Try to discover a running agent via the state file written by the
- * Go runtime. Returns the agent URL and secret if found and healthy.
+ * Go runtime. Port/pid come from agent-state.json; the session secret
+ * must come from KAIRO_LOCAL_SECRET in the desktop parent env (never
+ * from the state file).
  */
-async function tryReuseAgent(dataDir: string): Promise<{ port: number; secret: string } | null> {
+async function tryReuseAgent(
+  dataDir: string,
+): Promise<{ port: number; secret: string; pid: number } | null> {
   const statePath = path.join(dataDir, 'agent-state.json');
   if (!fs.existsSync(statePath)) {
     return null;
   }
 
-  let state: AgentStateFile;
+  let state: ReturnType<typeof parseAgentStateJson>;
   try {
-    state = JSON.parse(fs.readFileSync(statePath, 'utf-8'));
+    state = parseAgentStateJson(fs.readFileSync(statePath, 'utf-8'));
   } catch {
     console.warn('[kairo] agent state file corrupted, ignoring');
     return null;
   }
 
-  if (!state.port || state.port <= 0) {
+  if (!state) {
     return null;
   }
 
-  // Verify the agent is still alive via health check.
-  const healthURL = `http://127.0.0.1:${state.port}/api/v1/health`;
-  try {
-    await new Promise<void>((resolve, reject) => {
-      const req = http.get(healthURL, { timeout: 2000 }, (res) => {
-        res.resume();
-        if (res.statusCode === 200) {
-          resolve();
-        } else {
-          reject(new Error(`status ${res.statusCode}`));
+  const secret = resolveAgentSecretFromEnv();
+  if (!secret) {
+    console.log(
+      '[kairo] agent state file found but KAIRO_LOCAL_SECRET is unset — cannot reuse without auth secret',
+    );
+    return null;
+  }
+
+  // If the host JDK was configured/changed after this agent started,
+  // do not reuse — the old process still has stale JAVA/KAIRO_* env.
+  const expectedHome = (process.env.KAIRO_JDK_HOME || loadPersistedJDKHome() || '').trim();
+  if (expectedHome) {
+    const markerPath = path.join(dataDir, 'agent-jdk-home.txt');
+    let agentHome = '';
+    try {
+      agentHome = fs.readFileSync(markerPath, 'utf-8').trim();
+    } catch { /* missing marker = pre-fix agent */ }
+    const norm = (p: string) => path.normalize(p).toLowerCase();
+    if (!agentHome || norm(agentHome) !== norm(expectedHome)) {
+      console.log('[kairo] host JDK changed since agent start — not reusing stale agent');
+      try {
+        if (state.pid > 0) {
+          if (process.platform === 'win32') {
+            exec(`taskkill /T /PID ${state.pid} /F`, { timeout: 5_000 }, () => { /* ignore */ });
+          } else {
+            try { process.kill(state.pid, 'SIGTERM'); } catch { /* ignore */ }
+          }
         }
-      });
-      req.on('error', reject);
-      req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
+      } catch { /* ignore */ }
+      try { fs.unlinkSync(statePath); } catch { /* ignore */ }
+      return null;
+    }
+  }
+
+  const base = `http://127.0.0.1:${state.port}`;
+  try {
+    const health = await httpGet(`${base}/api/v1/health`);
+    if (health.statusCode !== 200) {
+      throw new Error(`health status ${health.statusCode}`);
+    }
+    const auth = await httpGet(`${base}/api/v1/toolchains`, {
+      headers: { 'X-Kairo-Secret': secret },
     });
+    if (auth.statusCode !== 200) {
+      console.log(
+        `[kairo] agent on port ${state.port} rejected KAIRO_LOCAL_SECRET — not reusing`,
+      );
+      return null;
+    }
     console.log(`[kairo] reusing existing agent on port ${state.port} (pid ${state.pid})`);
-    return { port: state.port, secret: state.secret };
+    return { port: state.port, secret, pid: state.pid };
   } catch {
     console.log(`[kairo] agent state file found but agent is not healthy, will start a new one`);
     // Clean up stale state file.
@@ -300,18 +383,68 @@ async function tryReuseAgent(dataDir: string): Promise<{ port: number; secret: s
   }
 }
 
-async function startAgent(dataDir: string, bundledDir?: string): Promise<{ port: number; secret: string }> {
-  const port = await findFreePort();
+/** Shared agent process env (DK-P1-1): start + respawn must agree. */
+function buildAgentEnv(secret: string, dataDir: string): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    KAIRO_DESKTOP: '1',
+    KAIRO_LOCAL_SECRET: secret,
+    KAIRO_DATA_DIR: dataDir,
+  };
+  const jdk = getPersistedJDKConfigPath();
+  if (jdk) env.KAIRO_JDK_CONFIG = jdk;
+  const tomcat = getPersistedTomcatConfigPath();
+  if (tomcat) env.KAIRO_TOMCAT_CONFIG = tomcat;
+  return env;
+}
+
+/** Poll agent-state.json until the agent reports a bound port (DK-P1-2). */
+async function waitForAgentPort(dataDir: string, timeoutMs: number): Promise<number> {
+  const statePath = path.join(dataDir, 'agent-state.json');
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (!agentProcess) {
+      throw new Error('Agent process died before writing agent-state.json');
+    }
+    try {
+      if (fs.existsSync(statePath)) {
+        const state = parseAgentStateJson(fs.readFileSync(statePath, 'utf-8'));
+        if (state && state.port > 0) {
+          return state.port;
+        }
+      }
+    } catch {
+      // partial write — retry
+    }
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  throw new Error(`Agent did not write a bound port to agent-state.json within ${timeoutMs}ms`);
+}
+
+async function startAgent(
+  dataDir: string,
+  bundledDir?: string,
+): Promise<{ port: number; secret: string; ready: Promise<void> }> {
+  agentDataDir = dataDir;
+  agentBundledDir = bundledDir;
+  childLifecycle.agentStatePath = path.join(dataDir, 'agent-state.json');
   const secret = generateSecret();
   const agentPath = resolveAgentPath();
 
   // Verify the binary before spawning.
   verifyAgentBinary(agentPath);
 
+  // DK-P1-2: agent binds :0 and writes the real port to agent-state.json.
+  // Avoids the findFreePort → spawn TOCTOU window.
+  const statePath = path.join(dataDir, 'agent-state.json');
+  try { fs.unlinkSync(statePath); } catch { /* ignore missing */ }
+
+  // Pass the session secret via env (KAIRO_LOCAL_SECRET), never as a
+  // CLI flag — process listings (tasklist /v, Get-CimInstance) would
+  // otherwise expose the hex secret to any local user.
   const args = [
     '--bind', '127.0.0.1',
-    '--port', String(port),
-    '--secret', secret,
+    '--port', '0',
     '--data-dir', dataDir,
     '--log-level', 'info',
   ];
@@ -327,11 +460,21 @@ async function startAgent(dataDir: string, bundledDir?: string): Promise<{ port:
 
   agentProcess = spawn(agentPath, args, {
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: {
-      ...process.env,
-      KAIRO_DESKTOP: '1',
-    },
+    env: buildAgentEnv(secret, dataDir),
   });
+  childLifecycle.register('agent', agentProcess);
+
+  // Record which host JDK this agent process was started with so
+  // tryReuseAgent can invalidate reuse after the user switches JDK.
+  try {
+    fs.writeFileSync(
+      path.join(dataDir, 'agent-jdk-home.txt'),
+      process.env.KAIRO_JDK_HOME || '',
+      'utf-8',
+    );
+  } catch (err) {
+    console.warn('[kairo] Failed to write agent-jdk-home marker:', err);
+  }
 
   agentProcess.stdout?.on('data', (data: Buffer) => {
     const text = data.toString('utf-8');
@@ -357,115 +500,164 @@ async function startAgent(dataDir: string, bundledDir?: string): Promise<{ port:
       console.log(`[kairo] Agent exited with code ${code}, signal ${signal}`);
     }
     agentProcess = null;
+    // Auto-respawn on the same port/secret so the renderer can reconnect
+    // (Round 10 scenario C: kill agent → reconnect must recover).
+    if (!isQuitting && agentStartedByUs && agentDataDir && agentPort && agentSecret && !agentRespawning) {
+      agentRespawning = true;
+      const respawnPort = agentPort;
+      const respawnSecret = agentSecret;
+      const respawnDataDir = agentDataDir;
+      const respawnBundled = agentBundledDir;
+      setTimeout(() => {
+        void (async () => {
+          try {
+            console.log(`[kairo] Respawning agent on port ${respawnPort}…`);
+            const agentPath = resolveAgentPath();
+            verifyAgentBinary(agentPath);
+            const args = [
+              '--bind', '127.0.0.1',
+              '--port', String(respawnPort),
+              '--data-dir', respawnDataDir,
+              '--log-level', 'info',
+            ];
+            if (respawnBundled) args.push('--bundled-dir', respawnBundled);
+            agentProcess = spawn(agentPath, args, {
+              stdio: ['ignore', 'pipe', 'pipe'],
+              // DK-P1-1: preserve JDK/Tomcat config env on respawn.
+              env: buildAgentEnv(respawnSecret, respawnDataDir),
+            });
+            childLifecycle.register('agent', agentProcess);
+            agentProcess.stdout?.on('data', (data: Buffer) => {
+              process.stdout.write(`[agent] ${data.toString('utf-8')}`);
+            });
+            agentProcess.stderr?.on('data', (data: Buffer) => {
+              process.stderr.write(`[agent] ${data.toString('utf-8')}`);
+            });
+            agentProcess.on('exit', (c, s) => {
+              childExitCodes.set('agent', { code: c, signal: s });
+              agentProcess = null;
+              if (!isQuitting) {
+                console.error(`[kairo] Respawned agent exited code=${c} signal=${s}`);
+              }
+            });
+            // Brief health wait. Agent writes agent-state.json itself (0600).
+            const healthURL = `http://127.0.0.1:${respawnPort}/api/v1/health`;
+            for (let i = 0; i < 40; i++) {
+              try {
+                await new Promise<void>((resolve, reject) => {
+                  const req = http.get(healthURL, (res) => {
+                    res.resume();
+                    res.statusCode === 200 ? resolve() : reject(new Error(String(res.statusCode)));
+                  });
+                  req.on('error', reject);
+                  req.setTimeout(1000, () => {
+                    req.destroy();
+                    reject(new Error('timeout'));
+                  });
+                });
+                console.log(`[kairo] Agent respawned healthy on port ${respawnPort}`);
+                return;
+              } catch {
+                await new Promise((r) => setTimeout(r, 250));
+              }
+            }
+            console.error('[kairo] Agent respawn health check failed');
+          } catch (err: any) {
+            console.error(`[kairo] Agent respawn failed: ${err?.message || err}`);
+          } finally {
+            agentRespawning = false;
+          }
+        })();
+      }, 800);
+    }
   });
 
-  // Wait for health check
-  const healthURL = `http://127.0.0.1:${port}/api/v1/health`;
-  const startTime = Date.now();
-  const timeout = 15_000;
-
-  try {
-    await new Promise<void>((resolve, reject) => {
-      const check = () => {
-        if (!agentProcess) {
-          reject(new Error('Agent process died before health check'));
-          return;
-        }
-        const req = http.get(healthURL, (res) => {
-          res.resume();
-          if (res.statusCode === 200) {
-            resolve();
-          } else {
-            retryOrReject(new Error(`Health check returned status ${res.statusCode}`));
-          }
-        });
-        req.on('error', (err: Error) => {
-          retryOrReject(err);
-        });
-        req.setTimeout(2_000, () => {
-          req.destroy();
-          retryOrReject(new Error('Health check request timed out'));
-        });
-      };
-
-      const retryOrReject = (err: Error) => {
-        if (Date.now() - startTime > timeout) {
-          reject(new Error('Agent health check timed out after ' + timeout + 'ms: ' + err.message));
-          return;
-        }
-        setTimeout(check, 300);
-      };
-
-      check();
-    });
-  } catch (err: any) {
-    // Collect diagnostics before killing the process.
-    const stdout = stdoutChunks.join('').slice(-4096);
-    const stderr = stderrChunks.join('').slice(-4096);
-    console.error(`[kairo] Agent health check failed. stdout (last 4KB):\n${stdout}`);
-    console.error(`[kairo] Agent health check failed. stderr (last 4KB):\n${stderr}`);
-
-    // Stop the child process.
-    if (agentProcess && !agentProcess.killed) {
-      agentProcess.kill('SIGTERM');
-      setTimeout(() => {
-        if (agentProcess && !agentProcess.killed) {
-          agentProcess.kill('SIGKILL');
-        }
-      }, 3_000);
-    }
-    agentProcess = null;
-
-    throw new Error(
-      `Failed to start the Kairo Runtime Agent.\n\n` +
-      `The agent process did not become healthy within ${timeout / 1000}s.\n\n` +
-      `Details: ${err.message}\n\n` +
-      `Last stderr output:\n${stderr.slice(-1024) || '(none)'}`
-    );
-  }
-
-  agentPort = port;
   agentSecret = secret;
-  console.log(`[kairo] Agent healthy on port ${port}`);
-  return { port, secret };
-}
 
-function killProcessTree(proc: ChildProcess | null, signal: NodeJS.Signals): void {
-  if (!proc || proc.killed || !proc.pid) return;
-  try {
-    if (process.platform === 'win32') {
-      // Windows: taskkill /T /PID kills the process and all its children.
-      exec(`taskkill /T /PID ${proc.pid} /F`, { timeout: 5_000 }, (err) => {
-        if (err) console.error(`[kairo] taskkill error: ${err.message}`);
+  // Discover the OS-assigned port before returning so Theia can start in
+  // parallel with the health check (still no findFreePort TOCTOU).
+  const portDiscover = waitForAgentPort(dataDir, 15_000).then((port) => {
+    agentPort = port;
+    console.log(`[kairo] Agent bound port ${port}`);
+    return port;
+  });
+
+  const ready = (async () => {
+    const port = await portDiscover;
+    const healthURL = `http://127.0.0.1:${port}/api/v1/health`;
+    const startTime = Date.now();
+    const timeout = 15_000;
+
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const check = () => {
+          if (!agentProcess) {
+            reject(new Error('Agent process died before health check'));
+            return;
+          }
+          const req = http.get(healthURL, (res) => {
+            res.resume();
+            if (res.statusCode === 200) {
+              resolve();
+            } else {
+              retryOrReject(new Error(`Health check returned status ${res.statusCode}`));
+            }
+          });
+          req.on('error', (err: Error) => {
+            retryOrReject(err);
+          });
+          req.setTimeout(2_000, () => {
+            req.destroy();
+            retryOrReject(new Error('Health check request timed out'));
+          });
+        };
+
+        const retryOrReject = (err: Error) => {
+          if (Date.now() - startTime > timeout) {
+            reject(new Error('Agent health check timed out after ' + timeout + 'ms: ' + err.message));
+            return;
+          }
+          setTimeout(check, 100);
+        };
+
+        check();
       });
-    } else {
-      // Unix: negative PID sends signal to the entire process group.
+    } catch (err: any) {
+      const stdout = stdoutChunks.join('').slice(-4096);
+      const stderr = stderrChunks.join('').slice(-4096);
+      console.error(`[kairo] Agent health check failed. stdout (last 4KB):\n${stdout}`);
+      console.error(`[kairo] Agent health check failed. stderr (last 4KB):\n${stderr}`);
+
+      // DK-P2-2: await ProcessManager escalation instead of fire-and-forget
+      // kill + immediately nulling the ref (which skipped SIGKILL before).
       try {
-        process.kill(-proc.pid, signal);
-      } catch {
-        // Fallback: kill just the parent.
-        proc.kill(signal);
-      }
+        await childLifecycle.manager.shutdownOne('agent', {
+          termTimeoutMs: 3_000,
+          killTimeoutMs: 3_000,
+        });
+      } catch { /* best-effort */ }
+      agentProcess = null;
+
+      throw new Error(
+        `Failed to start the Kairo Runtime Agent.\n\n` +
+        `The agent process did not become healthy within ${timeout / 1000}s.\n\n` +
+        `Details: ${err.message}\n\n` +
+        `Last stderr output:\n${stderr.slice(-1024) || '(none)'}`
+      );
     }
-  } catch (err: any) {
-    console.error(`[kairo] killProcessTree error: ${err.message}`);
-  }
+    console.log(`[kairo] Agent healthy on port ${port}`);
+  })();
+
+  const port = await portDiscover;
+  return { port, secret, ready };
 }
 
-function stopAgent(): void {
-  if (!agentStartedByUs) {
-    console.log('[kairo] agent was reused, not stopping it');
-    return;
-  }
-  if (agentProcess && !agentProcess.killed) {
-    console.log('[kairo] Stopping agent...');
-    killProcessTree(agentProcess, 'SIGTERM');
-    setTimeout(() => {
-      if (agentProcess && !agentProcess.killed) {
-        killProcessTree(agentProcess, 'SIGKILL');
-      }
-    }, 5_000);
-  }
+async function stopAgent(): Promise<void> {
+  // DK-P2-1: ChildLifecycle stops reused agents by default unless
+  // KAIRO_KEEP_REUSED_AGENT=1 (with kairo-runtime cmdline verify).
+  console.log('[kairo] Stopping agent...');
+  await childLifecycle.stopAgent();
+  agentProcess = null;
 }
 
 // ─── Theia Backend ────────────────────────────────────────────
@@ -475,46 +667,72 @@ async function startTheiaBackend(): Promise<number> {
   // into apps/desktop/lib/backend/main.js by copy-browser-artifacts.js.
   const theiaEntry = path.join(__dirname, 'backend', 'main.js');
 
-  // We do NOT pre-allocate a port for Theia because the bundle
-  // entry that we spawn directly does not parse theia CLI argv on
-  // its own — it ignores THEIA_PORT (and any --port flag we pass)
-  // and binds to a port Theia itself picks (often a random
-  // ephemeral port, surfaced only via the "Theia app listening
-  // on http://127.0.0.1:NNN" log line). See MILESTONES.md N-021.
-  // We therefore spawn Theia, then discover the port from its
-  // stdout/stderr logs, then health-check that port.
+  // Port discovery (DK-P2-5): prefer THEIA_PORT / theia-state.json when
+  // present; otherwise scrape known Theia listen log lines. Log scrape
+  // remains the fallback because this bundle entry ignores THEIA_PORT
+  // and CLI --port and only announces the ephemeral bind via stdout —
+  // see theia-port-discover.ts module header.
   console.log(`[kairo] Starting Theia backend: ${theiaEntry}`);
+
+  // Electron window: preload owns getSecret — do not pass the session
+  // secret into the Theia child (avoids HTML embedding). Headless:
+  // browser clients fetch secret via /kairo-agent-secret, so pass it
+  // to the backend env only (never embedded in HTML).
+  const theiaEnv: NodeJS.ProcessEnv = {
+    ...process.env,
+    // Run Electron as plain Node.js so the Theia backend can use
+    // require() / CommonJS without the Chromium runtime overhead.
+    ELECTRON_RUN_AS_NODE: '1',
+    KAIRO_DESKTOP: '1',
+    KAIRO_AGENT_URL: `http://127.0.0.1:${agentPort}`,
+  };
+  if (isHeadless) {
+    theiaEnv.KAIRO_HEADLESS = '1';
+    theiaEnv.KAIRO_AGENT_SECRET = agentSecret;
+    delete theiaEnv.KAIRO_AGENT_SECRET_VIA_PRELOAD;
+  } else {
+    theiaEnv.KAIRO_AGENT_SECRET_VIA_PRELOAD = '1';
+    // Clear any inherited secret so the backend cannot inject it.
+    theiaEnv.KAIRO_AGENT_SECRET = '';
+  }
 
   theiaProcess = spawn(process.execPath, [theiaEntry], {
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: {
-      ...process.env,
-      // Run Electron as plain Node.js so the Theia backend can use
-      // require() / CommonJS without the Chromium runtime overhead.
-      ELECTRON_RUN_AS_NODE: '1',
-      KAIRO_AGENT_URL: `http://127.0.0.1:${agentPort}`,
-      KAIRO_AGENT_SECRET: agentSecret,
-    },
+    env: theiaEnv,
   });
+  childLifecycle.register('theia', theiaProcess);
 
-  // Capture stdout/stderr to find the port Theia picked. Theia
-  // logs `... listening on http://127.0.0.1:NNNN.` (or similar)
-  // once the HTTP server is up. We regex that out of either
-  // stream because Theia 1.73 has historically emitted it on
-  // different streams across versions.
-  let discoveredPort: number | undefined;
-  const portRegex = /listening on (?:https?:\/\/)?(?:[^\s/:]+):(\d{2,5})/i;
+  // Capture stdout/stderr. Patterns live in theia-port-discover.ts.
+  let logBuffer = '';
+  let logPort: number | undefined;
+  const dataDir = process.env.KAIRO_DATA_DIR
+    || path.join(app.getPath('userData'), 'kairo-data');
+  const theiaStatePath = path.join(dataDir, 'theia-state.json');
+
+  /** Ordered candidates: env → state file → log (stable signals first). */
+  const collectCandidates = (): number[] => {
+    const ports: number[] = [];
+    const add = (p: number | undefined) => {
+      if (p !== undefined && !ports.includes(p)) ports.push(p);
+    };
+    add(readTheiaPortFromEnv(theiaEnv));
+    add(readTheiaPortFromStateFile(theiaStatePath));
+    if (logPort === undefined) {
+      logPort = parseTheiaListenPort(logBuffer);
+    }
+    add(logPort);
+    return ports;
+  };
+
   const collectData = (data: Buffer) => {
     const text = data.toString('utf8');
+    logBuffer += text;
+    if (logBuffer.length > 512_000) {
+      logBuffer = logBuffer.slice(-256_000);
+    }
     process.stdout.write(`[theia] ${text}`);
-    if (discoveredPort === undefined) {
-      const m = portRegex.exec(text);
-      if (m) {
-        const p = Number.parseInt(m[1], 10);
-        if (Number.isInteger(p) && p > 0 && p < 65536) {
-          discoveredPort = p;
-        }
-      }
+    if (logPort === undefined) {
+      logPort = parseTheiaListenPort(logBuffer);
     }
   };
 
@@ -535,65 +753,82 @@ async function startTheiaBackend(): Promise<number> {
     theiaProcess = null;
   });
 
-  // Wait for Theia to be ready: discover port from logs, then
-  // poll that port's HTTP server.
+  // Wait for Theia to be ready: try each candidate port until one
+  // answers HTTP. Stale THEIA_PORT from a parent env may fail while
+  // the real log-discovered port succeeds.
   const startTime = Date.now();
   const timeout = 45_000;
+  let readyPort: number | undefined;
 
   await new Promise<void>((resolve, reject) => {
+    let candidateIndex = 0;
+
     const check = () => {
       if (!theiaProcess) {
         reject(new Error('Theia process died before becoming ready'));
         return;
       }
-      if (discoveredPort === undefined) {
-        retryOrReject(new Error('Waiting for Theia to log its listen port'));
+      const candidates = collectCandidates();
+      if (candidates.length === 0) {
+        retryOrReject(new Error('Waiting for Theia listen port'));
         return;
       }
-      const healthURL = `http://127.0.0.1:${discoveredPort}`;
+      if (candidateIndex >= candidates.length) {
+        candidateIndex = 0;
+      }
+      const port = candidates[candidateIndex];
+      candidateIndex += 1;
+      const healthURL = `http://127.0.0.1:${port}`;
       const req = http.get(healthURL, (res) => {
         res.resume();
         if (res.statusCode && res.statusCode < 500) {
+          readyPort = port;
           resolve();
         } else {
-          retryOrReject(new Error(`Theia returned status ${res.statusCode}`));
+          retryOrReject(new Error(`Theia returned status ${res.statusCode} on port ${port}`));
         }
       });
       req.on('error', () => {
-        retryOrReject(new Error('Theia not ready yet'));
+        retryOrReject(new Error(`Theia not ready yet on port ${port}`));
       });
       req.setTimeout(3_000, () => {
         req.destroy();
-        retryOrReject(new Error('Theia health check timed out'));
+        retryOrReject(new Error(`Theia health check timed out on port ${port}`));
       });
     };
 
     const retryOrReject = (err: Error) => {
       if (Date.now() - startTime > timeout) {
-        reject(new Error('Theia backend timed out after ' + timeout + 'ms: ' + err.message));
+        reject(new Error(theiaPortDiscoverTimeoutMessage(timeout, err.message)));
         return;
       }
-      setTimeout(check, 500);
+      setTimeout(check, 80);
     };
 
     check();
   });
 
-  theiaPort = discoveredPort!;
+  theiaPort = readyPort!;
+  // DK-P2-5: persist discovered port/pid so resolvePreferredTheiaPort
+  // can prefer theia-state.json on restart/reuse (kept separate from
+  // agent-state.json).
+  const theiaPid = theiaProcess?.pid;
+  if (theiaPid && theiaPid > 0) {
+    try {
+      writeTheiaStateFile(theiaStatePath, { port: theiaPort, pid: theiaPid });
+      console.log(`[kairo] theia state written to ${theiaStatePath} (port=${theiaPort}, pid=${theiaPid})`);
+    } catch (err: any) {
+      console.warn(`[kairo] failed to write theia-state.json: ${err?.message || err}`);
+    }
+  }
   console.log(`[kairo] Theia backend ready on port ${theiaPort}`);
   return theiaPort;
 }
 
-function stopTheiaBackend(): void {
-  if (theiaProcess && !theiaProcess.killed) {
-    console.log('[kairo] Stopping Theia backend...');
-    killProcessTree(theiaProcess, 'SIGTERM');
-    setTimeout(() => {
-      if (theiaProcess && !theiaProcess.killed) {
-        killProcessTree(theiaProcess, 'SIGKILL');
-      }
-    }, 5_000);
-  }
+async function stopTheiaBackend(): Promise<void> {
+  console.log('[kairo] Stopping Theia backend...');
+  await childLifecycle.stopTheia();
+  theiaProcess = null;
 }
 
 // ─── IPC ──────────────────────────────────────────────────────
@@ -613,6 +848,103 @@ ipcMain.on('toggle-devtools', () => {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.toggleDevTools();
   }
+});
+
+/** Native host-JDK picker for menu / status-bar "Switch JDK". */
+ipcMain.handle('kairo:switch-host-jdk', async () => {
+  const choice = await showJDKSetupDialog({ found: false, searchedPaths: [] });
+  if (choice !== 'continue') {
+    return choice;
+  }
+  const jdk = detectHostJDK(agentBundledDir);
+  if (!jdk.found) {
+    return 'continue';
+  }
+  applyHostJDKEnv(jdk);
+  savePersistedJDKHome(jdk);
+  try {
+    const src = getPersistedJDKConfigPath();
+    if (src && agentDataDir) {
+      fs.copyFileSync(src, path.join(agentDataDir, 'host-jdk.json'));
+    }
+    if (src) process.env.KAIRO_JDK_CONFIG = src;
+    if (agentDataDir) {
+      // Clear marker so tryReuseAgent won't keep a stale agent.
+      fs.writeFileSync(path.join(agentDataDir, 'agent-jdk-home.txt'), '', 'utf-8');
+    }
+  } catch (err) {
+    console.warn('[kairo] Failed to sync JDK after switch:', err);
+  }
+  if (agentStartedByUs && agentDataDir) {
+    await stopAgent();
+    try {
+      await startAgent(agentDataDir, agentBundledDir);
+    } catch (err) {
+      console.error('[kairo] Failed to respawn agent after JDK switch:', err);
+    }
+  }
+  return 'continue';
+});
+
+/** Native Tomcat 6 picker (Tools / Kairo menu). */
+async function configureTomcatHome(): Promise<'continue' | 'quit'> {
+  const choice = await showTomcatSetupDialog();
+  if (choice !== 'continue') {
+    return choice;
+  }
+  const home = detectTomcatHome(agentBundledDir);
+  if (!home) {
+    return 'continue';
+  }
+  applyTomcatEnv(home);
+  savePersistedTomcatHome(home);
+  try {
+    const src = getPersistedTomcatConfigPath();
+    if (src && agentDataDir) {
+      fs.copyFileSync(src, path.join(agentDataDir, 'host-tomcat.json'));
+    }
+    if (src) process.env.KAIRO_TOMCAT_CONFIG = src;
+  } catch (err) {
+    console.warn('[kairo] Failed to sync Tomcat after switch:', err);
+  }
+  if (agentStartedByUs && agentDataDir) {
+    await stopAgent();
+    try {
+      await startAgent(agentDataDir, agentBundledDir);
+    } catch (err) {
+      console.error('[kairo] Failed to respawn agent after Tomcat switch:', err);
+    }
+  }
+  return 'continue';
+}
+
+ipcMain.handle('kairo:switch-tomcat', () => configureTomcatHome());
+
+// OS keychain-backed encryption for sensitive renderer data (SQL passwords).
+ipcMain.handle('kairo:safe-storage-available', () => {
+  try {
+    return safeStorage.isEncryptionAvailable();
+  } catch {
+    return false;
+  }
+});
+ipcMain.handle('kairo:safe-storage-encrypt', (_event, plaintext: string) => {
+  if (typeof plaintext !== 'string') {
+    throw new Error('plaintext must be a string');
+  }
+  if (!safeStorage.isEncryptionAvailable()) {
+    throw new Error('safeStorage encryption is not available');
+  }
+  return safeStorage.encryptString(plaintext).toString('base64');
+});
+ipcMain.handle('kairo:safe-storage-decrypt', (_event, ciphertextB64: string) => {
+  if (typeof ciphertextB64 !== 'string') {
+    throw new Error('ciphertext must be a string');
+  }
+  if (!safeStorage.isEncryptionAvailable()) {
+    throw new Error('safeStorage encryption is not available');
+  }
+  return safeStorage.decryptString(Buffer.from(ciphertextB64, 'base64'));
 });
 
 // Send menu actions to the renderer process.
@@ -806,6 +1138,7 @@ function buildMenuTemplate(): MenuItemConstructorOptions[] {
             { label: 'Toggle Terminal', ...action('kairo.terminal.toggle') },
             { label: 'Keyboard Shortcuts', ...action('kairo.keymap.open') },
             { label: 'Switch JDK', ...action('kairo.jdk.switch') },
+            { label: 'Configure Tomcat...', click: () => { void configureTomcatHome(); } },
             { label: 'Reconnect Runtime Agent', ...action('kairo.agent.reconnect') },
           ],
         },
@@ -833,19 +1166,31 @@ async function createWindow(): Promise<void> {
   process.env.KAIRO_AGENT_URL = `http://127.0.0.1:${agentPort}`;
   process.env.KAIRO_AGENT_SECRET = agentSecret;
 
+  const workArea = screen.getPrimaryDisplay().workAreaSize;
+
   mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 800,
+    width: Math.min(1600, Math.max(1280, Math.floor(workArea.width * 0.85))),
+    height: Math.min(1000, Math.max(800, Math.floor(workArea.height * 0.85))),
     minWidth: 960,
     minHeight: 600,
     title: 'Kairo IDE',
     backgroundColor: '#1e1f22',
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      // Avoid HiDPI zoom quirks that push the status bar off the true bottom.
+      zoomFactor: 1,
     },
+  });
+
+  mainWindow.once('ready-to-show', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.show();
+      flog('[startup] window-shown');
+    }
   });
 
   // Auto-open DevTools only in unpackaged (dev) runs so the user
@@ -892,41 +1237,9 @@ async function createWindow(): Promise<void> {
   });
   mainWindow.webContents.on('did-finish-load', () => {
     flog('[renderer] did-finish-load');
-    // Auto-accept the Workspace Trust dialog in packaged desktop builds.
-    // The dialog blocks the entire UI until the user clicks, which is
-    // problematic for automated testing and first-run scenarios in an
-    // intranet-only product. We inject a one-shot MutationObserver
-    // that detects the trust dialog and clicks "Yes" automatically.
-    if (app.isPackaged || process.env.KAIRO_AUTO_TRUST === '1') {
-      mainWindow?.webContents.executeJavaScript(`
-        (function autoTrust() {
-          const observer = new MutationObserver(() => {
-            const btns = document.querySelectorAll('button');
-            for (const b of btns) {
-              if (b.textContent && b.textContent.includes('trust the authors') && !b.textContent.includes("don't")) {
-                b.click();
-                observer.disconnect();
-                return;
-              }
-            }
-          });
-          observer.observe(document.body, { childList: true, subtree: true });
-          // Also check immediately in case the dialog is already rendered.
-          const existing = document.querySelectorAll('button');
-          for (const b of existing) {
-            if (b.textContent && b.textContent.includes('trust the authors') && !b.textContent.includes("don't")) {
-              b.click();
-              observer.disconnect();
-              return;
-            }
-          }
-          // Safety: stop observing after 30 seconds regardless.
-          setTimeout(() => observer.disconnect(), 30000);
-        })();
-      `).catch((err: Error) => {
-        flog(`[kairo] auto-trust injection error: ${err.message}`);
-      });
-    }
+    // Workspace Trust must be an explicit user decision. Do not auto-click
+    // the trust dialog (DK-P0-5) — a malicious workspace would otherwise
+    // receive full trust without consent.
   });
   mainWindow.webContents.on('did-start-navigation', (_e, url, isInPlace, isMainFrame) => {
     flog(`[renderer] did-start-navigation: url=${url} inPlace=${isInPlace} mainFrame=${isMainFrame}`);
@@ -955,6 +1268,32 @@ async function createWindow(): Promise<void> {
   // non-http(s) schemes (file://, intent://, etc.) to prevent the
   // renderer from launching arbitrary local applications.
   const allowExternalLinks = process.env.KAIRO_ALLOW_EXTERNAL_LINKS === '1';
+
+  /** Allow only the Theia frontend port on loopback; never the agent API port. */
+  const isAllowedLocalFrontendUrl = (raw: string): boolean => {
+    try {
+      const u = new URL(raw);
+      if (u.protocol !== 'http:' && u.protocol !== 'https:') {
+        return false;
+      }
+      if (u.hostname !== '127.0.0.1' && u.hostname !== 'localhost') {
+        return false;
+      }
+      const port = u.port ? Number(u.port) : (u.protocol === 'https:' ? 443 : 80);
+      if (!Number.isFinite(port)) {
+        return false;
+      }
+      // Deny agent API port even when it shares loopback (DK-P0-7).
+      if (agentPort > 0 && port === agentPort) {
+        return false;
+      }
+      // Only the Theia frontend port is a valid top-frame / window.open target.
+      return theiaPort > 0 && port === theiaPort;
+    } catch {
+      return false;
+    }
+  };
+
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     try {
       const u = new URL(url);
@@ -962,13 +1301,16 @@ async function createWindow(): Promise<void> {
         console.warn('[kairo] refusing to open URL with non-http(s) scheme:', u.protocol);
         return { action: 'deny' };
       }
-      // Allow localhost window.open: Theia creates a new window via
-      // window.open when opening a folder/workspace while
-      // workspace.preserveWindow=false. External URLs are still refused
-      // unless KAIRO_ALLOW_EXTERNAL_LINKS=1.
-      if (u.hostname === '127.0.0.1' || u.hostname === 'localhost') {
+      // Allow localhost window.open only for the Theia frontend port.
+      // Theia creates a new window via window.open when opening a
+      // folder/workspace while workspace.preserveWindow=false.
+      if (isAllowedLocalFrontendUrl(url)) {
         console.log('[kairo] allowing local window.open:', url);
         return { action: 'allow' };
+      }
+      if (u.hostname === '127.0.0.1' || u.hostname === 'localhost') {
+        console.warn(`[kairo] refusing local window.open to non-frontend port: ${url}`);
+        return { action: 'deny' };
       }
       if (!allowExternalLinks) {
         console.warn(`[kairo] refusing to open external URL (set KAIRO_ALLOW_EXTERNAL_LINKS=1 to allow): ${url}`);
@@ -982,34 +1324,64 @@ async function createWindow(): Promise<void> {
   });
 
   // Also intercept navigation: if a link inside the app tries to
-  // navigate the main frame to an external URL, block it. This is
-  // a defense-in-depth measure — the CSP already restricts
-  // connect-src, but navigating the top frame to http://evil.com
-  // would replace the IDE entirely.
+  // navigate the main frame to an external URL or the agent API
+  // port, block it. This is a defense-in-depth measure — the CSP
+  // already restricts connect-src, but navigating the top frame to
+  // http://evil.com would replace the IDE entirely.
   mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (!isAllowedLocalFrontendUrl(url)) {
+      event.preventDefault();
+      console.warn(`[kairo] blocked top-frame navigation to non-frontend URL: ${url}`);
+    }
+  });
+
+  // DK-P2-9: also block HTTP(S) redirects that would escape the Theia
+  // frontend allowlist (will-navigate alone misses Location redirects).
+  mainWindow.webContents.on('will-redirect', (event, url) => {
+    if (!isAllowedLocalFrontendUrl(url)) {
+      event.preventDefault();
+      console.warn(`[kairo] blocked redirect to non-frontend URL: ${url}`);
+    }
+  });
+
+  // Cover subframe navigations (Theia iframes / secondary frames).
+  // Non-http(s) subframe targets (about:blank, blob:, data:) are allowed;
+  // http(s) must still pass the same frontend allowlist.
+  mainWindow.webContents.on('will-frame-navigate', (details) => {
+    const url = details.url;
     try {
       const u = new URL(url);
-      if (u.hostname !== '127.0.0.1' && u.hostname !== 'localhost') {
-        event.preventDefault();
-        console.warn(`[kairo] blocked top-frame navigation to non-local URL: ${url}`);
+      if (!details.isMainFrame && u.protocol !== 'http:' && u.protocol !== 'https:') {
+        return;
       }
     } catch {
-      event.preventDefault();
-      console.warn('[kairo] blocked top-frame navigation to malformed URL:', url);
+      details.preventDefault();
+      console.warn(`[kairo] blocked malformed frame navigation URL: ${url}`);
+      return;
+    }
+    if (!isAllowedLocalFrontendUrl(url)) {
+      details.preventDefault();
+      console.warn(`[kairo] blocked frame navigation to non-frontend URL: ${url}`);
     }
   });
 
   // Config is injected BEFORE the page loads via the preload script.
   // No executeJavaScript — avoids the race condition.
+  const tLoad = Date.now();
   await mainWindow.loadURL(`http://127.0.0.1:${theiaPort}`);
+  flog(`[startup] loadURL=${Date.now() - tLoad}ms`);
 
-  // Set the native application menu to match the browser version's
-  // comprehensive menu layout. The menu actions are sent to the
-  // renderer via IPC, where the preload script forwards them to
-  // the Theia command registry.
-  const menu = Menu.buildFromTemplate(buildMenuTemplate());
-  Menu.setApplicationMenu(menu);
-  flog('[kairo] native application menu set');
+  // Defer native menu until after first paint so it does not contend
+  // with Theia frontend bootstrap (OPT-001).
+  mainWindow.webContents.once('did-finish-load', () => {
+    try {
+      const menu = Menu.buildFromTemplate(buildMenuTemplate());
+      Menu.setApplicationMenu(menu);
+      flog('[kairo] native application menu set (deferred)');
+    } catch (err: any) {
+      flog(`[kairo] menu set failed: ${err?.message || err}`);
+    }
+  });
 
   // Handle the close event to force-close the window even when the
   // renderer's beforeunload handler (Theia's DefaultWindowService)
@@ -1058,13 +1430,18 @@ function setupCSP(session: Electron.Session): void {
     // extension contribution validation — it cannot be
     // avoided in production builds. We therefore always
     // allow 'unsafe-eval' so the frontend can initialize.
-    const scriptSrcExtra = " 'unsafe-eval'";
+    //
+    // 'unsafe-inline' is intentionally omitted from script-src
+    // (DK-P0-3). index.html only loads ./bundle.js; any needed
+    // inline scripts must use a nonce/hash. style-src still
+    // allows 'unsafe-inline' because Monaco/Theia inject
+    // dynamic style elements extensively.
     callback({
       responseHeaders: {
         ...details.responseHeaders,
         'Content-Security-Policy': [
           "default-src 'self'",
-          `script-src 'self' 'unsafe-inline'${scriptSrcExtra}`,
+          "script-src 'self' 'unsafe-eval'",
           "style-src 'self' 'unsafe-inline'",
           "connect-src 'self' data: http://127.0.0.1:* ws://127.0.0.1:*",
           "img-src 'self' data:",
@@ -1084,6 +1461,23 @@ app.on('session-created', (session) => {
 // Prevent multiple instances
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
+  // DK-P2-4: second instance must not quit silently — headless prints to
+  // stderr; GUI shows a brief error box (works before app 'ready').
+  const msg =
+    'Another instance of Kairo IDE is already running. This instance will quit.';
+  console.error(`[kairo] ${msg}`);
+  try {
+    process.stderr.write(`[kairo] ${msg}\n`);
+  } catch {
+    /* ignore */
+  }
+  if (!isHeadless) {
+    try {
+      dialog.showErrorBox('Kairo IDE', msg);
+    } catch {
+      /* dialog unavailable — stderr already notified */
+    }
+  }
   app.quit();
 } else {
   app.on('second-instance', () => {
@@ -1113,24 +1507,36 @@ if (!gotLock) {
     // Now that the app is ready we can use app.getPath('userData')
     // to set up the log file for packaged builds.
     ensureFileLogger();
+    const startupT0 = Date.now();
+    const phase = (name: string) => flog(`[startup] ${name}=${Date.now() - startupT0}ms`);
+    phase('ready');
 
-    // Run startup validation before launching child processes.
-    const warnings = validateStartup();
+    const bundledDir = app.isPackaged
+      ? path.join(process.resourcesPath, 'bundled')
+      : undefined;
+    const dataDir = path.join(app.getPath('userData'), 'kairo-data');
+
+    // Overlap filesystem prep / validation with JDK detect (OPT-001).
+    const [warnings, jdkDetected] = await Promise.all([
+      Promise.resolve().then(() => {
+        fs.mkdirSync(dataDir, { recursive: true });
+        return validateStartup();
+      }),
+      Promise.resolve().then(() => detectHostJDK(bundledDir)),
+    ]);
     for (const w of warnings) {
       console.warn(`[kairo] startup warning: ${w}`);
     }
+    phase('jdk+prep');
 
     // ── Host JDK (unified) ────────────────────────────────────
     // Prefer one JDK 21+ install for both the IDE host and JDT LS.
     // Fall back to JDK 17+ when 21 is unavailable (language features
     // stay limited until a 21+ runtime is configured).
-    const bundledDir = app.isPackaged
-      ? path.join(process.resourcesPath, 'bundled')
-      : undefined;
-
-    let jdkResult = detectHostJDK(bundledDir);
+    let jdkResult = jdkDetected;
     if (jdkResult.found) {
       applyHostJDKEnv(jdkResult);
+      savePersistedJDKHome(jdkResult);
       console.log(`[kairo] Host JDK ${jdkResult.version} at ${jdkResult.javaHome}`);
       if ((jdkResult.major ?? 0) < JDT_LS_MIN_JDK_MAJOR) {
         console.warn(
@@ -1147,10 +1553,60 @@ if (!gotLock) {
       jdkResult = detectHostJDK(bundledDir);
       if (jdkResult.found) {
         applyHostJDKEnv(jdkResult);
+        savePersistedJDKHome(jdkResult);
         console.log(`[kairo] Host JDK ${jdkResult.version} configured at ${jdkResult.javaHome}`);
       } else {
         console.warn('[kairo] Proceeding without JDK 17+ — Java language features will be limited');
       }
+    }
+
+    // Mirror host-jdk.json into the agent dataDir so Go Detect() can
+    // find it even when KAIRO_JDK_HOME was not inherited (reuse edge cases).
+    try {
+      const src = getPersistedJDKConfigPath();
+      if (src && fs.existsSync(src)) {
+        fs.copyFileSync(src, path.join(dataDir, 'host-jdk.json'));
+      }
+      if (src) {
+        process.env.KAIRO_JDK_CONFIG = src;
+      }
+      process.env.KAIRO_DATA_DIR = dataDir;
+    } catch (err) {
+      console.warn('[kairo] Failed to sync host-jdk.json into dataDir:', err);
+    }
+
+    // ── Tomcat 6 home (same persistence pattern as host JDK) ──
+    let tomcatHome = detectTomcatHome(bundledDir);
+    if (tomcatHome) {
+      applyTomcatEnv(tomcatHome);
+      savePersistedTomcatHome(tomcatHome);
+      console.log(`[kairo] Tomcat 6 at ${tomcatHome}`);
+    } else {
+      console.warn('[kairo] No Tomcat 6 detected, showing setup dialog');
+      const tomcatChoice = await showTomcatSetupDialog();
+      if (tomcatChoice === 'quit') {
+        app.quit();
+        return;
+      }
+      tomcatHome = detectTomcatHome(bundledDir);
+      if (tomcatHome) {
+        applyTomcatEnv(tomcatHome);
+        savePersistedTomcatHome(tomcatHome);
+        console.log(`[kairo] Tomcat 6 configured at ${tomcatHome}`);
+      } else {
+        console.warn('[kairo] Proceeding without Tomcat 6 — server start will fail until configured');
+      }
+    }
+    try {
+      const tomcatCfg = getPersistedTomcatConfigPath();
+      if (tomcatCfg && fs.existsSync(tomcatCfg)) {
+        fs.copyFileSync(tomcatCfg, path.join(dataDir, 'host-tomcat.json'));
+      }
+      if (tomcatCfg) {
+        process.env.KAIRO_TOMCAT_CONFIG = tomcatCfg;
+      }
+    } catch (err) {
+      console.warn('[kairo] Failed to sync host-tomcat.json into dataDir:', err);
     }
 
     // Set CSP on the default session as a safety net (the
@@ -1159,33 +1615,44 @@ if (!gotLock) {
     setupCSP(session.defaultSession);
 
     try {
-      const dataDir = path.join(app.getPath('userData'), 'kairo-data');
-      fs.mkdirSync(dataDir, { recursive: true });
-
       // Try to reuse an existing agent first. If one is already
       // running (e.g. started by a previous Desktop session or by
       // the browser launcher), connect to it instead of starting a
       // duplicate. This enables the "Desktop + Browser sharing the
       // same agent" workflow.
       const reused = await tryReuseAgent(dataDir);
+      phase(reused ? 'agent-reuse' : 'agent-reuse-miss');
       let port: number;
       let secret: string;
       if (reused) {
         port = reused.port;
         secret = reused.secret;
-        agentStartedByUs = false;
+        setAgentStartedByUs(false);
+        agentPort = port;
+        agentSecret = secret;
+        agentDataDir = dataDir;
+        childLifecycle.agentStatePath = path.join(dataDir, 'agent-state.json');
+        // Track PID so quit can stop reused agent (opt-out: KAIRO_KEEP_REUSED_AGENT=1).
+        if (reused.pid > 0) {
+          childLifecycle.manager.registerByPid('agent', reused.pid);
+        }
+        await startTheiaBackend();
+        phase('theiaReady');
       } else {
-        // Start Go Agent
+        // Start Go Agent; open window as soon as Theia is up — do not block
+        // first paint on agent health (OPT-001). Agent reconnects in UI.
         const result = await startAgent(dataDir, bundledDir);
+        phase('agentSpawn');
         port = result.port;
         secret = result.secret;
-        agentStartedByUs = true;
+        setAgentStartedByUs(true);
+        agentPort = port;
+        agentSecret = secret;
+        await Promise.all([
+          result.ready.then(() => phase('agentReady')),
+          startTheiaBackend().then(() => phase('theiaReady')),
+        ]);
       }
-      agentPort = port;
-      agentSecret = secret;
-
-      // Start Theia Backend
-      await startTheiaBackend();
 
       if (isHeadless) {
         // Headless mode: agent + backend only, no Electron window.
@@ -1207,23 +1674,25 @@ if (!gotLock) {
         // We use a simple interval to keep Node.js event loop alive.
         // On Ctrl+C, the 'before-quit' handler will tear them down.
         setInterval(() => {
-          // Heartbeat: check child processes are still alive.
-          if (agentProcess?.killed && theiaProcess?.killed) {
+          // DK-P1-7: after exit handlers null the refs, `?.killed` is falsey
+          // forever — quit when both children are gone.
+          if (!agentProcess && !theiaProcess) {
             console.log('[kairo] All child processes exited, quitting.');
             app.quit();
           }
         }, 5000).unref();
       } else {
-        // Create window — config is passed via env to preload
-        createWindow();
+        phase('createWindow');
+        await createWindow();
+        phase('windowLoaded');
       }
 
     } catch (err: any) {
       console.error('[kairo] Failed to start:', err);
       dialog.showErrorBox('Kairo IDE Error',
         `Failed to start Kairo IDE:\n${err.message}\n\nPlease check the console for details.`);
-      stopTheiaBackend();
-      stopAgent();
+      await stopTheiaBackend();
+      await stopAgent();
       app.quit();
     }
   });
@@ -1233,22 +1702,31 @@ if (!gotLock) {
 
     // Log child process exit codes for diagnostics.
     flog(`[kairo] shutdown initiated; child exit codes: ${JSON.stringify([...childExitCodes.entries()])}`);
+    flog(`[kairo] process manager:\n${childLifecycle.manager.getDiagnostics()}`);
 
-    // Detect zombie processes: if a child process is still alive after
-    // a previous stop attempt, force-kill it.
-    if (agentProcess && !agentProcess.killed) {
-      flog('[kairo] zombie agent detected; force-killing before quit');
-      killProcessTree(agentProcess, 'SIGKILL');
+    // Only run cleanup once — app.exit / nested quit must not re-enter.
+    if (quitCleanupStarted) {
+      return;
     }
-    if (theiaProcess && !theiaProcess.killed) {
-      flog('[kairo] zombie theia detected; force-killing before quit');
-      killProcessTree(theiaProcess, 'SIGKILL');
-    }
+    quitCleanupStarted = true;
+    event.preventDefault();
 
-    // Wait for child processes to exit cleanly before quitting.
-    // Electron will wait for this event handler to complete.
-    stopTheiaBackend();
-    stopAgent();
+    void (async () => {
+      try {
+        await childLifecycle.stopOwned({
+          termTimeoutMs: 2_000,
+          killTimeoutMs: 2_000,
+        });
+      } catch (err: any) {
+        flog(`[kairo] stopOwned error: ${err?.message || err}`);
+      } finally {
+        agentProcess = null;
+        theiaProcess = null;
+        // Final PID sweep for anything that survived graceful shutdown.
+        childLifecycle.forceKillOwnedSync();
+        app.exit(0);
+      }
+    })();
 
     // WM_CLOSE / app.quit() can stall for ~15s on Windows when a
     // child process (Theia, the Go agent, or a hung renderer)
@@ -1256,10 +1734,9 @@ if (!gotLock) {
     // the user sees the window vanish but the tray icon — and
     // sometimes the whole process tree — linger. After 5s we
     // bypass any in-flight cleanup and force-exit the process.
-    // During a clean shutdown the event loop is already gone
-    // before this fires, so the timer is a safe no-op.
     setTimeout(() => {
       flog('[kairo] quit timeout reached; forcing app.exit(0)');
+      childLifecycle.forceKillOwnedSync();
       app.exit(0);
     }, 5_000);
   });
@@ -1284,10 +1761,6 @@ if (!gotLock) {
 // Best-effort cleanup on process exit
 process.on('exit', (code) => {
   flog(`[kairo] main process exiting with code ${code}; child exit codes: ${JSON.stringify([...childExitCodes.entries()])}`);
-  if (agentProcess && !agentProcess.killed) {
-    try { agentProcess.kill('SIGKILL'); } catch { /* already gone */ }
-  }
-  if (theiaProcess && !theiaProcess.killed) {
-    try { theiaProcess.kill('SIGKILL'); } catch { /* already gone */ }
-  }
+  // PID-based tree kill — works even when ChildProcess refs were nulled.
+  childLifecycle.forceKillOwnedSync();
 });

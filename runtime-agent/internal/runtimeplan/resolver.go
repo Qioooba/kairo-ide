@@ -8,6 +8,7 @@ import (
 
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/catalinabase"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/domain"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/jdkmanager"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/pathpolicy"
 )
 
@@ -163,6 +164,13 @@ func (r *DefaultRuntimePlanResolver) ResolveRuntime(
 		if _, err := os.Stat(javaHome); err != nil {
 			return nil, fmt.Errorf("java home %s: %w", javaHome, err)
 		}
+	} else {
+		bundledDir := os.Getenv("KAIRO_BUNDLED_DIR")
+		resolved, err := jdkmanager.ResolveJavaHome(bundledDir)
+		if err != nil {
+			return nil, err
+		}
+		javaHome = resolved
 	}
 
 	var serverID domain.ServerID

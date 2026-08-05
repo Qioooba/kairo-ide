@@ -1,6 +1,9 @@
 package jdkmanager
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"os"
 	"path/filepath"
 	"testing"
@@ -49,26 +52,57 @@ func TestExtractTarGz_Corrupt(t *testing.T) {
 	}
 }
 
-// TestExtractTarGz_PathTraversalEntry verifies that entries escaping the
-// destination directory are skipped.
-func TestExtractTarGz_PathTraversalEntry(t *testing.T) {
-	// createFakeTarGz writes a normal layout; craft a traversal entry
-	// by reusing the tar writer with a malicious name.
+// TestExtractTarGz_SymlinkEscape verifies escaping symlinks are skipped (GO-P2-3).
+func TestExtractTarGz_SymlinkEscape(t *testing.T) {
 	dir := t.TempDir()
-	archivePath := filepath.Join(dir, "evil.tar.gz")
+	archivePath := filepath.Join(dir, "symlink-escape.tar.gz")
 
-	tgzData := createFakeTarGz(t, false)
-	if err := os.WriteFile(archivePath, tgzData, 0644); err != nil {
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gw)
+	if err := tw.WriteHeader(&tar.Header{
+		Name:     "jdk-safe/",
+		Mode:     0755,
+		Typeflag: tar.TypeDir,
+	}); err != nil {
 		t.Fatal(err)
 	}
+	if err := tw.WriteHeader(&tar.Header{
+		Name:     "jdk-safe/escape",
+		Mode:     0777,
+		Typeflag: tar.TypeSymlink,
+		Linkname: "/etc/passwd",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.WriteHeader(&tar.Header{
+		Name:     "jdk-safe/rel-escape",
+		Mode:     0777,
+		Typeflag: tar.TypeSymlink,
+		Linkname: "../../outside.txt",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(archivePath, buf.Bytes(), 0644); err != nil {
+		t.Fatal(err)
+	}
+
 	destDir := filepath.Join(dir, "out")
 	if err := extractTarGz(archivePath, destDir); err != nil {
-		t.Fatalf("extractTarGz failed: %v", err)
+		t.Fatalf("extractTarGz: %v", err)
 	}
-	// The malicious-path branch (entries with "..") cannot be triggered by the
-	// fixture, so this test just guards the happy path. A crafted tar with
-	// "../escape.txt" is covered by the jdtls distribution tests.
-	_ = destDir
+	if _, err := os.Lstat(filepath.Join(destDir, "jdk-safe", "escape")); !os.IsNotExist(err) {
+		t.Fatalf("absolute symlink escape should be skipped, err=%v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(destDir, "jdk-safe", "rel-escape")); !os.IsNotExist(err) {
+		t.Fatalf("relative symlink escape should be skipped, err=%v", err)
+	}
 }
 
 // TestExtractAndMove_RoundTrip verifies extractAndMove with a tar.gz fixture.

@@ -1,13 +1,27 @@
 import * as React from '@theia/core/shared/react';
-import { injectable } from '@theia/core/shared/inversify';
+import { inject, injectable, postConstruct } from '@theia/core/shared/inversify';
 import { Command, CommandContribution, CommandRegistry } from '@theia/core/lib/common/command';
 import { KeybindingContribution, KeybindingRegistry } from '@theia/core/lib/browser/keybinding';
 import { ReactDialog } from '@theia/core/lib/browser/dialogs/react-dialog';
 import { DialogProps } from '@theia/core/lib/browser/dialogs';
 import { isOSX } from '@theia/core/lib/common/os';
+import { DisposableCollection } from '@theia/core/lib/common/disposable';
+import { KairoI18nService, type KairoI18nKey } from '@kairo/i18n';
 
 import { KAIRO_SHORTCUT_CHEATSHEET_FACTORY_ID } from './kairo-factory-ids';
 import './kairo-shortcut-cheatsheet.css';
+
+type CheatsheetCategoryKey =
+  | 'widget.cheatsheet.category.editing'
+  | 'widget.cheatsheet.category.navigation'
+  | 'widget.cheatsheet.category.searchReplace'
+  | 'widget.cheatsheet.category.buildRunDebug'
+  | 'widget.cheatsheet.category.refactoring'
+  | 'widget.cheatsheet.category.generalIde'
+  | 'widget.cheatsheet.category.toolWindows'
+  | 'widget.cheatsheet.category.bookmarks'
+  | 'widget.cheatsheet.category.codeFolding'
+  | 'widget.cheatsheet.category.multipleCursors';
 
 export namespace KairoCheatsheetCommands {
   export const TOGGLE: Command = {
@@ -24,14 +38,14 @@ interface ShortcutRow {
 }
 
 interface ShortcutCategory {
-  name: string;
+  nameKey: CheatsheetCategoryKey;
   icon: string;
   shortcuts: ShortcutRow[];
 }
 
 const IDEA_KEYBINDINGS_MAC: ShortcutCategory[] = [
   {
-    name: 'Editing',
+    nameKey: 'widget.cheatsheet.category.editing',
     icon: 'codicon-edit',
     shortcuts: [
       { action: 'Undo', idea: '⌘Z', kairo: '⌘Z' },
@@ -67,7 +81,7 @@ const IDEA_KEYBINDINGS_MAC: ShortcutCategory[] = [
     ],
   },
   {
-    name: 'Navigation',
+    nameKey: 'widget.cheatsheet.category.navigation',
     icon: 'codicon-compass',
     shortcuts: [
       { action: 'Search Everywhere', idea: 'Double ⇧', kairo: 'Double ⇧' },
@@ -94,7 +108,7 @@ const IDEA_KEYBINDINGS_MAC: ShortcutCategory[] = [
     ],
   },
   {
-    name: 'Search / Replace',
+    nameKey: 'widget.cheatsheet.category.searchReplace',
     icon: 'codicon-search',
     shortcuts: [
       { action: 'Find in Path', idea: '⌘⇧F', kairo: '⌘⇧F' },
@@ -106,7 +120,7 @@ const IDEA_KEYBINDINGS_MAC: ShortcutCategory[] = [
     ],
   },
   {
-    name: 'Build / Run / Debug',
+    nameKey: 'widget.cheatsheet.category.buildRunDebug',
     icon: 'codicon-play',
     shortcuts: [
       { action: 'Build Project', idea: '⌘F9', kairo: '⌘F9' },
@@ -124,7 +138,7 @@ const IDEA_KEYBINDINGS_MAC: ShortcutCategory[] = [
     ],
   },
   {
-    name: 'Refactoring',
+    nameKey: 'widget.cheatsheet.category.refactoring',
     icon: 'codicon-wand',
     shortcuts: [
       { action: 'Generate Code', idea: '⌘N', kairo: '⌘N' },
@@ -141,7 +155,7 @@ const IDEA_KEYBINDINGS_MAC: ShortcutCategory[] = [
     ],
   },
   {
-    name: 'General / IDE',
+    nameKey: 'widget.cheatsheet.category.generalIde',
     icon: 'codicon-settings-gear',
     shortcuts: [
       { action: 'Save All', idea: '⌘S', kairo: '⌘S' },
@@ -155,7 +169,7 @@ const IDEA_KEYBINDINGS_MAC: ShortcutCategory[] = [
     ],
   },
   {
-    name: 'Tool Windows',
+    nameKey: 'widget.cheatsheet.category.toolWindows',
     icon: 'codicon-layout',
     shortcuts: [
       { action: 'Project', idea: '⌘1', kairo: '⌘1' },
@@ -169,7 +183,7 @@ const IDEA_KEYBINDINGS_MAC: ShortcutCategory[] = [
     ],
   },
   {
-    name: 'Bookmarks',
+    nameKey: 'widget.cheatsheet.category.bookmarks',
     icon: 'codicon-bookmark',
     shortcuts: [
       { action: 'Toggle Bookmark', idea: 'F11', kairo: 'F11' },
@@ -178,7 +192,7 @@ const IDEA_KEYBINDINGS_MAC: ShortcutCategory[] = [
     ],
   },
   {
-    name: 'Code Folding',
+    nameKey: 'widget.cheatsheet.category.codeFolding',
     icon: 'codicon-folding',
     shortcuts: [
       { action: 'Collapse', idea: '⌘-', kairo: '⌘-' },
@@ -188,7 +202,7 @@ const IDEA_KEYBINDINGS_MAC: ShortcutCategory[] = [
     ],
   },
   {
-    name: 'Multiple Cursors',
+    nameKey: 'widget.cheatsheet.category.multipleCursors',
     icon: 'codicon-multiple-windows',
     shortcuts: [
       { action: 'Add Cursor Above', idea: '⌃G', kairo: '⌃G' },
@@ -201,7 +215,7 @@ const IDEA_KEYBINDINGS_MAC: ShortcutCategory[] = [
 
 const IDEA_KEYBINDINGS_WIN: ShortcutCategory[] = [
   {
-    name: 'Editing (编辑)',
+    nameKey: 'widget.cheatsheet.category.editing',
     icon: 'codicon-edit',
     shortcuts: [
       { action: 'Undo (撤销)', idea: 'Ctrl+Z', kairo: 'Ctrl+Z' },
@@ -237,7 +251,7 @@ const IDEA_KEYBINDINGS_WIN: ShortcutCategory[] = [
     ],
   },
   {
-    name: 'Navigation (导航)',
+    nameKey: 'widget.cheatsheet.category.navigation',
     icon: 'codicon-compass',
     shortcuts: [
       { action: 'Search Everywhere (全局搜索)', idea: 'Double Shift', kairo: 'Double Shift' },
@@ -265,7 +279,7 @@ const IDEA_KEYBINDINGS_WIN: ShortcutCategory[] = [
     ],
   },
   {
-    name: 'Search / Replace (搜索/替换)',
+    nameKey: 'widget.cheatsheet.category.searchReplace',
     icon: 'codicon-search',
     shortcuts: [
       { action: 'Find in Path (全局查找)', idea: 'Ctrl+Shift+F', kairo: 'Ctrl+Shift+F' },
@@ -277,7 +291,7 @@ const IDEA_KEYBINDINGS_WIN: ShortcutCategory[] = [
     ],
   },
   {
-    name: 'Build / Run / Debug (构建/运行/调试)',
+    nameKey: 'widget.cheatsheet.category.buildRunDebug',
     icon: 'codicon-play',
     shortcuts: [
       { action: 'Build Project (构建项目)', idea: 'Ctrl+F9', kairo: 'Ctrl+F9' },
@@ -297,7 +311,7 @@ const IDEA_KEYBINDINGS_WIN: ShortcutCategory[] = [
     ],
   },
   {
-    name: 'Refactoring (重构)',
+    nameKey: 'widget.cheatsheet.category.refactoring',
     icon: 'codicon-wand',
     shortcuts: [
       { action: 'Generate Code (生成代码)', idea: 'Alt+Insert', kairo: 'Alt+Insert' },
@@ -315,7 +329,7 @@ const IDEA_KEYBINDINGS_WIN: ShortcutCategory[] = [
     ],
   },
   {
-    name: 'General / IDE (通用)',
+    nameKey: 'widget.cheatsheet.category.generalIde',
     icon: 'codicon-settings-gear',
     shortcuts: [
       { action: 'Save All (保存全部)', idea: 'Ctrl+S', kairo: 'Ctrl+S' },
@@ -329,7 +343,7 @@ const IDEA_KEYBINDINGS_WIN: ShortcutCategory[] = [
     ],
   },
   {
-    name: 'Tool Windows (工具窗口)',
+    nameKey: 'widget.cheatsheet.category.toolWindows',
     icon: 'codicon-layout',
     shortcuts: [
       { action: 'Project (项目)', idea: 'Alt+1', kairo: 'Alt+1' },
@@ -343,7 +357,7 @@ const IDEA_KEYBINDINGS_WIN: ShortcutCategory[] = [
     ],
   },
   {
-    name: 'Bookmarks (书签)',
+    nameKey: 'widget.cheatsheet.category.bookmarks',
     icon: 'codicon-bookmark',
     shortcuts: [
       { action: 'Toggle Bookmark (切换书签)', idea: 'F11', kairo: 'F11' },
@@ -352,7 +366,7 @@ const IDEA_KEYBINDINGS_WIN: ShortcutCategory[] = [
     ],
   },
   {
-    name: 'Code Folding (代码折叠)',
+    nameKey: 'widget.cheatsheet.category.codeFolding',
     icon: 'codicon-folding',
     shortcuts: [
       { action: 'Collapse (折叠)', idea: 'Ctrl+-', kairo: 'Ctrl+-' },
@@ -362,7 +376,7 @@ const IDEA_KEYBINDINGS_WIN: ShortcutCategory[] = [
     ],
   },
   {
-    name: 'Multiple Cursors (多光标)',
+    nameKey: 'widget.cheatsheet.category.multipleCursors',
     icon: 'codicon-multiple-windows',
     shortcuts: [
       { action: 'Add Cursor Above (上方添加光标)', idea: 'Ctrl+Alt+Up', kairo: 'Ctrl+Alt+Up' },
@@ -385,9 +399,9 @@ function getCloseKey(): string {
   return isOSX ? 'Esc' : 'Esc';
 }
 
-function renderKbd(keys: string): React.ReactNode {
+function renderKbd(keys: string, comingSoonLabel: string): React.ReactNode {
   if (keys === '\u2014' || keys === 'Coming soon') {
-    return <span className="kairo-cheatsheet-key kairo-cheatsheet-key-na">{keys}</span>;
+    return <span className="kairo-cheatsheet-key kairo-cheatsheet-key-na">{keys === 'Coming soon' ? comingSoonLabel : keys}</span>;
   }
   const noteMatch = keys.match(/^(.+?)\s*(\([^)]+\))$/);
   const mainPart = noteMatch ? noteMatch[1] : keys;
@@ -436,11 +450,26 @@ function highlightText(text: string, term: string): React.ReactNode {
   );
 }
 
-const CheatsheetContent: React.FC<{ searchTerm: string; onSearchChange: (term: string) => void }> = ({ searchTerm, onSearchChange }) => {
+const CheatsheetContent: React.FC<{
+  i18n: KairoI18nService;
+  searchTerm: string;
+  onSearchChange: (term: string) => void;
+}> = ({ i18n, searchTerm, onSearchChange }) => {
+  const t = React.useCallback(
+    (key: KairoI18nKey, params?: Record<string, string | number>) => i18n.t(key, params),
+    [i18n],
+  );
+  const [, forceUpdate] = React.useReducer((x: number) => x + 1, 0);
   const searchInputRef = React.useRef<HTMLInputElement>(null);
   const term = searchTerm.trim().toLowerCase();
   const data = getShortcutData();
   const isMac = isOSX;
+  const comingSoonLabel = t('widget.cheatsheet.comingSoon');
+
+  React.useEffect(() => {
+    const disposable = i18n.onDidChangeLanguage(() => forceUpdate());
+    return () => disposable.dispose();
+  }, [i18n]);
 
   const filteredCategories = React.useMemo(() => {
     if (!term) return data;
@@ -474,10 +503,10 @@ const CheatsheetContent: React.FC<{ searchTerm: string; onSearchChange: (term: s
           ref={searchInputRef}
           className="kairo-cheatsheet-search-input"
           type="search"
-          placeholder={isMac ? 'Search shortcuts...' : '搜索快捷键 (按操作名称或按键搜索)...'}
+          placeholder={isMac ? t('widget.cheatsheet.searchPlaceholder') : t('widget.cheatsheet.searchPlaceholderLong')}
           value={searchTerm}
           onChange={e => onSearchChange(e.target.value)}
-          aria-label="Search shortcuts"
+          aria-label={t('widget.cheatsheet.searchAria')}
         />
         {searchTerm && (
           <button
@@ -486,7 +515,7 @@ const CheatsheetContent: React.FC<{ searchTerm: string; onSearchChange: (term: s
               onSearchChange('');
               searchInputRef.current?.focus();
             }}
-            aria-label="Clear search"
+            aria-label={t('widget.cheatsheet.clearSearchAria')}
           >
             <i className="codicon codicon-close" />
           </button>
@@ -504,7 +533,7 @@ const CheatsheetContent: React.FC<{ searchTerm: string; onSearchChange: (term: s
           marginBottom: 8,
         }}>
           <i className="codicon codicon-info" style={{ marginRight: 6 }} />
-          Kairo IDE 默认使用 IntelliJ IDEA Windows 快捷键方案。工具窗口 Alt+2/3/4/7 映射为 Servers/Deployments/Builds/TODO（与 IDEA Bookmarks/Find/Run/Structure 不同）。
+          {t('widget.cheatsheet.infoBannerWin')}
         </div>
       )}
 
@@ -512,60 +541,60 @@ const CheatsheetContent: React.FC<{ searchTerm: string; onSearchChange: (term: s
         {filteredCategories.length === 0 ? (
           <div className="kairo-cheatsheet-empty">
             <i className="codicon codicon-search" style={{ fontSize: 48, opacity: 0.3, marginBottom: 12 }} />
-            <div>No shortcuts match &quot;{searchTerm}&quot;</div>
+            <div>{t('widget.cheatsheet.emptyNoMatch', { term: searchTerm })}</div>
             <div style={{ fontSize: 12, opacity: 0.6, marginTop: 4 }}>
-              Try searching for action names like &quot;debug&quot;, &quot;format&quot;, or &quot;git&quot;
+              {t('widget.cheatsheet.emptyHint')}
             </div>
           </div>
         ) : (
           filteredCategories.map(category => (
-            <div key={category.name} className="kairo-cheatsheet-category">
+            <div key={category.nameKey} className="kairo-cheatsheet-category">
               <div className="kairo-cheatsheet-category-header">
                 <i className={`codicon ${category.icon}`} style={{ marginRight: 6 }} />
-                {category.name}
+                {t(category.nameKey)}
                 <span className="kairo-cheatsheet-category-count">({category.shortcuts.length})</span>
               </div>
               <table className="kairo-cheatsheet-table">
                 <thead>
                   <tr>
-                    <th className="kairo-cheatsheet-col-action">{isMac ? 'Action' : '操作'}</th>
+                    <th className="kairo-cheatsheet-col-action">{t('widget.cheatsheet.colAction')}</th>
                     {showTwoColumns ? (
                       <>
                         <th className="kairo-cheatsheet-col-idea">
                           <i className="codicon codicon-symbol-namespace" style={{ marginRight: 4 }} />
-                          IDEA Shortcut
+                          {t('widget.cheatsheet.colIdeaShortcut')}
                         </th>
                         <th className="kairo-cheatsheet-col-kairo">
                           <span className="kairo-cheatsheet-kairo-badge">K</span>
-                          Kairo Shortcut
+                          {t('widget.cheatsheet.colKairoShortcut')}
                         </th>
                       </>
                     ) : (
                       <th className="kairo-cheatsheet-col-idea" style={{ width: '50%' }}>
                         <i className="codicon codicon-keyboard" style={{ marginRight: 4 }} />
-                        IntelliJ IDEA 快捷键
+                        {t('widget.cheatsheet.colIdeaShortcutWin')}
                       </th>
                     )}
                   </tr>
                 </thead>
                 <tbody>
                   {category.shortcuts.map((row, idx) => (
-                    <tr key={`${category.name}-${idx}`}>
+                    <tr key={`${category.nameKey}-${idx}`}>
                       <td className="kairo-cheatsheet-col-action">
                         {highlightText(row.action, term)}
                       </td>
                       {showTwoColumns ? (
                         <>
                           <td className="kairo-cheatsheet-col-idea">
-                            {renderKbd(row.idea)}
+                            {renderKbd(row.idea, comingSoonLabel)}
                           </td>
                           <td className="kairo-cheatsheet-col-kairo">
-                            {renderKbd(row.kairo)}
+                            {renderKbd(row.kairo, comingSoonLabel)}
                           </td>
                         </>
                       ) : (
                         <td className="kairo-cheatsheet-col-idea">
-                          {renderKbd(row.idea)}
+                          {renderKbd(row.idea, comingSoonLabel)}
                         </td>
                       )}
                     </tr>
@@ -579,9 +608,12 @@ const CheatsheetContent: React.FC<{ searchTerm: string; onSearchChange: (term: s
 
       <div className="kairo-cheatsheet-footer">
         <span>
-          Press <kbd className="kairo-cheatsheet-key kairo-cheatsheet-key-sm">{getCloseKey()}</kbd> to close
+          {t('widget.cheatsheet.footerCloseBefore')}{' '}
+          <kbd className="kairo-cheatsheet-key kairo-cheatsheet-key-sm">{getCloseKey()}</kbd>{' '}
+          {t('widget.cheatsheet.footerCloseAfter')}
           &nbsp;&bull;&nbsp;
-          {renderKbd(getToggleShortcut())} to toggle
+          {renderKbd(getToggleShortcut(), comingSoonLabel)}{' '}
+          {t('widget.cheatsheet.footerToggleAfter')}
         </span>
       </div>
     </div>
@@ -590,22 +622,34 @@ const CheatsheetContent: React.FC<{ searchTerm: string; onSearchChange: (term: s
 
 export class KairoShortcutCheatsheetDialog extends ReactDialog<void> {
   protected searchTerm = '';
+  protected readonly dialogDisposables = new DisposableCollection();
 
-  constructor() {
+  constructor(protected readonly i18n: KairoI18nService) {
     super({
-      title: isOSX
-        ? 'Keyboard Shortcuts — IDEA vs Kairo'
-        : 'Kairo IDE 快捷键参考 — IntelliJ IDEA Keymap (Windows 预设)',
+      title: i18n.t(isOSX ? 'widget.cheatsheet.titleMac' : 'widget.cheatsheet.titleWin'),
       maxWidth: isOSX ? 900 : 960,
     } as DialogProps);
     this.addClass('kairo-cheatsheet-dialog');
     this.id = KAIRO_SHORTCUT_CHEATSHEET_FACTORY_ID;
     this.closeCrossNode.classList.add('codicon', 'codicon-close');
+    this.dialogDisposables.push(
+      i18n.onDidChangeLanguage(() => {
+        (this as unknown as { title: string }).title =
+          i18n.t(isOSX ? 'widget.cheatsheet.titleMac' : 'widget.cheatsheet.titleWin');
+        this.update();
+      }),
+    );
+  }
+
+  override dispose(): void {
+    this.dialogDisposables.dispose();
+    super.dispose();
   }
 
   protected render(): React.ReactNode {
     return (
       <CheatsheetContent
+        i18n={this.i18n}
         searchTerm={this.searchTerm}
         onSearchChange={term => {
           this.searchTerm = term;
@@ -623,12 +667,33 @@ export class KairoShortcutCheatsheetDialog extends ReactDialog<void> {
 @injectable()
 export class KairoShortcutCheatsheetContribution implements CommandContribution, KeybindingContribution {
 
+  @inject(KairoI18nService)
+  protected readonly i18n!: KairoI18nService;
+
   protected dialog: KairoShortcutCheatsheetDialog | null = null;
+  protected commandRegistry: CommandRegistry | undefined;
+
+  @postConstruct()
+  protected init(): void {
+    this.i18n.onDidChangeLanguage(() => this.refreshCommandLabel());
+  }
+
+  protected refreshCommandLabel(): void {
+    const cmd = this.commandRegistry?.getCommand(KairoCheatsheetCommands.TOGGLE.id);
+    if (cmd) {
+      cmd.label = this.i18n.t('widget.cheatsheet.commandLabel');
+    }
+  }
 
   registerCommands(registry: CommandRegistry): void {
-    registry.registerCommand(KairoCheatsheetCommands.TOGGLE, {
-      execute: () => this.toggle(),
-    });
+    this.commandRegistry = registry;
+    registry.registerCommand(
+      { ...KairoCheatsheetCommands.TOGGLE, label: this.i18n.t('widget.cheatsheet.commandLabel') },
+      {
+        execute: () => this.toggle(),
+      },
+    );
+    this.refreshCommandLabel();
   }
 
   registerKeybindings(keybindings: KeybindingRegistry): void {
@@ -647,7 +712,7 @@ export class KairoShortcutCheatsheetContribution implements CommandContribution,
   }
 
   protected open(): void {
-    this.dialog = new KairoShortcutCheatsheetDialog();
+    this.dialog = new KairoShortcutCheatsheetDialog(this.i18n);
     this.dialog.open();
   }
 }

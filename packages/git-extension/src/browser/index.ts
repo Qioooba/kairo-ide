@@ -25,7 +25,15 @@ import { GitCherryPickService } from './git-cherrypick-service';
 import { GitCherryPickContribution } from './git-cherrypick-contribution';
 
 export { GitService } from './git-service';
-export type { GitFileStatus, GitStatusResult, GitCommit, GitBlameLine, GitDiffResult, GitCommitResult } from './git-service';
+export type { GitFileStatus, GitStatusResult, GitCommit, GitBlameLine, GitDiffResult, GitCommitResult, GitCommitOptions } from './git-service';
+export {
+  uriToFsPath,
+  toRepoRelativePath,
+  decodeGitQuotedPath,
+  parsePorcelainStatusZ,
+  parsePorcelainStatusLines,
+  normalizeFsPath,
+} from './git-path-utils';
 export { GitStore } from './git-store';
 export type { GitChangesState } from './git-store';
 export { GitChangesWidget } from './git-changes-widget';

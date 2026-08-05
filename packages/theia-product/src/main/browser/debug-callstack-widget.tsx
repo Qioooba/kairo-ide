@@ -10,12 +10,11 @@ import * as React from 'react';
 import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import { Emitter, Event } from '@theia/core/lib/common/event';
-import { OpenerService, open } from '@theia/core/lib/browser/opener-service';
-import URI from '@theia/core/lib/common/uri';
 import { DebugSessionManager } from '@theia/debug/lib/browser/debug-session-manager';
 import type { DebugSession } from '@theia/debug/lib/browser/debug-session';
-import type { DebugProtocol } from '@vscode/debugprotocol';
+import type { DebugStackFrame } from '@theia/debug/lib/browser/model/debug-stack-frame';
 import { KairoI18nService, type KairoI18nKey } from '@kairo/i18n';
+import { KairoDebugSessionService } from './kairo-debug-session-service';
 
 export const KAIRO_DEBUG_CALLSTACK_FACTORY_ID = 'kairo-debug-callstack';
 
@@ -52,24 +51,14 @@ export interface CallStackState {
 interface CallStackViewProps {
     state: CallStackState;
     session: DebugSession | undefined;
-    openerService: OpenerService;
     t: TFunction;
     onSelectFrame: (frame: StackFrameInfo) => void;
     onRefresh: () => void;
 }
 
-const CallStackView: React.FC<CallStackViewProps> = ({ state, session, openerService, t, onSelectFrame, onRefresh }) => {
+const CallStackView: React.FC<CallStackViewProps> = ({ state, session, t, onSelectFrame, onRefresh }) => {
     const handleFrameClick = (frame: StackFrameInfo) => {
         onSelectFrame(frame);
-        if (frame.source?.path) {
-            const uri = new URI(frame.source.path);
-            open(openerService, uri, {
-                selection: {
-                    start: { line: Math.max(0, frame.line - 1), character: Math.max(0, frame.column - 1) },
-                    end: { line: Math.max(0, frame.line - 1), character: Math.max(0, frame.column - 1) },
-                },
-            });
-        }
     };
 
     return (
@@ -173,11 +162,11 @@ export class KairoDebugCallStackWidget extends ReactWidget {
     @inject(DebugSessionManager)
     protected readonly sessionManager!: DebugSessionManager;
 
-    @inject(OpenerService)
-    protected readonly openerService!: OpenerService;
-
     @inject(KairoI18nService)
     protected readonly i18n!: KairoI18nService;
+
+    @inject(KairoDebugSessionService)
+    protected readonly debugSessionService!: KairoDebugSessionService;
 
     protected state: CallStackState = { frames: [], threadName: '', busy: false, error: null, sessionId: undefined };
     protected readonly onStateChangeEmitter = new Emitter<CallStackState>();
@@ -195,9 +184,14 @@ export class KairoDebugCallStackWidget extends ReactWidget {
         this.addClass('kairo-widget');
         this.update();
 
-        this.sessionManager.onDidChange(() => this.update());
-        this.sessionManager.onDidStopDebugSession(() => this.refresh());
-        this.sessionManager.onDidDestroyDebugSession(() => this.clear());
+        this.sessionManager.onDidChange(() => this.syncCurrentFrameHighlight());
+        this.debugSessionService.onDidChangeState(state => {
+            if (state.isSuspended) {
+                void this.refresh();
+            } else {
+                this.clear();
+            }
+        });
     }
 
     protected onAfterShow(): void {
@@ -211,11 +205,49 @@ export class KairoDebugCallStackWidget extends ReactWidget {
         return React.createElement(CallStackView, {
             state: this.state,
             session: session ?? undefined,
-            openerService: this.openerService,
             t,
-            onSelectFrame: (frame: StackFrameInfo) => this.selectFrame(frame),
+            onSelectFrame: (frame: StackFrameInfo) => void this.selectFrame(frame),
             onRefresh: () => this.refresh(),
         });
+    }
+
+    protected mapStackFrame(frame: DebugStackFrame, currentFrameId: number | undefined, index: number): StackFrameInfo {
+        const source = frame.source;
+        return {
+            id: frame.raw.id,
+            name: frame.raw.name,
+            source: source ? {
+                name: source.name ?? 'Unknown',
+                path: source.uri.toString(),
+            } : frame.raw.source ? {
+                name: frame.raw.source.name ?? 'Unknown',
+                path: frame.raw.source.path ?? '',
+            } : undefined,
+            line: frame.raw.line,
+            column: frame.raw.column,
+            isCurrent: currentFrameId !== undefined
+                ? frame.raw.id === currentFrameId
+                : index === 0,
+        };
+    }
+
+    protected syncCurrentFrameHighlight(): void {
+        const currentFrameId = this.sessionManager.currentSession?.currentFrame?.raw?.id;
+        if (currentFrameId === undefined || this.state.frames.length === 0) {
+            this.update();
+            return;
+        }
+        const needsUpdate = this.state.frames.some(f => f.isCurrent !== (f.id === currentFrameId));
+        if (needsUpdate) {
+            this.setState({
+                frames: this.state.frames.map(f => ({
+                    ...f,
+                    isCurrent: f.id === currentFrameId,
+                })),
+            });
+        } else {
+            this.update();
+        }
     }
 
     async refresh(): Promise<void> {
@@ -234,19 +266,11 @@ export class KairoDebugCallStackWidget extends ReactWidget {
                 return;
             }
 
-            const response = await session.sendRequest('stackTrace', { threadId: thread.threadId });
-            const rawFrames = response.body?.stackFrames ?? [];
-            const frames: StackFrameInfo[] = rawFrames.map((f: DebugProtocol.StackFrame, i: number) => ({
-                id: f.id,
-                name: f.name,
-                source: f.source ? {
-                    name: f.source.name ?? 'Unknown',
-                    path: f.source.path ?? '',
-                } : undefined,
-                line: f.line,
-                column: f.column,
-                isCurrent: i === 0,
-            }));
+            const stackFrames = await thread.fetchFrames();
+            const currentFrameId = thread.currentFrame?.raw?.id;
+            const frames: StackFrameInfo[] = stackFrames.map((f, i) =>
+                this.mapStackFrame(f, currentFrameId, i),
+            );
 
             this.setState({
                 frames,
@@ -266,16 +290,19 @@ export class KairoDebugCallStackWidget extends ReactWidget {
         }
     }
 
-    protected selectFrame(frame: StackFrameInfo): void {
-        // The actual frame switching is handled by the native debug session
-        // when the user clicks on a frame. Theia's DebugStackFramesWidget
-        // already handles this. This is a convenience view.
-        const session = this.sessionManager.currentSession;
-        if (session) {
-            // Mark the selected frame as current
-            this.state.frames.forEach(f => { f.isCurrent = f.id === frame.id; });
-            this.update();
+    protected async selectFrame(frame: StackFrameInfo): Promise<void> {
+        const focused = await this.debugSessionService.focusFrame(frame.id);
+        if (focused) {
+            void focused.open({ preview: true });
         }
+
+        const currentFrameId = this.sessionManager.currentSession?.currentFrame?.raw?.id ?? frame.id;
+        this.setState({
+            frames: this.state.frames.map(f => ({
+                ...f,
+                isCurrent: f.id === currentFrameId,
+            })),
+        });
     }
 
     protected clear(): void {
@@ -287,18 +314,4 @@ export class KairoDebugCallStackWidget extends ReactWidget {
         this.onStateChangeEmitter.fire(this.state);
         this.update();
     }
-}
-
-function _mapStackTraceFrame(f: DebugProtocol.StackFrame, index: number): StackFrameInfo {
-    return {
-        id: f.id,
-        name: f.name,
-        source: f.source ? {
-            name: f.source.name ?? 'Unknown',
-            path: f.source.path ?? '',
-        } : undefined,
-        line: f.line,
-        column: f.column,
-        isCurrent: index === 0,
-    };
 }

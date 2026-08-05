@@ -50,19 +50,31 @@ function decodeXmlEntities(text: string): string {
 
 function parseSimpleXml(xml: string): SimpleXmlElement | null {
   try {
-    const tagRegex = /<(\/?)([\w:-]+)(?:\s+([^>]*?))?(\/?)>/g;
+    // Strip comments and expand CDATA so the tag regex never sees raw markup
+    // inside them (VC-P1-6). Attribute values with '>' are handled via a
+    // quoted-attribute scanner below.
+    let input = xml
+      .replace(/<!--[\s\S]*?-->/g, '')
+      .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, (_, cdata: string) =>
+        cdata
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;'),
+      );
+
+    const tagRegex = /<(\/?)([\w:-]+)((?:\s+[\w:-]+\s*=\s*(?:"[^"]*"|'[^']*'))*)\s*(\/?)>/g;
     const root: SimpleXmlElement = {};
     const stack: { elem: SimpleXmlElement; name: string }[] = [{ elem: root, name: '' }];
     let lastIndex = 0;
     let match: RegExpExecArray | null;
 
-    while ((match = tagRegex.exec(xml)) !== null) {
+    while ((match = tagRegex.exec(input)) !== null) {
       const [, isClosing, tagName, attrs, selfClosing] = match;
       const start = match.index;
       const end = tagRegex.lastIndex;
 
       if (start > lastIndex) {
-        const text = decodeXmlEntities(xml.substring(lastIndex, start).trim());
+        const text = decodeXmlEntities(input.substring(lastIndex, start).trim());
         if (text && stack.length > 0) {
           const top = stack[stack.length - 1].elem;
           top['#text'] = (top['#text'] || '') + text;
@@ -77,10 +89,10 @@ function parseSimpleXml(xml: string): SimpleXmlElement | null {
       } else {
         const attributes: Record<string, string> = {};
         if (attrs) {
-          const attrRegex = /([\w:-]+)\s*=\s*"([^"]*)"/g;
+          const attrRegex = /([\w:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
           let attrMatch: RegExpExecArray | null;
           while ((attrMatch = attrRegex.exec(attrs)) !== null) {
-            attributes[attrMatch[1]] = decodeXmlEntities(attrMatch[2]);
+            attributes[attrMatch[1]] = decodeXmlEntities(attrMatch[2] ?? attrMatch[3] ?? '');
           }
         }
 

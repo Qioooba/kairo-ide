@@ -1,6 +1,12 @@
 appId: com.kairo.ide
 productName: Kairo IDE
+executableName: Kairo
 copyright: Copyright © 2025-2026 Kairo IDE
+
+# Single source of truth for electron-builder (DK-P1-6).
+# Do not reintroduce a "build" block in package.json — pack scripts
+# (package-windows.cjs, build:win) load this file via --config or
+# electron-builder's default yml discovery.
 
 directories:
   output: dist
@@ -8,6 +14,8 @@ directories:
 
 # Do NOT rebuild native modules; we ship zero native Node addons.
 npmRebuild: false
+
+afterPack: ./scripts/after-pack.cjs
 
 # Include all compiled artifacts produced by `pnpm build`.
 # Layout after copy:
@@ -21,8 +29,10 @@ files:
   - lib/preload.js
   - lib/process-manager.js
   - lib/jdk-check.js
+  - lib/tomcat-check.js
   - lib/frontend/**/*
   - lib/backend/**/*
+  - lib/prebuilds/**/*
   - package.json
   # Exclude source maps — production builds don't need them (~133 MB saved).
   - "!lib/**/*.map"
@@ -32,15 +42,25 @@ files:
   # Only @kairo/protocol is listed as a runtime dependency; all other packages
   # are in devDependencies so electron-builder won't include them.
 asar: true
-asarUnpack:
-  - lib/backend/native/**/*
+# asarUnpack is intentionally NOT used here: with pnpm workspace-linked
+# deps (@kairo/protocol), electron-builder's unpack filter throws
+# "must be under apps/desktop". Natives are mirrored by scripts/after-pack.cjs.
+
+# Shared bundled runtime artifacts (all platforms).
+extraResources:
+  - from: bundled/tomcat6
+    to: bundled/tomcat6
+    filter: ["**/*"]
+  - from: bundled/jdtls
+    to: bundled/jdtls
+    filter: ["**/*"]
+  - from: bundled/kairo-jdi-bridge.jar
+    to: bundled/kairo-jdi-bridge.jar
 
 # Platform-specific agent binary. The desktop prebuild script
 # produces the binary under runtime-agent/bin/. electron-builder
 # copies it into the platform-specific resources folder so the
 # main process can resolve it at runtime via process.resourcesPath.
-# The binary name is platform-specific (kairo-runtime vs kairo-runtime.exe),
-# so extraResources is configured per-platform below.
 
 # macOS
 mac:
@@ -57,27 +77,18 @@ mac:
     - from: ../../runtime-agent/bin/kairo-runtime
       to: bin/kairo-runtime
 
-# Windows
+# Windows — dir only by default; build-and-package.ps1 creates the intranet 7z.
+# Use `pnpm --filter @kairo/desktop exec electron-builder --win --config.win.target=nsis`
+# when an NSIS installer is needed.
 win:
   target:
-    - target: nsis
-      arch:
-        - x64
-    - target: zip
+    - target: dir
       arch:
         - x64
   artifactName: ${name}-${version}-win-${arch}.${ext}
   extraResources:
     - from: ../../runtime-agent/bin/kairo-runtime.exe
       to: bin/kairo-runtime.exe
-    - from: bundled/tomcat6
-      to: bundled/tomcat6
-      filter: ["**/*"]
-    - from: bundled/jdtls
-      to: bundled/jdtls
-      filter: ["**/*"]
-    - from: bundled/kairo-jdi-bridge.jar
-      to: bundled/kairo-jdi-bridge.jar
   sign: scripts/sign-win.cjs
   requestedExecutionLevel: asInvoker
 
@@ -103,8 +114,9 @@ nsis:
   include: scripts/installer/kairo-setup.nsi
   # Run after install
   runAfterFinish: false
-  # Delete app data on uninstall prompt
-  deleteAppDataOnUninstall: true
+  # Delete app data on uninstall prompt — keep false so uninstall does
+  # not wipe user workspaces / settings under %APPDATA% (DK-P2-6).
+  deleteAppDataOnUninstall: false
 
 # Linux
 linux:

@@ -29,7 +29,7 @@ timeout.unref();
 
 // ─── ADR 参考值 ──────────────────────────────────────────────────
 const ADR_REF = {
-  jdtls: '1.21.0',       // ADR-0017
+  jdtls: '1.55.0',       // ADR-0017 / supply-chain-lock.json
   tomcat: '6.0.53',      // ADR-0006
   go: '1.22',            // minimum
   node: '20.10',         // minimum from package.json engines

@@ -223,6 +223,9 @@ func TestExtractIP(t *testing.T) {
 		{"no port", "10.0.0.1", "", "10.0.0.1"},
 		{"xff single", "10.0.0.2:80", "192.168.1.100", "192.168.1.100"},
 		{"xff multiple", "10.0.0.2:80", "192.168.1.100, 10.0.0.3", "192.168.1.100"},
+		// GO-P2-1: loopback ignores forged XFF
+		{"loopback ignores xff", "127.0.0.1:54321", "1.2.3.4", "127.0.0.1"},
+		{"ipv6 loopback ignores xff", "[::1]:54321", "1.2.3.4", "[::1]"},
 	}
 
 	for _, tc := range tests {

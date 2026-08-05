@@ -481,6 +481,19 @@ func extractTarGz(archivePath, destDir string) error {
 			}
 			outFile.Close()
 		case tar.TypeSymlink:
+			// Reject symlink escape (GO-P2-3): Linkname may be absolute or
+			// contain ".." that resolves outside destDir.
+			linkTarget := hdr.Linkname
+			if linkTarget == "" || filepath.IsAbs(linkTarget) ||
+				strings.HasPrefix(linkTarget, "/") || strings.HasPrefix(linkTarget, `\`) ||
+				len(linkTarget) >= 2 && linkTarget[1] == ':' {
+				continue
+			}
+			resolved := filepath.Clean(filepath.Join(filepath.Dir(fpath), filepath.FromSlash(linkTarget)))
+			cleanDest := filepath.Clean(destDir)
+			if resolved != cleanDest && !strings.HasPrefix(resolved, cleanDest+string(os.PathSeparator)) {
+				continue
+			}
 			if err := os.MkdirAll(filepath.Dir(fpath), 0755); err != nil {
 				return err
 			}

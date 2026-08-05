@@ -2,6 +2,7 @@ import * as React from 'react';
 import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import { CommandService } from '@theia/core/lib/common';
+import { PreferenceService } from '@theia/core/lib/common/preferences';
 import { RuntimeConnectionService } from '@kairo/runtime-extension';
 import { KairoI18nService } from '@kairo/i18n';
 import { ServerStore, ServerInstance, ConnectionState, HotReloadStatus } from './server-store';
@@ -117,16 +118,18 @@ interface ServerViewProps {
     commandService: CommandService;
     runtime: RuntimeConnectionService;
     i18n: KairoI18nService;
+    preferences: PreferenceService;
 }
 
-const ServerViewComponent: React.FC<ServerViewProps> = ({ store, commandService, runtime, i18n }) => {
+const ServerViewComponent: React.FC<ServerViewProps> = ({ store, commandService, runtime, i18n, preferences }) => {
     const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
     const [, forceUpdate] = React.useReducer(x => x + 1, 0);
     const [servers, setServers] = React.useState<ServerInstance[]>(store.getServers());
     const [connectionState, setConnectionState] = React.useState<ConnectionState>(store.getConnectionState());
-    const [autoSyncEnabled, setAutoSyncEnabled] = React.useState(() => {
-        try { return localStorage.getItem('kairo.hotReload.autoSyncOnSave') !== 'false'; } catch { return true; }
-    });
+    // BD-P1-12: read/write PreferenceService (HotDeployService reads the same key).
+    const [autoSyncEnabled, setAutoSyncEnabled] = React.useState(() =>
+        preferences.get('kairo.hotReload.autoSyncOnSave', true) as boolean,
+    );
     const [publishState, setPublishState] = React.useState<'idle' | 'publishing' | 'success' | 'error'>('idle');
     const [publishMessage, setPublishMessage] = React.useState(t('widget.servers.hotReload.autoSyncActive'));
     const [hotReloadStatus, setHotReloadStatus] = React.useState<HotReloadStatus>(store.getHotReloadStatus());
@@ -151,6 +154,16 @@ const ServerViewComponent: React.FC<ServerViewProps> = ({ store, commandService,
         return () => sub.dispose();
     }, [store]);
 
+    React.useEffect(() => {
+        const disposable = preferences.onPreferenceChanged(change => {
+            if (change.preferenceName === 'kairo.hotReload.autoSyncOnSave') {
+                // PreferenceChange omits newValue in Theia 1.73 — re-read.
+                setAutoSyncEnabled(preferences.get('kairo.hotReload.autoSyncOnSave', true) as boolean);
+            }
+        });
+        return () => disposable.dispose();
+    }, [preferences]);
+
     // The API retains stopped server history. Prefer the currently live
     // instance so historical rows cannot leave Stop/Restart/Open disabled
     // while a later server is running (KAIRO-RC-WEB-262).
@@ -166,30 +179,38 @@ const ServerViewComponent: React.FC<ServerViewProps> = ({ store, commandService,
     const handleStop = () => commandService.executeCommand('kairo.server.stop');
     const handleRestart = () => commandService.executeCommand('kairo.server.restart');
     const handleOpenApp = () => commandService.executeCommand('kairo.app.open');
-    const handleUpdate = () => {
+    // BD-P1-11: await the command promise instead of unconditional success.
+    const handleUpdate = async () => {
         setPublishState('publishing');
         setPublishMessage(t('widget.servers.hotReload.updating'));
-        commandService.executeCommand('kairo.server.update');
-        setTimeout(() => {
+        try {
+            await commandService.executeCommand('kairo.server.update');
             setPublishState('success');
             setPublishMessage(t('widget.servers.hotReload.updateTriggered'));
-        }, 1000);
+        } catch (err) {
+            setPublishState('error');
+            setPublishMessage(err instanceof Error ? err.message : t('widget.servers.hotReload.failed', { msg: String(err) }));
+        }
     };
-    const handleReloadContext = () => {
-        if (window.confirm(t('widget.servers.hotReload.reloadContextConfirm'))) {
-            setPublishState('publishing');
-            setPublishMessage(t('widget.servers.hotReload.reloading'));
-            commandService.executeCommand('kairo.server.reloadContext');
-            setTimeout(() => {
-                setPublishState('success');
-                setPublishMessage(t('widget.servers.hotReload.reloadTriggered'));
-            }, 1000);
+    const handleReloadContext = async () => {
+        if (!window.confirm(t('widget.servers.hotReload.reloadContextConfirm'))) {
+            return;
+        }
+        setPublishState('publishing');
+        setPublishMessage(t('widget.servers.hotReload.reloading'));
+        try {
+            await commandService.executeCommand('kairo.server.reloadContext');
+            setPublishState('success');
+            setPublishMessage(t('widget.servers.hotReload.reloadTriggered'));
+        } catch (err) {
+            setPublishState('error');
+            setPublishMessage(err instanceof Error ? err.message : t('widget.servers.hotReload.failed', { msg: String(err) }));
         }
     };
     const toggleAutoSync = () => {
         const next = !autoSyncEnabled;
         setAutoSyncEnabled(next);
-        try { localStorage.setItem('kairo.hotReload.autoSyncOnSave', String(next)); } catch {}
+        void preferences.set('kairo.hotReload.autoSyncOnSave', next);
         setPublishMessage(next ? t('widget.servers.hotReload.autoSyncActive') : t('widget.servers.hotReload.autoSyncPaused'));
     };
 
@@ -257,7 +278,7 @@ const ServerViewComponent: React.FC<ServerViewProps> = ({ store, commandService,
                     className="theia-button main"
                     data-testid="server-start-button"
                     onClick={handleStart}
-                    disabled={activeServer?.state === 'running' || activeServer?.state === 'starting' || isDisconnected}
+                    disabled={activeServer?.state === 'running' || activeServer?.state === 'starting' || activeServer?.state === 'stopping' || isDisconnected}
                     aria-label={t('widget.servers.toolbar.startServerAria')}
                 >
                     <span className="codicon codicon-play" aria-hidden="true" />
@@ -267,7 +288,7 @@ const ServerViewComponent: React.FC<ServerViewProps> = ({ store, commandService,
                     className="theia-button secondary"
                     data-testid="server-debug-button"
                     onClick={handleDebug}
-                    disabled={activeServer?.state === 'running' || activeServer?.state === 'starting' || isDisconnected}
+                    disabled={activeServer?.state === 'running' || activeServer?.state === 'starting' || activeServer?.state === 'stopping' || isDisconnected}
                     aria-label={t('widget.servers.toolbar.debugServerAria')}
                     title={t('widget.servers.toolbar.debugServerTooltip')}
                 >
@@ -279,7 +300,7 @@ const ServerViewComponent: React.FC<ServerViewProps> = ({ store, commandService,
                     className="theia-button toolbar"
                     data-testid="server-stop-button"
                     onClick={handleStop}
-                    disabled={!activeServer || activeServer.state === 'stopped' || isDisconnected}
+                    disabled={!activeServer || activeServer.state === 'stopped' || activeServer.state === 'stopping' || isDisconnected}
                     aria-label={t('widget.servers.toolbar.stopServerAria')}
                     title={t('common.stop')}
                 >
@@ -408,6 +429,7 @@ export class ServerViewWidget extends ReactWidget {
     @inject(CommandService) protected readonly commandService!: CommandService;
     @inject(RuntimeConnectionService) protected readonly runtime!: RuntimeConnectionService;
     @inject(KairoI18nService) protected readonly i18n!: KairoI18nService;
+    @inject(PreferenceService) protected readonly preferences!: PreferenceService;
 
     constructor() {
         super();
@@ -434,6 +456,7 @@ export class ServerViewWidget extends ReactWidget {
             commandService: this.commandService,
             runtime: this.runtime,
             i18n: this.i18n,
+            preferences: this.preferences,
         });
     }
 }

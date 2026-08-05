@@ -44,6 +44,18 @@ test('mergeLogHistory preserves live lines received during history loading witho
   assert.deepEqual(mergeLogHistory(history, live).map(entry => entry.line), ['old', 'overlap', 'new']);
 });
 
+test('mergeLogHistory uses ordinal identity when present (WS vs poll)', () => {
+  const history = [{ line: 'same', ts: 't1', stream: 'stdout', level: 'info', source: 'catalina', ordinal: 1 }];
+  const live = [{ line: 'same', ts: 't2', stream: 'stdout', level: 'info', source: 'catalina', ordinal: 1 }];
+  assert.equal(mergeLogHistory(history, live).length, 1, 'same source+ordinal must collapse');
+});
+
+test('mergeLogHistory keeps distinct ordinals even with identical ts/line', () => {
+  const a = { line: 'tick', ts: 't', stream: 'stdout', level: 'info', source: 'catalina', ordinal: 1 };
+  const b = { line: 'tick', ts: 't', stream: 'stdout', level: 'info', source: 'catalina', ordinal: 2 };
+  assert.equal(mergeLogHistory([a], [b]).length, 2);
+});
+
 test('HistoryDeltaTracker suppresses repeated polls and clear-time history, then handles append and rotation', () => {
   const tracker = new HistoryDeltaTracker();
   const persisted = (value, ordinal) => ({ ...line(value), source: 'kairo.log', ordinal });

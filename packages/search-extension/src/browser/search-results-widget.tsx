@@ -9,7 +9,7 @@ import { KairoI18nService } from '@kairo/i18n';
 import { VirtualList } from '@kairo/ui-kit';
 import { KairoSearchSessionModel, type SearchSessionState } from './search-session-model';
 import { resolveWorkspaceMatchUri } from './search-path';
-import { groupMatchesByFile, sameLineContext } from './search-result-utils';
+import { groupMatchesByFile, getSearchFileName, getSearchFileDir, getSearchFileIcon, matchPreviewParts } from './search-result-utils';
 import './search-center.css';
 
 /**
@@ -195,6 +195,7 @@ export const SearchResultsPanel: React.FC<SearchResultsPanelProps> = ({
           testId="find-tool-results"
           renderItem={(item, _index, isSelected) => {
             if (item.kind === 'header') {
+              const file = item.file || '';
               return (
                 <button
                   type="button"
@@ -203,15 +204,15 @@ export const SearchResultsPanel: React.FC<SearchResultsPanelProps> = ({
                   data-testid="find-tool-group"
                 >
                   <span className={`codicon kairo-search-chevron ${item.collapsed ? 'codicon-chevron-right' : 'codicon-chevron-down'}`} aria-hidden="true" />
-                  <span className="codicon codicon-file" aria-hidden="true" />
-                  <span className="kairo-search-result-filename">{item.file?.split(/[\\/]/).pop()}</span>
-                  <span className="kairo-search-result-filepath">{item.file}</span>
+                  <span className={`codicon ${getSearchFileIcon(getSearchFileName(file))}`} aria-hidden="true" />
+                  <span className="kairo-search-result-filename">{getSearchFileName(file)}</span>
+                  <span className="kairo-search-result-filepath">{getSearchFileDir(file)}</span>
                   <span className="kairo-search-result-count">{item.matchCount}</span>
                 </button>
               );
             }
             const match = item.match!;
-            const { before, after } = sameLineContext(match);
+            const preview = matchPreviewParts(match);
             return (
               <button
                 type="button"
@@ -223,7 +224,11 @@ export const SearchResultsPanel: React.FC<SearchResultsPanelProps> = ({
               >
                 <span className="kairo-search-result-lineno">{match.line}</span>
                 <span className="kairo-search-result-preview">
-                  {before}<mark>{match.matchText}</mark>{after}
+                  {preview.before}
+                  {preview.highlight
+                    ? <span className="kairo-search-highlight">{preview.highlight}</span>
+                    : null}
+                  {preview.after}
                 </span>
               </button>
             );

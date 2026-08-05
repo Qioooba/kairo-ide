@@ -471,6 +471,12 @@ test('pathToFileUri handles posix and windows paths', () => {
   assert.equal(pathToFileUri('C:\\repo\\proj'), 'file:///C:/repo/proj');
 });
 
+test('pathToFileUri percent-encodes spaces, unicode, and UNC', () => {
+  assert.equal(pathToFileUri('C:\\repo\\my project'), 'file:///C:/repo/my%20project');
+  assert.equal(pathToFileUri('/repo/中文'), 'file:///repo/%E4%B8%AD%E6%96%87');
+  assert.equal(pathToFileUri('\\\\server\\share\\a b'), 'file://server/share/a%20b');
+});
+
 test('extractJdtLsHome finds the install home from the -jar launcher path', () => {
   assert.equal(extractJdtLsHome(DESCRIPTOR), '/jdtls-home');
   // Windows-style separators are normalized.

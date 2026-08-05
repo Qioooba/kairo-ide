@@ -393,7 +393,7 @@ test('save operations are wrapped in undo stops', () => {
 // ------------------------------------------------------------------
 
 test('save actions silently catch errors to avoid disrupting save flow', () => {
-  // The production code wraps the entire onJavaFileSaved in a try-catch
+  // The production code wraps the entire runSaveActions in a try-catch
   // with an empty catch block. This is a structural verification.
   let caught = false;
   try {
@@ -404,6 +404,15 @@ test('save actions silently catch errors to avoid disrupting save flow', () => {
   }
   assert.equal(caught, true);
   // The key assertion: errors are caught and never re-thrown.
+});
+
+test('save actions flush pending sync and run on will-save (JV-P0-3)', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const src = fs.readFileSync(path.join(__dirname, 'java-save-actions.ts'), 'utf8');
+  assert.match(src, /onModelWillSaveModel/, 'must hook will-save, not did-save');
+  assert.match(src, /flushPending/, 'must flushPending before format/organize');
+  assert.doesNotMatch(src, /onDidSaveTextDocument/, 'must not apply save actions after save');
 });
 
 test('teardown', () => {

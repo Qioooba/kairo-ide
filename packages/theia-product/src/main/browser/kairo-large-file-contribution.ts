@@ -25,6 +25,14 @@ import {
   LargeFileTier,
 } from './large-file-policy';
 
+/** Code languages that must never be downgraded to plaintext. */
+const SYNTAX_LANGUAGE_IDS = new Set([
+  'java', 'jsp', 'xml', 'json', 'jsonc', 'properties',
+  'html', 'css', 'scss', 'less', 'javascript', 'typescript',
+  'javascriptreact', 'typescriptreact', 'sql', 'yaml', 'yml',
+  'markdown', 'shellscript', 'bat', 'powershell', 'python', 'go',
+]);
+
 export const KairoLargeFileCommands = {
   TOGGLE_FULL_FEATURES: {
     id: 'kairo.largeFile.toggleFullFeatures',
@@ -128,9 +136,13 @@ implements FrontendApplicationContribution, CommandContribution {
     }
     if (nextTier !== 'normal') {
       editor.getControl().updateOptions(editorOptionsForLargeFile(nextTier));
-      // Huge models below Monaco's built-in 20 MB threshold would otherwise
-      // still be tokenized and synchronized with language providers in full.
-      if (nextTier === 'huge' && model.getLanguageId() !== 'plaintext') {
+      // Never strip syntax highlighting from source files — plaintext mode
+      // made tens-of-thousands-line JSPs lose all coloring past the threshold.
+      if (
+        nextTier === 'huge'
+        && !SYNTAX_LANGUAGE_IDS.has(state.originalLanguage)
+        && model.getLanguageId() !== 'plaintext'
+      ) {
         monaco.editor.setModelLanguage(model, 'plaintext');
       }
     }

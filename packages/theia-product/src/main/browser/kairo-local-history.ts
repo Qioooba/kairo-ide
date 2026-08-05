@@ -30,6 +30,7 @@ import { AbstractDialog, ConfirmDialogProps } from '@theia/core/lib/browser/dial
 import { Message } from '@theia/core/shared/@lumino/messaging';
 import { WorkspaceService } from '@theia/workspace/lib/browser';
 import { KairoSaveableService } from './kairo-saveable-service';
+import { KairoI18nService } from '@kairo/i18n';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                               */
@@ -111,8 +112,9 @@ export class LocalHistoryService {
 
       for (const child of resolved.children) {
         if (!child.isFile || !child.name.startsWith('snapshot-')) continue;
-        // Filter by file path prefix embedded in the snapshot name
-        if (!child.name.includes(filePrefix)) continue;
+        // Exact suffix match: snapshot-<ts>-<sanitizedPath> (TP-P2-15).
+        // includes() wrongly matched Foo.java inside FooBar.java paths.
+        if (!child.name.endsWith(`-${filePrefix}`)) continue;
 
         const parts = child.name.split('-');
         const ts = parseInt(parts[1] || '0', 10);
@@ -265,6 +267,7 @@ export class LocalHistoryWidget extends Widget {
   @inject(EditorManager) protected readonly editorManager!: EditorManager;
   @inject(LocalHistoryService) protected readonly historyService!: LocalHistoryService;
   @inject(MessageService) protected readonly messages!: MessageService;
+  @inject(KairoI18nService) protected readonly i18n!: KairoI18nService;
 
   protected snapshots: Snapshot[] = [];
   protected currentUri: URI | undefined;
@@ -273,14 +276,22 @@ export class LocalHistoryWidget extends Widget {
   constructor() {
     super();
     this.id = LocalHistoryWidget.ID;
-    this.title.label = 'Local History';
-    this.title.caption = 'Local History — View and restore file snapshots';
     this.addClass('kairo-widget');
-    this.renderEmpty();
   }
 
   @postConstruct()
   protected init(): void {
+    this.applyLocalizedStrings();
+    this.toDispose.push(
+      this.i18n.onDidChangeLanguage(() => {
+        this.applyLocalizedStrings();
+        if (this.currentUri) {
+          void this.refresh();
+        } else {
+          this.renderEmpty();
+        }
+      }),
+    );
     this.toDispose.push(
       this.editorManager.onCurrentEditorChanged(widget => {
         if (widget) {
@@ -300,7 +311,14 @@ export class LocalHistoryWidget extends Widget {
     const current = this.editorManager.currentEditor;
     if (current) {
       this.setEditor(current);
+    } else {
+      this.renderEmpty();
     }
+  }
+
+  protected applyLocalizedStrings(): void {
+    this.title.label = this.i18n.t('widget.localHistory.title');
+    this.title.caption = this.i18n.t('widget.localHistory.caption');
   }
 
   protected setEditor(widget: EditorWidget): void {
@@ -323,54 +341,77 @@ export class LocalHistoryWidget extends Widget {
   }
 
   protected renderEmpty(): void {
-    this.node.innerHTML = `<div class="kairo-widget-body">
-      <p>No history available. Open a file to view its snapshot timeline.</p>
-    </div>`;
+    this.node.replaceChildren();
+    const body = document.createElement('div');
+    body.className = 'kairo-widget-body';
+    const p = document.createElement('p');
+    p.textContent = this.i18n.t('widget.localHistory.emptyNoFile');
+    body.appendChild(p);
+    this.node.appendChild(body);
   }
 
   protected render(): void {
+    this.node.replaceChildren();
+    const body = document.createElement('div');
+    body.className = 'kairo-widget-body';
+
     if (this.snapshots.length === 0) {
-      this.node.innerHTML = `<div class="kairo-widget-body">
-        <p>No snapshots for this file yet. Save the file to create snapshots.</p>
-      </div>`;
+      const p = document.createElement('p');
+      p.textContent = this.i18n.t('widget.localHistory.emptyNoSnapshots');
+      body.appendChild(p);
+      this.node.appendChild(body);
       return;
     }
 
-    const rows = this.snapshots.map((s, _i) => {
-      const date = new Date(s.timestamp);
-      const timeStr = date.toLocaleString();
-      const sizeStr = this.formatSize(s.size);
-      return `
-        <tr>
-          <td>${escapeHtml(timeStr)}</td>
-          <td>${sizeStr}</td>
-          <td>
-            <button class="theia-button secondary" data-action="compare" data-id="${s.id}">Diff</button>
-            <button class="theia-button secondary" data-action="restore" data-id="${s.id}">Restore</button>
-          </td>
-        </tr>`;
-    }).join('');
+    const table = document.createElement('table');
+    table.className = 'kairo-deployments-table';
+    table.setAttribute('aria-label', this.i18n.t('widget.localHistory.tableAriaLabel'));
 
-    this.node.innerHTML = `<div class="kairo-widget-body">
-      <table class="kairo-deployments-table" aria-label="Local history snapshots">
-        <thead><tr><th>Timestamp</th><th>Size</th><th>Actions</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
-    </div>`;
+    const thead = document.createElement('thead');
+    const headRow = document.createElement('tr');
+    for (const label of [
+      this.i18n.t('widget.localHistory.columnTimestamp'),
+      this.i18n.t('widget.localHistory.columnSize'),
+      this.i18n.t('widget.localHistory.columnActions'),
+    ]) {
+      const th = document.createElement('th');
+      th.textContent = label;
+      headRow.appendChild(th);
+    }
+    thead.appendChild(headRow);
+    table.appendChild(thead);
 
-    // Attach click handlers
-    this.node.querySelectorAll('button[data-action="compare"]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const id = (btn as HTMLElement).dataset.id;
-        if (id) void this.handleCompare(id);
-      });
-    });
-    this.node.querySelectorAll('button[data-action="restore"]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const id = (btn as HTMLElement).dataset.id;
-        if (id) void this.handleRestore(id);
-      });
-    });
+    const tbody = document.createElement('tbody');
+    for (const s of this.snapshots) {
+      const tr = document.createElement('tr');
+
+      const tdTime = document.createElement('td');
+      tdTime.textContent = new Date(s.timestamp).toLocaleString();
+      tr.appendChild(tdTime);
+
+      const tdSize = document.createElement('td');
+      tdSize.textContent = this.formatSize(s.size);
+      tr.appendChild(tdSize);
+
+      const tdActions = document.createElement('td');
+      const compareBtn = document.createElement('button');
+      compareBtn.className = 'theia-button secondary';
+      compareBtn.textContent = this.i18n.t('widget.localHistory.actionDiff');
+      compareBtn.addEventListener('click', () => void this.handleCompare(s.id));
+      const restoreBtn = document.createElement('button');
+      restoreBtn.className = 'theia-button secondary';
+      restoreBtn.textContent = this.i18n.t('widget.localHistory.actionRestore');
+      restoreBtn.addEventListener('click', () => void this.handleRestore(s.id));
+      tdActions.appendChild(compareBtn);
+      tdActions.appendChild(document.createTextNode(' '));
+      tdActions.appendChild(restoreBtn);
+      tr.appendChild(tdActions);
+
+      tbody.appendChild(tr);
+    }
+    table.appendChild(tbody);
+    body.appendChild(table);
+    this.node.appendChild(body);
   }
 
   protected async handleCompare(snapshotId: string): Promise<void> {
@@ -384,7 +425,7 @@ export class LocalHistoryWidget extends Widget {
       const diffLines = this.computeDiff(snapshotContent, currentContent);
       this.showDiffDialog(snapshotId, diffLines);
     } catch (err) {
-      this.messages.error(`Failed to compare: ${(err as Error).message}`);
+      this.messages.error(this.i18n.t('widget.localHistory.compareFailed', { msg: (err as Error).message }));
     }
   }
 
@@ -394,17 +435,20 @@ export class LocalHistoryWidget extends Widget {
     const timeStr = snap ? new Date(snap.timestamp).toLocaleString() : 'unknown';
 
     const dialog = new RestoreConfirmDialog(
-      `Restore "${this.currentUri.displayName}" to snapshot from ${timeStr}?\n\nCurrent unsaved changes will be lost.`,
+      this.i18n.t('widget.localHistory.restoreConfirm', {
+        name: this.currentUri.displayName,
+        time: timeStr,
+      }),
     );
     const result = await dialog.open();
     if (result) {
       try {
         await this.historyService.restoreSnapshot(this.currentUri, snapshotId);
-        this.messages.info(`Restored "${this.currentUri.displayName}" to snapshot from ${timeStr}.`);
+        this.messages.info(this.i18n.t('widget.localHistory.restored', { name: this.currentUri.displayName, time: timeStr }));
         // Reopen the file to show restored content
         await this.editorManager.open(this.currentUri, { mode: 'activate' });
       } catch (err) {
-        this.messages.error(`Failed to restore: ${(err as Error).message}`);
+        this.messages.error(this.i18n.t('widget.localHistory.restoreFailed', { msg: (err as Error).message }));
       }
     }
   }
@@ -435,21 +479,24 @@ export class LocalHistoryWidget extends Widget {
     container.style.fontSize = '12px';
     container.style.whiteSpace = 'pre-wrap';
     container.style.padding = '8px';
-    container.style.backgroundColor = 'var(--theia-editor-background, #1e1e1e)';
-    container.style.color = 'var(--theia-editor-foreground, #d4d4d4)';
+    container.style.backgroundColor = 'var(--theia-editor-background)';
+    container.style.color = 'var(--theia-editor-foreground)';
 
     if (diffLines.length === 0) {
-      container.textContent = 'No differences found.';
+      container.textContent = this.i18n.t('widget.localHistory.noDifferences');
     } else {
-      container.innerHTML = diffLines.map(line => {
+      for (const line of diffLines) {
+        const row = document.createElement('div');
+        row.textContent = line;
         if (line.startsWith('- ')) {
-          return `<div style="color:var(--theia-errorForeground,#f44747);background:rgba(244,71,71,0.1)">${escapeHtml(line)}</div>`;
+          row.style.color = 'var(--theia-errorForeground)';
+          row.style.background = 'var(--theia-diffEditor-removedTextBackground)';
+        } else if (line.startsWith('+ ')) {
+          row.style.color = 'var(--theia-debugConsole-infoForeground, var(--theia-terminal-ansiGreen))';
+          row.style.background = 'var(--theia-diffEditor-insertedTextBackground)';
         }
-        if (line.startsWith('+ ')) {
-          return `<div style="color:var(--theia-terminal-ansiGreen,#4ec9b0);background:rgba(78,201,176,0.1)">${escapeHtml(line)}</div>`;
-        }
-        return `<div>${escapeHtml(line)}</div>`;
-      }).join('');
+        container.appendChild(row);
+      }
     }
 
     const dialog = new (class extends AbstractDialog<boolean> {
@@ -514,7 +561,7 @@ export class LocalHistoryContribution implements FrontendApplicationContribution
           this.shell.activateWidget(w.id);
           w.update();
         } catch (err) {
-          this.messages.error(`Failed to open Local History: ${(err as Error).message}`);
+          this.messages.error(this.i18n.t('widget.localHistory.openFailed', { msg: (err as Error).message }));
         }
         return undefined;
       },
@@ -543,16 +590,4 @@ export class LocalHistoryContribution implements FrontendApplicationContribution
       console.debug('[kairo] local-history: skip snapshot for new file', editor.uri.displayName);
     }
   }
-}
-
-function escapeHtml(s: string): string {
-  return s.replace(/[&<>"']/g, c => {
-    switch (c) {
-      case '&': return '&amp;';
-      case '<': return '&lt;';
-      case '>': return '&gt;';
-      case '"': return '&quot;';
-      default: return '&#39;';
-    }
-  });
 }

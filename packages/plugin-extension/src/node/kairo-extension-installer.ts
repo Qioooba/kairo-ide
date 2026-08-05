@@ -12,12 +12,12 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import * as crypto from 'crypto';
 import AdmZip from 'adm-zip';
 import * as semver from 'semver';
 import {
   KairoExtension,
   ExtensionManifest,
-  ExtensionManifestEntry,
   InstallResult,
   InstallErrorCode,
   KAIRO_EXTENSIONS_DIR_NAME,
@@ -28,6 +28,9 @@ import { isAllowlisted, getAllowlistEntry } from './kairo-allowlist';
 
 /** Roughly maps to the VS Code API surface that Theia 1.73.1 supports */
 const SUPPORTED_ENGINE_VERSION = '^1.73.0';
+
+/** Unix symlink mode bits in ZIP external attributes (upper 16 bits). */
+const ZIP_S_IFLNK = 0xa000;
 
 function getExtensionsRoot(): string {
   return path.join(os.homedir(), KAIRO_EXTENSIONS_DIR_NAME, KAIRO_EXTENSIONS_SUBDIR);
@@ -42,6 +45,33 @@ function ensureDirs(): void {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
+}
+
+/**
+ * Resolve a ZIP entry path under targetDir, rejecting Zip Slip /
+ * absolute paths / null bytes. Exported for unit tests.
+ */
+export function resolveSafeZipEntryPath(targetDir: string, relativePath: string): string {
+  if (!relativePath || relativePath.includes('\0')) {
+    throw new Error(`Invalid zip entry path: ${relativePath}`);
+  }
+  // Reject absolute paths (POSIX and Windows) before join/resolve.
+  if (path.isAbsolute(relativePath) || /^[a-zA-Z]:[\\/]/.test(relativePath) || relativePath.startsWith('\\\\')) {
+    throw new Error(`Zip entry uses absolute path: ${relativePath}`);
+  }
+  const resolvedTarget = path.resolve(targetDir);
+  const resolved = path.resolve(targetDir, relativePath);
+  const targetPrefix = resolvedTarget.endsWith(path.sep) ? resolvedTarget : resolvedTarget + path.sep;
+  if (resolved !== resolvedTarget && !resolved.startsWith(targetPrefix)) {
+    throw new Error(`Zip Slip rejected: ${relativePath}`);
+  }
+  return resolved;
+}
+
+function isZipSymlinkEntry(entry: AdmZip.IZipEntry): boolean {
+  // adm-zip stores Unix mode in the high 16 bits of attr when present.
+  const mode = (entry.attr >>> 16) & 0xffff;
+  return (mode & ZIP_S_IFLNK) === ZIP_S_IFLNK;
 }
 
 /**
@@ -90,7 +120,7 @@ function parseExtensionManifest(raw: string): VsCodePackageJson {
  * 1. Validate the .vsix is a valid ZIP
  * 2. Read extension/package.json from the ZIP
  * 3. Validate required fields (name, publisher, version)
- * 4. Check against the allowlist
+ * 4. Check against the allowlist (strict — non-allowlisted rejected)
  * 5. Check if already installed
  * 6. Extract to ~/.kairo/extensions/<publisher>.<name>-<version>/
  * 7. Update the extensions manifest
@@ -141,12 +171,33 @@ export function installFromVsix(vsixPath: string): InstallResult {
     }
   }
 
-  // 5. Check allowlist
+  // 5. Strict allowlist — unsigned non-allowlisted extensions are refused (VC-P0-2).
+  // Signature/hash PKI is not wired; the allowlist is the gate.
   const allowlisted = isAllowlisted(extensionId);
-  const allowlistEntry = getAllowlistEntry(extensionId);
   if (!allowlisted) {
-    // In v1, we still allow installation but mark as unverified
-    // Strict mode: return { success: false, error: `Extension "${extensionId}" is not on the allowlist.`, errorCode: InstallErrorCode.NOT_ALLOWLISTED };
+    return {
+      success: false,
+      error: `Extension "${extensionId}" is not on the allowlist.`,
+      errorCode: InstallErrorCode.NOT_ALLOWLISTED,
+    };
+  }
+  const allowlistEntry = getAllowlistEntry(extensionId);
+  if (allowlistEntry?.verifiedVersionRange && !semver.satisfies(pkg.version, allowlistEntry.verifiedVersionRange)) {
+    return {
+      success: false,
+      error: `Extension "${extensionId}" version ${pkg.version} is outside the allowlisted range ${allowlistEntry.verifiedVersionRange}.`,
+      errorCode: InstallErrorCode.NOT_ALLOWLISTED,
+    };
+  }
+  if (allowlistEntry?.sha256) {
+    const digest = crypto.createHash('sha256').update(fs.readFileSync(vsixPath)).digest('hex');
+    if (digest.toLowerCase() !== allowlistEntry.sha256.toLowerCase()) {
+      return {
+        success: false,
+        error: `Extension "${extensionId}" .vsix SHA-256 mismatch (expected ${allowlistEntry.sha256}, got ${digest}).`,
+        errorCode: InstallErrorCode.NOT_ALLOWLISTED,
+      };
+    }
   }
 
   // 6. Check if already installed
@@ -156,30 +207,35 @@ export function installFromVsix(vsixPath: string): InstallResult {
     return { success: false, error: `Extension "${extensionId}" version ${pkg.version} is already installed`, errorCode: InstallErrorCode.ALREADY_INSTALLED };
   }
 
-  // 7. Extract the extension/ directory contents
+  // 7. Extract the extension/ directory contents (Zip Slip–safe)
   try {
-    // Extract extension/ contents to the target directory
     const entries = zip.getEntries();
     for (const entry of entries) {
-      const entryName = entry.entryName;
+      const entryName = entry.entryName.replace(/\\/g, '/');
       // Only extract files under extension/
       if (!entryName.startsWith('extension/')) {
         continue;
+      }
+      if (isZipSymlinkEntry(entry)) {
+        throw new Error(`Symlink zip entries are not allowed: ${entryName}`);
       }
       // Skip the extension/ prefix
       const relativePath = entryName.substring('extension/'.length);
       if (!relativePath) {
         continue;
       }
-      const targetPath = path.join(targetDir, relativePath);
-
-      if (entry.isDirectory) {
-        fs.mkdirSync(targetPath, { recursive: true });
-      } else {
-        const dir = path.dirname(targetPath);
-        fs.mkdirSync(dir, { recursive: true });
-        fs.writeFileSync(targetPath, entry.getData());
+      // Directory markers end with /
+      if (relativePath.endsWith('/') || entry.isDirectory) {
+        const dirRel = relativePath.replace(/\/$/, '');
+        if (dirRel) {
+          fs.mkdirSync(resolveSafeZipEntryPath(targetDir, dirRel), { recursive: true });
+        }
+        continue;
       }
+      const targetPath = resolveSafeZipEntryPath(targetDir, relativePath);
+      const dir = path.dirname(targetPath);
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(targetPath, entry.getData());
     }
   } catch (e: any) {
     // Clean up on failure
@@ -194,8 +250,8 @@ export function installFromVsix(vsixPath: string): InstallResult {
     version: pkg.version,
     enabled: true,
     installedAt: new Date().toISOString(),
-    allowlisted,
-    verified: allowlisted,
+    allowlisted: true,
+    verified: !!allowlistEntry,
   };
   saveExtensionManifest(manifest);
 
@@ -214,8 +270,8 @@ export function installFromVsix(vsixPath: string): InstallResult {
     categories: pkg.categories || [],
     activationEvents: pkg.activationEvents || ['*'],
     engineVersion: pkg.engines?.vscode,
-    allowlisted,
-    verified: allowlisted,
+    allowlisted: true,
+    verified: !!allowlistEntry,
   };
 
   return { success: true, extension };

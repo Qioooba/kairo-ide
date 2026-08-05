@@ -5,6 +5,52 @@ export interface SearchResultGroup {
   matches: readonly SearchMatch[];
 }
 
+export interface MatchPreviewParts {
+  before: string;
+  highlight: string;
+  after: string;
+}
+
+/** IDEA-style group header: filename only (no directory). */
+export function getSearchFileName(filepath: string): string {
+  const parts = filepath.split(/[\\/]/);
+  return parts[parts.length - 1] || filepath;
+}
+
+/** IDEA-style group header: parent directory path (no filename). */
+export function getSearchFileDir(filepath: string): string {
+  const parts = filepath.split(/[\\/]/);
+  if (parts.length <= 1) {
+    return '';
+  }
+  return parts.slice(0, -1).join('/');
+}
+
+export function getSearchFileIcon(filename: string): string {
+  const ext = filename.split('.').pop()?.toLowerCase();
+  switch (ext) {
+    case 'java': return 'codicon-symbol-class';
+    case 'js': case 'jsx': case 'ts': case 'tsx': return 'codicon-symbol-namespace';
+    case 'xml': case 'html': case 'jsp': return 'codicon-symbol-misc';
+    case 'css': case 'less': case 'scss': return 'codicon-symbol-color';
+    case 'json': return 'codicon-symbol-object';
+    case 'md': return 'codicon-symbol-string';
+    case 'py': return 'codicon-symbol-namespace';
+    case 'go': return 'codicon-symbol-namespace';
+    default: return 'codicon-file';
+  }
+}
+
+/** Same-line preview segments for IDEA result rows. */
+export function matchPreviewParts(match: SearchMatch): MatchPreviewParts {
+  const { before, after } = sameLineContext(match);
+  return {
+    before,
+    highlight: match.matchText ?? '',
+    after,
+  };
+}
+
 export function groupMatchesByFile(matches: readonly SearchMatch[]): SearchResultGroup[] {
   const groups = new Map<string, SearchMatch[]>();
   for (const match of matches) {

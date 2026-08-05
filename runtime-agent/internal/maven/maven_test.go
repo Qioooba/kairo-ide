@@ -163,6 +163,18 @@ func TestLifecycleTasks(t *testing.T) {
 			t.Errorf("duplicate task ID: %q", task.ID)
 		}
 		seen[task.ID] = true
+		if !IsAllowedTask(task.ID) {
+			t.Errorf("IsAllowedTask(%q) = false, want true", task.ID)
+		}
+	}
+	if IsAllowedTask("exec:exec") {
+		t.Error("plugin goals must be rejected")
+	}
+	if IsAllowedTask("clean compile") {
+		t.Error("multi-arg tasks must be rejected")
+	}
+	if IsAllowedTask("") {
+		t.Error("empty task must be rejected")
 	}
 }
 

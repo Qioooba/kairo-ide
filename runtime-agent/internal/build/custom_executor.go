@@ -41,13 +41,20 @@ type BuildEventHandler func(event BuildEvent)
 type CustomBuildExecutor struct {
 	mu      sync.Mutex
 	running map[string]*exec.Cmd
+	results map[string]customBuildResult
 	handler BuildEventHandler
+}
+
+type customBuildResult struct {
+	status   string // "finished" | "cancelled" | "error"
+	exitCode int
 }
 
 // NewCustomBuildExecutor creates a new executor.
 func NewCustomBuildExecutor(handler BuildEventHandler) *CustomBuildExecutor {
 	return &CustomBuildExecutor{
 		running: make(map[string]*exec.Cmd),
+		results: make(map[string]customBuildResult),
 		handler: handler,
 	}
 }
@@ -55,11 +62,13 @@ func NewCustomBuildExecutor(handler BuildEventHandler) *CustomBuildExecutor {
 // Start begins executing a custom build command.
 func (e *CustomBuildExecutor) Start(ctx context.Context, cfg CustomBuildConfig) error {
 	e.mu.Lock()
-	defer e.mu.Unlock()
-
 	if _, exists := e.running[cfg.BuildID]; exists {
+		e.mu.Unlock()
 		return fmt.Errorf("build %s is already running", cfg.BuildID)
 	}
+	delete(e.results, cfg.BuildID)
+	handler := e.handler
+	e.mu.Unlock()
 
 	// Parse command: split on spaces respecting quotes
 	cmdParts := shellSplit(cfg.Command)
@@ -98,37 +107,55 @@ func (e *CustomBuildExecutor) Start(ctx context.Context, cfg CustomBuildConfig) 
 	}
 
 	if err := cmd.Start(); err != nil {
-		e.handler(BuildEvent{
-			Type:    "error",
-			BuildID: cfg.BuildID,
-			Message: fmt.Sprintf("Failed to start: %v", err),
-			Code:    "COMMAND_NOT_FOUND",
-			TS:      time.Now().UnixMilli(),
-		})
+		if handler != nil {
+			handler(BuildEvent{
+				Type:    "error",
+				BuildID: cfg.BuildID,
+				Message: fmt.Sprintf("Failed to start: %v", err),
+				Code:    "COMMAND_NOT_FOUND",
+				TS:      time.Now().UnixMilli(),
+			})
+		}
 		return fmt.Errorf("start command: %w", err)
 	}
 
+	e.mu.Lock()
+	// Re-check in case of concurrent Start with same ID after unlock.
+	if _, exists := e.running[cfg.BuildID]; exists {
+		e.mu.Unlock()
+		_ = killProcessGroup(cmd)
+		return fmt.Errorf("build %s is already running", cfg.BuildID)
+	}
 	e.running[cfg.BuildID] = cmd
+	e.mu.Unlock()
 
 	startTime := time.Now()
-	e.handler(BuildEvent{
-		Type:    "start",
-		BuildID: cfg.BuildID,
-		Pid:     cmd.Process.Pid,
-		TS:      startTime.UnixMilli(),
-	})
+	if handler != nil {
+		handler(BuildEvent{
+			Type:    "start",
+			BuildID: cfg.BuildID,
+			Pid:     cmd.Process.Pid,
+			TS:      startTime.UnixMilli(),
+		})
+	}
 
-	// Stream stdout and stderr in goroutines
-	go e.streamLogs(cfg.BuildID, stdout, "stdout")
-	go e.streamLogs(cfg.BuildID, stderr, "stderr")
+	// Drain pipes before treating Wait as complete (GO-P2-4).
+	var pipeWG sync.WaitGroup
+	pipeWG.Add(2)
+	go func() {
+		defer pipeWG.Done()
+		e.streamLogs(cfg.BuildID, stdout, "stdout")
+	}()
+	go func() {
+		defer pipeWG.Done()
+		e.streamLogs(cfg.BuildID, stderr, "stderr")
+	}()
 
-	// Wait for completion in goroutine
 	go func() {
 		err := cmd.Wait()
+		pipeWG.Wait()
 		e.mu.Lock()
 		delete(e.running, cfg.BuildID)
-		e.mu.Unlock()
-
 		duration := time.Since(startTime).Milliseconds()
 		exitCode := 0
 		if err != nil {
@@ -138,13 +165,19 @@ func (e *CustomBuildExecutor) Start(ctx context.Context, cfg CustomBuildConfig) 
 				exitCode = -1
 			}
 		}
-		e.handler(BuildEvent{
-			Type:       "finish",
-			BuildID:    cfg.BuildID,
-			ExitCode:   exitCode,
-			DurationMs: duration,
-			TS:         time.Now().UnixMilli(),
-		})
+		e.results[cfg.BuildID] = customBuildResult{status: "finished", exitCode: exitCode}
+		finishHandler := e.handler
+		e.mu.Unlock()
+
+		if finishHandler != nil {
+			finishHandler(BuildEvent{
+				Type:       "finish",
+				BuildID:    cfg.BuildID,
+				ExitCode:   exitCode,
+				DurationMs: duration,
+				TS:         time.Now().UnixMilli(),
+			})
+		}
 	}()
 
 	return nil
@@ -160,11 +193,17 @@ func (e *CustomBuildExecutor) Cancel(buildID string) error {
 		return fmt.Errorf("build %s not running", buildID)
 	}
 
-	e.handler(BuildEvent{
-		Type:    "cancel",
-		BuildID: buildID,
-		TS:      time.Now().UnixMilli(),
-	})
+	if e.handler != nil {
+		e.handler(BuildEvent{
+			Type:    "cancel",
+			BuildID: buildID,
+			TS:      time.Now().UnixMilli(),
+		})
+	}
+
+	e.mu.Lock()
+	e.results[buildID] = customBuildResult{status: "cancelled", exitCode: -1}
+	e.mu.Unlock()
 
 	return killProcessGroup(cmd)
 }
@@ -175,6 +214,20 @@ func (e *CustomBuildExecutor) IsRunning(buildID string) bool {
 	defer e.mu.Unlock()
 	_, ok := e.running[buildID]
 	return ok
+}
+
+// Status returns the current status of a build.
+// status is "running" | "finished" | "cancelled" | "unknown".
+func (e *CustomBuildExecutor) Status(buildID string) (status string, exitCode int, known bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if _, ok := e.running[buildID]; ok {
+		return "running", 0, true
+	}
+	if res, ok := e.results[buildID]; ok {
+		return res.status, res.exitCode, true
+	}
+	return "unknown", 0, false
 }
 
 // RunningBuilds returns a list of currently running build IDs.
@@ -192,6 +245,9 @@ func (e *CustomBuildExecutor) streamLogs(buildID string, reader io.Reader, strea
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024) // 1MB max line
 	for scanner.Scan() {
+		if e.handler == nil {
+			continue
+		}
 		e.handler(BuildEvent{
 			Type:    "log",
 			BuildID: buildID,

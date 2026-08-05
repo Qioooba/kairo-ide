@@ -67,6 +67,9 @@ export class SvnStore {
   protected readonly onFocusCommitEmitter = new Emitter<void>();
   readonly onFocusCommit: Event<void> = this.onFocusCommitEmitter.event;
 
+  /** When true, applyFromCache will not auto-select all changes on empty selection. */
+  protected suppressAutoSelect = false;
+
   @postConstruct()
   protected init(): void {
     // Status events only re-apply the cache — never re-fetch (avoids loops).
@@ -76,6 +79,7 @@ export class SvnStore {
       this.onDidChangeEmitter.fire(this.state);
     });
     this.svnService.onDidCommitSuccess(() => {
+      this.suppressAutoSelect = false;
       this.state = { ...this.state, isCommitting: false, commitMessage: '', selectedFiles: new Set() };
       this.applyFromCache();
     });
@@ -94,6 +98,7 @@ export class SvnStore {
   async setWcRoot(root: string | undefined): Promise<void> {
     this.svnService.setActiveWcRoot(root);
     if (!root) {
+      this.suppressAutoSelect = false;
       this.state = {
         ...this.state,
         wcRoot: '',
@@ -183,7 +188,7 @@ export class SvnStore {
           newSelected.add(f.path);
         }
       }
-      if (newSelected.size === 0 && allChanges.length > 0) {
+      if (newSelected.size === 0 && allChanges.length > 0 && !this.suppressAutoSelect) {
         for (const f of allChanges) {
           newSelected.add(f.path);
         }
@@ -224,14 +229,19 @@ export class SvnStore {
     const newSelected = new Set(this.state.selectedFiles);
     if (newSelected.has(path)) {
       newSelected.delete(path);
+      if (newSelected.size === 0) {
+        this.suppressAutoSelect = true;
+      }
     } else {
       newSelected.add(path);
+      this.suppressAutoSelect = false;
     }
     this.state = { ...this.state, selectedFiles: newSelected };
     this.onDidChangeEmitter.fire(this.state);
   }
 
   selectAll(): void {
+    this.suppressAutoSelect = false;
     const newSelected = new Set<string>();
     for (const f of [
       ...this.state.modifiedFiles,
@@ -248,8 +258,14 @@ export class SvnStore {
   }
 
   deselectAll(): void {
+    this.suppressAutoSelect = true;
     this.state = { ...this.state, selectedFiles: new Set() };
     this.onDidChangeEmitter.fire(this.state);
+  }
+
+  /** True after explicit deselect-all / last toggle-off — commit dialog must not re-fill. */
+  get shouldSuppressAutoSelect(): boolean {
+    return this.suppressAutoSelect;
   }
 
   setCommitMessage(msg: string): void {

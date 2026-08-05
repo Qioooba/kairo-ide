@@ -18,10 +18,10 @@ export interface LargeFileThresholds {
 }
 
 export const DEFAULT_LARGE_FILE_THRESHOLDS: LargeFileThresholds = {
-  largeCharacterCount: 2_000_000,
-  largeLineCount: 20_000,
-  hugeCharacterCount: 10_000_000,
-  hugeLineCount: 80_000,
+  largeCharacterCount: 5_000_000,
+  largeLineCount: 100_000,
+  hugeCharacterCount: 50_000_000,
+  hugeLineCount: 500_000,
 };
 
 export function classifyLargeFile(
@@ -54,13 +54,14 @@ export function editorOptionsForLargeFile(tier: Exclude<LargeFileTier, 'normal'>
     codeLens: false,
     folding: false,
     inlayHints: { enabled: 'off' },
-    links: false,
     minimap: { enabled: false },
     occurrencesHighlight: 'off',
     renderWhitespace: 'none',
     selectionHighlight: false,
     stickyScroll: { enabled: false },
     wordWrap: 'off',
+    // Keep full-line rendering for syntax highlighting on very large JSP/Java.
+    stopRenderingLineAfter: -1,
   };
 
   if (tier === 'large') {
@@ -74,7 +75,6 @@ export function editorOptionsForLargeFile(tier: Exclude<LargeFileTier, 'normal'>
     parameterHints: { enabled: false },
     quickSuggestions: false,
     renderValidationDecorations: 'off',
-    stopRenderingLineAfter: 5_000,
     suggestOnTriggerCharacters: false,
   };
 }

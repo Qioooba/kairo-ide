@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/api/protocol"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/audit"
@@ -95,6 +96,38 @@ func TestParseJavaFile_CacheAndMissing(t *testing.T) {
 
 	if _, err := parseJavaFile(filepath.Join(dir, "missing.java")); err == nil {
 		t.Error("expected error for missing file")
+	}
+}
+
+func TestParseJavaFile_CacheTTLExpiry(t *testing.T) {
+	dir := t.TempDir()
+	path := writeJavaFile(t, dir, "TTL.java", "public class TTL { }\n")
+
+	info1, err := parseJavaFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	javaCacheMu.Lock()
+	info1.CachedAt = time.Now().Add(-javaCacheTTL - time.Second)
+	javaCacheMu.Unlock()
+
+	info2, err := parseJavaFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info1 == info2 {
+		t.Error("expected cache miss after TTL expiry")
+	}
+}
+
+func TestPickFreeTCPPort(t *testing.T) {
+	port, err := pickFreeTCPPort()
+	if err != nil {
+		t.Fatalf("pickFreeTCPPort: %v", err)
+	}
+	if port <= 0 || port > 65535 {
+		t.Errorf("port = %d, want 1..65535", port)
 	}
 }
 

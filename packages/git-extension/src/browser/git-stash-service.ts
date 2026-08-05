@@ -36,7 +36,15 @@ export class GitStashService {
   }
 
   private async execGit(args: string[]): Promise<string> {
-    const { stdout } = await execFileAsync('git', args, { cwd: this.getCwd() });
+    const { stdout } = await execFileAsync('git', args, {
+      cwd: this.getCwd(),
+      env: {
+        ...(typeof process !== 'undefined' ? process.env : {}),
+        LANG: 'C',
+        LC_ALL: 'C',
+        LANGUAGE: 'C',
+      },
+    });
     return stdout;
   }
 
@@ -54,8 +62,9 @@ export class GitStashService {
         const dateStr = parts[i + 3];
         const idxMatch = ref.match(/stash@\{(\d+)\}/);
         const index = idxMatch ? parseInt(idxMatch[1], 10) : i;
-        const branchMatch = message.match(/(?:On|WIP on)\s+(.+?)(?:$|:)/);
-        const branch = branchMatch ? branchMatch[1] : '';
+        // With LC_ALL=C, stash subjects are "WIP on <branch>: …" or "On <branch>: …".
+        const branchMatch = message.match(/^(?:WIP on|On) ([^:]+): /);
+        const branch = branchMatch ? branchMatch[1].trim() : '';
         entries.push({
           ref, index, hash,
           message: message.replace(/^WIP on /, '').replace(/^On /, ''),
@@ -95,9 +104,7 @@ export class GitStashService {
   }
 
   async drop(ref?: string): Promise<void> {
-    try {
-      await this.execGit(['stash', 'drop', ref || 'stash@{0}']);
-    } catch { /* ignore */ }
+    await this.execGit(['stash', 'drop', ref || 'stash@{0}']);
     this.onDidChangeStashEmitter.fire(await this.list());
     this.onDidChangeEmitter.fire();
   }

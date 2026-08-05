@@ -78,7 +78,7 @@ const TEMPLATES: TemplateDef[] = [
   {
     prefix: 'soutm',
     label: 'soutm',
-    insertText: 'System.out.println("${1:$METHOD_NAME$}");',
+    insertText: 'System.out.println("${1:methodName}");',
     detail: 'Print method name placeholder',
     category: 'Output',
   },
@@ -793,6 +793,11 @@ export interface PostfixMatch {
   expressionStartColumn: number;
 }
 
+/** Escape text embedded into Monaco InsertAsSnippet templates (JV-P3-6). */
+export function escapeSnippetText(text: string): string {
+  return text.replace(/\\/g, '\\\\').replace(/\$/g, '\\$').replace(/\}/g, '\\}');
+}
+
 const POSTFIX_STOP = new Set('=;,{}?:&|!<>+-*/%^~'.split(''));
 
 /**
@@ -939,7 +944,6 @@ export function registerJavaLiveTemplates(
   languageId: string,
   options?: JavaLiveTemplatesOptions,
 ): Disposable {
-  console.log(`[KAIRO-JAVA-DEBUG] registerJavaLiveTemplates() called for language: ${languageId}`);
   return monaco.languages.registerCompletionItemProvider(languageId, {
     triggerCharacters: ['.'],
     provideCompletionItems: (model, position, _context, _token) => {
@@ -947,14 +951,11 @@ export function registerJavaLiveTemplates(
         if (options?.shouldProvide && !options.shouldProvide(model, position)) {
           return { suggestions: [] };
         }
-        console.log(`[KAIRO-JAVA-DEBUG] Live template provideCompletionItems called! lang=${model.getLanguageId()}, pos=${position.lineNumber}:${position.column}`);
         const word = model.getWordUntilPosition(position);
         const prefix = word.word;
         const startColumn = word.startColumn;
         const lineContent = model.getLineContent(position.lineNumber);
         const linePrefix = lineContent.substring(0, position.column - 1);
-
-        console.log(`[KAIRO-JAVA-DEBUG] word="${prefix}", startColumn=${startColumn}, endColumn=${word.endColumn}`);
 
         const replaceRange = new monaco.Range(
           position.lineNumber,
@@ -969,6 +970,7 @@ export function registerJavaLiveTemplates(
         const postfixMatch = matchPostfix(linePrefix);
         if (postfixMatch) {
           const lower = postfixMatch.postfix.toLowerCase();
+          const escapedExpr = escapeSnippetText(postfixMatch.expression);
           for (const tpl of POSTFIX_TEMPLATES) {
             if (!tpl.postfix.startsWith(lower)) {
               continue;
@@ -984,7 +986,7 @@ export function registerJavaLiveTemplates(
               kind: monaco.languages.CompletionItemKind.Snippet,
               detail: `[Postfix] ${tpl.detail}`,
               documentation: `Wrap \`${postfixMatch.expression}\` — ${tpl.detail}`,
-              insertText: tpl.build(postfixMatch.expression),
+              insertText: tpl.build(escapedExpr),
               insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
               filterText: `${postfixMatch.expression}.${tpl.postfix}`,
               range: fullRange,
@@ -1001,7 +1003,8 @@ export function registerJavaLiveTemplates(
 
         // Require at least 2 characters unless exact short classics (sout, if, …)
         const lowerPrefix = prefix.toLowerCase();
-        if (lowerPrefix.length < 2 && !['if'].includes(lowerPrefix)) {
+        const shortClassics = ['if', 'for', 'sout', 'psvm', 'syso'];
+        if (lowerPrefix.length < 2 && !shortClassics.includes(lowerPrefix)) {
           return { suggestions };
         }
 
@@ -1024,15 +1027,14 @@ export function registerJavaLiveTemplates(
           });
         }
         for (const tpl of byPrefix.values()) {
-          if (tpl.prefix.startsWith(lowerPrefix)) {
-            const score = tpl.prefix === lowerPrefix ? 0 : tpl.prefix.length;
+          const tplPrefixLower = tpl.prefix.toLowerCase();
+          if (tplPrefixLower.startsWith(lowerPrefix)) {
+            const score = tplPrefixLower === lowerPrefix ? 0 : tpl.prefix.length;
             matches.push({ tpl, score });
           }
         }
 
         matches.sort((a, b) => a.score - b.score || a.tpl.prefix.localeCompare(b.tpl.prefix));
-
-        console.log(`[KAIRO-JAVA-DEBUG] prefix="${prefix}", matches=${matches.length}, postfix=${suggestions.length}`);
 
         for (const { tpl } of matches) {
           suggestions.push({
@@ -1048,10 +1050,8 @@ export function registerJavaLiveTemplates(
           });
         }
 
-        console.log(`[KAIRO-JAVA-DEBUG] Returning ${suggestions.length} suggestions`);
         return { suggestions };
-      } catch (e) {
-        console.error('[KAIRO-JAVA-DEBUG] Error in provideCompletionItems:', e);
+      } catch {
         return { suggestions: [] };
       }
     },

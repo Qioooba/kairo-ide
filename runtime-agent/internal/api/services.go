@@ -240,10 +240,12 @@ type ServerRunner interface {
 	ReloadContext(id string) error
 }
 
-// Authenticator handles login/logout.
+// Authenticator handles login/logout and session validation.
 type Authenticator interface {
 	Login(payload json.RawMessage, w http.ResponseWriter) (json.RawMessage, error)
 	Logout(r *http.Request, w http.ResponseWriter) error
+	// ValidateSession returns nil when token is a known, non-expired session.
+	ValidateSession(token string) error
 }
 
 // EventBus serves the WebSocket event stream.
@@ -262,11 +264,15 @@ type EventBus interface {
 // Status returns the current distribution state (downloaded,
 // version, JRE, etc.).
 //
+// DistributionStatus returns the on-disk JDT LS package status
+// (installed flag, version, home, launcher jar).
+//
 // GetLaunchDescriptor returns the JVM command-line arguments
 // the Theia backend needs to spawn the JDT LS process for a
 // given project.
 type JDTLS interface {
 	Status() (json.RawMessage, error)
+	DistributionStatus() (json.RawMessage, error)
 	Prepare(ctx context.Context) (json.RawMessage, error)
 	GetLaunchDescriptor(ctx context.Context, workspaceID string, projectID string, workingDir string) (json.RawMessage, error)
 }

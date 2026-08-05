@@ -159,24 +159,29 @@ test('TldParser.rtexprvalue=true when explicitly set to "true"', () => {
   assert.strictEqual(key.rtexprvalue, true);
 });
 
-test('TldParser.rtexprvalue does not treat "yes" / "1" as true (strict)', () => {
-  // The current code only accepts the literal string 'true'.
-  // That is intentional — "yes"/"1" are not legal in TLDs.
-  // If we ever relax this, the test will catch the change.
+test('TldParser.rtexprvalue accepts "yes" (JSP TLD boolean)', () => {
+  // JV-P2-6: JSP TLD historically allows yes/no in addition to true/false.
   const tld = new TldParser().parse(`<?xml version="1.0"?>
     <taglib>
       <short-name>x</short-name><uri>urn:x</uri>
       <tag>
         <name>t</name><tag-class>X</tag-class><body-content>empty</body-content>
         <attribute>
-          <name>a</name><required>false</required>
+          <name>a</name><required>yes</required>
           <rtexprvalue>yes</rtexprvalue>
+        </attribute>
+        <attribute>
+          <name>b</name><required>no</required>
+          <rtexprvalue>1</rtexprvalue>
         </attribute>
       </tag>
     </taglib>`);
   assert.ok(tld);
-  assert.strictEqual(tld.tags[0].attributes[0].rtexprvalue, false,
-    'rtexprvalue="yes" must not be coerced to true');
+  assert.strictEqual(tld.tags[0].attributes[0].required, true);
+  assert.strictEqual(tld.tags[0].attributes[0].rtexprvalue, true);
+  assert.strictEqual(tld.tags[0].attributes[1].required, false);
+  assert.strictEqual(tld.tags[0].attributes[1].rtexprvalue, false,
+    'numeric "1" is still not coerced to true');
 });
 
 test('TldParser.required=true is parsed from the literal string "true"', () => {

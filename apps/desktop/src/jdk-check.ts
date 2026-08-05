@@ -6,16 +6,16 @@
  * surface a friendly setup dialog BEFORE the long agent
  * health-check timeout.
  *
- * Priority (same as jdkmanager/manager.go):
- *   1. KAIRO_JDK_HOME env var
- *   2. bundled/jdk17/ directory
- *   3. JAVA_HOME env var
- *   4. java on PATH
- *   5. Common install locations
+ * Priority:
+ *   1. KAIRO_JDT_LS_JRE / KAIRO_JRE17_HOME (when seeking 21+)
+ *   2. KAIRO_JDK_HOME env var
+ *   3. Persisted user choice (userData/host-jdk.json)
+ *   4. bundled/jdk21 then bundled/jdk17
+ *   5. JAVA_HOME / PATH / common install locations
  */
 
 import { execSync } from 'child_process';
-import { dialog } from 'electron';
+import { app, dialog } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -33,6 +33,14 @@ export interface JDKDetectionResult {
 
 export type JDKDialogChoice = 'continue' | 'quit';
 
+/** Shape of the on-disk JDK preference written after manual selection. */
+export interface PersistedJDKConfig {
+  javaHome: string;
+  version?: string;
+  major?: number;
+  updatedAt?: string;
+}
+
 // ─── Constants ──────────────────────────────────────────────────
 
 /** Minimum JDK for general IDE host features (debug bridge, etc.). */
@@ -41,6 +49,73 @@ const MIN_JDK_MAJOR = 17;
 export const JDT_LS_MIN_JDK_MAJOR = 21;
 
 const javaExe = process.platform === 'win32' ? 'java.exe' : 'java';
+const PERSISTED_JDK_FILENAME = 'host-jdk.json';
+
+// ─── Persistence ────────────────────────────────────────────────
+
+/**
+ * Path to the persisted JDK preference file.
+ * Prefer `KAIRO_JDK_CONFIG` (tests / overrides), otherwise
+ * `<userData>/host-jdk.json` once Electron `app` is ready.
+ */
+export function getPersistedJDKConfigPath(): string | undefined {
+  const override = process.env.KAIRO_JDK_CONFIG?.trim();
+  if (override) {
+    return override;
+  }
+  try {
+    return path.join(app.getPath('userData'), PERSISTED_JDK_FILENAME);
+  } catch {
+    // app.getPath throws before ready — detection may run too early in tests.
+    return undefined;
+  }
+}
+
+/** Read a previously chosen JDK home, if the install still exists. */
+export function loadPersistedJDKHome(): string | undefined {
+  const cfgPath = getPersistedJDKConfigPath();
+  if (!cfgPath || !fs.existsSync(cfgPath)) {
+    return undefined;
+  }
+  try {
+    const raw = JSON.parse(fs.readFileSync(cfgPath, 'utf-8')) as PersistedJDKConfig;
+    if (!raw?.javaHome || typeof raw.javaHome !== 'string') {
+      return undefined;
+    }
+    const javaPath = path.join(raw.javaHome, 'bin', javaExe);
+    if (!fs.existsSync(javaPath)) {
+      return undefined;
+    }
+    return raw.javaHome;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Persist a validated JDK so the next launch skips the picker. */
+export function savePersistedJDKHome(result: JDKDetectionResult): void {
+  if (!result.found || !result.javaHome) {
+    return;
+  }
+  const cfgPath = getPersistedJDKConfigPath();
+  if (!cfgPath) {
+    console.warn('[kairo] Cannot persist JDK home — config path unavailable');
+    return;
+  }
+  try {
+    fs.mkdirSync(path.dirname(cfgPath), { recursive: true });
+    const data: PersistedJDKConfig = {
+      javaHome: result.javaHome,
+      version: result.version,
+      major: result.major,
+      updatedAt: new Date().toISOString(),
+    };
+    fs.writeFileSync(cfgPath, JSON.stringify(data, null, 2), 'utf-8');
+    console.log(`[kairo] Persisted host JDK to ${cfgPath}`);
+  } catch (err) {
+    console.warn('[kairo] Failed to persist JDK home:', err);
+  }
+}
 
 function commonJDKPaths(): string[] {
   if (process.platform === 'win32') {
@@ -157,28 +232,34 @@ function parseJavaVersionString(text: string): string {
 /**
  * Parse the major version from a Java version string.
  * Handles:
- *   "1.8.0_391" → 8
- *   "17.0.9"    → 17
- *   "21.0.1"    → 21
- *   "24"        → 24
- *   "25-ea"     → 25
+ *   "1.8.0_391"           → 8
+ *   "17.0.9"              → 17
+ *   "17.0.9+7"            → 17
+ *   "21.0.1"              → 21
+ *   "24"                  → 24
+ *   "25-ea"               → 25
+ *   "Temurin-17.0.9+7"    → 17  (vendor / distro prefix)
+ *   "openjdk-21.0.2+13"   → 21
  */
 export function parseMajorVersion(version: string): number {
   if (!version) return 0;
 
-  // "1.8.0_391" → 8
-  if (version.startsWith('1.')) {
-    const parts = version.split('.');
-    if (parts.length >= 2) {
-      const minor = parseInt(parts[1], 10);
-      if (!isNaN(minor)) return minor;
-    }
+  // Strip leading vendor / distribution junk so the first digit begins
+  // the version token (e.g. "Temurin-17.0.9+7" → "17.0.9+7").
+  const fromDigit = version.trim().replace(/^[^0-9]+/, '');
+  if (!fromDigit) return 0;
+
+  // Legacy Java 1.x: "1.8.0_391" → 8 (must not treat "11.0.1" as 1.x).
+  if (/^1\.\d+/.test(fromDigit)) {
+    const minor = parseInt(fromDigit.split('.')[1], 10);
+    return Number.isFinite(minor) ? minor : 0;
   }
 
-  // "17.0.9" → 17, "24" → 24, "25-ea" → 25
-  const firstPart = version.split(/[.\-_]/)[0];
-  const major = parseInt(firstPart, 10);
-  return isNaN(major) ? 0 : major;
+  // Modern: "17.0.9+7", "21.0.1", "25-ea", "24"
+  const m = /^(\d+)/.exec(fromDigit);
+  if (!m) return 0;
+  const major = parseInt(m[1], 10);
+  return Number.isFinite(major) ? major : 0;
 }
 
 // ─── Detection ──────────────────────────────────────────────────
@@ -214,6 +295,12 @@ function detectJDKAtLeast(minMajor: number, bundledDir?: string): JDKDetectionRe
   // Explicit host JDK (accepted when it already meets minMajor).
   {
     const r = tryHome(process.env.KAIRO_JDK_HOME);
+    if (r) return { ...r, searchedPaths };
+  }
+
+  // User-selected JDK from a previous launch (host-jdk.json).
+  {
+    const r = tryHome(loadPersistedJDKHome());
     if (r) return { ...r, searchedPaths };
   }
 
@@ -394,8 +481,9 @@ export async function showJDKSetupDialog(
     return showJDKSetupDialog(_result);
   }
 
-  // Valid JDK found — set KAIRO_JDK_HOME.
-  process.env.KAIRO_JDK_HOME = probe.javaHome;
+  // Valid JDK found — apply env for this process and persist for next launch.
+  applyHostJDKEnv(probe);
+  savePersistedJDKHome(probe);
   console.log(`[kairo] User selected JDK ${probe.version} at ${probe.javaPath}`);
   console.log(`[kairo] KAIRO_JDK_HOME set to ${probe.javaHome}`);
 

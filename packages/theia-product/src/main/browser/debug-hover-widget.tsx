@@ -3,6 +3,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import * as monaco from '@theia/monaco-editor-core';
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import { KairoDebugSessionService } from './kairo-debug-session-service';
+import { classifyValue } from './debug-value-classify';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                               */
@@ -190,7 +191,7 @@ const DebugHoverWidgetContent: React.FC<DebugHoverWidgetProps> = ({
                 background: 'var(--theia-editorWidget-background)',
                 border: '1px solid var(--theia-editorWidget-border)',
                 borderRadius: 4,
-                boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
+                boxShadow: '0 4px 12px var(--theia-widget-shadow)',
                 minWidth: 200,
                 maxWidth: 400,
                 maxHeight: 350,
@@ -271,7 +272,7 @@ const DebugHoverWidgetContent: React.FC<DebugHoverWidgetProps> = ({
                     borderTop: '1px solid var(--theia-panel-border)',
                     display: 'flex',
                     gap: 8,
-                    background: 'rgba(255,255,255,0.02)',
+                    background: 'var(--theia-editor-inactiveSelectionBackground)',
                 }}
             >
                 <button
@@ -314,15 +315,6 @@ const DebugHoverWidgetContent: React.FC<DebugHoverWidgetProps> = ({
     );
 };
 
-function classifyValue(value: string): string {
-    if (value === 'null' || value === 'undefined') return 'null';
-    if (/^".*"$/.test(value) || /^'.*'$/.test(value)) return 'string';
-    if (/^-?\d/.test(value) || value === 'true' || value === 'false') return 'number';
-    if (value.startsWith('{') || value.startsWith('[')) return 'object';
-    if (value.includes('Exception') || value.includes('Error')) return 'error';
-    return '';
-}
-
 /* ------------------------------------------------------------------ */
 /*  Monaco Content Widget Wrapper                                       */
 /* ------------------------------------------------------------------ */
@@ -342,6 +334,20 @@ export function createDebugHoverWidget(
     let root: Root | null = null;
     let isVisible = false;
     let hideTimeout: number | null = null;
+    let currentPosition: monaco.Position | null = null;
+
+    function scheduleHide(delay: number) {
+        if (hideTimeout) clearTimeout(hideTimeout);
+        hideTimeout = window.setTimeout(() => {
+            hide();
+        }, delay);
+    }
+
+    const scrollDisposable = editor.onDidScrollChange(() => {
+        if (isVisible) {
+            scheduleHide(100);
+        }
+    });
 
     const contentWidget: monaco.editor.IContentWidget = {
         getId: () => 'kairo-debug-hover-widget',
@@ -373,15 +379,6 @@ export function createDebugHoverWidget(
             };
         },
     };
-
-    let currentPosition: monaco.Position | null = null;
-
-    function scheduleHide(delay: number) {
-        if (hideTimeout) clearTimeout(hideTimeout);
-        hideTimeout = window.setTimeout(() => {
-            hide();
-        }, delay);
-    }
 
     function show(position: { lineNumber: number; column: number }, result: HoverValueResult) {
         if (hideTimeout) {
@@ -430,14 +427,9 @@ export function createDebugHoverWidget(
     }
 
     function dispose() {
+        scrollDisposable.dispose();
         hide();
     }
-
-    editor.onDidScrollChange(() => {
-        if (isVisible) {
-            scheduleHide(100);
-        }
-    });
 
     return { show, hide, dispose };
 }

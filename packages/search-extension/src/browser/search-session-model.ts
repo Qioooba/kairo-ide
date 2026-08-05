@@ -149,6 +149,8 @@ export class KairoSearchSessionModel {
     this.cancelStream();
     const normalized = normalizeOptions(options);
     const requestId = ++this.requestId;
+    // Drop stale terminal stream state so subscribe() does not replay `done`.
+    this.streamService.reset();
     this.update({
       status: 'loading',
       requestId,
@@ -157,6 +159,7 @@ export class KairoSearchSessionModel {
       totalMatches: 0,
       truncated: false,
       erroredFiles: [],
+      streamState: undefined,
     });
 
     this.unsubscribeStream = this.streamService.subscribe(streamState => {
@@ -201,16 +204,84 @@ export class KairoSearchSessionModel {
             streamState,
           });
           break;
+        case 'idle':
+          break;
       }
     });
 
-    await this.streamService.searchStream(normalized);
+    try {
+      await this.streamService.searchStream(normalized);
+      if (requestId !== this.requestId) {
+        return;
+      }
+      // Ensure loading clears even if the terminal event was missed.
+      if (this.state.status === 'loading') {
+        const matches = this.streamService.snapshot.matches;
+        this.update({
+          status: matches.length > 0 ? 'results' : 'empty',
+          requestId,
+          options: normalized,
+          matches,
+          totalMatches: this.streamService.snapshot.totalMatches,
+          truncated: false,
+          erroredFiles: [],
+          streamState: this.streamService.snapshot,
+        });
+      }
+    } catch (error) {
+      if (requestId !== this.requestId) {
+        return;
+      }
+      if (error instanceof KairoSearchCancelledError) {
+        this.update({
+          status: 'cancelled',
+          requestId,
+          options: normalized,
+          matches: [],
+          totalMatches: 0,
+          truncated: false,
+          erroredFiles: [],
+          streamState: undefined,
+        });
+        return;
+      }
+      if (this.state.status === 'loading') {
+        this.update({
+          status: 'error',
+          requestId,
+          options: normalized,
+          matches: this.streamService.snapshot.matches,
+          totalMatches: this.streamService.snapshot.totalMatches,
+          truncated: false,
+          erroredFiles: [],
+          error: toError(error),
+          streamState: this.streamService.snapshot,
+        });
+      }
+    }
   }
 
   cancelStream(): void {
+    if (this.state.status !== 'loading') {
+      this.streamService.cancel();
+      this.unsubscribeStream?.();
+      this.unsubscribeStream = undefined;
+      return;
+    }
+    const requestId = ++this.requestId;
     this.streamService.cancel();
     this.unsubscribeStream?.();
     this.unsubscribeStream = undefined;
+    this.update({
+      status: 'cancelled',
+      requestId,
+      options: this.state.options,
+      matches: [],
+      totalMatches: 0,
+      truncated: false,
+      erroredFiles: [],
+      streamState: undefined,
+    });
   }
 
   reset(): void {

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -133,18 +134,48 @@ func TestEventHub_SubscribeWithAfterSequence(t *testing.T) {
 	ch, cancel := hub.Subscribe("ws1", "", 1)
 	defer cancel()
 
-	// Should receive e2 and e3
-	count := 0
-	timeout := time.After(500 * time.Millisecond)
-	for count < 2 {
+	got := make([]EventType, 0, 2)
+	for i := 0; i < 2; i++ {
 		select {
 		case e := <-ch:
-			count++
-			if e.Type != "e2" && e.Type != "e3" {
-				t.Errorf("unexpected event type: %s", e.Type)
-			}
-		case <-timeout:
-			t.Fatalf("timed out after receiving %d events", count)
+			got = append(got, e.Type)
+		case <-time.After(time.Second):
+			t.Fatalf("timed out waiting for history replay event %d", i)
+		}
+	}
+	if got[0] != "e2" || got[1] != "e3" {
+		t.Errorf("replay order = %v, want [e2 e3]", got)
+	}
+}
+
+func TestEventHub_ReplayBeforeLivePublish(t *testing.T) {
+	hub := NewEventHub(100, 16)
+
+	hub.Publish(Event{Type: "hist1", WorkspaceID: "ws1"})
+	hub.Publish(Event{Type: "hist2", WorkspaceID: "ws1"})
+
+	ch, cancel := hub.Subscribe("ws1", "", 0)
+	defer cancel()
+
+	hub.Publish(Event{Type: "live1", WorkspaceID: "ws1"})
+
+	var seqs []int64
+	var types []EventType
+	for i := 0; i < 3; i++ {
+		select {
+		case e := <-ch:
+			seqs = append(seqs, e.Sequence)
+			types = append(types, e.Type)
+		case <-time.After(time.Second):
+			t.Fatalf("timed out waiting for event %d; got %v", i, types)
+		}
+	}
+	if types[0] != "hist1" || types[1] != "hist2" || types[2] != "live1" {
+		t.Errorf("order = %v, want [hist1 hist2 live1]", types)
+	}
+	for i := 1; i < len(seqs); i++ {
+		if seqs[i] <= seqs[i-1] {
+			t.Errorf("sequences not increasing: %v", seqs)
 		}
 	}
 }
@@ -276,14 +307,23 @@ func TestEventHub_Unsubscribe_Cleanup(t *testing.T) {
 	ch, cancel := hub.Subscribe("ws1", "sub1", 0)
 	cancel()
 
-	// Channel should be closed after unsubscribe
-	_, ok := <-ch
-	if ok {
-		t.Error("channel should be closed after unsubscribe")
+	// Unsubscribe closes done, not the data channel — Publish must not panic
+	// and must not deliver to the cancelled subscriber.
+	hub.Publish(Event{Type: "after-cancel", WorkspaceID: "ws1"})
+	select {
+	case <-ch:
+		t.Error("cancelled subscriber must not receive events")
+	case <-time.After(50 * time.Millisecond):
+		// expected
 	}
 
-	// Ensure we can re-subscribe with same ID
-	ch2, cancel2 := hub.Subscribe("ws1", "sub1", 0)
+	// Re-subscribe after the current history so only the next live event is delivered.
+	hist, _ := hub.GetHistory("ws1", 0)
+	after := int64(0)
+	if len(hist) > 0 {
+		after = hist[len(hist)-1].Sequence
+	}
+	ch2, cancel2 := hub.Subscribe("ws1", "sub1", after)
 	defer cancel2()
 
 	hub.Publish(Event{Type: "test", WorkspaceID: "ws1"})
@@ -545,11 +585,12 @@ func TestEventBusAdapter_UpgraderCheckOrigin(t *testing.T) {
 		origin string
 		want   bool
 	}{
-		{"empty origin", "", true},
+		{"empty origin", "", false},
 		{"localhost", "http://localhost:3000", true},
 		{"127.0.0.1", "http://127.0.0.1:8080", true},
 		{"ipv6", "http://[::1]:8080", true},
 		{"file", "file://", true},
+		{"localhost evil prefix", "http://localhost.evil.com", false},
 		{"external", "http://evil.com", false},
 		{"https external", "https://example.com", false},
 	}
@@ -702,11 +743,17 @@ func TestEventHub_ConcurrentPublish(t *testing.T) {
 	total := numGoroutines * pubsPerGoroutine
 	done := make(chan struct{})
 
-	// Drain concurrently with publishing
+	// Drain concurrently with publishing (timed — data ch is never closed)
 	received := int64(0)
 	go func() {
-		for range ch {
-			// Count received events
+		timeout := time.After(2 * time.Second)
+		for {
+			select {
+			case <-timeout:
+				return
+			case <-ch:
+				// Count received events
+			}
 		}
 	}()
 
@@ -747,10 +794,12 @@ func TestEventHub_ConcurrentSubscribeUnsubscribe(t *testing.T) {
 	for i := 0; i < numGoroutines; i++ {
 		go func(id int) {
 			ch, cancel := hub.Subscribe("ws1", "", 0)
-			// Immediately unsubscribe
 			cancel()
-			// Drain channel to ensure it's closed
-			for range ch {
+			// Data channel is not closed; just ensure Publish after cancel is safe.
+			hub.Publish(Event{Type: "post-cancel", WorkspaceID: "ws1"})
+			select {
+			case <-ch:
+			case <-time.After(10 * time.Millisecond):
 			}
 			done <- struct{}{}
 		}(i)
@@ -759,6 +808,70 @@ func TestEventHub_ConcurrentSubscribeUnsubscribe(t *testing.T) {
 	for i := 0; i < numGoroutines; i++ {
 		<-done
 	}
+}
+
+// TestEventHub_PublishUnsubscribeRace stresses the GO-P0-2 fix: Publish
+// sends outside the lock while unsubscribe closes done (never the data
+// channel). Run with -race; must not panic.
+func TestEventHub_PublishUnsubscribeRace(t *testing.T) {
+	hub := NewEventHub(100, 8)
+
+	const rounds = 200
+	const publishers = 8
+	const subscribers = 16
+
+	var pubWg, subWg sync.WaitGroup
+	stop := make(chan struct{})
+
+	for i := 0; i < publishers; i++ {
+		pubWg.Add(1)
+		go func() {
+			defer pubWg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+					hub.Publish(Event{Type: "race", WorkspaceID: "ws1"})
+				}
+			}
+		}()
+	}
+
+	for i := 0; i < subscribers; i++ {
+		subWg.Add(1)
+		go func(id int) {
+			defer subWg.Done()
+			for r := 0; r < rounds; r++ {
+				ch, cancel := hub.Subscribe("ws1", "", 0)
+				// Concurrent drain while publishers hammer Publish
+				drainDone := make(chan struct{})
+				go func() {
+					defer close(drainDone)
+					timeout := time.After(5 * time.Millisecond)
+					for {
+						select {
+						case <-timeout:
+							return
+						case <-ch:
+						}
+					}
+				}()
+				// Interleave early cancel with Publish
+				if id%2 == 0 {
+					cancel()
+				}
+				<-drainDone
+				cancel()
+			}
+		}(i)
+	}
+
+	subWg.Wait()
+	close(stop)
+	pubWg.Wait()
+	// Final publish after all unsubscribed — must not panic
+	hub.Publish(Event{Type: "final", WorkspaceID: "ws1"})
 }
 
 func TestEventHub_ConcurrentPublishSubscribeRace(t *testing.T) {
@@ -849,10 +962,13 @@ func TestEventHub_UnsubscribeNonexistent(t *testing.T) {
 	// Second unsubscribe should be safe
 	hub.unsubscribe("ws1", "sub1")
 
-	// Channel should be closed
-	_, ok := <-ch
-	if ok {
-		t.Error("channel should be closed after unsubscribe")
+	// Publish must not panic; cancelled sub must not receive
+	hub.Publish(Event{Type: "test", WorkspaceID: "ws1"})
+	select {
+	case <-ch:
+		t.Error("cancelled subscriber must not receive events")
+	case <-time.After(50 * time.Millisecond):
+		// expected
 	}
 }
 
@@ -1276,14 +1392,18 @@ func TestEventHub_UnsubscribeRemovesWorkspace(t *testing.T) {
 
 	ch1, cancel1 := hub.Subscribe("ws1", "sub1", 0)
 	cancel1()
-	_, ok := <-ch1
-	if ok {
-		t.Error("channel should be closed")
+	// Data channel stays open; cancelled subscriber just stops receiving.
+	hub.Publish(Event{Type: "ghost", WorkspaceID: "ws1"})
+	select {
+	case <-ch1:
+		t.Error("cancelled subscriber must not receive events")
+	case <-time.After(50 * time.Millisecond):
 	}
 
-	// After unsubscribe, the workspace map entry should be cleaned up
-	// Re-subscribe should work fine
-	ch2, cancel2 := hub.Subscribe("ws1", "sub2", 0)
+	// Re-subscribe after the current sequence so history replay does not
+	// deliver the earlier "ghost" event into ch2.
+	after := hub.sequence.Load()
+	ch2, cancel2 := hub.Subscribe("ws1", "sub2", after)
 	defer cancel2()
 
 	hub.Publish(Event{Type: "test", WorkspaceID: "ws1"})
@@ -1399,12 +1519,14 @@ func TestEventHub_PublishAfterUnsubscribe(t *testing.T) {
 	ch, cancel := hub.Subscribe("ws1", "sub1", 0)
 	cancel()
 
-	// Drain closed channel
-	for range ch {
-	}
-
 	// Publish after unsubscribe - should not panic
 	hub.Publish(Event{Type: "test", WorkspaceID: "ws1"})
+
+	select {
+	case <-ch:
+		t.Error("cancelled subscriber must not receive events")
+	case <-time.After(50 * time.Millisecond):
+	}
 
 	// History should still be updated
 	history, _ := hub.GetHistory("ws1", 0)
@@ -1732,11 +1854,9 @@ func TestEventHub_ConcurrentSubscribeAndPublish(t *testing.T) {
 		}
 	}
 
-	// Now safe to unsubscribe
+	// Now safe to unsubscribe (data channel is not closed)
 	for i := 0; i < numSubscribers; i++ {
 		subs[i].cancel()
-		for range subs[i].ch {
-		}
 	}
 
 	// Verify history
@@ -2013,66 +2133,6 @@ func TestEventHub_OldSubscribe_UniqueIDs(t *testing.T) {
 	}
 }
 
-func TestEventHub_ServeWSCompat(t *testing.T) {
-	hub := NewEventHub(100, 10)
-
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		hub.ServeWSCompat(w, r)
-	}))
-	defer srv.Close()
-
-	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/events?workspaceId=ws1&afterSequence=0"
-	header := http.Header{}
-	header.Set("X-Kairo-Auth", "any-secret-works")
-
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, header)
-	if err != nil {
-		t.Fatalf("failed to dial WebSocket: %v", err)
-	}
-	defer conn.Close()
-
-	hub.Publish(Event{Type: "ws.test", WorkspaceID: "ws1", Message: "hello-ws"})
-
-	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
-	var received Event
-	if err := conn.ReadJSON(&received); err != nil {
-		t.Fatalf("failed to read event from WebSocket: %v", err)
-	}
-
-	if received.Type != "ws.test" {
-		t.Errorf("expected 'ws.test', got '%s'", received.Type)
-	}
-	if received.Message != "hello-ws" {
-		t.Errorf("expected 'hello-ws', got '%s'", received.Message)
-	}
-}
-
-func TestEventHub_ServeWSCompat_NoWorkspace(t *testing.T) {
-	hub := NewEventHub(100, 10)
-
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		hub.ServeWSCompat(w, r)
-	}))
-	defer srv.Close()
-
-	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/events"
-	header := http.Header{}
-	header.Set("X-Kairo-Auth", "any-secret")
-
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, header)
-	if err != nil {
-		t.Fatalf("dial should succeed even without workspaceId: %v", err)
-	}
-	defer conn.Close()
-
-	// Connection should be closed immediately by the server
-	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-	_, _, err = conn.ReadMessage()
-	if err == nil {
-		t.Error("expected connection to be closed when no workspaceId")
-	}
-}
-
 func TestEventHub_ServeWS_WithAuth(t *testing.T) {
 	hub := NewEventHub(100, 10)
 
@@ -2239,11 +2299,12 @@ func TestEventHub_UpgraderCheckOrigin(t *testing.T) {
 		origin string
 		want   bool
 	}{
-		{"empty origin", "", true},
+		{"empty origin", "", false},
 		{"localhost", "http://localhost:3000", true},
 		{"127.0.0.1", "http://127.0.0.1:8080", true},
 		{"ipv6", "http://[::1]:8080", true},
 		{"file", "file://", true},
+		{"localhost evil prefix", "http://localhost.evil.com", false},
 		{"external", "http://evil.com", false},
 		{"https external", "https://example.com", false},
 	}

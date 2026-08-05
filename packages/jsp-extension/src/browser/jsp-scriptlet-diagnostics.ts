@@ -13,9 +13,10 @@ import { JSP_LANGUAGE_ID } from './jsp-monarch';
 import { JspJavaParser } from './jsp-java-nav';
 import {
   buildVirtualJavaFile,
+  mapVirtualPositionToBlockOffset,
   parseVirtualUri,
   virtualUriForBlock,
-  virtualWrapperLineCount,
+  type JspVirtualKind,
 } from './jsp-virtual-java';
 
 /** Minimal LSP diagnostic shape we need for mapping. */
@@ -31,37 +32,51 @@ interface LSPDiagnostic {
 const DIAGNOSTICS_DEBOUNCE_MS = 500;
 
 /**
- * Convert a 0-based offset to a 0-based line number.
- */
-function offsetToLine(content: string, offset: number): number {
-  const textBefore = content.substring(0, Math.min(offset, content.length));
-  return textBefore.split('\n').length - 1;
-}
-
-/**
  * Map an LSP diagnostic from the virtual Java file back to the JSP
  * document coordinate space.
+ *
+ * Accounts for the block's starting column on the first content line
+ * and subtracts the expression rewrite prefix (`Object __expr = `).
  */
-function mapDiagnosticToJsp(
-  blockContentStartLine: number,
+export function mapDiagnosticToJsp(
+  jspContent: string,
+  blockStart: number,
+  blockContent: string,
   javaDiagnostic: LSPDiagnostic,
-  wrapperLineCount: number = virtualWrapperLineCount('scriptlet'),
+  kind: JspVirtualKind = 'scriptlet',
 ): monaco.editor.IMarkerData {
-  const diagLine = javaDiagnostic.range.start.line;
-  const diagEndLine = javaDiagnostic.range.end.line;
+  const parser = new JspJavaParser();
+  const blockOrigin = parser.offsetToPosition(jspContent, blockStart);
 
-  const jspStartLine = blockContentStartLine + (diagLine - wrapperLineCount);
-  const jspEndLine = blockContentStartLine + (diagEndLine - wrapperLineCount);
+  const mapPos = (javaLine: number, javaChar: number): { line: number; character: number } => {
+    const mapped = mapVirtualPositionToBlockOffset(blockContent, javaLine, javaChar, kind);
+    if (!mapped) {
+      return blockOrigin;
+    }
+    if (mapped.lineInBlock === 0) {
+      return {
+        line: blockOrigin.line,
+        character: blockOrigin.character + mapped.characterInBlock,
+      };
+    }
+    return {
+      line: blockOrigin.line + mapped.lineInBlock,
+      character: mapped.characterInBlock,
+    };
+  };
+
+  const start = mapPos(javaDiagnostic.range.start.line, javaDiagnostic.range.start.character);
+  const end = mapPos(javaDiagnostic.range.end.line, javaDiagnostic.range.end.character);
 
   return {
     severity: severityToMarkerSeverity(javaDiagnostic.severity),
     message: javaDiagnostic.message,
     source: javaDiagnostic.source,
     code: javaDiagnostic.code === undefined ? undefined : String(javaDiagnostic.code),
-    startLineNumber: Math.max(1, jspStartLine + 1),
-    startColumn: javaDiagnostic.range.start.character + 1,
-    endLineNumber: Math.max(1, jspEndLine + 1),
-    endColumn: javaDiagnostic.range.end.character + 1,
+    startLineNumber: Math.max(1, start.line + 1),
+    startColumn: Math.max(1, start.character + 1),
+    endLineNumber: Math.max(1, end.line + 1),
+    endColumn: Math.max(1, end.character + 1),
   };
 }
 
@@ -107,7 +122,6 @@ export function registerJspScriptletDiagnostics(
     const blocks = parser.findJavaBlocks(content);
 
     const newVirtualUris = new Set<string>();
-    const _markers: monaco.editor.IMarkerData[] = [];
 
     for (let i = 0; i < blocks.length; i++) {
       const block = blocks[i];
@@ -160,14 +174,12 @@ export function registerJspScriptletDiagnostics(
     }, DIAGNOSTICS_DEBOUNCE_MS);
   }
 
-  // ── Listen for JSP model creation ────────────────────────────
-  const createDisposable = monaco.editor.onDidCreateModel(model => {
-    const langId = model.getLanguageId();
-    if (langId !== JSP_LANGUAGE_ID) {
+  // ── Attach diagnostics to a JSP model ────────────────────────
+  function attachModel(model: monaco.editor.ITextModel): void {
+    const uri = model.uri.toString();
+    if (modelStates.has(uri)) {
       return;
     }
-
-    const uri = model.uri.toString();
 
     // Listen for content changes on this specific model.
     const contentChangeDisposable = model.onDidChangeContent(() => {
@@ -189,27 +201,57 @@ export function registerJspScriptletDiagnostics(
 
     // Run initial diagnostics immediately.
     scheduleDiagnostics(state);
+  }
+
+  function detachModel(model: monaco.editor.ITextModel): void {
+    const uri = model.uri.toString();
+    const state = modelStates.get(uri);
+    if (!state) {
+      return;
+    }
+    if (state.changeTimer) {
+      clearTimeout(state.changeTimer);
+    }
+    state.contentChangeDisposable.dispose();
+    // Close all virtual URIs for this model.
+    for (const virtualUri of state.activeVirtualUris) {
+      try {
+        client.didClose(virtualUri);
+      } catch {
+        // Ignore.
+      }
+    }
+    modelStates.delete(uri);
+    monaco.editor.setModelMarkers(model, 'jsp-scriptlet-java', []);
+  }
+
+  // ── Listen for JSP model creation ────────────────────────────
+  const createDisposable = monaco.editor.onDidCreateModel(model => {
+    if (model.getLanguageId() === JSP_LANGUAGE_ID) {
+      attachModel(model);
+    }
+  });
+
+  // Already-open JSP models (created before this provider registered) — JV-P2-8
+  for (const model of monaco.editor.getModels()) {
+    if (model.getLanguageId() === JSP_LANGUAGE_ID) {
+      attachModel(model);
+    }
+  }
+
+  // Language id switches (e.g. plain text → jsp) — JV-P2-8
+  const languageDisposable = monaco.editor.onDidChangeModelLanguage(e => {
+    const newLanguage = e.model.getLanguageId();
+    if (e.oldLanguage === JSP_LANGUAGE_ID && newLanguage !== JSP_LANGUAGE_ID) {
+      detachModel(e.model);
+    } else if (newLanguage === JSP_LANGUAGE_ID) {
+      attachModel(e.model);
+    }
   });
 
   // ── Listen for model disposal ────────────────────────────────
   const disposeDisposable = monaco.editor.onWillDisposeModel(model => {
-    const uri = model.uri.toString();
-    const state = modelStates.get(uri);
-    if (state) {
-      if (state.changeTimer) {
-        clearTimeout(state.changeTimer);
-      }
-      state.contentChangeDisposable.dispose();
-      // Close all virtual URIs for this model.
-      for (const virtualUri of state.activeVirtualUris) {
-        try {
-          client.didClose(virtualUri);
-        } catch {
-          // Ignore.
-        }
-      }
-      modelStates.delete(uri);
-    }
+    detachModel(model);
   });
 
   // ── Listen for diagnostics from JDT LS ───────────────────────
@@ -234,19 +276,12 @@ export function registerJspScriptletDiagnostics(
 
     const block = blocks[parsed.blockIndex];
     const blockContent = content.slice(block.start, block.end);
-    const kind = block.kind === 'declaration' ? 'declaration'
+    const kind: JspVirtualKind = block.kind === 'declaration' ? 'declaration'
       : block.kind === 'expression' ? 'expression'
         : 'scriptlet';
 
-    // Calculate the JSP line where the block content starts.
-    // If the first character is a newline, the content starts on the next line.
-    const blockTagLine = offsetToLine(content, block.start);
-    const contentStartLine = blockContent.startsWith('\n')
-      ? blockTagLine + 1
-      : blockTagLine;
-
     const markers = params.diagnostics.map(d =>
-      mapDiagnosticToJsp(contentStartLine, d, virtualWrapperLineCount(kind)),
+      mapDiagnosticToJsp(content, block.start, blockContent, d, kind),
     );
 
     // Set markers on the JSP model using the JSP diagnostics owner.
@@ -256,6 +291,7 @@ export function registerJspScriptletDiagnostics(
   return {
     dispose(): void {
       createDisposable.dispose();
+      languageDisposable.dispose();
       disposeDisposable.dispose();
       diagnosticsDisposable.dispose();
       // Clean up all model states.

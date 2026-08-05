@@ -19,6 +19,47 @@ import { JAVA_LANGUAGE_ID } from '../common/java-common';
 import { JavaLanguageClient } from './java-language-client';
 import { JavaDocumentSync, lspDiagnosticsToMarkers } from './java-document-sync-core';
 
+/**
+ * Normalize a file URI for comparison on Windows: lowercase the drive
+ * letter and decode percent-encoding so JDT LS diagnostics still match
+ * Monaco models when casing/encoding differ (JV-P1-6).
+ */
+export function normalizeUriKey(uri: string): string {
+  try {
+    const parsed = monaco.Uri.parse(uri);
+    let path = parsed.path || '';
+    // Lowercase Windows drive letter: /C:/... or /c%3A/...
+    path = path.replace(/^\/([A-Za-z])(?=[:%])/, (_m, d: string) => `/${d.toLowerCase()}`);
+    path = path.replace(/^\/([a-z])%3[aA]/, '/$1:');
+    // Compare decoded paths so %20 vs space and %E4%B8%AD vs 中文 match.
+    try {
+      path = decodeURIComponent(path);
+    } catch {
+      // keep encoded path if malformed
+    }
+    return `${parsed.scheme.toLowerCase()}:${path}`.toLowerCase();
+  } catch {
+    return String(uri || '').toLowerCase();
+  }
+}
+
+/** Resolve a Monaco model by URI, tolerating drive-letter / encoding drift. */
+export function findModelByUri(uri: string): monaco.editor.ITextModel | null {
+  try {
+    const direct = monaco.editor.getModel(monaco.Uri.parse(uri));
+    if (direct) return direct;
+  } catch {
+    // fall through to scan
+  }
+  const key = normalizeUriKey(uri);
+  for (const model of monaco.editor.getModels()) {
+    if (normalizeUriKey(model.uri.toString()) === key) {
+      return model;
+    }
+  }
+  return null;
+}
+
 @injectable()
 export class JavaDocumentSyncContribution implements FrontendApplicationContribution, Disposable {
   @inject(JavaLanguageClient)
@@ -51,7 +92,7 @@ export class JavaDocumentSyncContribution implements FrontendApplicationContribu
     // Render backend diagnostics as editor markers.
     this.subs.push(
       this.client.onDiagnostics(params => {
-        const model = monaco.editor.getModel(monaco.Uri.parse(params.uri));
+        const model = findModelByUri(params.uri);
         if (!model) {
           return;
         }

@@ -2,7 +2,7 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert');
-const { sameLineContext, multiLineContext, groupMatchesByFile } = require('../../lib/browser/search-result-utils');
+const { sameLineContext, multiLineContext, groupMatchesByFile, matchPreviewParts, getSearchFileName, getSearchFileDir } = require('../../lib/browser/search-result-utils');
 
 test('sameLineContext strips multi-line prefixes/suffixes', () => {
   const { before, after } = sameLineContext({
@@ -23,6 +23,26 @@ test('multiLineContext splits preview lines', () => {
   assert.deepStrictEqual(ctx.afterLines, ['c', 'd']);
   assert.strictEqual(ctx.sameBefore, 'pre');
   assert.strictEqual(ctx.sameAfter, 'post');
+});
+
+test('matchPreviewParts returns same-line highlight segments', () => {
+  const parts = matchPreviewParts({
+    file: 'A.java',
+    line: 4,
+    column: 3,
+    matchText: 'needle',
+    contextBefore: 'line1\nline2\na ',
+    contextAfter: ' b\nline5',
+  });
+  assert.strictEqual(parts.before, 'a ');
+  assert.strictEqual(parts.highlight, 'needle');
+  assert.strictEqual(parts.after, ' b');
+});
+
+test('getSearchFileName and getSearchFileDir split IDEA-style headers', () => {
+  assert.strictEqual(getSearchFileName('src/main/Foo.java'), 'Foo.java');
+  assert.strictEqual(getSearchFileDir('src/main/Foo.java'), 'src/main');
+  assert.strictEqual(getSearchFileDir('Foo.jsp'), '');
 });
 
 test('groupMatchesByFile preserves order', () => {

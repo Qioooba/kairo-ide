@@ -5,7 +5,7 @@ import { RuntimeConnectionService, WorkspaceContextService } from '@kairo/runtim
 import { ActiveProjectService } from '@kairo/project-extension';
 import type { Endpoint } from '@kairo/protocol';
 import { JavaLanguageClient } from './java-language-client';
-import type { JdtLsState } from '../node/jdt-ls-manager';
+import type { JdtLsState } from '../common/jdt-ls-state';
 
 export const JDT_LS_MAX_AUTO_RESTARTS = 3;
 export const JDT_LS_RESTART_BASE_DELAY_MS = 1_000;
@@ -556,11 +556,31 @@ export function isFatalJdtLsFailure(message: string, exitCode?: number | null): 
         || /application.*org\.eclipse\.jdt\.ls\.core\.id1.*not found/i.test(msg);
 }
 
-/** Convert an absolute filesystem path to a file:// URI. */
+/**
+ * Convert an absolute filesystem path to a file:// URI with proper
+ * percent-encoding (spaces, non-ASCII, UNC). Windows drive letters are
+ * preserved as `/C:/...` so JDT LS accepts the rootUri.
+ */
 export function pathToFileUri(p: string): string {
-    const normalized = p.replace(/\\/g, '/');
-    const withSlash = normalized.startsWith('/') ? normalized : `/${normalized}`;
-    return `file://${withSlash}`;
+    let normalized = String(p || '').replace(/\\/g, '/');
+    // UNC: //server/share/path → file://server/share/path
+    if (normalized.startsWith('//')) {
+        const parts = normalized.split('/');
+        const host = encodeURIComponent(parts[2] || '');
+        const path = parts.slice(3).map(seg => encodeURIComponent(seg)).join('/');
+        return path ? `file://${host}/${path}` : `file://${host}`;
+    }
+    if (!normalized.startsWith('/')) {
+        normalized = `/${normalized}`;
+    }
+    // Windows drive: /C:/Users/... — keep the drive letter unencoded.
+    const drive = /^\/([A-Za-z]):(\/.*)?$/.exec(normalized);
+    if (drive) {
+        const rest = (drive[2] || '').split('/').filter((_, i) => i > 0).map(encodeURIComponent).join('/');
+        return rest ? `file:///${drive[1]}:/${rest}` : `file:///${drive[1]}:`;
+    }
+    const encoded = normalized.split('/').map((seg, i) => (i === 0 ? '' : encodeURIComponent(seg))).join('/');
+    return `file://${encoded}`;
 }
 
 /**

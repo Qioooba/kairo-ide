@@ -15,7 +15,7 @@ const assert = require('node:assert/strict');
 
 // Load the compiled module directly — we don't need the full DI
 // container for these contract tests.
-const { WorkspaceContextService } = require('../../lib/browser/workspace-context-service');
+const { WorkspaceContextService, decodeProjectYamlBytes } = require('../../lib/browser/workspace-context-service');
 
 test('WorkspaceContextService exports the class', () => {
   assert.ok(typeof WorkspaceContextService === 'function');
@@ -131,4 +131,22 @@ test('WorkspaceContextService.syncFromRoots handles empty roots', async () => {
 
   await promise;
   assert.strictEqual(svc.context, undefined);
+});
+
+test('WorkspaceContextService Chinese path fallback uses encodeURIComponent before btoa (BD-P0-6)', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const src = fs.readFileSync(path.join(__dirname, 'workspace-context-service.ts'), 'utf8');
+  assert.match(src, /btoa\(encodeURIComponent\(rootPath\)\)/,
+    'offline fallback must encodeURIComponent before btoa for non-Latin1 paths');
+  assert.doesNotMatch(src, /btoa\(rootPath\)/,
+    'raw btoa(rootPath) throws InvalidCharacterError on Chinese paths');
+});
+
+test('decodeProjectYamlBytes prefers gbk when utf-8 is mojibake (BD-P2-12)', () => {
+  // "中文" in GBK is D6 D0 CE C4
+  const gbkBytes = new Uint8Array([0x6e, 0x61, 0x6d, 0x65, 0x3a, 0x20, 0xd6, 0xd0, 0xce, 0xc4, 0x0a]);
+  const text = decodeProjectYamlBytes(gbkBytes);
+  assert.ok(text.includes('中文') || text.includes('name:'), `expected Chinese or name, got ${JSON.stringify(text)}`);
+  assert.ok(!text.includes('\uFFFD') || text.includes('中文'), 'should not keep pure mojibake when gbk works');
 });

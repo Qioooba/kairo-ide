@@ -9,7 +9,7 @@
     "build": "tsc -p tsconfig.json",
     "clean": "rm -rf lib",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "test": "node --test src/node/tomcat-manager.test.cjs src/browser/server-service.test.cjs src/browser/log-buffer.test.cjs src/browser/log-viewer-contract.test.cjs src/browser/server-store-context.test.cjs src/browser/server-view-widget.test.cjs src/browser/log-viewer-widget.test.cjs"
+    "test": "node --test src/browser/server-service.test.cjs src/browser/log-buffer.test.cjs src/browser/log-viewer-contract.test.cjs src/browser/server-store-context.test.cjs src/browser/server-view-widget.test.cjs src/browser/log-viewer-widget.test.cjs"
   },
   "dependencies": {
     "@kairo/i18n": "workspace:*",

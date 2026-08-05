@@ -421,12 +421,17 @@ export class KairoSqlConsoleWidget extends ReactWidget {
   @postConstruct()
   protected init(): void {
     this.id = KairoSqlConsoleWidget.ID;
-    this.title.label = 'SQL Console';
-    this.title.caption = 'Kairo SQL Console';
+    this.updateTitle();
+    this.toDispose.push(this.i18n.onDidChangeLanguage(() => this.updateTitle()));
     this.title.iconClass = 'codicon codicon-database';
     this.title.closable = true;
     this.addClass('kairo-widget');
     this.update();
+  }
+
+  protected updateTitle(): void {
+    this.title.label = this.i18n.t('widget.sqlConsole.title');
+    this.title.caption = this.i18n.t('widget.sqlConsole.caption');
   }
 
   protected render(): React.ReactNode {

@@ -11,19 +11,23 @@
 import * as monaco from '@theia/monaco-editor-core';
 import URI from '@theia/core/lib/common/uri';
 import { injectable, inject } from '@theia/core/shared/inversify';
+import { DisposableCollection } from '@theia/core/lib/common/disposable';
 import { FileService } from '@theia/filesystem/lib/browser/file-service';
 import { WorkspaceService } from '@theia/workspace/lib/browser/workspace-service';
 import { JSP_LANGUAGE_ID } from './jsp-monarch';
 import { TldParser, Tld, TldTag } from './tld-parser';
 
-/** Build a CompletionItem with a default range placeholder. */
-function ci(partial: Partial<monaco.languages.CompletionItem> & {
-  label: string;
-  kind: monaco.languages.CompletionItemKind;
-  insertText: string;
-}): monaco.languages.CompletionItem {
+/** Build a CompletionItem with an explicit replacement range. */
+function ci(
+  range: monaco.IRange,
+  partial: Partial<monaco.languages.CompletionItem> & {
+    label: string;
+    kind: monaco.languages.CompletionItemKind;
+    insertText: string;
+  },
+): monaco.languages.CompletionItem {
   return {
-    range: { startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 1 },
+    range,
     ...partial,
   } as monaco.languages.CompletionItem;
 }
@@ -31,7 +35,7 @@ function ci(partial: Partial<monaco.languages.CompletionItem> & {
 /**
  * Build documentation and insertText for a TLD tag.
  */
-function buildTagCompletionItem(tag: TldTag, prefix: string): monaco.languages.CompletionItem {
+function buildTagCompletionItem(tag: TldTag, prefix: string, range: monaco.IRange): monaco.languages.CompletionItem {
   const docParts: string[] = [];
   if (tag.tagClass) {
     docParts.push(`**Tag Class**: \`${tag.tagClass}\``);
@@ -55,7 +59,7 @@ function buildTagCompletionItem(tag: TldTag, prefix: string): monaco.languages.C
     ? tag.attributes.map((a, i) => ` ${a.name}="\${${i + 1}}"`).join('')
     : '';
 
-  return ci({
+  return ci(range, {
     label: `${prefix}:${tag.name}`,
     kind: monaco.languages.CompletionItemKind.Class,
     detail: tag.tagClass ?? prefix,
@@ -70,6 +74,7 @@ function buildTagCompletionItem(tag: TldTag, prefix: string): monaco.languages.C
  */
 function buildAttributeCompletionItem(
   attr: { name: string; required: boolean; rtexprvalue: boolean; type?: string; description?: string },
+  range: monaco.IRange,
 ): monaco.languages.CompletionItem {
   const type = attr.type ?? 'String';
   const req = attr.required ? ' [required]' : '';
@@ -87,7 +92,7 @@ function buildAttributeCompletionItem(
     docParts.push('**Supports EL**: yes');
   }
 
-  return ci({
+  return ci(range, {
     label: attr.name,
     kind: monaco.languages.CompletionItemKind.Property,
     detail,
@@ -119,17 +124,56 @@ export class TldCompletionProvider {
   /** Whether the workspace has already been scanned. */
   protected scanned = false;
 
+  /** File watchers that invalidate the cache on TLD/JAR changes. */
+  protected readonly watchers = new DisposableCollection();
+  protected watchersStarted = false;
+
   /**
    * Scan the workspace roots for *.tld files and parse them.
-   * Subsequent calls are no-ops.
+   * Subsequent calls are no-ops until {@link invalidateCache}.
    */
   async scanWorkspace(): Promise<void> {
     if (this.scanned) return;
     this.scanned = true;
     const roots = await this.workspaceService.roots;
     if (roots.length === 0) return;
-    const rootUri = URI.fromFilePath(roots[0].resource.path.toString());
-    await this.walkDir(rootUri);
+    for (const root of roots) {
+      const rootUri = URI.fromFilePath(root.resource.path.toString());
+      await this.walkDir(rootUri);
+    }
+    this.ensureWatchers();
+  }
+
+  /**
+   * Watch workspace roots so TLD/JAR changes refresh the cache (JV-P2-5).
+   * Safe to call multiple times; watchers survive invalidateCache.
+   */
+  protected ensureWatchers(): void {
+    if (this.watchersStarted) return;
+    this.watchersStarted = true;
+
+    void this.workspaceService.roots.then(roots => {
+      for (const root of roots) {
+        try {
+          this.watchers.push(this.fileService.watch(root.resource, { recursive: true, excludes: [] }));
+        } catch {
+          // Watch may fail on remote/unsupported providers
+        }
+      }
+    });
+
+    this.watchers.push(this.fileService.onDidFilesChange(event => {
+      for (const change of event.changes) {
+        const p = change.resource.path.toString().replace(/\\/g, '/');
+        const base = change.resource.path.base.toLowerCase();
+        const isTld = base.endsWith('.tld');
+        const isWebInfLibJar = base.endsWith('.jar') && /\/WEB-INF\/lib\//i.test(p);
+        if (isTld || isWebInfLibJar) {
+          this.invalidateCache();
+          return;
+        }
+      }
+    }));
   }
 
   /**
@@ -181,10 +225,18 @@ export class TldCompletionProvider {
 
   /**
    * Invalidate the cache so the next completion request re-scans.
+   * Watchers stay active so subsequent file changes keep refreshing.
    */
   invalidateCache(): void {
     this.tldCache.clear();
     this.scanned = false;
+  }
+
+  /** Tear down file watchers (tests / contribution dispose). */
+  dispose(): void {
+    this.watchers.dispose();
+    this.watchersStarted = false;
+    this.invalidateCache();
   }
 
   private async walkDir(uri: URI): Promise<void> {
@@ -194,7 +246,10 @@ export class TldCompletionProvider {
       for (const child of stat.children) {
         const basename = child.resource.path.base;
         if (child.isDirectory) {
-          if (basename.startsWith('.') || basename === 'node_modules' || basename === 'lib' || basename === 'dist') {
+          // Skip generic `lib/` trees, but never skip WEB-INF/lib (JV-P2-5).
+          const parentBase = uri.path.base;
+          const skipLib = basename === 'lib' && parentBase !== 'WEB-INF';
+          if (basename.startsWith('.') || basename === 'node_modules' || skipLib || basename === 'dist') {
             continue;
           }
           await this.walkDir(child.resource);
@@ -222,9 +277,6 @@ export class TldCompletionProvider {
 
 /** Regex to detect if cursor is inside a <%@ taglib %> directive. */
 const TAGLIB_DIRECTIVE_RE = /<%@\s+taglib\b/gi;
-
-/** Regex to extract the prefix attribute value from a taglib directive. */
-const _TAGLIB_PREFIX_RE = /<%@\s+taglib\b[^%]*\bprefix\s*=\s*"([^"]*)"/i;
 
 /** Regex to detect a known tag with attributes: <prefix:tagname */
 const TAG_WITH_ATTRS_RE = /<([a-zA-Z_][\w-]*):([a-zA-Z_][\w-]*)\s+([^>]*)$/;
@@ -287,18 +339,25 @@ class JspTldCompletionProvider implements monaco.languages.CompletionItemProvide
     await this.tldProvider.scanWorkspace();
     if (token.isCancellationRequested) return { suggestions: [] };
 
+    const word = model.getWordUntilPosition(position);
+    const range = new monaco.Range(
+      position.lineNumber,
+      word.startColumn,
+      position.lineNumber,
+      word.endColumn,
+    );
     const lineContent = model.getLineContent(position.lineNumber);
     const lineBeforeCursor = lineContent.substring(0, position.column - 1);
 
     // ── Phase 1: <%@ taglib %> directive completion ──────────
     if (isInsideTaglibDirective(model, position)) {
-      return this.suggestTaglibDirective(model, position);
+      return this.suggestTaglibDirective(model, position, range);
     }
 
     // ── Phase 2: Attribute completion for known tags ──────────
     const tagInfo = parseTagForAttributeCompletion(lineContent, position.column - 1);
     if (tagInfo) {
-      return this.suggestTagAttributes(tagInfo.prefix, tagInfo.tagName);
+      return this.suggestTagAttributes(tagInfo.prefix, tagInfo.tagName, range);
     }
 
     // ── Phase 3: Tag name completion (<prefix:tag) ────────────
@@ -325,7 +384,7 @@ class JspTldCompletionProvider implements monaco.languages.CompletionItemProvide
       const suggestions: monaco.languages.CompletionItem[] = [];
       for (const { tag } of matched) {
         if (tagPrefix === '' || tag.name.startsWith(tagPrefix)) {
-          suggestions.push(buildTagCompletionItem(tag, prefix));
+          suggestions.push(buildTagCompletionItem(tag, prefix, range));
         }
       }
       return { suggestions };
@@ -339,7 +398,7 @@ class JspTldCompletionProvider implements monaco.languages.CompletionItemProvide
     const suggestions: monaco.languages.CompletionItem[] = [];
     for (const pfx of allPrefixes) {
       if (prefixText === '' || pfx.startsWith(prefixText)) {
-        suggestions.push(ci({
+        suggestions.push(ci(range, {
           label: `${pfx}:`,
           kind: monaco.languages.CompletionItemKind.Module,
           detail: `${pfx} tag library`,
@@ -357,6 +416,7 @@ class JspTldCompletionProvider implements monaco.languages.CompletionItemProvide
   private suggestTaglibDirective(
     model: monaco.editor.ITextModel,
     position: monaco.Position,
+    range: monaco.IRange,
   ): monaco.languages.CompletionList {
     const lineContent = model.getLineContent(position.lineNumber);
     const lineBeforeCursor = lineContent.substring(0, position.column - 1);
@@ -377,7 +437,7 @@ class JspTldCompletionProvider implements monaco.languages.CompletionItemProvide
         // Suggest known TLD URIs
         const tldUris = this.tldProvider.getTldUris();
         for (const { uri, shortName } of tldUris) {
-          suggestions.push(ci({
+          suggestions.push(ci(range, {
             label: uri,
             kind: monaco.languages.CompletionItemKind.Value,
             detail: `${shortName} tag library`,
@@ -395,7 +455,7 @@ class JspTldCompletionProvider implements monaco.languages.CompletionItemProvide
         ];
         for (const jstl of jstlUris) {
           if (!tldUris.some(t => t.uri === jstl.uri)) {
-            suggestions.push(ci({
+            suggestions.push(ci(range, {
               label: jstl.uri,
               kind: monaco.languages.CompletionItemKind.Value,
               detail: jstl.name,
@@ -409,7 +469,7 @@ class JspTldCompletionProvider implements monaco.languages.CompletionItemProvide
         // Suggest known prefixes
         const prefixes = this.tldProvider.getPrefixes();
         for (const pfx of prefixes) {
-          suggestions.push(ci({
+          suggestions.push(ci(range, {
             label: pfx,
             kind: monaco.languages.CompletionItemKind.Value,
             detail: `${pfx} tag library prefix`,
@@ -426,7 +486,7 @@ class JspTldCompletionProvider implements monaco.languages.CompletionItemProvide
     const hasPrefix = /prefix\s*=/i.test(lineBeforeCursor);
 
     if (!hasUri) {
-      suggestions.push(ci({
+      suggestions.push(ci(range, {
         label: 'uri',
         kind: monaco.languages.CompletionItemKind.Property,
         detail: 'Tag library URI',
@@ -437,7 +497,7 @@ class JspTldCompletionProvider implements monaco.languages.CompletionItemProvide
       }));
     }
     if (!hasPrefix) {
-      suggestions.push(ci({
+      suggestions.push(ci(range, {
         label: 'prefix',
         kind: monaco.languages.CompletionItemKind.Property,
         detail: 'Tag library prefix',
@@ -457,13 +517,14 @@ class JspTldCompletionProvider implements monaco.languages.CompletionItemProvide
   private suggestTagAttributes(
     prefix: string,
     tagName: string,
+    range: monaco.IRange,
   ): monaco.languages.CompletionList {
     const tag = this.tldProvider.getTag(prefix, tagName);
     if (!tag) return { suggestions: [] };
 
     const suggestions: monaco.languages.CompletionItem[] = [];
     for (const attr of tag.attributes) {
-      suggestions.push(buildAttributeCompletionItem(attr));
+      suggestions.push(buildAttributeCompletionItem(attr, range));
     }
 
     return { suggestions };

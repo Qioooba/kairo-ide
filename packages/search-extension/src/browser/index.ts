@@ -73,7 +73,7 @@ export { parseFileMask, mergeGlobs, normalizeMaskToken } from './file-mask';
 export type { ParsedFileMask } from './file-mask';
 export { SearchResultsWidget, SearchResultsPanel } from './search-results-widget';
 export { SearchResultsContribution } from './search-results-contribution';
-export { sameLineContext, multiLineContext } from './search-result-utils';
+export { sameLineContext, multiLineContext, getSearchFileName, getSearchFileDir, getSearchFileIcon, matchPreviewParts } from './search-result-utils';
 
 export function bindSearchExtension(bind: interfaces.Bind): void {
   bind(KairoSearchService).toSelf().inSingletonScope();

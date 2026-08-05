@@ -177,3 +177,112 @@ test('a throwing listener cannot block other listeners or change the search outc
     console.error = originalConsoleError;
   }
 });
+
+class StubStreamService {
+  constructor() {
+    this.listeners = new Set();
+    this.state = {
+      status: 'idle',
+      matches: [],
+      totalMatches: 0,
+      batchIndex: 0,
+    };
+    this.searchCalls = [];
+    this.cancelCount = 0;
+    this.resetCount = 0;
+  }
+
+  subscribe(listener) {
+    this.listeners.add(listener);
+    listener(this.state);
+    return () => this.listeners.delete(listener);
+  }
+
+  reset() {
+    this.resetCount++;
+    this.state = { status: 'idle', matches: [], totalMatches: 0, batchIndex: 0 };
+    for (const listener of this.listeners) {
+      listener(this.state);
+    }
+  }
+
+  async searchStream(_options) {
+    return new Promise((resolve, reject) => {
+      this.searchCalls.push({ resolve, reject });
+    });
+  }
+
+  cancel() {
+    this.cancelCount++;
+    const call = this.searchCalls[this.searchCalls.length - 1];
+    if (call) {
+      call.reject(new KairoSearchCancelledError());
+    }
+  }
+
+  get snapshot() {
+    return this.state;
+  }
+
+  emit(state) {
+    this.state = state;
+    for (const listener of this.listeners) {
+      listener(state);
+    }
+  }
+}
+
+function makeStreamModel() {
+  const stream = new StubStreamService();
+  const model = new KairoSearchSessionModel();
+  model.streamService = stream;
+  return { model, stream };
+}
+
+test('searchStream clears loading on done and ignores stale replay after reset', async () => {
+  const { model, stream } = makeStreamModel();
+  const states = [];
+  const unsubscribe = model.subscribe(state => states.push(state.status));
+
+  const pending = model.searchStream({ workspaceId: 'ws-1', query: 'needle' });
+  assert.strictEqual(model.snapshot.status, 'loading');
+  assert.strictEqual(stream.resetCount, 1);
+
+  stream.emit({
+    status: 'streaming',
+    matches: [{ file: 'A.java', line: 1, column: 1, matchText: 'needle', contextBefore: '', contextAfter: '' }],
+    totalMatches: 1,
+    batchIndex: 0,
+  });
+  assert.strictEqual(model.snapshot.status, 'loading');
+  assert.strictEqual(model.snapshot.matches.length, 1);
+
+  stream.emit({
+    status: 'done',
+    matches: stream.state.matches,
+    totalMatches: 1,
+    batchIndex: 0,
+  });
+  stream.searchCalls[0].resolve();
+  await pending;
+
+  assert.strictEqual(model.snapshot.status, 'results');
+  assert.deepStrictEqual(states, ['idle', 'loading', 'loading', 'results']);
+  unsubscribe();
+});
+
+test('searchStream publishes cancelled when the stream is aborted', async () => {
+  const { model, stream } = makeStreamModel();
+  const pending = model.searchStream({ workspaceId: 'ws-1', query: 'needle' });
+  stream.searchCalls[0].reject(new KairoSearchCancelledError());
+  await pending;
+  assert.strictEqual(model.snapshot.status, 'cancelled');
+});
+
+test('cancelStream publishes cancelled and stops an in-flight stream', () => {
+  const { model, stream } = makeStreamModel();
+  void model.searchStream({ workspaceId: 'ws-1', query: 'needle' });
+  model.cancelStream();
+  assert.strictEqual(model.snapshot.status, 'cancelled');
+  assert.ok(stream.cancelCount >= 1);
+});

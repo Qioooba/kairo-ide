@@ -4,8 +4,12 @@
  * project state for the UI.
  */
 
-import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
+import { injectable, inject, postConstruct, optional } from '@theia/core/shared/inversify';
+import { StorageService } from '@theia/core/lib/browser/storage-service';
 import { RuntimeConnectionService } from '@kairo/runtime-extension';
+import { KairoI18nService } from '@kairo/i18n';
+
+const MAVEN_LAST_ROOT_KEY = 'kairo.maven.lastRootPath';
 
 export interface MavenProjectInfo {
     groupId: string;
@@ -120,6 +124,14 @@ export class KairoMavenService {
     @inject(RuntimeConnectionService)
     protected readonly runtime!: RuntimeConnectionService;
 
+    @inject(StorageService)
+    @optional()
+    protected readonly storage?: StorageService;
+
+    @inject(KairoI18nService)
+    @optional()
+    protected readonly i18n?: KairoI18nService;
+
     protected detectResult: MavenDetectResult | null = null;
     protected multiModule: MavenMultiModuleProject | null = null;
     protected lifecycleTree: MavenLifecycleTreeItem[] = [];
@@ -132,16 +144,35 @@ export class KairoMavenService {
 
     @postConstruct()
     protected init(): void {
-        // Initialize empty state
+        void this.restoreLastRootPath();
+    }
+
+    protected async restoreLastRootPath(): Promise<void> {
+        if (!this.storage) {
+            return;
+        }
+        try {
+            const saved = await this.storage.getData<string>(MAVEN_LAST_ROOT_KEY);
+            if (typeof saved === 'string' && saved.trim()) {
+                this.rootPath = saved.trim();
+            }
+        } catch {
+            // ignore storage failures
+        }
     }
 
     /** Detect a Maven project at the given root path. */
     async detect(rootPath: string): Promise<MavenDetectResult | null> {
         this.rootPath = rootPath;
         try {
+            await this.storage?.setData(MAVEN_LAST_ROOT_KEY, rootPath);
+        } catch {
+            // ignore
+        }
+        try {
             const result = await this.runtime.request(
                 'POST /api/v1/maven/detect',
-                { body: { rootPath } }
+                { rootPath }
             ) as MavenDetectResult;
             this.detectResult = result;
             this.notifyListeners();
@@ -158,6 +189,7 @@ export class KairoMavenService {
         try {
             const result = await this.runtime.request(
                 'GET /api/v1/maven/dependencies',
+                undefined,
                 { query: { rootPath: this.rootPath, offline } }
             ) as MavenDetectResult;
             this.detectResult = result;
@@ -175,21 +207,23 @@ export class KairoMavenService {
             phase: task,
             module: this.rootPath,
             status: 'running',
-            message: `Running mvn ${task}...`,
+            message: this.i18n?.t('widget.maven.runningMvn', { task }) ?? `Running mvn ${task}...`,
             percentComplete: 0,
         });
 
         try {
             const result = await this.runtime.request(
                 'POST /api/v1/maven/run',
-                { body: { rootPath: this.rootPath, task, offline } }
+                { rootPath: this.rootPath, task, offline }
             ) as MavenRunResult;
 
             this.setBuildProgress({
                 phase: task,
                 module: this.rootPath,
                 status: result.success ? 'success' : 'failed',
-                message: result.success ? 'Build succeeded' : (result.error || 'Build failed'),
+                message: result.success
+                    ? (this.i18n?.t('build.buildSuccess') ?? 'Build succeeded')
+                    : (result.error || (this.i18n?.t('build.buildFailed') ?? 'Build failed')),
                 percentComplete: 100,
             });
 

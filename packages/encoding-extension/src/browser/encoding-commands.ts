@@ -22,6 +22,7 @@ import { injectable, inject, interfaces } from '@theia/core/shared/inversify';
 import { QuickInputService, ApplicationShell, FrontendApplicationContribution, QuickPickItem } from '@theia/core/lib/browser';
 import { ConfirmDialog } from '@theia/core/lib/browser/dialogs';
 import { KairoProjectEncodingContribution } from './project-encoding-contribution';
+import { KairoEncodingCacheContribution } from './encoding-cache-contribution';
 import {
   Command,
   CommandContribution,
@@ -29,12 +30,17 @@ import {
   MessageService,
 } from '@theia/core/lib/common';
 import { EditorManager } from '@theia/editor/lib/browser/editor-manager';
+import { FileUri } from '@theia/core/lib/common/file-uri';
+import { WorkspaceContextService } from '@kairo/runtime-extension';
+import { KairoI18nService, type KairoI18nKey } from '@kairo/i18n';
 import { reloadEditorWithEncoding } from './reopen-strategy';
 import URI from '@theia/core/lib/common/uri';
 import {
   KairoEncodingServiceImpl,
   KAIRO_ENCODING_OPTIONS,
   toTheiaEncodingId,
+  toGoEncodingId,
+  sameEncodingId,
 } from './encoding-service';
 
 export namespace KairoEncodingCommands {
@@ -67,32 +73,76 @@ export class KairoEncodingCommandsContribution implements CommandContribution {
   @inject(QuickInputService) protected quickPick!: QuickInputService;
   @inject(MessageService) protected messages!: MessageService;
   @inject(ApplicationShell) protected shell!: ApplicationShell;
+  @inject(WorkspaceContextService) protected workspaceContext!: WorkspaceContextService;
+  @inject(KairoI18nService) protected i18n!: KairoI18nService;
+
+  /** Captured so labels can be refreshed after async i18n load / language switch. */
+  protected commandRegistry: CommandRegistry | undefined;
+
+  protected readonly commandI18nKeys: Record<string, KairoI18nKey> = {
+    [KairoEncodingCommands.REOPEN_WITH_ENCODING.id]: 'encoding.reopenWithEncoding',
+    [KairoEncodingCommands.SAVE_WITH_ENCODING.id]: 'encoding.saveWithEncoding',
+    [KairoEncodingCommands.SHOW_ENCODING.id]: 'encoding.showFileEncoding',
+    [KairoEncodingCommands.CONVERT_ENCODING.id]: 'encoding.convertEncoding',
+  };
+
+  protected withLabel(cmd: Command): Command {
+    const key = this.commandI18nKeys[cmd.id];
+    const label = key ? this.i18n.t(key) : cmd.label;
+    const category = cmd.category === 'Kairo' ? this.i18n.t('menu.category.kairo') : cmd.category;
+    return key || category !== cmd.category ? { ...cmd, label, category } : cmd;
+  }
+
+  protected refreshCommandLabels(): void {
+    if (!this.commandRegistry) {
+      return;
+    }
+    const category = this.i18n.t('menu.category.kairo');
+    for (const [id, key] of Object.entries(this.commandI18nKeys)) {
+      const cmd = this.commandRegistry.getCommand(id);
+      if (cmd) {
+        cmd.label = this.i18n.t(key);
+        if (cmd.category === 'Kairo' || cmd.category === category) {
+          cmd.category = category;
+        }
+      }
+    }
+  }
 
   registerCommands(registry: CommandRegistry): void {
-    registry.registerCommand(KairoEncodingCommands.SHOW_ENCODING, {
+    this.commandRegistry = registry;
+    this.refreshCommandLabels();
+    this.i18n.onDidChangeLanguage(() => this.refreshCommandLabels());
+
+    registry.registerCommand(this.withLabel(KairoEncodingCommands.SHOW_ENCODING), {
       execute: async (uri?: URI | string) => {
         const target = this.normalizeUri(uri) ?? this.currentEditorUri();
         if (!target) {
-          this.messages.warn('No file is open.');
+          this.messages.warn(this.i18n.t('encoding.noFileOpen'));
           return;
         }
         const enc = this.service.getEncodingFor(target);
-        this.messages.info(`${target.toString()}: ${enc}`);
+        this.messages.info(this.i18n.t('encoding.showEncoding', {
+          path: target.toString(),
+          encoding: enc,
+        }));
       },
     });
 
-    registry.registerCommand(KairoEncodingCommands.REOPEN_WITH_ENCODING, {
+    registry.registerCommand(this.withLabel(KairoEncodingCommands.REOPEN_WITH_ENCODING), {
       execute: async (uri?: URI | string) => {
         const target = this.normalizeUri(uri) ?? this.currentEditorUri();
         if (!target) {
-          this.messages.warn('Open a file first.');
+          this.messages.warn(this.i18n.t('encoding.openFileFirst'));
           return;
         }
         const current = this.service.getEncodingFor(target);
         const picked = await this.pickEncoding(current);
         if (!picked) return;
-        if (picked === current) {
-          this.messages.info(`Already using ${current}, nothing to do.`);
+        // Compare in Kairo domain — getEncodingFor used to return
+        // Theia ids while picks are Kairo labels (BD-P1-8).
+        if (sameEncodingId(picked, current)) {
+          this.messages.info(this.i18n.t('encoding.alreadyUsing', { encoding: current }));
           return;
         }
         // Register the override BEFORE reloading so both the
@@ -107,25 +157,35 @@ export class KairoEncodingCommandsContribution implements CommandContribution {
         // follow-up).
         const widget = await this.editorManager.getByUri(target);
         if (widget) {
-          const outcome = await reloadEditorWithEncoding(widget, target, toTheiaEncodingId(picked), this.editorManager, this.messages);
+          const outcome = await reloadEditorWithEncoding(
+            widget, target, toTheiaEncodingId(picked), this.editorManager, this.messages,
+            this.i18n.t('encoding.dirtyRefuse'),
+          );
           if (outcome === 'refused-dirty') {
+            // Roll back the override so a later Ctrl+S does not
+            // silently rewrite the file in the new encoding.
+            this.service.setEncodingFor(target, current);
             return;
           }
         }
-        this.messages.info(`Reopened ${target.displayName} as ${picked}.`);
+        this.service.invalidateEncodingCache(target);
+        this.messages.info(this.i18n.t('encoding.reopenedAs', {
+          name: target.displayName,
+          encoding: picked,
+        }));
       },
     });
 
-    registry.registerCommand(KairoEncodingCommands.SAVE_WITH_ENCODING, {
+    registry.registerCommand(this.withLabel(KairoEncodingCommands.SAVE_WITH_ENCODING), {
       execute: async (uri?: URI | string) => {
         const target = this.normalizeUri(uri) ?? this.currentEditorUri();
         if (!target) {
-          this.messages.warn('Open a file first.');
+          this.messages.warn(this.i18n.t('encoding.openFileFirst'));
           return;
         }
         const widget = await this.editorManager.getByUri(target);
         if (!widget) {
-          this.messages.warn(`No open editor for ${target.displayName}.`);
+          this.messages.warn(this.i18n.t('encoding.noOpenEditor', { name: target.displayName }));
           return;
         }
         const document = widget.editor.document;
@@ -137,10 +197,8 @@ export class KairoEncodingCommandsContribution implements CommandContribution {
         const validation = await this.service.validateEncoding(text, picked);
         if (!validation.valid) {
           this.messages.error(
-            `Cannot save as ${picked}: the document contains characters ` +
-              `${picked} cannot represent. ${validation.error || ''} ` +
-              `Save refused; choose an encoding that can represent the ` +
-              `buffer (utf-8 is always safe).`,
+            this.i18n.t('encoding.cannotEncode', { encoding: picked }) +
+              (validation.error ? ` ${validation.error}` : ''),
           );
           return;
         }
@@ -152,54 +210,53 @@ export class KairoEncodingCommandsContribution implements CommandContribution {
           // one (the one-way "Saved as utf-8" that stayed GBK).
           this.service.setEncodingFor(target, picked);
           await this.service.writeWithEncoding(target, text, picked);
+          this.service.invalidateEncodingCache(target);
           // Mark the document as not dirty without re-saving
           // (we just wrote the bytes ourselves).
           (document as { setDirty?: (dirty: boolean) => void }).setDirty?.(false);
-          this.messages.info(`Saved ${target.displayName} as ${picked}.`);
+          this.messages.info(this.i18n.t('encoding.savedAs', {
+            name: target.displayName,
+            encoding: picked,
+          }));
         } catch (err) {
-          this.messages.error(`Save with ${picked} failed: ${(err as Error).message}`);
+          this.messages.error(this.i18n.t('encoding.saveFailed', {
+            encoding: picked,
+            msg: (err as Error).message,
+          }));
         }
       },
     });
 
-    registry.registerCommand(KairoEncodingCommands.CONVERT_ENCODING, {
+    registry.registerCommand(this.withLabel(KairoEncodingCommands.CONVERT_ENCODING), {
       execute: async (uri?: URI | string) => {
         const target = this.normalizeUri(uri) ?? this.currentEditorUri();
         if (!target) {
-          this.messages.warn('Open a file first.');
+          this.messages.warn(this.i18n.t('encoding.openFileFirst'));
           return;
         }
         const widget = await this.editorManager.getByUri(target);
         if (!widget) {
-          this.messages.warn(`No open editor for ${target.displayName}.`);
+          this.messages.warn(this.i18n.t('encoding.noOpenEditor', { name: target.displayName }));
           return;
         }
         const document = widget.editor.document;
         const current = this.service.getEncodingFor(target);
         const picked = await this.pickEncoding(current);
         if (!picked) return;
-        if (picked === current) {
-          this.messages.info(`Already using ${current}, nothing to convert.`);
+        if (sameEncodingId(picked, current)) {
+          this.messages.info(this.i18n.t('encoding.alreadyUsingConvert', { encoding: current }));
           return;
         }
         // Show confirmation dialog with details
         const dialog = new ConfirmDialog({
-          title: 'Convert Encoding',
-          msg: [
-            `You are about to convert the encoding of this file:`,
-            ``,
-            `  File: ${target.displayName}`,
-            `  Current encoding: ${current}`,
-            `  Target encoding: ${picked}`,
-            ``,
-            `⚠️ Warning: This operation is NOT reversible.`,
-            `The file bytes on disk will be permanently changed.`,
-            `Make sure you have a backup or version control.`,
-            ``,
-            `Do you want to proceed?`,
-          ].join('\n'),
-          ok: 'Convert',
-          cancel: 'Cancel',
+          title: this.i18n.t('encoding.convertTitle'),
+          msg: this.i18n.t('encoding.convertMsg', {
+            name: target.displayName,
+            from: current,
+            to: picked,
+          }),
+          ok: this.i18n.t('encoding.convertOk'),
+          cancel: this.i18n.t('encoding.convertCancel'),
         });
         const confirmed = await dialog.open();
         if (!confirmed) return;
@@ -208,37 +265,50 @@ export class KairoEncodingCommandsContribution implements CommandContribution {
         const validation = await this.service.validateEncoding(text, picked);
         if (!validation.valid) {
           this.messages.error(
-            `Cannot convert to ${picked}: the document contains characters ` +
-              `${picked} cannot represent. ${validation.error || ''} ` +
-              `Conversion refused.`,
+            this.i18n.t('encoding.convertRefused', {
+              msg: this.i18n.t('encoding.cannotEncode', { encoding: picked }) +
+                (validation.error ? ` ${validation.error}` : ''),
+            }),
           );
           return;
         }
+        const wsId = this.workspaceContext.context?.workspaceId;
+        if (!wsId) {
+          this.messages.error(this.i18n.t('encoding.noWorkspace'));
+          return;
+        }
         try {
-          // Use the Go agent's recode endpoint to convert the file on disk
+          // BD-P1-6: real workspaceId, OS fs path (not `/g:/…` URI path),
+          // and Go-canonical from/to ids (not Theia utf8 / utf8bom).
           await this.service.recode({
-            workspaceId: '', // not needed for sandbox-less calls
-            file: target.path.toString(),
-            from: current,
-            to: picked,
+            workspaceId: wsId,
+            file: FileUri.fsPath(target),
+            from: toGoEncodingId(current),
+            to: toGoEncodingId(picked),
           });
           // Update the encoding metadata
           this.service.setEncodingFor(target, picked);
+          this.service.invalidateEncodingCache(target);
           // Reload the editor to show the recoded content
           const reloaded = await this.editorManager.getByUri(target);
           if (reloaded) {
             await reloadEditorWithEncoding(
               reloaded, target, toTheiaEncodingId(picked),
               this.editorManager, this.messages,
+              this.i18n.t('encoding.dirtyRefuse'),
             );
           }
-          this.messages.info(
-            `Converted ${target.displayName} from ${current} to ${picked}.`,
-          );
+          this.messages.info(this.i18n.t('encoding.converted', {
+            name: target.displayName,
+            from: current,
+            to: picked,
+          }));
         } catch (err) {
-          this.messages.error(
-            `Conversion from ${current} to ${picked} failed: ${(err as Error).message}`,
-          );
+          this.messages.error(this.i18n.t('encoding.convertFailed', {
+            from: current,
+            to: picked,
+            msg: (err as Error).message,
+          }));
         }
       },
     });
@@ -262,10 +332,10 @@ export class KairoEncodingCommandsContribution implements CommandContribution {
   protected async pickEncoding(current: string): Promise<string | undefined> {
     const picks = KAIRO_ENCODING_OPTIONS.map(e => ({
       label: e,
-      description: e === current ? 'current' : undefined,
+      description: sameEncodingId(e, current) ? this.i18n.t('encoding.currentLabel') : undefined,
     }));
     const sel = await this.quickPick.showQuickPick(picks, {
-      placeholder: `Pick an encoding (current: ${current})`,
+      placeholder: this.i18n.t('encoding.pickPlaceholder', { encoding: current }),
     });
     if (!sel) return undefined;
     return typeof sel === 'string' ? sel : (sel as QuickPickItem).label;
@@ -277,4 +347,6 @@ export function bindEncodingCommands(bind: interfaces.Bind): void {
   // Project default encoding -> folder-level override (WEB-206).
   bind(KairoProjectEncodingContribution).toSelf().inSingletonScope();
   bind(FrontendApplicationContribution).toService(KairoProjectEncodingContribution);
+  bind(KairoEncodingCacheContribution).toSelf().inSingletonScope();
+  bind(FrontendApplicationContribution).toService(KairoEncodingCacheContribution);
 }

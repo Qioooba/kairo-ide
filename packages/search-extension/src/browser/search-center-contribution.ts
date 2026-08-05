@@ -1,6 +1,7 @@
 import { injectable } from '@theia/core/shared/inversify';
 import { AbstractViewContribution } from '@theia/core/lib/browser/shell/view-contribution';
 import { KeybindingRegistry } from '@theia/core/lib/browser/keybinding';
+import { Widget } from '@theia/core/lib/browser/widgets';
 import { isOSX } from '@theia/core/lib/common/os';
 import type { FrontendApplication } from '@theia/core/lib/browser/frontend-application';
 import { SearchCenterWidget } from './search-center-widget';
@@ -38,19 +39,43 @@ export class SearchCenterContribution extends AbstractViewContribution<SearchCen
     event.preventDefault();
     event.stopPropagation();
     this.pendingMode = isReplaceShortcut ? 'replace' : 'search';
-    void this.openView({ activate: true }).then(widget => {
-      widget?.setMode?.(this.pendingMode);
-      widget?.captureEditorSelection?.();
-    });
+    void this.openSearchOverlay();
   };
 
   constructor() {
     super({
       widgetId: SearchCenterWidget.ID,
       widgetName: 'Find in Path',
+      // Keep AbstractViewContribution registration, but openView attaches
+      // as a body overlay (IDEA modal) — not an editor tab.
       defaultWidgetOptions: { area: 'main' },
       toggleCommandId: 'kairo.search.center.toggle',
     });
+  }
+
+  /**
+   * Open Search Center as a fixed overlay on document.body (like IDEA
+   * Find in Path). Avoids creating an empty "搜索中心" editor tab.
+   */
+  async openSearchOverlay(): Promise<SearchCenterWidget> {
+    const widget = await this.widgetManager.getOrCreateWidget(SearchCenterWidget.ID) as SearchCenterWidget;
+    if (widget.isAttached && widget.node.parentElement !== document.body) {
+      // Was previously docked in the shell — detach and re-host as overlay.
+      Widget.detach(widget);
+    }
+    if (!widget.isAttached) {
+      Widget.attach(widget, document.body);
+    }
+    widget.show();
+    widget.activate();
+    widget.setMode?.(this.pendingMode);
+    widget.captureEditorSelection?.();
+    widget.update();
+    return widget;
+  }
+
+  override async openView(_args?: Partial<{ activate: boolean; reveal: boolean }>): Promise<SearchCenterWidget> {
+    return this.openSearchOverlay();
   }
 
   onStart(_app: FrontendApplication): void {
@@ -99,10 +124,7 @@ export class SearchCenterContribution extends AbstractViewContribution<SearchCen
     }, {
       execute: async () => {
         this.pendingMode = 'replace';
-        const widget = await this.openView({ activate: true });
-        widget?.setMode?.('replace');
-        widget?.captureEditorSelection?.();
-        return widget;
+        return this.openSearchOverlay();
       },
     });
   }

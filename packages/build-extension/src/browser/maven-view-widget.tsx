@@ -13,6 +13,7 @@ import * as React from 'react';
 import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import { KairoI18nService } from '@kairo/i18n';
+import { RuntimeConnectionService, WorkspaceContextService } from '@kairo/runtime-extension';
 import './kairo-custom-build-runner.css';
 
 /** A Maven lifecycle goal. */
@@ -135,7 +136,11 @@ interface MavenViewState {
   showConflictWarning: boolean;
 }
 
-const MavenView: React.FC<{ i18n: KairoI18nService }> = ({ i18n }) => {
+const MavenView: React.FC<{
+  i18n: KairoI18nService;
+  runtime: RuntimeConnectionService;
+  workspaceContext: WorkspaceContextService;
+}> = ({ i18n, runtime, workspaceContext }) => {
   const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
   const [, forceUpdate] = React.useReducer(x => x + 1, 0);
   const [state, setState] = React.useState<MavenViewState>({
@@ -158,30 +163,37 @@ const MavenView: React.FC<{ i18n: KairoI18nService }> = ({ i18n }) => {
     return () => disposable.dispose();
   }, [i18n]);
 
-  /** Simulate detecting a Maven project by fetching pom.xml metadata. */
+  const resolveRootPath = React.useCallback((): string | undefined => {
+    return workspaceContext.context?.workspaceRoot;
+  }, [workspaceContext]);
+
+  /** Detect a Maven project via the runtime agent (envelope + secret + workspace root). */
   React.useEffect(() => {
     const detectProject = async () => {
       try {
-        const response = await fetch('/api/v1/maven/detect', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ rootPath: '.' }),
-        });
-        if (response.ok) {
-          const data = await response.json();
-          if (data.found) {
-            const detectedConflicts = detectConflicts(data.dependencies || []);
-            setState(prev => ({
-              ...prev,
-              project: data.project || null,
-              dependencies: data.dependencies || [],
-              tree: data.tree || [],
-              conflicts: detectedConflicts,
-              loading: false,
-              showConflictWarning: detectedConflicts.length > 0,
-            }));
-            return;
-          }
+        const rootPath = resolveRootPath();
+        if (!rootPath) {
+          setState(prev => ({ ...prev, loading: false }));
+          return;
+        }
+        const data = await runtime.request('POST /api/v1/maven/detect', { rootPath }) as {
+          found?: boolean;
+          project?: MavenProjectInfo;
+          dependencies?: MavenDependency[];
+          tree?: MavenDependencyTreeNode[];
+        };
+        if (data?.found) {
+          const detectedConflicts = detectConflicts(data.dependencies || []);
+          setState(prev => ({
+            ...prev,
+            project: data.project || null,
+            dependencies: data.dependencies || [],
+            tree: data.tree || [],
+            conflicts: detectedConflicts,
+            loading: false,
+            showConflictWarning: detectedConflicts.length > 0,
+          }));
+          return;
         }
       } catch {
         // Agent not available
@@ -189,7 +201,7 @@ const MavenView: React.FC<{ i18n: KairoI18nService }> = ({ i18n }) => {
       setState(prev => ({ ...prev, loading: false }));
     };
     detectProject();
-  }, []);
+  }, [runtime, resolveRootPath]);
 
   /** Run a Maven goal. */
   const runGoal = async (goalId: string) => {
@@ -202,12 +214,20 @@ const MavenView: React.FC<{ i18n: KairoI18nService }> = ({ i18n }) => {
     }));
 
     try {
-      const response = await fetch('/api/v1/maven/run', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rootPath: '.', task: goalId, offline: false }),
-      });
-      const data: MavenBuildResult = await response.json();
+      const rootPath = resolveRootPath();
+      if (!rootPath) {
+        setState(prev => ({
+          ...prev,
+          running: false,
+          currentTask: '',
+          error: 'No workspace root',
+        }));
+        return;
+      }
+      const data = await runtime.request(
+        'POST /api/v1/maven/run',
+        { rootPath, task: goalId, offline: false },
+      ) as MavenBuildResult;
       setState(prev => ({
         ...prev,
         running: false,
@@ -434,6 +454,8 @@ export class MavenViewWidget extends ReactWidget {
   static readonly ID = 'kairo-maven-view';
 
   @inject(KairoI18nService) protected readonly i18n!: KairoI18nService;
+  @inject(RuntimeConnectionService) protected readonly runtime!: RuntimeConnectionService;
+  @inject(WorkspaceContextService) protected readonly workspaceContext!: WorkspaceContextService;
 
   constructor() {
     super();
@@ -457,6 +479,6 @@ export class MavenViewWidget extends ReactWidget {
   }
 
   protected render(): React.ReactNode {
-    return <MavenView i18n={this.i18n} />;
+    return <MavenView i18n={this.i18n} runtime={this.runtime} workspaceContext={this.workspaceContext} />;
   }
 }

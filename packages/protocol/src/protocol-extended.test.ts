@@ -11,7 +11,6 @@ import {
   PROTOCOL_VERSION_PATH,
   ok,
   err,
-  mapBuildState,
   type RequestEnvelope,
   type ResponseEnvelope,
   type ErrorEnvelope,
@@ -106,29 +105,6 @@ test('err() with all 20 error codes', () => {
     const e = err('req-1', code, `Error: ${code}`);
     assert.strictEqual(e.error.code, code);
     assert.strictEqual(e.ok, false);
-  }
-});
-
-// ---- mapBuildState ---------------------------------------------------------
-
-test('mapBuildState returns correct icons', () => {
-  assert.strictEqual(mapBuildState('running').icon, 'circle-filled');
-  assert.strictEqual(mapBuildState('failed').icon, 'error');
-  assert.strictEqual(mapBuildState('stopped').icon, 'circle-outline');
-});
-
-test('mapBuildState returns correct colors', () => {
-  assert.strictEqual(mapBuildState('running').color, 'var(--theia-successForeground)');
-  assert.strictEqual(mapBuildState('failed').color, 'var(--theia-errorForeground)');
-  assert.strictEqual(mapBuildState('stopped').color, 'var(--theia-disabledForeground)');
-});
-
-test('mapBuildState: default for unknown states', () => {
-  for (const state of ['queued', 'success', 'cancelled', 'paused', 'unknown-state']) {
-    const d = mapBuildState(state);
-    assert.strictEqual(d.label, state);
-    assert.strictEqual(d.icon, 'circle-outline');
-    assert.strictEqual(d.color, 'var(--theia-foreground)');
   }
 });
 

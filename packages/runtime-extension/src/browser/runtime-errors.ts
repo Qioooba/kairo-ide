@@ -60,6 +60,9 @@ export class KairoError extends Error {
    * try again without changing the request payload.
    */
   isTransient(): boolean {
+    // 501 / unsupported are permanent capability gaps — never retry.
+    if (this.code === 'unsupported') return false;
+    if (this.httpStatus === 501) return false;
     if (this.retryable) return true;
     if (this.code === 'timeout') return true;
     if (this.code === 'io_error') return true;
@@ -92,10 +95,10 @@ function httpStatusToCode(status: number): KairoErrorCode {
   if (status === 401) return 'unauthenticated';
   if (status === 403) return 'forbidden';
   if (status === 404) return 'not_found';
+  if (status === 408) return 'timeout';
   if (status === 409) return 'conflict';
   if (status === 429) return 'rate_limited';
   if (status >= 400 && status < 500) return 'invalid_request';
-  if (status === 408) return 'timeout';
   if (status >= 500) return 'internal';
   return FALLBACK_ERROR_CODE;
 }

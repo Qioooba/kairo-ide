@@ -12,6 +12,8 @@ import (
 
 // MultiVMDebugOrchestrator manages multiple debug sessions across
 // different JVM instances (e.g., multi-module Maven projects).
+// Bulk SuspendAll/ResumeAll were removed (GO-P2-6 / S5) — they were an
+// empty public surface with no production callers.
 type MultiVMDebugOrchestrator struct {
 	mu       sync.RWMutex
 	sessions map[string]*DebugSession // sessionID -> session
@@ -161,33 +163,6 @@ func (mo *MultiVMDebugOrchestrator) RemoveGlobalBreakpoint(id int32) error {
 	return nil
 }
 
-// SuspendAll suspends all running VMs.
-// Returns the first error encountered, or nil if all succeeded.
-func (mo *MultiVMDebugOrchestrator) SuspendAll() error {
-	mo.mu.RLock()
-	defer mo.mu.RUnlock()
-
-	for _, session := range mo.sessions {
-		if session.State == StateRunning {
-			session.State = StateSuspended
-		}
-	}
-	return nil
-}
-
-// ResumeAll resumes all suspended VMs.
-// Returns the first error encountered, or nil if all succeeded.
-func (mo *MultiVMDebugOrchestrator) ResumeAll() error {
-	mo.mu.RLock()
-	defer mo.mu.RUnlock()
-
-	for _, session := range mo.sessions {
-		if session.State == StateSuspended {
-			session.State = StateRunning
-		}
-	}
-	return nil
-}
 
 // TerminateAll terminates all sessions.
 func (mo *MultiVMDebugOrchestrator) TerminateAll() error {

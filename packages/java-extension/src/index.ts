@@ -5,7 +5,8 @@
 export * from './browser/index';
 export * from './common/java-common';
 export * from './common/lsp-protocol';
+export type { JdtLsState } from './common/jdt-ls-state';
 export { JdtLsBackendService, JdtLsFrontendClient, JdtLsBackendPath } from './common/java-ls-protocol';
 export type { JdtLsBackendService as IJdtLsBackendService, JdtLsFrontendClient as IJdtLsFrontendClient } from './common/java-ls-protocol';
 export { JdtLsManager, JdtLsService, encodeLspMessage, LSPMessageParser, bindJdtLsService } from './node/index';
-export type { JdtLsDistribution, JdtLsEvent, JdtLsState, JdtLsEventListener, JdtLsStartError, JdtLsServiceEvent } from './node/index';
+export type { JdtLsDistribution, JdtLsEvent, JdtLsEventListener, JdtLsStartError, JdtLsServiceEvent } from './node/index';

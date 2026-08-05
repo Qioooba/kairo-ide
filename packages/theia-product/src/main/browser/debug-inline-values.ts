@@ -14,6 +14,22 @@ function getMonacoControl(widget: EditorWidget): monaco.editor.ICodeEditor | nul
     return null;
 }
 
+/** Strip string/char literals so `==` / assignments inside strings are ignored. */
+function stripStringLiterals(line: string): string {
+    let out = '';
+    let inSingle = false;
+    let inDouble = false;
+    let escaped = false;
+    for (const ch of line) {
+        if (escaped) { escaped = false; out += ' '; continue; }
+        if (ch === '\\' && (inSingle || inDouble)) { escaped = true; out += ' '; continue; }
+        if (ch === "'" && !inDouble) { inSingle = !inSingle; out += ' '; continue; }
+        if (ch === '"' && !inSingle) { inDouble = !inDouble; out += ' '; continue; }
+        out += (inSingle || inDouble) ? ' ' : ch;
+    }
+    return out;
+}
+
 @injectable()
 export class KairoDebugInlineValuesService implements FrontendApplicationContribution {
     @inject(EditorManager)
@@ -78,7 +94,13 @@ export class KairoDebugInlineValuesService implements FrontendApplicationContrib
             }
         });
 
-        this.disposables.push(modelChangeDisposable, modelContentChangeDisposable);
+        const scrollDisposable = editor.onDidScrollChange(() => {
+            if (this.debugSession.isSuspended) {
+                this.scheduleRefresh(150);
+            }
+        });
+
+        this.disposables.push(modelChangeDisposable, modelContentChangeDisposable, scrollDisposable);
     }
 
     protected scheduleRefresh(delay: number): void {
@@ -105,6 +127,30 @@ export class KairoDebugInlineValuesService implements FrontendApplicationContrib
         }
     }
 
+    /** Lines to scan: visible viewport (±2) plus current stack frame line when known. */
+    protected collectScanLines(editor: monaco.editor.ICodeEditor, model: monaco.editor.ITextModel): number[] {
+        const lineCount = model.getLineCount();
+        const lines = new Set<number>();
+        const visible = editor.getVisibleRanges();
+        for (const range of visible) {
+            const start = Math.max(1, range.startLineNumber - 2);
+            const end = Math.min(lineCount, range.endLineNumber + 2);
+            for (let n = start; n <= end; n++) lines.add(n);
+        }
+        const frameLine = this.debugSession.currentSession?.currentFrame?.raw?.line;
+        if (typeof frameLine === 'number' && frameLine >= 1 && frameLine <= lineCount) {
+            for (let n = Math.max(1, frameLine - 2); n <= Math.min(lineCount, frameLine + 2); n++) {
+                lines.add(n);
+            }
+        }
+        // Fallback: if nothing visible yet, scan a small head window instead of full file
+        if (lines.size === 0) {
+            const end = Math.min(lineCount, 80);
+            for (let n = 1; n <= end; n++) lines.add(n);
+        }
+        return Array.from(lines).sort((a, b) => a - b);
+    }
+
     protected async refreshEditor(editor: monaco.editor.ICodeEditor, model: monaco.editor.ITextModel): Promise<void> {
         const scopes = await this.debugSession.fetchScopes();
         if (!scopes || scopes.length === 0) return;
@@ -123,11 +169,12 @@ export class KairoDebugInlineValuesService implements FrontendApplicationContrib
         }
 
         const values: InlineValueInfo[] = [];
-        const lineCount = model.getLineCount();
         const processed = new Set<string>();
+        const scanLines = this.collectScanLines(editor, model);
 
-        for (let lineNum = 1; lineNum <= lineCount; lineNum++) {
-            const lineContent = model.getLineContent(lineNum).trim();
+        for (const lineNum of scanLines) {
+            const raw = model.getLineContent(lineNum);
+            const lineContent = stripStringLiterals(raw).trim();
             if (!lineContent || lineContent.startsWith('//') || lineContent.startsWith('/*') || lineContent.startsWith('*')) continue;
 
             const declarations = this.extractDeclarations(lineContent);
@@ -173,12 +220,16 @@ export class KairoDebugInlineValuesService implements FrontendApplicationContrib
 
     protected extractAssignments(lineContent: string): { name: string }[] {
         const assignments: { name: string }[] = [];
-        const assignPattern = /(\w+)\s*=/g;
+        // Match `name =` but not `==`, `!=`, `<=`, `>=`, `===`
+        const assignPattern = /(\w+)\s*=(?!=)/g;
         let match: RegExpExecArray | null;
         while ((match = assignPattern.exec(lineContent)) !== null) {
-            if (match[1] && !['if', 'for', 'while', 'switch', 'return'].includes(match[1])) {
-                assignments.push({ name: match[1] });
-            }
+            const name = match[1];
+            if (!name || ['if', 'for', 'while', 'switch', 'return'].includes(name)) continue;
+            // Reject when the char immediately before the identifier is a comparison op
+            const before = lineContent.slice(Math.max(0, match.index - 1), match.index);
+            if (/[=!<>]/.test(before)) continue;
+            assignments.push({ name });
         }
         return assignments;
     }

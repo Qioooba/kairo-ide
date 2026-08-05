@@ -38,7 +38,7 @@ import type {
 } from '@kairo/protocol';
 import { RuntimeConnectionService, KairoError } from '@kairo/runtime-extension';
 import { JavaLanguageClient } from './java-language-client';
-import type { JdtLsState } from '../node/jdt-ls-manager';
+import type { JdtLsState } from '../common/jdt-ls-state';
 
 @injectable()
 export class KairoJavaService {

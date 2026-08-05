@@ -588,3 +588,87 @@ func TestCopyFile_Overwrite(t *testing.T) {
 		t.Errorf("content = %q, want new", string(data))
 	}
 }
+// TestLaunchOrchestrator_AbsoluteArtifactDeploy verifies beforeLaunchTasks=[deploy]
+// succeeds when ArtifactPath is already absolute (as produced by the run-config
+// handler). Previously ResolveWithin rejected absolute paths and deploy always failed.
+func TestLaunchOrchestrator_AbsoluteArtifactDeploy(t *testing.T) {
+	projectRoot := t.TempDir()
+	artifactDir := filepath.Join(projectRoot, "build", "classes")
+	if err := os.MkdirAll(artifactDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(artifactDir, "App.class"), []byte{0xca, 0xfe}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	config := api.LaunchOrchestratorConfig{
+		Configuration: domain.TomcatRunConfiguration{
+			ID:        "cfg-abs",
+			Name:      "Abs Artifact",
+			Type:      "tomcat6",
+			ProjectID: "project-1",
+			Mode:      "run",
+			Server: domain.RunConfigurationServer{
+				HTTPPort:    8080,
+				ContextPath: "/test",
+			},
+			Deploy: domain.RunConfigurationDeploy{
+				Mode: "exploded",
+			},
+			BeforeLaunchTasks: []string{"deploy"},
+		},
+		WorkspaceRoot: projectRoot,
+		ProjectRoot:   projectRoot,
+		ArtifactPath:  artifactDir,
+		JavaHome:      "/usr/lib/jvm/java-8",
+	}
+
+	deployer := &mockDeployer{
+		publishResult: &api.DeployResult{ID: "dep-1", State: "success"},
+	}
+	serverRunner := &mockServerRunner{
+		startResult: &api.ServerResponse{
+			ID:        "srv-1",
+			State:     "running",
+			StartedAt: time.Now(),
+		},
+	}
+	orch := NewLaunchOrchestrator(&mockBuildEngine{}, deployer, serverRunner, t.TempDir(), nil)
+
+	result, err := orch.Execute(context.Background(), config)
+	if err != nil {
+		t.Fatalf("Execute with absolute artifact: %v", err)
+	}
+	if result == nil || result.State != "running" {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+}
+
+func TestResolveArtifactWithinRoot(t *testing.T) {
+	root := t.TempDir()
+	inside := filepath.Join(root, "webapp")
+	if err := os.MkdirAll(inside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := resolveArtifactWithinRoot(root, inside)
+	if err != nil {
+		t.Fatalf("absolute inside: %v", err)
+	}
+	if got != filepath.Clean(inside) {
+		t.Errorf("got %q, want %q", got, filepath.Clean(inside))
+	}
+
+	got, err = resolveArtifactWithinRoot(root, "webapp")
+	if err != nil {
+		t.Fatalf("relative: %v", err)
+	}
+	if got != filepath.Clean(inside) {
+		t.Errorf("relative got %q, want %q", got, filepath.Clean(inside))
+	}
+
+	outside := filepath.Join(t.TempDir(), "other")
+	if _, err := resolveArtifactWithinRoot(root, outside); err == nil {
+		t.Fatal("expected error for path outside root")
+	}
+}

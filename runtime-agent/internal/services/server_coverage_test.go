@@ -3,6 +3,7 @@ package services
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -29,9 +30,6 @@ func TestRealServerRunner_Start_NoTomcat(t *testing.T) {
 
 func TestRealServerRunner_Start_Validation(t *testing.T) {
 	tomcatHome := filepath.Join(t.TempDir(), "tomcat6")
-	// Pin JAVA_HOME so the test does not depend on (or get polluted by)
-	// the ambient environment when other tests in the package mutate it.
-	t.Setenv("JAVA_HOME", filepath.Join(t.TempDir(), "jdk"))
 	r := newRealServerRunner(t.TempDir(), t.TempDir(), tomcatHome, log.New("test"), 0, 0)
 
 	_, err := r.Start(api.StartServerRequest{})
@@ -42,6 +40,43 @@ func TestRealServerRunner_Start_Validation(t *testing.T) {
 	_, err = r.Start(api.StartServerRequest{WebappDir: filepath.Join(t.TempDir(), "missing")})
 	if err == nil || !strings.Contains(err.Error(), "webappDir not found") {
 		t.Errorf("expected webappDir not found error, got: %v", err)
+	}
+}
+
+func TestRealServerRunner_Start_ResolvesBundledJDK(t *testing.T) {
+	t.Setenv("JAVA_HOME", "")
+	t.Setenv("KAIRO_JDK_HOME", "")
+	t.Setenv("KAIRO_JDT_LS_JRE", "")
+
+	bundledDir := t.TempDir()
+	javaHome := filepath.Join(bundledDir, "jdk17")
+	binDir := filepath.Join(javaHome, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	javaExe := "java"
+	if runtime.GOOS == "windows" {
+		javaExe = "java.exe"
+	}
+	javaPath := filepath.Join(binDir, javaExe)
+	javaContent := "#!/bin/sh\necho 'openjdk version \"17.0.9\" 2023-10-17' >&2\nexit 0\n"
+	if runtime.GOOS == "windows" {
+		javaContent = "@echo off\r\necho openjdk version \"17.0.9\" 2023-10-17 1>&2\r\nexit /b 0\r\n"
+	}
+	if err := os.WriteFile(javaPath, []byte(javaContent), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	webapp := t.TempDir()
+	tomcatHome := filepath.Join(t.TempDir(), "tomcat6")
+	r := newRealServerRunner(t.TempDir(), bundledDir, tomcatHome, log.New("test"), 0, 0)
+
+	_, err := r.Start(api.StartServerRequest{WebappDir: webapp})
+	if err == nil {
+		t.Fatal("expected downstream Tomcat error, not success")
+	}
+	if strings.Contains(err.Error(), "JAVA_HOME") || strings.Contains(err.Error(), "javaHome is required") {
+		t.Fatalf("should resolve bundled JDK before Tomcat start, got: %v", err)
 	}
 }
 

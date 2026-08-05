@@ -4,6 +4,10 @@
 const { spawn } = require('node:child_process');
 
 const WINDOWS_TASKKILL_WATCHDOG_MS = 5_000;
+/** Hard ceiling so a mis-set env/arg cannot hang CI forever. */
+const MAX_TIMEOUT_SECONDS = 3_600;
+/** Default when CLI seconds omitted and KAIRO_TIMEOUT_MS unset (cold builds). */
+const DEFAULT_TIMEOUT_SECONDS = 900;
 
 function armWindowsTaskkillWatchdog(taskkill, child, exit, delayMs = WINDOWS_TASKKILL_WATCHDOG_MS) {
   let settled = false;
@@ -30,17 +34,58 @@ function armWindowsTaskkillWatchdog(taskkill, child, exit, delayMs = WINDOWS_TAS
 
 function usage(message) {
   if (message) console.error(`[timeout] ERROR: ${message}`);
-  console.error('usage: run-with-timeout.cjs <seconds:1..300> <command> [args...]');
+  console.error(
+    `usage: run-with-timeout.cjs [seconds:1..${MAX_TIMEOUT_SECONDS}] <command> [args...]\n` +
+    `       or set KAIRO_TIMEOUT_MS (ms, max ${MAX_TIMEOUT_SECONDS * 1000}) and omit seconds`
+  );
   process.exit(2);
 }
 
-function main(argv = process.argv, platform = process.platform) {
-const seconds = Number(argv[2]);
-const command = argv[3];
-const args = argv.slice(4);
-if (!Number.isInteger(seconds) || seconds < 1 || seconds > 300 || !command) {
-  usage('timeout must be an integer from 1 to 300 seconds and command is required');
+/**
+ * Resolve timeout seconds from CLI argv and/or KAIRO_TIMEOUT_MS.
+ * Returns { seconds, command, args } or null if argv cannot be parsed.
+ */
+function resolveTimeoutArgs(argv = process.argv, env = process.env) {
+  const raw = argv.slice(2);
+  if (raw.length === 0) return null;
+
+  let seconds;
+  let command;
+  let args;
+
+  const firstAsNumber = Number(raw[0]);
+  if (Number.isInteger(firstAsNumber) && String(firstAsNumber) === raw[0]) {
+    seconds = firstAsNumber;
+    command = raw[1];
+    args = raw.slice(2);
+  } else if (env.KAIRO_TIMEOUT_MS != null && env.KAIRO_TIMEOUT_MS !== '') {
+    const ms = Number(env.KAIRO_TIMEOUT_MS);
+    if (!Number.isFinite(ms) || ms < 1000) return { error: 'KAIRO_TIMEOUT_MS must be >= 1000' };
+    seconds = Math.ceil(ms / 1000);
+    command = raw[0];
+    args = raw.slice(1);
+  } else {
+    seconds = DEFAULT_TIMEOUT_SECONDS;
+    command = raw[0];
+    args = raw.slice(1);
+  }
+
+  // CLI integer seconds win when present; KAIRO_TIMEOUT_MS is fallback when seconds are omitted.
+
+  if (!Number.isInteger(seconds) || seconds < 1 || seconds > MAX_TIMEOUT_SECONDS || !command) {
+    return {
+      error: `timeout must be an integer from 1 to ${MAX_TIMEOUT_SECONDS} seconds and command is required`
+    };
+  }
+  return { seconds, command, args };
 }
+
+function main(argv = process.argv, platform = process.platform, env = process.env) {
+const resolved = resolveTimeoutArgs(argv, env);
+if (!resolved || resolved.error) {
+  usage(resolved && resolved.error);
+}
+const { seconds, command, args } = resolved;
 
 const isWindows = platform === 'win32';
 // On POSIX, a detached child becomes leader of a new process group. Killing
@@ -95,4 +140,10 @@ child.on('exit', (code, signal) => {
 
 if (require.main === module) main();
 
-module.exports = { WINDOWS_TASKKILL_WATCHDOG_MS, armWindowsTaskkillWatchdog };
+module.exports = {
+  WINDOWS_TASKKILL_WATCHDOG_MS,
+  MAX_TIMEOUT_SECONDS,
+  DEFAULT_TIMEOUT_SECONDS,
+  armWindowsTaskkillWatchdog,
+  resolveTimeoutArgs
+};

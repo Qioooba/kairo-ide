@@ -27,6 +27,12 @@ export interface Tld {
   tags: TldTag[];
 }
 
+/** Accepts JSP TLD boolean literals: true/false and yes/no (case-insensitive). */
+export function parseTldBoolean(raw: string | null | undefined): boolean {
+  const v = raw?.trim().toLowerCase();
+  return v === 'true' || v === 'yes';
+}
+
 @injectable()
 export class TldParser {
   parse(xml: string): Tld | undefined {
@@ -67,12 +73,11 @@ export class TldParser {
       for (const a of allByTag(t, 'attribute')) {
         attrs.push({
           name: byTag(a, 'name')?.textContent ?? '',
-          required: byTag(a, 'required')?.textContent?.trim() === 'true',
+          // JSP TLD also allows "yes"/"no" (JV-P2-6).
+          required: parseTldBoolean(byTag(a, 'required')?.textContent),
           // JSP 2.3 §JSP.8.5.2: the default for <rtexprvalue> is
-          // false. The previous `!== 'false'` defaulted to true
-          // when the element was absent (the common case in
-          // older TLDs) and also accepted "yes"/"1"/typos as true.
-          rtexprvalue: byTag(a, 'rtexprvalue')?.textContent?.trim() === 'true',
+          // false when the element is absent.
+          rtexprvalue: parseTldBoolean(byTag(a, 'rtexprvalue')?.textContent),
           type: byTag(a, 'type')?.textContent ?? undefined,
         });
       }

@@ -15,12 +15,27 @@ import { injectable } from '@theia/core/shared/inversify';
 import { KeybindingContribution, KeybindingRegistry } from '@theia/core/lib/browser/keybinding';
 import { CommandContribution, CommandRegistry } from '@theia/core/lib/common/command';
 import { isOSX } from '@theia/core/lib/common/os';
+import { isKairoBrowser } from './kairo-platform';
 
 interface IDEAKeybinding {
   command: string;
   keybinding: string;
   when?: string;
 }
+
+/**
+ * Chrome (and Edge) reserve several Ctrl chords so IDEA bindings never
+ * reach the page. When running in a browser tab, remap those to Alt-
+ * based alternatives. Electron keeps the true IDEA chords.
+ *
+ * Reserved by Chrome (cannot preventDefault): Ctrl+N/T/W, Ctrl+Shift+N/T, Ctrl+Tab.
+ * Note: ctrl+w / ctrl+shift+w are handled explicitly for smartSelect below
+ * (TP-P3-9) so they are not listed here — avoids dual remap + binding overlap.
+ */
+const BROWSER_CHROME_REMAPS: Record<string, string> = {
+  'ctrl+n': 'alt+shift+n',            // Find Class (Chrome: new window)
+  'ctrl+shift+n': 'alt+shift+f',      // Find File (Chrome: new incognito)
+};
 
 const IDEA_WINDOWS_KEYBINDINGS: IDEAKeybinding[] = [
   { command: 'undo', keybinding: 'ctrl+z' },
@@ -35,6 +50,7 @@ const IDEA_WINDOWS_KEYBINDINGS: IDEAKeybinding[] = [
   { command: 'editor.action.rename', keybinding: 'shift+f6', when: 'editorTextFocus' },
   { command: 'editor.action.deleteLines', keybinding: 'ctrl+y', when: 'editorTextFocus' },
   { command: 'editor.action.copyLinesDownAction', keybinding: 'ctrl+d', when: 'editorTextFocus' },
+  // Browser: Chrome steals ctrl+w; use alt+shift+w / ctrl+alt+shift+w (TP-P3-9)
   { command: 'editor.action.smartSelect.expand', keybinding: 'ctrl+w', when: 'editorTextFocus' },
   { command: 'editor.action.smartSelect.shrink', keybinding: 'ctrl+shift+w', when: 'editorTextFocus' },
   { command: 'editor.action.insertLineAfter', keybinding: 'shift+enter', when: 'editorTextFocus' },
@@ -53,7 +69,8 @@ const IDEA_WINDOWS_KEYBINDINGS: IDEAKeybinding[] = [
   { command: 'editor.unfoldAll', keybinding: 'ctrl+shift+=', when: 'editorFocus' },
   { command: 'editor.action.joinLines', keybinding: 'ctrl+shift+j', when: 'editorTextFocus' },
   { command: 'editor.action.addSelectionToNextFindMatch', keybinding: 'alt+j', when: 'editorTextFocus' },
-  { command: 'editor.action.selectHighlights', keybinding: 'ctrl+alt+shift+j', when: 'editorTextFocus' },
+  // Was ctrl+alt+shift+j — conflicted with liveTemplates.manage (TP-P2-3)
+  { command: 'editor.action.selectHighlights', keybinding: 'ctrl+alt+shift+l', when: 'editorTextFocus' },
   { command: 'editor.action.toggleColumnSelection', keybinding: 'alt+shift+insert', when: 'editorFocus' },
 
   { command: 'kairo.find.class', keybinding: 'ctrl+n' },
@@ -77,8 +94,8 @@ const IDEA_WINDOWS_KEYBINDINGS: IDEAKeybinding[] = [
   { command: 'editor.action.typeHierarchy', keybinding: 'ctrl+h', when: 'editorTextFocus' },
   { command: 'kairo.java.callHierarchy.showIncoming', keybinding: 'ctrl+alt+h', when: 'editorTextFocus && editorLangId == java' },
   { command: 'kairo.navigation.fileStructure', keybinding: 'ctrl+f12', when: 'editorTextFocus' },
-  { command: 'kairo.navigation.recentLocations', keybinding: 'ctrl+shift+e' },
-  { command: 'kairo.navigation.lastEditLocation', keybinding: 'ctrl+shift+backspace' },
+  // Map unimplemented IDEA aliases to existing recentFiles (TP-P2-2)
+  { command: 'kairo.navigation.recentFiles', keybinding: 'ctrl+shift+e' },
 
   { command: 'kairo.search.center.toggle', keybinding: 'ctrl+shift+f' },
   { command: 'kairo.search.replace', keybinding: 'ctrl+shift+r' },
@@ -98,7 +115,7 @@ const IDEA_WINDOWS_KEYBINDINGS: IDEAKeybinding[] = [
   { command: 'workbench.action.debug.stepInto', keybinding: 'f7', when: 'inDebugMode' },
   { command: 'workbench.action.debug.stepOut', keybinding: 'shift+f8', when: 'inDebugMode' },
   { command: 'workbench.action.debug.continue', keybinding: 'f9', when: 'inDebugMode' },
-  { command: 'kairo.debug.runToCursor', keybinding: 'alt+f9', when: 'inDebugMode' },
+  { command: 'editor.debug.action.runToCursor', keybinding: 'alt+f9', when: 'inDebugMode' },
 
   { command: 'workbench.action.files.saveAll', keybinding: 'ctrl+s' },
   { command: 'kairo.terminal.toggle', keybinding: 'alt+f12' },
@@ -138,7 +155,7 @@ const IDEA_WINDOWS_KEYBINDINGS: IDEAKeybinding[] = [
   { command: 'editor.action.extractConstant', keybinding: 'ctrl+alt+c', when: 'editorTextFocus' },
   { command: 'editor.action.extractField', keybinding: 'ctrl+alt+f', when: 'editorTextFocus' },
   { command: 'editor.action.changeSignature', keybinding: 'ctrl+f6', when: 'editorTextFocus' },
-  { command: 'kairo.copyPath', keybinding: 'ctrl+shift+c' },
+  { command: 'core.copy.path', keybinding: 'ctrl+shift+c' },
   { command: 'editor.action.clipboardPasteHistoryAction', keybinding: 'ctrl+shift+v', when: 'editorTextFocus' },
 
   { command: 'editor.action.selectAll', keybinding: 'ctrl+a' },
@@ -157,25 +174,31 @@ export class KairoIDEAWindowsKeymapContribution implements CommandContribution, 
       return;
     }
 
-    let registered = 0;
-    let skipped = 0;
+    const inBrowser = isKairoBrowser();
 
     for (const binding of IDEA_WINDOWS_KEYBINDINGS) {
       try {
+        let chord = binding.keybinding;
+        if (inBrowser) {
+          if (binding.command === 'editor.action.smartSelect.expand') {
+            chord = 'alt+shift+w';
+          } else if (binding.command === 'editor.action.smartSelect.shrink') {
+            chord = 'ctrl+alt+shift+w';
+          } else if (BROWSER_CHROME_REMAPS[chord]) {
+            chord = BROWSER_CHROME_REMAPS[chord];
+          }
+        }
         const keybindingConfig: { command: string; keybinding: string; when?: string } = {
           command: binding.command,
-          keybinding: binding.keybinding,
+          keybinding: chord,
         };
         if (binding.when) {
           keybindingConfig.when = binding.when;
         }
         registry.registerKeybinding(keybindingConfig);
-        registered++;
-      } catch (err) {
-        skipped++;
+      } catch {
+        // skip invalid bindings
       }
     }
-
-    console.log(`[kairo] IDEA keymap (Win): ${registered} registered, ${skipped} skipped`);
   }
 }

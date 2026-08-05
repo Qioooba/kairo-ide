@@ -85,25 +85,33 @@ test('hotReload.mode enum is the four documented values', () => {
   );
 });
 
-test('toolchainRef.fingerprint pattern requires sha256: or empty: prefix', () => {
-  // The fingerprint is the security anchor — if its format
-  // changes the agent's toolchain cache becomes invalid.
+test('toolchainRef.fingerprint pattern allows empty or sha256:/empty: prefix', () => {
+  // BD-P1-16: UI may send "" before the agent computes a fingerprint.
   const s = projectJsonSchema as {
     $defs: { toolchainRef: { properties: { fingerprint: { pattern: string } } } };
   };
-  assert.strictEqual(s.$defs.toolchainRef.properties.fingerprint.pattern, '^(sha256|empty):');
+  assert.strictEqual(s.$defs.toolchainRef.properties.fingerprint.pattern, '^(?:|(?:sha256|empty):.*)$');
 });
 
 test('compiler.sourceLevel + targetLevel enum is the seven documented JDK levels', () => {
   const s = projectJsonSchema as unknown as {
-    $defs: { toolchainCompiler: { allOf: Array<{ properties?: { sourceLevel?: { enum: readonly string[] }; targetLevel?: { enum: readonly string[] } } }> } };
+    $defs: {
+      toolchainCompiler: {
+        unevaluatedProperties?: boolean;
+        properties: {
+          sourceLevel: { enum: readonly string[] };
+          targetLevel: { enum: readonly string[] };
+        };
+      };
+    };
   };
-  // toolchainCompiler is { allOf: [{$ref: toolchainRef}, {properties: {sourceLevel, targetLevel}}] }
-  const compilerProps = s.$defs.toolchainCompiler.allOf[1].properties!;
+  // BD-P1-16: flat object with unevaluatedProperties (not allOf).
+  assert.strictEqual(s.$defs.toolchainCompiler.unevaluatedProperties, false);
+  const compilerProps = s.$defs.toolchainCompiler.properties;
   for (const level of ['1.5', '1.6', '1.7', '1.8', '9', '11', '17']) {
-    assert.ok(compilerProps.sourceLevel!.enum.includes(level),
+    assert.ok(compilerProps.sourceLevel.enum.includes(level),
       `sourceLevel enum missing "${level}"`);
-    assert.ok(compilerProps.targetLevel!.enum.includes(level),
+    assert.ok(compilerProps.targetLevel.enum.includes(level),
       `targetLevel enum missing "${level}"`);
   }
 });

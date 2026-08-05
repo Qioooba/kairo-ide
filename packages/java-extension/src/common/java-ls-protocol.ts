@@ -10,7 +10,7 @@
 // bound to the right classes; this file just defines the
 // shapes.
 
-import type { JdtLsState } from '../node/jdt-ls-manager';
+import type { JdtLsState } from './jdt-ls-state';
 import type {
   LSPPublishDiagnosticsParams,
   LSPCompletionList,

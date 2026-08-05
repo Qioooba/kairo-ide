@@ -96,11 +96,17 @@ test('launch sends only id path and expected mode; debug attach failure stops To
   const service = createService(() => ({ id: 'server-1', projectId: 'project-1', state: 'running', ports: { http: 18080, debug: 8000 } }));
   service.state = { document: { version: 1, configurations: [configuration], selectedConfigurationId: configuration.id }, loading: false, submitting: false, validationIssues: [] };
   service.activeProject = { requireProject: async () => ({ workspaceId: 'ws-1', projectId: 'project-1', name: 'Legacy', root: '/workspace/project' }) };
+  service.commands = { executeCommand: async () => undefined };
   let attachTarget;
   service.javaDebug = { probeAvailability: async () => ({ state: 'available' }), attach: async target => { attachTarget = target; throw new Error('attach failed'); } };
   const stopped = [];
   const adopted = [];
-  service.servers = { adopt: server => { adopted.push(server.id); return server; }, stop: async id => { stopped.push(id); } };
+  const forgotten = [];
+  service.servers = {
+    adopt: server => { adopted.push(server.id); return server; },
+    stop: async id => { stopped.push(id); },
+    forget: id => { forgotten.push(id); },
+  };
   await assert.rejects(service.launch(configuration), /attach failed/);
   assert.deepEqual(service.calls[0].payload, { mode: 'debug' });
   assert.deepEqual(service.calls[0].init.pathParams, { workspaceId: 'ws-1', configurationId: 'debug-local' });
@@ -108,7 +114,8 @@ test('launch sends only id path and expected mode; debug attach failure stops To
   assert.equal(attachTarget.port, 8000);
   assert.equal(attachTarget.serverId, 'server-1');
   assert.deepEqual(stopped, ['server-1']);
-  assert.deepEqual(adopted, ['server-1']);
+  assert.deepEqual(adopted, []);
+  assert.deepEqual(forgotten, ['server-1']);
 });
 
 test('launch locks before async preflight so double click issues one endpoint request', async () => {
@@ -119,6 +126,7 @@ test('launch locks before async preflight so double click issues one endpoint re
   let release;
   const project = new Promise(resolve => { release = resolve; });
   service.activeProject = { requireProject: () => project };
+  service.commands = { executeCommand: async () => undefined };
   service.servers = { adopt: server => server };
   const first = service.launch(configuration);
   await assert.rejects(service.launch(configuration), /already in progress/);

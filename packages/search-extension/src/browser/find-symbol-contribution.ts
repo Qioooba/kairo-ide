@@ -3,6 +3,7 @@ import { AbstractViewContribution } from '@theia/core/lib/browser/shell/view-con
 import { KeybindingRegistry } from '@theia/core/lib/browser/keybinding';
 import { isOSX } from '@theia/core/lib/common/os';
 import { FindSymbolWidget } from './find-symbol-widget';
+import { openBodyOverlay } from './open-body-overlay';
 
 @injectable()
 export class FindSymbolContribution extends AbstractViewContribution<FindSymbolWidget> {
@@ -13,6 +14,10 @@ export class FindSymbolContribution extends AbstractViewContribution<FindSymbolW
       defaultWidgetOptions: { area: 'main' },
       toggleCommandId: 'kairo.find.symbol',
     });
+  }
+
+  override async openView(_args?: Partial<{ activate: boolean; reveal: boolean }>): Promise<FindSymbolWidget> {
+    return openBodyOverlay(this.widgetManager, FindSymbolWidget.ID) as Promise<FindSymbolWidget>;
   }
 
   registerKeybindings(keybindings: KeybindingRegistry): void {

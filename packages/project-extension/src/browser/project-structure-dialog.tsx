@@ -607,12 +607,23 @@ export class ProjectStructureDialog extends ReactDialog<void> {
                     workspaceId: project.workspaceId,
                     rootPath: project.root,
                     projectId: project.projectId,
-                    autoDetectClasspath: true,
+                    // Persist Dependencies-tab edits: when the user has any
+                    // classpath entries (esp. manual), stop autodetection and
+                    // pass the explicit list (BD-P1-13).
+                    autoDetectClasspath: !this.state.classpath.some(e => e.source === 'manual'),
+                    libraries: this.state.classpath.map(e => e.path),
                 },
                 { timeoutMs: 30000 },
             );
 
             this.setState({ saving: false });
+            // Broadcast encoding/project change so encoding-contribution and
+            // other listeners apply immediately (BD-P2-7).
+            await this.activeProject.setProject({
+                ...project,
+                name: saved.name || this.state.projectName || project.name,
+                encoding: this.state.encoding,
+            });
             void this.messageService.info(this.t('widget.projectStructure.messages.saveSuccess', { name: saved.name }));
             return true;
         } catch (err) {
@@ -649,14 +660,24 @@ export class ProjectStructureDialog extends ReactDialog<void> {
     }
 
     protected async handleAddSourceDir(): Promise<void> {
-        const path = window.prompt(this.t('widget.projectStructure.dialogs.enterSourceDir'));
-        if (!path) return;
-        const trimmed = path.trim();
-        if (!trimmed) return;
-        this.setState({
-            sourceDirs: [...this.state.sourceDirs, { path: trimmed, isTest: false }],
-            selectedSourceIdx: this.state.sourceDirs.length,
-        });
+        // BD-P2-6: Electron has no window.prompt — use folder picker.
+        try {
+            const dialog = await this.fileDialogService.showOpenDialog({
+                title: this.t('widget.projectStructure.dialogs.enterSourceDir'),
+                canSelectFiles: false,
+                canSelectFolders: true,
+                canSelectMany: false,
+            });
+            if (!dialog) return;
+            const trimmed = String(dialog.path).trim();
+            if (!trimmed) return;
+            this.setState({
+                sourceDirs: [...this.state.sourceDirs, { path: trimmed, isTest: false }],
+                selectedSourceIdx: this.state.sourceDirs.length,
+            });
+        } catch (err) {
+            this.setState({ error: err instanceof Error ? err.message : String(err) });
+        }
     }
 
     protected handleRemoveSourceDir(): void {

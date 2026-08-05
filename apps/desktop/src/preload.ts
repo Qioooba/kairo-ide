@@ -44,9 +44,11 @@ contextBridge.exposeInMainWorld('__kairo', {
 // Existing code reads these window globals. Keep them until all
 // consumers migrate to window.__kairo.
 
+// Non-secret config only. The session secret must NOT be placed on
+// window.kairoConfig — any page script could read the property.
+// Callers that need auth use window.__kairo.getSecret() instead.
 contextBridge.exposeInMainWorld('kairoConfig', {
     agentUrl,
-    agentSecret: secret,
     platform: process.platform,
     appVersion,
     noKairoFrontend: process.env.KAIRO_NO_KAIRO_FRONTEND === '1',
@@ -68,6 +70,21 @@ contextBridge.exposeInMainWorld('kairoIPC', {
     toggleDevTools: () => {
         ipcRenderer.send('toggle-devtools');
     },
+    /** Open the native host JDK picker and persist the choice. */
+    switchHostJDK: (): Promise<'continue' | 'quit'> =>
+        ipcRenderer.invoke('kairo:switch-host-jdk'),
+    /** Open the native Tomcat 6 picker and persist the choice. */
+    switchTomcat: (): Promise<'continue' | 'quit'> =>
+        ipcRenderer.invoke('kairo:switch-tomcat'),
+    /** Whether Electron safeStorage encryption is available. */
+    isSafeStorageAvailable: (): Promise<boolean> =>
+        ipcRenderer.invoke('kairo:safe-storage-available'),
+    /** Encrypt a string via OS keychain-backed safeStorage (base64 ciphertext). */
+    encryptString: (plaintext: string): Promise<string> =>
+        ipcRenderer.invoke('kairo:safe-storage-encrypt', plaintext),
+    /** Decrypt a safeStorage ciphertext (base64). */
+    decryptString: (ciphertextB64: string): Promise<string> =>
+        ipcRenderer.invoke('kairo:safe-storage-decrypt', ciphertextB64),
 });
 
 // ─── Error logging ────────────────────────────────────────────

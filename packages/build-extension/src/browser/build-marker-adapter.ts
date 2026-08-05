@@ -1,5 +1,6 @@
 import * as monaco from '@theia/monaco-editor-core';
 import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
+import { FrontendApplicationContribution } from '@theia/core/lib/browser';
 import { BuildStore, type BuildDiagnostic } from './build-store';
 
 /**
@@ -20,14 +21,17 @@ export function toMarkerSeverity(severity: BuildDiagnostic['severity']): monaco.
  * The line and column from the build diagnostic are expected to be 1-based.
  */
 export function diagnosticToMarker(d: BuildDiagnostic): monaco.editor.IMarkerData {
+    const endLine = d.endLine ?? d.line;
+    const endColumn = d.endColumn ?? (d.column >= 1 ? d.column + 1 : 2);
     return {
         severity: toMarkerSeverity(d.severity),
         message: d.message,
         source: 'Kairo Build',
+        code: d.code,
         startLineNumber: d.line >= 1 ? d.line : 1,
         startColumn: d.column >= 1 ? d.column : 1,
-        endLineNumber: d.line >= 1 ? d.line : 1,
-        endColumn: d.column >= 1 ? d.column + 1 : 2,
+        endLineNumber: endLine >= 1 ? endLine : 1,
+        endColumn: endColumn >= 1 ? endColumn : 2,
     };
 }
 
@@ -55,9 +59,12 @@ function findModelByFilePath(filePath: string): monaco.editor.ITextModel | undef
  *
  * It subscribes to the BuildStore and automatically sets markers whenever
  * a build completes with diagnostics.
+ *
+ * Bound as FrontendApplicationContribution so DI instantiates it at startup
+ * (BD-P1-18) — binding alone does not construct the singleton.
  */
 @injectable()
-export class BuildMarkerAdapter {
+export class BuildMarkerAdapter implements FrontendApplicationContribution {
     @inject(BuildStore)
     private readonly buildStore!: BuildStore;
 
@@ -73,6 +80,10 @@ export class BuildMarkerAdapter {
                 this.clearAll();
             }
         });
+    }
+
+    onStart(): void {
+        // Subscription happens in @postConstruct; nothing else required.
     }
 
     /**

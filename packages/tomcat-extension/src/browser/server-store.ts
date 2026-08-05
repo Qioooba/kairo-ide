@@ -117,6 +117,8 @@ export class ServerStore {
     private eventsUnsubscribe?: () => void;
     private statusUnsubscribe?: () => void;
     private contextUnsubscribe?: { dispose(): void };
+    /** BD-P2-1: only the latest bootstrap may apply snapshot / subscribe. */
+    private bootstrapGeneration = 0;
 
     @postConstruct()
     protected init(): void {
@@ -150,8 +152,6 @@ export class ServerStore {
         // appears.
         this.contextUnsubscribe = this.workspaceContext.onDidChangeContext(ctx => {
             if (ctx) {
-                this.eventsUnsubscribe?.();
-                this.eventsUnsubscribe = undefined;
                 void this.bootstrap();
             }
         });
@@ -162,35 +162,24 @@ export class ServerStore {
     }
 
     protected async bootstrap(): Promise<void> {
+        // BD-P2-1: bump generation so older in-flight bootstraps bail out
+        // instead of overwriting the newer subscription (leak + duplicate events).
+        const generation = ++this.bootstrapGeneration;
+        const previousUnsub = this.eventsUnsubscribe;
+        this.eventsUnsubscribe = undefined;
+        previousUnsub?.();
+
         // Load initial snapshot
         const ctx = this.workspaceContext.context;
         if (ctx) {
-            try {
-                const servers = await this.runtime.request('GET /api/v1/servers', undefined) as ProtocolServerInstance[];
-                if (Array.isArray(servers)) {
-                    this.servers = servers.map(s => ({
-                        id: s.id,
-                        workspaceId: ctx.workspaceId,
-                        projectId: s.projectId,
-                        state: s.state,
-                        httpPort: s.ports.http || 0,
-                        debugPort: s.ports.debug || 0,
-                        pid: s.pid || 0,
-                        startTime: s.startedAt || '',
-                        url: s.ports.http ? `http://127.0.0.1:${s.ports.http}` : undefined,
-                    }));
-                    this.onDidChangeEmitter.fire(this.getServers());
-                    this.setConnectionState(this.servers.length === 0 ? 'empty' : 'connected');
-                }
-            } catch {
-                // Agent not reachable yet — store stays empty.
-                this.setConnectionState('disconnected');
-            }
+            await this.refetchServersSnapshot(generation);
         }
+
+        if (generation !== this.bootstrapGeneration) return;
 
         // Subscribe to events
         if (ctx) {
-            this.eventsUnsubscribe = this.runtime.subscribeEvents(ctx.workspaceId, (event: WsEvent) => {
+            const unsub = this.runtime.subscribeEvents(ctx.workspaceId, (event: WsEvent) => {
                 if (event.type === 'server.state') {
                     const existing = this.servers.find(s => s.id === event.serverId);
                     const nextState = event.state as ServerInstance['state'];
@@ -199,6 +188,10 @@ export class ServerStore {
                             `[ServerStore] rejected out-of-order transition for ${event.serverId}: ` +
                             `${existing.state} -> ${nextState} (snapshot may be stale)`,
                         );
+                        // BD-P1-5: rejected transitions (e.g. external kill
+                        // running→stopped) leave the panel stuck unless we
+                        // reconcile against GET /servers.
+                        void this.refetchServersSnapshot();
                         return;
                     }
                     this.upsertServer({
@@ -221,6 +214,41 @@ export class ServerStore {
                     }
                 }
             });
+            if (generation !== this.bootstrapGeneration) {
+                unsub();
+                return;
+            }
+            this.eventsUnsubscribe = unsub;
+        }
+    }
+
+    /** Force-refresh the local snapshot from GET /servers (BD-P1-5).
+     * When called from bootstrap, pass the generation so a stale in-flight
+     * refetch cannot overwrite a newer bootstrap's snapshot (BD-P2-1). */
+    protected async refetchServersSnapshot(expectedGeneration?: number): Promise<void> {
+        const ctx = this.workspaceContext.context;
+        if (!ctx) return;
+        try {
+            const servers = await this.runtime.request('GET /api/v1/servers', undefined) as ProtocolServerInstance[];
+            if (expectedGeneration !== undefined && expectedGeneration !== this.bootstrapGeneration) return;
+            if (Array.isArray(servers)) {
+                this.servers = servers.map(s => ({
+                    id: s.id,
+                    workspaceId: ctx.workspaceId,
+                    projectId: s.projectId,
+                    state: s.state,
+                    httpPort: s.ports.http || 0,
+                    debugPort: s.ports.debug || 0,
+                    pid: s.pid || 0,
+                    startTime: s.startedAt || '',
+                    url: s.ports.http ? `http://127.0.0.1:${s.ports.http}` : undefined,
+                }));
+                this.onDidChangeEmitter.fire(this.getServers());
+                this.setConnectionState(this.servers.length === 0 ? 'empty' : 'connected');
+            }
+        } catch {
+            if (expectedGeneration !== undefined && expectedGeneration !== this.bootstrapGeneration) return;
+            this.setConnectionState('disconnected');
         }
     }
 
@@ -263,7 +291,9 @@ export class ServerStore {
     }
 
     dispose(): void {
+        this.bootstrapGeneration++;
         this.eventsUnsubscribe?.();
+        this.eventsUnsubscribe = undefined;
         this.statusUnsubscribe?.();
         this.contextUnsubscribe?.dispose();
         this.onDidChangeEmitter.dispose();

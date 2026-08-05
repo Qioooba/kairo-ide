@@ -6,6 +6,15 @@ import { GitService } from './git-service';
 
 const execFileAsync = promisify(execFile);
 
+function gitEnv(): NodeJS.ProcessEnv {
+  return {
+    ...(typeof process !== 'undefined' ? process.env : {}),
+    LANG: 'C',
+    LC_ALL: 'C',
+    LANGUAGE: 'C',
+  };
+}
+
 export type CherryPickStatus = 'idle' | 'in-progress' | 'conflict';
 
 export interface CherryPickState {
@@ -32,12 +41,29 @@ export class GitCherryPickService {
   }
 
   private async execGit(args: string[]): Promise<string> {
-    const { stdout } = await execFileAsync('git', args, { cwd: this.getCwd() });
+    const { stdout } = await execFileAsync('git', args, { cwd: this.getCwd(), env: gitEnv() });
     return stdout;
   }
 
   getState(): CherryPickState {
     return { ...this.state };
+  }
+
+  /** Locale-independent: conflict leaves CHERRY_PICK_HEAD (or unmerged index entries). */
+  private async isConflictState(): Promise<boolean> {
+    if (await this.isCherryPickInProgress()) {
+      return true;
+    }
+    try {
+      const { stdout } = await execFileAsync(
+        'git',
+        ['ls-files', '-u'],
+        { cwd: this.getCwd(), env: gitEnv() },
+      );
+      return stdout.trim().length > 0;
+    } catch {
+      return false;
+    }
   }
 
   async cherryPick(hashes: string[]): Promise<void> {
@@ -51,14 +77,13 @@ export class GitCherryPickService {
     this.onDidChangeStateEmitter.fire(this.state);
 
     try {
+      // Let git's sequencer own the full list — do not re-apply hashes after --continue.
       await this.execGit(['cherry-pick', ...hashes]);
       this.state = { status: 'idle', remainingHashes: [] };
       this.onDidChangeStateEmitter.fire(this.state);
       this.onDidChangeEmitter.fire();
     } catch (err: unknown) {
-      const stderr = (err as { stderr?: string }).stderr || '';
-      const msg = err instanceof Error ? err.message : String(err);
-      if (stderr.includes('CONFLICT') || msg.includes('conflict') || stderr.includes('conflict')) {
+      if (await this.isConflictState()) {
         this.state = { ...this.state, status: 'conflict' };
         this.onDidChangeStateEmitter.fire(this.state);
       } else {
@@ -74,39 +99,23 @@ export class GitCherryPickService {
   }
 
   async continue(): Promise<void> {
-    if (this.state.remainingHashes.length > 0) {
-      const nextHash = this.state.remainingHashes[0];
-      this.state = {
-        status: 'in-progress',
-        currentHash: nextHash,
-        currentMessage: '',
-        remainingHashes: this.state.remainingHashes.slice(1),
-      };
-      this.onDidChangeStateEmitter.fire(this.state);
-      try {
-        await this.execGit(['cherry-pick', '--continue']);
-        // After --continue, we need to cherry-pick the next one
-        await this.execGit(['cherry-pick', nextHash]);
-        this.state = { status: 'idle', remainingHashes: [] };
-        this.onDidChangeStateEmitter.fire(this.state);
-        this.onDidChangeEmitter.fire();
-      } catch (err: unknown) {
-        const stderr = (err as { stderr?: string }).stderr || '';
-        const msg = err instanceof Error ? err.message : String(err);
-        if (stderr.includes('CONFLICT') || msg.includes('conflict') || stderr.includes('conflict')) {
-          this.state = { ...this.state, status: 'conflict' };
-          this.onDidChangeStateEmitter.fire(this.state);
-        } else {
-          this.state = { status: 'idle', remainingHashes: [] };
-          this.onDidChangeStateEmitter.fire(this.state);
-          throw err;
-        }
-      }
-    } else {
+    // git cherry-pick --continue resumes the current commit and then any
+    // remaining commits in the sequencer. Do NOT manually cherry-pick the
+    // next hash (that would apply it twice).
+    try {
       await this.execGit(['cherry-pick', '--continue']);
       this.state = { status: 'idle', remainingHashes: [] };
       this.onDidChangeStateEmitter.fire(this.state);
       this.onDidChangeEmitter.fire();
+    } catch (err: unknown) {
+      if (await this.isConflictState()) {
+        this.state = { ...this.state, status: 'conflict' };
+        this.onDidChangeStateEmitter.fire(this.state);
+      } else {
+        this.state = { status: 'idle', remainingHashes: [] };
+        this.onDidChangeStateEmitter.fire(this.state);
+        throw err;
+      }
     }
   }
 
@@ -120,10 +129,11 @@ export class GitCherryPickService {
   async isCherryPickInProgress(): Promise<boolean> {
     try {
       const cwd = this.getCwd();
-      const { stdout } = await execFileAsync('git', ['rev-parse', '--git-dir'], { cwd });
+      const { stdout } = await execFileAsync('git', ['rev-parse', '--git-dir'], { cwd, env: gitEnv() });
       const gitDir = stdout.trim();
       const fs = await import('node:fs/promises');
-      const cherryPickHead = gitDir + '/CHERRY_PICK_HEAD';
+      const path = await import('node:path');
+      const cherryPickHead = path.join(gitDir, 'CHERRY_PICK_HEAD');
       await fs.access(cherryPickHead);
       return true;
     } catch {

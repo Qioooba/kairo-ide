@@ -83,8 +83,8 @@ export class JdtLsService implements JdtLsBackendService {
    *  `{ ok: true, dist }` or `{ ok: false, reason }`.
    *  `home` / `jreHome` (from the agent's launch descriptor) win over
    *  the KAIRO_JDT_LS_HOME / JAVA_HOME env fallbacks. */
-  inspect(home?: string, jreHome?: string): { ok: true; dist: JdtLsDistribution } | { ok: false; reason: string } {
-    const r = JdtLsManager.resolveDistribution({ home, jreHome });
+  async inspect(home?: string, jreHome?: string): Promise<{ ok: true; dist: JdtLsDistribution } | { ok: false; reason: string }> {
+    const r = await JdtLsManager.resolveDistribution({ home, jreHome });
     if ('kind' in r) {
       return { ok: false, reason: r.message };
     }
@@ -96,7 +96,7 @@ export class JdtLsService implements JdtLsBackendService {
       this.manager = new JdtLsManager(this.logger);
       this.subscription = this.manager.onEvent(e => this.handleManagerEvent(e));
     }
-    if (this.manager.state$() === 'ready' || this.manager.state$() === 'initializing') {
+    if (this.manager.state$() === 'ready' || this.manager.state$() === 'initializing' || this.manager.state$() === 'starting') {
       return;
     }
     await this.manager.start(opts);
@@ -284,7 +284,7 @@ export class JdtLsService implements JdtLsBackendService {
   // ---- JdtLsBackendService (JSON-RPC surface) -----------------
 
   async $start(opts: { rootUri: string; workspaceDataDir: string; sourceLevel?: string; home?: string; jreHome?: string }): Promise<{ ok: true } | { ok: false; reason: string }> {
-    const inspect = this.inspect(opts.home, opts.jreHome);
+    const inspect = await this.inspect(opts.home, opts.jreHome);
     if (!inspect.ok) {
       return { ok: false, reason: inspect.reason };
     }
@@ -305,7 +305,7 @@ export class JdtLsService implements JdtLsBackendService {
   }
 
   async $inspect(): Promise<{ ok: true; home: string; jre: string; launcherJar: string } | { ok: false; reason: string }> {
-    const r = this.inspect();
+    const r = await this.inspect();
     if (!r.ok) {
       return r;
     }

@@ -27,9 +27,9 @@ export const KAIRO_DEBUG_BREAKPOINTS_FACTORY_ID = 'kairo-debug-breakpoints';
 export const KAIRO_DEBUG_TOOLBAR_FACTORY_ID = 'kairo-debug-toolbar';
 export const KAIRO_DEBUG_CONSOLE_FACTORY_ID = 'kairo-debug-console';
 export const KAIRO_DEBUG_WATCH_FACTORY_ID = 'kairo-debug-watch';
-export const KAIRO_DEBUG_MODULE_SELECTOR_FACTORY_ID = 'kairo-debug-module-selector';
+// Empty-shell panels (TP-P2-5) — factory IDs retained only so old layouts don't crash lookups.
 export const KAIRO_DEBUG_CONDITION_EDITOR_FACTORY_ID = 'kairo-debug-condition-editor';
-export const KAIRO_DEBUG_HOTSWAP_STATUS_FACTORY_ID = 'kairo-debug-hotswap-status';
+export const KAIRO_JAVA_HOTSWAP_FACTORY_ID = 'kairo-hotswap-widget';
 export const KAIRO_DEBUG_DIAGNOSTICS_FACTORY_ID = 'kairo-debug-diagnostics';
 export const KAIRO_DEBUG_TOOL_WINDOW_FACTORY_ID = 'kairo-debug-tool-window';
 export const KAIRO_DEBUG_HOVER_PROVIDER_FACTORY_ID = 'kairo-debug-hover-provider';

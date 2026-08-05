@@ -9,13 +9,13 @@
  */
 
 import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
+import { Navigatable } from '@theia/core/lib/browser';
 import { TabBarDecorator } from '@theia/core/lib/browser/shell/tab-bar-decorator';
 import { WidgetDecoration } from '@theia/core/lib/browser/widget-decoration';
 import { Emitter, Event, Disposable } from '@theia/core/lib/common';
 import { Title, Widget } from '@theia/core/shared/@lumino/widgets';
 import { EditorManager } from '@theia/editor/lib/browser/editor-manager';
 import { KairoEncodingServiceImpl } from './encoding-service';
-import URI from '@theia/core/lib/common/uri';
 
 @injectable()
 export class KairoEncodingTabDecorator implements TabBarDecorator {
@@ -32,11 +32,10 @@ export class KairoEncodingTabDecorator implements TabBarDecorator {
 
   @postConstruct()
   protected init(): void {
-    // Refresh when the active editor changes
-    this.editorListener = this.editorManager.onCurrentEditorChanged(() => {
+    // Refresh when editors open/close or the active tab changes.
+    this.editorListener = this.editorManager.onCreated(() => {
       this.onDidChangeDecorationsEmitter.fire();
     });
-    // Refresh when the encoding changes for the current file
     this.encodingListener = this.encodingSvc.onDidChangeEncoding(() => {
       this.onDidChangeDecorationsEmitter.fire();
     });
@@ -49,13 +48,15 @@ export class KairoEncodingTabDecorator implements TabBarDecorator {
   }
 
   decorate(title: Title<Widget>): WidgetDecoration.Data[] {
-    const editor = this.editorManager.currentEditor;
-    if (!editor) return [];
-    // Only decorate the editor tab that matches the current editor
-    if (title.owner !== editor) return [];
-    const uri = editor.editor.document.uri;
-    if (!uri) return [];
-    const enc = this.encodingSvc.getEncodingFor(uri as unknown as URI);
+    const owner = title.owner;
+    if (!Navigatable.is(owner)) {
+      return [];
+    }
+    const uri = owner.getResourceUri();
+    if (!uri) {
+      return [];
+    }
+    const enc = this.encodingSvc.getEncodingFor(uri);
     // Don't show suffix for plain UTF-8 — it's the default and
     // would be visual noise on every file.
     if (enc === 'utf8' || enc === 'utf-8') return [];

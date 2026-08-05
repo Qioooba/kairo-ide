@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -613,13 +614,28 @@ func TestResolveRuntime_NoToolchainNoWebappDir(t *testing.T) {
 		RuntimeID:   "tomcat6",
 		WebappDir:   "", // no webapp dir
 	})
+	t.Setenv("JAVA_HOME", "")
+	t.Setenv("KAIRO_JDK_HOME", "")
+	t.Setenv("KAIRO_JDT_LS_JRE", "")
+	t.Setenv("KAIRO_BUNDLED_DIR", env.tmpDir)
+	bundledJDK := filepath.Join(env.tmpDir, "jdk17", "bin")
+	if err := os.MkdirAll(bundledJDK, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(bundledJDK, "java"),
+		[]byte("#!/bin/sh\necho 'openjdk version \"17.0.9\" 2023-10-17' >&2\nexit 0\n"),
+		0o755,
+	); err != nil {
+		t.Fatal(err)
+	}
 	resolver, _ := env.newResolver(t)
 	plan, err := resolver.ResolveRuntime(context.Background(), env.wsID(), domain.ProjectID(noTcID), nil)
 	if err != nil {
 		t.Fatalf("ResolveRuntime: %v", err)
 	}
-	if plan.JavaHome != "" {
-		t.Errorf("JavaHome should be empty, got %q", plan.JavaHome)
+	if plan.JavaHome == "" {
+		t.Error("JavaHome should be resolved from bundled JDK when no toolchain is configured")
 	}
 	if plan.WebappDir != "" {
 		t.Errorf("WebappDir should be empty, got %q", plan.WebappDir)

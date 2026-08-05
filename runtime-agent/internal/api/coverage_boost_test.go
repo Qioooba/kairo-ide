@@ -1475,8 +1475,8 @@ func TestHandleSQLExecute_NoSQLService(t *testing.T) {
 	w := httptest.NewRecorder()
 	s.handleSQLExecute(w, req)
 
-	if w.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", w.Code)
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404 for unknown connectionId, got %d", w.Code)
 	}
 }
 

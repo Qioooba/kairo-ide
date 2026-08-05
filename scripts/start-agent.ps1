@@ -49,23 +49,25 @@ Write-Host "============================================" -ForegroundColor Cyan
 Write-Host "  Binary:   $agentBinary"
 Write-Host "  Port:     $Port"
 Write-Host "  DataDir:  $DataDir"
-Write-Host "  Secret:   $($Secret.Substring(0,8))..."
+Write-Host "  Secret:   (set via KAIRO_LOCAL_SECRET env, not printed)"
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "Press Ctrl+C to stop the agent." -ForegroundColor Yellow
 Write-Host ""
 
-# Build arguments.
-$args = @(
+# Pass secret via env so it never appears in process listings.
+$env:KAIRO_LOCAL_SECRET = $Secret
+
+# Build arguments (no --secret).
+$agentArgs = @(
     "--bind", "127.0.0.1",
     "--port", $Port,
-    "--secret", $Secret,
     "--data-dir", $DataDir,
     "--log-level", "info"
 )
 if ($BundledDir) {
-    $args += "--bundled-dir", $BundledDir
+    $agentArgs += "--bundled-dir", $BundledDir
 }
 
 # Start agent in foreground.
-& $agentBinary @args
+& $agentBinary @agentArgs

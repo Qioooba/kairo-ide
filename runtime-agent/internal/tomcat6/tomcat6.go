@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"encoding/xml"
 	"errors"
 	"fmt"
@@ -508,6 +509,14 @@ func FindCatalinaHome(bundledDir string) (string, error) {
 		}
 		return "", fmt.Errorf("KAIRO_TOMCAT6_HOME is set but bootstrap.jar not found at %s", v)
 	}
+
+	// Electron-persisted choice (userData/host-tomcat.json).
+	for _, home := range loadPersistedTomcatHomes() {
+		if _, err := os.Stat(filepath.Join(home, "bin", "bootstrap.jar")); err == nil {
+			return home, nil
+		}
+	}
+
 	p := filepath.Join(bundledDir, "tomcat6", "apache-tomcat-6.0.53")
 	if _, err := os.Stat(filepath.Join(p, "bin", "bootstrap.jar")); err == nil {
 		return p, nil
@@ -527,6 +536,84 @@ func FindCatalinaHome(bundledDir string) (string, error) {
 		}
 	}
 	return "", errors.New("Tomcat 6 not found: set KAIRO_TOMCAT6_HOME")
+}
+
+type persistedTomcatConfig struct {
+	CatalinaHome string `json:"catalinaHome"`
+}
+
+func loadPersistedTomcatHomes() []string {
+	candidates := make([]string, 0, 4)
+	if cfg := strings.TrimSpace(os.Getenv("KAIRO_TOMCAT_CONFIG")); cfg != "" {
+		candidates = append(candidates, cfg)
+	}
+	dataDir := strings.TrimSpace(os.Getenv("KAIRO_DATA_DIR"))
+	if dataDir != "" {
+		candidates = append(candidates,
+			filepath.Join(dataDir, "host-tomcat.json"),
+			filepath.Join(filepath.Dir(dataDir), "host-tomcat.json"),
+		)
+	}
+	// Only probe Electron userData defaults when no explicit data dir/config
+	// is provided (avoids tests accidentally picking up a developer install).
+	if dataDir == "" && strings.TrimSpace(os.Getenv("KAIRO_TOMCAT_CONFIG")) == "" {
+		if runtime.GOOS == "windows" {
+			if appData := os.Getenv("APPDATA"); appData != "" {
+				for _, name := range []string{"Kairo", "kairo-ide", "@kairo/desktop"} {
+					candidates = append(candidates, filepath.Join(appData, name, "host-tomcat.json"))
+				}
+			}
+		} else if runtime.GOOS == "darwin" {
+			home, _ := os.UserHomeDir()
+			if home != "" {
+				for _, name := range []string{"Kairo", "kairo-ide"} {
+					candidates = append(candidates, filepath.Join(home, "Library", "Application Support", name, "host-tomcat.json"))
+				}
+			}
+		} else {
+			home, _ := os.UserHomeDir()
+			if home != "" {
+				for _, name := range []string{"Kairo", "kairo-ide"} {
+					candidates = append(candidates, filepath.Join(home, ".config", name, "host-tomcat.json"))
+				}
+			}
+		}
+	}
+
+	seen := make(map[string]struct{})
+	homes := make([]string, 0, len(candidates))
+	for _, cfgPath := range candidates {
+		home := readPersistedTomcatHome(cfgPath)
+		if home == "" {
+			continue
+		}
+		key := strings.ToLower(filepath.Clean(home))
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		homes = append(homes, home)
+	}
+	return homes
+}
+
+func readPersistedTomcatHome(cfgPath string) string {
+	raw, err := os.ReadFile(cfgPath)
+	if err != nil {
+		return ""
+	}
+	var cfg persistedTomcatConfig
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return ""
+	}
+	home := strings.TrimSpace(cfg.CatalinaHome)
+	if home == "" {
+		return ""
+	}
+	if _, err := os.Stat(filepath.Join(home, "bin", "bootstrap.jar")); err != nil {
+		return ""
+	}
+	return home
 }
 
 // ResolveCatalinaHome resolves the Tomcat 6 catalina.home directory.

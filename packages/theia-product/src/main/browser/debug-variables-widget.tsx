@@ -218,8 +218,13 @@ export class KairoDebugVariablesWidget extends ReactWidget {
         this.update();
 
         this.sessionManager.onDidChange(() => this.update());
-        this.sessionManager.onDidStopDebugSession(() => this.refresh());
-        this.sessionManager.onDidDestroyDebugSession(() => this.clear());
+        this.debugSessionService.onDidChangeState(state => {
+            if (state.isSuspended) {
+                void this.refresh();
+            } else {
+                this.clear();
+            }
+        });
     }
 
     protected onAfterShow(): void {

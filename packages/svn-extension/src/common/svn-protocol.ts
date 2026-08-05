@@ -31,6 +31,17 @@ export interface SvnBackendService {
   $validatePath(path: string): Promise<SvnInstallation | undefined>;
   /** Execute an arbitrary SVN command via the command queue. */
   $exec(args: string[], cwd: string, type: 'read' | 'write'): Promise<CommandResult>;
+  /**
+   * Cancel a queued or in-flight command by id (from onCommandEvent start).
+   * Kills the child process when the command is already running.
+   * Returns true if a matching command was cancelled.
+   */
+  $cancel(commandId: string): Promise<boolean>;
+  /**
+   * Cancel all queued/running commands for a working copy (or every WC if
+   * cwd is omitted). Returns the number of commands cancelled.
+   */
+  $cancelAll(cwd?: string): Promise<number>;
   /** Check if a directory is an SVN working copy. */
   $isWcRoot(cwd: string): Promise<boolean>;
   /** Walk up from a directory to find the WC root. */

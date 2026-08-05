@@ -281,18 +281,20 @@ export class JavaJUnitRunner {
    * Extract a fully qualified class name from a file path.
    */
   protected extractClassNameFromPath(filePath: string): string | undefined {
+    // Normalize Windows backslashes so Maven layout matching works.
+    const normalized = filePath.replace(/\\/g, '/');
     // Match path like .../src/main/java/com/example/MyTest.java
-    const javaMatch = filePath.match(/src\/main\/java\/(.+)\.java$/);
+    const javaMatch = normalized.match(/src\/main\/java\/(.+)\.java$/);
     if (javaMatch) {
       return javaMatch[1].replace(/\//g, '.');
     }
     // Match path like .../src/test/java/com/example/MyTest.java
-    const testMatch = filePath.match(/src\/test\/java\/(.+)\.java$/);
+    const testMatch = normalized.match(/src\/test\/java\/(.+)\.java$/);
     if (testMatch) {
       return testMatch[1].replace(/\//g, '.');
     }
     // Fallback: just use the file name without extension
-    const fileNameMatch = filePath.match(/\/([^/]+)\.java$/);
+    const fileNameMatch = normalized.match(/\/([^/]+)\.java$/);
     if (fileNameMatch) {
       return fileNameMatch[1];
     }
@@ -307,7 +309,7 @@ export class JavaJUnitRunner {
    * @param timeoutMs Optional timeout in milliseconds (default 60s)
    */
   async runTest(className: string, methodName?: string, timeoutMs?: number): Promise<JUnitTestRun> {
-    const runId = `junit-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const runId = `junit-${typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}`}`;
     const startTime = new Date().toISOString();
     const effectiveTimeout = timeoutMs ?? DEFAULT_TEST_TIMEOUT_MS;
 
@@ -333,16 +335,18 @@ export class JavaJUnitRunner {
       // Progress: compiling
       this.emitProgress(runId, 'compiling', 'Compiling test classes...');
 
-      // Execute the test via the Go Agent
+      // Execute the test via the Go Agent (JUnitCore + platform classpath sep).
+      const cpSep = process.platform === 'win32' ? ';' : ':';
+      const classpath = `target/test-classes${cpSep}target/classes`;
       const result = await this.runtime.request(
         'POST /api/v1/run' as Endpoint,
         {
           command: 'java',
           args: [
-            '-cp', 'target/test-classes:target/classes',
-            methodName ? `-Dtest.method=${methodName}` : '',
+            '-cp', classpath,
+            'org.junit.runner.JUnitCore',
             className,
-          ].filter(Boolean),
+          ],
           xmlOutput: true,
         },
         { timeoutMs: effectiveTimeout, noRetry: true },
@@ -373,6 +377,9 @@ export class JavaJUnitRunner {
         }
 
         run.results = this.convertResults(suites);
+        if (methodName) {
+          run.results = run.results.filter(r => r.methodName === methodName);
+        }
 
         run.totalCount = run.results.length;
         run.passedCount = run.results.filter(r => r.status === 'passed').length;
@@ -476,7 +483,7 @@ export class JavaJUnitRunner {
 // ── JUnit XML Parser ────────────────────────────────────────────────
 
 /** Parse JUnit XML output into structured results. */
-function parseJUnitXml(xml: string): JUnitXmlSuite[] {
+export function parseJUnitXml(xml: string): JUnitXmlSuite[] {
   if (!xml || typeof xml !== 'string') {
     throw new Error('Invalid XML input: empty or non-string');
   }
@@ -498,11 +505,12 @@ function parseJUnitXml(xml: string): JUnitXmlSuite[] {
       testCases: [],
     };
 
-    const caseRegex = /<testcase\b([^>]*)>([\s\S]*?)<\/testcase>/g;
+    // Self-closing <testcase .../> (passed cases) and open/close forms.
+    const caseRegex = /<testcase\b([^>]*?)(?:\/>|>([\s\S]*?)<\/testcase>)/g;
     let caseMatch: RegExpExecArray | null;
     while ((caseMatch = caseRegex.exec(body)) !== null) {
       const caseAttrs = caseMatch[1];
-      const caseBody = caseMatch[2];
+      const caseBody = caseMatch[2] ?? '';
       const tc: JUnitXmlTestCase = {
         className: attrValue(caseAttrs, 'classname') ?? '',
         name: attrValue(caseAttrs, 'name') ?? '',

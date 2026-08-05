@@ -111,3 +111,10 @@ test('VirtualList default overscan is 5', () => {
 test('VirtualList default rowHeight is 24', () => {
   assert.match(source, /DEFAULT_ROW_HEIGHT = 24/);
 });
+test('VirtualList has windowOffset support for windowed items', () => {
+  assert.match(source, /windowOffset/);
+});
+
+test('VirtualList scrolls selected index into view on keyboard nav', () => {
+  assert.match(source, /scrollIndexIntoView/);
+});

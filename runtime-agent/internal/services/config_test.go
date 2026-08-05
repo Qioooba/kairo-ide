@@ -21,6 +21,13 @@ func TestProjectStoreAndRepoShareState(t *testing.T) {
 	}
 	svc := NewMemoryServices(cfg, nil)
 
+	if svc.CustomBuild == nil {
+		t.Fatal("CustomBuild must be injected")
+	}
+	if svc.JDKManager == nil {
+		t.Fatal("JDKManager must be injected")
+	}
+
 	p := domain.Project{
 		ID:          "project-ws_test",
 		WorkspaceID: "ws_test",

@@ -33,11 +33,12 @@ import { FrontendApplicationContribution } from '@theia/core/lib/browser';
 import { Disposable } from '@theia/core/lib/common/disposable';
 import { MessageService } from '@theia/core/lib/common/message-service';
 import { ILogger } from '@theia/core/lib/common/logger';
+import { KairoI18nService } from '@kairo/i18n';
 import { JavaLanguageClient } from './java-language-client';
 import { JAVA_LANGUAGE_ID } from '../common/java-common';
 
-const DECOMPILING_PLACEHOLDER = '// Decompiling class file, please wait…\n';
-const DECOMPILE_FAILED_MSG = '// Decompilation failed. Please ensure the project is imported in Java language server to enable decompilation.\n';
+const DECOMPILING_PLACEHOLDER_KEY = 'widget.java.decompile.placeholder' as const;
+const DECOMPILE_FAILED_MSG_KEY = 'widget.java.decompile.failed' as const;
 
 function isClassUri(uri: monaco.Uri): boolean {
   if (!uri.path.endsWith('.class')) return false;
@@ -54,6 +55,9 @@ export class JavaClassDecompilerContribution implements FrontendApplicationContr
 
   @inject(ILogger)
   protected readonly logger!: ILogger;
+
+  @inject(KairoI18nService)
+  protected readonly i18n!: KairoI18nService;
 
   protected readonly subs: Disposable[] = [];
 
@@ -105,7 +109,7 @@ export class JavaClassDecompilerContribution implements FrontendApplicationContr
       return;
     }
 
-    model.setValue(DECOMPILING_PLACEHOLDER);
+    model.setValue(this.i18n.t(DECOMPILING_PLACEHOLDER_KEY));
 
     this.client.classFileContents(uriStr)
       .then(source => {
@@ -113,15 +117,15 @@ export class JavaClassDecompilerContribution implements FrontendApplicationContr
         if (source && source.trim().length > 0) {
           model.setValue(source);
         } else {
-          model.setValue(DECOMPILE_FAILED_MSG);
-          this.messages.warn('Could not decompile this class file. The project may need to be imported first.');
+          model.setValue(this.i18n.t(DECOMPILE_FAILED_MSG_KEY));
+          this.messages.warn(this.i18n.t('widget.java.decompile.warnEmpty'));
         }
       })
       .catch(err => {
         if (model.isDisposed()) return;
         this.logger.warn('[java-decompile] Decompilation failed:', err);
-        model.setValue(DECOMPILE_FAILED_MSG);
-        this.messages.warn('Could not decompile .class file. Ensure the Java language server is running and the project is imported.');
+        model.setValue(this.i18n.t(DECOMPILE_FAILED_MSG_KEY));
+        this.messages.warn(this.i18n.t('widget.java.decompile.warnFailed'));
       });
   }
 

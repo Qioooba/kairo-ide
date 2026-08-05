@@ -29,15 +29,16 @@
 // process.env so it works in a packaged desktop build as
 // well as in a dev shell.
 
-import { spawn, spawnSync, ChildProcess, SpawnOptions } from 'child_process';
-import { existsSync, readdirSync, statSync } from 'fs';
-import { join, resolve } from 'path';
+import { spawn, ChildProcess, SpawnOptions } from 'child_process';
+import { existsSync, readdirSync, readFileSync, statSync } from 'fs';
+import { dirname, join, resolve } from 'path';
 import { Readable, Writable } from 'stream';
 import {
   StreamMessageReader,
   StreamMessageWriter,
   createMessageConnection,
   MessageConnection,
+  CancellationTokenSource,
 } from 'vscode-jsonrpc/node';
 import { ILogger } from '@theia/core/lib/common/logger';
 import { Disposable } from '@theia/core/lib/common/disposable';
@@ -67,6 +68,8 @@ import {
   LSPTextEdit,
   LSPDocumentHighlight,
 } from '../common/lsp-protocol';
+import type { JdtLsState } from '../common/jdt-ls-state';
+export type { JdtLsState } from '../common/jdt-ls-state';
 
 /** What the manager knows about the install of JDT LS. */
 export interface JdtLsDistribution {
@@ -78,7 +81,7 @@ export interface JdtLsDistribution {
   home: string;
   /** Config to pass to `-configuration`, if any. */
   configDir?: string;
-  /** All the plugin jars (used for `-classpath`). */
+  /** All the plugin jars (resolved for install validation; not passed as -classpath). */
   pluginJars: string[];
 }
 
@@ -95,16 +98,6 @@ export type JdtLsEvent =
   | { kind: 'initialized'; result: LSPInitializeResult }
   | { kind: 'exit'; code: number | null; signal: NodeJS.Signals | null }
   | { kind: 'progress'; params: LSPProgressParams };
-
-export type JdtLsState =
-  | 'uninitialized'
-  | 'starting'
-  | 'initializing'
-  | 'ready'
-  | 'stopping'
-  | 'stopped'
-  | 'crashed'
-  | 'failed';
 
 export type JdtLsEventListener = (event: JdtLsEvent) => void;
 
@@ -143,6 +136,8 @@ export class JdtLsManager implements Disposable {
   protected initializeResolver: ((result: LSPInitializeResult) => void) | undefined;
   protected initializeRejecter: ((err: Error) => void) | undefined;
   protected stopPromise: Promise<void> | undefined;
+  /** Optional project source/compliance level from start opts (e.g. "1.8"). */
+  protected requestedSourceLevel: string | undefined;
 
   constructor(protected readonly logger?: ILogger) {}
 
@@ -165,7 +160,7 @@ export class JdtLsManager implements Disposable {
    * either an env var, a constructor argument, or a value
    * baked into the launch descriptor returned by the agent.
    */
-  static resolveDistribution(opts: { home?: string; jreHome?: string }): JdtLsDistribution | JdtLsStartError {
+  static async resolveDistribution(opts: { home?: string; jreHome?: string }): Promise<JdtLsDistribution | JdtLsStartError> {
     const home = opts.home ?? process.env.KAIRO_JDT_LS_HOME;
     if (!home) {
       return {
@@ -223,7 +218,9 @@ export class JdtLsManager implements Disposable {
 
     // Resolve a host JRE 21+. Skip stale KAIRO_JRE17_HOME / JAVA_HOME
     // when they point at JDK 17 (JDT LS 1.55 needs osgi.ee JavaSE 21).
-    const javaBin = resolveHostJre21(opts.jreHome);
+    // Async probe — never block the event loop with long synchronous
+    // java -version chains (JV-P2-10).
+    const javaBin = await resolveHostJre21(opts.jreHome);
     if (!javaBin) {
       return {
         kind: 'env',
@@ -253,23 +250,20 @@ export class JdtLsManager implements Disposable {
     // opts.home / opts.jreHome (from the Go agent's launch descriptor)
     // win over KAIRO_JDT_LS_HOME / JAVA_HOME env fallbacks inside
     // resolveDistribution.
-    const dist = JdtLsManager.resolveDistribution({ home: opts.home, jreHome: opts.jreHome });
+    const dist = await JdtLsManager.resolveDistribution({ home: opts.home, jreHome: opts.jreHome });
     if ('kind' in dist) {
       this.setState('failed');
       throw new Error(dist.message);
     }
     this.setState('starting');
 
-    // The Equinox launcher takes:
-    //   -data <workspaceDataDir>          workspace storage
-    //   -configuration <configDir>         OSGi bundles
-    // and we put every plugin jar on -classpath so the
-    // launcher can find them.
+    // Equinox is launched via -jar; -classpath before -jar is ignored by the
+    // JVM and listing 100+ plugin jars can exceed the Windows command-line
+    // limit. Bundle discovery is owned by -configuration / the launcher.
     const args: string[] = [
-      '-classpath',
-      dist.pluginJars.join(process.platform === 'win32' ? ';' : ':'),
       '-Xms50m',
-      '-Xmx1024m',
+      // Default heap capped for IDE interactivity (OPT-003); override via KAIRO_JDT_XMX=1024m etc.
+      `-Xmx${process.env.KAIRO_JDT_XMX || '768m'}`,
       '-Declipse.application=org.eclipse.jdt.ls.core.id1',
       '-Dosgi.bundles.defaultStartLevel=4',
       '-Declipse.product=org.eclipse.jdt.ls.core.product',
@@ -290,6 +284,9 @@ export class JdtLsManager implements Disposable {
     }
     args.push('-data', opts.workspaceDataDir);
 
+    // Remember sourceLevel for javaSettings() (project prefs), not _JAVA_OPTIONS.
+    this.requestedSourceLevel = opts.sourceLevel;
+
     const spawnOpts: SpawnOptions = {
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
@@ -299,11 +296,6 @@ export class JdtLsManager implements Disposable {
         // ourselves and never want it to use a console
         // window on Windows.
         JAVA_TOOL_OPTIONS: '',
-        // Project source level — many JDT LS behaviours
-        // (compliance, forbidden references, etc.) key off
-        // this. We forward it so a Java 6 project gets a
-        // Java 6 compile graph.
-        ...(opts.sourceLevel ? { '_JAVA_OPTIONS': `-Dsource.level=${opts.sourceLevel}` } : {}),
       },
     };
 
@@ -464,7 +456,7 @@ export class JdtLsManager implements Disposable {
 
   /** Default JDT LS `java.*` settings sent on initialize / configuration. */
   protected javaSettings(): Record<string, unknown> {
-    return {
+    const settings: Record<string, unknown> = {
       completion: { enabled: true, guessMethodArguments: true },
       import: { enabled: true },
       format: { enabled: true },
@@ -479,6 +471,28 @@ export class JdtLsManager implements Disposable {
       },
       trace: { server: process.env.KAIRO_JDT_TRACE === 'verbose' ? 'verbose' : 'off' },
     };
+    // Prefer real JDT settings over the old useless `_JAVA_OPTIONS:-Dsource.level`.
+    if (this.requestedSourceLevel) {
+      settings.jdt = {
+        ls: {
+          lombokSupport: { enabled: true },
+        },
+      };
+      settings.errors = {
+        incompleteClasspath: { severity: 'warning' },
+      };
+      // Eclipse compiler compliance is normally project-driven; expose the
+      // requested level so workspace/configuration consumers can read it.
+      (settings.configuration as Record<string, unknown>).runtimes = [];
+      settings.autobuild = { enabled: true };
+      settings.project = {
+        referencedLibraries: [],
+        resourceFilters: [],
+        // Non-standard but harmless key used by Kairo project bootstrap.
+        sourceLevel: this.requestedSourceLevel,
+      };
+    }
+    return settings;
   }
 
   /** Resolve one `workspace/configuration` section (e.g. `java` or `java.symbols`). */
@@ -875,9 +889,13 @@ export class JdtLsManager implements Disposable {
   ): Promise<T> {
     const connection = this.connection;
     if (!connection) return Promise.reject(new Error(`JDT LS connection unavailable for ${method}`));
-    const child = this.process;
     const timeoutMs = options.timeoutMs ?? this.requestTimeoutMs();
-    const request = connection.sendRequest<T>(method, params);
+    // Only initialize may terminate the process on timeout. Other requests
+    // cancel via $/cancelRequest and reject — killing JDT LS on slow
+    // codeLens/completion exhausts the restart quota (JV-P0-1).
+    const terminateOnTimeout = method === 'initialize' || !!options.onTimeout;
+    const cts = new CancellationTokenSource();
+    const request = connection.sendRequest<T>(method, params, cts.token);
     return new Promise<T>((resolve, reject) => {
       let settled = false;
       const timer = setTimeout(() => {
@@ -886,12 +904,18 @@ export class JdtLsManager implements Disposable {
         const error = new JdtLsRequestTimeoutError(method, timeoutMs);
         this.appendLog('stderr', `[timeout] ${error.message}`);
         try {
-          if (options.onTimeout) options.onTimeout();
-          else if (child && this.process === child) child.kill('SIGKILL');
+          cts.cancel();
         } catch (err) {
-          this.appendLog('stderr', `[timeout-cleanup] ${String(err)}`);
+          this.appendLog('stderr', `[timeout-cancel] ${String(err)}`);
         }
-        if (this.connection === connection) this.cleanup(options.timeoutState ?? 'crashed');
+        if (terminateOnTimeout) {
+          try {
+            if (options.onTimeout) options.onTimeout();
+          } catch (err) {
+            this.appendLog('stderr', `[timeout-cleanup] ${String(err)}`);
+          }
+          if (this.connection === connection) this.cleanup(options.timeoutState ?? 'crashed');
+        }
         reject(error);
       }, timeoutMs);
       request.then(
@@ -899,12 +923,14 @@ export class JdtLsManager implements Disposable {
           if (settled) return;
           settled = true;
           clearTimeout(timer);
+          cts.dispose();
           resolve(value);
         },
         err => {
           if (settled) return;
           settled = true;
           clearTimeout(timer);
+          cts.dispose();
           reject(err);
         },
       );
@@ -998,49 +1024,79 @@ export class JdtLsManager implements Disposable {
 /** Minimum host JRE major for JDT LS 1.55 (osgi.ee JavaSE 21). */
 const JDT_LS_MIN_JRE_MAJOR = 21;
 
+/** Cached `java -version` majors keyed by absolute java binary path. */
+const javaMajorCache = new Map<string, number | undefined>();
+
+/** Short timeout for async `java -version` probes (JV-P2-10). */
+const JAVA_PROBE_TIMEOUT_MS = 2_000;
+
 /**
  * Pick a JDK/JRE home that can actually spawn JDT LS.
  * Priority mirrors runtime-agent/internal/jdtls/jre.go:
  * explicit opts → KAIRO_JDT_LS_JRE → KAIRO_JRE17_HOME (if 21+) →
  * KAIRO_JDK_HOME / JAVA_HOME (if 21+) → common install paths.
+ *
+ * Probing is async (never blocks the event loop) and common paths are checked
+ * in parallel with a shared major cache (JV-P2-10).
  */
-function resolveHostJre21(explicit?: string): string | undefined {
+async function resolveHostJre21(explicit?: string): Promise<string | undefined> {
   const javaExe = process.platform === 'win32' ? 'java.exe' : 'java';
-  const tryHome = (home: string | undefined): string | undefined => {
+  const tryHome = async (home: string | undefined): Promise<string | undefined> => {
     if (!home || !String(home).trim()) return undefined;
     const homeAbs = resolve(home.trim());
     if (!existsSync(homeAbs)) return undefined;
     const bin = join(homeAbs, 'bin', javaExe);
     if (!existsSync(bin)) return undefined;
-    const major = probeJavaMajor(bin);
+    const major = await probeJavaMajor(bin);
     if (major === undefined || major < JDT_LS_MIN_JRE_MAJOR) return undefined;
     return bin;
   };
 
-  const fromExplicit = tryHome(explicit);
+  const fromExplicit = await tryHome(explicit);
   if (fromExplicit) return fromExplicit;
   for (const envName of ['KAIRO_JDT_LS_JRE', 'KAIRO_JRE17_HOME', 'KAIRO_JDK_HOME', 'JAVA_HOME']) {
-    const hit = tryHome(process.env[envName]);
+    const hit = await tryHome(process.env[envName]);
     if (hit) return hit;
   }
 
-  for (const bin of commonJdtLsJreBins(javaExe)) {
-    if (!existsSync(bin)) continue;
-    const major = probeJavaMajor(bin);
-    if (major !== undefined && major >= JDT_LS_MIN_JRE_MAJOR) return bin;
-  }
-  return undefined;
+  const candidates = commonJdtLsJreBins(javaExe).filter(bin => existsSync(bin));
+  if (candidates.length === 0) return undefined;
+  const probed = await Promise.all(
+    candidates.map(async bin => {
+      const major = await probeJavaMajor(bin);
+      return major !== undefined && major >= JDT_LS_MIN_JRE_MAJOR ? bin : undefined;
+    }),
+  );
+  return probed.find((bin): bin is string => !!bin);
 }
 
-function probeJavaMajor(javaBin: string): number | undefined {
+/**
+ * Resolve the major version for a java binary.
+ * Prefers the JDK `release` file (no process spawn), then falls
+ * back to a short async `java -version` with aggressive caching.
+ */
+async function probeJavaMajor(javaBin: string): Promise<number | undefined> {
+  const abs = resolve(javaBin);
+  if (javaMajorCache.has(abs)) {
+    return javaMajorCache.get(abs);
+  }
+  const fromRelease = readReleaseMajor(abs);
+  if (fromRelease !== undefined) {
+    javaMajorCache.set(abs, fromRelease);
+    return fromRelease;
+  }
+  const fromSpawn = await spawnJavaVersionMajor(abs);
+  javaMajorCache.set(abs, fromSpawn);
+  return fromSpawn;
+}
+
+/** Read JAVA_VERSION from `<jre>/release` next to `bin/java`. */
+function readReleaseMajor(javaBin: string): number | undefined {
   try {
-    const r = spawnSync(javaBin, ['-version'], {
-      encoding: 'utf8',
-      timeout: 5_000,
-      windowsHide: true,
-    });
-    const text = `${r.stdout || ''}${r.stderr || ''}${r.error ? String(r.error.message) : ''}`;
-    const m = /version\s+"([^"]+)"/.exec(text);
+    const releasePath = join(dirname(dirname(javaBin)), 'release');
+    if (!existsSync(releasePath)) return undefined;
+    const text = readFileSync(releasePath, 'utf8');
+    const m = /JAVA_VERSION="([^"]+)"/.exec(text);
     if (m) return parseJavaMajor(m[1]);
   } catch {
     /* ignore */
@@ -1048,12 +1104,58 @@ function probeJavaMajor(javaBin: string): number | undefined {
   return undefined;
 }
 
-function parseJavaMajor(version: string): number {
+function spawnJavaVersionMajor(javaBin: string): Promise<number | undefined> {
+  return new Promise(resolveMajor => {
+    let settled = false;
+    const finish = (major: number | undefined): void => {
+      if (settled) return;
+      settled = true;
+      resolveMajor(major);
+    };
+    let child: ChildProcess;
+    try {
+      child = spawn(javaBin, ['-version'], {
+        windowsHide: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+    } catch {
+      finish(undefined);
+      return;
+    }
+    let text = '';
+    const onChunk = (buf: Buffer | string): void => {
+      text += typeof buf === 'string' ? buf : buf.toString('utf8');
+    };
+    child.stdout?.on('data', onChunk);
+    child.stderr?.on('data', onChunk);
+    const timer = setTimeout(() => {
+      try { child.kill(); } catch { /* ignore */ }
+      finish(undefined);
+    }, JAVA_PROBE_TIMEOUT_MS);
+    child.on('error', () => {
+      clearTimeout(timer);
+      finish(undefined);
+    });
+    child.on('close', () => {
+      clearTimeout(timer);
+      const m = /version\s+"([^"]+)"/.exec(text);
+      finish(m ? parseJavaMajor(m[1]) : undefined);
+    });
+  });
+}
+
+/** @internal exported for unit tests */
+export function parseJavaMajor(version: string): number {
   if (version.startsWith('1.')) {
     const parts = version.split('.');
     return Number.parseInt(parts[1] || '0', 10) || 0;
   }
   return Number.parseInt(version.split('.')[0] || '0', 10) || 0;
+}
+
+/** @internal clear probe cache (tests). */
+export function clearJavaMajorCache(): void {
+  javaMajorCache.clear();
 }
 
 function commonJdtLsJreBins(javaExe: string): string[] {
@@ -1062,7 +1164,6 @@ function commonJdtLsJreBins(javaExe: string): string[] {
       'C:\\Program Files\\Eclipse Adoptium',
       'C:\\Program Files\\Java',
       'C:\\Program Files\\Microsoft',
-      'E:\\Tools',
     ];
     const out: string[] = [];
     for (const root of roots) {

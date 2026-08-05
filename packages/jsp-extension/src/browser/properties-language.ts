@@ -17,7 +17,7 @@ import { PROPERTIES_LANGUAGE_ID, PROPERTIES_MONARCH } from './properties-monarch
  * Common Java properties keys for completion suggestions.
  * Organized by category.
  */
-const PROPERTIES_KEY_COMPLETIONS: Record<string, monaco.languages.CompletionItem[]> = {
+const PROPERTIES_KEY_COMPLETIONS: Record<string, Array<Omit<monaco.languages.CompletionItem, 'range'> & { range?: monaco.IRange }>> = {
   /** JDBC / Database connection properties. */
   datasource: [
     createCompletion('jdbc.driverClassName', 'Property', 'JDBC 驱动类名', 'jdbc.driverClassName'),
@@ -105,7 +105,7 @@ function createCompletion(
   kind: string,
   detail: string,
   insertText: string,
-): monaco.languages.CompletionItem {
+): Omit<monaco.languages.CompletionItem, 'range'> & { range?: monaco.IRange } {
   const kindMap: Record<string, monaco.languages.CompletionItemKind> = {
     'Property': monaco.languages.CompletionItemKind.Property,
     'Value': monaco.languages.CompletionItemKind.Value,
@@ -116,8 +116,7 @@ function createCompletion(
     kind: kindMap[kind] ?? monaco.languages.CompletionItemKind.Property,
     detail,
     insertText,
-    range: { startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 1 },
-  } as monaco.languages.CompletionItem;
+  };
 }
 
 /**
@@ -145,10 +144,19 @@ class PropertiesCompletionProvider implements monaco.languages.CompletionItemPro
       return { suggestions: [] };
     }
 
-    // Collect all property key suggestions
+    // Collect all property key suggestions with a real replace range.
+    const word = model.getWordUntilPosition(position);
+    const range = new monaco.Range(
+      position.lineNumber,
+      word.startColumn,
+      position.lineNumber,
+      word.endColumn,
+    );
     const allSuggestions: monaco.languages.CompletionItem[] = [];
     for (const category of Object.values(PROPERTIES_KEY_COMPLETIONS)) {
-      allSuggestions.push(...category);
+      for (const item of category) {
+        allSuggestions.push({ ...item, range } as monaco.languages.CompletionItem);
+      }
     }
 
     return { suggestions: allSuggestions };

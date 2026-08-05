@@ -1,5 +1,5 @@
 !define PRODUCT_NAME "Kairo IDE"
-!define PRODUCT_VERSION "1.0.0"
+!define PRODUCT_VERSION "0.1.0"
 !define PRODUCT_PUBLISHER "Kairo Team"
 ; OFFLINE / AIR-GAPPED: Kairo IDE is designed for fully intranet deployment.
 ; Do not register a public website URL in the Windows uninstall entry;
@@ -39,8 +39,24 @@ Section "MainSection" SEC01
 SectionEnd
 
 Section "Uninstall"
-  Delete "$INSTDIR\*.*"
-  RMDir /r "$INSTDIR"
+  ; Prefer explicit deletes over RMDir /r on $INSTDIR (DK-P2-6): a wrong
+  ; InstallDir would otherwise recursively wipe an unintended tree.
+  Delete "$INSTDIR\uninst.exe"
+  Delete "$INSTDIR\KairoIDE.exe"
+  Delete "$INSTDIR\*.exe"
+  Delete "$INSTDIR\*.dll"
+  Delete "$INSTDIR\*.pak"
+  Delete "$INSTDIR\*.bin"
+  Delete "$INSTDIR\*.dat"
+  Delete "$INSTDIR\*.json"
+  Delete "$INSTDIR\LICENSE*"
+  Delete "$INSTDIR\version"
+  RMDir /r "$INSTDIR\resources"
+  RMDir /r "$INSTDIR\locales"
+  RMDir /r "$INSTDIR\bin"
+  RMDir /r "$INSTDIR\docs"
+  ; Remove install root only if empty after the deletes above.
+  RMDir "$INSTDIR"
   Delete "$SMPROGRAMS\Kairo IDE\Kairo IDE.lnk"
   Delete "$DESKTOP\Kairo IDE.lnk"
   RMDir "$SMPROGRAMS\Kairo IDE"

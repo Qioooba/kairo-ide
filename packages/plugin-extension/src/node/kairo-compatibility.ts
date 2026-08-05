@@ -239,7 +239,8 @@ export function generateCompatibilityReport(extension: KairoExtension): Compatib
   } else if (score >= 0.2) {
     assessment = 'incompatible';
   } else {
-    assessment = 'unknown';
+    // VC-P3-6: score < 0.2 is incompatible, not unknown.
+    assessment = 'incompatible';
   }
 
   return {

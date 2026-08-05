@@ -21,13 +21,27 @@ type PortDiagnostics struct {
 	Suggestion  string `json:"suggestion,omitempty"`
 }
 
+// Valid diagnostic port range (GO-P3-7): any TCP port 1–65535.
+// Privileged ports (<1024) are allowed so operators can diagnose
+// conflicts on 80/443; the suggestion text must match this range.
+const (
+	diagPortMin = 1
+	diagPortMax = 65535
+)
+
 // diagnosePort checks whether a port is occupied and returns
-// diagnostics about the occupying process. It works on macOS (lsof)
-// and Linux (ss/netstat).
+// diagnostics about the occupying process.
+//
+// Platform backends shell out to lsof/ss/netstat/tasklist and parse
+// text — best-effort only (GO-P3-7). Prefer exact local-address port
+// matching over substring Contains to avoid :8080 matching :18080.
 func diagnosePort(port int) PortDiagnostics {
 	result := PortDiagnostics{Port: port}
-	if port <= 0 || port > 65535 {
-		result.Suggestion = "Invalid port number. Use a port between 1024 and 65535."
+	if port < diagPortMin || port > diagPortMax {
+		result.Suggestion = fmt.Sprintf(
+			"Invalid port number. Use a port between %d and %d.",
+			diagPortMin, diagPortMax,
+		)
 		return result
 	}
 
@@ -63,9 +77,9 @@ func findPortOccupier(port int) (int, string) {
 }
 
 func findPortOccupierLsof(port int) (int, string) {
-	addr := fmt.Sprintf(":%d", port)
-	// lsof -nP -iTCP:PORT -sTCP:LISTEN -t returns just the PID
-	out, err := exec.Command("lsof", "-nP", "-iTCP:"+addr, "-sTCP:LISTEN", "-t").Output()
+	// lsof -iTCP:PORT scopes by numeric port; avoid building ":*port" that
+	// could be confused with substring filters elsewhere.
+	out, err := exec.Command("lsof", "-nP", fmt.Sprintf("-iTCP:%d", port), "-sTCP:LISTEN", "-t").Output()
 	if err != nil {
 		return 0, ""
 	}
@@ -77,19 +91,15 @@ func findPortOccupierLsof(port int) (int, string) {
 	if err != nil || pid <= 0 {
 		return 0, ""
 	}
-	// Get process name
-	procName := getProcessName(pid)
-	return pid, procName
+	return pid, getProcessName(pid)
 }
 
 func findPortOccupierLinux(port int) (int, string) {
-	// Try ss first (modern), fall back to netstat
-	addr := fmt.Sprintf(":%d", port)
-	out, err := exec.Command("ss", "-tlnp", "sport", "="+addr).Output()
+	// Try ss first (modern), fall back to netstat.
+	out, err := exec.Command("ss", "-tlnp", "sport", "=", fmt.Sprintf(":%d", port)).Output()
 	if err == nil {
 		return parseSSOutput(string(out), port)
 	}
-	// Fall back to netstat
 	out, err = exec.Command("netstat", "-tlnp").Output()
 	if err != nil {
 		return 0, ""
@@ -97,55 +107,80 @@ func findPortOccupierLinux(port int) (int, string) {
 	return parseNetstatOutput(string(out), port)
 }
 
+// fieldHasPort reports whether an address field ends with exactly :port
+// (avoids HasSuffix(":8080") matching ":18080").
+func fieldHasPort(field string, port int) bool {
+	idx := strings.LastIndexByte(field, ':')
+	if idx < 0 || idx+1 >= len(field) {
+		return false
+	}
+	n, err := strconv.Atoi(field[idx+1:])
+	return err == nil && n == port
+}
+
 func parseSSOutput(output string, port int) (int, string) {
-	addr := fmt.Sprintf(":%d", port)
 	for _, line := range strings.Split(output, "\n") {
-		if !strings.Contains(line, addr) {
+		fields := strings.Fields(line)
+		matched := false
+		for _, field := range fields {
+			if fieldHasPort(field, port) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
 			continue
 		}
 		// Format: LISTEN  0  128  0.0.0.0:8080  0.0.0.0:*  users:(("java",pid=12345,fd=42))
-		fields := strings.Fields(line)
 		for _, field := range fields {
-			if strings.HasPrefix(field, "users:((") {
-				// Extract pid from users:(("java",pid=12345,fd=42))
-				idx := strings.Index(field, "pid=")
-				if idx < 0 {
-					continue
-				}
-				rest := field[idx+4:]
-				end := strings.IndexAny(rest, ",)")
-				if end < 0 {
-					continue
-				}
-				pid, err := strconv.Atoi(rest[:end])
-				if err != nil || pid <= 0 {
-					continue
-				}
-				// Extract process name
-				start := len("users:((\"")
-				nameEnd := strings.IndexByte(field[start:], '"')
-				if nameEnd < 0 {
-					nameEnd = 0
-				}
-				procName := field[start : start+nameEnd]
-				return pid, procName
+			if !strings.HasPrefix(field, "users:((") {
+				continue
 			}
+			idx := strings.Index(field, "pid=")
+			if idx < 0 {
+				continue
+			}
+			rest := field[idx+4:]
+			end := strings.IndexAny(rest, ",)")
+			if end < 0 {
+				continue
+			}
+			pid, err := strconv.Atoi(rest[:end])
+			if err != nil || pid <= 0 {
+				continue
+			}
+			start := len("users:((\"")
+			nameEnd := strings.IndexByte(field[start:], '"')
+			if nameEnd < 0 {
+				nameEnd = 0
+			}
+			procName := field[start : start+nameEnd]
+			return pid, procName
 		}
 	}
 	return 0, ""
 }
 
 func parseNetstatOutput(output string, port int) (int, string) {
-	addr := fmt.Sprintf(":%d", port)
 	for _, line := range strings.Split(output, "\n") {
-		if !strings.Contains(line, addr) || !strings.Contains(line, "LISTEN") {
+		if !strings.Contains(line, "LISTEN") {
 			continue
 		}
 		fields := strings.Fields(line)
 		if len(fields) < 7 {
 			continue
 		}
-		// Last field: 12345/java
+		// Local address is typically field[3] on Linux netstat -tlnp.
+		localIdx := -1
+		for i, f := range fields {
+			if fieldHasPort(f, port) {
+				localIdx = i
+				break
+			}
+		}
+		if localIdx < 0 {
+			continue
+		}
 		last := fields[len(fields)-1]
 		parts := strings.SplitN(last, "/", 2)
 		if len(parts) != 2 {
@@ -161,26 +196,29 @@ func parseNetstatOutput(output string, port int) (int, string) {
 }
 
 func findPortOccupierWindows(port int) (int, string) {
-	addr := fmt.Sprintf(":%d", port)
 	out, err := exec.Command("netstat", "-ano", "-p", "TCP").Output()
 	if err != nil {
 		return 0, ""
 	}
 	for _, line := range strings.Split(string(out), "\n") {
 		line = strings.TrimSpace(line)
-		if !strings.Contains(line, "LISTENING") || !strings.Contains(line, addr) {
+		if !strings.Contains(line, "LISTENING") {
 			continue
 		}
 		fields := strings.Fields(line)
 		if len(fields) < 5 {
 			continue
 		}
+		// Windows netstat: Proto LocalAddress ForeignAddress State PID
+		// Local address is fields[1].
+		if !fieldHasPort(fields[1], port) {
+			continue
+		}
 		pid, err := strconv.Atoi(fields[len(fields)-1])
 		if err != nil || pid <= 0 {
 			continue
 		}
-		procName := getProcessName(pid)
-		return pid, procName
+		return pid, getProcessName(pid)
 	}
 	return 0, ""
 }
@@ -220,8 +258,11 @@ func (s *Server) handlePortDiagnostics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	port, err := strconv.Atoi(portStr)
-	if err != nil || port <= 0 || port > 65535 {
-		writeError(w, "", "", protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: "port must be a number between 1 and 65535"})
+	if err != nil || port < diagPortMin || port > diagPortMax {
+		writeError(w, "", "", protocol.KairoError{
+			Code:    protocol.ErrInvalidRequest,
+			Message: fmt.Sprintf("port must be a number between %d and %d", diagPortMin, diagPortMax),
+		})
 		return
 	}
 

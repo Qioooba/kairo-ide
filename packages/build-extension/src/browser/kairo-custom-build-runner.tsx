@@ -12,7 +12,8 @@ import { KairoI18nService } from '@kairo/i18n';
 import './kairo-custom-build-runner.css';
 
 export const CUSTOM_BUILD_WIDGET_ID = 'kairo-custom-build';
-export const CUSTOM_BUILD_LABEL = 'Custom Build';
+/** English fallback label for static references; widget title uses i18n at runtime. */
+export const CUSTOM_BUILD_LABEL = 'Custom Build Runner';
 
 interface BuildLogEntry {
     type: 'stdout' | 'stderr' | 'info' | 'error';
@@ -50,8 +51,6 @@ export class CustomBuildRunnerWidget extends ReactWidget {
     constructor() {
         super();
         this.id = CUSTOM_BUILD_WIDGET_ID;
-        this.title.label = CUSTOM_BUILD_LABEL;
-        this.title.caption = CUSTOM_BUILD_LABEL;
         this.title.closable = true;
         this.title.iconClass = 'codicon codicon-terminal';
         this.addClass('kairo-widget');
@@ -64,8 +63,8 @@ export class CustomBuildRunnerWidget extends ReactWidget {
     }
 
     protected updateTitle(): void {
-        this.title.label = this.i18n.t('widget.build.customRunner.title' as any);
-        this.title.caption = this.i18n.t('widget.build.customRunner.caption' as any);
+        this.title.label = this.i18n.t('widget.build.customRunner.title');
+        this.title.caption = this.i18n.t('widget.build.customRunner.caption');
     }
 
     setCommand(command: string, projectRoot: string, workingDir?: string): void {
@@ -132,18 +131,61 @@ export class CustomBuildRunnerWidget extends ReactWidget {
 
     cancel(): void {
         if (!this.state.running || !this.state.buildId) return;
+        const buildId = this.state.buildId;
         this.runtime.request(
             'POST /api/v1/build/custom/{buildId}/cancel',
             undefined,
-            { pathParams: { buildId: this.state.buildId }, timeoutMs: 10_000 }
-        ).catch(() => {/* ignore cancel errors */});
+            { pathParams: { buildId }, timeoutMs: 10_000 }
+        ).then(() => {
+            this.state = {
+                ...this.state,
+                running: false,
+                exitCode: -1,
+            };
+            this.addLog('info', this.i18n.t('widget.build.customRunner.log.waiting' as any));
+            this.update();
+        }).catch(() => {
+            this.state = { ...this.state, running: false };
+            this.update();
+        });
     }
 
     protected async pollBuildStatus(buildId: string): Promise<void> {
-        // Simplified polling — in production, use WebSocket events
         this.addLog('info', this.i18n.t('widget.build.customRunner.log.started' as any, { buildId }));
         this.addLog('info', this.i18n.t('widget.build.customRunner.log.running' as any, { command: this.state.command }));
-        this.addLog('info', this.i18n.t('widget.build.customRunner.log.waiting' as any));
+
+        const deadline = Date.now() + 30 * 60 * 1000;
+        while (this.state.running && this.state.buildId === buildId && Date.now() < deadline) {
+            try {
+                const status = await this.runtime.request(
+                    'GET /api/v1/build/custom/{buildId}',
+                    undefined,
+                    { pathParams: { buildId }, timeoutMs: 10_000, noRetry: true },
+                );
+                if (status.status && status.status !== 'running') {
+                    const exitCode = typeof status.exitCode === 'number' ? status.exitCode : (status.status === 'cancelled' ? -1 : 0);
+                    this.state = {
+                        ...this.state,
+                        running: false,
+                        exitCode,
+                    };
+                    this.addLog(
+                        exitCode === 0 ? 'info' : 'error',
+                        this.i18n.t('widget.build.customRunner.log.waiting' as any) + ` (${status.status}, exit=${exitCode})`,
+                    );
+                    this.update();
+                    return;
+                }
+            } catch {
+                // keep polling while the agent may still be starting
+            }
+            await new Promise(r => setTimeout(r, 1000));
+        }
+        if (this.state.running && this.state.buildId === buildId) {
+            this.state = { ...this.state, running: false, exitCode: -1 };
+            this.addLog('error', this.i18n.t('widget.build.customRunner.error.requestFailed' as any, { message: 'timeout' }));
+            this.update();
+        }
     }
 
     protected addLog(type: BuildLogEntry['type'], line: string): void {

@@ -16,11 +16,11 @@
 
 import * as monaco from '@theia/monaco-editor-core';
 import URI from '@theia/core/lib/common/uri';
-import { injectable, inject } from '@theia/core/shared/inversify';
 import { FileService } from '@theia/filesystem/lib/browser/file-service';
 import { WorkspaceService } from '@theia/workspace/lib/browser/workspace-service';
 import { JSP_LANGUAGE_ID } from './jsp-monarch';
 import { JspJavaParser } from './jsp-java-nav';
+import type { JspNavServices } from './jsp-nav-services';
 
 /** Common Java source roots in legacy web projects. */
 const SRC_ROOTS = [
@@ -60,15 +60,40 @@ function isAbsoluteUrl(path: string): boolean {
   return /^(https?:|ftp:|mailto:|javascript:|data:)/i.test(path);
 }
 
-@injectable()
+/**
+ * Walk up from the current URI looking for a WEB-INF segment; the
+ * parent of WEB-INF is the webapp root. Also recognizes common
+ * Eclipse/Maven web roots embedded in the path.
+ * Exported for unit tests (JV-P2-7).
+ */
+export function findWebappRoot(currentUri: monaco.Uri): monaco.Uri | undefined {
+  const parts = currentUri.path.split('/').filter(p => p.length > 0);
+  for (let i = parts.length - 1; i >= 0; i--) {
+    if (parts[i] === 'WEB-INF') {
+      const rootPath = '/' + parts.slice(0, i).join('/');
+      return currentUri.with({ path: rootPath || '/' });
+    }
+  }
+
+  // Fallback: known web-root folder names as a path segment
+  const webRootNames = new Set(['webapp', 'WebContent', 'web', 'WebRoot']);
+  for (let i = parts.length - 1; i >= 0; i--) {
+    if (webRootNames.has(parts[i])) {
+      const rootPath = '/' + parts.slice(0, i + 1).join('/');
+      return currentUri.with({ path: rootPath });
+    }
+  }
+
+  return undefined;
+}
+
 export class JspNavigationProvider implements monaco.languages.DefinitionProvider {
-  @inject(FileService)
-  protected readonly fileService!: FileService;
-
-  @inject(WorkspaceService)
-  protected readonly workspaceService!: WorkspaceService;
-
   private readonly javaParser = new JspJavaParser();
+
+  constructor(
+    protected readonly fileService: FileService,
+    protected readonly workspaceService: WorkspaceService,
+  ) {}
 
   async provideDefinition(
     model: monaco.editor.ITextModel,
@@ -91,7 +116,7 @@ export class JspNavigationProvider implements monaco.languages.DefinitionProvide
         if (column < matchStart || column >= matchEnd) continue;
 
         if (!isAbsoluteUrl(pathValue)) {
-          const targetUri = this.resolvePath(model.uri, pathValue);
+          const targetUri = await this.resolvePath(model.uri, pathValue);
           if (targetUri) {
             return [{
               uri: targetUri,
@@ -127,10 +152,40 @@ export class JspNavigationProvider implements monaco.languages.DefinitionProvide
     return this.resolveJavaClass(fqn, _token);
   }
 
-  private resolvePath(currentUri: monaco.Uri, path: string): monaco.Uri | undefined {
-    const dir = monaco.Uri.joinPath(currentUri, '..');
+  /**
+   * Resolve a JSP/HTML path relative to the current file, or as a
+   * webapp-absolute path when it starts with `/` (e.g. `/WEB-INF/...`).
+   * Returns undefined when the target does not exist (JV-P2-7).
+   */
+  private async resolvePath(
+    currentUri: monaco.Uri,
+    path: string,
+  ): Promise<monaco.Uri | undefined> {
+    let candidate: monaco.Uri | undefined;
     try {
-      return monaco.Uri.joinPath(dir, path);
+      if (path.startsWith('/')) {
+        const webRoot = findWebappRoot(currentUri);
+        if (!webRoot) {
+          return undefined;
+        }
+        candidate = monaco.Uri.joinPath(webRoot, path.replace(/^\/+/, ''));
+      } else {
+        const dir = monaco.Uri.joinPath(currentUri, '..');
+        candidate = monaco.Uri.joinPath(dir, path);
+      }
+    } catch {
+      return undefined;
+    }
+
+    if (!candidate) {
+      return undefined;
+    }
+
+    try {
+      await this.fileService.resolve(new URI(candidate.toString(true)), {
+        resolveMetadata: false,
+      });
+      return candidate;
     } catch {
       return undefined;
     }
@@ -170,9 +225,9 @@ export class JspNavigationProvider implements monaco.languages.DefinitionProvide
  * Register the JSP navigation definition provider with Monaco.
  * Returns a Disposable for cleanup.
  */
-export function registerJspNavigation(): monaco.IDisposable {
+export function registerJspNavigation(services: JspNavServices): monaco.IDisposable {
   return monaco.languages.registerDefinitionProvider(
     JSP_LANGUAGE_ID,
-    new JspNavigationProvider(),
+    new JspNavigationProvider(services.fileService, services.workspaceService),
   );
 }

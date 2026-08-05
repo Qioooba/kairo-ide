@@ -151,6 +151,21 @@ var LifecycleTasks = []LifecycleTask{
 	{ID: "install", Label: "Install", Description: "Install to local repository", Phase: "install"},
 }
 
+// IsAllowedTask reports whether task is a whitelisted Maven lifecycle phase
+// (GO-P2-2). Rejects plugin goals like "exec:exec" and arbitrary args.
+func IsAllowedTask(task string) bool {
+	task = strings.TrimSpace(task)
+	if task == "" || strings.ContainsAny(task, " \t\n\r") {
+		return false
+	}
+	for _, t := range LifecycleTasks {
+		if t.ID == task {
+			return true
+		}
+	}
+	return false
+}
+
 // pomXML is the XML structure for parsing pom.xml.
 type pomXML struct {
 	XMLName     xml.Name `xml:"project"`

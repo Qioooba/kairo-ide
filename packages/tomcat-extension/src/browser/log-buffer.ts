@@ -76,7 +76,7 @@ export function mergeLogHistory(history: readonly KairoLogLine[], live: readonly
     const merged: KairoLogLine[] = [];
     const seen = new Set<string>();
     for (const entry of [...history, ...live]) {
-        const key = `${entry.ts}\u0000${entry.stream}\u0000${entry.line}`;
+        const key = logIdentity(entry);
         if (!seen.has(key)) { seen.add(key); merged.push(entry); }
     }
     return merged;

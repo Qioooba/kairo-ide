@@ -5,6 +5,8 @@
     "noEmit": true,
     "jsx": "react"
   },
+  // Root noEmit graph covers packages + apps (incl. apps/desktop).
+  // CI type-check also runs @kairo/desktop tsc --noEmit (DK-P3-5).
   "include": [
     "apps/*/src/**/*.ts",
     "apps/*/src/**/*.tsx",

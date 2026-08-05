@@ -158,14 +158,21 @@ type ColumnDef struct {
 	Label string `json:"label"`
 }
 
+// ErrOracleInstantClientMissing is returned by stub TestConnection / Execute
+// when Oracle Instant Client libraries are not available.
+const ErrOracleInstantClientMissing = "Oracle Instant Client is not installed. This feature requires Oracle Instant Client libraries (libclntsh.so). See https://www.oracle.com/database/technologies/instant-client.html"
+
 // QueryResult holds the result of a SQL query execution.
 type QueryResult struct {
-	Columns         []ColumnDef       `json:"columns"`
-	Rows            []map[string]any  `json:"rows"`
-	RowCount        int               `json:"rowCount"`
-	TotalRows       int               `json:"totalRows,omitempty"`
-	ExecutionTimeMs int64             `json:"executionTimeMs"`
-	Truncated       bool              `json:"truncated"`
+	Columns         []ColumnDef      `json:"columns"`
+	Rows            []map[string]any `json:"rows"`
+	RowCount        int              `json:"rowCount"`
+	TotalRows       int              `json:"totalRows,omitempty"`
+	ExecutionTimeMs int64            `json:"executionTimeMs"`
+	Truncated       bool             `json:"truncated"`
+	// Error is set when the stub/driver cannot execute the query.
+	// Callers must treat a non-empty Error as failure even if RowCount is 0.
+	Error string `json:"error,omitempty"`
 }
 
 // TestConnectionResult is the result of a connection test.
@@ -225,7 +232,7 @@ func (e *OracleExecutor) TestConnection(ctx context.Context, cfg ConnectionConfi
 	// 4. Also run "SELECT instance_name FROM v$instance"
 	return TestConnectionResult{
 		Success: false,
-		Error:   "Oracle Instant Client is not installed. This feature requires Oracle Instant Client libraries (libclntsh.so). See https://www.oracle.com/database/technologies/instant-client.html",
+		Error:   ErrOracleInstantClientMissing,
 	}
 }
 
@@ -240,34 +247,28 @@ func (e *OracleExecutor) TestConnection(ctx context.Context, cfg ConnectionConfi
 // 5. Handle Oracle-specific errors
 func (e *OracleExecutor) Execute(ctx context.Context, cfg ConnectionConfig, query string, maxRows int) *QueryResult {
 	start := time.Now()
+	elapsed := func() int64 { return time.Since(start).Milliseconds() }
 
 	if err := cfg.Validate(); err != nil {
 		return &QueryResult{
-			Columns:         nil,
-			Rows:            nil,
-			RowCount:        0,
-			ExecutionTimeMs: time.Since(start).Milliseconds(),
-			Truncated:       false,
+			ExecutionTimeMs: elapsed(),
+			Error:           fmt.Sprintf("invalid connection config: %v", err),
 		}
 	}
 
 	if strings.TrimSpace(query) == "" {
 		return &QueryResult{
-			Columns:         nil,
-			Rows:            nil,
-			RowCount:        0,
-			ExecutionTimeMs: time.Since(start).Milliseconds(),
-			Truncated:       false,
+			ExecutionTimeMs: elapsed(),
+			Error:           "sql query is required",
 		}
 	}
 
-	// Stub: return empty result with a message
+	// Stub: Instant Client / OCI driver is not wired — never pretend success.
+	_ = ctx
+	_ = maxRows
 	return &QueryResult{
-		Columns:         nil,
-		Rows:            nil,
-		RowCount:        0,
-		ExecutionTimeMs: time.Since(start).Milliseconds(),
-		Truncated:       false,
+		ExecutionTimeMs: elapsed(),
+		Error:           ErrOracleInstantClientMissing,
 	}
 }
 
@@ -585,52 +586,70 @@ func ParseParameterizedQuery(sql string) *ParameterizedQuery {
 	return pq
 }
 
-// BindParams replaces named parameters in the SQL with the provided
-// values. Returns the substituted SQL and any error.
-func (pq *ParameterizedQuery) BindParams(params map[string]any) (string, error) {
-	result := pq.SQL
-	for name, value := range params {
-		placeholder := ":" + name
-		altPlaceholder := "@" + name
-
-		escaped := escapeParamValue(value)
-		if strings.Contains(result, placeholder) {
-			result = strings.ReplaceAll(result, placeholder, escaped)
-		} else if strings.Contains(result, altPlaceholder) {
-			result = strings.ReplaceAll(result, altPlaceholder, escaped)
-		} else {
-			return "", fmt.Errorf("parameter %q not found in query", name)
-		}
-	}
-	return result, nil
+// NamedBind is a name/value pair for use with database/sql drivers
+// that support Oracle-style named placeholders (e.g. godror, go-ora).
+type NamedBind struct {
+	Name  string
+	Value any
 }
 
-// escapeParamValue safely escapes a parameter value for SQL injection
-// prevention. In production, this should use proper prepared statement
-// bindings through the Oracle driver.
-func escapeParamValue(value any) string {
+// PrepareNamed returns the original SQL (placeholders intact) and
+// named bind values for prepared-statement execution. This is the
+// only production-safe parameter path (GO-P2-5); string-escape
+// BindParams lives in oracle_bind_escape_test.go for tests only.
+func (pq *ParameterizedQuery) PrepareNamed(params map[string]any) (string, []NamedBind, error) {
+	binds := make([]NamedBind, 0, len(pq.Parameters))
+	for _, p := range pq.Parameters {
+		val, ok := params[p.Name]
+		if !ok {
+			return "", nil, fmt.Errorf("parameter %q not found in query", p.Name)
+		}
+		if err := validateParamValue(val); err != nil {
+			return "", nil, fmt.Errorf("parameter %q: %w", p.Name, err)
+		}
+		binds = append(binds, NamedBind{Name: p.Name, Value: val})
+	}
+	// Also reject unknown params so callers catch typos early.
+	for name := range params {
+		found := false
+		for _, p := range pq.Parameters {
+			if p.Name == name {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return "", nil, fmt.Errorf("parameter %q not found in query", name)
+		}
+	}
+	return pq.SQL, binds, nil
+}
+
+// validateParamValue rejects values that cannot be safely bound or escaped.
+func validateParamValue(value any) error {
 	if value == nil {
-		return "NULL"
+		return nil
 	}
 	switch v := value.(type) {
-	case int, int8, int16, int32, int64:
-		return fmt.Sprintf("%d", v)
-	case float32, float64:
-		return fmt.Sprintf("%v", v)
-	case bool:
-		if v {
-			return "1"
-		}
-		return "0"
 	case string:
-		escaped := strings.ReplaceAll(v, "'", "''")
-		return fmt.Sprintf("'%s'", escaped)
-	case time.Time:
-		return fmt.Sprintf("TO_DATE('%s', 'YYYY-MM-DD HH24:MI:SS')", v.Format("2006-01-02 15:04:05"))
-	default:
-		escaped := strings.ReplaceAll(fmt.Sprintf("%v", v), "'", "''")
-		return fmt.Sprintf("'%s'", escaped)
+		if strings.ContainsRune(v, 0) {
+			return errors.New("string parameter contains NUL byte")
+		}
+	case []byte:
+		if bytesContainNUL(v) {
+			return errors.New("[]byte parameter contains NUL byte")
+		}
 	}
+	return nil
+}
+
+func bytesContainNUL(b []byte) bool {
+	for _, c := range b {
+		if c == 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // ── Result Set Streaming ───────────────────────────────────────────

@@ -1,40 +1,76 @@
 # build-and-package.ps1 — Kairo IDE 一键构建 + 分卷打包脚本
 #
 # 功能:
+#   0. 清理残留进程 (避免 conpty.node / win-unpacked 被锁)
 #   1. 构建浏览器前端 (browser app)
 #   2. 构建 Go Runtime Agent
-#   3. 准备 bundled 资源 (Tomcat 6, JDT LS)
-#   4. 拷贝浏览器产物到 desktop
-#   5. 编译 TypeScript
-#   6. electron-builder 打包 Windows zip
-#   7. 创建分卷压缩 (每卷 ≤ 70MB)
+#   3. 准备 bundled 资源 (Tomcat 6, JDT LS, JDI Bridge)
+#   4. 拷贝浏览器产物 (含 prebuilds) 到 desktop + 编译 TypeScript
+#   5. electron-builder --win dir + afterPack 展开 native
+#   6. 生成 Kairo-Server.exe + 7z 分卷 (每卷 ≤ 70MB)
+#   7. 硬冒烟: 缺关键文件则失败 (可用 -AllowDegraded 降级为警告)
+#   8. 上传分卷到挂载盘 (默认 Z:\KairoIDE\yyyy-MM-dd\)
 #
 # 用法:
 #   .\scripts\build-and-package.ps1
-#   .\scripts\build-and-package.ps1 -VolumeSize 50  # 自定义分卷大小(MB)
-#   .\scripts\build-and-package.ps1 -SkipBuild        # 跳过构建,仅打包
-#   .\scripts\build-and-package.ps1 -SkipSplit        # 不创建分卷压缩
+#   .\scripts\build-and-package.ps1 -VolumeSize 50
+#   .\scripts\build-and-package.ps1 -SkipBuild
+#   .\scripts\build-and-package.ps1 -SkipSplit
+#   .\scripts\build-and-package.ps1 -AllowDegraded   # JDT LS / JDI 缺失时不硬失败
+#   .\scripts\build-and-package.ps1 -SkipLockCleanup # 不杀残留进程
+#   .\scripts\build-and-package.ps1 -PublishRoot "Z:\发布\KairoIDE"
+#   .\scripts\build-and-package.ps1 -PublishDate "2026-08-03"
+#   .\scripts\build-and-package.ps1 -SkipPublish
+#   .\scripts\build-and-package.ps1 -PublishRequired  # Z 盘不可用则整次失败
 #
 # 环境变量 (可选):
-#   $env:KAIRO_TOMCAT6_HOME = "E:\Apps\Tomcat6\apache-tomcat-6.0.53"  # 本地 Tomcat 6
-#   $env:KAIRO_JDTLS_HOME   = "E:\Apps\eclipse-jdt-ls"                 # 本地 JDT LS
-#   $env:KAIRO_JDTLS_ARCHIVE = "D:\jdtls-1.55.0.tar.gz"                # JDT LS 归档
+#   $env:KAIRO_TOMCAT6_HOME = "E:\Apps\Tomcat6\apache-tomcat-6.0.53"
+#   $env:KAIRO_JDTLS_HOME   = "E:\Apps\eclipse-jdt-ls"
+#   $env:KAIRO_JDTLS_ARCHIVE = "D:\jdtls-1.55.0.tar.gz"
+#   $env:KAIRO_PUBLISH_ROOT = "Z:\KairoIDE"          # 上传根目录 (其下按日期建子目录)
 #
-# 产物:
-#   apps/desktop/dist/Kairo-0.1.0-win.zip          (完整安装包)
-#   apps/desktop/dist/KairoIDE-v0.1.0-win-x64.7z.* (分卷压缩包)
+# 产物 (内网交付):
+#   apps/desktop/dist/KairoIDE-v0.1.0-win-x64.7z.*   (分卷, 解压即用)
+#   apps/desktop/dist/win-unpacked/                  (本地调试目录)
+#   <PublishRoot>\<yyyy-MM-dd>\*.7z.*                (挂载盘副本)
 
 [CmdletBinding()]
 param(
     [int]$VolumeSize = 70,
     [switch]$SkipBuild,
     [switch]$SkipSplit,
-    [switch]$SkipSmoke
+    [switch]$SkipSmoke,
+    [switch]$AllowDegraded,
+    [switch]$SkipLockCleanup,
+    [string]$PublishRoot = "",
+    [string]$PublishDate = "",
+    [switch]$SkipPublish,
+    [switch]$PublishRequired
 )
 
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 Set-StrictMode -Version 2.0
+
+# Resolve publish root: -PublishRoot > env > default Z:\KairoIDE
+if ([string]::IsNullOrWhiteSpace($PublishRoot)) {
+    if (-not [string]::IsNullOrWhiteSpace($env:KAIRO_PUBLISH_ROOT)) {
+        $PublishRoot = $env:KAIRO_PUBLISH_ROOT.Trim()
+    } else {
+        $PublishRoot = "Z:\KairoIDE"
+    }
+}
+if ([string]::IsNullOrWhiteSpace($PublishDate)) {
+    $PublishDate = Get-Date -Format "yyyy-MM-dd"
+} else {
+    # Normalize common inputs: 20260803 / 2026/08/03 / 2026-08-03
+    $rawDate = $PublishDate.Trim()
+    if ($rawDate -match '^\d{8}$') {
+        $PublishDate = "{0}-{1}-{2}" -f $rawDate.Substring(0,4), $rawDate.Substring(4,2), $rawDate.Substring(6,2)
+    } elseif ($rawDate -match '^\d{4}[/-]\d{1,2}[/-]\d{1,2}$') {
+        $PublishDate = (Get-Date $rawDate).ToString("yyyy-MM-dd")
+    }
+}
 
 # ─── 预检: 必需的工具链 ─────────────────────────────
 $missing = @()
@@ -61,6 +97,215 @@ function Step($msg)   { Write-Host "`n>>> $msg" -ForegroundColor Cyan }
 function Ok($msg)     { Write-Host "  [OK]   $msg" -ForegroundColor Green }
 function Warn($msg)   { Write-Host "  [WARN] $msg" -ForegroundColor Yellow }
 function Err($msg)    { Write-Host "  [FAIL] $msg" -ForegroundColor Red; exit 1 }
+
+# Soft requirement: warn-only when -AllowDegraded, otherwise hard-fail.
+function Require-OrDegrade {
+    param(
+        [Parameter(Mandatory)][string]$Message,
+        [switch]$Critical
+    )
+    if ($AllowDegraded -and -not $Critical) {
+        Warn $Message
+        return $false
+    }
+    Err $Message
+    return $false
+}
+
+# Kill leftover Kairo / Theia / agent processes that lock package files
+# (conpty.node, app.asar, win-unpacked). Does NOT touch Cursor itself.
+function Stop-KairoLockHolders {
+    $patterns = @(
+        'kairo-runtime\.exe',
+        'Kairo\.exe',
+        'Kairo-Server\.exe',
+        'apps\\browser\\lib\\backend',
+        'apps\\desktop\\dist\\win-unpacked',
+        'artifacts\\qa\\',
+        'KAIRO_AGENT_URL='
+    )
+    $hit = @()
+    try {
+        $hit = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+            $name = $_.Name
+            $cmd = if ($null -eq $_.CommandLine) { '' } else { $_.CommandLine }
+            if ($name -match '^(kairo-runtime|Kairo|Kairo-Server)\.exe$') { return $true }
+            foreach ($p in $patterns) {
+                if ($cmd -match $p) { return $true }
+            }
+            return $false
+        })
+    } catch {
+        Warn "无法枚举进程: $($_.Exception.Message)"
+        return
+    }
+    if ($hit.Count -eq 0) {
+        Ok "无残留 Kairo/Theia 占用进程"
+        return
+    }
+    Warn "发现 $($hit.Count) 个可能锁文件的残留进程,正在结束..."
+    $killed = 0
+    foreach ($proc in $hit) {
+        $id = $proc.ProcessId
+        # Skip our own shell / current packaging tree by name only — taskkill /T is enough.
+        & taskkill.exe /F /T /PID $id 2>$null | Out-Null
+        if ($LASTEXITCODE -eq 0) { $killed++ }
+    }
+    Start-Sleep -Seconds 2
+    Ok "已尝试结束 $killed / $($hit.Count) 个残留进程"
+
+    # If browser prebuilds are still locked, rename aside so theia can recopy.
+    $conpty = Join-Path $RepoRoot "apps/browser/lib/prebuilds/win32-x64/conpty.node"
+    if (Test-Path $conpty) {
+        try {
+            $fs = [System.IO.File]::Open($conpty, 'Open', 'ReadWrite', 'None')
+            $fs.Close()
+        } catch {
+            $aside = "$conpty.locked-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+            try {
+                Move-Item -LiteralPath $conpty -Destination $aside -Force -ErrorAction Stop
+                Warn "conpty.node 仍被占用,已旁路为 $(Split-Path $aside -Leaf)"
+            } catch {
+                Warn "conpty.node 旁路失败: $($_.Exception.Message)"
+            }
+        }
+    }
+}
+
+# Preflight: required inputs must exist before electron-builder runs.
+function Assert-PackPreflight {
+    param([string]$DesktopRoot)
+
+    $checks = @(
+        @{ Path = (Join-Path $DesktopRoot "lib/main.js"); Crit = $true; Label = "lib/main.js"; Msg = "desktop lib/main.js 缺失 — 先编译 TypeScript" },
+        @{ Path = (Join-Path $DesktopRoot "lib/backend/main.js"); Crit = $true; Label = "lib/backend/main.js"; Msg = "browser backend 未拷贝 — 运行 copy-browser-artifacts" },
+        @{ Path = (Join-Path $DesktopRoot "lib/prebuilds/win32-x64/conpty.node"); Crit = $true; Label = "conpty.node"; Msg = "prebuilds/conpty.node 缺失 — 终端将不可用" },
+        @{ Path = (Join-Path $DesktopRoot "lib/backend/native/watcher.node"); Crit = $true; Label = "watcher.node"; Msg = "backend/native/watcher.node 缺失" },
+        @{ Path = (Join-Path $DesktopRoot "bundled/tomcat6/apache-tomcat-6.0.53/bin/catalina.bat"); Crit = $true; Label = "tomcat6"; Msg = "Tomcat 6 未就绪" },
+        @{ Path = (Join-Path $DesktopRoot "bundled/kairo-jdi-bridge.jar"); Crit = $false; Label = "kairo-jdi-bridge.jar"; Msg = "kairo-jdi-bridge.jar 未就绪 — Java 调试不可用" },
+        @{ Path = (Join-Path $DesktopRoot "bundled/jdtls/config_win/config.ini"); Crit = $false; Label = "jdtls"; Msg = "JDT LS 未就绪 — Java 智能提示不可用" },
+        @{ Path = (Join-Path $RepoRoot "runtime-agent/bin/kairo-runtime.exe"); Crit = $true; Label = "kairo-runtime.exe"; Msg = "kairo-runtime.exe 未构建" }
+    )
+    foreach ($c in $checks) {
+        $exists = $false
+        if (Test-Path -LiteralPath $c.Path) {
+            $item = Get-Item -LiteralPath $c.Path
+            $exists = $item.PSIsContainer -or ($item.Length -gt 0)
+        }
+        if ($exists) {
+            Ok "preflight: $($c.Label)"
+        } else {
+            Require-OrDegrade -Message $c.Msg -Critical:$c.Crit
+        }
+    }
+}
+
+# Smoke check helper (shared counter via script scope)
+$script:smokeFailCount = 0
+function Invoke-SmokeCheck {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$OkMsg,
+        [Parameter(Mandatory)][string]$FailMsg,
+        [switch]$Critical
+    )
+    if ((Test-Path -LiteralPath $Path) -and ((Get-Item -LiteralPath $Path).PSIsContainer -or (Get-Item -LiteralPath $Path).Length -gt 0)) {
+        Ok $OkMsg
+        return
+    }
+    if ($AllowDegraded -and -not $Critical) {
+        Warn $FailMsg
+    } else {
+        Write-Host "  [FAIL] $FailMsg" -ForegroundColor Red
+        $script:smokeFailCount++
+    }
+}
+
+# Copy split volumes to mounted share: <PublishRoot>\<yyyy-MM-dd>\
+function Publish-ReleaseArtifacts {
+    param(
+        [Parameter(Mandatory)][string]$SourceDist,
+        [Parameter(Mandatory)][string]$SplitName,
+        [Parameter(Mandatory)][string]$Root,
+        [Parameter(Mandatory)][string]$DateFolder
+    )
+
+    if ($SkipPublish) {
+        Warn "已跳过上传 (-SkipPublish)"
+        return $null
+    }
+    if ($SkipSplit) {
+        Warn "已跳过分卷 (-SkipSplit), 无 .7z 可上传"
+        return $null
+    }
+
+    $volumes = @(Get-ChildItem -Path $SourceDist -Filter "$SplitName.7z.*" -File -ErrorAction SilentlyContinue |
+                 Sort-Object Name)
+    if ($volumes.Count -eq 0) {
+        $msg = "未找到分卷 $SplitName.7z.* ,无法上传到 $Root"
+        if ($PublishRequired) { Err $msg } else { Warn $msg }
+        return $null
+    }
+
+    $rootDrive = [System.IO.Path]::GetPathRoot($Root)
+    if ($rootDrive -and -not (Test-Path -LiteralPath $rootDrive)) {
+        $msg = "发布盘不可用: $rootDrive (检查挂载)。目标应为 $Root\$DateFolder"
+        if ($PublishRequired) { Err $msg } else { Warn $msg }
+        return $null
+    }
+
+    $dest = Join-Path $Root $DateFolder
+    try {
+        New-Item -ItemType Directory -Force -Path $dest | Out-Null
+    } catch {
+        $msg = "无法创建发布目录 $dest : $($_.Exception.Message)"
+        if ($PublishRequired) { Err $msg } else { Warn $msg }
+        return $null
+    }
+
+    Step "上传分卷到发布目录"
+    Write-Host "  目标: $dest" -ForegroundColor Cyan
+    $copied = 0
+    $bytes = 0L
+    foreach ($vol in $volumes) {
+        $target = Join-Path $dest $vol.Name
+        try {
+            Copy-Item -LiteralPath $vol.FullName -Destination $target -Force -ErrorAction Stop
+            $copied++
+            $bytes += $vol.Length
+            $sizeMb = [math]::Round($vol.Length / 1MB, 2)
+            Ok "$($vol.Name)  ($sizeMb MB)"
+        } catch {
+            $msg = "复制失败 $($vol.Name): $($_.Exception.Message)"
+            if ($PublishRequired) { Err $msg } else { Warn $msg; return $null }
+        }
+    }
+
+    $readme = Join-Path $dest "README-解压说明.txt"
+    $readmeBody = @"
+Kairo IDE 内网分发包 — $DateFolder
+
+解压:
+  1. 安装 7-Zip
+  2. 右键 $SplitName.7z.001 → 7-Zip → 解压到当前文件夹
+  3. 得到程序目录后双击:
+       Kairo.exe          桌面版
+       Kairo-Server.exe   浏览器版 (无窗口)
+
+目标机需 JDK 17+。
+详见仓库 docs/DEPLOY-GUIDE.md
+"@
+    try {
+        Set-Content -LiteralPath $readme -Value $readmeBody -Encoding UTF8
+        Ok "README-解压说明.txt"
+    } catch {
+        Warn "无法写入说明文件: $($_.Exception.Message)"
+    }
+
+    $totalMb = [math]::Round($bytes / 1MB, 1)
+    Ok "已上传 $copied 个分卷到 $dest  (共 $totalMb MB)"
+    return $dest
+}
 
 # ─── 标题 ──────────────────────────────────────────────────
 $banner = @"
@@ -141,9 +386,9 @@ function Invoke-StaleCleanup {
     foreach ($p in $patterns) {
         if (-not (Test-Path $p.Dir)) { continue }
         foreach ($glob in $p.Globs) {
-            $hits = Get-ChildItem -Path $p.Dir -Filter $glob -Force -ErrorAction SilentlyContinue |
-                    Sort-Object LastWriteTime -Descending
-            if (-not $hits) { continue }
+            $hits = @(Get-ChildItem -Path $p.Dir -Filter $glob -Force -ErrorAction SilentlyContinue |
+                    Sort-Object LastWriteTime -Descending)
+            if ($hits.Count -eq 0) { continue }
             $skip = [Math]::Min($KeepLatest, $hits.Count)
             $staleList = $hits | Select-Object -Skip $skip
             foreach ($s in $staleList) {
@@ -173,6 +418,14 @@ function Invoke-StaleCleanup {
     } else {
         Ok "无需清理 (无残留旁路目录)"
     }
+}
+
+# ─── 阶段 0: 清理占用 + 旁路目录 ───────────────────────────
+if (-not $SkipLockCleanup) {
+    Step "阶段 0: 清理残留进程 (防文件锁)"
+    Stop-KairoLockHolders
+} else {
+    Warn "已跳过残留进程清理 (-SkipLockCleanup)"
 }
 
 Invoke-StaleCleanup -KeepLatest 1
@@ -237,10 +490,36 @@ if (-not $SkipBuild) {
         if ($LASTEXITCODE -ge 8) { Err "JDT LS 复制失败" }
         Ok "JDT LS 复制完成"
     } else {
-        Warn "JDT LS 未找到。Java 智能提示将不可用。"
-        Warn "设置 KAIRO_JDTLS_HOME 或 KAIRO_JDTLS_ARCHIVE 环境变量可包含 JDT LS。"
+        Require-OrDegrade -Message @"
+JDT LS 未找到。设置环境变量后重试:
+  `$env:KAIRO_JDTLS_HOME = 'E:\Apps\eclipse-jdt-ls'
+或 `$env:KAIRO_JDTLS_ARCHIVE = 'D:\jdtls-1.55.0.tar.gz'
+或手动放到: $jdtlsTarget
+"@
         New-Item -ItemType Directory -Force -Path $jdtlsTarget | Out-Null
         New-Item -ItemType File -Force -Path "$jdtlsTarget/PLACEHOLDER.txt" -Value "JDT LS not bundled. Set KAIRO_JDTLS_HOME env var." | Out-Null
+    }
+
+    # JDI Bridge jar (Java Debug Adapter)
+    $jdiJarTarget = Join-Path $bundledDir "kairo-jdi-bridge.jar"
+    $jdiJarRoot = Join-Path $RepoRoot "bundled/kairo-jdi-bridge.jar"
+    $jdiBuildCmd = Join-Path $RepoRoot "scripts/build-jdi-bridge.cmd"
+    if ((Test-Path $jdiJarTarget) -and ((Get-Item $jdiJarTarget).Length -gt 0)) {
+        Ok "kairo-jdi-bridge.jar 已就绪"
+    } elseif ((Test-Path $jdiJarRoot) -and ((Get-Item $jdiJarRoot).Length -gt 0)) {
+        Copy-Item $jdiJarRoot $jdiJarTarget -Force
+        Ok "kairo-jdi-bridge.jar 已从 repo bundled/ 复制"
+    } elseif (Test-Path $jdiBuildCmd) {
+        Warn "正在编译 kairo-jdi-bridge.jar..."
+        & cmd.exe /c $jdiBuildCmd
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path $jdiJarRoot)) {
+            Require-OrDegrade -Message "JDI Bridge 编译失败 — Java 调试适配器将不可用"
+        } else {
+            Copy-Item $jdiJarRoot $jdiJarTarget -Force
+            Ok "kairo-jdi-bridge.jar 已编译并复制"
+        }
+    } else {
+        Require-OrDegrade -Message "kairo-jdi-bridge.jar 未找到 — 运行 scripts/build-jdi-bridge.cmd"
     }
 
     Step "阶段 4/5: 拷贝浏览器产物 + 编译 TypeScript"
@@ -256,7 +535,30 @@ if (-not $SkipBuild) {
     } finally { Pop-Location }
 } else {
     Step "跳过构建阶段 (--SkipBuild)"
+    $bundledDir = Join-Path $DesktopDir "bundled"
+    $jdiJarTarget = Join-Path $bundledDir "kairo-jdi-bridge.jar"
+    $jdiJarRoot = Join-Path $RepoRoot "bundled/kairo-jdi-bridge.jar"
+    if (-not (Test-Path $jdiJarTarget) -and (Test-Path $jdiJarRoot)) {
+        New-Item -ItemType Directory -Force -Path $bundledDir | Out-Null
+        Copy-Item $jdiJarRoot $jdiJarTarget -Force
+        Ok "SkipBuild: 已补拷 kairo-jdi-bridge.jar"
+    }
+    # Refresh browser artifacts if prebuilds were never staged (common after old packs).
+    $conptyDesktop = Join-Path $DesktopDir "lib/prebuilds/win32-x64/conpty.node"
+    if (-not (Test-Path $conptyDesktop)) {
+        Warn "SkipBuild: 缺少 prebuilds,正在补拷浏览器产物..."
+        Push-Location $DesktopDir
+        try {
+            node scripts/copy-browser-artifacts.js --strict
+            if ($LASTEXITCODE -ne 0) { Err "SkipBuild 补拷浏览器产物失败" }
+            Ok "SkipBuild: 浏览器产物已补齐"
+        } finally { Pop-Location }
+    }
 }
+
+# ─── 打包前预检 ────────────────────────────────────────────
+Step "打包前预检 (关键资源)"
+Assert-PackPreflight -DesktopRoot $DesktopDir
 
 # ─── 阶段 5: electron-builder 打包 (仅 win-unpacked) ──────
 Step "阶段 5/5: electron-builder 打包 (dir 模式, 仅创建目录)"
@@ -314,11 +616,12 @@ if ($useStageOutput) {
 
 Push-Location $DesktopDir
 try {
+    # dir target only — NSIS/zip are slow and zip lacks Kairo-Server.exe;
+    # intranet distribution uses the 7z volumes created below.
     if ($useStageOutput) {
-        # 用绝对路径,避免相对路径在 $DesktopDir cwd 下被解析到 apps/desktop/$stageDirName 而非 dist/$stageDirName
-        pnpm electron-builder --win "--config.directories.output=$stageDir"
+        pnpm electron-builder --win --config.win.target=dir "--config.directories.output=$stageDir"
     } else {
-        pnpm electron-builder --win
+        pnpm electron-builder --win --config.win.target=dir
     }
     if ($LASTEXITCODE -ne 0) {
         $checkUnpacked = Join-Path $stageDir "win-unpacked"
@@ -482,37 +785,36 @@ if ($useStageOutput -and (Test-Path $liveUnpackedDir)) {
     }
 }
 
-# 快速冒烟验证
+# 冒烟验证 — 关键项默认硬失败; -AllowDegraded 时非关键项降级为警告
 if (-not $SkipSmoke -and (Test-Path (Join-Path $liveUnpackedDir "Kairo.exe"))) {
-    $agentInDist = Join-Path $liveUnpackedDir "resources/bin/kairo-runtime.exe"
-    if (Test-Path $agentInDist) {
-        Ok "kairo-runtime.exe 已嵌入"
-    } else {
-        Warn "kairo-runtime.exe 未在 resources/bin/ 中找到"
+    Step "冒烟验证 (产物完整性)"
+    $script:smokeFailCount = 0
+
+    Invoke-SmokeCheck -Critical -Path (Join-Path $liveUnpackedDir "Kairo.exe") `
+        -OkMsg "Kairo.exe 已生成" -FailMsg "Kairo.exe 缺失"
+    Invoke-SmokeCheck -Critical -Path (Join-Path $liveUnpackedDir "Kairo-Server.exe") `
+        -OkMsg "Kairo-Server.exe 已生成" -FailMsg "Kairo-Server.exe 缺失"
+    Invoke-SmokeCheck -Critical -Path (Join-Path $liveUnpackedDir "resources/bin/kairo-runtime.exe") `
+        -OkMsg "kairo-runtime.exe 已嵌入" -FailMsg "kairo-runtime.exe 未嵌入"
+    Invoke-SmokeCheck -Critical -Path (Join-Path $liveUnpackedDir "resources/bundled/tomcat6/apache-tomcat-6.0.53/bin/catalina.bat") `
+        -OkMsg "Tomcat 6 已嵌入" -FailMsg "Tomcat 6 未嵌入"
+    Invoke-SmokeCheck -Path (Join-Path $liveUnpackedDir "resources/bundled/jdtls/config_win/config.ini") `
+        -OkMsg "JDT LS 已嵌入" -FailMsg "JDT LS 未嵌入 (Java 智能提示不可用)"
+    Invoke-SmokeCheck -Path (Join-Path $liveUnpackedDir "resources/bundled/kairo-jdi-bridge.jar") `
+        -OkMsg "kairo-jdi-bridge.jar 已嵌入" -FailMsg "kairo-jdi-bridge.jar 未嵌入 (Java 调试不可用)"
+    Invoke-SmokeCheck -Critical -Path (Join-Path $liveUnpackedDir "resources/app.asar.unpacked/lib/backend/native/watcher.node") `
+        -OkMsg "asar.unpacked native (watcher.node) 已展开" -FailMsg "asar.unpacked/native 缺失 — afterPack 未生效"
+    Invoke-SmokeCheck -Critical -Path (Join-Path $liveUnpackedDir "resources/app.asar.unpacked/lib/prebuilds/win32-x64/conpty.node") `
+        -OkMsg "asar.unpacked prebuilds (conpty.node) 已展开" -FailMsg "asar.unpacked/prebuilds 缺失 — 终端不可用"
+    Invoke-SmokeCheck -Path (Join-Path $liveUnpackedDir "start-browser-mode.cmd") `
+        -OkMsg "start-browser-mode.cmd 已复制" -FailMsg "start-browser-mode.cmd 未复制"
+
+    if ($script:smokeFailCount -gt 0) {
+        Err "冒烟验证失败: $($script:smokeFailCount) 项关键产物缺失。修复后重跑,或加 -AllowDegraded 仅作降级包。"
     }
-    $jdtlsInDist = Join-Path $liveUnpackedDir "resources/bundled/jdtls/config_win/config.ini"
-    if (Test-Path $jdtlsInDist) {
-        Ok "JDT LS 已嵌入"
-    } else {
-        Warn "JDT LS 未嵌入 (Java 智能提示不可用)"
-    }
-    $tomcatInDist = Join-Path $liveUnpackedDir "resources/bundled/tomcat6/apache-tomcat-6.0.53/bin/catalina.bat"
-    if (Test-Path $tomcatInDist) {
-        Ok "Tomcat 6 已嵌入"
-    } else {
-        Warn "Tomcat 6 未嵌入"
-    }
-    $serverExeInDist = Join-Path $liveUnpackedDir "Kairo-Server.exe"
-    if (Test-Path $serverExeInDist) {
-        $wrapperSizeKB = [math]::Round((Get-Item $serverExeInDist).Length / 1KB, 0)
-        if ($wrapperSizeKB -lt 5000) {
-            Ok "Kairo-Server.exe (Go 包装器, ${wrapperSizeKB}KB) — 已优化"
-        } else {
-            Ok "Kairo-Server.exe 已生成 (${wrapperSizeKB}KB)"
-        }
-    } else {
-        Warn "Kairo-Server.exe 未生成"
-    }
+    Ok "冒烟验证全部通过"
+} elseif (-not $SkipSmoke) {
+    Err "冒烟验证失败: 未找到 win-unpacked/Kairo.exe"
 }
 
 # ─── 将 stage 产物合并回 dist(尽力而为) ─────────────────
@@ -565,10 +867,28 @@ if ($useStageOutput -and (Test-Path $liveUnpackedDir)) {
     }
 }
 
+# ─── 上传到挂载盘 ──────────────────────────────────────────
+$publishedDir = $null
+if (-not $SkipPublish) {
+    $publishedDir = Publish-ReleaseArtifacts `
+        -SourceDist $DistDir `
+        -SplitName $SplitBase `
+        -Root $PublishRoot `
+        -DateFolder $PublishDate
+}
+
 # ─── 收尾 ──────────────────────────────────────────────────
 # 注意:7z 分卷压缩已在「创建分卷压缩 (直接从 win-unpacked 目录)」步骤中完成,
 # 此处仅做汇总展示,不再重复压缩(之前还有一个从 $ZipPath 再次分卷的旧逻辑,
 # 已被替换为直接从 win-unpacked 压缩,更省时间和磁盘)。
+$publishLine = if ($publishedDir) {
+    "║  已上传: $publishedDir"
+} elseif ($SkipPublish) {
+    "║  上传: 已跳过 (-SkipPublish)"
+} else {
+    "║  上传: 未完成 (检查 $PublishRoot 是否可写; 可用 -PublishRequired 强制失败)"
+}
+
 $endBanner = @"
 
 ╔══════════════════════════════════════════════════════════╗
@@ -590,6 +910,8 @@ if (-not $SkipSplit) {
 
 $footer = @"
 
+║                                                          ║
+$publishLine
 ║                                                          ║
 ║  发送给内网用户:                                          ║
 ║    1. 将所有 .7z.00* 文件发给用户                          ║

@@ -105,6 +105,13 @@ test('accepts configuration with root context path', () => {
   assert.strictEqual(result.valid, true);
 });
 
+test('accepts multilevel context path', () => {
+  const result = validateRunConfigurationDocument(document([configuration({
+    server: { id: 'srv-1', httpPort: 8080, debugPort: 8000, contextPath: '/app/admin' },
+  })]));
+  assert.strictEqual(result.valid, true);
+});
+
 test('rejects configuration with port out of range', () => {
   const result = validateRunConfigurationDocument(document([configuration({
     server: { id: 'srv-1', httpPort: 80, debugPort: 8000, contextPath: '/app' },

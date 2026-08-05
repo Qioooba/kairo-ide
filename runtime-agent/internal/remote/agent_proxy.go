@@ -1,3 +1,5 @@
+//go:build remote
+
 // Package remote implements the remote agent proxy for Phase 3+
 // remote Linux agent functionality.
 //

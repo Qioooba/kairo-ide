@@ -415,10 +415,16 @@ func TestExecutor_Timeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
-	// Test that the executor handles context cancellation
+	// Stub Execute must fail honestly (Instant Client missing), not empty success.
 	result := executor.Execute(ctx, cfg, "SELECT 1 FROM DUAL", 100)
 	if result == nil {
 		t.Fatal("Execute() returned nil result")
+	}
+	if result.Error == "" {
+		t.Fatal("Execute() should set Error without Instant Client")
+	}
+	if !strings.Contains(result.Error, "Instant Client") {
+		t.Errorf("Execute Error = %q, want Instant Client message", result.Error)
 	}
 
 	// Test with empty query
@@ -429,11 +435,17 @@ func TestExecutor_Timeout(t *testing.T) {
 	if result2.RowCount != 0 {
 		t.Errorf("RowCount = %d, want 0 for empty query", result2.RowCount)
 	}
+	if result2.Error == "" {
+		t.Fatal("Execute() empty query should set Error")
+	}
 
 	// Test connection test
 	testResult := executor.TestConnection(context.Background(), cfg)
 	if testResult.Success {
 		t.Error("TestConnection should fail without Oracle client")
+	}
+	if !strings.Contains(testResult.Error, "Instant Client") {
+		t.Errorf("TestConnection Error = %q, want Instant Client message", testResult.Error)
 	}
 }
 
@@ -769,27 +781,65 @@ func TestBindParams(t *testing.T) {
 // TestEscapeParamValue tests parameter value escaping.
 func TestEscapeParamValue(t *testing.T) {
 	tests := []struct {
-		name  string
-		value any
-		want  string
+		name    string
+		value   any
+		want    string
+		wantErr bool
 	}{
-		{"nil", nil, "NULL"},
-		{"int", 42, "42"},
-		{"int64", int64(999), "999"},
-		{"float64", 3.14, "3.14"},
-		{"bool true", true, "1"},
-		{"bool false", false, "0"},
-		{"string", "hello", "'hello'"},
-		{"string with quote", "it's", "'it''s'"},
-		{"time", time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC), "TO_DATE('2024-01-15 10:30:00', 'YYYY-MM-DD HH24:MI:SS')"},
+		{"nil", nil, "NULL", false},
+		{"int", 42, "42", false},
+		{"int64", int64(999), "999", false},
+		{"float64", 3.14, "3.14", false},
+		{"bool true", true, "1", false},
+		{"bool false", false, "0", false},
+		{"string", "hello", "'hello'", false},
+		{"string with quote", "it's", "'it''s'", false},
+		{"nul byte", "a\x00b", "", true},
+		{"unsupported", struct{ X int }{1}, "", true},
+		{"time", time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC), "TO_DATE('2024-01-15 10:30:00', 'YYYY-MM-DD HH24:MI:SS')", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := escapeParamValue(tt.value)
+			got, err := escapeParamValue(tt.value)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("escapeParamValue: %v", err)
+			}
 			if got != tt.want {
 				t.Errorf("escapeParamValue = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestPrepareNamed(t *testing.T) {
+	pq := ParseParameterizedQuery("SELECT * FROM users WHERE id = :userId AND name = :userName")
+	sql, binds, err := pq.PrepareNamed(map[string]any{"userId": 42, "userName": "Ada"})
+	if err != nil {
+		t.Fatalf("PrepareNamed: %v", err)
+	}
+	if sql != pq.SQL {
+		t.Errorf("SQL mutated: %q", sql)
+	}
+	if len(binds) != 2 {
+		t.Fatalf("binds = %d, want 2", len(binds))
+	}
+	_, _, err = pq.PrepareNamed(map[string]any{"userId": 1})
+	if err == nil {
+		t.Fatal("expected error for missing param")
+	}
+	_, _, err = pq.PrepareNamed(map[string]any{"userId": 1, "userName": "x", "extra": 3})
+	if err == nil {
+		t.Fatal("expected error for unknown param")
+	}
+	_, _, err = pq.PrepareNamed(map[string]any{"userId": "a\x00b", "userName": "x"})
+	if err == nil {
+		t.Fatal("expected error for NUL byte")
 	}
 }
 
@@ -960,6 +1010,9 @@ func TestExecutor_Execute_InvalidConfig(t *testing.T) {
 	}
 	if result.RowCount != 0 {
 		t.Errorf("RowCount = %d, want 0", result.RowCount)
+	}
+	if result.Error == "" || !strings.Contains(result.Error, "invalid connection config") {
+		t.Errorf("Error = %q, want invalid connection config", result.Error)
 	}
 }
 

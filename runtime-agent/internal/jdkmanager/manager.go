@@ -5,6 +5,7 @@
 package jdkmanager
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -42,7 +43,8 @@ func NewManager(bundledDir string) *Manager {
 }
 
 // Detect finds the best available JDK 17+ on the system.
-// Priority: KAIRO_JDK_HOME > bundled/jdk17 > KAIRO_JDT_LS_JRE > JAVA_HOME > PATH
+// Priority: KAIRO_JDK_HOME > host-jdk.json (Electron persist) >
+// bundled/jdk21/jdk17 > KAIRO_JDT_LS_JRE > JAVA_HOME > PATH
 func (m *Manager) Detect() Status {
 	searchPaths := make([]string, 0)
 	javaExe := "java"
@@ -59,11 +61,22 @@ func (m *Manager) Detect() Status {
 		}
 	}
 
-	// 2. Bundled JDK 17
-	bundledJava := filepath.Join(m.BundledDir, "jdk17", "bin", javaExe)
-	searchPaths = append(searchPaths, bundledJava)
-	if jdk, ok := checkJava(bundledJava); ok && jdk.Major >= 17 {
-		return Status{Available: true, JDK: jdk, SearchPaths: searchPaths}
+	// 1b. Persisted Electron host JDK (userData/host-jdk.json)
+	for _, persistedHome := range loadPersistedJDKHomes() {
+		homeJava := filepath.Join(persistedHome, "bin", javaExe)
+		searchPaths = append(searchPaths, homeJava)
+		if jdk, ok := checkJava(homeJava); ok && jdk.Major >= 17 {
+			return Status{Available: true, JDK: jdk, SearchPaths: searchPaths}
+		}
+	}
+
+	// 2. Bundled JDK (prefer 21 when packaged, fall back to 17)
+	for _, name := range []string{"jdk21", "jdk17"} {
+		bundledJava := filepath.Join(m.BundledDir, name, "bin", javaExe)
+		searchPaths = append(searchPaths, bundledJava)
+		if jdk, ok := checkJava(bundledJava); ok && jdk.Major >= 17 {
+			return Status{Available: true, JDK: jdk, SearchPaths: searchPaths}
+		}
 	}
 
 	// 3. KAIRO_JDT_LS_JRE environment variable
@@ -106,6 +119,103 @@ func (m *Manager) Detect() Status {
 		Message:     "No JDK 17+ found. Please install a JDK 17 or later, or set JAVA_HOME.",
 		SearchPaths: searchPaths,
 	}
+}
+
+// ResolveJavaHome returns the best available JDK 17+ home for running
+// Tomcat and other Java workloads. It mirrors Detect() and is used when
+// callers do not supply an explicit javaHome (e.g. POST /api/v1/servers
+// with only projectId).
+func ResolveJavaHome(bundledDir string) (string, error) {
+	status := NewManager(bundledDir).Detect()
+	if status.Available && status.JDK != nil {
+		return status.JDK.Home, nil
+	}
+	return "", fmt.Errorf(
+		"no JDK 17+ found for Tomcat: install a JDK, set JAVA_HOME, or run `pnpm bundled:prepare` to materialize bundled/jdk17 (searched: %v)",
+		status.SearchPaths,
+	)
+}
+
+// persistedJDKConfig is the on-disk shape written by Electron jdk-check.ts.
+type persistedJDKConfig struct {
+	JavaHome string `json:"javaHome"`
+}
+
+// loadPersistedJDKHomes returns JDK homes from host-jdk.json candidates.
+// Electron writes <userData>/host-jdk.json; agent dataDir is typically
+// <userData>/kairo-data. KAIRO_JDK_CONFIG / KAIRO_DATA_DIR override paths.
+func loadPersistedJDKHomes() []string {
+	candidates := make([]string, 0, 4)
+	if cfg := strings.TrimSpace(os.Getenv("KAIRO_JDK_CONFIG")); cfg != "" {
+		candidates = append(candidates, cfg)
+	}
+	if dataDir := strings.TrimSpace(os.Getenv("KAIRO_DATA_DIR")); dataDir != "" {
+		candidates = append(candidates,
+			filepath.Join(dataDir, "host-jdk.json"),
+			filepath.Join(filepath.Dir(dataDir), "host-jdk.json"),
+		)
+	}
+	// Best-effort Electron userData defaults when env is missing.
+	if runtime.GOOS == "windows" {
+		if appData := os.Getenv("APPDATA"); appData != "" {
+			for _, name := range []string{"Kairo", "kairo-ide", "@kairo/desktop"} {
+				candidates = append(candidates, filepath.Join(appData, name, "host-jdk.json"))
+			}
+		}
+	} else if runtime.GOOS == "darwin" {
+		home, _ := os.UserHomeDir()
+		if home != "" {
+			for _, name := range []string{"Kairo", "kairo-ide"} {
+				candidates = append(candidates, filepath.Join(home, "Library", "Application Support", name, "host-jdk.json"))
+			}
+		}
+	} else {
+		home, _ := os.UserHomeDir()
+		if home != "" {
+			for _, name := range []string{"Kairo", "kairo-ide"} {
+				candidates = append(candidates, filepath.Join(home, ".config", name, "host-jdk.json"))
+			}
+		}
+	}
+
+	seen := make(map[string]struct{})
+	homes := make([]string, 0, len(candidates))
+	for _, cfgPath := range candidates {
+		home := readPersistedJDKHome(cfgPath)
+		if home == "" {
+			continue
+		}
+		key := strings.ToLower(filepath.Clean(home))
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		homes = append(homes, home)
+	}
+	return homes
+}
+
+func readPersistedJDKHome(cfgPath string) string {
+	raw, err := os.ReadFile(cfgPath)
+	if err != nil {
+		return ""
+	}
+	var cfg persistedJDKConfig
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return ""
+	}
+	home := strings.TrimSpace(cfg.JavaHome)
+	if home == "" {
+		return ""
+	}
+	javaExe := "java"
+	if runtime.GOOS == "windows" {
+		javaExe = "java.exe"
+	}
+	if _, err := os.Stat(filepath.Join(home, "bin", javaExe)); err != nil {
+		return ""
+	}
+	return home
 }
 
 // checkJava runs "java -version" and parses the output.

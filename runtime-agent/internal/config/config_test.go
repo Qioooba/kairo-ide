@@ -60,7 +60,8 @@ func TestValidate(t *testing.T) {
 	}{
 		{"default", func(c *Config) {}, true},
 		{"no bind", func(c *Config) { c.BindAddress = "" }, false},
-		{"bad port", func(c *Config) { c.Port = 0 }, false},
+		{"ephemeral port", func(c *Config) { c.Port = 0 }, true},
+		{"negative port", func(c *Config) { c.Port = -1 }, false},
 		{"half tls", func(c *Config) { c.TLSCert = "a" }, false},
 	}
 	for _, tc := range cases {
@@ -169,6 +170,16 @@ func TestBind_OtherFlags(t *testing.T) {
 	}
 	if c.TLSCert != "/p/cert" || c.TLSKey != "/p/key" {
 		t.Errorf("TLS = %+v", c)
+	}
+}
+
+func TestBind_EphemeralPort(t *testing.T) {
+	c, _, err := Bind([]string{"--port", "0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Port != 0 {
+		t.Errorf("Port = %d, want 0 (ephemeral)", c.Port)
 	}
 }
 

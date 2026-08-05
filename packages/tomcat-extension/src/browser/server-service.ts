@@ -23,17 +23,25 @@ export class KairoServerService {
   /** Adopt a ServerInstance created by another trusted typed endpoint. */
   adopt(instance: ServerInstance): ServerInstance {
     this.cache.set(instance.id, instance);
-    this.store.upsertServer(toStoreServer(instance), { force: true });
+    // BD-P3-8: pass the live workspace id from RuntimeConnectionService.
+    this.store.upsertServer(toStoreServer(instance, this.runtime.workspace()), { force: true });
     return instance;
   }
 
+  /** Drop a previously adopted server from the local cache/store without calling the runtime. */
+  forget(id: string): void {
+    this.cache.delete(id);
+    this.store.removeServer(id);
+  }
+
   async start(projectId: string, debug = false): Promise<ServerInstance> {
-    const s = await this.runtime.request('POST /api/v1/servers', { projectId, debug });
+    // BD-P1-2: never retry start — duplicate Tomcat binds the same ports.
+    const s = await this.runtime.request('POST /api/v1/servers', { projectId, debug }, { noRetry: true });
     return this.adopt(s);
   }
 
   async stop(id: string, force = false): Promise<ServerInstance> {
-    const s = await this.runtime.request('DELETE /api/v1/servers/{serverId}', { force }, { pathParams: { serverId: id } });
+    const s = await this.runtime.request('DELETE /api/v1/servers/{serverId}', { force }, { pathParams: { serverId: id }, noRetry: true });
     return this.adopt(s);
   }
 }

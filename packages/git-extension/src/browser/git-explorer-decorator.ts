@@ -4,6 +4,7 @@ import { Tree, TreeNode, CompositeTreeNode } from '@theia/core/lib/browser/tree'
 import { Emitter, Event, MaybePromise } from '@theia/core/lib/common';
 import { WidgetDecoration } from '@theia/core/lib/browser/widget-decoration';
 import { GitService } from './git-service';
+import { toRepoRelativePath } from './git-path-utils';
 
 /** Extended node shape for file-system-backed tree nodes. */
 interface FileNode extends TreeNode {
@@ -19,16 +20,6 @@ const STATUS_COLORS: Record<string, string> = {
   C: 'var(--theia-textLink-foreground)',
   U: 'var(--theia-editorError-foreground)',
   '?': 'var(--theia-descriptionForeground)',
-};
-
-const STATUS_LABELS: Record<string, string> = {
-  M: 'M',
-  A: 'A',
-  D: 'D',
-  R: 'R',
-  C: 'C',
-  U: 'U',
-  '?': '?',
 };
 
 @injectable()
@@ -62,21 +53,8 @@ export class GitExplorerDecorator implements TreeDecorator {
       const filePath = this.getFilePath(node);
       if (!filePath) continue;
 
-      let relative = filePath;
-      if (filePath.startsWith('file://')) {
-        relative = decodeURIComponent(filePath.replace('file://', ''));
-        if (relative.startsWith(repoRoot)) {
-          relative = relative.substring(repoRoot.length + 1);
-        } else {
-          continue;
-        }
-      } else if (filePath.startsWith(repoRoot)) {
-        relative = filePath.substring(repoRoot.length + 1);
-      } else if (!filePath.startsWith('/')) {
-        // Already relative, keep as-is
-      } else {
-        continue;
-      }
+      const relative = toRepoRelativePath(filePath, repoRoot);
+      if (relative === undefined) continue;
 
       const fileStatus = statusResult.files.find(
         (f: { path: string }) => f.path === relative,
@@ -84,11 +62,14 @@ export class GitExplorerDecorator implements TreeDecorator {
       if (!fileStatus) continue;
 
       const color = STATUS_COLORS[fileStatus.status] || STATUS_COLORS['?'];
-      const label = STATUS_LABELS[fileStatus.status] || '';
 
       result.set(node.id, {
         fontData: { color },
-        captionSuffixes: label ? [{ data: ` ${label}`, fontData: { color } }] : undefined,
+        tailDecorations: [{
+          icon: 'circle',
+          color,
+          tooltip: `Git: ${this.statusTooltip(fileStatus.status)}`,
+        }],
       });
     }
 
@@ -103,6 +84,19 @@ export class GitExplorerDecorator implements TreeDecorator {
       for (const child of children) {
         yield* this.collectNodes(child);
       }
+    }
+  }
+
+  protected statusTooltip(status: string): string {
+    switch (status) {
+      case 'M': return 'Modified';
+      case 'A': return 'Added';
+      case 'D': return 'Deleted';
+      case 'R': return 'Renamed';
+      case 'C': return 'Copied';
+      case 'U': return 'Unmerged';
+      case '?': return 'Untracked';
+      default: return status;
     }
   }
 

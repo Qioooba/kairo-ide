@@ -41,8 +41,8 @@ export default new ContainerModule((bind, unbind, isBound, rebind) => {
   bind(KairoJavaDebugAdapterContribution).toSelf().inSingletonScope();
   bind(DebugAdapterContribution).toService(KairoJavaDebugAdapterContribution);
 
-  // Inject agent config (URL + secret) into the frontend HTML so
-  // that regular browsers can also connect to the Go Runtime Agent.
+  // Inject agent config URL into the frontend HTML for browser mode.
+  // The session secret is delivered via /kairo-agent-secret (same-origin).
   bind(KairoAgentConfigContribution).toSelf().inSingletonScope();
   bind(BackendApplicationContribution).toService(KairoAgentConfigContribution);
 

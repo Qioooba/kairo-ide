@@ -21,6 +21,7 @@ import { ILogger } from '@theia/core/lib/common/logger';
 import { MessageService } from '@theia/core/lib/common/message-service';
 import { StorageService } from '@theia/core/lib/browser';
 import { CommandService } from '@theia/core/lib/common/command';
+import { KairoI18nService } from '@kairo/i18n';
 
 export interface VersionInfo {
   currentVersion: string;
@@ -80,6 +81,7 @@ export class KairoUpgradeChecker {
   @inject(MessageService) protected readonly messages!: MessageService;
   @inject(StorageService) protected readonly storage!: StorageService;
   @inject(CommandService) protected readonly commands!: CommandService;
+  @inject(KairoI18nService) protected readonly i18n!: KairoI18nService;
 
   protected readonly onDidChangeProgressEmitter = new Emitter<UpgradeProgress>();
   readonly onDidChangeProgress: Event<UpgradeProgress> = this.onDidChangeProgressEmitter.event;
@@ -117,7 +119,7 @@ export class KairoUpgradeChecker {
     await this.loadConfig();
 
     if (!isUpgradeCheckEnabled()) {
-      this.progress = { state: 'disabled', message: 'Kairo IDE runs in offline/air-gapped mode. Automatic update checks are disabled.' };
+      this.progress = { state: 'disabled', message: this.i18n.t('upgrade.offlineDisabled') };
       this.onDidChangeProgressEmitter.fire(this.progress);
       this.logger.info('Kairo upgrade checker: offline/air-gapped mode — network checks disabled.');
       return;
@@ -145,19 +147,19 @@ export class KairoUpgradeChecker {
 
   async checkForUpdates(): Promise<VersionInfo | undefined> {
     if (!isUpgradeCheckEnabled()) {
-      this.updateProgress({ state: 'disabled', message: 'Update checks are disabled in offline/air-gapped mode.' });
+      this.updateProgress({ state: 'disabled', message: this.i18n.t('upgrade.checkDisabled') });
       this.logger.info('Update check skipped: offline/air-gapped mode (set KAIRO_ALLOW_UPGRADE_CHECK=1 and KAIRO_UPGRADE_ENDPOINT to enable intranet updates).');
       return undefined;
     }
 
     const endpoint = this.config.endpoint || getConfiguredEndpoint();
     if (!endpoint) {
-      this.updateProgress({ state: 'error', error: 'No update endpoint configured.' });
+      this.updateProgress({ state: 'error', error: this.i18n.t('upgrade.noEndpoint') });
       this.logger.warn('Update check requested but no endpoint configured. Set KAIRO_UPGRADE_ENDPOINT to your intranet update server.');
       return undefined;
     }
 
-    this.updateProgress({ state: 'checking', message: 'Checking for updates (intranet)...' });
+    this.updateProgress({ state: 'checking', message: this.i18n.t('upgrade.checking') });
 
     try {
       const response = await fetch(endpoint, {
@@ -193,20 +195,23 @@ export class KairoUpgradeChecker {
       if (updateAvailable && !this.config.updateNotified) {
         this.updateProgress({
           state: 'available',
-          message: `New version available: ${latestVersion} (current: ${this.config.currentVersion})`,
+          message: this.i18n.t('upgrade.available', {
+            latest: latestVersion,
+            current: this.config.currentVersion,
+          }),
         });
         this.onUpdateAvailableEmitter.fire(this.versionInfo);
         this.messages.info(
-          `Kairo IDE - New version available!\n\n` +
-          `Current: ${this.config.currentVersion}\n` +
-          `Latest: ${latestVersion}\n\n` +
-          (data.releaseNotes ? `Release notes:\n${data.releaseNotes}\n\n` : '') +
-          `Use "Kairo: Check for Updates" to install.`,
+          `${this.i18n.t('upgrade.newVersionTitle')}\n\n` +
+          `${this.i18n.t('upgrade.newVersionCurrent', { current: this.config.currentVersion })}\n` +
+          `${this.i18n.t('upgrade.newVersionLatest', { latest: latestVersion })}\n\n` +
+          (data.releaseNotes ? `${this.i18n.t('upgrade.releaseNotes', { notes: data.releaseNotes })}\n\n` : '') +
+          this.i18n.t('upgrade.checkCommandHint'),
         );
         this.config.updateNotified = true;
         await this.persistConfig();
       } else if (!updateAvailable) {
-        this.updateProgress({ state: 'idle', message: 'Already up to date.' });
+        this.updateProgress({ state: 'idle', message: this.i18n.t('upgrade.upToDate') });
       }
 
       return this.versionInfo;
@@ -220,11 +225,11 @@ export class KairoUpgradeChecker {
 
   async downloadUpdate(): Promise<void> {
     if (!isUpgradeCheckEnabled()) {
-      this.updateProgress({ state: 'disabled', message: 'Downloads disabled in offline mode.' });
+      this.updateProgress({ state: 'disabled', message: this.i18n.t('upgrade.downloadDisabled') });
       return;
     }
     if (!this.versionInfo?.downloadUrl) {
-      this.updateProgress({ state: 'error', error: 'Download URL not available' });
+      this.updateProgress({ state: 'error', error: this.i18n.t('upgrade.downloadUrlMissing') });
       return;
     }
 
@@ -261,10 +266,10 @@ export class KairoUpgradeChecker {
         }
       }
 
-      this.updateProgress({ state: 'downloaded', message: 'Download complete' });
+      this.updateProgress({ state: 'downloaded', message: this.i18n.t('upgrade.downloadComplete') });
 
       if (this.versionInfo.sha256) {
-        this.updateProgress({ state: 'verifying', message: 'Verifying SHA-256...' });
+        this.updateProgress({ state: 'verifying', message: this.i18n.t('upgrade.verifying') });
         const fullData = new Uint8Array(
           chunks.reduce((acc, chunk) => acc + chunk.length, 0),
         );
@@ -279,7 +284,7 @@ export class KairoUpgradeChecker {
             `SHA-256 mismatch. Expected: ${this.versionInfo.sha256.slice(0, 16)}..., Got: ${hash.slice(0, 16)}...`,
           );
         }
-        this.updateProgress({ state: 'verified', message: 'SHA-256 verified' });
+        this.updateProgress({ state: 'verified', message: this.i18n.t('upgrade.verified') });
       }
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
@@ -292,17 +297,17 @@ export class KairoUpgradeChecker {
     if (!isUpgradeCheckEnabled()) {
       return;
     }
-    this.updateProgress({ state: 'installing', message: 'Installing update...' });
+    this.updateProgress({ state: 'installing', message: this.i18n.t('upgrade.installing') });
     try {
-      this.updateProgress({ state: 'installing', message: 'Backing up current version...' });
+      this.updateProgress({ state: 'installing', message: this.i18n.t('upgrade.backingUp') });
       this.config.backupPath = await this.createBackup();
-      this.updateProgress({ state: 'installing', message: 'Applying update...' });
+      this.updateProgress({ state: 'installing', message: this.i18n.t('upgrade.applying') });
       this.config.currentVersion = this.versionInfo?.latestVersion || this.config.currentVersion;
       this.config.updateNotified = false;
       await this.persistConfig();
-      this.updateProgress({ state: 'complete', message: 'Update installed. Please restart IDE.' });
+      this.updateProgress({ state: 'complete', message: this.i18n.t('upgrade.installComplete') });
       this.messages.info(
-        `Kairo IDE updated to ${this.config.currentVersion}.\nPlease restart IDE.`,
+        this.i18n.t('upgrade.updated', { version: this.config.currentVersion }),
       );
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
@@ -316,13 +321,13 @@ export class KairoUpgradeChecker {
       return;
     }
     if (!this.config.backupPath) {
-      this.messages.error('No backup available for rollback.');
+      this.messages.error(this.i18n.t('upgrade.noBackup'));
       return;
     }
-    this.updateProgress({ state: 'rolling-back', message: 'Rolling back...' });
+    this.updateProgress({ state: 'rolling-back', message: this.i18n.t('upgrade.rollingBack') });
     try {
-      this.updateProgress({ state: 'complete', message: 'Rollback complete. Please restart IDE.' });
-      this.messages.info('Rollback complete. Please restart IDE.');
+      this.updateProgress({ state: 'complete', message: this.i18n.t('upgrade.rollbackComplete') });
+      this.messages.info(this.i18n.t('upgrade.rollbackComplete'));
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       this.updateProgress({ state: 'error', error: msg });
@@ -332,23 +337,10 @@ export class KairoUpgradeChecker {
 
   showExperimentalWarning(): void {
     if (!isUpgradeCheckEnabled()) {
-      this.messages.info(
-        'Kairo IDE runs in offline/air-gapped mode.\n\n' +
-        'Automatic update checks are disabled because Kairo IDE is designed\n' +
-        'for fully intranet deployment with zero internet connectivity.\n\n' +
-        'To enable intranet updates, set KAIRO_ALLOW_UPGRADE_CHECK=1 and\n' +
-        'configure KAIRO_UPGRADE_ENDPOINT to your internal update server.',
-      );
+      this.messages.info(this.i18n.t('upgrade.offlineInfo'));
       return;
     }
-    this.messages.warn(
-      'Kairo IDE upgrade checker is experimental.\n\n' +
-      'Notes:\n' +
-      '• Backs up current version before upgrading\n' +
-      '• SHA-256 verification for download integrity\n' +
-      '• Rollback supported on failure\n' +
-      '• Close all projects before upgrading\n',
-    );
+    this.messages.warn(this.i18n.t('upgrade.experimentalWarning'));
   }
 
   protected updateProgress(progress: Partial<UpgradeProgress>): void {
@@ -370,26 +362,17 @@ export class KairoUpgradeChecker {
   }
 
   protected async computeSHA256(data: Uint8Array): Promise<string> {
-    if (typeof crypto !== 'undefined' && crypto.subtle) {
-      try {
-        const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-        const hashArray = Array.from(new Uint8Array(hashBuffer));
-        return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-      } catch {
-        // fall through
-      }
+    if (typeof crypto === 'undefined' || !crypto.subtle) {
+      throw new Error('SHA-256 verification unavailable: Web Crypto API not present');
     }
-    return this.simpleHash(data);
-  }
-
-  protected simpleHash(data: Uint8Array): string {
-    let hash = 0;
-    for (let i = 0; i < data.length; i++) {
-      const char = data[i];
-      hash = ((hash << 5) - hash) + char;
-      hash = hash & hash;
+    try {
+      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(`SHA-256 verification failed: ${msg}`);
     }
-    return Math.abs(hash).toString(16).padStart(8, '0').repeat(8);
   }
 
   protected async createBackup(): Promise<string> {

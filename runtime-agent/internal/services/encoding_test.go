@@ -115,6 +115,35 @@ func TestMemEncoder_Recode_NoSandbox(t *testing.T) {
 	}
 }
 
+// BD-P2-14: Recode must honor optional eol override.
+func TestMemEncoder_Recode_Eol(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "eol.txt")
+	if err := os.WriteFile(path, []byte("a\nb\nc"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	m := &memEncoder{}
+	payload, _ := json.Marshal(map[string]interface{}{
+		"workspaceId": "ws1",
+		"file":        path,
+		"from":        "utf-8",
+		"to":          "utf-8",
+		"eol":         "crlf",
+	})
+	if _, err := m.Recode(payload); err != nil {
+		t.Fatalf("Recode with eol failed: %v", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []byte("a\r\nb\r\nc")
+	if string(got) != string(want) {
+		t.Fatalf("eol rewrite: got %q want %q", got, want)
+	}
+}
+
 func TestMemEncoder_Recode_InvalidJSON(t *testing.T) {
 	m := &memEncoder{}
 	_, err := m.Recode(json.RawMessage(`not json`))
@@ -178,5 +207,37 @@ func TestMemEncoder_ResolveWrite_NilReceiver(t *testing.T) {
 	}
 	if path != "/tmp/test.txt" {
 		t.Errorf("got %q, want /tmp/test.txt", path)
+	}
+}
+
+// BD-P2-10: concurrent Detect / GetEncoding must not race on fileEncoding.
+func TestMemEncoder_FileEncodingConcurrent(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "conc.txt")
+	if err := os.WriteFile(path, []byte("Hello"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	m := &memEncoder{}
+	payload, _ := json.Marshal(map[string]interface{}{
+		"workspaceId": "ws1",
+		"file":        path,
+		"sampleBytes": 1024,
+	})
+
+	const n = 50
+	done := make(chan struct{})
+	for i := 0; i < n; i++ {
+		go func() {
+			_, _ = m.Detect(payload)
+			_ = m.GetEncoding(path)
+			done <- struct{}{}
+		}()
+	}
+	for i := 0; i < n; i++ {
+		<-done
+	}
+	if enc := m.GetEncoding(path); enc == "" {
+		t.Fatal("expected cached encoding after concurrent Detect")
 	}
 }

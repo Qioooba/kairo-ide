@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { inject, injectable, postConstruct } from '@theia/core/shared/inversify';
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
+import { ConfirmDialog } from '@theia/core/lib/browser/dialogs';
 import type { TomcatRunConfiguration, PortDiagnostics } from '@kairo/protocol';
 import { KairoI18nService } from '@kairo/i18n';
 import {
@@ -294,7 +295,19 @@ const RunConfigurationsView: React.FC<{ service: KairoRunConfigurationService; i
           <button className="theia-button toolbar" disabled={busy} onClick={() => setEditing({ originalId: configuration.id, value: configuration })} aria-label={`${t('common.edit')} ${configuration.name}`} title={`${t('common.edit')} ${configuration.name}`}>
             <span className="codicon codicon-edit" aria-hidden="true" />
           </button>
-          <button className="theia-button danger" disabled={busy} onClick={() => { if (window.confirm(t('widget.runConfigurations.deleteConfirm', { name: configuration.name }))) void service.delete(configuration.id).catch(() => undefined); }} aria-label={`${t('common.delete')} ${configuration.name}`} title={`${t('common.delete')} ${configuration.name}`}>
+          <button className="theia-button danger" disabled={busy} onClick={() => {
+            void (async () => {
+              const confirmed = await new ConfirmDialog({
+                title: t('common.delete'),
+                msg: t('widget.runConfigurations.deleteConfirm', { name: configuration.name }),
+                ok: t('common.delete'),
+                cancel: t('common.cancel'),
+              }).open();
+              if (confirmed) {
+                void service.delete(configuration.id).catch(() => undefined);
+              }
+            })();
+          }} aria-label={`${t('common.delete')} ${configuration.name}`} title={`${t('common.delete')} ${configuration.name}`}>
             <span className="codicon codicon-trash" aria-hidden="true" />
           </button>
         </div>

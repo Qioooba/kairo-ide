@@ -20,8 +20,14 @@ import { MenuContribution, MenuModelRegistry } from '@theia/core/lib/common/menu
 import { EDITOR_CONTEXT_MENU } from '@theia/editor/lib/browser/editor-menu';
 import { FileService } from '@theia/filesystem/lib/browser/file-service';
 import { WorkspaceService } from '@theia/workspace/lib/browser';
+import { MonacoWorkspace } from '@theia/monaco/lib/browser/monaco-workspace';
+import { ResourceEdit } from '@theia/monaco-editor-core/esm/vs/editor/browser/services/bulkEditService';
 import { JAVA_LANGUAGE_ID } from '../common/java-common';
 import { JAVA_MONARCH } from './java-monarch';
+import {
+  applyKairoLanguageEditorDefaults,
+  scheduleProgressiveTokenization,
+} from './monaco-tokenization-config';
 import { JavaLanguageClient } from './java-language-client';
 import { JdtClassFileFsProvider } from './jdt-fs-provider';
 import { JavaCompletionProvider, JavaDefinitionResponse } from './java-completion-provider';
@@ -87,6 +93,8 @@ export class JavaMonacoRegistrationContribution implements FrontendApplicationCo
   protected readonly jdtFs!: JdtClassFileFsProvider;
   @inject(FileService)
   protected readonly fileService!: FileService;
+  @inject(MonacoWorkspace) @optional()
+  protected readonly monacoWorkspace?: MonacoWorkspace;
   @inject(JavaDocumentSyncContribution) @optional()
   protected readonly documentSync?: JavaDocumentSyncContribution;
   @inject(JavaRunService) @optional()
@@ -105,9 +113,11 @@ export class JavaMonacoRegistrationContribution implements FrontendApplicationCo
   protected readonly messages?: MessageService;
 
   protected subs: Disposable[] = [];
+  /** Per-model content listeners — disposed on model dispose so `subs` does not grow forever. */
+  protected modelContentSubs = new Map<string, Disposable>();
 
   onStart(): void {
-    console.log('[KAIRO-JAVA-DEBUG] JavaMonacoRegistrationContribution.onStart() called!');
+    applyKairoLanguageEditorDefaults();
     // Theia's monaco-editor-core ships no basic-languages, so
     // .java opened as Plain Text: no highlighting, and the
     // completion/definition providers below never fired
@@ -167,15 +177,36 @@ export class JavaMonacoRegistrationContribution implements FrontendApplicationCo
     this.subs.push(this.fileService.registerProvider('jdt', this.jdtFs));
 
     // Cache source text for fallback IntelliSense when LS is unavailable.
-    this.subs.push(monaco.editor.onDidCreateModel(model => {
+    const cacheModel = (model: monaco.editor.ITextModel): void => {
       this.provider.cacheSource(model.uri.toString(), model.getValue());
-      this.subs.push(model.onDidChangeContent(() => {
+      scheduleProgressiveTokenization(model);
+    };
+    const attachContentListener = (model: monaco.editor.ITextModel): void => {
+      const uri = model.uri.toString();
+      this.modelContentSubs.get(uri)?.dispose();
+      this.modelContentSubs.set(uri, model.onDidChangeContent(() => {
         this.provider.cacheSource(model.uri.toString(), model.getValue());
       }));
+    };
+    for (const model of monaco.editor.getModels()) {
+      if (model.getLanguageId() === JAVA_LANGUAGE_ID) {
+        cacheModel(model);
+        attachContentListener(model);
+      }
+    }
+    this.subs.push(monaco.editor.onDidCreateModel(model => {
+      cacheModel(model);
+      attachContentListener(model);
     }));
     this.subs.push(
       monaco.editor.onWillDisposeModel(model => {
-        this.provider.clearSource(model.uri.toString());
+        const uri = model.uri.toString();
+        this.provider.clearSource(uri);
+        const sub = this.modelContentSubs.get(uri);
+        if (sub) {
+          sub.dispose();
+          this.modelContentSubs.delete(uri);
+        }
       }),
     );
 
@@ -191,6 +222,7 @@ export class JavaMonacoRegistrationContribution implements FrontendApplicationCo
         provideCompletionItems: async (model, position, context, token) => {
           if (token.isCancellationRequested) return { suggestions: [] };
           const uri = model.uri.toString();
+          this.provider.cacheSource(uri, model.getValue());
           this.documentSync?.flushPending(uri);
           const smart = consumeSmartCompletionFlag();
           const smartCycle = smart ? consumeSmartCompletionCycle() : 0;
@@ -200,6 +232,7 @@ export class JavaMonacoRegistrationContribution implements FrontendApplicationCo
             // 0-based LSP positions.
             line: position.lineNumber - 1,
             character: position.column - 1,
+            linePrefix: model.getLineContent(position.lineNumber).substring(0, position.column - 1),
             triggerKind: context.triggerKind + 1 as 1 | 2 | 3,
             triggerCharacter: context.triggerCharacter,
             smart,
@@ -224,9 +257,8 @@ export class JavaMonacoRegistrationContribution implements FrontendApplicationCo
               };
               return adaptCompletionItem(boosted, range);
             }),
-            // Never keep the widget on "Loading…" after we already have
-            // a definitive (possibly empty / fallback) list.
-            incomplete: false,
+            // Preserve JDT isIncomplete so truncated lists keep re-querying.
+            incomplete: !!response.isIncomplete,
           };
         },
         resolveCompletionItem: async (item, token) => {
@@ -257,26 +289,14 @@ export class JavaMonacoRegistrationContribution implements FrontendApplicationCo
             command: undefined,
           });
           if (token.isCancellationRequested) return item;
-          let wordRange: monaco.Range;
-          if (item.range instanceof monaco.Range) {
-            wordRange = item.range;
-          } else if (item.range && typeof item.range === 'object') {
-            const ranges = item.range as { insert?: monaco.IRange; insertText?: monaco.IRange; inserting?: monaco.IRange };
-            const r = ranges.insert ?? ranges.inserting ?? ranges.insertText;
-            if (r) {
-              wordRange = new monaco.Range(r.startLineNumber, r.startColumn, r.endLineNumber, r.endColumn);
-            } else {
-              wordRange = new monaco.Range(1, 1, 1, 1);
-            }
-          } else {
-            wordRange = new monaco.Range(1, 1, 1, 1);
-          }
+          const wordRange = completionItemWordRange(item as MonacoCompletionItemWithData);
           return adaptCompletionItem(resolved, wordRange);
         },
       }),
       monaco.languages.registerDefinitionProvider(JAVA_LANGUAGE_ID, {
         provideDefinition: async (model, position, token) => {
           if (token.isCancellationRequested) return [];
+          this.provider.cacheSource(model.uri.toString(), model.getValue());
           const definitions = await this.provider.provideDefinition(
             model.uri.toString(),
             position.lineNumber - 1,
@@ -546,7 +566,7 @@ export class JavaMonacoRegistrationContribution implements FrontendApplicationCo
       monaco.editor.registerCommand('java.apply.workspaceEdit', (_accessor, ...args: unknown[]) => {
         const edit = args[0] as LSPWorkspaceEdit | undefined;
         if (edit) {
-          applyLspWorkspaceEditToOpenEditors(edit);
+          void this.applyLspWorkspaceEdit(edit);
         }
       }),
     );
@@ -562,7 +582,7 @@ export class JavaMonacoRegistrationContribution implements FrontendApplicationCo
           return;
         }
         if (original.id === 'java.apply.workspaceEdit' && original.arguments?.[0]) {
-          applyLspWorkspaceEditToOpenEditors(original.arguments[0] as LSPWorkspaceEdit);
+          await this.applyLspWorkspaceEdit(original.arguments[0] as LSPWorkspaceEdit);
           return;
         }
         if (this.commandService) {
@@ -778,7 +798,7 @@ export class JavaMonacoRegistrationContribution implements FrontendApplicationCo
     }
     const result = await this.refactoring.refactor(sel.uri, sel.range, kind);
     if (result.success && result.edit) {
-      applyLspWorkspaceEditToOpenEditors(result.edit);
+      await this.applyLspWorkspaceEdit(result.edit);
       this.messages?.info(result.message);
     } else {
       this.messages?.warn(result.message || `No ${kind} refactoring available.`);
@@ -804,7 +824,7 @@ export class JavaMonacoRegistrationContribution implements FrontendApplicationCo
       });
       const withEdit = (actions ?? []).find(a => !('command' in a) && (a as LSPCodeAction).edit) as LSPCodeAction | undefined;
       if (withEdit?.edit) {
-        applyLspWorkspaceEditToOpenEditors(withEdit.edit);
+        await this.applyLspWorkspaceEdit(withEdit.edit);
         this.messages?.info(`${label} applied.`);
         return;
       }
@@ -932,7 +952,6 @@ export class JavaMonacoRegistrationContribution implements FrontendApplicationCo
       if (!model) return;
       const langId = model.getLanguageId();
       if (langId !== JAVA_LANGUAGE_ID && langId !== 'jsp') return;
-      console.log('[KAIRO-JAVA-DEBUG] Applying Java editor options for quick suggestions');
       editor.updateOptions({
         quickSuggestions: {
           other: true,
@@ -1060,7 +1079,37 @@ export class JavaMonacoRegistrationContribution implements FrontendApplicationCo
     return lenses;
   }
 
+  /**
+   * Apply LSP workspace edits through MonacoWorkspace.applyBulkEdit so
+   * changes to unopened files are persisted (not only open models).
+   */
+  protected async applyLspWorkspaceEdit(edit: LSPWorkspaceEdit): Promise<void> {
+    const adapted = adaptWorkspaceEdit(edit);
+    if (adapted.rejectReason) {
+      this.messages?.warn(adapted.rejectReason);
+      return;
+    }
+    if (!adapted.edits?.length) {
+      return;
+    }
+    if (this.monacoWorkspace) {
+      try {
+        const resourceEdits = ResourceEdit.convert(adapted);
+        await this.monacoWorkspace.applyBulkEdit(resourceEdits);
+        return;
+      } catch (err) {
+        this.messages?.warn(
+          `Workspace edit via MonacoWorkspace failed, falling back to open editors: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+    // Fallback: only open models (previous behaviour).
+    applyLspWorkspaceEditToOpenModels(edit);
+  }
+
   dispose(): void {
+    for (const d of this.modelContentSubs.values()) d.dispose();
+    this.modelContentSubs.clear();
     for (const d of this.subs) d.dispose();
     this.subs = [];
   }
@@ -1151,13 +1200,40 @@ function adaptCompletionItem(
     suggestion._kairoData = item.data;
     suggestion._kairoNeedsResolve = true;
   }
+  if (range instanceof monaco.Range) {
+    suggestion._kairoWordRange = range;
+  } else {
+    const insert = (range as monaco.languages.CompletionItemRanges).insert;
+    suggestion._kairoWordRange = insert
+      ? new monaco.Range(insert.startLineNumber, insert.startColumn, insert.endLineNumber, insert.endColumn)
+      : defaultRange;
+  }
 
   return suggestion;
+}
+
+/** Word range captured during provideCompletionItems for resolve fallback (JV-P1-9). */
+function completionItemWordRange(item: MonacoCompletionItemWithData): monaco.Range {
+  if (item._kairoWordRange) {
+    return item._kairoWordRange;
+  }
+  if (item.range instanceof monaco.Range) {
+    return item.range;
+  }
+  if (item.range && typeof item.range === 'object') {
+    const ranges = item.range as { insert?: monaco.IRange; replace?: monaco.IRange; insertText?: monaco.IRange; inserting?: monaco.IRange };
+    const r = ranges.insert ?? ranges.replace ?? ranges.inserting ?? ranges.insertText;
+    if (r) {
+      return new monaco.Range(r.startLineNumber, r.startColumn, r.endLineNumber, r.endColumn);
+    }
+  }
+  return new monaco.Range(1, 1, 1, 1);
 }
 
 interface MonacoCompletionItemWithData extends monaco.languages.CompletionItem {
   _kairoData?: unknown;
   _kairoNeedsResolve?: boolean;
+  _kairoWordRange?: monaco.Range;
 }
 
 export { adaptCompletionItem };
@@ -1188,7 +1264,19 @@ function insertSnippet(editor: monaco.editor.ICodeEditor, snippet: string): void
   ]);
 }
 
-function applyLspWorkspaceEditToOpenEditors(edit: LSPWorkspaceEdit): void {
+/**
+ * Apply an LSP workspace edit via MonacoWorkspace so unopened files
+ * and resource operations are not silently dropped.
+ * Exported for unit tests of the conversion path.
+ */
+export function lspWorkspaceEditToMonacoEdits(
+  edit: LSPWorkspaceEdit,
+): monaco.languages.WorkspaceEdit & monaco.languages.Rejection {
+  return adaptWorkspaceEdit(edit);
+}
+
+/** Last-resort apply when MonacoWorkspace is unavailable. */
+function applyLspWorkspaceEditToOpenModels(edit: LSPWorkspaceEdit): void {
   const changes = edit.changes ?? {};
   for (const [uri, textEdits] of Object.entries(changes)) {
     const model = monaco.editor.getModel(monaco.Uri.parse(uri));
@@ -1308,18 +1396,49 @@ export function adaptDocumentSymbols(result: LSPDocumentSymbolResult): monaco.la
 
 export function adaptWorkspaceEdit(edit: LSPWorkspaceEdit | null): monaco.languages.WorkspaceEdit & monaco.languages.Rejection {
   if (!edit) return { edits: [], rejectReason: 'JDT LS did not return rename edits.' };
-  const edits: monaco.languages.IWorkspaceTextEdit[] = [];
+  const edits: Array<monaco.languages.IWorkspaceTextEdit | monaco.languages.IWorkspaceFileEdit> = [];
   for (const [uri, textEdits] of Object.entries(edit.changes ?? {})) {
     edits.push(...textEdits.map(textEdit => adaptTextEdit(uri, textEdit, undefined)));
   }
   for (const change of edit.documentChanges ?? []) {
     if ('kind' in change) {
-      return { edits: [], rejectReason: `Rename requires unsupported file operation: ${change.kind}.` };
+      const fileEdit = adaptResourceOperation(change);
+      if (fileEdit) {
+        edits.push(fileEdit);
+      } else {
+        return { edits: [], rejectReason: `Rename requires unsupported file operation: ${change.kind}.` };
+      }
+      continue;
     }
     const version = change.textDocument.version ?? undefined;
     edits.push(...change.edits.map(textEdit => adaptTextEdit(change.textDocument.uri, textEdit, version)));
   }
   return { edits };
+}
+
+function adaptResourceOperation(
+  op: { kind: string; uri?: string; oldUri?: string; newUri?: string },
+): monaco.languages.IWorkspaceFileEdit | undefined {
+  if (op.kind === 'create' && op.uri) {
+    return {
+      newResource: monaco.Uri.parse(op.uri),
+      options: { overwrite: false, ignoreIfExists: true },
+    };
+  }
+  if (op.kind === 'delete' && op.uri) {
+    return {
+      oldResource: monaco.Uri.parse(op.uri),
+      options: { recursive: true, ignoreIfNotExists: true },
+    };
+  }
+  if (op.kind === 'rename' && op.oldUri && op.newUri) {
+    return {
+      oldResource: monaco.Uri.parse(op.oldUri),
+      newResource: monaco.Uri.parse(op.newUri),
+      options: { overwrite: false, ignoreIfExists: false },
+    };
+  }
+  return undefined;
 }
 
 function isEditableCodeAction(action: { command: string } | LSPCodeAction): action is LSPCodeAction & { edit: LSPWorkspaceEdit } {

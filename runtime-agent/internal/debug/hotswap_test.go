@@ -319,20 +319,20 @@ func TestBuildRedefineClassesCommand(t *testing.T) {
 		t.Errorf("expected 1 class, got %d", count)
 	}
 
-	tag, err := r.ReadByte()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if tag != 1 {
-		t.Errorf("expected tag 1, got %d", tag)
-	}
-
 	refTypeID, err := r.ReadObjectID()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if refTypeID != 0x100 {
 		t.Errorf("expected 0x100, got %d", refTypeID)
+	}
+
+	byteCount, err := r.ReadInt()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if int(byteCount) != len(classBytes) {
+		t.Errorf("byte count = %d, want %d", byteCount, len(classBytes))
 	}
 }
 

@@ -202,9 +202,10 @@ func (g *Generator) Generate(payload []byte) (GenerateResult, error) {
 		// location, and ABSOLUTE src entries are not valid
 		// Eclipse — an external model dir therefore always left
 		// the LS in standalone-file mode (KAIRO-RC-WEB-251).
-		IntoProjectRoot      bool   `json:"intoProjectRoot"`
-		AutoDetectClasspath  *bool  `json:"autoDetectClasspath"`
-		BuildFile            string `json:"buildFile"`
+		IntoProjectRoot      bool     `json:"intoProjectRoot"`
+		AutoDetectClasspath  *bool    `json:"autoDetectClasspath"`
+		BuildFile            string   `json:"buildFile"`
+		Libraries            []string `json:"libraries"`
 	}
 	if len(payload) > 0 {
 		if err := jsonUnmarshal(payload, &req); err != nil {
@@ -244,6 +245,10 @@ func (g *Generator) Generate(payload []byte) (GenerateResult, error) {
 	if proj.Name == "" {
 		proj.Name = proj.ProjectID
 	}
+	// Explicit libraries from the Project Structure dialog override YAML/autodetect.
+	if len(req.Libraries) > 0 {
+		proj.Libraries = append([]string{}, req.Libraries...)
+	}
 	// Defaults that make sense for legacy Java Web projects.
 	if proj.Encoding == "" {
 		proj.Encoding = "UTF-8"
@@ -260,6 +265,9 @@ func (g *Generator) Generate(payload []byte) (GenerateResult, error) {
 	// Try to resolve classpath from build.xml (Ant projects)
 	classpathSource := "autodetect"
 	if !autoDetect {
+		classpathSource = "manual"
+	}
+	if len(req.Libraries) > 0 && !autoDetect {
 		classpathSource = "manual"
 	}
 	hasYamlLibraries := len(proj.Libraries) > 0
@@ -308,7 +316,7 @@ func (g *Generator) Generate(payload []byte) (GenerateResult, error) {
 			"jars":     len(antResult.Classpath),
 			"warnings": len(antResult.Warnings),
 		})
-	} else if hasYamlLibraries {
+	} else if hasYamlLibraries && autoDetect {
 		classpathSource = "yaml"
 	}
 
@@ -317,7 +325,8 @@ func (g *Generator) Generate(payload []byte) (GenerateResult, error) {
 	// — the .kairo/project.yaml written by the import wizard has
 	// no libraries field, and without these jars javax.servlet.*
 	// is unresolvable for the JDT LS (KAIRO-RC-WEB-251).
-	if len(proj.Libraries) == 0 {
+	// Skip when the caller supplied an explicit manual classpath.
+	if autoDetect && len(proj.Libraries) == 0 {
 		if entries, err := os.ReadDir(filepath.Join(rootAbs, "lib")); err == nil {
 			for _, e := range entries {
 				if !e.IsDir() && strings.HasSuffix(e.Name(), ".jar") {
@@ -326,7 +335,7 @@ func (g *Generator) Generate(payload []byte) (GenerateResult, error) {
 			}
 		}
 	}
-	if len(proj.ReferencedLibraries) == 0 {
+	if autoDetect && len(proj.ReferencedLibraries) == 0 {
 		if entries, err := os.ReadDir(filepath.Join(rootAbs, "WebRoot", "WEB-INF", "lib")); err == nil {
 			for _, e := range entries {
 				if !e.IsDir() && strings.HasSuffix(e.Name(), ".jar") {

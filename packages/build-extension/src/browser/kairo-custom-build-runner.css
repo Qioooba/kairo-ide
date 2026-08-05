@@ -28,7 +28,7 @@
 }
 
 .kairo-error-banner.kairo-custom-build-result-success {
-    background-color: rgba(0, 255, 0, 0.1);
+    background-color: color-mix(in srgb, var(--theia-terminal-ansiGreen, #3dcc91) 12%, transparent);
     border-color: var(--theia-terminal-ansiGreen, var(--kairo-success, #3dcc91));
     color: var(--theia-terminal-ansiGreen, var(--kairo-success, #3dcc91));
 }

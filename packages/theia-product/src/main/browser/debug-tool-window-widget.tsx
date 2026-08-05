@@ -3,6 +3,8 @@ import { injectable, inject, postConstruct } from '@theia/core/shared/inversify'
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import { CommandService } from '@theia/core/lib/common/command';
 import { EditorManager } from '@theia/editor/lib/browser';
+import URI from '@theia/core/lib/common/uri';
+import { WorkspaceContextService } from '@kairo/runtime-extension';
 import { KairoI18nService } from '@kairo/i18n';
 import { KAIRO_DEBUG_TOOL_WINDOW_FACTORY_ID } from './kairo-factory-ids';
 import { KairoDebugSessionService } from './kairo-debug-session-service';
@@ -21,9 +23,10 @@ interface DebugToolWindowViewProps {
     commandService: CommandService;
     editorManager: EditorManager;
     i18n: KairoI18nService;
+    workspaceKey: string;
 }
 
-const DebugToolWindowView: React.FC<DebugToolWindowViewProps> = ({ sessionService, commandService, editorManager, i18n }) => {
+const DebugToolWindowView: React.FC<DebugToolWindowViewProps> = ({ sessionService, commandService, editorManager, i18n, workspaceKey }) => {
     const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
     const [, forceUpdate] = React.useReducer(x => x + 1, 0);
 
@@ -59,8 +62,8 @@ const DebugToolWindowView: React.FC<DebugToolWindowViewProps> = ({ sessionServic
 
     const handleNavigate = React.useCallback(async (path: string, line: number) => {
         try {
-            const uri = `file://${path}`;
-            await editorManager.open(uri as any, {
+            const uri = path.includes('://') ? new URI(path) : URI.fromFilePath(path);
+            await editorManager.open(uri, {
                 selection: { start: { line: line - 1, character: 0 }, end: { line: line - 1, character: 0 } },
                 mode: 'activate',
             });
@@ -227,7 +230,7 @@ const DebugToolWindowView: React.FC<DebugToolWindowViewProps> = ({ sessionServic
                                 icon="codicon-watch"
                                 defaultExpanded={true}
                             >
-                                <IDEAWatchesPanel sessionService={sessionService} i18n={i18n} />
+                                <IDEAWatchesPanel sessionService={sessionService} i18n={i18n} workspaceKey={workspaceKey} />
                             </CollapsibleSection>
                         </div>
                     </div>
@@ -258,6 +261,9 @@ export class KairoDebugToolWindowWidget extends ReactWidget {
     @inject(KairoI18nService)
     protected readonly i18n!: KairoI18nService;
 
+    @inject(WorkspaceContextService)
+    protected readonly workspaceContext!: WorkspaceContextService;
+
     @postConstruct()
     protected init(): void {
         this.id = KairoDebugToolWindowWidget.ID;
@@ -275,11 +281,13 @@ export class KairoDebugToolWindowWidget extends ReactWidget {
     }
 
     protected render(): React.ReactNode {
+        const workspaceKey = this.workspaceContext.context?.workspaceId || 'default';
         return <DebugToolWindowView
             sessionService={this.sessionService}
             commandService={this.commandService}
             editorManager={this.editorManager}
             i18n={this.i18n}
+            workspaceKey={workspaceKey}
         />;
     }
 }

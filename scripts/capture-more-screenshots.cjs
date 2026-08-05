@@ -19,9 +19,10 @@ const OUTPUT_DIR = process.argv[2] || path.join(__dirname, '..', 'docs', 'screen
   const agentUrl = process.env.KAIRO_AGENT_URL || 'http://127.0.0.1:18080';
   const agentSecret = process.env.KAIRO_AGENT_SECRET || '';
   if (agentSecret) {
+    // Secret only via __kairo.getSecret() closure — never on kairoConfig (S1).
     await page.addInitScript((config) => {
       window.__kairo = { agentBaseUrl: config.agentUrl, getSecret: () => config.agentSecret };
-      window.kairoConfig = { agentUrl: config.agentUrl, agentSecret: config.agentSecret };
+      window.kairoConfig = { agentUrl: config.agentUrl };
       window.__KAIRO_DEFAULT_RUNTIME_URL__ = config.agentUrl;
     }, { agentUrl, agentSecret });
   }

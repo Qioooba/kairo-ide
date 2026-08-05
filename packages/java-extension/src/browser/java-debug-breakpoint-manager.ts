@@ -82,7 +82,7 @@ export class JavaBreakpointManager {
   }
 
   createGroup(name: string): BreakpointGroup {
-    const id = `group-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const id = `group-${typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}`}`;
     const group: BreakpointGroup = {
       id,
       name: name.trim() || `Group ${this.groups.size + 1}`,

@@ -187,7 +187,8 @@ func (c Config) Validate() error {
 	if c.BindAddress == "" {
 		return errors.New("bindAddress is required")
 	}
-	if c.Port <= 0 || c.Port > 65535 {
+	// Port 0 means ephemeral OS assignment (DK-P1-2); otherwise 1–65535.
+	if c.Port < 0 || c.Port > 65535 {
 		return fmt.Errorf("port out of range: %d", c.Port)
 	}
 	if c.DataDir == "" {
@@ -216,7 +217,9 @@ func Bind(args []string) (Config, string, error) {
 	fs := flag.NewFlagSet("kairo-runtime", flag.ContinueOnError)
 	configPath := fs.String("config", "", "path to YAML config file")
 	bind := fs.String("bind", "", "bind address (overrides config)")
-	port := fs.Int("port", 0, "port (overrides config)")
+	// String flag so --port 0 (ephemeral) is distinct from an omitted flag
+	// (which keeps the config/default port). DK-P1-2.
+	port := fs.String("port", "", "port (0 = ephemeral OS assignment; overrides config)")
 	logLevel := fs.String("log-level", "", "log level (debug|info|warn|error)")
 	requireAuth := fs.Bool("require-auth", false, "require auth on loopback")
 	dataDir := fs.String("data-dir", "", "data directory (overrides KAIRO_DATA_DIR / config)")
@@ -246,8 +249,12 @@ func Bind(args []string) (Config, string, error) {
 	if *bind != "" {
 		cfg.BindAddress = *bind
 	}
-	if *port != 0 {
-		cfg.Port = *port
+	if *port != "" {
+		n, err := strconv.Atoi(*port)
+		if err != nil {
+			return Config{}, "", fmt.Errorf("invalid --port: %w", err)
+		}
+		cfg.Port = n
 	}
 	if *logLevel != "" {
 		cfg.LogLevel = *logLevel

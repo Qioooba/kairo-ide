@@ -1,3 +1,5 @@
+//go:build unwired
+
 package app
 
 import (

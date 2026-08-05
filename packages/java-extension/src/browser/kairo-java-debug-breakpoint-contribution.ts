@@ -10,6 +10,7 @@ import { BreakpointManager } from '@theia/debug/lib/browser/breakpoint/breakpoin
 import { SourceBreakpoint } from '@theia/debug/lib/browser/breakpoint/breakpoint-marker';
 import { DebugSourceBreakpoint } from '@theia/debug/lib/browser/model/debug-source-breakpoint';
 import { DebugEditorService } from '@theia/debug/lib/browser/editor/debug-editor-service';
+import { KairoI18nService, type KairoI18nKey } from '@kairo/i18n';
 import * as monaco from '@theia/monaco-editor-core';
 
 /** Private debug type for Kairo Java Debug Adapter, matches the one in @kairo/theia-product. */
@@ -21,23 +22,23 @@ const CONDITIONAL_BREAKPOINT_CMD = 'editor.debug.action.conditionalBreakpoint';
 export namespace KairoJavaDebugCommands {
     export const EDIT_BREAKPOINT_CONDITION: Command = {
         id: 'kairo.java.debug.editBreakpointCondition',
-        label: '编辑断点条件...',
+        label: 'Edit Breakpoint Condition...',
     };
     export const EDIT_BREAKPOINT_HIT_COUNT: Command = {
         id: 'kairo.java.debug.editBreakpointHitCount',
-        label: '编辑命中次数...',
+        label: 'Edit Hit Count...',
     };
     export const EDIT_LOGPOINT_MESSAGE: Command = {
         id: 'kairo.java.debug.editLogpointMessage',
-        label: '编辑日志点消息...',
+        label: 'Edit Logpoint Message...',
     };
     export const EVALUATE_EXPRESSION: Command = {
         id: 'kairo.java.debug.evaluateExpression',
-        label: '求值表达式',
+        label: 'Evaluate Expression',
     };
     export const TOGGLE_LOGPOINT: Command = {
         id: 'kairo.java.debug.toggleLogpoint',
-        label: '切换日志点',
+        label: 'Toggle Logpoint',
     };
 }
 
@@ -61,32 +62,75 @@ export class KairoJavaDebugBreakpointCommandContribution implements CommandContr
     @inject(MessageService)
     protected readonly messageService!: MessageService;
 
+    @inject(KairoI18nService)
+    protected readonly i18n!: KairoI18nService;
+
     @inject(CommandService) @optional()
     protected readonly commands?: CommandService;
 
     @inject(DebugEditorService) @optional()
     protected readonly debugEditors?: DebugEditorService;
 
+    protected commandRegistry: CommandRegistry | undefined;
+
+    protected readonly commandI18nKeys: Record<string, KairoI18nKey> = {
+        [KairoJavaDebugCommands.EDIT_BREAKPOINT_CONDITION.id]: 'widget.java.debugBreakpoint.editCondition',
+        [KairoJavaDebugCommands.EDIT_BREAKPOINT_HIT_COUNT.id]: 'widget.java.debugBreakpoint.editHitCount',
+        [KairoJavaDebugCommands.EDIT_LOGPOINT_MESSAGE.id]: 'widget.java.debugBreakpoint.editLogpointMessage',
+        [KairoJavaDebugCommands.EVALUATE_EXPRESSION.id]: 'widget.java.debugBreakpoint.evaluateExpression',
+        [KairoJavaDebugCommands.TOGGLE_LOGPOINT.id]: 'widget.java.debugBreakpoint.toggleLogpoint',
+        [CONDITIONAL_BREAKPOINT_CMD]: 'widget.java.debugBreakpoint.addConditionalBreakpoint',
+    };
+
+    protected t(key: KairoI18nKey, params?: Record<string, string | number>): string {
+        return this.i18n.t(key, params);
+    }
+
+    protected withLabel(cmd: Command): Command {
+        const key = this.commandI18nKeys[cmd.id];
+        return key ? { ...cmd, label: this.i18n.t(key) } : cmd;
+    }
+
+    protected refreshCommandLabels(): void {
+        if (!this.commandRegistry) {
+            return;
+        }
+        for (const [id, key] of Object.entries(this.commandI18nKeys)) {
+            const cmd = this.commandRegistry.getCommand(id);
+            if (cmd) {
+                cmd.label = this.i18n.t(key);
+            }
+        }
+    }
+
     registerCommands(registry: CommandRegistry): void {
-        registry.registerCommand(KairoJavaDebugCommands.EDIT_BREAKPOINT_CONDITION, {
+        this.commandRegistry = registry;
+        this.refreshCommandLabels();
+        this.i18n.onDidChangeLanguage(() => this.refreshCommandLabels());
+
+        registry.registerCommand(this.withLabel(KairoJavaDebugCommands.EDIT_BREAKPOINT_CONDITION), {
             execute: (breakpoint?: DebugSourceBreakpoint) => this.editBreakpointCondition(breakpoint),
         });
-        registry.registerCommand(KairoJavaDebugCommands.EDIT_BREAKPOINT_HIT_COUNT, {
+        registry.registerCommand(this.withLabel(KairoJavaDebugCommands.EDIT_BREAKPOINT_HIT_COUNT), {
             execute: (breakpoint?: DebugSourceBreakpoint) => this.editBreakpointHitCount(breakpoint),
         });
-        registry.registerCommand(KairoJavaDebugCommands.EDIT_LOGPOINT_MESSAGE, {
+        registry.registerCommand(this.withLabel(KairoJavaDebugCommands.EDIT_LOGPOINT_MESSAGE), {
             execute: (breakpoint?: DebugSourceBreakpoint) => this.editLogpointMessage(breakpoint),
         });
-        registry.registerCommand(KairoJavaDebugCommands.EVALUATE_EXPRESSION, {
+        registry.registerCommand(this.withLabel(KairoJavaDebugCommands.EVALUATE_EXPRESSION), {
             execute: (expression: string) => this.evaluateExpression(expression),
         });
-        registry.registerCommand(KairoJavaDebugCommands.TOGGLE_LOGPOINT, {
+        registry.registerCommand(this.withLabel(KairoJavaDebugCommands.TOGGLE_LOGPOINT), {
             execute: (breakpoint?: DebugSourceBreakpoint) => this.toggleLogpoint(breakpoint),
         });
         // Keymap binds Ctrl+Shift+F8 here; Theia's own id is debug.breakpoint.add.conditional
         // and is disabled when a line breakpoint already exists. Always open the condition UI.
         registry.registerCommand(
-            { id: CONDITIONAL_BREAKPOINT_CMD, label: 'Add Conditional Breakpoint...', category: 'Debug' },
+            {
+                id: CONDITIONAL_BREAKPOINT_CMD,
+                label: this.t('widget.java.debugBreakpoint.addConditionalBreakpoint'),
+                category: this.t('menu.debug'),
+            },
             { execute: () => this.openConditionalBreakpointUi() },
         );
     }
@@ -134,7 +178,7 @@ export class KairoJavaDebugBreakpointCommandContribution implements CommandContr
     protected async editBreakpointCondition(breakpoint?: DebugSourceBreakpoint): Promise<void> {
         const bp = this.resolveBreakpoint(breakpoint);
         if (!bp) {
-            this.messageService.warn('请先在编辑器中定位到要设置条件断点的行。');
+            this.messageService.warn(this.t('widget.java.debugBreakpoint.positionLineCondition'));
             return;
         }
         // Prefer Theia inline breakpoint editor when available (shows Expression/Hit Count/Log Message).
@@ -144,10 +188,10 @@ export class KairoJavaDebugBreakpointCommandContribution implements CommandContr
         }
         const current = bp.condition ?? '';
         const dialog = new SingleTextInputDialog({
-            title: '编辑断点条件',
+            title: this.t('widget.java.debugBreakpoint.editConditionTitle'),
             initialValue: current,
-            placeholder: '例如: x > 0',
-            confirmButtonLabel: '设置',
+            placeholder: this.t('widget.java.debugBreakpoint.conditionPlaceholder'),
+            confirmButtonLabel: this.t('widget.java.debugBreakpoint.setButton'),
         });
         const value = await dialog.open();
         if (value === undefined || value === null) {
@@ -159,22 +203,24 @@ export class KairoJavaDebugBreakpointCommandContribution implements CommandContr
                 condition,
             } as Partial<DebugProtocol.SourceBreakpoint>);
         } catch (error) {
-            this.messageService.error(`条件断点设置失败: ${toMessage(error)}`);
+            this.messageService.error(this.t('widget.java.debugBreakpoint.conditionFailed', {
+                msg: toMessage(error),
+            }));
         }
     }
 
     protected async editBreakpointHitCount(breakpoint?: DebugSourceBreakpoint): Promise<void> {
         const bp = this.resolveBreakpoint(breakpoint);
         if (!bp) {
-            this.messageService.warn('请先在编辑器中定位到要设置命中次数的行。');
+            this.messageService.warn(this.t('widget.java.debugBreakpoint.positionLineHitCount'));
             return;
         }
         const current = bp.hitCondition ?? '';
         const dialog = new SingleTextInputDialog({
-            title: '编辑命中次数',
+            title: this.t('widget.java.debugBreakpoint.editHitCountTitle'),
             initialValue: current,
-            placeholder: '例如: >5',
-            confirmButtonLabel: '设置',
+            placeholder: this.t('widget.java.debugBreakpoint.hitCountPlaceholder'),
+            confirmButtonLabel: this.t('widget.java.debugBreakpoint.setButton'),
         });
         const value = await dialog.open();
         if (value === undefined || value === null) {
@@ -182,29 +228,34 @@ export class KairoJavaDebugBreakpointCommandContribution implements CommandContr
         }
         try {
             const hitCondition = value.trim() || undefined;
-            if (hitCondition && !/^(?:[><=!%]+|[><=]=?)\s*\d+$/.test(hitCondition)) {
-                this.messageService.warn(`命中次数表达式 "${hitCondition}" 格式可能不被 Debug Adapter 支持，已尝试设置。`);
+            // DAP allows a plain hit count like "5" (JV-P2-12).
+            if (hitCondition && !/^(?:\d+|(?:[><=!%]+|[><=]=?)\s*\d+)$/.test(hitCondition)) {
+                this.messageService.warn(this.t('widget.java.debugBreakpoint.hitCountFormatWarn', {
+                    expr: hitCondition,
+                }));
             }
             this.breakpointManager.updateBreakpoint(bp, {
                 hitCondition,
             } as Partial<DebugProtocol.SourceBreakpoint>);
         } catch (error) {
-            this.messageService.error(`命中次数断点设置失败: ${toMessage(error)}`);
+            this.messageService.error(this.t('widget.java.debugBreakpoint.hitCountFailed', {
+                msg: toMessage(error),
+            }));
         }
     }
 
     protected async editLogpointMessage(breakpoint?: DebugSourceBreakpoint): Promise<void> {
         const bp = this.resolveBreakpoint(breakpoint);
         if (!bp) {
-            this.messageService.warn('请先在编辑器中定位到要设置日志点的行。');
+            this.messageService.warn(this.t('widget.java.debugBreakpoint.positionLineLogpoint'));
             return;
         }
         const current = bp.logMessage ?? '';
         const dialog = new SingleTextInputDialog({
-            title: '编辑日志点消息',
+            title: this.t('widget.java.debugBreakpoint.editLogpointTitle'),
             initialValue: current,
-            placeholder: '例如: 变量 x = {x}',
-            confirmButtonLabel: '设置',
+            placeholder: this.t('widget.java.debugBreakpoint.logpointPlaceholder'),
+            confirmButtonLabel: this.t('widget.java.debugBreakpoint.setButton'),
         });
         const value = await dialog.open();
         if (value === undefined || value === null) {
@@ -216,35 +267,41 @@ export class KairoJavaDebugBreakpointCommandContribution implements CommandContr
                 logMessage,
             } as Partial<DebugProtocol.SourceBreakpoint>);
         } catch (error) {
-            this.messageService.error(`日志点设置失败: ${toMessage(error)}`);
+            this.messageService.error(this.t('widget.java.debugBreakpoint.logpointFailed', {
+                msg: toMessage(error),
+            }));
         }
     }
 
     protected async evaluateExpression(expression: string): Promise<void> {
         const session = this.sessionManager.currentSession;
         if (!session) {
-            this.messageService.error('没有活动的 Debug 会话，无法求值表达式。');
+            this.messageService.error(this.t('widget.java.debugBreakpoint.noDebugSession'));
             return;
         }
         if (session.configuration.type !== KAIRO_JAVA_DEBUG_TYPE) {
-            this.messageService.error('当前 Debug 会话不是 Kairo Java 调试会话。');
+            this.messageService.error(this.t('widget.java.debugBreakpoint.notJavaSession'));
             return;
         }
         try {
             const result = await session.evaluate(expression);
             const resultStr = result.result;
             if (resultStr) {
-                this.messageService.info(`求值结果: ${resultStr}`);
+                this.messageService.info(this.t('widget.java.debugBreakpoint.evaluateResult', {
+                    result: resultStr,
+                }));
             }
         } catch (error) {
-            this.messageService.error(`表达式求值失败: ${toMessage(error)}`);
+            this.messageService.error(this.t('widget.java.debugBreakpoint.evaluateFailed', {
+                msg: toMessage(error),
+            }));
         }
     }
 
     protected async toggleLogpoint(breakpoint?: DebugSourceBreakpoint): Promise<void> {
         const bp = this.resolveBreakpoint(breakpoint);
         if (!bp) {
-            this.messageService.warn('请先在编辑器中定位到要切换日志点的行。');
+            this.messageService.warn(this.t('widget.java.debugBreakpoint.positionLineToggleLogpoint'));
             return;
         }
         try {
@@ -254,10 +311,10 @@ export class KairoJavaDebugBreakpointCommandContribution implements CommandContr
                 } as Partial<DebugProtocol.SourceBreakpoint>);
             } else {
                 const dialog = new SingleTextInputDialog({
-                    title: '创建日志点',
+                    title: this.t('widget.java.debugBreakpoint.createLogpointTitle'),
                     initialValue: '',
-                    placeholder: '例如: 变量 x = {x}',
-                    confirmButtonLabel: '创建',
+                    placeholder: this.t('widget.java.debugBreakpoint.logpointPlaceholder'),
+                    confirmButtonLabel: this.t('widget.java.debugBreakpoint.createButton'),
                 });
                 const value = await dialog.open();
                 if (value === undefined || value === null) {
@@ -271,7 +328,9 @@ export class KairoJavaDebugBreakpointCommandContribution implements CommandContr
                 }
             }
         } catch (error) {
-            this.messageService.error(`日志点切换失败: ${toMessage(error)}`);
+            this.messageService.error(this.t('widget.java.debugBreakpoint.toggleLogpointFailed', {
+                msg: toMessage(error),
+            }));
         }
     }
 }

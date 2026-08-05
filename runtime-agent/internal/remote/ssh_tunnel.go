@@ -1,3 +1,5 @@
+//go:build remote
+
 // Package remote implements SSH tunnel connections for Phase 3+
 // remote Linux agent functionality.
 //

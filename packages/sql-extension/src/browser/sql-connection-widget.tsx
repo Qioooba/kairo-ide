@@ -438,8 +438,11 @@ export class SqlConnectionWidget extends ReactWidget {
       try {
         const configs = JSON.parse(text);
         if (Array.isArray(configs)) {
-          const count = await this.connectionService.importConnections(configs);
-          alert(this.t('widget.sql.connection.imported', { count }));
+          // VC-P1-8: skip connections that would be created with an empty password.
+          const { imported, skipped } = await this.connectionService.importConnections(configs);
+          const msg = this.t('widget.sql.connection.imported', { count: imported }) +
+            (skipped > 0 ? ` (${skipped} skipped — empty password)` : '');
+          alert(msg);
         }
       } catch {
         alert(this.t('widget.sql.connection.invalidImport'));

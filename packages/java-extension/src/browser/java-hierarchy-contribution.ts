@@ -12,7 +12,7 @@
  * JavaHierarchyWidget in the bottom panel.
  */
 
-import { injectable, inject } from '@theia/core/shared/inversify';
+import { injectable, inject, optional } from '@theia/core/shared/inversify';
 import {
   ApplicationShell,
   WidgetManager,
@@ -20,6 +20,7 @@ import {
 import { Command, CommandContribution, CommandRegistry, MenuContribution, MenuModelRegistry } from '@theia/core/lib/common';
 import { EditorManager } from '@theia/editor/lib/browser/editor-manager';
 import { CommonMenus } from '@theia/core/lib/browser/common-menus';
+import { KairoI18nService, type KairoI18nKey } from '@kairo/i18n';
 import { JavaHierarchyWidget } from './java-hierarchy-widget';
 
 export namespace JavaHierarchyCommands {
@@ -52,17 +53,50 @@ export class JavaHierarchyContribution implements CommandContribution, MenuContr
   @inject(EditorManager)
   protected readonly editorManager!: EditorManager;
 
+  @inject(KairoI18nService) @optional()
+  protected readonly i18n?: KairoI18nService;
+
+  protected commandRegistry: CommandRegistry | undefined;
+
+  protected readonly commandI18nKeys: Record<string, KairoI18nKey> = {
+    [JavaHierarchyCommands.SHOW_CALL_HIERARCHY_INCOMING.id]: 'widget.java.command.showCallHierarchyIncoming',
+    [JavaHierarchyCommands.SHOW_CALL_HIERARCHY_OUTGOING.id]: 'widget.java.command.showCallHierarchyOutgoing',
+    [JavaHierarchyCommands.SHOW_TYPE_HIERARCHY_SUPERTYPES.id]: 'widget.java.command.showTypeHierarchySupertypes',
+    [JavaHierarchyCommands.SHOW_TYPE_HIERARCHY_SUBTYPES.id]: 'widget.java.command.showTypeHierarchySubtypes',
+  };
+
+  protected withLabel(cmd: Command): Command {
+    const key = this.commandI18nKeys[cmd.id];
+    return key && this.i18n ? { ...cmd, label: this.i18n.t(key) } : cmd;
+  }
+
+  protected refreshCommandLabels(): void {
+    if (!this.commandRegistry || !this.i18n || typeof this.commandRegistry.getCommand !== 'function') {
+      return;
+    }
+    for (const [id, key] of Object.entries(this.commandI18nKeys)) {
+      const cmd = this.commandRegistry.getCommand(id);
+      if (cmd) {
+        cmd.label = this.i18n.t(key);
+      }
+    }
+  }
+
   registerCommands(registry: CommandRegistry): void {
-    registry.registerCommand(JavaHierarchyCommands.SHOW_CALL_HIERARCHY_INCOMING, {
+    this.commandRegistry = registry;
+    this.refreshCommandLabels();
+    this.i18n?.onDidChangeLanguage(() => this.refreshCommandLabels());
+
+    registry.registerCommand(this.withLabel(JavaHierarchyCommands.SHOW_CALL_HIERARCHY_INCOMING), {
       execute: () => this.showHierarchy('call-incoming'),
     });
-    registry.registerCommand(JavaHierarchyCommands.SHOW_CALL_HIERARCHY_OUTGOING, {
+    registry.registerCommand(this.withLabel(JavaHierarchyCommands.SHOW_CALL_HIERARCHY_OUTGOING), {
       execute: () => this.showHierarchy('call-outgoing'),
     });
-    registry.registerCommand(JavaHierarchyCommands.SHOW_TYPE_HIERARCHY_SUPERTYPES, {
+    registry.registerCommand(this.withLabel(JavaHierarchyCommands.SHOW_TYPE_HIERARCHY_SUPERTYPES), {
       execute: () => this.showHierarchy('type-supertypes'),
     });
-    registry.registerCommand(JavaHierarchyCommands.SHOW_TYPE_HIERARCHY_SUBTYPES, {
+    registry.registerCommand(this.withLabel(JavaHierarchyCommands.SHOW_TYPE_HIERARCHY_SUBTYPES), {
       execute: () => this.showHierarchy('type-subtypes'),
     });
   }
@@ -70,12 +104,14 @@ export class JavaHierarchyContribution implements CommandContribution, MenuContr
   registerMenus(menus: MenuModelRegistry): void {
     menus.registerMenuAction(CommonMenus.EDIT, {
       commandId: JavaHierarchyCommands.SHOW_CALL_HIERARCHY_INCOMING.id,
-      label: 'Show Call Hierarchy (Incoming Calls)',
+      label: this.i18n?.t('widget.java.command.showCallHierarchyIncomingMenu')
+        ?? 'Show Call Hierarchy (Incoming Calls)',
       order: 'a50',
     });
     menus.registerMenuAction(CommonMenus.EDIT, {
       commandId: JavaHierarchyCommands.SHOW_TYPE_HIERARCHY_SUPERTYPES.id,
-      label: 'Show Type Hierarchy (Supertypes)',
+      label: this.i18n?.t('widget.java.command.showTypeHierarchySupertypesMenu')
+        ?? 'Show Type Hierarchy (Supertypes)',
       order: 'a51',
     });
   }

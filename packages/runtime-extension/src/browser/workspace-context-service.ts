@@ -190,8 +190,10 @@ export class WorkspaceContextService implements FrontendApplicationContribution 
                 this.setWorkspace(created.id, created.rootPath);
             }
         } catch (_err) {
-            // If the backend is not available, derive workspaceId from path
-            const fallbackId = `local-${btoa(rootPath).replace(/[+/=]/g, '').slice(0, 16)}`;
+            // If the backend is not available, derive workspaceId from path.
+            // encodeURIComponent before btoa so non-Latin1 paths (e.g. Chinese)
+            // do not throw InvalidCharacterError.
+            const fallbackId = `local-${btoa(encodeURIComponent(rootPath)).replace(/[+/=]/g, '').slice(0, 16)}`;
             this.setWorkspace(fallbackId, rootPath);
         }
     }
@@ -225,7 +227,10 @@ export class WorkspaceContextService implements FrontendApplicationContribution 
                 const bytes = content.value instanceof Uint8Array
                     ? content.value
                     : new Uint8Array(content.value.buffer || content.value);
-                const text = new TextDecoder('utf-8').decode(bytes);
+                // BD-P2-12: project.yaml may be GBK on Chinese legacy projects.
+                // Prefer UTF-8 (with BOM); fall back to gbk when UTF-8 yields
+                // replacement characters and gbk does not.
+                const text = decodeProjectYamlBytes(bytes);
                 const parsed = this.parseSimpleYaml(text);
                 if (parsed) {
                     this.projectYaml = parsed;
@@ -328,4 +333,30 @@ export class WorkspaceContextService implements FrontendApplicationContribution 
         }
         return this.currentContext;
     }
+}
+
+/**
+ * Decode `.kairo/project.yaml` bytes. UTF-8 (incl. BOM) is preferred;
+ * fall back to GBK when UTF-8 produces replacement characters and GBK
+ * yields a cleaner decode (common for Chinese legacy projects).
+ */
+export function decodeProjectYamlBytes(bytes: Uint8Array): string {
+    if (bytes.length >= 3 && bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF) {
+        return new TextDecoder('utf-8').decode(bytes);
+    }
+    const utf8 = new TextDecoder('utf-8').decode(bytes);
+    const utf8Bad = (utf8.match(/\uFFFD/g) || []).length;
+    if (utf8Bad === 0) {
+        return utf8;
+    }
+    try {
+        const gbk = new TextDecoder('gbk').decode(bytes);
+        const gbkBad = (gbk.match(/\uFFFD/g) || []).length;
+        if (gbkBad < utf8Bad) {
+            return gbk;
+        }
+    } catch {
+        // TextDecoder('gbk') unavailable — keep UTF-8.
+    }
+    return utf8;
 }

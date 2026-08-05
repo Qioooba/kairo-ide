@@ -766,3 +766,15 @@ type errorReader struct{}
 func (e *errorReader) Read(p []byte) (int, error) {
 	return 0, io.ErrUnexpectedEOF
 }
+
+func TestJDWPCommandSetConstants(t *testing.T) {
+	if cmdSetMethod != 6 {
+		t.Errorf("cmdSetMethod = %d, want 6 (JDWP Method command set)", cmdSetMethod)
+	}
+	if cmdSetObjectReference != 9 {
+		t.Errorf("cmdSetObjectReference = %d, want 9", cmdSetObjectReference)
+	}
+	if cmdSetMethod == cmdSetObjectReference {
+		t.Error("cmdSetMethod must not collide with cmdSetObjectReference")
+	}
+}

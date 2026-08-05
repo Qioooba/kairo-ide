@@ -142,32 +142,89 @@ export class JavaRefactoring {
   /**
    * After extract method, JDT LS may use a placeholder name
    * like "extractedMethod". If the user provided a custom
-   * name, we find the placeholder and rename it.
+   * name, rewrite that placeholder in every text edit
+   * (declaration + call sites), not only the first match.
    */
-  private async applyRename(uri: string, edit: LSPWorkspaceEdit, newName: string): Promise<LSPWorkspaceEdit | null> {
-    // Find the extracted method declaration position in the
-    // edit — it will be the first edit that inserts a new
-    // method. The new method text contains the placeholder
-    // name. We search for the placeholder in the newText.
-    const methodEdits = edit.changes?.[uri] ?? [];
-    for (const e of methodEdits) {
-      // Look for a method declaration pattern: "private ... void extractedMethod()"
-      const placeholderMatch = /(?:void|int|String|boolean|long|double|float|char|byte|short)\s+(\w+)\s*\(/.exec(e.newText);
-      if (placeholderMatch) {
-        const placeholderName = placeholderMatch[1];
-        const updatedText = e.newText.replace(new RegExp(`\\b${placeholderName}\\b`, 'g'), newName);
-        const updatedEdit: LSPWorkspaceEdit = {
-          changes: {
-            ...edit.changes,
-            [uri]: methodEdits.map(me => me === e ? { ...me, newText: updatedText } : me),
-          },
-        };
-        if (edit.documentChanges) {
-          updatedEdit.documentChanges = edit.documentChanges;
+  private async applyRename(_uri: string, edit: LSPWorkspaceEdit, newName: string): Promise<LSPWorkspaceEdit | null> {
+    const placeholderName = findExtractedMethodPlaceholder(edit);
+    if (!placeholderName) {
+      return null;
+    }
+    const re = new RegExp(`\\b${escapeRegExp(placeholderName)}\\b`, 'g');
+    let changed = false;
+
+    const renameText = (text: string): string => {
+      re.lastIndex = 0;
+      const next = text.replace(re, newName);
+      if (next !== text) {
+        changed = true;
+      }
+      return next;
+    };
+
+    const updated: LSPWorkspaceEdit = {};
+    if (edit.changes) {
+      const changes: NonNullable<LSPWorkspaceEdit['changes']> = {};
+      for (const [changeUri, edits] of Object.entries(edit.changes)) {
+        changes[changeUri] = edits.map(me => {
+          const newText = renameText(me.newText);
+          return newText === me.newText ? me : { ...me, newText };
+        });
+      }
+      updated.changes = changes;
+    }
+    if (edit.documentChanges) {
+      updated.documentChanges = edit.documentChanges.map(dc => {
+        if (!('edits' in dc) || !Array.isArray(dc.edits)) {
+          return dc;
         }
-        return updatedEdit;
+        return {
+          ...dc,
+          edits: dc.edits.map(te => {
+            const newText = renameText(te.newText);
+            return newText === te.newText ? te : { ...te, newText };
+          }),
+        };
+      });
+    }
+    return changed ? updated : null;
+  }
+}
+
+/** Escape a literal for use inside a RegExp. */
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Detect the JDT LS extract-method placeholder name from any
+ * text edit in the workspace edit (declaration or call site).
+ */
+function findExtractedMethodPlaceholder(edit: LSPWorkspaceEdit): string | undefined {
+  const texts: string[] = [];
+  for (const edits of Object.values(edit.changes ?? {})) {
+    for (const e of edits) {
+      texts.push(e.newText);
+    }
+  }
+  for (const dc of edit.documentChanges ?? []) {
+    if ('edits' in dc && Array.isArray(dc.edits)) {
+      for (const e of dc.edits) {
+        texts.push(e.newText);
       }
     }
-    return null;
   }
+  for (const text of texts) {
+    // Method declaration: "private ... void extractedMethod("
+    const decl = /(?:void|int|String|boolean|long|double|float|char|byte|short)\s+(\w+)\s*\(/.exec(text);
+    if (decl) {
+      return decl[1];
+    }
+  }
+  for (const text of texts) {
+    if (/\bextractedMethod\b/.test(text)) {
+      return 'extractedMethod';
+    }
+  }
+  return undefined;
 }

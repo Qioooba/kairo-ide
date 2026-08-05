@@ -5,10 +5,10 @@
  * numbers so that breakpoints set in .jsp files are resolved
  * to the actual generated Servlet code.
  *
- * Tomcat 6 generates Servlet .java files with line-number
- * comments like `// line 42`, which reference the original JSP
- * line. This service parses those comments to build a two-way
- * mapping.
+ * Jasper/Tomcat may embed `// line N` comments, alternate
+ * `from line #N` markers, or a JSR-045 SMAP trailer. When none
+ * are present the mapper fails visibly rather than silently
+ * mapping to the wrong Java line.
  *
  * Controlled by the experimental flag `kairo.jsp.debugBreakpoints`
  * (default: false). Users must explicitly opt in.
@@ -23,6 +23,7 @@ import { FileService } from '@theia/filesystem/lib/browser/file-service';
 import { WorkspaceService } from '@theia/workspace/lib/browser/workspace-service';
 import URI from '@theia/core/lib/common/uri';
 import { StorageService } from '@theia/core/lib/browser';
+import { EditorManager } from '@theia/editor/lib/browser';
 import { JSP_LANGUAGE_ID } from './jsp-monarch';
 import { JspJavaParser } from './jsp-java-nav';
 
@@ -59,8 +60,136 @@ export interface JspDebugConfig {
 }
 
 const JSP_DEBUG_CONFIG_KEY = 'kairo.jsp.debugBreakpoints';
-const JSP_LINE_COMMENT_REGEX = /\/\/\s*line\s+(\d+)/i;
+/** Classic Jasper `// line N` (and loose variants). */
+const JSP_LINE_COMMENT_REGEX = /\/\/\s*(?:HTML\s*\/\/\s*)?(?:from\s+)?line\s+#?(\d+)/i;
 const JSP_FILE_EXTENSION = '.jsp';
+const NO_MAPPING_MSG =
+  '生成的 Servlet 源码中未找到 JSP 行号映射（需要 // line N 注释或 SMAP）。' +
+  '请确认 Jasper keepgenerated/映射信息已启用，或手动配置正确的 Servlet 源码目录。';
+
+/**
+ * Basename of a filesystem path that may use `/` or `\\`.
+ * Exported for unit tests (JV-P1-13).
+ */
+export function fsPathBasename(fsPath: string): string {
+  const normalized = fsPath.replace(/\\/g, '/');
+  const idx = normalized.lastIndexOf('/');
+  return idx >= 0 ? normalized.slice(idx + 1) : normalized;
+}
+
+/**
+ * Join a directory and file name using the directory's separator style.
+ * Exported for unit tests (JV-P1-13).
+ */
+export function joinFsPath(dir: string, fileName: string): string {
+  const trimmed = dir.replace(/[/\\]+$/, '');
+  const sep = trimmed.includes('\\') && !trimmed.includes('/') ? '\\' : '/';
+  return `${trimmed}${sep}${fileName}`;
+}
+
+/**
+ * Parse JSP→Java line mappings from generated Servlet source.
+ * Supports `// line N` comments and a trailing JSR-045 SMAP `*L` section.
+ * Exported for unit tests (JV-P1-13).
+ */
+export function parseServletLineMappings(
+  text: string,
+  javaFilePath: string,
+): JspLineMapping[] {
+  const mappings: JspLineMapping[] = [];
+  const lines = text.split(/\r?\n/);
+
+  for (let i = 0; i < lines.length; i++) {
+    const match = JSP_LINE_COMMENT_REGEX.exec(lines[i]);
+    if (match) {
+      const jspLine = parseInt(match[1], 10);
+      if (jspLine > 0) {
+        mappings.push({
+          jspLine,
+          javaLine: i + 1,
+          javaFile: javaFilePath,
+        });
+      }
+    }
+  }
+
+  if (mappings.length === 0) {
+    mappings.push(...parseSmapLineMappings(text, javaFilePath));
+  }
+
+  return mappings;
+}
+
+/**
+ * Parse a JSR-045 SMAP `*L` section into JSP→Java line mappings.
+ * Format (simplified): `InputStartLine[#FileId][,InputLineCount]:OutputStartLine[,OutputLineIncrement]`
+ */
+export function parseSmapLineMappings(
+  text: string,
+  javaFilePath: string,
+): JspLineMapping[] {
+  const smapStart = text.lastIndexOf('\n*S ');
+  if (smapStart < 0 && !text.startsWith('Smap')) {
+    // Also accept SMAP embedded after a form-feed / comment trailer
+    const alt = text.lastIndexOf('*S Jasper');
+    if (alt < 0) {
+      return [];
+    }
+  }
+
+  const lineSection = /\*L\r?\n([\s\S]*?)(?:\*E|\*S\b|$)/.exec(text);
+  if (!lineSection) {
+    return [];
+  }
+
+  const mappings: JspLineMapping[] = [];
+  const entryRe =
+    /^(\d+)(?:#\d+)?(?:,(\d+))?:(\d+)(?:,(\d+))?$/;
+  for (const raw of lineSection[1].split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) continue;
+    const m = entryRe.exec(line);
+    if (!m) continue;
+    const inputStart = parseInt(m[1], 10);
+    const inputCount = m[2] ? parseInt(m[2], 10) : 1;
+    const outputStart = parseInt(m[3], 10);
+    const outputInc = m[4] ? parseInt(m[4], 10) : 1;
+    if (inputStart <= 0 || outputStart <= 0) continue;
+    for (let i = 0; i < inputCount; i++) {
+      mappings.push({
+        jspLine: inputStart + i,
+        javaLine: outputStart + i * outputInc,
+        javaFile: javaFilePath,
+      });
+    }
+  }
+  return mappings;
+}
+
+/**
+ * Map a Java source line back to the nearest preceding JSP line marker.
+ * Exported for unit tests (JV-P1-13).
+ */
+export function mapJavaLineToJspLine(text: string, javaLine: number): number {
+  const lines = text.split(/\r?\n/);
+  const start = Math.min(Math.max(javaLine, 1), lines.length) - 1;
+  for (let i = start; i >= 0; i--) {
+    const match = JSP_LINE_COMMENT_REGEX.exec(lines[i]);
+    if (match) {
+      return parseInt(match[1], 10);
+    }
+  }
+
+  // Fall back to SMAP: find mapping whose javaLine is closest ≤ javaLine
+  const smap = parseSmapLineMappings(text, '');
+  let best: JspLineMapping | undefined;
+  for (const m of smap) {
+    if (m.javaLine <= javaLine && (!best || m.javaLine > best.javaLine)) {
+      best = m;
+    }
+  }
+  return best ? best.jspLine : javaLine;
+}
 
 @injectable()
 export class JspDebugBreakpointMapper {
@@ -108,7 +237,7 @@ export class JspDebugBreakpointMapper {
         'JSP 断点调试是实验性功能。\n\n' +
         '已知限制：\n' +
         '• 需要 Tomcat 生成的 Servlet 源码可用\n' +
-        '• 仅支持 Tomcat 6 生成的 Servlet 格式\n' +
+        '• 行号映射依赖 // line N 注释或 SMAP\n' +
         '• 行号映射可能有偏移\n' +
         '• 如果生成的 Servlet 源码不可用，断点将无法设置\n\n' +
         '此功能默认关闭，需要手动启用。',
@@ -156,29 +285,19 @@ export class JspDebugBreakpointMapper {
       await this.fileService.resolve(javaUri);
       mapping.servletSourceAvailable = true;
 
-      // Read the Java file and parse line comments
+      // Read the Java file and parse line comments / SMAP
       const content = await this.fileService.readFile(javaUri);
       const text = content.value.toString();
-      const lines = text.split('\n');
+      mapping.mappings = parseServletLineMappings(text, javaFilePath);
 
-      // Parse `// line N` comments
-      for (let i = 0; i < lines.length; i++) {
-        const match = JSP_LINE_COMMENT_REGEX.exec(lines[i]);
-        if (match) {
-          const jspLine = parseInt(match[1], 10);
-          if (jspLine > 0) {
-            mapping.mappings.push({
-              jspLine,
-              javaLine: i + 1, // 1-based line number
-              javaFile: javaFilePath,
-            });
-          }
-        }
+      if (mapping.mappings.length === 0) {
+        mapping.error = NO_MAPPING_MSG;
+        this.logger.warn(`JSP 断点映射解析失败: ${jspFilePath} — ${mapping.error}`);
+      } else {
+        this.logger.info(
+          `JSP 断点映射解析完成: ${jspFilePath} → ${mapping.mappings.length} 个行映射`,
+        );
       }
-
-      this.logger.info(
-        `JSP 断点映射解析完成: ${jspFilePath} → ${mapping.mappings.length} 个行映射`,
-      );
     } catch (error) {
       mapping.servletSourceAvailable = false;
       mapping.error = error instanceof Error ? error.message : String(error);
@@ -208,15 +327,26 @@ export class JspDebugBreakpointMapper {
     // Find the generated Servlet Java file path
     const javaFilePath = this.deriveJavaFilePath(jspFilePath);
     if (!javaFilePath) {
+      this.messages.warn(
+        'JSP 断点: 未配置 Servlet 源码目录，无法映射行号。请先设置生成的 _jsp.java 所在目录。',
+      );
       return null;
     }
 
     const mapping = await this.parseMapping(jspFilePath, javaFilePath);
 
     if (!mapping.servletSourceAvailable) {
+      this.messages.warn(
+        `JSP 断点: 找不到生成的 Servlet 源码 — ${javaFilePath}`,
+      );
       this.logger.warn(
         `JSP 断点警告: 生成的 Servlet 源码不可用 — ${javaFilePath}`,
       );
+      return null;
+    }
+
+    if (mapping.mappings.length === 0) {
+      this.messages.warn(mapping.error || NO_MAPPING_MSG);
       return null;
     }
 
@@ -236,6 +366,9 @@ export class JspDebugBreakpointMapper {
     }
 
     if (!bestMapping) {
+      this.messages.warn(
+        `JSP 断点: 无法将第 ${jspLine} 行映射到 Servlet 源码。`,
+      );
       return null;
     }
 
@@ -255,19 +388,18 @@ export class JspDebugBreakpointMapper {
    * @param jspFilePath Absolute path to the .jsp file
    */
   deriveJavaFilePath(jspFilePath: string): string | null {
-    const _jspName = jspFilePath.replace(/\.jsp$/, '');
-    const fileName = jspFilePath.split('/').pop();
-    if (!fileName || !fileName.endsWith(JSP_FILE_EXTENSION)) {
+    const fileName = fsPathBasename(jspFilePath);
+    if (!fileName || !fileName.toLowerCase().endsWith(JSP_FILE_EXTENSION)) {
       return null;
     }
 
-    const baseName = fileName.replace(/\.jsp$/, '');
+    const baseName = fileName.replace(/\.jsp$/i, '');
     // Convert JSP file name to valid Java identifier
     const javaClassName = baseName.replace(/[^a-zA-Z0-9_]/g, '_') + '_jsp.java';
 
     // If a custom servlet source directory is configured, use it
     if (this.config.servletSourceDir) {
-      return `${this.config.servletSourceDir}/${javaClassName}`;
+      return joinFsPath(this.config.servletSourceDir, javaClassName);
     }
 
     // Default: look relative to the project's work directory
@@ -302,6 +434,11 @@ export class JspDebugBreakpointMapper {
       return 'JSP 断点调试已启用，但未配置 Servlet 源码目录。请设置 Servlet 源码路径。';
     }
     return `JSP 断点调试已启用。Servlet 源码目录: ${this.config.servletSourceDir}`;
+  }
+
+  /** Surface a successful mapping to the user (CodeLens command). */
+  notifyMapping(message: string): void {
+    this.messages.info(message);
   }
 
   // ── Internal ──────────────────────────────────────────────────
@@ -401,11 +538,11 @@ export function registerJspDebugCodeLens(): monaco.IDisposable {
 
 /**
  * Register a command that handles the "Toggle Breakpoint" CodeLens action.
- * Returns a Disposable for cleanup.
+ * Must receive the DI-constructed mapper — never `new` it (injections empty).
  */
-export function registerJspBreakpointCommand(): monaco.IDisposable {
-  const mapper = new JspDebugBreakpointMapper();
-
+export function registerJspBreakpointCommand(
+  mapper: JspDebugBreakpointMapper,
+): monaco.IDisposable {
   // Register a Monaco action for the CodeLens command
   const disposable = monaco.editor.addEditorAction({
     id: 'kairo.jsp.toggleBreakpoint',
@@ -423,18 +560,13 @@ export function registerJspBreakpointCommand(): monaco.IDisposable {
 
       const result = await mapper.mapJspLineToJava(jspFilePath, jspLine);
       if (result) {
-        // Show notification with the mapping info
-        const jspFileName = jspFilePath.split('/').pop() || jspFilePath;
-        const msg = `JSP 断点: ${jspFileName} 第 ${jspLine} 行 → _jspService() 第 ${result.javaLine} 行`;
-        // Use global message service if available
-        const model = editor.getModel();
-        if (model) {
-          // Show as an info decoration or just log
-          console.log(msg);
-        }
-      } else {
-        console.log(`JSP 断点: 无法映射 ${jspFilePath} 第 ${jspLine} 行到生成的 Servlet 代码`);
+        const jspFileName = fsPathBasename(jspFilePath) || jspFilePath;
+        mapper.notifyMapping(
+          `JSP 断点: ${jspFileName} 第 ${jspLine} 行 → _jspService() 第 ${result.javaLine} 行`,
+        );
       }
+      // Failure paths already surface MessageService warnings from the mapper.
+      void editor;
     },
   });
 
@@ -453,8 +585,14 @@ const JSP_SERVLET_FILE_RE = /_jsp\.java$/i;
  * When a breakpoint is hit in a generated _jsp.java file, the debugger
  * opens that file. This opener intercepts the open and navigates to
  * the original JSP source instead.
+ *
+ * Must use EditorManager.open — never createModel('') for a real file://
+ * URI (that pollutes the model registry and Ctrl+S can write empty).
  */
-export function registerJspBreakpointEditorOpener(): monaco.IDisposable {
+export function registerJspBreakpointEditorOpener(
+  editorManager: EditorManager,
+  fileService: FileService,
+): monaco.IDisposable {
 
   return monaco.editor.registerEditorOpener({
     openCodeEditor: async (
@@ -462,6 +600,7 @@ export function registerJspBreakpointEditorOpener(): monaco.IDisposable {
       resource: monaco.Uri,
       selectionOrPosition?: monaco.IRange | monaco.IPosition,
     ): Promise<boolean> => {
+      void source;
       const path = resource.path;
       if (!JSP_SERVLET_FILE_RE.test(path)) {
         return false; // Let the default opener handle it
@@ -469,7 +608,7 @@ export function registerJspBreakpointEditorOpener(): monaco.IDisposable {
 
       // Derive the original JSP file name from the generated Java file name
       // e.g. "index_jsp.java" → "index.jsp"
-      const javaFileName = path.split('/').pop() || '';
+      const javaFileName = fsPathBasename(path);
       const jspBaseName = javaFileName
         .replace(/_jsp\.java$/i, '')
         .replace(/_/g, '.'); // Replace underscores used as separators
@@ -486,47 +625,33 @@ export function registerJspBreakpointEditorOpener(): monaco.IDisposable {
         jspLine = selectionOrPosition.lineNumber;
       } else if (selectionOrPosition && 'startLineNumber' in selectionOrPosition) {
         jspLine = selectionOrPosition.startLineNumber;
-      } else {
-        // Fallback to line 1
-        jspLine = 1;
       }
 
-      // Try to read the generated Java file to find the JSP line mapping
+      // Read generated Java via FileService (fetch('file://') fails in Electron)
       try {
-        // Read the generated Java file to find the `// line N` comment
-        // that maps back to the original JSP line
-        const response = await fetch(resource.toString(true));
-        if (response.ok) {
-          const text = await response.text();
-          const lines = text.split('\n');
-          // Look backwards from the current Java line for the nearest `// line N` comment
-          for (let i = jspLine - 1; i >= 0; i--) {
-            const match = JSP_LINE_COMMENT_REGEX.exec(lines[i]);
-            if (match) {
-              jspLine = parseInt(match[1], 10);
-              break;
-            }
-          }
-        }
+        const fileContent = await fileService.readFile(new URI(resource.toString(true)));
+        const text = fileContent.value.toString();
+        jspLine = mapJavaLineToJspLine(text, jspLine);
       } catch {
         // Use the default line mapping
       }
 
-      // Open the JSP file in the same editor
-      const jspUri = monaco.Uri.from({
+      // Open via EditorManager so Theia loads real file content into the model.
+      // jspFilePath is a URI path (from monaco.Uri.path), not a raw fs path.
+      const monacoJspUri = monaco.Uri.from({
         scheme: resource.scheme,
         authority: resource.authority,
         path: jspFilePath,
       });
-
-      let model = monaco.editor.getModel(jspUri);
-      if (!model) {
-        model = monaco.editor.createModel('', JSP_LANGUAGE_ID, jspUri);
-      }
-      source.setModel(model);
-      const range = new monaco.Range(jspLine, 1, jspLine, 1);
-      source.setSelection(range);
-      source.revealLineInCenter(jspLine);
+      const jspUri = new URI(monacoJspUri.toString(true));
+      // Selection is 0-based in Theia/LSP Range
+      const line = Math.max(0, jspLine - 1);
+      await editorManager.open(jspUri, {
+        selection: {
+          start: { line, character: 0 },
+          end: { line, character: 0 },
+        },
+      });
 
       return true; // We handled the open
     },
@@ -547,23 +672,22 @@ async function findJspFileForServlet(
   // The JSP file is typically under:
   //   <webapp>/<name>.jsp
 
+  // monaco.Uri.path is always POSIX-style (`/`)
   const javaPath = javaUri.path;
 
   // Try to find the webapp root by walking up from the Java file
   // Look for WEB-INF directory
-  const parts = javaPath.split('/');
+  const parts = javaPath.split('/').filter(Boolean);
   for (let i = parts.length - 1; i >= 0; i--) {
     if (parts[i] === 'WEB-INF') {
       // The webapp is the parent of WEB-INF
-      const webappRoot = parts.slice(0, i).join('/');
-      const jspPath = `${webappRoot}/${jspBaseName}.jsp`;
-      return jspPath;
+      const webappRoot = '/' + parts.slice(0, i).join('/');
+      return `${webappRoot}/${jspBaseName}.jsp`;
     }
   }
 
-  // Fallback: try common JSP locations relative to the workspace root
-  // Look for the JSP file by name
-  const parentDir = javaPath.substring(0, javaPath.lastIndexOf('/'));
-  const jspCandidate = `${parentDir}/${jspBaseName}.jsp`;
-  return jspCandidate;
+  // Fallback: try common JSP locations relative to the parent dir
+  const slash = javaPath.lastIndexOf('/');
+  const parentDir = slash >= 0 ? javaPath.substring(0, slash) : javaPath;
+  return `${parentDir}/${jspBaseName}.jsp`;
 }

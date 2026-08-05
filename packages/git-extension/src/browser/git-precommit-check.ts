@@ -343,7 +343,15 @@ export class GitPreCommitChecker {
             // 获取暂存的 Java 文件
             const { stdout: stagedOutput } = await execFileAsync(
                 'git', ['diff', '--cached', '--name-only', '--diff-filter=ACMR'],
-                { cwd: repoRoot },
+                {
+                    cwd: repoRoot,
+                    env: {
+                        ...(typeof process !== 'undefined' ? process.env : {}),
+                        LANG: 'C',
+                        LC_ALL: 'C',
+                        LANGUAGE: 'C',
+                    },
+                },
             );
 
             const stagedFiles = stagedOutput.trim().split('\n').filter(f => f.endsWith('.java'));

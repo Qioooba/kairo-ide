@@ -17,6 +17,16 @@ if (!global.DragEvent) {
   };
 }
 
+const { FrontendApplicationConfigProvider } = require('@theia/core/lib/browser/frontend-application-config-provider');
+FrontendApplicationConfigProvider.set({
+  defaultTheme: 'dark',
+  defaultIconTheme: 'theia-file-icons',
+  applicationName: 'Kairo',
+  validatePreferencesSchema: true,
+});
+
+require('reflect-metadata');
+
 const { test } = require('node:test');
 const assert = require('node:assert');
 

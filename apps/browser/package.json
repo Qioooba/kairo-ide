@@ -13,8 +13,8 @@
         "applicationName": "Kairo IDE",
         "preferences": {
           "files.autoSave": "off",
-          "security.workspace.trust.enabled": false,
-          "workspace.preserveWindow": true
+          "workspace.preserveWindow": true,
+          "security.workspace.trust.enabled": true
         }
       }
     }

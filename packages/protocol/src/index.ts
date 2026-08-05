@@ -615,6 +615,11 @@ export interface JdtProjectRequest {
   autoDetectClasspath?: boolean;
   /** Optional explicit build file path (e.g. build.xml). */
   buildFile?: string;
+  /**
+   * Explicit library/jar paths for the JDT model. When provided with
+   * autoDetectClasspath=false, these replace autodetection (BD-P1-13).
+   */
+  libraries?: string[];
 }
 
 export interface JdtProjectResponse {
@@ -672,6 +677,8 @@ export interface AuditEvent {
 /* ------------------------------------------------------------------ */
 
 export interface EndpointMap {
+  // Liveness (no auth required on the agent)
+  'GET /api/v1/health': { request: undefined; response: HealthResponse };
   // Workspaces
   'GET /api/v1/workspaces': { request: undefined; response: Workspace[] };
   'POST /api/v1/workspaces': {
@@ -787,13 +794,76 @@ export interface EndpointMap {
   'POST /api/v1/maven/run': { request: { rootPath: string; task: string; offline?: boolean }; response: MavenRunResult };
   // Custom build
   'POST /api/v1/build/custom': { request: CustomBuildStartRequest; response: CustomBuildStartResponse };
+  'GET /api/v1/build/custom/{buildId}': { request: undefined; response: CustomBuildStatusResponse };
   'POST /api/v1/build/custom/{buildId}/cancel': { request: undefined; response: CustomBuildCancelResponse };
   // Ant classpath
   'POST /api/v1/ant/classpath/analyze': { request: AntClasspathAnalyzeRequest; response: AntClasspathAnalyzeResponse };
   // JVM incremental compilation and hot reload
   'POST /api/v1/jvm/compile-incremental': { request: { files?: string[]; projectId?: string }; response: { state: string; filesCompiled?: number; error?: string } };
-  'POST /api/v1/jvm/compile': { request: { file: string }; response: { success: boolean; classPath?: string; error?: string } };
-  'POST /api/v1/jvm/redefine': { request: { sourcePath: string }; response: { success: boolean; error?: string } };
+  'POST /api/v1/jvm/compile': { request: { file: string; projectId?: string }; response: { success: boolean; classPath?: string; error?: string } };
+  'POST /api/v1/jvm/redefine': { request: { sourcePath: string; classPath?: string }; response: { success: boolean; error?: string } };
+  // Java detect / run (main + JUnit)
+  'POST /api/v1/java/detect': {
+    request: { filePath: string };
+    response: {
+      packageName: string;
+      className: string;
+      methods: Array<{
+        name: string;
+        line: number;
+        isMain: boolean;
+        isTest: boolean;
+        startLine: number;
+        endLine: number;
+      }>;
+    };
+  };
+  'POST /api/v1/java/run': {
+    request: {
+      projectRoot: string;
+      filePath: string;
+      className: string;
+      packageName?: string;
+      line?: number;
+      debug?: boolean;
+      methodType?: 'main' | 'test' | string;
+    };
+    response: {
+      ok: boolean;
+      exitCode: number;
+      stdout: string;
+      stderr: string;
+      buildDir?: string;
+      classpath?: string;
+      debugPort?: number;
+      error?: string;
+    };
+  };
+  // SQL (experimental Oracle)
+  'POST /api/v1/sql/execute': {
+    request: { connectionId: string; sql: string; maxRows?: number };
+    response: {
+      columns: Array<{ name: string; type: string; label: string }>;
+      rows: Array<Record<string, unknown>>;
+      rowCount: number;
+      totalRows?: number;
+      executionTimeMs: number;
+      truncated: boolean;
+      error?: string;
+    };
+  };
+  'POST /api/v1/sql/test-connection': {
+    request: {
+      host: string;
+      port: number;
+      sid?: string;
+      serviceName?: string;
+      useServiceName: boolean;
+      username: string;
+      password: string;
+    };
+    response: { success: boolean; oracleVersion?: string; instanceName?: string; connectionId?: string };
+  };
 }
 
 export interface DetectedProjectLayout {
@@ -930,6 +1000,12 @@ export interface CustomBuildStartResponse {
   status: string;
 }
 
+export interface CustomBuildStatusResponse {
+  buildId: string;
+  status: string;
+  exitCode?: number;
+}
+
 export interface CustomBuildCancelResponse {
   buildId: string;
   status: string;
@@ -996,25 +1072,6 @@ export type WsEvent =
       data?: { status: string };
       message?: string;
     };
-
-/* ------------------------------------------------------------------ */
-/*  Shared display helpers                                             */
-/* ------------------------------------------------------------------ */
-
-export interface StateDisplay {
-    label: string;
-    icon: string;
-    color: string;
-}
-
-export function mapBuildState(state: string): StateDisplay {
-    switch (state) {
-        case 'running': return { label: 'Running', icon: 'circle-filled', color: 'var(--theia-successForeground)' };
-        case 'failed': return { label: 'Failed', icon: 'error', color: 'var(--theia-errorForeground)' };
-        case 'stopped': return { label: 'Stopped', icon: 'circle-outline', color: 'var(--theia-disabledForeground)' };
-        default: return { label: state, icon: 'circle-outline', color: 'var(--theia-foreground)' };
-    }
-}
 
 /* ------------------------------------------------------------------ */
 /*  Helpers (re-exported from index)                                   */

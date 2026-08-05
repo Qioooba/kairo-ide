@@ -12,8 +12,11 @@
 
 import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
 import { Emitter, Event } from '@theia/core/lib/common/event';
+import URI from '@theia/core/lib/common/uri';
 import { DebugSessionManager } from '@theia/debug/lib/browser/debug-session-manager';
+import { BreakpointManager } from '@theia/debug/lib/browser/breakpoint/breakpoint-manager';
 import type { DebugSession } from '@theia/debug/lib/browser/debug-session';
+import type { DebugStackFrame } from '@theia/debug/lib/browser/model/debug-stack-frame';
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import { KairoJavaDebugService, type KairoJavaDebugState } from './kairo-java-debug-service';
 
@@ -76,6 +79,9 @@ export class KairoDebugSessionService {
   @inject(KairoJavaDebugService)
   protected readonly javaDebug!: KairoJavaDebugService;
 
+  @inject(BreakpointManager)
+  protected readonly breakpointManager!: BreakpointManager;
+
   protected readonly onStateChangeEmitter = new Emitter<KairoDebugSessionState>();
   readonly onDidChangeState: Event<KairoDebugSessionState> = this.onStateChangeEmitter.event;
 
@@ -118,7 +124,11 @@ export class KairoDebugSessionService {
   }
 
   protected _breakpointsMuted = false;
-  protected _temporaryRunToLine: { line: number; source: DebugProtocol.Source } | null = null;
+  protected _temporaryRunToLine: {
+    line: number;
+    source: DebugProtocol.Source;
+    previous: DebugProtocol.SourceBreakpoint[];
+  } | null = null;
 
   @postConstruct()
   protected init(): void {
@@ -164,6 +174,10 @@ export class KairoDebugSessionService {
     };
 
     this.onStateChangeEmitter.fire(this.state);
+
+    if (isSuspended) {
+      void this.clearTemporaryRunToCursorBreakpoint();
+    }
 
     if (hasSession) {
       this.fetchThreads();
@@ -237,11 +251,11 @@ export class KairoDebugSessionService {
     const session = this.currentSession;
     if (!session) return [];
 
-    const thread = session.currentThread;
-    if (!thread) return [];
+    const frameId = session.currentFrame?.raw?.id;
+    if (frameId === undefined) return [];
 
     try {
-      const scopesResponse = await session.sendRequest('scopes', { frameId: thread.threadId });
+      const scopesResponse = await session.sendRequest('scopes', { frameId });
       const scopes = scopesResponse.body?.scopes ?? [];
       if (!scopes || scopes.length === 0) return [];
 
@@ -272,7 +286,7 @@ export class KairoDebugSessionService {
     if (!session) return [];
 
     const frameId = session.currentFrame?.raw?.id;
-    if (!frameId) return [];
+    if (frameId === undefined) return [];
 
     try {
       const response = await session.sendRequest('scopes', { frameId });
@@ -280,6 +294,40 @@ export class KairoDebugSessionService {
     } catch {
       return [];
     }
+  }
+
+  /**
+   * Focus a stack frame for scopes, variables, and evaluation context.
+   * Uses Theia's DebugThread.currentFrame setter, which notifies listeners
+   * via onDidFocusStackFrame — there is no separate DAP "select frame" request.
+   */
+  async focusFrame(frameId: number): Promise<DebugStackFrame | undefined> {
+    const session = this.currentSession;
+    if (!session) {
+      return undefined;
+    }
+
+    const thread = session.currentThread;
+    if (!thread) {
+      return undefined;
+    }
+
+    await thread.fetchFrames();
+
+    let target: DebugStackFrame | undefined;
+    for (const frame of thread.frames) {
+      if (frame.raw.id === frameId) {
+        target = frame;
+        break;
+      }
+    }
+    if (!target) {
+      return undefined;
+    }
+
+    thread.currentFrame = target;
+    this.refreshState();
+    return target;
   }
 
   /**
@@ -405,21 +453,61 @@ export class KairoDebugSessionService {
 
   /**
    * Run to cursor (set temporary breakpoint at line and continue).
+   * Preserves existing breakpoints for the source and restores them after the hit.
    */
   async runToCursor(line: number, source: DebugProtocol.Source): Promise<void> {
     const session = this.currentSession;
     if (!session) return;
 
-    const threadId = session.currentThread?.threadId ?? 0;
-    const currentBreakpoints = (session as any).breakpoints || [];
+    const previous = this.getSourceBreakpoints(source);
+    const alreadyPresent = previous.some(bp => bp.line === line);
+    const breakpoints = alreadyPresent ? previous : [...previous, { line }];
 
-    this._temporaryRunToLine = { line, source };
+    this._temporaryRunToLine = alreadyPresent ? null : { line, source, previous };
     await session.sendRequest('setBreakpoints', {
       source,
-      lines: [line],
-      breakpoints: [{ line }],
+      lines: breakpoints.map(bp => bp.line),
+      breakpoints,
     });
     await this.continue();
+  }
+
+  protected getSourceBreakpoints(source: DebugProtocol.Source): DebugProtocol.SourceBreakpoint[] {
+    if (!source.path) return [];
+    try {
+      const uri = source.path.includes('://') ? new URI(source.path) : URI.fromFilePath(source.path);
+      return this.breakpointManager.getBreakpoints(uri)
+        .filter(bp => bp.enabled)
+        .map(bp => {
+          const raw: DebugProtocol.SourceBreakpoint = { line: bp.line };
+          if (bp.column !== undefined) raw.column = bp.column;
+          if (bp.condition) raw.condition = bp.condition;
+          if (bp.hitCondition) raw.hitCondition = bp.hitCondition;
+          if (bp.logMessage) raw.logMessage = bp.logMessage;
+          return raw;
+        });
+    } catch {
+      return [];
+    }
+  }
+
+  protected async clearTemporaryRunToCursorBreakpoint(): Promise<void> {
+    const temp = this._temporaryRunToLine;
+    if (!temp) return;
+    this._temporaryRunToLine = null;
+
+    const session = this.currentSession;
+    if (!session) return;
+
+    try {
+      await session.sendRequest('setBreakpoints', {
+        source: temp.source,
+        lines: temp.previous.map(bp => bp.line),
+        breakpoints: temp.previous,
+      });
+    } catch {
+      // Best-effort restore; session may already be gone.
+    }
   }
 
   /**

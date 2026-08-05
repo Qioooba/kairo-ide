@@ -1,3 +1,5 @@
+//go:build remote
+
 // Package remote implements the file sync service for Phase 3+
 // remote Linux agent functionality.
 //

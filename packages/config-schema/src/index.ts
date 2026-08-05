@@ -93,7 +93,7 @@ export const projectJsonSchema = {
             ajpPort: { type: 'integer', minimum: 1024, maximum: 65535 },
             jmxPort: { type: 'integer', minimum: 1024, maximum: 65535 },
             debugPort: { type: 'integer', minimum: 1024, maximum: 65535 },
-            contextPath: { type: 'string', pattern: '^/[A-Za-z0-9._-]*$' },
+            contextPath: { type: 'string', pattern: '^/(?:[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*)?$' },
             env: { type: 'object', additionalProperties: { type: 'string' } },
             jvm: {
               type: 'object',
@@ -148,27 +148,30 @@ export const projectJsonSchema = {
       additionalProperties: false,
       properties: {
         toolchainId: { type: 'string' },
-        fingerprint: { type: 'string', pattern: '^(sha256|empty):' },
+        fingerprint: { type: 'string', pattern: '^(?:|(?:sha256|empty):.*)$' },
         label: { type: 'string' },
         vmOptions: { type: 'array', items: { type: 'string' } },
         jvmHeapMb: { type: 'integer', minimum: 64, maximum: 8192 },
       },
     },
+    // BD-P1-16: draft 2020-12 + allOf + additionalProperties:false rejects
+    // sibling $ref properties. Prefer unevaluatedProperties; also allow an
+    // empty fingerprint (UI may send "" before the agent computes one).
     toolchainCompiler: {
-      allOf: [
-        { $ref: '#/$defs/toolchainRef' },
-        {
-          type: 'object',
-          required: ['sourceLevel', 'targetLevel'],
-          additionalProperties: false,
-          properties: {
-            sourceLevel: { enum: ['1.5', '1.6', '1.7', '1.8', '9', '11', '17'] },
-            targetLevel: { enum: ['1.5', '1.6', '1.7', '1.8', '9', '11', '17'] },
-            args: { type: 'array', items: { type: 'string' } },
-            emulatedV6: { type: 'boolean' },
-          },
-        },
-      ],
+      type: 'object',
+      required: ['toolchainId', 'fingerprint', 'sourceLevel', 'targetLevel'],
+      unevaluatedProperties: false,
+      properties: {
+        toolchainId: { type: 'string' },
+        fingerprint: { type: 'string', pattern: '^(?:|(?:sha256|empty):.*)$' },
+        label: { type: 'string' },
+        vmOptions: { type: 'array', items: { type: 'string' } },
+        jvmHeapMb: { type: 'integer', minimum: 64, maximum: 8192 },
+        sourceLevel: { enum: ['1.5', '1.6', '1.7', '1.8', '9', '11', '17'] },
+        targetLevel: { enum: ['1.5', '1.6', '1.7', '1.8', '9', '11', '17'] },
+        args: { type: 'array', items: { type: 'string' } },
+        emulatedV6: { type: 'boolean' },
+      },
     },
   },
 } as const;

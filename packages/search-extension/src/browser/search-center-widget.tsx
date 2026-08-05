@@ -13,13 +13,13 @@ import { SearchReplaceService, type ReplaceApplyResult, type ReplacePlan } from 
 import { resolveWorkspaceMatchUri } from './search-path';
 import { SearchScopeModel, type SearchScope, SCOPE_OPTIONS } from './search-scope-model';
 import { parseFileMask, mergeGlobs } from './file-mask';
-import { groupMatchesByFile, sameLineContext, multiLineContext } from './search-result-utils';
+import { groupMatchesByFile, sameLineContext, multiLineContext, getSearchFileName, getSearchFileDir, getSearchFileIcon, matchPreviewParts } from './search-result-utils';
 import { SearchResultsWidget } from './search-results-widget';
 import { VirtualList } from '@kairo/ui-kit';
 import './search-center.css';
 
 export { parseFileMask, mergeGlobs, normalizeMaskToken } from './file-mask';
-export { groupMatchesByFile, sameLineContext, multiLineContext } from './search-result-utils';
+export { groupMatchesByFile, sameLineContext, multiLineContext, getSearchFileName, getSearchFileDir, getSearchFileIcon, matchPreviewParts } from './search-result-utils';
 export type { SearchResultGroup } from './search-result-utils';
 
 export interface SearchCenterQuery {
@@ -204,30 +204,9 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
     return item?.kind === 'match' ? item.match : undefined;
   };
 
-  const getFileIcon = (filename: string): string => {
-    const ext = filename.split('.').pop()?.toLowerCase();
-    switch (ext) {
-      case 'java': return 'codicon-symbol-class';
-      case 'js': case 'jsx': case 'ts': case 'tsx': return 'codicon-symbol-namespace';
-      case 'xml': case 'html': case 'jsp': return 'codicon-symbol-misc';
-      case 'css': case 'less': case 'scss': return 'codicon-symbol-color';
-      case 'json': return 'codicon-symbol-object';
-      case 'md': return 'codicon-symbol-string';
-      case 'py': return 'codicon-symbol-namespace';
-      case 'go': return 'codicon-symbol-namespace';
-      default: return 'codicon-file';
-    }
-  };
-
-  const getFileName = (filepath: string): string => {
-    const parts = filepath.split(/[\\/]/);
-    return parts[parts.length - 1] || filepath;
-  };
-
-  const getFilePath = (filepath: string): string => {
-    const parts = filepath.split(/[\\/]/);
-    return parts.slice(0, -1).join('/');
-  };
+  const getFileIcon = getSearchFileIcon;
+  const getFileName = getSearchFileName;
+  const getFilePath = getSearchFileDir;
 
   const submit = async (event: React.FormEvent): Promise<void> => {
     event.preventDefault();
@@ -388,7 +367,7 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
             <span className="kairo-search-preview-lineno-current">{selectedMatch.line}</span>
             <span className="kairo-search-preview-code">
               {sameBefore}
-              <mark>{selectedMatch.matchText}</mark>
+              <span className="kairo-search-highlight">{selectedMatch.matchText}</span>
               {sameAfter}
             </span>
           </div>
@@ -675,7 +654,7 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
                   );
                 }
                 const match = item.match!;
-                const { before, after } = sameLineContext(match);
+                const preview = matchPreviewParts(match);
                 return (
                   <button
                     type="button"
@@ -701,7 +680,11 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
                   >
                     <span className="kairo-search-result-lineno">{match.line}</span>
                     <span className="kairo-search-result-preview">
-                      {before}<mark>{match.matchText}</mark>{after}
+                      {preview.before}
+                      {preview.highlight
+                        ? <span className="kairo-search-highlight">{preview.highlight}</span>
+                        : null}
+                      {preview.after}
                     </span>
                   </button>
                 );
@@ -778,6 +761,8 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
               className="kairo-search-footer-btn"
               onClick={() => setShowPreview(!showPreview)}
               title={showPreview ? t('widget.search.center.preview.hide') : t('widget.search.center.preview.show')}
+              disabled={matchCount === 0}
+              style={matchCount === 0 ? { display: 'none' } : undefined}
             >
               {showPreview ? t('widget.search.center.preview.hide') : t('widget.search.center.preview.show')}
             </button>

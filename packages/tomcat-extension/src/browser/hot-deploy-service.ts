@@ -20,6 +20,7 @@ import {
   FrontendApplicationContribution,
   FrontendApplication,
 } from '@theia/core/lib/browser';
+import { FileUri } from '@theia/core/lib/common/file-uri';
 import { ILogger } from '@theia/core/lib/common/logger';
 import { MessageService } from '@theia/core/lib/common/message-service';
 import { CommandService } from '@theia/core/lib/common/command';
@@ -28,6 +29,7 @@ import { Disposable } from '@theia/core/lib/common/disposable';
 import { MonacoWorkspace } from '@theia/monaco/lib/browser/monaco-workspace';
 import type { MonacoEditorModel } from '@theia/monaco/lib/browser/monaco-editor-model';
 import { RuntimeConnectionService } from '@kairo/runtime-extension';
+import { KairoI18nService } from '@kairo/i18n';
 import { ServerStore } from './server-store';
 import type { ServerInstance } from './server-store';
 import { BuildStore } from '@kairo/build-extension';
@@ -49,10 +51,13 @@ export class HotDeployService implements FrontendApplicationContribution {
   @inject(RuntimeConnectionService) protected readonly runtime!: RuntimeConnectionService;
   @inject(ServerStore) protected readonly serverStore!: ServerStore;
   @inject(BuildStore) protected readonly buildStore!: BuildStore;
+  @inject(KairoI18nService) protected readonly i18n!: KairoI18nService;
 
   protected debounceTimer: ReturnType<typeof setTimeout> | undefined;
   protected pendingJavaFiles = new Set<string>();
   protected unsubscribeBuild: Disposable | undefined;
+  protected saveDisposable: Disposable | undefined;
+  protected blurHandler: (() => void) | undefined;
 
   protected get debounceMs(): number {
     return this.preferences.get('kairo.hotReload.debounceMs', 500) as number;
@@ -73,7 +78,7 @@ export class HotDeployService implements FrontendApplicationContribution {
 
   onStart(_app: FrontendApplication): void {
     // Listen for text document save events
-    this.monacoWorkspace.onDidSaveTextDocument((model: MonacoEditorModel) => {
+    this.saveDisposable = this.monacoWorkspace.onDidSaveTextDocument((model: MonacoEditorModel) => {
       const uri = model.uri?.toString();
       if (!uri) return;
 
@@ -88,9 +93,8 @@ export class HotDeployService implements FrontendApplicationContribution {
 
     // On frame deactivation: auto-save + sync
     if (typeof window !== 'undefined') {
-      window.addEventListener('blur', () => {
-        this.onWindowBlur();
-      });
+      this.blurHandler = () => this.onWindowBlur();
+      window.addEventListener('blur', this.blurHandler);
     }
 
     // Listen for build completion events — auto-sync classes to running server
@@ -113,6 +117,11 @@ export class HotDeployService implements FrontendApplicationContribution {
     }
     this.pendingJavaFiles.clear();
     this.unsubscribeBuild?.dispose();
+    this.saveDisposable?.dispose();
+    if (this.blurHandler && typeof window !== 'undefined') {
+      window.removeEventListener('blur', this.blurHandler);
+      this.blurHandler = undefined;
+    }
   }
 
   /** Check if a URI represents a Java source file. */
@@ -165,27 +174,21 @@ export class HotDeployService implements FrontendApplicationContribution {
     this.serverStore.setHotReloadStatus('compiling');
 
     try {
-      const result = await this.runtime.request(
-        'POST /api/v1/jvm/compile-incremental',
-        { files, projectId: server.projectId },
-        { noRetry: true },
-      ) as any;
-
-      if (result && result.state === 'completed') {
-        this.serverStore.setHotReloadStatus('synced');
-        const fileNames = files.map(f => f.split('/').pop() || f).join(', ');
-        this.logger.info(`[HotDeploy] Compiled and synced: ${fileNames}`);
-      } else if (result && result.state === 'failed') {
-        this.serverStore.setHotReloadStatus('restart_required');
-        this.messages.warn(`Compilation failed for ${files.length} file(s). Check the Problems panel.`);
-      } else {
-        this.serverStore.setHotReloadStatus('synced');
-      }
+      // BD-P2-8: agent expects filesystem paths, not Monaco URIs.
+      const fsPaths = files.map(f => {
+        try {
+          return f.includes('://') ? FileUri.fsPath(f) : f;
+        } catch {
+          return f;
+        }
+      });
+      const result = await this.requestCompileIncremental({ files: fsPaths, projectId: server.projectId });
+      this.applyCompileResult(result, files.length);
     } catch (error) {
       this.serverStore.setHotReloadStatus('restart_required');
       const msg = error instanceof Error ? error.message : String(error);
       this.logger.error(`[HotDeploy] Compile and sync failed: ${msg}`);
-      this.messages.warn(`Hot deploy failed: ${msg}`);
+      this.messages.warn(this.i18n.t('widget.servers.hotReload.failed', { msg }));
     }
   }
 
@@ -196,7 +199,7 @@ export class HotDeployService implements FrontendApplicationContribution {
   async updateApplication(): Promise<void> {
     const server = this.getRunningServer();
     if (!server) {
-      this.messages.warn('No running server. Start the server first.');
+      this.messages.warn(this.i18n.t('widget.servers.hotReload.noRunningServer'));
       return;
     }
 
@@ -205,26 +208,25 @@ export class HotDeployService implements FrontendApplicationContribution {
 
     try {
       // Trigger incremental compile via the agent
-      const result = await this.runtime.request(
-        'POST /api/v1/jvm/compile-incremental',
-        { projectId: server.projectId },
-        { noRetry: true },
-      ) as any;
-
-      if (result && result.state === 'completed') {
+      const result = await this.requestCompileIncremental({ projectId: server.projectId });
+      if (result.state === 'success') {
         this.serverStore.setHotReloadStatus('synced');
-        this.messages.info(`Application updated: ${result.filesCompiled ?? 0} file(s) compiled.`);
-      } else if (result && result.state === 'failed') {
+        this.messages.info(this.i18n.t('widget.servers.hotReload.applicationUpdated', {
+          count: result.filesCompiled ?? 0,
+        }));
+      } else if (result.state === 'failure') {
         this.serverStore.setHotReloadStatus('restart_required');
-        this.messages.warn('Compilation failed. Some changes require a reload or restart.');
+        this.messages.warn(this.i18n.t('widget.servers.hotReload.compilationFailed'));
       } else {
-        this.serverStore.setHotReloadStatus('synced');
-        this.messages.info('Application updated.');
+        this.serverStore.setHotReloadStatus('restart_required');
+        this.messages.warn(this.i18n.t('widget.servers.hotReload.unexpectedState', {
+          state: result.state || 'unknown',
+        }));
       }
     } catch (error) {
       this.serverStore.setHotReloadStatus('restart_required');
       const msg = error instanceof Error ? error.message : String(error);
-      this.messages.error(`Update failed: ${msg}`);
+      this.messages.error(this.i18n.t('widget.servers.hotReload.updateFailed', { msg }));
     }
   }
 
@@ -235,7 +237,7 @@ export class HotDeployService implements FrontendApplicationContribution {
   async reloadContext(): Promise<void> {
     const server = this.getRunningServer();
     if (!server) {
-      this.messages.warn('No running server. Start the server first.');
+      this.messages.warn(this.i18n.t('widget.servers.hotReload.noRunningServer'));
       return;
     }
 
@@ -249,11 +251,11 @@ export class HotDeployService implements FrontendApplicationContribution {
         { pathParams: { serverId: server.id }, noRetry: true },
       );
       this.serverStore.setHotReloadStatus('synced');
-      this.messages.info('Context reloaded. The application should reflect your changes.');
+      this.messages.info(this.i18n.t('widget.servers.hotReload.contextReloaded'));
     } catch (error) {
       this.serverStore.setHotReloadStatus('restart_required');
       const msg = error instanceof Error ? error.message : String(error);
-      this.messages.error(`Context reload failed: ${msg}`);
+      this.messages.error(this.i18n.t('widget.servers.hotReload.contextReloadFailed', { msg }));
     }
   }
 
@@ -286,22 +288,87 @@ export class HotDeployService implements FrontendApplicationContribution {
     this.logger.info('[HotDeploy] Build completed — triggering auto-sync to running server');
     this.serverStore.setHotReloadStatus('compiling');
 
-    this.runtime.request(
-      'POST /api/v1/jvm/compile-incremental',
-      { projectId: server.projectId },
-      { noRetry: true },
-    ).then((result: any) => {
-      if (result && result.state === 'completed') {
+    this.requestCompileIncremental({ projectId: server.projectId }).then(result => {
+      if (result.state === 'success') {
         this.serverStore.setHotReloadStatus('synced');
         this.logger.info('[HotDeploy] Build auto-sync completed');
       } else {
         this.serverStore.setHotReloadStatus('restart_required');
-        this.logger.warn('[HotDeploy] Build auto-sync failed');
+        this.logger.warn(`[HotDeploy] Build auto-sync failed (state=${result.state})`);
       }
     }).catch((error: unknown) => {
       this.serverStore.setHotReloadStatus('restart_required');
       const msg = error instanceof Error ? error.message : String(error);
       this.logger.error(`[HotDeploy] Build auto-sync error: ${msg}`);
     });
+  }
+
+  /**
+   * Start an incremental compile and, when the agent returns queued/running,
+   * poll GET /api/v1/builds/{id} until a terminal Go state (success|failure|…).
+   * Go vocabulary is queued|running|success|failure|cancelled — not completed/failed.
+   */
+  protected async requestCompileIncremental(payload: {
+    projectId: string;
+    files?: string[];
+  }): Promise<{ state: string; filesCompiled?: number; id?: string }> {
+    const started = await this.runtime.request(
+      'POST /api/v1/jvm/compile-incremental',
+      payload,
+      { noRetry: true },
+    ) as { state?: string; filesCompiled?: number; id?: string };
+
+    let state = String(started?.state || '');
+    let filesCompiled = started?.filesCompiled;
+    const buildId = started?.id;
+    if (buildId && /^(queued|running|pending)$/i.test(state)) {
+      const terminal = await this.waitForBuildTerminal(buildId, 120_000);
+      state = String(terminal.state || state);
+      if (typeof terminal.filesCompiled === 'number') {
+        filesCompiled = terminal.filesCompiled;
+      }
+    }
+    return { state, filesCompiled, id: buildId };
+  }
+
+  protected async waitForBuildTerminal(
+    buildId: string,
+    timeoutMs: number,
+  ): Promise<{ state?: string; filesCompiled?: number }> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      try {
+        const b = await this.runtime.request(
+          'GET /api/v1/builds/{buildId}',
+          undefined,
+          { pathParams: { buildId }, noRetry: true },
+        ) as { state?: string; filesCompiled?: number };
+        if (b?.state && !/^(pending|running|queued)$/i.test(b.state)) {
+          return b;
+        }
+      } catch {
+        // keep polling
+      }
+      await new Promise(r => setTimeout(r, 500));
+    }
+    return { state: 'failure' };
+  }
+
+  protected applyCompileResult(
+    result: { state: string; filesCompiled?: number },
+    fileCount: number,
+  ): void {
+    if (result.state === 'success') {
+      this.serverStore.setHotReloadStatus('synced');
+      this.logger.info(`[HotDeploy] Compiled and synced (${fileCount} file(s))`);
+    } else if (result.state === 'failure' || result.state === 'cancelled') {
+      this.serverStore.setHotReloadStatus('restart_required');
+      this.messages.warn(this.i18n.t('widget.servers.hotReload.compilationFailedCount', {
+        count: fileCount,
+      }));
+    } else {
+      this.serverStore.setHotReloadStatus('restart_required');
+      this.logger.warn(`[HotDeploy] Unexpected compile state: ${result.state}`);
+    }
   }
 }

@@ -293,22 +293,15 @@ func TestDiskAuthenticator_Login_NoCredentials(t *testing.T) {
 	os.Unsetenv("KAIRO_AUTH_USER")
 	os.Unsetenv("KAIRO_AUTH_PASSWORD")
 	os.Unsetenv("KAIRO_SECRET")
+	os.Unsetenv("KAIRO_LOCAL_SECRET")
 
 	payload, _ := json.Marshal(map[string]string{
 		"username": "admin",
 		"password": "any",
 	})
-	resp, err := a.Login(payload, nil)
-	if err != nil {
-		t.Fatalf("Login should succeed in dev mode: %v", err)
-	}
-	var result map[string]any
-	json.Unmarshal(resp, &result)
-	if result["sessionToken"] == nil || result["sessionToken"] == "" {
-		t.Error("sessionToken should be generated")
-	}
-	if result["csrfToken"] == nil || result["csrfToken"] == "" {
-		t.Error("csrfToken should be generated")
+	_, err := a.Login(payload, nil)
+	if err == nil {
+		t.Fatal("Login should reject when no credentials are configured")
 	}
 }
 
@@ -316,8 +309,9 @@ func TestDiskAuthenticator_Login_WithSharedSecret(t *testing.T) {
 	a := newDiskAuthenticator(t.TempDir(), log.New("test"))
 	os.Unsetenv("KAIRO_AUTH_USER")
 	os.Unsetenv("KAIRO_AUTH_PASSWORD")
-	os.Setenv("KAIRO_SECRET", "my-secret-key")
-	defer os.Unsetenv("KAIRO_SECRET")
+	os.Unsetenv("KAIRO_SECRET")
+	os.Setenv("KAIRO_LOCAL_SECRET", "my-secret-key")
+	defer os.Unsetenv("KAIRO_LOCAL_SECRET")
 
 	// Correct password
 	payload, _ := json.Marshal(map[string]string{
@@ -330,8 +324,12 @@ func TestDiskAuthenticator_Login_WithSharedSecret(t *testing.T) {
 	}
 	var result map[string]any
 	json.Unmarshal(resp, &result)
-	if result["sessionToken"] == nil {
+	token, _ := result["sessionToken"].(string)
+	if token == "" {
 		t.Error("sessionToken should be generated")
+	}
+	if err := a.ValidateSession(token); err != nil {
+		t.Fatalf("ValidateSession: %v", err)
 	}
 
 	// Wrong password
@@ -348,6 +346,7 @@ func TestDiskAuthenticator_Login_WithSharedSecret(t *testing.T) {
 func TestDiskAuthenticator_Login_WithUserAuth(t *testing.T) {
 	a := newDiskAuthenticator(t.TempDir(), log.New("test"))
 	os.Unsetenv("KAIRO_SECRET")
+	os.Unsetenv("KAIRO_LOCAL_SECRET")
 	// SHA-256 of "correct-password"
 	os.Setenv("KAIRO_AUTH_USER", "admin")
 	os.Setenv("KAIRO_AUTH_PASSWORD", "4a44bc153ac69d4b5b5e8f3e10c5e9cfc5b8f5e7c5e8f5e7c5e8f5e7c5e8f5e7")
@@ -370,6 +369,7 @@ func TestDiskAuthenticator_Login_EmptyCredentials(t *testing.T) {
 	os.Unsetenv("KAIRO_AUTH_USER")
 	os.Unsetenv("KAIRO_AUTH_PASSWORD")
 	os.Unsetenv("KAIRO_SECRET")
+	os.Unsetenv("KAIRO_LOCAL_SECRET")
 
 	// Empty username
 	payload, _ := json.Marshal(map[string]string{
@@ -405,6 +405,8 @@ func TestDiskAuthenticator_Login_ResponseFields(t *testing.T) {
 	os.Unsetenv("KAIRO_AUTH_USER")
 	os.Unsetenv("KAIRO_AUTH_PASSWORD")
 	os.Unsetenv("KAIRO_SECRET")
+	os.Setenv("KAIRO_LOCAL_SECRET", "testpass")
+	defer os.Unsetenv("KAIRO_LOCAL_SECRET")
 
 	payload, _ := json.Marshal(map[string]string{
 		"username": "testuser",
@@ -452,11 +454,33 @@ func TestDiskAuthenticator_Login_ResponseFields(t *testing.T) {
 
 func TestDiskAuthenticator_Logout(t *testing.T) {
 	a := newDiskAuthenticator(t.TempDir(), log.New("test"))
+	os.Unsetenv("KAIRO_AUTH_USER")
+	os.Unsetenv("KAIRO_AUTH_PASSWORD")
+	os.Unsetenv("KAIRO_SECRET")
+	os.Setenv("KAIRO_LOCAL_SECRET", "logout-secret")
+	defer os.Unsetenv("KAIRO_LOCAL_SECRET")
+
+	payload, _ := json.Marshal(map[string]string{
+		"username": "admin",
+		"password": "logout-secret",
+	})
+	resp, err := a.Login(payload, nil)
+	if err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+	var result map[string]any
+	json.Unmarshal(resp, &result)
+	token := result["sessionToken"].(string)
+
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/logout", nil)
+	req.Header.Set("X-Kairo-Session", token)
 	rec := httptest.NewRecorder()
-	err := a.Logout(req, rec)
+	err = a.Logout(req, rec)
 	if err != nil {
 		t.Errorf("Logout should not error: %v", err)
+	}
+	if err := a.ValidateSession(token); err == nil {
+		t.Fatal("session should be invalid after Logout")
 	}
 }
 
@@ -498,6 +522,12 @@ func TestNewMemoryServices_BasicConstruction(t *testing.T) {
 	}
 	if svc.ServerRunner == nil {
 		t.Error("ServerRunner is nil")
+	}
+	if svc.CustomBuild == nil {
+		t.Error("CustomBuild is nil")
+	}
+	if svc.JDKManager == nil {
+		t.Error("JDKManager is nil")
 	}
 	if svc.Auth == nil {
 		t.Error("Auth is nil")

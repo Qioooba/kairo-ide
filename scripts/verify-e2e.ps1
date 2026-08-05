@@ -287,9 +287,10 @@ if ($SkipAgent) {
       throw "no agent binary available at $useBin"
     }
 
+    # Pass secret via env so it never appears in process listings (S1).
+    $env:KAIRO_LOCAL_SECRET = $Secret
     $args = @("--bind", "127.0.0.1", "--port", "$Port",
               "--data-dir", $dataDir,
-              "--secret",  $Secret,
               "--log-level", "info")
     $script:agentProc = Start-Process -FilePath $useBin -ArgumentList $args -PassThru -NoNewWindow
     Write-Host "[agent] pid: $($script:agentProc.Id)"

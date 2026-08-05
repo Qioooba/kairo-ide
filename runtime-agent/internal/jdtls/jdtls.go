@@ -180,6 +180,52 @@ func (m *Manager) IsPrepared() bool {
 	return true
 }
 
+// DistributionStatus returns the installation status of the
+// JDT LS distribution (GET /api/v1/jdtls/distribution).
+func (m *Manager) DistributionStatus() DistributionStatus {
+	home := m.HomedDir()
+	rep, err := readInstallReport(m.dataDir)
+	if err != nil || rep == nil {
+		return DistributionStatus{
+			Installed: false,
+			Version:   JDTLSVersion,
+			Home:      home,
+			Source:    "none",
+			Message:   "JDT LS distribution is not installed",
+		}
+	}
+	installed := m.IsPrepared()
+	source := "install-report"
+	switch {
+	case rep.ArchiveName == "(pre-bundled)":
+		source = "pre-bundled"
+	case os.Getenv("KAIRO_JDTLS_HOME") != "":
+		source = "KAIRO_JDTLS_HOME"
+	case rep.ArchiveName != "" && rep.ArchiveName != "(pre-bundled)":
+		source = "archive"
+	}
+	msg := ""
+	if !installed {
+		msg = "install report present but launcher is missing or unreadable"
+	}
+	version := rep.Version
+	if version == "" {
+		version = JDTLSVersion
+	}
+	repHome := rep.Home
+	if repHome == "" {
+		repHome = home
+	}
+	return DistributionStatus{
+		Installed:   installed,
+		Version:     version,
+		Home:        repHome,
+		LauncherJAR: rep.LauncherJAR,
+		Source:      source,
+		Message:     msg,
+	}
+}
+
 // LastStart returns the metadata of the most recent successful
 // Start, or nil if Start has not been called.
 func (m *Manager) LastStart() *Status {

@@ -14,7 +14,7 @@ import * as React from 'react';
 import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import { KairoI18nService } from '@kairo/i18n';
-import { ClassHotSwapProbe, type HotSwapEntry } from './java-hotswap-probe';
+import { JavaHotSwapService, type HotSwapHistoryEntry } from './java-hotswap-service';
 
 export const KAIRO_HOTSWAP_WIDGET_ID = 'kairo-hotswap-widget';
 
@@ -22,11 +22,11 @@ export const KAIRO_HOTSWAP_WIDGET_ID = 'kairo-hotswap-widget';
 export class HotSwapWidget extends ReactWidget {
   static readonly ID = KAIRO_HOTSWAP_WIDGET_ID;
 
-  @inject(ClassHotSwapProbe) protected readonly hotSwapProbe!: ClassHotSwapProbe;
+  @inject(JavaHotSwapService) protected readonly hotSwapService!: JavaHotSwapService;
   @inject(KairoI18nService) protected readonly i18n!: KairoI18nService;
 
-  protected entries: HotSwapEntry[] = [];
-  protected selectedEntry: HotSwapEntry | undefined;
+  protected entries: HotSwapHistoryEntry[] = [];
+  protected selectedEntry: HotSwapHistoryEntry | undefined;
 
   constructor() {
     super();
@@ -41,9 +41,9 @@ export class HotSwapWidget extends ReactWidget {
   protected init(): void {
     this.updateTitle();
     this.toDispose.push(this.i18n.onDidChangeLanguage(() => this.updateTitle()));
-    this.entries = [...this.hotSwapProbe.swapHistory];
-    this.hotSwapProbe.onDidSwap(_entry => {
-      this.entries = [...this.hotSwapProbe.swapHistory];
+    this.entries = [...this.hotSwapService.swapHistory];
+    this.hotSwapService.onDidSwap(_entry => {
+      this.entries = [...this.hotSwapService.swapHistory];
       this.update();
     });
   }
@@ -61,7 +61,7 @@ export class HotSwapWidget extends ReactWidget {
     return React.createElement(HotSwapHistory, {
       entries: this.entries,
       selectedEntry: this.selectedEntry,
-      onSelect: (entry: HotSwapEntry) => {
+      onSelect: (entry: HotSwapHistoryEntry) => {
         this.selectedEntry = entry;
         this.update();
       },
@@ -71,9 +71,9 @@ export class HotSwapWidget extends ReactWidget {
 }
 
 interface HotSwapHistoryProps {
-  entries: HotSwapEntry[];
-  selectedEntry: HotSwapEntry | undefined;
-  onSelect: (entry: HotSwapEntry) => void;
+  entries: HotSwapHistoryEntry[];
+  selectedEntry: HotSwapHistoryEntry | undefined;
+  onSelect: (entry: HotSwapHistoryEntry) => void;
   i18n: KairoI18nService;
 }
 
@@ -83,11 +83,10 @@ const HotSwapHistory: React.FC<HotSwapHistoryProps> = ({
   const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
   const locale = i18n.getCurrentLanguage();
 
-  const statusIconClass = (status: HotSwapEntry['status']): string => {
+  const statusIconClass = (status: HotSwapHistoryEntry['status']): string => {
     switch (status) {
       case 'success': return 'codicon codicon-check kairo-java-hotswap-status-success';
       case 'failed': return 'codicon codicon-error kairo-java-hotswap-status-failed';
-      case 'in-progress': return 'codicon codicon-sync codicon-modifier-spin kairo-java-hotswap-status-pending';
     }
   };
 
@@ -102,11 +101,10 @@ const HotSwapHistory: React.FC<HotSwapHistoryProps> = ({
     return t('widget.java.hotswap.durationSec', { sec: (ms / 1000).toFixed(1) });
   };
 
-  const statusLabel = (status: HotSwapEntry['status']): string => {
+  const statusLabel = (status: HotSwapHistoryEntry['status']): string => {
     switch (status) {
       case 'success': return t('widget.java.hotswap.status.success');
       case 'failed': return t('widget.java.hotswap.status.failed');
-      case 'in-progress': return t('widget.java.hotswap.status.inProgress');
     }
   };
 

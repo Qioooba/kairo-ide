@@ -34,10 +34,20 @@ export class KairoEncodingRegistry extends EncodingRegistry {
           return override.encoding;
         }
       }
+      // BD-P1-9: among matching folder overrides, deepest path wins
+      // (not registration order). Otherwise a shallow project root
+      // registered after a nested directory override shadows it.
+      let deepest: { encoding: string; depth: number } | undefined;
       for (const override of overrides) {
         if (override.parent && override.parent.isEqualOrParent(resource)) {
-          return override.encoding;
+          const depth = override.parent.path.toString().length;
+          if (!deepest || depth > deepest.depth) {
+            deepest = { encoding: override.encoding, depth };
+          }
         }
+      }
+      if (deepest) {
+        return deepest.encoding;
       }
       for (const override of overrides) {
         if (override.extension && resource.path.ext === `.${override.extension}`) {

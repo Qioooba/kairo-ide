@@ -4,13 +4,7 @@ import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import { KairoI18nService } from '@kairo/i18n';
 import { GitStore } from './git-store';
 import { GitService } from './git-service';
-
-interface DiffLine {
-    type: 'header' | 'add' | 'remove' | 'context' | 'hunk';
-    oldLine?: number;
-    newLine?: number;
-    content: string;
-}
+import { parseDiff, type DiffLine } from './git-diff-parse';
 
 interface GitDiffProps {
     store: GitStore;
@@ -48,40 +42,12 @@ const GitDiffComponent: React.FC<GitDiffProps> = ({ store, gitService, i18n }) =
         setLoading(true);
         try {
             const result = await gitService.getDiff(f, s);
-            const lines = parseDiff(result.diff);
-            setDiffLines(lines);
+            setDiffLines(parseDiff(result.diff));
         } catch (err) {
             setError(err instanceof Error ? err.message : String(err));
         } finally {
             setLoading(false);
         }
-    };
-
-    const parseDiff = (diff: string): DiffLine[] => {
-        const lines: DiffLine[] = [];
-        let oldLine = 0;
-        let newLine = 0;
-
-        for (const line of diff.split('\n')) {
-            if (line.startsWith('diff ') || line.startsWith('index ') ||
-                line.startsWith('--- ') || line.startsWith('+++ ')) {
-                lines.push({ type: 'header', content: line });
-            } else if (line.startsWith('@@')) {
-                const match = line.match(/@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/);
-                if (match) {
-                    oldLine = parseInt(match[1], 10);
-                    newLine = parseInt(match[3], 10);
-                }
-                lines.push({ type: 'hunk', content: line });
-            } else if (line.startsWith('+')) {
-                lines.push({ type: 'add', content: line, newLine: newLine++ });
-            } else if (line.startsWith('-')) {
-                lines.push({ type: 'remove', content: line, oldLine: oldLine++ });
-            } else {
-                lines.push({ type: 'context', content: line, oldLine: oldLine++, newLine: newLine++ });
-            }
-        }
-        return lines;
     };
 
     const lineClass = (type: DiffLine['type']): string => {
@@ -91,6 +57,7 @@ const GitDiffComponent: React.FC<GitDiffProps> = ({ store, gitService, i18n }) =
             case 'add': return 'kairo-diff-add';
             case 'remove': return 'kairo-diff-remove';
             case 'context': return 'kairo-diff-context';
+            case 'meta': return 'kairo-diff-header';
         }
     };
 

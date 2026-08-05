@@ -23,8 +23,8 @@ const (
 	cmdSetReferenceType  = 2
 	cmdSetClassType      = 3
 	cmdSetArrayType      = 4
-	cmdSetField          = 8
-	cmdSetMethod         = 9
+	cmdSetField           = 8
+	cmdSetMethod          = 6 // JDWP Method command set
 	cmdSetObjectReference = 9
 	cmdSetStringReference = 10
 	cmdSetThreadReference = 11

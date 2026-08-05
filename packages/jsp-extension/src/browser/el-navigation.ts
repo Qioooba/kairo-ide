@@ -11,10 +11,10 @@
 
 import * as monaco from '@theia/monaco-editor-core';
 import URI from '@theia/core/lib/common/uri';
-import { injectable, inject } from '@theia/core/shared/inversify';
 import { FileService } from '@theia/filesystem/lib/browser/file-service';
 import { WorkspaceService } from '@theia/workspace/lib/browser/workspace-service';
 import { JSP_LANGUAGE_ID } from './jsp-monarch';
+import type { JspNavServices } from './jsp-nav-services';
 
 /** Type mapping for EL implicit objects → Java FQN. */
 const EL_TYPE_MAP: Record<string, string> = {
@@ -91,13 +91,11 @@ function findElExpressionAt(
  *
  * Navigates from EL expressions to Java class definitions.
  */
-@injectable()
 export class ElNavigationProvider implements monaco.languages.DefinitionProvider {
-  @inject(FileService)
-  protected readonly fileService!: FileService;
-
-  @inject(WorkspaceService)
-  protected readonly workspaceService!: WorkspaceService;
+  constructor(
+    protected readonly fileService: FileService,
+    protected readonly workspaceService: WorkspaceService,
+  ) {}
 
   async provideDefinition(
     model: monaco.editor.ITextModel,
@@ -156,9 +154,9 @@ export class ElNavigationProvider implements monaco.languages.DefinitionProvider
 /**
  * Register the EL navigation definition provider with Monaco.
  */
-export function registerElNavigation(): monaco.IDisposable {
+export function registerElNavigation(services: JspNavServices): monaco.IDisposable {
   return monaco.languages.registerDefinitionProvider(
     JSP_LANGUAGE_ID,
-    new ElNavigationProvider(),
+    new ElNavigationProvider(services.fileService, services.workspaceService),
   );
 }

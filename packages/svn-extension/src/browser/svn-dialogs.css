@@ -161,13 +161,13 @@
   font-family: var(--theia-ui-font-family);
 }
 
-.kairo-svn-dlg-badge.M { color: #c27d0e; background: color-mix(in srgb, #fbbc04 18%, transparent); }
-.kairo-svn-dlg-badge.A { color: #1f8a5c; background: color-mix(in srgb, #3dcc91 18%, transparent); }
-.kairo-svn-dlg-badge.D { color: #c0394a; background: color-mix(in srgb, #f04757 18%, transparent); }
-.kairo-svn-dlg-badge.C { color: #c0394a; background: color-mix(in srgb, #f04757 22%, transparent); }
-.kairo-svn-dlg-badge.R { color: #2f6fed; background: color-mix(in srgb, #4a9eff 18%, transparent); }
+.kairo-svn-dlg-badge.M { color: var(--theia-editorWarning-foreground, #c27d0e); background: color-mix(in srgb, var(--theia-editorWarning-foreground, #fbbc04) 18%, transparent); }
+.kairo-svn-dlg-badge.A { color: var(--theia-editorInfo-foreground, #1f8a5c); background: color-mix(in srgb, var(--theia-charts-green, #3dcc91) 18%, transparent); }
+.kairo-svn-dlg-badge.D { color: var(--theia-errorForeground, #c0394a); background: color-mix(in srgb, var(--theia-errorForeground, #f04757) 18%, transparent); }
+.kairo-svn-dlg-badge.C { color: var(--theia-errorForeground, #c0394a); background: color-mix(in srgb, var(--theia-errorForeground, #f04757) 22%, transparent); }
+.kairo-svn-dlg-badge.R { color: var(--theia-textLink-foreground, #2f6fed); background: color-mix(in srgb, var(--theia-textLink-foreground, #4a9eff) 18%, transparent); }
 .kairo-svn-dlg-badge.\? { color: var(--theia-descriptionForeground); background: color-mix(in srgb, var(--theia-descriptionForeground) 12%, transparent); }
-.kairo-svn-dlg-badge.U { color: #2f6fed; background: color-mix(in srgb, #4a9eff 18%, transparent); }
+.kairo-svn-dlg-badge.U { color: var(--theia-textLink-foreground, #2f6fed); background: color-mix(in srgb, var(--theia-textLink-foreground, #4a9eff) 18%, transparent); }
 
 .kairo-svn-dlg-diff {
   flex: 1;

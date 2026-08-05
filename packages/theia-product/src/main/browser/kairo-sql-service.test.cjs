@@ -57,3 +57,15 @@ test('SqlQueryResult with empty result set', () => {
   assert.strictEqual(result.rows.length, 0);
   assert.strictEqual(result.rowCount, 0);
 });
+
+test('KairoSqlService uses RuntimeConnectionService (no hardcoded agent URL)', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const src = fs.readFileSync(path.join(__dirname, 'kairo-sql-service.ts'), 'utf8');
+  assert.match(src, /RuntimeConnectionService/);
+  assert.match(src, /POST \/api\/v1\/sql\/test-connection/);
+  assert.match(src, /POST \/api\/v1\/sql\/execute/);
+  assert.doesNotMatch(src, /localhost:17890/);
+  assert.doesNotMatch(src, /SQL_AGENT_BASE/);
+  assert.doesNotMatch(src, /fetch\(/);
+});

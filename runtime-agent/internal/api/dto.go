@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/Qioooba/kairo-ide/runtime-agent/internal/app"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/domain"
 )
 
@@ -226,24 +225,6 @@ func ToBuildResponseList(runs []domain.BuildRun) []BuildResponse {
 		out[i] = ToBuildResponse(run)
 	}
 	return out
-}
-
-// ToDeploymentResponse converts an app.DeployResult to a DeploymentResponse DTO.
-func ToDeploymentResponse(result *app.DeployResult) DeploymentResponse {
-	if result == nil {
-		return DeploymentResponse{}
-	}
-	return DeploymentResponse{
-		ID:        result.ID,
-		ProjectID: result.ProjectID,
-		BuildID:   result.BuildID,
-		State:     result.State,
-		Added:     result.Succeeded,
-		Modified:  result.Modified,
-		Deleted:   result.Deleted,
-		Bytes:     result.Bytes,
-		Error:     result.Error,
-	}
 }
 
 // decodeJSON decodes the request body into a typed struct.

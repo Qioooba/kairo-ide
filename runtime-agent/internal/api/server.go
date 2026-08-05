@@ -12,10 +12,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -25,6 +25,7 @@ import (
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/build"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/jdkmanager"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/log"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/security"
 )
 
 // WebSocketSubprotocol is the single subprotocol that all
@@ -54,7 +55,8 @@ type Server struct {
 	version  string
 	bindAddr string
 	port     int
-	secret   string
+	secret      string
+	requireAuth bool // when true, reject requests even if secret is unset
 
 	// rateLimiter enforces per-IP request rate limiting.
 	rateLimiter *RateLimiter
@@ -73,8 +75,99 @@ type Server struct {
 	// via the project catalog.
 	recentProjects []recentProjectEntry
 
+	// idempotencyCache dedupes POST build/deploy/start by
+	// client requestId (BD-P1-2). Entries expire after a short TTL.
+	idempotencyMu    sync.Mutex
+	idempotencyCache map[string]idempotencyEntry
+
 	// injected services
 	Services *Services
+}
+
+type idempotencyEntry struct {
+	status  int
+	body    []byte
+	expires time.Time
+}
+
+const idempotencyTTL = 5 * time.Minute
+const idempotencyMaxEntries = 256
+
+func (s *Server) lookupIdempotent(requestID string) (status int, body []byte, ok bool) {
+	if requestID == "" {
+		return 0, nil, false
+	}
+	s.idempotencyMu.Lock()
+	defer s.idempotencyMu.Unlock()
+	if s.idempotencyCache == nil {
+		return 0, nil, false
+	}
+	ent, found := s.idempotencyCache[requestID]
+	if !found {
+		return 0, nil, false
+	}
+	if time.Now().After(ent.expires) {
+		delete(s.idempotencyCache, requestID)
+		return 0, nil, false
+	}
+	return ent.status, ent.body, true
+}
+
+func (s *Server) storeIdempotent(requestID string, status int, body []byte) {
+	if requestID == "" {
+		return
+	}
+	s.idempotencyMu.Lock()
+	defer s.idempotencyMu.Unlock()
+	if s.idempotencyCache == nil {
+		s.idempotencyCache = make(map[string]idempotencyEntry)
+	}
+	now := time.Now()
+	if len(s.idempotencyCache) >= idempotencyMaxEntries {
+		for k, v := range s.idempotencyCache {
+			if now.After(v.expires) {
+				delete(s.idempotencyCache, k)
+			}
+		}
+		for len(s.idempotencyCache) >= idempotencyMaxEntries {
+			for k := range s.idempotencyCache {
+				delete(s.idempotencyCache, k)
+				break
+			}
+		}
+	}
+	copied := make([]byte, len(body))
+	copy(copied, body)
+	s.idempotencyCache[requestID] = idempotencyEntry{
+		status:  status,
+		body:    copied,
+		expires: now.Add(idempotencyTTL),
+	}
+}
+
+func writeIdempotentOK[P any](s *Server, w http.ResponseWriter, env protocol.RequestEnvelope, payload P) {
+	resp := protocol.ResponseEnvelope{
+		RequestID:     env.RequestID,
+		CorrelationID: env.CorrelationID,
+		OK:            true,
+		Payload:       payload,
+	}
+	body, err := json.Marshal(resp)
+	if err != nil {
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInternal, Message: err.Error()})
+		return
+	}
+	s.storeIdempotent(env.RequestID, http.StatusOK, body)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(body)
+}
+
+func replayIdempotent(w http.ResponseWriter, status int, body []byte) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Kairo-Idempotent-Replay", "1")
+	w.WriteHeader(status)
+	_, _ = w.Write(body)
 }
 
 // RestartConfig tells /api/v1/runtime/restart how to
@@ -154,6 +247,9 @@ type Services struct {
 	// Java Debug Adapter (JDI Bridge). Optional: when nil,
 	// /api/v1/debug/adapter/status returns a 500.
 	JDKManager *jdkmanager.Manager
+	// Sandbox authorizes filesystem paths against workspace roots.
+	// Used by streaming search and other path-sensitive handlers.
+	Sandbox *security.WorkspaceRoots
 }
 
 // NewServer creates a Server.
@@ -172,10 +268,21 @@ func NewServer(services *Services, l *log.Logger, a *audit.Log, version string, 
 	return s
 }
 
+// SetRequireAuth enables mandatory authentication even when no
+// secret is configured. When true and secret is empty, protected
+// routes require a valid session token (Authorization: Bearer or
+// X-Kairo-Session). Safe to call before ListenAndServe.
+func (s *Server) SetRequireAuth(require bool) {
+	s.requireAuth = require
+}
+
 // SetRateLimit configures the per-IP rate limit. A value <= 0
 // disables rate limiting. Safe to call before ListenAndServe.
 func (s *Server) SetRateLimit(perMinute int) {
 	if perMinute <= 0 {
+		if s.rateLimiter != nil {
+			s.rateLimiter.Stop()
+		}
 		s.rateLimiter = nil
 	} else {
 		if s.rateLimiter != nil {
@@ -203,30 +310,69 @@ func (s *Server) SetRestartConfig(rc RestartConfig) {
 // match.
 func (s *Server) Handler() http.Handler { return s.middleware(s.router) }
 
-// ListenAndServe starts the HTTP server. addr is "host:port".
-func (s *Server) ListenAndServe(addr string, tlsCert, tlsKey string) error {
+// BoundPort returns the TCP port the server is listening on.
+// After Listen (or ListenAndServe with ":0"), this is the OS-assigned port.
+func (s *Server) BoundPort() int {
 	s.mu.Lock()
-	host, port, _ := splitHostPort(addr)
-	s.bindAddr = host
-	if n, err := strconv.Atoi(port); err == nil {
-		s.port = n
+	defer s.mu.Unlock()
+	return s.port
+}
+
+// Listen binds addr (host:port; port 0 = ephemeral) without serving.
+// Callers that need the real port before Serve (agent-state.json) use this.
+func (s *Server) Listen(addr string) (net.Listener, error) {
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return nil, err
 	}
+	host, _, _ := splitHostPort(addr)
+	tcpAddr, ok := ln.Addr().(*net.TCPAddr)
+	if !ok {
+		_ = ln.Close()
+		return nil, fmt.Errorf("unexpected listener address type %T", ln.Addr())
+	}
+	s.mu.Lock()
+	s.bindAddr = host
+	if s.bindAddr == "" {
+		s.bindAddr = tcpAddr.IP.String()
+	}
+	s.port = tcpAddr.Port
 	s.httpServer = &http.Server{
-		Addr:              addr,
+		Addr:              ln.Addr().String(),
 		Handler:           s.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      60 * time.Second,
 		IdleTimeout:       2 * time.Minute,
 	}
+	s.mu.Unlock()
+	s.logger.Info("http listen", log.Fields{"addr": ln.Addr().String()})
+	return ln, nil
+}
+
+// Serve serves HTTP (or HTTPS) on an already-bound listener from Listen.
+func (s *Server) Serve(ln net.Listener, tlsCert, tlsKey string) error {
+	s.mu.Lock()
 	srv := s.httpServer
 	s.mu.Unlock()
-
-	s.logger.Info("http listen", log.Fields{"addr": addr, "tls": tlsCert != ""})
-	if tlsCert != "" {
-		return srv.ListenAndServeTLS(tlsCert, tlsKey)
+	if srv == nil {
+		return errors.New("Serve called before Listen")
 	}
-	return srv.ListenAndServe()
+	if tlsCert != "" {
+		s.logger.Info("http serve tls", log.Fields{"addr": ln.Addr().String()})
+		return srv.ServeTLS(ln, tlsCert, tlsKey)
+	}
+	return srv.Serve(ln)
+}
+
+// ListenAndServe binds and serves. addr may use port 0 for an ephemeral port
+// (DK-P1-2); BoundPort() then reports the OS-assigned port.
+func (s *Server) ListenAndServe(addr string, tlsCert, tlsKey string) error {
+	ln, err := s.Listen(addr)
+	if err != nil {
+		return err
+	}
+	return s.Serve(ln, tlsCert, tlsKey)
 }
 
 // Shutdown gracefully stops the HTTP server. Used by
@@ -253,23 +399,24 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 		cid := r.Header.Get("X-Kairo-Correlation-Id")
 		w.Header().Set("X-Kairo-Request-Id", rid)
 
-		// Secret check: if the agent has a secret configured, require
-		// the X-Kairo-Secret header on every request. The health and
-		// endpoints routes are exempt so the desktop host can poll
-		// them during boot before the secret is wired into the
-		// runtime client. /api/v1/events does its own auth via the
-		// WebSocket Sec-WebSocket-Protocol subprotocol (browsers
-		// cannot set custom headers on a WebSocket upgrade).
-		// OPTIONS requests are also exempt (CORS preflight has no
-		// X-Kairo-Secret header by design).
-		if s.secret != "" && r.Method != http.MethodOptions {
+		// Auth check: when a secret is configured, require
+		// X-Kairo-Secret. When RequireAuth is set without a secret,
+		// require a valid login session token instead. Health and
+		// endpoints are exempt so the desktop host can poll during
+		// boot. /api/v1/events and /api/v1/search/stream do their
+		// own WebSocket subprotocol auth. OPTIONS (CORS preflight)
+		// is exempt by design. Login remains reachable so clients
+		// can obtain a session when RequireAuth is on.
+		if (s.secret != "" || s.requireAuth) && r.Method != http.MethodOptions {
 			switch r.URL.Path {
 			case "/api/v1/health", "/api/v1/endpoints":
 				// Public, by contract.
 			case "/api/v1/events", "/api/v1/search/stream":
 				// WebSocket auth is handled inside handleEvents / handleSearchStream.
+			case "/api/v1/auth/login":
+				// Must remain reachable to mint sessions under RequireAuth.
 			default:
-				if subtle.ConstantTimeCompare([]byte(r.Header.Get("X-Kairo-Secret")), []byte(s.secret)) != 1 {
+				if !s.authorizedRequest(r) {
 					writeError(w, rid, cid, protocol.KairoError{
 						Code:    protocol.ErrUnauthenticated,
 						Message: "missing or invalid auth secret",
@@ -316,8 +463,42 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 	return s.corsMiddleware(handler)
 }
 
+// authorizedRequest reports whether r carries valid credentials:
+// matching X-Kairo-Secret when configured, otherwise a valid login
+// session when RequireAuth is set (or when Auth is available and a
+// session token is presented alongside an empty secret).
+func (s *Server) authorizedRequest(r *http.Request) bool {
+	if s.secret != "" {
+		if subtle.ConstantTimeCompare([]byte(r.Header.Get("X-Kairo-Secret")), []byte(s.secret)) == 1 {
+			return true
+		}
+		// Secret configured: header must match. Session alone is not enough.
+		return false
+	}
+	if !s.requireAuth {
+		return true
+	}
+	token := sessionTokenFromRequest(r)
+	if token == "" || s.Services == nil || s.Services.Auth == nil {
+		return false
+	}
+	return s.Services.Auth.ValidateSession(token) == nil
+}
+
+func sessionTokenFromRequest(r *http.Request) string {
+	if t := strings.TrimSpace(r.Header.Get("X-Kairo-Session")); t != "" {
+		return t
+	}
+	const prefix = "Bearer "
+	auth := r.Header.Get("Authorization")
+	if strings.HasPrefix(auth, prefix) {
+		return strings.TrimSpace(auth[len(prefix):])
+	}
+	return ""
+}
+
 func (s *Server) corsMiddleware(next http.Handler) http.Handler {
-	allowedHeaders := "Content-Type, X-Kairo-Secret, X-Kairo-Request-Id, X-Kairo-Workspace-Id, X-Kairo-CSRF"
+	allowedHeaders := "Content-Type, X-Kairo-Secret, X-Kairo-Session, Authorization, X-Kairo-Request-Id, X-Kairo-Workspace-Id, X-Kairo-CSRF"
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
 		if origin != "" {
@@ -337,29 +518,9 @@ func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// isSafeOrigin returns true if the origin is a localhost/loopback URL.
-// This prevents arbitrary websites from making credentialed cross-origin
-// requests to the agent. The desktop form runs on loopback; the browser
-// form runs on localhost.
+// isSafeOrigin delegates to security.IsSafeOrigin (exact hostname match).
 func isSafeOrigin(origin string) bool {
-	// Allow any localhost origin.
-	if strings.HasPrefix(origin, "http://localhost") ||
-		strings.HasPrefix(origin, "https://localhost") ||
-		strings.HasPrefix(origin, "http://127.0.0.1") ||
-		strings.HasPrefix(origin, "https://127.0.0.1") ||
-		strings.HasPrefix(origin, "http://[::1]") ||
-		strings.HasPrefix(origin, "https://[::1]") {
-		return true
-	}
-	// Allow file:// origins (Electron renderer).
-	if strings.HasPrefix(origin, "file://") {
-		return true
-	}
-	// Allow vscode-webview:// origins (VS Code / Theia webviews).
-	if strings.HasPrefix(origin, "vscode-webview://") {
-		return true
-	}
-	return false
+	return security.IsSafeOrigin(origin)
 }
 
 func (s *Server) routes() {
@@ -424,6 +585,7 @@ func (s *Server) routes() {
 	s.router.HandleFunc("/api/v1/events", s.handleEvents)
 	// JDT Language Server
 	s.router.HandleFunc("/api/v1/jdtls", s.handleJDTLS)
+	s.router.HandleFunc("/api/v1/jdtls/distribution", s.handleJDTLSDistribution)
 	// JDT project model generator for legacy projects.
 	s.router.HandleFunc("/api/v1/jdtls/project", s.handleJDTProject)
 	// Port diagnostics
@@ -444,8 +606,10 @@ func (s *Server) routes() {
 	// Java run/detect main/test methods (IDEA-style one-click run)
 	s.router.HandleFunc("/api/v1/java/run", s.handleRunJava)
 	s.router.HandleFunc("/api/v1/java/detect", s.handleDetectJava)
-	// Incremental compilation
+	// Incremental compilation + HotSwap compile/redefine
 	s.router.HandleFunc("/api/v1/jvm/compile-incremental", s.handleCompileIncremental)
+	s.router.HandleFunc("/api/v1/jvm/compile", s.handleJvmCompile)
+	s.router.HandleFunc("/api/v1/jvm/redefine", s.handleJvmRedefine)
 	// Server context reload
 	s.router.HandleFunc("/api/v1/servers/{serverId}/reload", s.handleServerReload)
 }
@@ -572,6 +736,9 @@ func writeError(w http.ResponseWriter, requestID, correlationID string, e protoc
 	}
 	if e.Code == protocol.ErrRateLimited {
 		status = http.StatusTooManyRequests
+	}
+	if e.Code == protocol.ErrUnsupported {
+		status = http.StatusNotImplemented
 	}
 	writeJSON(w, status, resp)
 }

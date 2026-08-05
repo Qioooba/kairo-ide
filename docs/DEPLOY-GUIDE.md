@@ -21,15 +21,14 @@
 
 ### 1.1 获取安装包
 
-从管理员处获取分卷压缩包（如 `KairoIDE-v0.1.0-win-x64.7z.001` ~ `.004`）。
+从管理员处获取分卷压缩包（如 `KairoIDE-v0.1.0-win-x64.7z.001` ~ `.00N`）。
 
 ### 1.2 解压
 
 **步骤:**
 1. 安装 [7-Zip](https://7-zip.org/)（如未安装）
 2. 右键 `KairoIDE-v0.1.0-win-x64.7z.001` → **7-Zip → 解压到当前文件夹**
-3. 得到 `Kairo-0.1.0-win.zip`
-4. 将 `Kairo-0.1.0-win.zip` 解压到任意目录（支持中文路径、空格）
+3. 得到程序目录（含 `Kairo.exe` 等；支持中文路径、空格）
 
 **解压后的目录结构:**
 
@@ -178,16 +177,17 @@ $env:KAIRO_JDTLS_HOME   = "E:\Apps\eclipse-jdt-ls"
 ```
 
 产物在 `apps/desktop/dist/`:
-- `Kairo-0.1.0-win.zip` — 完整安装包
-- `KairoIDE-v0.1.0-win-x64.7z.001` ~ `.004` — 分卷压缩包
+- `KairoIDE-v0.1.0-win-x64.7z.001` ~ `.00N` — **内网交付用分卷**（解压即得到程序目录）
+- `win-unpacked/` — 本地调试用未压缩目录
+
+> 不要用 electron-builder 顺带生成的旧 zip/NSIS 当交付物；以 7z 分卷为准（含双版本 exe）。
 
 ### 4.2 部署到目标机器
 
 1. 将全部 `.7z.00*` 文件复制到目标机器
-2. 用 7-Zip 解压 → 得到 `Kairo-0.1.0-win.zip`
-3. 解压 `Kairo-0.1.0-win.zip` 到目标目录（如 `D:\Kairo\`）
-4. 确保目标机器已安装 JDK 17+
-5. 双击 `Kairo.exe` 或 `scripts\start-browser-mode.cmd` 启动
+2. 用 7-Zip 解压 `.7z.001` → **直接得到程序目录**（含 `Kairo.exe` / `Kairo-Server.exe`）
+3. 确保目标机器已安装 JDK 17+
+4. 双击 `Kairo.exe` 或 `Kairo-Server.exe` / `start-browser-mode.cmd` 启动
 
 ### 4.3 完全离线验证
 
@@ -211,19 +211,33 @@ Kairo IDE 已预打包所有依赖，无需外网:
 ### 5.1 命令
 
 ```powershell
-# 完整构建 + 打包 + 分卷压缩（每卷 70MB）
+# 完整构建 + 打包 + 分卷压缩（每卷 70MB）— 推荐
 .\scripts\build-and-package.ps1
 
 # 自定义分卷大小
 .\scripts\build-and-package.ps1 -VolumeSize 50
 
-# 跳过构建（仅重新打包）
+# 跳过构建（仅重新打包；缺 prebuilds 时会自动补拷）
 .\scripts\build-and-package.ps1 -SkipBuild
 
 # 跳过分卷压缩
 .\scripts\build-and-package.ps1 -SkipSplit
+
+# 允许降级包（缺 JDT LS / JDI 时不硬失败；关键项仍失败）
+.\scripts\build-and-package.ps1 -AllowDegraded
+
+# 上传到挂载盘指定目录\当天日期（默认 Z:\KairoIDE\yyyy-MM-dd\）
+.\scripts\build-and-package.ps1 -PublishRoot "Z:\KairoIDE"
+
+# 指定日期目录 / 跳过上传 / 上传失败则整次失败
+.\scripts\build-and-package.ps1 -PublishDate "2026-08-03"
+.\scripts\build-and-package.ps1 -SkipPublish
+.\scripts\build-and-package.ps1 -PublishRequired
 ```
 
+脚本默认会：清理残留 Kairo/Theia 进程 → 预检关键资源 → `electron-builder --win dir` → 生成双版本 → 7z 分卷 → **硬冒烟** → **上传到 `PublishRoot\日期\`**。
+
+上传根目录优先级：`-PublishRoot` > 环境变量 `KAIRO_PUBLISH_ROOT` > 默认 `Z:\KairoIDE`。
 ### 5.2 环境变量
 
 | 变量 | 说明 | 示例 |
@@ -236,12 +250,16 @@ Kairo IDE 已预打包所有依赖，无需外网:
 
 ```
 build-and-package.ps1
-├── 阶段 1: pnpm --filter @kairo/browser build    (浏览器前端)
-├── 阶段 2: node scripts/build-agent.js            (Go Agent)
-├── 阶段 3: 准备 bundled/tomcat6 + bundled/jdtls
-├── 阶段 4: copy-browser-artifacts + tsc           (组装)
-├── 阶段 5: electron-builder --win                 (打包)
-└── 阶段 6: 7z 分卷压缩                            (分卷)
+├── 阶段 0: 清理残留进程 + 旁路目录
+├── 阶段 1: pnpm --filter @kairo/browser build     (浏览器前端)
+├── 阶段 2: node scripts/build-agent.js             (Go Agent)
+├── 阶段 3: bundled Tomcat / JDT LS / JDI Bridge
+├── 阶段 4: copy-browser-artifacts(+prebuilds)+tsc
+├── 预检:   Assert-PackPreflight
+├── 阶段 5: electron-builder --win dir + afterPack
+├──        生成 Kairo-Server.exe + 清理冗余
+├──        7z 分卷 + 硬冒烟验证
+└──        上传到 PublishRoot\yyyy-MM-dd\
 ```
 
 ### 5.4 其他可用脚本

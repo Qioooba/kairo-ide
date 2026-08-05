@@ -76,6 +76,12 @@ func (s *jdtlsService) Status() (json.RawMessage, error) {
 	return json.Marshal(st)
 }
 
+func (s *jdtlsService) DistributionStatus() (json.RawMessage, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return json.Marshal(s.mgr.DistributionStatus())
+}
+
 func (s *jdtlsService) Prepare(ctx context.Context) (json.RawMessage, error) {
 	rep, err := s.mgr.EnsureInstalled(ctx)
 	if err != nil {

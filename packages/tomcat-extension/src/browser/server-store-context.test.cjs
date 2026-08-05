@@ -46,6 +46,13 @@ test('server-store.ts calls bootstrap in context change handler (N-032)', () => 
   assert.match(source, /this\.contextUnsubscribe = this\.workspaceContext\.onDidChangeContext/);
 });
 
+// BD-P2-1: bootstrap generation so only the latest in-flight wins
+test('server-store.ts uses bootstrap generation to discard stale bootstraps (BD-P2-1)', () => {
+  assert.match(source, /bootstrapGeneration/);
+  assert.match(source, /const generation = \+\+this\.bootstrapGeneration/);
+  assert.match(source, /if \(generation !== this\.bootstrapGeneration\) return/);
+});
+
 // Verify the state machine exists
 test('server-store.ts defines isValidTransition', () => {
   assert.match(source, /export function isValidTransition/);

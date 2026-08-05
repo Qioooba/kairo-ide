@@ -68,6 +68,7 @@ import {
   KAIRO_DEBUG_TOOLBAR_FACTORY_ID,
   KAIRO_DEBUG_CONSOLE_FACTORY_ID,
   KAIRO_DEBUG_WATCH_FACTORY_ID,
+  KAIRO_JAVA_HOTSWAP_FACTORY_ID,
   KAIRO_DEBUG_DIAGNOSTICS_FACTORY_ID,
   KAIRO_DEBUG_TOOL_WINDOW_FACTORY_ID,
 } from './kairo-factory-ids';
@@ -122,6 +123,7 @@ export namespace KairoCommands {
   export const REVEAL_KAIRO_DEBUG_TOOLBAR: Command = { id: 'kairo.debug.view.toolbar', label: 'Kairo: Show Debug Toolbar' };
   export const REVEAL_KAIRO_DEBUG_CONSOLE: Command = { id: 'kairo.debug.view.console', label: 'Kairo: Show Debug Console' };
   export const REVEAL_KAIRO_DEBUG_WATCH: Command = { id: 'kairo.debug.view.watch', label: 'Kairo: Show Debug Watch' };
+  export const REVEAL_KAIRO_JAVA_HOTSWAP: Command = { id: 'kairo.java.hotswap.showHistory', label: 'Kairo: Show Hot Swap History' };
   export const OPEN_DEBUG_DIAGNOSTICS: Command = { id: 'kairo:open-debug-diagnostics', label: 'Kairo: Open Debug Diagnostics' };
   export const OPEN_IDEA_DEBUG_TOOL_WINDOW: Command = { id: 'kairo.debug.openToolWindow', label: 'Debug: Open Debug Tool Window (IDEA-style)' };
   export const DEBUG_RESTART: Command = { id: 'kairo.debug.restart', label: 'Debug: Rerun' };
@@ -512,24 +514,14 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
    */
   protected async ensureRuntimeAgentHealthy(): Promise<boolean> {
     const probe = async (): Promise<boolean> => {
-      const base = (this.runtime.baseUrl() || '').replace(/\/$/, '');
-      if (!base) {
+      if (!(this.runtime.baseUrl() || '').replace(/\/$/, '')) {
         return false;
       }
       try {
-        const ctl = new AbortController();
-        const timer = setTimeout(() => ctl.abort(), 4_000);
-        try {
-          const res = await fetch(`${base}/api/v1/health`, {
-            method: 'GET',
-            credentials: 'omit',
-            signal: ctl.signal,
-            headers: { Accept: 'application/json' },
-          });
-          return res.ok;
-        } finally {
-          clearTimeout(timer);
-        }
+        const health = await this.runtime.request('GET /api/v1/health', undefined, {
+          timeoutMs: 4_000,
+        });
+        return !!health?.ok;
       } catch {
         return false;
       }
@@ -663,7 +655,7 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
     let lastStatus: string | undefined;
     this.statusUnsub = this.runtime.onStatusChange(s => {
       if (s === 'disconnected' && lastStatus === 'open') {
-        this.messages.warn('Runtime Agent is disconnected. Buttons will retry on click.', { timeout: 12000 });
+        this.messages.warn(this.i18n.t('views.runtimeDisconnected'), { timeout: 12000 });
       }
       lastStatus = s;
     });
@@ -739,7 +731,6 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
   }
 
   async registerCommands(registry: CommandRegistry): Promise<void> {
-    console.log('[kairo] KairoViewsContribution.registerCommands called');
     this.commandRegistry = registry;
     // Language pack may still be loading when commands first register;
     // refresh once now and again whenever the locale changes.
@@ -755,7 +746,7 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
             _w => { /* singleton via WidgetManager */ },
           );
         } catch (err) {
-          this.messages.error(kairoErrorMessage(err, 'Open Import Wizard failed'));
+          this.messages.error(kairoErrorMessage(err, this.i18n.t('views.openImportWizardFailed')));
         }
         return undefined;
       },
@@ -770,7 +761,7 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
             _w => { /* singleton via WidgetManager */ },
           );
         } catch (err) {
-          this.messages.error(kairoErrorMessage(err, 'Open Project Selector failed'));
+          this.messages.error(kairoErrorMessage(err, this.i18n.t('views.openProjectSelectorFailed')));
         }
         return undefined;
       },
@@ -781,14 +772,14 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
         try {
           const ws = this.projectSvc.currentWorkspace();
           if (!ws) {
-            this.messages.warn('Open a workspace first via File > Open Folder.');
+            this.messages.warn(this.i18n.t('views.openWorkspaceFirst'));
             return undefined;
           }
           const out = await this.projectSvc.detectLayout(ws.id);
-          this.messages.info(`Scanned ${ws.rootPath}.`);
+          this.messages.info(this.i18n.t('views.scanned', { path: ws.rootPath }));
           return out;
         } catch (err) {
-          this.messages.error(kairoErrorMessage(err, 'Scan failed'));
+          this.messages.error(kairoErrorMessage(err, this.i18n.t('views.scanFailed')));
           return undefined;
         }
       },
@@ -800,13 +791,11 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
           const agentOk = await this.ensureRuntimeAgentHealthy();
           if (!agentOk) {
             const url = this.runtime.baseUrl() || '(unset)';
-            this.messages.error(
-              `无法连接运行时代理（${url}）。请确认 kairo-runtime 已启动，点击状态栏「代理」重连，或刷新页面后重试。`,
-            );
+            this.messages.error(this.i18n.t('runtimeAgent.unreachable', { url }));
             return undefined;
           }
           const p = await this.activeProject.requireProject();
-          const result = await this.runtime.request('POST /api/v1/builds', { projectId: p.projectId }) as {
+          const result = await this.runtime.request('POST /api/v1/builds', { projectId: p.projectId }, { noRetry: true }) as {
             id?: string;
             state?: string;
             diagnostics?: Array<{ file: string; line?: number; column?: number; severity?: string; message?: string }>;
@@ -822,17 +811,21 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
           if (state === 'failed' || firstError) {
             if (firstError?.file) {
               this.messages.error(
-                `Build failed: ${firstError.file}:${firstError.line || 1} — ${firstError.message || 'error'}`,
+                this.i18n.t('build.failedAt', {
+                  file: firstError.file,
+                  line: firstError.line || 1,
+                  message: firstError.message || 'error',
+                }),
               );
               await this.openBuildDiagnostic(firstError);
             } else {
-              this.messages.error(`Build ${state}.`);
+              this.messages.error(this.i18n.t('build.stateMessage', { state }));
             }
           } else {
-            this.messages.info(`Build ${state}.`);
+            this.messages.info(this.i18n.t('build.stateMessage', { state }));
           }
         } catch (err) {
-          this.messages.error(kairoErrorMessage(err, 'Build failed'));
+          this.messages.error(kairoErrorMessage(err, this.i18n.t('views.buildFailed')));
         }
         return undefined;
       },
@@ -848,13 +841,11 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
           const agentOk = await this.ensureRuntimeAgentHealthy();
           if (!agentOk) {
             const url = this.runtime.baseUrl() || '(unset)';
-            this.messages.error(
-              `无法连接运行时代理（${url}）。请确认 kairo-runtime 已启动，点击状态栏「代理」重连，或刷新页面后重试。`,
-            );
+            this.messages.error(this.i18n.t('runtimeAgent.unreachable', { url }));
             return undefined;
           }
           const p = await this.activeProject.requireProject();
-          const result = await this.runtime.request('POST /api/v1/builds', { projectId: p.projectId, clean: true }) as {
+          const result = await this.runtime.request('POST /api/v1/builds', { projectId: p.projectId, clean: true }, { noRetry: true }) as {
             id?: string;
             state?: string;
             diagnostics?: Array<{ file: string; line?: number; column?: number; severity?: string; message?: string }>;
@@ -870,17 +861,21 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
           if (state === 'failed' || firstError) {
             if (firstError?.file) {
               this.messages.error(
-                `Clean build failed: ${firstError.file}:${firstError.line || 1} — ${firstError.message || 'error'}`,
+                this.i18n.t('build.failedAt', {
+                  file: firstError.file,
+                  line: firstError.line || 1,
+                  message: firstError.message || 'error',
+                }),
               );
               await this.openBuildDiagnostic(firstError);
             } else {
-              this.messages.error(`Clean build ${state}.`);
+              this.messages.error(this.i18n.t('build.stateMessage', { state }));
             }
           } else {
-            this.messages.info(`Clean build ${state}.`);
+            this.messages.info(this.i18n.t('build.stateMessage', { state }));
           }
         } catch (err) {
-          this.messages.error(kairoErrorMessage(err, 'Clean build failed'));
+          this.messages.error(kairoErrorMessage(err, this.i18n.t('views.cleanBuildFailed')));
         }
         return undefined;
       },
@@ -890,13 +885,16 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
       execute: async () => {
         try {
           const p = await this.activeProject.requireProject();
-          const build = await this.runtime.request('POST /api/v1/builds', { projectId: p.projectId });
-          const deploy = await this.runtime.request('POST /api/v1/deployments', { projectId: p.projectId, buildId: build.id, scope: 'all' });
-          this.messages.info(`Build ${build.state} → Deploy ${deploy.state}.`);
+          const build = await this.runtime.request('POST /api/v1/builds', { projectId: p.projectId }, { noRetry: true });
+          const deploy = await this.runtime.request('POST /api/v1/deployments', { projectId: p.projectId, buildId: build.id, scope: 'all' }, { noRetry: true });
+          this.messages.info(this.i18n.t('views.buildDeployResult', {
+            buildState: build.state,
+            deployState: deploy.state,
+          }));
           await this.refreshBuilds();
           await this.refreshDeployments();
         } catch (err) {
-          this.messages.error(kairoErrorMessage(err, 'Build and deploy failed'));
+          this.messages.error(kairoErrorMessage(err, this.i18n.t('views.buildAndDeployFailed')));
         }
         return undefined;
       },
@@ -911,11 +909,14 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
             buildId: '',
             scope: 'webapp',
             intent: 'publish-static-changes',
-          });
-          this.messages.info(`Published ${deploy.filesTouched} file(s), ${deploy.bytes} bytes.`);
+          }, { noRetry: true });
+          this.messages.info(this.i18n.t('views.published', {
+            files: deploy.filesTouched,
+            bytes: deploy.bytes,
+          }));
           await this.refreshDeployments();
         } catch (err) {
-          this.messages.error(kairoErrorMessage(err, 'Publish failed'));
+          this.messages.error(kairoErrorMessage(err, this.i18n.t('views.publishFailed')));
         }
         return undefined;
       },
@@ -927,16 +928,14 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
           const agentOk = await this.ensureRuntimeAgentHealthy();
           if (!agentOk) {
             const url = this.runtime.baseUrl() || '(unset)';
-            this.messages.error(
-              `无法连接运行时代理（${url}）。请确认 kairo-runtime 已启动，点击状态栏「代理」重连，或刷新页面后重试。`,
-            );
+            this.messages.error(this.i18n.t('runtimeAgent.unreachable', { url }));
             return undefined;
           }
           const p = await this.activeProject.requireProject();
           const srv = await this.serverSvc.start(p.projectId, false);
-          this.messages.info(`Server ${srv.id} ${srv.state}.`);
+          this.messages.info(this.i18n.t('views.serverState', { id: srv.id, state: srv.state }));
         } catch (err) {
-          this.messages.error(kairoErrorMessage(err, 'Server start failed'));
+          this.messages.error(kairoErrorMessage(err, this.i18n.t('views.serverStartFailed')));
         }
         return undefined;
       },
@@ -950,12 +949,12 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
           const javaDebug = await this.getJavaDebug();
           const capability = await javaDebug.probeAvailability();
           if (capability.state !== 'available') {
-            throw new Error(capability.message ?? 'Java Debug Adapter is unavailable');
+            throw new Error(capability.message ?? this.i18n.t('views.debugAdapterUnavailable'));
           }
           const srv = await this.serverSvc.start(p.projectId, true);
           serverId = srv.id;
           const port = srv.ports.debug;
-          if (!port) throw new Error('Tomcat started without a verified JDWP port');
+          if (!port) throw new Error(this.i18n.t('views.tomcatNoJdwpPort'));
           const status = await javaDebug.attach({
             serverId: srv.id,
             projectId: p.projectId,
@@ -963,12 +962,15 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
             projectRoot: p.root,
             port,
           });
-          this.messages.info(`Java Debug Adapter connected to JDWP 127.0.0.1:${port} (session ${status.sessionId}).`);
+          this.messages.info(this.i18n.t('views.debugAdapterConnected', {
+            port,
+            sessionId: status.sessionId ?? '',
+          }));
         } catch (err) {
           if (serverId) {
             try { await this.serverSvc.stop(serverId, false); } catch { /* preserve the attach error */ }
           }
-          this.messages.error(kairoErrorMessage(err, 'Server debug start failed'));
+          this.messages.error(kairoErrorMessage(err, this.i18n.t('views.serverDebugStartFailed')));
         }
         return undefined;
       },
@@ -978,8 +980,8 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
       execute: async () => {
         const javaDebug = await this.getJavaDebug();
         const status = await javaDebug.probeAvailability();
-        if (status.state === 'available') this.messages.info('Java Debug Adapter is available.');
-        else this.messages.warn(status.message ?? `Java Debug Adapter state: ${status.state}`);
+        if (status.state === 'available') this.messages.info(this.i18n.t('views.debugAdapterAvailable'));
+        else this.messages.warn(status.message ?? this.i18n.t('views.debugAdapterState', { state: status.state }));
         return status;
       },
     });
@@ -1009,26 +1011,28 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
           // (stopping them used to fail the whole command).
           const alive = list.filter(s => s.state !== 'stopped' && s.state !== 'error' && s.state !== 'crashed');
           if (alive.length === 0) {
-            this.messages.info('No running server.');
+            this.messages.info(this.i18n.t('views.noRunningServer'));
             return undefined;
           }
           const failures: string[] = [];
           for (const srv of alive) {
             try {
               await this.serverSvc.stop(srv.id, false);
-              this.messages.info(`Server ${srv.id} stopped.`);
+              this.messages.info(this.i18n.t('views.serverStopped', { id: srv.id }));
             } catch (err) {
               failures.push(`${srv.id}: ${(err as Error).message}`);
             }
           }
           if (failures.length > 0) {
-            this.messages.error(`Failed to stop: ${failures.join('; ')}`);
+            this.messages.error(this.i18n.t('views.stopFailed', { failures: failures.join('; ') }));
           }
           if (debugStopError) {
-            this.messages.warn(`Debug Adapter termination reported an error; Tomcat stop was still attempted: ${kairoErrorMessage(debugStopError, 'unknown error')}`);
+            this.messages.warn(this.i18n.t('views.debugStopWarn', {
+              message: kairoErrorMessage(debugStopError, this.i18n.t('views.unknownError')),
+            }));
           }
         } catch (err) {
-          this.messages.error(kairoErrorMessage(err, 'Server stop failed'));
+          this.messages.error(kairoErrorMessage(err, this.i18n.t('views.serverStopFailed')));
         }
         return undefined;
       },
@@ -1045,10 +1049,13 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
               undefined,
               { pathParams: { serverId: srv.id } },
             ) as ServerInstance;
-            this.messages.info(`Server ${result.id} restarted, new PID: ${result.pid}`);
+            this.messages.info(this.i18n.t('views.serverRestarted', {
+              id: result.id,
+              pid: result.pid ?? '?',
+            }));
           }
         } catch (err) {
-          this.messages.error(kairoErrorMessage(err, 'Server restart failed'));
+          this.messages.error(kairoErrorMessage(err, this.i18n.t('views.serverRestartFailed')));
         }
         return undefined;
       },
@@ -1060,13 +1067,13 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
           const list = (await this.runtime.request('GET /api/v1/servers', undefined)) as ServerInstance[];
           const srv = list[0];
           if (!srv || !srv.ports.http) {
-            this.messages.warn('No running server with an HTTP port.');
+            this.messages.warn(this.i18n.t('views.noRunningServerHttp'));
             return undefined;
           }
           const url = `http://127.0.0.1:${srv.ports.http}`;
           window.open(url, '_blank', 'noopener');
         } catch (err) {
-          this.messages.error(kairoErrorMessage(err, 'Open application failed'));
+          this.messages.error(kairoErrorMessage(err, this.i18n.t('views.openApplicationFailed')));
         }
         return undefined;
       },
@@ -1121,6 +1128,9 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
     registry.registerCommand(this.withLabel(KairoCommands.REVEAL_KAIRO_DEBUG_WATCH), {
       execute: () => { void this.revealOrCreate(KAIRO_DEBUG_WATCH_FACTORY_ID, () => undefined, () => undefined); },
     });
+    registry.registerCommand(this.withLabel(KairoCommands.REVEAL_KAIRO_JAVA_HOTSWAP), {
+      execute: () => { void this.revealOrCreate(KAIRO_JAVA_HOTSWAP_FACTORY_ID, () => undefined, () => undefined); },
+    });
     registry.registerCommand(this.withLabel(KairoCommands.OPEN_DEBUG_DIAGNOSTICS), {
       execute: () => { void this.revealOrCreateMain(KAIRO_DEBUG_DIAGNOSTICS_FACTORY_ID, () => undefined, () => undefined); },
     });
@@ -1131,7 +1141,7 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
         try {
           return await this.revealOrCreateBottom(KAIRO_DEBUG_TOOL_WINDOW_FACTORY_ID);
         } catch (err) {
-          this.messages.error(kairoErrorMessage(err, 'Failed to open Debug tool window'));
+          this.messages.error(kairoErrorMessage(err, this.i18n.t('views.openDebugToolWindowFailed')));
           return undefined;
         }
       },
@@ -1152,11 +1162,16 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
         try {
           const svc = await this.getDebugSessionService();
           const session = (svc as any).sessionManager?.currentSession;
-          if (session) {
-            await session.sendRequest('stepBack', { threadId: session.currentThread?.threadId ?? 0 });
+          const frameId = session?.currentFrame?.raw?.id;
+          if (session && frameId !== undefined) {
+            await session.sendRequest('restartFrame', { frameId });
           }
-        } catch {
-          // not supported
+        } catch (err) {
+          this.messages.warn(
+            this.i18n.t('views.dropFrameUnsupported', {
+              message: err instanceof Error ? err.message : String(err),
+            }),
+          );
         }
       },
       isEnabled: () => !!this.debugSessionService?.currentState.isSuspended,
@@ -1185,10 +1200,20 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
     registry.registerCommand(this.withLabel(KairoCommands.MANAGE_RUN_CONFIGURATIONS), {
       execute: () => { void this.revealOrCreateMain(KAIRO_RUN_CONFIGURATIONS_FACTORY_ID, () => undefined, () => undefined); },
     });
-    // P1-INT-01: JDK switch — opens the project selector so the user
-    // can switch to a different project / JDK configuration.
+    // Switch host JDK: prefer native Electron picker (persists host-jdk.json
+    // and restarts the agent). Browser builds fall back to project selector.
     registry.registerCommand(this.withLabel(KairoCommands.SWITCH_JDK), {
       execute: async () => {
+        const ipc = (window as unknown as { kairoIPC?: { switchHostJDK?: () => Promise<string> } }).kairoIPC;
+        if (ipc?.switchHostJDK) {
+          try {
+            await ipc.switchHostJDK();
+            this.messages.info(this.i18n.t('jdk.hostUpdated'));
+          } catch (err) {
+            this.messages.error(kairoErrorMessage(err, this.i18n.t('jdk.switchFailed')));
+          }
+          return undefined;
+        }
         try {
           await this.revealOrCreateMain<ProjectSelectorWidget>(
             KAIRO_PROJECT_SELECTOR_FACTORY_ID,
@@ -1196,7 +1221,7 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
             _w => { /* singleton via WidgetManager */ },
           );
         } catch (err) {
-          this.messages.error(kairoErrorMessage(err, '打开项目选择器失败'));
+          this.messages.error(kairoErrorMessage(err, this.i18n.t('jdk.openSelectorFailed')));
         }
         return undefined;
       },
@@ -1215,10 +1240,10 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
         this.runtime.openEvents();
         const ok = await this.ensureRuntimeAgentHealthy();
         if (ok) {
-          this.messages.info('已重新连接运行时代理');
+          this.messages.info(this.i18n.t('runtimeAgent.reconnected'));
         } else {
           this.messages.error(
-            `无法连接运行时代理（${this.runtime.baseUrl() || '(unset)'}）。请确认 agent 进程存活后重试。`,
+            this.i18n.t('runtimeAgent.unreachableShort', { url: this.runtime.baseUrl() || '(unset)' }),
           );
         }
         return undefined;
@@ -1273,7 +1298,7 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
           // Trigger hot deploy update
           await this.hotDeploy.updateApplication();
         } catch (err) {
-          this.messages.error(kairoErrorMessage(err, 'Update application failed'));
+          this.messages.error(kairoErrorMessage(err, this.i18n.t('views.updateApplicationFailed')));
         }
         return undefined;
       },
@@ -1285,7 +1310,7 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
         try {
           await this.hotDeploy.reloadContext();
         } catch (err) {
-          this.messages.error(kairoErrorMessage(err, 'Reload context failed'));
+          this.messages.error(kairoErrorMessage(err, this.i18n.t('views.reloadContextFailed')));
         }
         return undefined;
       },
@@ -1491,6 +1516,11 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
       order: 'd6',
     });
     menus.registerMenuAction([...KAIRO_MENU, 'd_debug'], {
+      commandId: KairoCommands.REVEAL_KAIRO_JAVA_HOTSWAP.id,
+      icon: 'codicon codicon-debug-restart',
+      order: 'd6a',
+    });
+    menus.registerMenuAction([...KAIRO_MENU, 'd_debug'], {
       commandId: KairoCommands.REVEAL_KAIRO_DEBUG_TOOLBAR.id,
       icon: 'codicon codicon-debug-alt',
       order: 'd7',
@@ -1680,7 +1710,7 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
         this.buildStore.setBuilds(list.map(b => mapBuildResult(b, ws)));
       }
     } catch (err) {
-      this.messages.error(kairoErrorMessage(err, 'Refresh builds failed'));
+      this.messages.error(kairoErrorMessage(err, this.i18n.t('views.refreshBuildsFailed')));
     }
   }
 
@@ -1763,7 +1793,7 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
       const list = (await this.runtime.request('GET /api/v1/deployments', undefined)) as DeploymentResult[];
       this.deploymentsView.setDeployments(Array.isArray(list) ? list : []);
     } catch (err) {
-      this.messages.error(kairoErrorMessage(err, 'Refresh deployments failed'));
+      this.messages.error(kairoErrorMessage(err, this.i18n.t('views.refreshDeploymentsFailed')));
     }
   }
 

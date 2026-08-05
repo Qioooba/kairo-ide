@@ -57,7 +57,7 @@ test('reload prefers live-editor setEncoding(Decode), no close/reopen', async ()
   const h = makeHarness(widget);
   const uri = FileUri.create('/p/WebRoot/hello.jsp');
 
-  const outcome = await reloadEditorWithEncoding(widget, uri, 'gbk', h.editorManager, h.messages);
+  const outcome = await reloadEditorWithEncoding(widget, uri, 'gbk', h.editorManager, h.messages, 'dirty');
 
   assert.strictEqual(outcome, 'redecoded');
   assert.deepStrictEqual(calls, [{ encoding: 'gbk', mode: ENCODING_MODE_DECODE }],
@@ -74,7 +74,7 @@ test('reload refuses on a dirty document instead of discarding edits', async () 
   });
   const h = makeHarness(widget);
 
-  const outcome = await reloadEditorWithEncoding(widget, FileUri.create('/p/a.jsp'), 'gbk', h.editorManager, h.messages);
+  const outcome = await reloadEditorWithEncoding(widget, FileUri.create('/p/a.jsp'), 'gbk', h.editorManager, h.messages, 'dirty');
 
   assert.strictEqual(outcome, 'refused-dirty');
   assert.deepStrictEqual(calls, [], 'dirty model must not be re-decoded');
@@ -83,16 +83,39 @@ test('reload refuses on a dirty document instead of discarding edits', async () 
   assert.strictEqual(h.warns.length, 1, 'user warned about dirty file');
 });
 
+// BD-P0-2: command must roll back the encoding override when reopen is refused-dirty.
+test('encoding-commands rolls back override on refused-dirty (BD-P0-2)', async () => {
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const src = fs.readFileSync(path.join(__dirname, 'encoding-commands.ts'), 'utf8');
+  assert.match(src, /outcome === ['"]refused-dirty['"]/, 'must handle refused-dirty');
+  assert.match(src, /setEncodingFor\(\s*target\s*,\s*current\s*\)/,
+    'must restore previous encoding override on refused-dirty');
+});
+
 test('reload falls back to close/reopen when the editor lacks setEncoding', async () => {
   const widget = makeWidget({ document: { dirty: false } });
   const h = makeHarness(widget);
   const uri = FileUri.create('/p/WebRoot/hello.jsp');
 
-  const outcome = await reloadEditorWithEncoding(widget, uri, 'gbk', h.editorManager, h.messages);
+  const outcome = await reloadEditorWithEncoding(widget, uri, 'gbk', h.editorManager, h.messages, 'dirty');
 
   assert.strictEqual(outcome, 'reopened');
   assert.strictEqual(widget.closed, true, 'widget closed on fallback path');
   assert.deepStrictEqual(h.opened, [uri], 'editor re-opened after disposal');
+});
+
+// BD-P2-3: close/reopen fallback must refuse dirty buffers (same as setEncoding).
+test('reload refuses dirty on close/reopen fallback (BD-P2-3)', async () => {
+  const widget = makeWidget({ document: { dirty: true } });
+  const h = makeHarness(widget);
+
+  const outcome = await reloadEditorWithEncoding(widget, FileUri.create('/p/a.jsp'), 'gbk', h.editorManager, h.messages, 'dirty');
+
+  assert.strictEqual(outcome, 'refused-dirty');
+  assert.strictEqual(widget.closed, false, 'dirty widget must not be closed on fallback');
+  assert.deepStrictEqual(h.opened, []);
+  assert.strictEqual(h.warns.length, 1, 'user warned about dirty file');
 });
 
 test('KairoEncodingRegistry: folder override matches files beneath it', () => {
@@ -122,6 +145,18 @@ test('KairoEncodingRegistry: exact per-file override beats folder default regard
   const getOverride = (reg as unknown as { getEncodingOverride(u: URI): string | undefined }).getEncodingOverride.bind(reg);
   assert.strictEqual(getOverride(FileUri.create('/proj/WebRoot/qa-zh-utf8.jsp')), 'utf-8', 'exact file override must win');
   assert.strictEqual(getOverride(FileUri.create('/proj/WebRoot/hello.jsp')), 'gbk', 'other files keep the folder default');
+});
+
+// BD-P1-9: nested directory override must beat shallow project root
+// even when the shallow override is registered later.
+test('KairoEncodingRegistry: deepest folder override wins over registration order (BD-P1-9)', () => {
+  const reg = new KairoEncodingRegistry();
+  reg.registerOverride({ parent: FileUri.create('/proj/WebRoot'), encoding: 'utf-8' });
+  // Shallow root registered AFTER deeper dir — must NOT shadow it.
+  reg.registerOverride({ parent: FileUri.create('/proj'), encoding: 'gbk' });
+  const getOverride = (reg as unknown as { getEncodingOverride(u: URI): string | undefined }).getEncodingOverride.bind(reg);
+  assert.strictEqual(getOverride(FileUri.create('/proj/WebRoot/hello.jsp')), 'utf-8', 'deeper WebRoot wins');
+  assert.strictEqual(getOverride(FileUri.create('/proj/src/Main.java')), 'gbk', 'outside WebRoot keeps project default');
 });
 
 test('KairoEncodingRegistry: stock extension and scheme branches preserved', () => {

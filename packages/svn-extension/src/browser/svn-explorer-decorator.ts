@@ -29,23 +29,6 @@ const STATUS_COLORS: Record<SvnFileStatus, string> = {
   [SvnFileStatus.None]: '',
 };
 
-const STATUS_LABELS: Record<SvnFileStatus, string> = {
-  [SvnFileStatus.Normal]: '',
-  [SvnFileStatus.Modified]: 'M',
-  [SvnFileStatus.Added]: 'A',
-  [SvnFileStatus.Deleted]: 'D',
-  [SvnFileStatus.Conflict]: '!',
-  [SvnFileStatus.Missing]: '!',
-  [SvnFileStatus.Unversioned]: '?',
-  [SvnFileStatus.Ignored]: 'I',
-  [SvnFileStatus.Replaced]: 'R',
-  [SvnFileStatus.Obstructed]: '~',
-  [SvnFileStatus.Locked]: 'L',
-  [SvnFileStatus.Switched]: 'S',
-  [SvnFileStatus.External]: 'X',
-  [SvnFileStatus.None]: '',
-};
-
 @injectable()
 export class SvnExplorerDecorator implements TreeDecorator {
   readonly id = 'kairo-svn-explorer-decorator';
@@ -110,11 +93,15 @@ export class SvnExplorerDecorator implements TreeDecorator {
       if (!status || status === SvnFileStatus.Normal || status === SvnFileStatus.None) continue;
 
       const color = STATUS_COLORS[status];
-      const label = STATUS_LABELS[status];
+      if (!color) continue;
 
       result.set(node.id, {
         fontData: { color },
-        captionSuffixes: label ? [{ data: ` ${label}`, fontData: { color } }] : undefined,
+        tailDecorations: [{
+          icon: 'circle',
+          color,
+          tooltip: `SVN: ${this.statusTooltip(status)}`,
+        }],
       });
     }
 
@@ -129,6 +116,24 @@ export class SvnExplorerDecorator implements TreeDecorator {
       for (const child of children) {
         yield* this.collectNodes(child);
       }
+    }
+  }
+
+  protected statusTooltip(status: SvnFileStatus): string {
+    switch (status) {
+      case SvnFileStatus.Modified: return 'Modified';
+      case SvnFileStatus.Added: return 'Added';
+      case SvnFileStatus.Deleted: return 'Deleted';
+      case SvnFileStatus.Conflict: return 'Conflict';
+      case SvnFileStatus.Missing: return 'Missing';
+      case SvnFileStatus.Unversioned: return 'Unversioned';
+      case SvnFileStatus.Ignored: return 'Ignored';
+      case SvnFileStatus.Replaced: return 'Replaced';
+      case SvnFileStatus.Obstructed: return 'Obstructed';
+      case SvnFileStatus.Locked: return 'Locked';
+      case SvnFileStatus.Switched: return 'Switched';
+      case SvnFileStatus.External: return 'External';
+      default: return '';
     }
   }
 

@@ -1,14 +1,14 @@
-import { injectable, inject } from '@theia/core/shared/inversify';
+import { injectable, inject, optional } from '@theia/core/shared/inversify';
 import { ILogger } from '@theia/core/lib/common/logger';
 import { OutputChannelManager, OutputChannel } from '@theia/output/lib/browser/output-channel';
 import { WorkspaceService } from '@theia/workspace/lib/browser';
 import { FileService } from '@theia/filesystem/lib/browser/file-service';
 import { EditorManager } from '@theia/editor/lib/browser';
 import URI from '@theia/core/lib/common/uri';
+import { FileUri } from '@theia/core/lib/common/file-uri';
+import { RuntimeConnectionService, KairoError } from '@kairo/runtime-extension';
+import { ActiveProjectService } from '@kairo/project-extension';
 import { RunJavaParams, RunJavaResult, JavaClassInfo, JavaMethodInfo } from './java-run-protocol';
-
-const RUNTIME_URL_KEY = 'kairo.runtimeUrl';
-const DEFAULT_RUNTIME_URL = 'http://127.0.0.1:18080';
 
 @injectable()
 export class JavaRunService {
@@ -27,14 +27,15 @@ export class JavaRunService {
   @inject(EditorManager)
   protected readonly editorManager!: EditorManager;
 
+  @inject(RuntimeConnectionService)
+  protected readonly runtime!: RuntimeConnectionService;
+
+  @inject(ActiveProjectService)
+  @optional()
+  protected readonly activeProject?: ActiveProjectService;
+
   protected outputChannel: OutputChannel | undefined;
   protected classInfoCache = new Map<string, { info: JavaClassInfo; mtime: number }>();
-
-  getRuntimeUrl(): string {
-    return (window as any).__KAIRO_RUNTIME_URL__ ||
-      (typeof process !== 'undefined' && process.env ? process.env.KAIRO_RUNTIME_URL : undefined) ||
-      DEFAULT_RUNTIME_URL;
-  }
 
   getOutputChannel(): OutputChannel {
     if (!this.outputChannel) {
@@ -43,18 +44,32 @@ export class JavaRunService {
     return this.outputChannel;
   }
 
+  /** OS filesystem path from a Theia file URI (not `/g:/...` URI path form). */
+  protected uriToFsPath(uriOrString: URI | string): string {
+    const uri = typeof uriOrString === 'string' ? new URI(uriOrString) : uriOrString;
+    return FileUri.fsPath(uri);
+  }
+
   async getProjectRoot(fileUri: string): Promise<string | undefined> {
     try {
-      const uri = new URI(fileUri);
-      const uriPath = uri.path.toString();
+      const filePath = this.uriToFsPath(fileUri);
+
+      // Prefer the directory that owns a `src` segment (standard Java layout).
+      const srcIdx = this.indexOfSrcSegment(filePath);
+      if (srcIdx > 0) {
+        return filePath.substring(0, srcIdx).replace(/[/\\]+$/, '');
+      }
+
+      const active = this.activeProject?.project;
+      if (active?.root) {
+        return active.root;
+      }
+
       const wsRoot = this.workspaceService.tryGetRoots()[0];
       if (wsRoot) {
-        return wsRoot.resource.path.toString();
+        return FileUri.fsPath(wsRoot.resource);
       }
-      if (uriPath.includes('/src/')) {
-        const idx = uriPath.indexOf('/src/');
-        return uriPath.substring(0, idx);
-      }
+
       return undefined;
     } catch (e) {
       this.logger.error('getProjectRoot failed', e);
@@ -62,9 +77,18 @@ export class JavaRunService {
     }
   }
 
+  /** Index of `/src` or `\src` path segment, or -1 when absent. */
+  protected indexOfSrcSegment(filePath: string): number {
+    const normalized = filePath.replace(/\\/g, '/');
+    const match = normalized.match(/(?:^|[/])src(?:[/]|$)/i);
+    if (!match || match.index === undefined) {
+      return -1;
+    }
+    return match.index === 0 ? 0 : match.index + 1;
+  }
+
   getFilePath(fileUri: string): string {
-    const uri = new URI(fileUri);
-    return uri.path.toString();
+    return this.uriToFsPath(fileUri);
   }
 
   async detectJavaMethods(fileUri: string): Promise<JavaClassInfo | undefined> {
@@ -81,20 +105,11 @@ export class JavaRunService {
       } catch {
         // If stat fails, continue to refetch
       }
-      const runtimeUrl = this.getRuntimeUrl();
-      const resp = await fetch(`${runtimeUrl}/api/v1/java/detect`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ filePath }),
-      });
-      if (!resp.ok) {
-        return this.parseJavaFileLocal(fileUri);
-      }
-      const data = await resp.json();
-      if (!data.ok) {
-        return this.parseJavaFileLocal(fileUri);
-      }
-      const info = data.payload as JavaClassInfo;
+      const info = await this.runtime.request(
+        'POST /api/v1/java/detect',
+        { filePath },
+        { noRetry: true },
+      );
       try {
         const stat = await this.fileService.resolve(uri, { resolveMetadata: true });
         this.classInfoCache.set(filePath, { info, mtime: stat.mtime || Date.now() });
@@ -136,16 +151,34 @@ export class JavaRunService {
           const isTest = testRegex.test(trimmed);
           const isMain = mainRegex.test(trimmed);
           if (isMain || isTest) {
+            // When @Test sits alone on its line, look ahead for the method signature.
+            let methodName = isMain ? 'main' : 'test';
+            let methodLine = i + 1;
+            const sameLineMatch = trimmed.match(/\s+(\w+)\s*\(/);
+            if (sameLineMatch && !isMain) {
+              methodName = sameLineMatch[1];
+            } else if (isTest && !isMain) {
+              for (let k = i + 1; k < Math.min(lines.length, i + 6); k++) {
+                const ahead = lines[k].trim();
+                if (!ahead || ahead.startsWith('@') || ahead.startsWith('//')) {
+                  continue;
+                }
+                const aheadMatch = ahead.match(/(?:public|protected|private|static|\s)*\s+(\w+)\s*\(/);
+                if (aheadMatch) {
+                  methodName = aheadMatch[1];
+                  methodLine = k + 1;
+                }
+                break;
+              }
+            }
             const method: JavaMethodInfo = {
-              name: isMain ? 'main' : 'test',
-              line: i + 1,
+              name: methodName,
+              line: methodLine,
               isMain,
               isTest,
               startLine: i + 1,
               endLine: i + 1,
             };
-            const methodMatch = trimmed.match(/\s+(\w+)\s*\(/);
-            if (methodMatch && !isMain) method.name = methodMatch[1];
             let depth = braceDepth;
             for (let j = i; j < lines.length; j++) {
               depth += (lines[j].match(/{/g) || []).length - (lines[j].match(/}/g) || []).length;
@@ -176,18 +209,7 @@ export class JavaRunService {
     channel.appendLine(`Working directory: ${params.projectRoot}`);
     channel.appendLine('');
     try {
-      const runtimeUrl = this.getRuntimeUrl();
-      const resp = await fetch(`${runtimeUrl}/api/v1/java/run`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(params),
-      });
-      const data = await resp.json();
-      if (!data.ok) {
-        channel.appendLine(`❌ Error: ${data.error?.message || 'Unknown error'}`);
-        return { ok: false, exitCode: -1, stdout: '', stderr: data.error?.message || '' };
-      }
-      const result = data.payload as RunJavaResult;
+      const result = await this.runtime.request('POST /api/v1/java/run', { ...params });
       if (result.stdout) {
         channel.appendLine('--- stdout ---');
         channel.append(result.stdout);
@@ -206,7 +228,9 @@ export class JavaRunService {
       }
       return result;
     } catch (e) {
-      const msg = `Failed to run: ${e instanceof Error ? e.message : String(e)}`;
+      const msg = e instanceof KairoError
+        ? e.message
+        : `Failed to run: ${e instanceof Error ? e.message : String(e)}`;
       channel.appendLine(`❌ ${msg}`);
       return { ok: false, exitCode: -1, stdout: '', stderr: msg, error: msg };
     }

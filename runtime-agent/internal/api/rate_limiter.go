@@ -2,8 +2,10 @@
 package api
 
 import (
+	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -112,19 +114,28 @@ func (rl *RateLimiter) cleanup() {
 }
 
 // extractIP extracts the client IP from the request.
+// X-Forwarded-For is ignored when RemoteAddr is loopback (GO-P2-1): the
+// agent binds locally, so a client-supplied XFF would let any local process
+// forge distinct rate-limit buckets and bypass the limiter.
 func extractIP(r *http.Request) string {
-	// Check X-Forwarded-For first
+	remote := stripHostPort(r.RemoteAddr)
+	if isLoopbackHost(remote) {
+		return remote
+	}
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 		// Take the first IP in the chain
 		for i := 0; i < len(xff); i++ {
 			if xff[i] == ',' {
-				return xff[:i]
+				return strings.TrimSpace(xff[:i])
 			}
 		}
-		return xff
+		return strings.TrimSpace(xff)
 	}
-	// Fall back to RemoteAddr
-	host := r.RemoteAddr
+	return remote
+}
+
+func stripHostPort(hostport string) string {
+	host := hostport
 	// Handle IPv6 bracket notation: [::1]:12345
 	if len(host) > 0 && host[0] == '[' {
 		for i := 1; i < len(host); i++ {
@@ -141,6 +152,15 @@ func extractIP(r *http.Request) string {
 		}
 	}
 	return host
+}
+
+func isLoopbackHost(host string) bool {
+	h := strings.Trim(host, "[]")
+	if h == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(h)
+	return ip != nil && ip.IsLoopback()
 }
 
 // RateLimitMiddleware returns an HTTP middleware that enforces

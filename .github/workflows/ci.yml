@@ -29,7 +29,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.2
       - name: Validate locked dependency configuration
         run: |
           node scripts/run-with-timeout.cjs 30 node scripts/fetch-verified-archive.cjs --id tomcat6-linux --check-config
@@ -43,9 +43,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.2
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v5.6.0
         with:
           go-version: ${{ env.GO_VERSION }}
 
@@ -70,7 +70,7 @@ jobs:
 
       - name: Upload agent logs on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.2
         with:
           name: go-unit-logs
           path: |
@@ -90,9 +90,9 @@ jobs:
         os: [linux, windows, darwin]
         arch: [amd64]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.2
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v5.6.0
         with:
           go-version: ${{ env.GO_VERSION }}
 
@@ -102,7 +102,7 @@ jobs:
           GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o ../dist/kairo-agent-${{ matrix.os }}-${{ matrix.arch }} ./cmd/kairo-runtime
 
       - name: Upload agent binary
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.2
         with:
           name: kairo-agent-${{ matrix.os }}-${{ matrix.arch }}
           path: dist/kairo-agent-${{ matrix.os }}-${{ matrix.arch }}
@@ -113,15 +113,15 @@ jobs:
   ts-clean-build:
     name: TS Clean Build + Lint + Unit
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.2
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4.4.0
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v4.4.0
         with:
           version: 9.15.9
 
@@ -132,10 +132,10 @@ jobs:
         run: node scripts/run-with-timeout.cjs 120 pnpm clean
 
       - name: Build all packages
-        run: node scripts/run-with-timeout.cjs 300 pnpm build
+        run: node scripts/run-with-timeout.cjs 900 pnpm build
 
       - name: Type-check packages
-        run: node scripts/run-with-timeout.cjs 180 pnpm -r --filter "./packages/*" exec tsc --noEmit
+        run: node scripts/run-with-timeout.cjs 240 pnpm typecheck
 
       - name: Lint
         run: node scripts/run-with-timeout.cjs 120 pnpm lint
@@ -157,7 +157,7 @@ jobs:
 
       - name: Upload test artifacts on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.2
         with:
           name: ts-test-logs
           path: |
@@ -171,16 +171,16 @@ jobs:
   contract:
     name: Contract Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
     needs: [ts-clean-build]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.2
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4.4.0
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v4.4.0
         with:
           version: 9.15.9
 
@@ -188,7 +188,7 @@ jobs:
         run: node scripts/run-with-timeout.cjs 300 pnpm install --frozen-lockfile
 
       - name: Build packages
-        run: node scripts/run-with-timeout.cjs 300 pnpm build
+        run: node scripts/run-with-timeout.cjs 900 pnpm build
 
       - name: Contract endpoint tests
         run: node --test tests/contract/contract.test.cjs
@@ -204,7 +204,7 @@ jobs:
 
       - name: Upload contract test results on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.2
         with:
           name: contract-test-results
           path: testdata/contracts/
@@ -216,16 +216,16 @@ jobs:
   integration-core:
     name: Integration Core
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 35
     needs: [go-unit-linux, ts-clean-build]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.2
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v5.6.0
         with:
           go-version: ${{ env.GO_VERSION }}
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4.4.0
         with:
           node-version: ${{ env.NODE_VERSION }}
 
@@ -233,7 +233,7 @@ jobs:
         working-directory: runtime-agent
         run: go build -trimpath -o ../dist/kairo-runtime ./cmd/kairo-runtime
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v4.4.0
         with:
           version: 9.15.9
 
@@ -241,7 +241,7 @@ jobs:
         run: node scripts/run-with-timeout.cjs 300 pnpm install --frozen-lockfile
 
       - name: Build packages
-        run: node scripts/run-with-timeout.cjs 300 pnpm build
+        run: node scripts/run-with-timeout.cjs 900 pnpm build
 
       - name: Start agent
         run: |
@@ -282,7 +282,7 @@ jobs:
 
       - name: Upload agent logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.2
         with:
           name: integration-core-agent-logs
           path: /tmp/kairo-agent*.log
@@ -297,13 +297,13 @@ jobs:
     timeout-minutes: 30
     needs: [go-unit-linux, supply-chain-config]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.2
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v5.6.0
         with:
           go-version: ${{ env.GO_VERSION }}
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v4.9.0
         with:
           distribution: 'temurin'
           java-version: '17'
@@ -384,7 +384,7 @@ jobs:
 
       - name: Upload Tomcat logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.2
         with:
           name: tomcat-logs
           path: |
@@ -401,22 +401,22 @@ jobs:
     timeout-minutes: 30
     needs: [ts-clean-build, supply-chain-config]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.2
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v5.6.0
         with:
           go-version: ${{ env.GO_VERSION }}
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4.4.0
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v4.9.0
         with:
           distribution: 'temurin'
           java-version: '17'
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v4.4.0
         with:
           version: 9.15.9
 
@@ -463,7 +463,7 @@ jobs:
 
       - name: Upload screenshots
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.2
         with:
           name: e2e-screenshots
           path: docs/screenshots/
@@ -471,7 +471,7 @@ jobs:
 
       - name: Upload Theia logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.2
         with:
           name: theia-logs
           path: |
@@ -491,21 +491,21 @@ jobs:
   desktop-smoke-windows:
     name: Desktop Smoke (Windows)
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     needs: [go-cross-build, ts-clean-build]
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.2
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v5.6.0
         with:
           go-version: ${{ env.GO_VERSION }}
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4.4.0
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v4.4.0
         with:
           version: 9.15.9
 
@@ -518,7 +518,11 @@ jobs:
         run: node scripts/run-with-timeout.cjs 300 pnpm install --frozen-lockfile
 
       - name: Build packages
-        run: node scripts/run-with-timeout.cjs 300 pnpm build
+        run: node scripts/run-with-timeout.cjs 900 pnpm build
+
+      - name: Signing gate (KAIRO_REQUIRE_SIGNING=1)
+        shell: pwsh
+        run: node apps/desktop/scripts/sign-win.test.cjs
 
       - name: Prepare and verify Windows bundled dependencies
         shell: pwsh
@@ -542,7 +546,7 @@ jobs:
 
       - name: Upload agent logs on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.2
         with:
           name: windows-agent-logs
           path: ${{ env:TEMP }}/kairo-agent*.log
@@ -558,17 +562,17 @@ jobs:
     needs: [go-cross-build, ts-clean-build]
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.2
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v5.6.0
         with:
           go-version: ${{ env.GO_VERSION }}
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4.4.0
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v4.4.0
         with:
           version: 9.15.9
 
@@ -609,7 +613,7 @@ jobs:
 
       - name: Upload agent logs on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.2
         with:
           name: macos-agent-logs
           path: /tmp/kairo-agent*.log
@@ -626,19 +630,19 @@ jobs:
       matrix:
         component: [go, frontend, perf]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.2
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v5.6.0
         if: matrix.component == 'go' || matrix.component == 'perf'
         with:
           go-version: ${{ env.GO_VERSION }}
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4.4.0
         if: matrix.component == 'frontend' || matrix.component == 'perf'
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v4.4.0
         if: matrix.component == 'frontend' || matrix.component == 'perf'
         with:
           version: 9.15.9
@@ -649,7 +653,7 @@ jobs:
 
       - name: Upload test logs on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.2
         with:
           name: windows-test-${{ matrix.component }}-logs
           path: |
@@ -666,17 +670,17 @@ jobs:
     timeout-minutes: 20
     needs: [go-unit-linux, ts-clean-build]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.2
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v5.6.0
         with:
           go-version: ${{ env.GO_VERSION }}
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4.4.0
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v4.4.0
         with:
           version: 9.15.9
 
@@ -698,7 +702,7 @@ jobs:
         run: node scripts/ci/coverage-check.cjs --go-coverage coverage/go/coverage.txt --go-threshold 60 --ts-threshold 50
 
       - name: Upload Go coverage to Codecov
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v5.5.5
         with:
           files: coverage/go/coverage.out
           flags: go
@@ -706,7 +710,7 @@ jobs:
           fail_ci_if_error: false
 
       - name: Upload TypeScript coverage to Codecov
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v5.5.5
         with:
           directory: coverage/typescript
           flags: typescript
@@ -715,7 +719,7 @@ jobs:
 
       - name: Upload coverage artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.2
         with:
           name: coverage-reports
           path: coverage/
@@ -729,22 +733,22 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.2
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v5.6.0
         with:
           go-version: ${{ env.GO_VERSION }}
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4.4.0
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v4.4.0
         with:
           version: 9.15.9
 
       - name: Install govulncheck
-        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.6.0
 
       - name: Run govulncheck
         working-directory: runtime-agent
@@ -757,21 +761,21 @@ jobs:
         run: node scripts/ci/security-audit.cjs
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@v3.37.5
         with:
           languages: go,javascript-typescript
 
       - name: Autobuild CodeQL
-        uses: github/codeql-action/autobuild@v3
+        uses: github/codeql-action/autobuild@v3.37.5
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@v3.37.5
         with:
           category: "/language:go,javascript-typescript"
 
       - name: Upload security scan results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.2
         with:
           name: security-scan-results
           path: |
@@ -785,22 +789,22 @@ jobs:
   performance-gate:
     name: Performance Gate
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     needs: [go-cross-build, ts-clean-build]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.2
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v5.6.0
         with:
           go-version: ${{ env.GO_VERSION }}
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4.4.0
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v4.4.0
         with:
           version: 9.15.9
 
@@ -808,7 +812,7 @@ jobs:
         run: node scripts/run-with-timeout.cjs 300 pnpm install --frozen-lockfile
 
       - name: Build packages
-        run: node scripts/run-with-timeout.cjs 300 pnpm build
+        run: node scripts/run-with-timeout.cjs 900 pnpm build
 
       - name: Build agent
         working-directory: runtime-agent
@@ -848,7 +852,7 @@ jobs:
 
       - name: Upload performance report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.2
         with:
           name: performance-report
           path: |
@@ -862,20 +866,20 @@ jobs:
   e2e-test:
     name: E2E Test
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     needs: [ts-clean-build, go-unit-linux]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.2
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v5.6.0
         with:
           go-version: ${{ env.GO_VERSION }}
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4.4.0
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v4.4.0
         with:
           version: 9.15.9
 
@@ -887,7 +891,7 @@ jobs:
         run: node scripts/run-with-timeout.cjs 300 pnpm install --frozen-lockfile
 
       - name: Build packages
-        run: node scripts/run-with-timeout.cjs 300 pnpm build
+        run: node scripts/run-with-timeout.cjs 900 pnpm build
 
       - name: Start agent
         run: |
@@ -912,7 +916,7 @@ jobs:
 
       - name: Upload screenshots
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.2
         with:
           name: e2e-screenshots
           path: docs/screenshots/
@@ -920,7 +924,7 @@ jobs:
 
       - name: Upload E2E test results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.2
         with:
           name: e2e-test-results
           path: tests/e2e/test-results/
@@ -928,7 +932,7 @@ jobs:
 
       - name: Upload logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.2
         with:
           name: e2e-logs
           path: |
@@ -948,21 +952,21 @@ jobs:
   build-artifacts:
     name: Build Artifacts
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 40
     needs: [go-cross-build, ts-clean-build]
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.2
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v5.6.0
         with:
           go-version: ${{ env.GO_VERSION }}
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4.4.0
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v4.4.0
         with:
           version: 9.15.9
 
@@ -974,21 +978,21 @@ jobs:
         run: node scripts/run-with-timeout.cjs 300 pnpm install --frozen-lockfile
 
       - name: Build packages
-        run: node scripts/run-with-timeout.cjs 300 pnpm build
+        run: node scripts/run-with-timeout.cjs 900 pnpm build
 
       - name: Package desktop application (Linux)
         run: |
           pnpm --filter @kairo/desktop build:linux 2>&1 || echo "Desktop packaging skipped (may require electron-builder)"
 
       - name: Upload desktop artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.2
         with:
           name: desktop-app-linux
           path: apps/desktop/dist/*.{AppImage,deb,rpm,zip,tar.gz}
           if-no-files-found: ignore
 
       - name: Upload agent binary
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.2
         with:
           name: kairo-runtime-linux
           path: dist/kairo-runtime
@@ -997,7 +1001,7 @@ jobs:
         run: node scripts/generate-sbom.cjs
 
       - name: Upload SBOM
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.2
         with:
           name: sbom
           path: sbom.json

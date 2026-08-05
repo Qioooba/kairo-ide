@@ -1,3 +1,5 @@
+//go:build unwired
+
 // Package security implements data retention policy enforcement for the
 // Kairo IDE runtime agent. It provides a configurable engine that scans
 // directories and applies age-based and size-based retention rules.
@@ -28,6 +30,9 @@ type RetentionPolicy struct {
 
 // RetentionManager manages a set of retention policies and applies them
 // to directories. It is safe for concurrent use.
+//
+// UNWIRED (GO-P3-2): never constructed by bootstrap / api.Server —
+// kept for unit tests; production does not run automated retention.
 type RetentionManager struct {
 	mu       sync.RWMutex
 	policies []RetentionPolicy

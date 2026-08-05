@@ -8,7 +8,20 @@
 
 import * as assert from 'node:assert';
 import { describe, it } from 'node:test';
-import { parseMajorVersion, probeJavaVersion, detectJDK17Plus, detectHostJDK, applyHostJDKEnv, JDT_LS_MIN_JDK_MAJOR } from './jdk-check';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import {
+  parseMajorVersion,
+  probeJavaVersion,
+  detectJDK17Plus,
+  detectHostJDK,
+  applyHostJDKEnv,
+  JDT_LS_MIN_JDK_MAJOR,
+  savePersistedJDKHome,
+  loadPersistedJDKHome,
+  getPersistedJDKConfigPath,
+} from './jdk-check';
 
 // ─── parseMajorVersion ──────────────────────────────────────────
 
@@ -17,8 +30,16 @@ describe('parseMajorVersion', () => {
     assert.strictEqual(parseMajorVersion('17.0.9'), 17);
   });
 
+  it('parses JDK 17 with +build suffix', () => {
+    assert.strictEqual(parseMajorVersion('17.0.9+7'), 17);
+  });
+
   it('parses JDK 21 version string', () => {
     assert.strictEqual(parseMajorVersion('21.0.1'), 21);
+  });
+
+  it('parses JDK 21 with +build suffix', () => {
+    assert.strictEqual(parseMajorVersion('21.0.2+13'), 21);
   });
 
   it('parses JDK 23 version string', () => {
@@ -33,6 +54,18 @@ describe('parseMajorVersion', () => {
     assert.strictEqual(parseMajorVersion('25-ea'), 25);
   });
 
+  it('parses vendor-prefixed Temurin version', () => {
+    assert.strictEqual(parseMajorVersion('Temurin-17.0.9+7'), 17);
+  });
+
+  it('parses vendor-prefixed openjdk version', () => {
+    assert.strictEqual(parseMajorVersion('openjdk-21.0.2+13'), 21);
+  });
+
+  it('parses jdk-N prefixed version', () => {
+    assert.strictEqual(parseMajorVersion('jdk-17.0.9+7'), 17);
+  });
+
   it('parses JDK 1.8 legacy version as 8', () => {
     assert.strictEqual(parseMajorVersion('1.8.0_391'), 8);
   });
@@ -43,6 +76,10 @@ describe('parseMajorVersion', () => {
 
   it('parses JDK 1.7 legacy version as 7', () => {
     assert.strictEqual(parseMajorVersion('1.7.0_80'), 7);
+  });
+
+  it('does not treat 11.x as legacy 1.x', () => {
+    assert.strictEqual(parseMajorVersion('11.0.21'), 11);
   });
 
   it('returns 0 for empty string', () => {
@@ -313,6 +350,86 @@ describe('applyHostJDKEnv', () => {
         if (v === undefined) delete process.env[k];
         else process.env[k] = v;
       }
+    }
+  });
+});
+
+describe('persisted JDK config', () => {
+  it('getPersistedJDKConfigPath honors KAIRO_JDK_CONFIG', () => {
+    const prev = process.env.KAIRO_JDK_CONFIG;
+    const override = path.join(os.tmpdir(), 'kairo-host-jdk-test.json');
+    process.env.KAIRO_JDK_CONFIG = override;
+    try {
+      assert.strictEqual(getPersistedJDKConfigPath(), override);
+    } finally {
+      if (prev === undefined) delete process.env.KAIRO_JDK_CONFIG;
+      else process.env.KAIRO_JDK_CONFIG = prev;
+    }
+  });
+
+  it('save/load round-trips a real JDK home', () => {
+    const host = detectHostJDK();
+    if (!host.found || !host.javaHome) {
+      return; // no JDK on this machine — skip
+    }
+
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kairo-jdk-persist-'));
+    const cfgPath = path.join(tmpDir, 'host-jdk.json');
+    const prevCfg = process.env.KAIRO_JDK_CONFIG;
+    process.env.KAIRO_JDK_CONFIG = cfgPath;
+    try {
+      savePersistedJDKHome(host);
+      assert.ok(fs.existsSync(cfgPath), 'config file written');
+      const loaded = loadPersistedJDKHome();
+      assert.strictEqual(loaded, host.javaHome);
+
+      const raw = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
+      assert.strictEqual(raw.javaHome, host.javaHome);
+      assert.ok(typeof raw.updatedAt === 'string');
+    } finally {
+      if (prevCfg === undefined) delete process.env.KAIRO_JDK_CONFIG;
+      else process.env.KAIRO_JDK_CONFIG = prevCfg;
+      try {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      } catch { /* ignore */ }
+    }
+  });
+
+  it('detectHostJDK picks up persisted home when env is unset', () => {
+    const host = detectHostJDK();
+    if (!host.found || !host.javaHome) {
+      return;
+    }
+
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kairo-jdk-detect-'));
+    const cfgPath = path.join(tmpDir, 'host-jdk.json');
+    const prev = {
+      KAIRO_JDK_CONFIG: process.env.KAIRO_JDK_CONFIG,
+      KAIRO_JDK_HOME: process.env.KAIRO_JDK_HOME,
+      KAIRO_JDT_LS_JRE: process.env.KAIRO_JDT_LS_JRE,
+      KAIRO_JRE17_HOME: process.env.KAIRO_JRE17_HOME,
+      JAVA_HOME: process.env.JAVA_HOME,
+    };
+
+    process.env.KAIRO_JDK_CONFIG = cfgPath;
+    delete process.env.KAIRO_JDK_HOME;
+    delete process.env.KAIRO_JDT_LS_JRE;
+    delete process.env.KAIRO_JRE17_HOME;
+    delete process.env.JAVA_HOME;
+
+    try {
+      savePersistedJDKHome(host);
+      const again = detectHostJDK();
+      assert.ok(again.found);
+      assert.strictEqual(again.javaHome, host.javaHome);
+    } finally {
+      for (const [k, v] of Object.entries(prev)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+      try {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      } catch { /* ignore */ }
     }
   });
 });

@@ -49,6 +49,8 @@ export interface JavaCompletionRequest {
   character: number;
   triggerKind?: 1 | 2 | 3;
   triggerCharacter?: string;
+  /** Text on the current line before the cursor (enables static fallback). */
+  linePrefix?: string;
   /** IDEA-like Smart Type Completion (Ctrl+Shift+Space). */
   smart?: boolean;
   /** 0=type filter, 1=members only, 2=all re-ranked — cycles on repeat. */
@@ -141,15 +143,20 @@ export class JavaCompletionProvider {
     };
 
     try {
-      return await Promise.race([
-        run(),
-        new Promise<JavaCompletionResponse>(resolve => {
-          setTimeout(() => {
-            this.logger.warn('[JavaCompletionProvider] completion budget exceeded — using fallback');
-            resolve(this.fallbackCompletions(req));
-          }, COMPLETION_BUDGET_MS);
-        }),
-      ]);
+      let budgetTimer: ReturnType<typeof setTimeout> | undefined;
+      const budget = new Promise<JavaCompletionResponse>(resolve => {
+        budgetTimer = setTimeout(() => {
+          this.logger.warn('[JavaCompletionProvider] completion budget exceeded — using fallback');
+          resolve(this.fallbackCompletions(req));
+        }, COMPLETION_BUDGET_MS);
+      });
+      try {
+        return await Promise.race([run(), budget]);
+      } finally {
+        if (budgetTimer) {
+          clearTimeout(budgetTimer);
+        }
+      }
     } catch (err) {
       this.logger.warn(`[JavaCompletionProvider] completion error: ${String(err)}`);
       return this.fallbackCompletions(req);
@@ -229,11 +236,25 @@ export class JavaCompletionProvider {
   private fallbackCompletions(req: JavaCompletionRequest): JavaCompletionResponse {
     const source = this.sourceCache.get(req.uri);
     if (!source) {
+      if (req.linePrefix !== undefined) {
+        const basic = this.intellisense.provideBasicCompletions(req.linePrefix);
+        return {
+          isIncomplete: basic.isIncomplete,
+          items: basic.items.map(adaptIntelliSenseCompletion),
+        };
+      }
       return { isIncomplete: false, items: [] };
     }
     const result = this.intellisense.provideCompletions(
       source, req.line, req.character, req.triggerCharacter,
     );
+    if (result.items.length === 0 && req.linePrefix !== undefined) {
+      const basic = this.intellisense.provideBasicCompletions(req.linePrefix);
+      return {
+        isIncomplete: false,
+        items: basic.items.map(adaptIntelliSenseCompletion),
+      };
+    }
     return {
       isIncomplete: result.isIncomplete,
       items: result.items.map(adaptIntelliSenseCompletion),

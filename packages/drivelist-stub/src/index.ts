@@ -1,18 +1,14 @@
 /**
- * Pure-JS stub of the `drivelist` package.
+ * Pure-JS implementation of the `drivelist` package.
  *
- * The upstream `drivelist` package is a native addon. On Windows the
- * Theia build pipeline does not have a working MSVC toolchain in this
- * repository's CI, so the addon cannot be compiled. Theia only uses
- * `drivelist.list()` to populate `EnvVariablesServer.getDrives()`, and
- * Kairo does not depend on a drive list (the user supplies a workspace
- * path explicitly), so returning an empty array is functionally
- * equivalent for Kairo's purposes.
- *
- * Behaviour intentionally matches the upstream callback API so the
- * shim is drop-in compatible with any future code that consumes
- * `drivelist.list`.
+ * The upstream `drivelist` package is a native addon that cannot be
+ * compiled in this repository's Windows CI without a C++ toolchain.
+ * This module lists drives without native bindings so Theia's
+ * EnvVariablesServer.getDrives() can populate the file-import dialog.
  */
+
+import fs from 'fs';
+import os from 'os';
 
 export interface DriveMountpoint {
   path: string;
@@ -39,13 +35,49 @@ export interface DriveDescriptor {
   error?: string;
 }
 
+function listWindowsDrives(): DriveDescriptor[] {
+  const drives: DriveDescriptor[] = [];
+  for (let code = 65; code <= 90; code++) {
+    const letter = String.fromCharCode(code);
+    const root = `${letter}:\\`;
+    try {
+      fs.accessSync(root, fs.constants.F_OK);
+      drives.push({
+        device: root,
+        description: `Local Disk (${letter}:)`,
+        mountpoints: [{ path: root, label: `${letter}:` }],
+        isSystem: letter === 'C',
+        isRemovable: letter !== 'C',
+      });
+    } catch {
+      // Drive letter not present or not accessible.
+    }
+  }
+  return drives;
+}
+
+function listUnixDrives(): DriveDescriptor[] {
+  return [{
+    device: '/',
+    description: 'Root',
+    mountpoints: [{ path: '/', label: '/' }],
+    isSystem: true,
+  }];
+}
+
+function listDrives(): DriveDescriptor[] {
+  if (os.platform() === 'win32') {
+    return listWindowsDrives();
+  }
+  return listUnixDrives();
+}
+
 /**
- * List the available drives. In the stub, this resolves to an empty
- * array. Callers expecting the upstream callback API can wrap the
- * returned promise.
+ * List the available drives. On Windows, probes A–Z for accessible
+ * volume roots. On Unix, returns the root mount.
  */
 export function list(): Promise<DriveDescriptor[]> {
-  return Promise.resolve([]);
+  return Promise.resolve(listDrives());
 }
 
 /**
@@ -56,7 +88,7 @@ export function list(): Promise<DriveDescriptor[]> {
 export function listCallback(
   cb: (error: Error | null, drives: DriveDescriptor[]) => void,
 ): void {
-  cb(null, []);
+  cb(null, listDrives());
 }
 
 export default { list, listCallback };

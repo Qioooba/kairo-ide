@@ -1,11 +1,13 @@
 /**
- * Java HotSwap Service — P3-ADVDBG-01
+ * Java HotSwap Service — P3-ADVDBG-01 / BD-P1-4
  *
  * Listens for Java file save events during debug sessions and
  * performs class hot-swapping:
  *   1. Compiles the changed file via javac (Go Agent)
- *   2. Calls the debug adapter's redefineClasses to hot-swap
- *   3. Shows a notification: "HotSwap: Reloaded ClassName.java"
+ *   2. Prefers DAP sendCustomRequest('redefineClasses') on the
+ *      active debug session (no second JDWP attach when DAP owns the port)
+ *   3. Falls back to POST /api/v1/jvm/redefine for exclusive JDWP;
+ *      never treats unsupported/501 as success
  *
  * Debounces saves (500ms) to avoid rapid consecutive hot-swaps.
  * Tracks hot-swap history (last 20 operations).
@@ -20,8 +22,8 @@ import { Emitter, Event } from '@theia/core/lib/common/event';
 import { ILogger } from '@theia/core/lib/common/logger';
 import { MessageService } from '@theia/core/lib/common/message-service';
 import { DebugSessionManager } from '@theia/debug/lib/browser/debug-session-manager';
-import { RuntimeConnectionService } from '@kairo/runtime-extension';
-import type { Endpoint } from '@kairo/protocol';
+import { RuntimeConnectionService, KairoError } from '@kairo/runtime-extension';
+import { KairoI18nService } from '@kairo/i18n';
 import { WorkspaceService } from '@theia/workspace/lib/browser/workspace-service';
 import { MonacoWorkspace } from '@theia/monaco/lib/browser/monaco-workspace';
 import type { MonacoEditorModel } from '@theia/monaco/lib/browser/monaco-editor-model';
@@ -51,6 +53,7 @@ export class JavaHotSwapService implements FrontendApplicationContribution {
   @inject(MessageService) protected readonly messages!: MessageService;
   @inject(DebugSessionManager) protected readonly sessionManager!: DebugSessionManager;
   @inject(RuntimeConnectionService) protected readonly runtime!: RuntimeConnectionService;
+  @inject(KairoI18nService) protected readonly i18n!: KairoI18nService;
   @inject(MonacoWorkspace) protected readonly monacoWorkspace!: MonacoWorkspace;
   @inject(WorkspaceService) protected readonly workspaceService!: WorkspaceService;
 
@@ -164,9 +167,10 @@ export class JavaHotSwapService implements FrontendApplicationContribution {
       this.debounceTimer = undefined;
       const files = Array.from(this.pendingFiles);
       this.pendingFiles.clear();
-      // Process the last file in the debounce window (most recent save)
-      const lastFile = files[files.length - 1];
-      void this.performHotSwap(lastFile);
+      // Hot-swap every file saved in the debounce window (Save All).
+      for (const file of files) {
+        void this.performHotSwap(file);
+      }
     }, HOTSWAP_DEBOUNCE_MS);
   }
 
@@ -174,7 +178,7 @@ export class JavaHotSwapService implements FrontendApplicationContribution {
   async performHotSwap(filePath: string): Promise<HotSwapHistoryEntry> {
     const fileName = filePath.split('/').pop() || filePath;
     const entry: HotSwapHistoryEntry = {
-      id: `hs-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      id: `hs-${typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}`}`,
       timestamp: Date.now(),
       fileName,
       status: 'failed',
@@ -201,56 +205,97 @@ export class JavaHotSwapService implements FrontendApplicationContribution {
           throw new Error(`Compilation failed: ${compileResult.error || 'unknown error'}`);
         }
 
-        // Step 2: Redefine the class via the debug adapter
-        await this.redefineClass(filePath);
+        // Step 2: Redefine via agent JDWP (exclusive listener) or fail honestly
+        await this.redefineClass(filePath, compileResult.classPath);
 
         entry.status = 'success';
-        entry.message = `HotSwap: Reloaded ${fileName}`;
+        entry.message = this.i18n.t('widget.java.hotswap.toast.reloaded', { fileName });
         entry.durationMs = Date.now() - startTime;
 
-        this.messages.info(`HotSwap: Reloaded ${fileName}`);
+        this.messages.info(entry.message);
         this.logger.info(`[HotSwap] Successfully hot-swapped ${fileName} (${entry.durationMs}ms, attempt ${attempt})`);
         break;
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
         this.logger.warn(`[HotSwap] Attempt ${attempt}/${MAX_HOTSWAP_RETRIES} failed for ${fileName}: ${lastError.message}`);
 
-        if (attempt < MAX_HOTSWAP_RETRIES) {
-          // Small delay before retry
-          await this.delay(500);
+        // Do not retry permanent capability gaps (501 / unsupported) or compile failures.
+        if (this.isNonRetryableHotSwapError(lastError) || attempt >= MAX_HOTSWAP_RETRIES) {
+          break;
         }
+        await this.delay(500);
       }
     }
 
     if (entry.status === 'failed') {
       entry.message = lastError?.message || 'HotSwap failed';
       entry.durationMs = Date.now() - startTime;
-
-      // Provide user-friendly error messages
-      let userMessage = `HotSwap failed for ${fileName}`;
-      if (lastError) {
-        const errMsg = lastError.message;
-        if (errMsg.includes('Compilation failed')) {
-          userMessage = `HotSwap: Compilation failed for ${fileName}. Check the Problems panel for details.`;
-          this.messages.warn(userMessage);
-        } else if (errMsg.includes('redefinition failed') || errMsg.includes('redefine')) {
-          userMessage = `HotSwap: Cannot reload ${fileName} — class schema has changed. Restart the debug session.`;
-          this.messages.warn(userMessage);
-        } else if (errMsg.includes('no longer active')) {
-          userMessage = `HotSwap: Debug session ended for ${fileName}.`;
-          this.messages.info(userMessage);
-        } else {
-          userMessage = `HotSwap failed for ${fileName}: ${entry.message}`;
-          this.messages.warn(userMessage);
-        }
-      }
-
+      this.showHotSwapFailure(fileName, lastError);
       this.logger.error(`[HotSwap] Failed to hot-swap ${fileName} after ${entry.attempts} attempt(s): ${entry.message}`);
     }
 
     this.addToHistory(entry);
     this.onDidSwapEmitter.fire(entry);
     return entry;
+  }
+
+  /** Permanent failures that should not burn retries. */
+  protected isNonRetryableHotSwapError(error: Error): boolean {
+    if (error instanceof KairoError) {
+      if (error.code === 'unsupported' || error.httpStatus === 501) {
+        return true;
+      }
+      if (!error.isTransient()) {
+        return true;
+      }
+    }
+    const msg = error.message.toLowerCase();
+    return msg.includes('unsupported')
+      || msg.includes('not implemented')
+      || msg.includes('compilation failed')
+      || /\b501\b/.test(msg);
+  }
+
+  protected showHotSwapFailure(fileName: string, lastError: Error | undefined): void {
+    if (!lastError) {
+      this.messages.warn(this.i18n.t('widget.java.hotswap.toast.failed', {
+        fileName,
+        message: 'HotSwap failed',
+      }));
+      return;
+    }
+
+    const errMsg = lastError.message;
+    if (errMsg.includes('Compilation failed')) {
+      this.messages.warn(this.i18n.t('widget.java.hotswap.toast.compileFailed', { fileName }));
+      return;
+    }
+    if (this.isUnsupportedRedefineError(lastError)) {
+      this.messages.warn(this.i18n.t('widget.java.hotswap.toast.unsupported', {
+        message: errMsg,
+      }));
+      return;
+    }
+    if (errMsg.includes('redefinition failed') || errMsg.toLowerCase().includes('redefine')) {
+      this.messages.warn(this.i18n.t('widget.java.hotswap.toast.redefineFailed', { fileName }));
+      return;
+    }
+    if (errMsg.includes('no longer active')) {
+      this.messages.info(this.i18n.t('widget.java.hotswap.toast.sessionEnded', { fileName }));
+      return;
+    }
+    this.messages.warn(this.i18n.t('widget.java.hotswap.toast.failed', {
+      fileName,
+      message: errMsg,
+    }));
+  }
+
+  protected isUnsupportedRedefineError(error: Error): boolean {
+    if (error instanceof KairoError) {
+      return error.code === 'unsupported' || error.httpStatus === 501;
+    }
+    const msg = error.message.toLowerCase();
+    return msg.includes('unsupported') || msg.includes('not implemented') || /\b501\b/.test(msg);
   }
 
   /** Compile a single Java file via the Go Agent. */
@@ -264,11 +309,7 @@ export class JavaHotSwapService implements FrontendApplicationContribution {
         'POST /api/v1/jvm/compile',
         { file: filePath },
         { noRetry: true },
-      ) as unknown as {
-        success: boolean;
-        classPath?: string;
-        error?: string;
-      } | undefined;
+      );
 
       if (result) {
         return result;
@@ -283,25 +324,63 @@ export class JavaHotSwapService implements FrontendApplicationContribution {
     }
   }
 
-  /** Request the debug adapter to redefine a class. */
-  protected async redefineClass(sourcePath: string): Promise<void> {
+  /**
+   * Prefer redefine via the already-attached DAP session (BD-P1-4).
+   * Returns true when the adapter accepted redefineClasses.
+   */
+  protected async redefineViaDap(sourcePath: string, classPath?: string): Promise<boolean> {
+    const session = this.sessionManager.currentSession;
+    if (!session || session.configuration.type !== KAIRO_JAVA_DEBUG_TYPE) {
+      return false;
+    }
+    try {
+      await session.sendCustomRequest('redefineClasses', {
+        classPaths: classPath ? [classPath] : [],
+        sourcePaths: [sourcePath],
+      });
+      return true;
+    } catch (err) {
+      this.logger.info(
+        `[HotSwap] DAP redefineClasses unavailable, will try agent JDWP: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+      return false;
+    }
+  }
+
+  /**
+   * Redefine via DAP when attached; otherwise exclusive agent JDWP.
+   * Never claims success on unsupported/501 agent responses.
+   */
+  protected async redefineClass(sourcePath: string, classPath?: string): Promise<void> {
+    if (await this.redefineViaDap(sourcePath, classPath)) {
+      return;
+    }
+
     try {
       const result = await this.runtime.request(
         'POST /api/v1/jvm/redefine',
-        { sourcePath },
+        { sourcePath, classPath },
         { noRetry: true },
-      ) as unknown as {
-        success: boolean;
-        error?: string;
-      } | undefined;
+      );
 
       if (result?.success !== true) {
-        throw new Error(result?.error || 'Class redefinition request failed');
+        throw new KairoError({
+          code: 'internal',
+          message: result?.error || 'Class redefinition request failed',
+        });
       }
     } catch (error) {
-      throw new Error(
-        `Class redefinition failed: ${error instanceof Error ? error.message : String(error)}`,
-      );
+      // Preserve KairoError so callers can detect unsupported / 501 without retries.
+      if (error instanceof KairoError) {
+        throw error;
+      }
+      throw new KairoError({
+        code: 'internal',
+        message: `Class redefinition failed: ${error instanceof Error ? error.message : String(error)}`,
+        cause: error,
+      });
     }
   }
 

@@ -6,3 +6,4 @@ export { KairoSafeEncodingService, UnrepresentableEncodingError } from './safe-e
 export { KairoEncodingRegistry } from './kairo-encoding-registry';
 export { KairoFileService, isEncodingRefusal } from './kairo-file-service';
 export { KairoEncodingTabDecorator } from './encoding-tab-decorator';
+export { KairoEncodingCacheContribution } from './encoding-cache-contribution';

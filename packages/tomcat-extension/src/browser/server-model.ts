@@ -3,11 +3,13 @@ import type { ServerInstance as StoreServerInstance } from './server-store';
 
 /** Keep the protocol-to-view mapping in one DOM-free, tested place. In
  * particular, retaining the JDWP port prevents a debug-ready Tomcat from
- * looking like a normal Run session in the UI. */
-export function toStoreServer(s: ProtocolServerInstance): StoreServerInstance {
+ * looking like a normal Run session in the UI.
+ * BD-P3-8: workspaceId must come from the caller (runtime / workspace
+ * context) — the protocol ServerInstance has no workspace field. */
+export function toStoreServer(s: ProtocolServerInstance, workspaceId: string): StoreServerInstance {
   return {
     id: s.id,
-    workspaceId: '',
+    workspaceId,
     projectId: s.projectId,
     state: s.state,
     httpPort: s.ports.http || 0,

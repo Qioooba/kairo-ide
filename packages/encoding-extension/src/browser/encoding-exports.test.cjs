@@ -60,4 +60,8 @@ test('KairoEncodingTabDecorator is exported', () => {
   assert.strictEqual(typeof enc.KairoEncodingTabDecorator, 'function');
 });
 
+test('KairoEncodingCacheContribution is exported', () => {
+  assert.strictEqual(typeof enc.KairoEncodingCacheContribution, 'function');
+});
+
 test('teardown', () => { disableJSDOM(); });

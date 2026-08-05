@@ -21,6 +21,7 @@ import * as monaco from '@theia/monaco-editor-core';
 import { DisposableCollection } from '@theia/core/lib/common/disposable';
 import { BookmarkService } from './kairo-bookmark-service';
 import { KAIRO_BOOKMARKS_FACTORY_ID } from './kairo-bookmark-widget';
+import { KairoI18nService } from '@kairo/i18n';
 
 export namespace KairoBookmarkCommands {
     export const TOGGLE: Command = {
@@ -99,6 +100,9 @@ export class KairoBookmarkContribution implements FrontendApplicationContributio
 
     @inject(MessageService)
     protected readonly messages!: MessageService;
+
+    @inject(KairoI18nService)
+    protected readonly i18n!: KairoI18nService;
 
     protected readonly toDispose = new DisposableCollection();
 
@@ -220,7 +224,7 @@ export class KairoBookmarkContribution implements FrontendApplicationContributio
     protected toggleBookmark(): void {
         const pos = this.getCurrentEditorAndPosition();
         if (!pos) {
-            this.messages.warn('No active editor.');
+            this.messages.warn(this.i18n.t('widget.editor.noActiveEditor'));
             return;
         }
         this.bookmarkService.toggleBookmark(pos.uri, pos.line);
@@ -229,7 +233,7 @@ export class KairoBookmarkContribution implements FrontendApplicationContributio
     protected setNumberedBookmark(num: number): void {
         const pos = this.getCurrentEditorAndPosition();
         if (!pos) {
-            this.messages.warn('No active editor.');
+            this.messages.warn(this.i18n.t('widget.editor.noActiveEditor'));
             return;
         }
         this.bookmarkService.toggleBookmark(pos.uri, pos.line, num);
@@ -238,7 +242,7 @@ export class KairoBookmarkContribution implements FrontendApplicationContributio
     protected async gotoBookmark(num: number): Promise<void> {
         const bookmark = this.bookmarkService.gotoBookmark(num);
         if (!bookmark) {
-            this.messages.info(`No bookmark ${num} set.`);
+            this.messages.info(this.i18n.t('widget.bookmarks.notSet', { num: String(num) }));
             return;
         }
         try {
@@ -259,7 +263,7 @@ export class KairoBookmarkContribution implements FrontendApplicationContributio
                 }
             }
         } catch {
-            this.messages.warn(`Could not navigate to bookmark ${num}.`);
+            this.messages.warn(this.i18n.t('widget.bookmarks.gotoFailed', { num: String(num) }));
         }
     }
 

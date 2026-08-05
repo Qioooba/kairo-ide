@@ -1,5 +1,5 @@
 /**
- * 遥测设置 UI — P3-OBS-02
+ * Telemetry settings UI — P3-OBS-02
  *
  * Settings UI for telemetry preferences:
  *   - Toggle: Enable/Disable telemetry
@@ -13,6 +13,7 @@ import { injectable, inject, postConstruct } from '@theia/core/shared/inversify'
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import { MessageService } from '@theia/core/lib/common/message-service';
 import { FileDialogService } from '@theia/filesystem/lib/browser';
+import { KairoI18nService, type KairoI18nKey } from '@kairo/i18n';
 import { KairoTelemetry, type TelemetryStats, type TelemetryEvent } from './kairo-telemetry';
 
 export const KAIRO_TELEMETRY_SETTINGS_ID = 'kairo-telemetry-settings';
@@ -24,6 +25,7 @@ export class KairoTelemetrySettingsWidget extends ReactWidget {
   @inject(MessageService) protected readonly messages!: MessageService;
   @inject(FileDialogService) protected readonly fileDialog!: FileDialogService;
   @inject(KairoTelemetry) protected readonly telemetry!: KairoTelemetry;
+  @inject(KairoI18nService) protected readonly i18n!: KairoI18nService;
 
   protected stats: TelemetryStats | undefined;
   protected showEvents = false;
@@ -31,14 +33,22 @@ export class KairoTelemetrySettingsWidget extends ReactWidget {
   constructor() {
     super();
     this.id = KAIRO_TELEMETRY_SETTINGS_ID;
-    this.title.label = '遥测设置';
-    this.title.caption = 'Kairo IDE 遥测数据设置';
+    // Leave empty until @postConstruct — avoids a Chinese flash before i18n (TP-P3-6).
+    this.title.label = '';
+    this.title.caption = '';
     this.title.iconClass = 'codicon codicon-graph';
     this.title.closable = true;
   }
 
   @postConstruct()
   protected init(): void {
+    this.title.label = this.i18n.t('widget.telemetry.title');
+    this.title.caption = this.i18n.t('widget.telemetry.caption');
+    this.toDispose.push(this.i18n.onDidChangeLanguage(() => {
+      this.title.label = this.i18n.t('widget.telemetry.title');
+      this.title.caption = this.i18n.t('widget.telemetry.caption');
+      this.update();
+    }));
     this.update();
   }
 
@@ -46,6 +56,7 @@ export class KairoTelemetrySettingsWidget extends ReactWidget {
     this.stats = this.telemetry.getStats();
 
     return React.createElement(TelemetrySettingsPanel, {
+      i18n: this.i18n,
       isEnabled: this.telemetry.isEnabled,
       privacyAccepted: this.telemetry.telemetryConfig.privacyAccepted,
       endpoint: this.telemetry.telemetryConfig.endpoint,
@@ -72,23 +83,23 @@ export class KairoTelemetrySettingsWidget extends ReactWidget {
         await this.telemetry.clearEvents();
         this.showEvents = false;
         this.update();
-        this.messages.info('遥测数据已清除。');
+        this.messages.info(this.i18n.t('widget.telemetry.cleared'));
       },
       onExport: async () => {
         const json = this.telemetry.exportToJSON();
         const saveUri = await this.fileDialog.showSaveDialog({
-          title: '导出遥测数据',
-          filters: { 'JSON 文件': ['json'] },
+          title: this.i18n.t('widget.telemetry.exportTitle'),
+          filters: { [this.i18n.t('widget.telemetry.jsonFilter')]: ['json'] },
         });
         if (saveUri) {
           // Write the file via the file service
           this.messages.info(
-            `遥测数据导出为 JSON 格式。请保存到: ${saveUri.path.toString()}`,
+            this.i18n.t('widget.telemetry.exportSaved', { path: saveUri.path.toString() }),
           );
           // Copy to clipboard as fallback
           try {
             await navigator.clipboard.writeText(json);
-            this.messages.info('遥测数据已复制到剪贴板。');
+            this.messages.info(this.i18n.t('widget.telemetry.copied'));
           } catch {
             // Clipboard not available
           }
@@ -101,6 +112,7 @@ export class KairoTelemetrySettingsWidget extends ReactWidget {
 // ── React Component ──────────────────────────────────────────────
 
 interface TelemetrySettingsPanelProps {
+  i18n: KairoI18nService;
   isEnabled: boolean;
   privacyAccepted: boolean;
   endpoint?: string;
@@ -116,51 +128,55 @@ interface TelemetrySettingsPanelProps {
 }
 
 const TelemetrySettingsPanel: React.FC<TelemetrySettingsPanelProps> = ({
-  isEnabled, privacyAccepted, endpoint, stats, showEvents, events,
+  i18n, isEnabled, privacyAccepted, endpoint, stats, showEvents, events,
   onToggle, onAcceptPrivacy, onSetEndpoint, onViewEvents, onClear, onExport,
 }) => {
   const [endpointDraft, setEndpointDraft] = React.useState(endpoint || '');
+  const t = React.useCallback(
+    (key: KairoI18nKey, params?: Record<string, string | number>) => i18n.t(key, params),
+    [i18n],
+  );
+  const locale = i18n.getCurrentLanguage() === 'zh-CN' ? 'zh-CN' : 'en';
 
   return (
     <div className="kairo-telemetry-container">
       <div className="kairo-telemetry-header">
-        <h3>遥测设置</h3>
+        <h3>{t('widget.telemetry.heading')}</h3>
         <p className="kairo-telemetry-description">
-          遥测数据收集帮助改进 Kairo IDE。默认禁用，需要手动启用。
-          所有数据默认仅存储在本地。
+          {t('widget.telemetry.description')}
         </p>
       </div>
 
       {/* Privacy disclosure */}
       {!privacyAccepted && (
         <div className="kairo-telemetry-privacy">
-          <h4>隐私声明</h4>
+          <h4>{t('widget.telemetry.privacyTitle')}</h4>
           <div className="kairo-telemetry-privacy-content">
-            <p><strong>收集的数据：</strong></p>
+            <p><strong>{t('widget.telemetry.collectedTitle')}</strong></p>
             <ul>
-              <li>IDE 启动事件</li>
-              <li>项目打开/关闭事件</li>
-              <li>构建开始/结束事件</li>
-              <li>搜索操作</li>
-              <li>调试会话事件</li>
-              <li>错误事件</li>
+              <li>{t('widget.telemetry.collectedStartup')}</li>
+              <li>{t('widget.telemetry.collectedProject')}</li>
+              <li>{t('widget.telemetry.collectedBuild')}</li>
+              <li>{t('widget.telemetry.collectedSearch')}</li>
+              <li>{t('widget.telemetry.collectedDebug')}</li>
+              <li>{t('widget.telemetry.collectedError')}</li>
             </ul>
-            <p><strong>不收集的数据：</strong></p>
+            <p><strong>{t('widget.telemetry.notCollectedTitle')}</strong></p>
             <ul>
-              <li>个人身份信息</li>
-              <li>文件内容</li>
-              <li>源代码</li>
-              <li>项目路径</li>
-              <li>环境变量</li>
+              <li>{t('widget.telemetry.notCollectedPii')}</li>
+              <li>{t('widget.telemetry.notCollectedFileContents')}</li>
+              <li>{t('widget.telemetry.notCollectedSource')}</li>
+              <li>{t('widget.telemetry.notCollectedPaths')}</li>
+              <li>{t('widget.telemetry.notCollectedEnv')}</li>
             </ul>
-            <p>数据默认仅存储在本地，不会发送到任何服务器。</p>
+            <p>{t('widget.telemetry.localOnlyNote')}</p>
           </div>
           <button
             type="button"
             className="theia-button"
             onClick={onAcceptPrivacy}
           >
-            我已阅读并同意
+            {t('widget.telemetry.acceptPrivacy')}
           </button>
         </div>
       )}
@@ -174,24 +190,24 @@ const TelemetrySettingsPanel: React.FC<TelemetrySettingsPanelProps> = ({
             disabled={!privacyAccepted}
             onChange={e => onToggle(e.target.checked)}
           />
-          启用遥测数据收集
+          {t('widget.telemetry.enableToggle')}
         </label>
         {!privacyAccepted && (
           <span className="kairo-telemetry-note">
-            请先同意隐私声明
+            {t('widget.telemetry.acceptPrivacyFirst')}
           </span>
         )}
       </div>
 
       {/* Enterprise endpoint */}
       <div className="kairo-telemetry-section">
-        <h4>企业遥测端点（可选）</h4>
+        <h4>{t('widget.telemetry.enterpriseEndpoint')}</h4>
         <div className="kairo-telemetry-field">
           <input
             type="text"
             value={endpointDraft}
             onChange={e => setEndpointDraft(e.target.value)}
-            placeholder="https://your-enterprise.com/telemetry"
+            placeholder={t('widget.telemetry.endpointPlaceholder')}
             className="theia-input"
             disabled={!isEnabled}
           />
@@ -201,7 +217,7 @@ const TelemetrySettingsPanel: React.FC<TelemetrySettingsPanelProps> = ({
             onClick={() => onSetEndpoint(endpointDraft)}
             disabled={!isEnabled}
           >
-            保存
+            {t('widget.telemetry.save')}
           </button>
         </div>
       </div>
@@ -209,25 +225,25 @@ const TelemetrySettingsPanel: React.FC<TelemetrySettingsPanelProps> = ({
       {/* Stats */}
       {stats && isEnabled && (
         <div className="kairo-telemetry-section">
-          <h4>数据统计</h4>
+          <h4>{t('widget.telemetry.statsTitle')}</h4>
           <div className="kairo-telemetry-stats">
             <div className="kairo-telemetry-stat">
-              <span className="stat-label">总事件数</span>
+              <span className="stat-label">{t('widget.telemetry.totalEvents')}</span>
               <span className="stat-value">{stats.totalEvents}</span>
             </div>
             {stats.oldestEvent && (
               <div className="kairo-telemetry-stat">
-                <span className="stat-label">最早事件</span>
+                <span className="stat-label">{t('widget.telemetry.oldestEvent')}</span>
                 <span className="stat-value">
-                  {new Date(stats.oldestEvent).toLocaleString('zh-CN')}
+                  {new Date(stats.oldestEvent).toLocaleString(locale)}
                 </span>
               </div>
             )}
             {stats.newestEvent && (
               <div className="kairo-telemetry-stat">
-                <span className="stat-label">最新事件</span>
+                <span className="stat-label">{t('widget.telemetry.newestEvent')}</span>
                 <span className="stat-value">
-                  {new Date(stats.newestEvent).toLocaleString('zh-CN')}
+                  {new Date(stats.newestEvent).toLocaleString(locale)}
                 </span>
               </div>
             )}
@@ -236,12 +252,12 @@ const TelemetrySettingsPanel: React.FC<TelemetrySettingsPanelProps> = ({
           {/* Events by type */}
           {Object.keys(stats.eventsByType).length > 0 && (
             <div className="kairo-telemetry-type-stats">
-              <h5>按类型统计</h5>
+              <h5>{t('widget.telemetry.byType')}</h5>
               <table className="kairo-telemetry-table">
                 <thead>
                   <tr>
-                    <th>事件类型</th>
-                    <th>数量</th>
+                    <th>{t('widget.telemetry.eventType')}</th>
+                    <th>{t('widget.telemetry.count')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -266,7 +282,7 @@ const TelemetrySettingsPanel: React.FC<TelemetrySettingsPanelProps> = ({
           onClick={onViewEvents}
           disabled={!isEnabled || stats?.totalEvents === 0}
         >
-          {showEvents ? '隐藏事件' : '查看事件'}
+          {showEvents ? t('widget.telemetry.hideEvents') : t('widget.telemetry.viewEvents')}
         </button>
         <button
           type="button"
@@ -274,7 +290,7 @@ const TelemetrySettingsPanel: React.FC<TelemetrySettingsPanelProps> = ({
           onClick={onExport}
           disabled={!isEnabled || stats?.totalEvents === 0}
         >
-          导出数据
+          {t('widget.telemetry.exportData')}
         </button>
         <button
           type="button"
@@ -282,19 +298,19 @@ const TelemetrySettingsPanel: React.FC<TelemetrySettingsPanelProps> = ({
           onClick={onClear}
           disabled={!isEnabled || stats?.totalEvents === 0}
         >
-          清除数据
+          {t('widget.telemetry.clearData')}
         </button>
       </div>
 
       {/* Events list */}
       {showEvents && events.length > 0 && (
         <div className="kairo-telemetry-events">
-          <h4>事件列表（最近 {Math.min(events.length, 50)} 条）</h4>
+          <h4>{t('widget.telemetry.eventsList', { count: Math.min(events.length, 50) })}</h4>
           <div className="kairo-telemetry-event-list">
             {events.slice(-50).reverse().map((event, idx) => (
               <div key={idx} className="kairo-telemetry-event-item">
                 <span className="event-time">
-                  {new Date(event.timestamp).toLocaleTimeString('zh-CN')}
+                  {new Date(event.timestamp).toLocaleTimeString(locale)}
                 </span>
                 <span className="event-type">{event.eventType}</span>
                 {event.data && (

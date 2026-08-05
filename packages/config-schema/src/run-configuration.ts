@@ -91,7 +91,7 @@ export const runConfigurationJsonSchema = {
             id: { type: 'string', pattern: stableId },
             httpPort: { type: 'integer', minimum: 1024, maximum: 65535 },
             debugPort: { type: 'integer', minimum: 1024, maximum: 65535 },
-            contextPath: { type: 'string', pattern: '^/[A-Za-z0-9._-]*$' },
+            contextPath: { type: 'string', pattern: '^/(?:[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*)?$' },
           },
         },
         deploy: {

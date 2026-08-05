@@ -6,7 +6,7 @@ export default [
     ignores: ['**/node_modules/**', '**/lib/**', '**/dist/**', '**/out/**', '**/gen/**', '**/.theia/**'],
   },
   {
-    files: ['packages/*/src/**/*.{ts,tsx}'],
+    files: ['packages/*/src/**/*.{ts,tsx}', 'apps/*/src/**/*.{ts,tsx}'],
     languageOptions: {
       parser: tsparser,
       parserOptions: {

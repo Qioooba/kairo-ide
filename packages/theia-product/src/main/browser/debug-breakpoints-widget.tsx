@@ -263,7 +263,7 @@ export class KairoDebugBreakpointsWidget extends ReactWidget {
                 breakpoints: displayBps,
                 busy: false,
                 error: null,
-                allEnabled: this.breakpointManager.breakpointsEnabled,
+                allEnabled: displayBps.length === 0 || displayBps.every(bp => bp.enabled),
             });
         } catch (error) {
             this.setState({
@@ -298,7 +298,10 @@ export class KairoDebugBreakpointsWidget extends ReactWidget {
     }
 
     protected toggleAll(): void {
-        this.breakpointManager.breakpointsEnabled = !this.breakpointManager.breakpointsEnabled;
+        // Per-breakpoint enable/disable — not the global mute (breakpointsEnabled).
+        const enable = !this.state.allEnabled;
+        this.breakpointManager.enableAllBreakpoints(enable);
+        this.refresh();
     }
 
     protected setState(partial: Partial<BreakpointsState>): void {

@@ -2,8 +2,7 @@
  * XML/DTD/XSD validation provider.
  *
  * Scans XML files in the workspace for:
- *  - DOCTYPE declarations that reference non-existent DTD files
- *  - XSD schemaLocation references pointing to missing files
+ *  - DOCTYPE / schemaLocation references that resolve to missing local files
  *  - Basic XML well-formedness errors (mismatched tags, unclosed elements)
  *
  * Results are registered as Monaco editor markers that appear in the
@@ -18,7 +17,7 @@ import { Disposable, DisposableCollection } from '@theia/core/lib/common/disposa
 import { FileService } from '@theia/filesystem/lib/browser/file-service';
 import { WorkspaceService } from '@theia/workspace/lib/browser/workspace-service';
 import { FrontendApplicationContribution } from '@theia/core/lib/browser';
-import _URI from '@theia/core/lib/common/uri';
+import URI from '@theia/core/lib/common/uri';
 
 /** Maximum file size to parse (1 MB). */
 const MAX_FILE_SIZE = 1 * 1024 * 1024;
@@ -26,20 +25,21 @@ const MAX_FILE_SIZE = 1 * 1024 * 1024;
 /** Timeout per file parse (5 seconds). */
 const PARSE_TIMEOUT_MS = 5000;
 
+/** Debounce for revalidation on edit. */
+const VALIDATE_DEBOUNCE_MS = 300;
+
 /** Owner string for Monaco markers. */
 const MARKER_OWNER = 'kairo-xml-dtd';
 
 /** XML file extensions to validate. */
 const XML_EXTENSIONS = ['.xml', '.xsd', '.tld'];
 
-/** Common web.xml filenames to check. */
-const WEB_XML_NAMES = ['web.xml'];
-
 /** XML declaration pattern: <?xml ... encoding="..." ?> */
 const XML_DECL_RE = /<\?xml\s[^?]*\bencoding\s*=\s*["']([^"']+)["']/i;
 
-/** DOCTYPE declaration pattern. */
-const DOCTYPE_RE = /<!DOCTYPE\s+(\S+)\s+(?:PUBLIC\s+["']([^"']+)["']\s+)?(?:["']([^"']+)["'])?\s*>/gi;
+/** DOCTYPE declaration pattern (PUBLIC or SYSTEM). */
+const DOCTYPE_RE =
+  /<!DOCTYPE\s+(\S+)(?:\s+PUBLIC\s+["']([^"']+)["']\s+["']([^"']+)["']|\s+SYSTEM\s+["']([^"']+)["']|\s+["']([^"']+)["'])?\s*>/gi;
 
 /** XSD schemaLocation pattern: xsi:schemaLocation="ns1 uri1 ns2 uri2" */
 const SCHEMA_LOCATION_RE = /schemaLocation\s*=\s*["']([^"']+)["']/gi;
@@ -47,14 +47,16 @@ const SCHEMA_LOCATION_RE = /schemaLocation\s*=\s*["']([^"']+)["']/gi;
 /** schemaLocation attribute value splitter: pairs of namespace URI */
 const SCHEMA_LOCATION_PAIR_RE = /(\S+)\s+(\S+)/g;
 
-/** HTML/XML tag pattern for matching open/close tags. */
+/** XML tag pattern for matching open/close tags. */
 const TAG_RE = /<\/?([a-zA-Z_][\w.:-]*)(\s[^>]*)?\/?>/g;
 
-/** Self-closing tags that don't need closing. */
-const VOID_TAGS = new Set([
-  'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
-  'link', 'meta', 'param', 'source', 'track', 'wbr',
-]);
+/** A local DTD/XSD reference collected during parse. */
+export interface LocalXmlRef {
+  ref: string;
+  index: number;
+  length: number;
+  kind: 'dtd' | 'xsd';
+}
 
 /** Validation result for a single XML file. */
 export interface XmlValidationResult {
@@ -65,19 +67,131 @@ export interface XmlValidationResult {
 }
 
 /**
- * Validate an XML file's DTD/XSD references and well-formedness.
- * Pure function — no side effects.
+ * Replace XML comments and CDATA bodies with spaces (same length) so
+ * tag matching ignores markup inside them while offsets stay stable.
+ * Exported for unit tests (JV-P1-15).
  */
-function validateXmlContent(content: string, _fileUri: string): monaco.editor.IMarkerData[] {
+export function maskXmlCommentsAndCdata(content: string): string {
+  return content
+    .replace(/<!--[\s\S]*?-->/g, m => ' '.repeat(m.length))
+    .replace(/<!\[CDATA\[[\s\S]*?\]\]>/g, m => ' '.repeat(m.length));
+}
+
+/**
+ * Build an array of 0-based offsets where each line starts.
+ * Exported for unit tests (JV-P1-15).
+ */
+export function buildLineStarts(content: string): number[] {
+  const starts = [0];
+  for (let i = 0; i < content.length; i++) {
+    if (content[i] === '\n') {
+      starts.push(i + 1);
+    }
+  }
+  return starts;
+}
+
+/**
+ * Convert a character offset to 1-based line/column using a line-start index.
+ * Exported for unit tests (JV-P1-15).
+ */
+export function offsetToLineCol(
+  lineStarts: number[],
+  offset: number,
+): { line: number; col: number } {
+  let lo = 0;
+  let hi = lineStarts.length - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (lineStarts[mid] <= offset) {
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  const lineIdx = Math.max(0, hi);
+  return {
+    line: lineIdx + 1,
+    col: offset - lineStarts[lineIdx] + 1,
+  };
+}
+
+/**
+ * Collect local (non-http) DTD / schemaLocation references.
+ * Exported for unit tests (JV-P1-15).
+ */
+export function collectLocalXmlRefs(content: string): LocalXmlRef[] {
+  const refs: LocalXmlRef[] = [];
+
+  DOCTYPE_RE.lastIndex = 0;
+  let doctypeMatch: RegExpExecArray | null;
+  while ((doctypeMatch = DOCTYPE_RE.exec(content)) !== null) {
+    // Groups: 1=root, 2=publicId, 3=systemId(PUBLIC), 4=systemId(SYSTEM), 5=systemId(bare)
+    const dtdRef = doctypeMatch[3] || doctypeMatch[4] || doctypeMatch[5];
+    if (dtdRef && !isRemoteRef(dtdRef)) {
+      refs.push({
+        ref: dtdRef,
+        index: doctypeMatch.index,
+        length: doctypeMatch[0].length,
+        kind: 'dtd',
+      });
+    }
+  }
+
+  SCHEMA_LOCATION_RE.lastIndex = 0;
+  let schemaMatch: RegExpExecArray | null;
+  while ((schemaMatch = SCHEMA_LOCATION_RE.exec(content)) !== null) {
+    const pairs = schemaMatch[1];
+    SCHEMA_LOCATION_PAIR_RE.lastIndex = 0;
+    let pair: RegExpExecArray | null;
+    while ((pair = SCHEMA_LOCATION_PAIR_RE.exec(pairs)) !== null) {
+      const schemaLocation = pair[2];
+      if (schemaLocation && !isRemoteRef(schemaLocation)) {
+        // Approximate location: start of the schemaLocation attribute value
+        const rel = pairs.indexOf(schemaLocation);
+        refs.push({
+          ref: schemaLocation,
+          index: schemaMatch.index + (rel >= 0 ? rel : 0),
+          length: schemaLocation.length,
+          kind: 'xsd',
+        });
+      }
+    }
+  }
+
+  return refs;
+}
+
+function isRemoteRef(ref: string): boolean {
+  return /^(https?:|urn:)/i.test(ref);
+}
+
+/**
+ * Validate XML well-formedness (tag matching) and optional encoding note.
+ * Does NOT emit "DTD may not exist" — callers add those after FileService checks.
+ * Exported for unit tests (JV-P1-15).
+ *
+ * @param deadlineMs Absolute Date.now() deadline; throws TimeoutError when exceeded.
+ */
+export function validateXmlContent(
+  content: string,
+  deadlineMs?: number,
+): monaco.editor.IMarkerData[] {
+  const checkDeadline = (): void => {
+    if (deadlineMs !== undefined && Date.now() > deadlineMs) {
+      throw new TimeoutError();
+    }
+  };
+
   const markers: monaco.editor.IMarkerData[] = [];
-  const lines = content.split('\n');
+  const lineStarts = buildLineStarts(content);
 
   // Check encoding declaration
   const encMatch = XML_DECL_RE.exec(content);
   if (encMatch) {
     const enc = encMatch[1].toLowerCase();
     if (enc !== 'utf-8' && enc !== 'gbk' && enc !== 'gb2312' && enc !== 'iso-8859-1') {
-      const line = getLineForOffset(content, encMatch.index);
+      const { line } = offsetToLineCol(lineStarts, encMatch.index);
       markers.push({
         severity: monaco.MarkerSeverity.Info,
         message: `XML 编码声明: ${encMatch[1]}`,
@@ -90,93 +204,52 @@ function validateXmlContent(content: string, _fileUri: string): monaco.editor.IM
     }
   }
 
-  // Check DOCTYPE — local DTD references
-  DOCTYPE_RE.lastIndex = 0;
-  let doctypeMatch: RegExpExecArray | null;
-  while ((doctypeMatch = DOCTYPE_RE.exec(content)) !== null) {
-    const dtdRef = doctypeMatch[3]; // system identifier
-    if (dtdRef && !dtdRef.startsWith('http://') && !dtdRef.startsWith('https://')) {
-      const line = getLineForOffset(content, doctypeMatch.index);
-      markers.push({
-        severity: monaco.MarkerSeverity.Warning,
-        message: `引用的 DTD 文件可能不存在: ${dtdRef}`,
-        source: 'DTD 验证',
-        startLineNumber: line,
-        startColumn: doctypeMatch.index - lines.slice(0, line - 1).join('\n').length + 1,
-        endLineNumber: line,
-        endColumn: (doctypeMatch.index - lines.slice(0, line - 1).join('\n').length) + doctypeMatch[0].length + 1,
-      });
-    }
-  }
+  checkDeadline();
 
-  // Check for schemaLocation references
-  SCHEMA_LOCATION_RE.lastIndex = 0;
-  let schemaMatch: RegExpExecArray | null;
-  while ((schemaMatch = SCHEMA_LOCATION_RE.exec(content)) !== null) {
-    const pairs = schemaMatch[1];
-    SCHEMA_LOCATION_PAIR_RE.lastIndex = 0;
-    let pair: RegExpExecArray | null;
-    while ((pair = SCHEMA_LOCATION_PAIR_RE.exec(pairs)) !== null) {
-      const schemaLocation = pair[2];
-      if (schemaLocation && !schemaLocation.startsWith('http://') && !schemaLocation.startsWith('https://')) {
-        const line = getLineForOffset(content, schemaMatch.index);
-        markers.push({
-          severity: monaco.MarkerSeverity.Warning,
-          message: `引用的 XSD 文件可能不存在: ${schemaLocation}`,
-          source: 'XSD 验证',
-          startLineNumber: line,
-          startColumn: 1,
-          endLineNumber: line,
-          endColumn: 1,
-        });
-      }
-    }
-  }
-
-  // Tag matching — basic well-formedness check
+  // Tag matching on comment/CDATA-masked content — XML has no HTML void tags
+  const masked = maskXmlCommentsAndCdata(content);
   const tagStack: Array<{ name: string; line: number; col: number }> = [];
   TAG_RE.lastIndex = 0;
   let tagMatch: RegExpExecArray | null;
-  while ((tagMatch = TAG_RE.exec(content)) !== null) {
+  let tagCount = 0;
+  while ((tagMatch = TAG_RE.exec(masked)) !== null) {
+    if ((++tagCount & 63) === 0) {
+      checkDeadline();
+    }
+
     const fullTag = tagMatch[0];
     const tagName = tagMatch[1];
     const isClosing = fullTag.startsWith('</');
     const isSelfClosing = fullTag.endsWith('/>') && !isClosing;
+    const { line, col } = offsetToLineCol(lineStarts, tagMatch.index);
 
     if (isClosing) {
       if (tagStack.length === 0) {
-        const line = getLineForOffset(content, tagMatch.index);
         markers.push({
           severity: monaco.MarkerSeverity.Error,
           message: `XML 格式错误: 多余的闭合标签 </${tagName}>`,
           source: 'XML 验证',
           startLineNumber: line,
-          startColumn: tagMatch.index - lines.slice(0, line - 1).join('\n').length + 1,
+          startColumn: col,
           endLineNumber: line,
-          endColumn: (tagMatch.index - lines.slice(0, line - 1).join('\n').length) + fullTag.length + 1,
+          endColumn: col + fullTag.length,
         });
         continue;
       }
       const last = tagStack.pop()!;
       if (last.name !== tagName) {
-        const line = getLineForOffset(content, tagMatch.index);
         markers.push({
           severity: monaco.MarkerSeverity.Error,
           message: `XML 标签不匹配: 期望 </${last.name}> (第 ${last.line} 行)，但找到 </${tagName}>`,
           source: 'XML 验证',
           startLineNumber: line,
-          startColumn: tagMatch.index - lines.slice(0, line - 1).join('\n').length + 1,
+          startColumn: col,
           endLineNumber: line,
-          endColumn: (tagMatch.index - lines.slice(0, line - 1).join('\n').length) + fullTag.length + 1,
+          endColumn: col + fullTag.length,
         });
       }
-    } else if (!isSelfClosing && !VOID_TAGS.has(tagName.toLowerCase())) {
-      const line = getLineForOffset(content, tagMatch.index);
-      tagStack.push({
-        name: tagName,
-        line,
-        col: tagMatch.index - lines.slice(0, line - 1).join('\n').length + 1,
-      });
+    } else if (!isSelfClosing) {
+      tagStack.push({ name: tagName, line, col });
     }
   }
 
@@ -197,15 +270,34 @@ function validateXmlContent(content: string, _fileUri: string): monaco.editor.IM
 }
 
 /**
- * Get the 1-based line number for a character offset in content.
+ * Build markers for unresolved local DTD/XSD refs.
+ * Exported for unit tests (JV-P1-15).
  */
-function getLineForOffset(content: string, offset: number): number {
-  // 0-based index, count newlines before offset
-  let line = 1;
-  for (let i = 0; i < offset && i < content.length; i++) {
-    if (content[i] === '\n') line++;
+export function markersForMissingRefs(
+  content: string,
+  missing: ReadonlySet<string>,
+): monaco.editor.IMarkerData[] {
+  if (missing.size === 0) {
+    return [];
   }
-  return line;
+  const lineStarts = buildLineStarts(content);
+  const markers: monaco.editor.IMarkerData[] = [];
+  for (const ref of collectLocalXmlRefs(content)) {
+    if (!missing.has(ref.ref)) continue;
+    const { line, col } = offsetToLineCol(lineStarts, ref.index);
+    markers.push({
+      severity: monaco.MarkerSeverity.Warning,
+      message: ref.kind === 'dtd'
+        ? `引用的 DTD 文件不存在: ${ref.ref}`
+        : `引用的 XSD 文件不存在: ${ref.ref}`,
+      source: ref.kind === 'dtd' ? 'DTD 验证' : 'XSD 验证',
+      startLineNumber: line,
+      startColumn: col,
+      endLineNumber: line,
+      endColumn: col + ref.length,
+    });
+  }
+  return markers;
 }
 
 /**
@@ -217,14 +309,7 @@ function isXmlFile(uri: string): boolean {
 }
 
 /**
- * Check if a file path is a web.xml file.
- */
-function _isWebXml(uri: string): boolean {
-  return WEB_XML_NAMES.some(name => uri.endsWith(name));
-}
-
-/**
- * XML/DTD validator that validates XML files on open/save and
+ * XML/DTD validator that validates XML files on open/save/edit and
  * registers diagnostics as Monaco editor markers.
  */
 @injectable()
@@ -239,13 +324,15 @@ export class XmlDtdValidator implements FrontendApplicationContribution, Disposa
   protected readonly workspaceService!: WorkspaceService;
 
   protected subs = new DisposableCollection();
+  protected attached = new Set<string>();
+  protected debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   @postConstruct()
   protected init(): void {
     this.subs.push(
       monaco.editor.onDidCreateModel(model => {
         if (isXmlFile(model.uri.path)) {
-          this.validateModel(model);
+          this.attachModel(model);
         }
       }),
     );
@@ -253,21 +340,62 @@ export class XmlDtdValidator implements FrontendApplicationContribution, Disposa
 
   onStart(): void {
     // Validate already-open XML models
-    const models = monaco.editor.getModels();
-    for (const model of models) {
+    for (const model of monaco.editor.getModels()) {
       if (isXmlFile(model.uri.path)) {
-        this.validateModel(model);
+        this.attachModel(model);
       }
     }
   }
 
   dispose(): void {
+    for (const timer of this.debounceTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.debounceTimers.clear();
     this.subs.dispose();
+  }
+
+  private attachModel(model: monaco.editor.ITextModel): void {
+    const key = model.uri.toString();
+    if (this.attached.has(key)) {
+      return;
+    }
+    this.attached.add(key);
+
+    this.validateModel(model);
+
+    const changeSub = model.onDidChangeContent(() => {
+      this.scheduleValidate(model);
+    });
+    const disposeSub = model.onWillDispose(() => {
+      const timer = this.debounceTimers.get(key);
+      if (timer) {
+        clearTimeout(timer);
+        this.debounceTimers.delete(key);
+      }
+      this.attached.delete(key);
+      changeSub.dispose();
+    });
+    this.subs.push(changeSub);
+    this.subs.push(disposeSub);
+  }
+
+  private scheduleValidate(model: monaco.editor.ITextModel): void {
+    const key = model.uri.toString();
+    const prev = this.debounceTimers.get(key);
+    if (prev) clearTimeout(prev);
+    this.debounceTimers.set(
+      key,
+      setTimeout(() => {
+        this.debounceTimers.delete(key);
+        this.validateModel(model);
+      }, VALIDATE_DEBOUNCE_MS),
+    );
   }
 
   /**
    * Validate a single Monaco text model. Runs the validation logic
-   * with a timeout and sets markers on the model.
+   * with a deadline and sets markers on the model.
    */
   private async validateModel(model: monaco.editor.ITextModel): Promise<void> {
     const content = model.getValue();
@@ -288,10 +416,15 @@ export class XmlDtdValidator implements FrontendApplicationContribution, Disposa
     }
 
     try {
-      const markers = await withTimeout(
-        () => validateXmlContent(content, model.uri.toString()),
-        PARSE_TIMEOUT_MS,
-      );
+      const deadline = Date.now() + PARSE_TIMEOUT_MS;
+      const markers = validateXmlContent(content, deadline);
+
+      const missing = await this.findMissingLocalRefs(model, content, deadline);
+      markers.push(...markersForMissingRefs(content, missing));
+
+      if (Date.now() > deadline) {
+        throw new TimeoutError();
+      }
       monaco.editor.setModelMarkers(model, MARKER_OWNER, markers);
     } catch (err) {
       if (err instanceof TimeoutError) {
@@ -310,30 +443,44 @@ export class XmlDtdValidator implements FrontendApplicationContribution, Disposa
       }
     }
   }
+
+  private async findMissingLocalRefs(
+    model: monaco.editor.ITextModel,
+    content: string,
+    deadline: number,
+  ): Promise<Set<string>> {
+    const missing = new Set<string>();
+    const baseUri = new URI(model.uri.toString(true));
+    for (const { ref } of collectLocalXmlRefs(content)) {
+      if (Date.now() > deadline) {
+        throw new TimeoutError();
+      }
+      const exists = await this.localRefExists(baseUri, ref);
+      if (!exists) {
+        missing.add(ref);
+      }
+    }
+    return missing;
+  }
+
+  private async localRefExists(baseUri: URI, ref: string): Promise<boolean> {
+    try {
+      // Absolute file path or workspace-relative / same-dir relative
+      const candidate = /^(?:[a-zA-Z]:[\\/]|\/)/.test(ref)
+        ? URI.fromFilePath(ref)
+        : baseUri.parent.resolve(ref);
+      await this.fileService.resolve(candidate, { resolveMetadata: false });
+      return true;
+    } catch {
+      return false;
+    }
+  }
 }
 
 /** Timeout error class. */
-class TimeoutError extends Error {
+export class TimeoutError extends Error {
   constructor() {
     super('操作超时');
     this.name = 'TimeoutError';
   }
-}
-
-/**
- * Execute a function with a timeout in milliseconds.
- * Throws TimeoutError if the function doesn't complete in time.
- */
-function withTimeout<T>(fn: () => T, ms: number): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new TimeoutError()), ms);
-    try {
-      const result = fn();
-      clearTimeout(timer);
-      resolve(result);
-    } catch (err) {
-      clearTimeout(timer);
-      reject(err);
-    }
-  });
 }

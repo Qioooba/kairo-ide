@@ -57,13 +57,16 @@ export async function reloadEditorWithEncoding(
   encoding: string,
   editorManager: EditorManagerLike,
   messages: ReopenMessages,
+  dirtyWarnMessage: string,
 ): Promise<ReopenOutcome> {
   const editor = widget.editor;
+  // BD-P2-3: refuse dirty buffers on both the native setEncoding path and
+  // the close/reopen fallback — never discard unsaved edits.
+  if (editor.document.dirty) {
+    messages.warn(dirtyWarnMessage);
+    return 'refused-dirty';
+  }
   if (typeof editor.setEncoding === 'function') {
-    if (editor.document.dirty) {
-      messages.warn('The file is dirty. Save it before reopening with another encoding.');
-      return 'refused-dirty';
-    }
     await editor.setEncoding(encoding, ENCODING_MODE_DECODE);
     return 'redecoded';
   }

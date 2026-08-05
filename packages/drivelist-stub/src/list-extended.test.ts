@@ -1,11 +1,11 @@
-// drivelist stub — extended contract tests.
+// drivelist — extended contract tests.
 //
 // Run with:
 //   pnpm --filter drivelist test
-//   (or)  node --require ts-node/register --require source-map-support/register --test src/list.test.ts
 
 import { test } from 'node:test';
 import assert from 'node:assert';
+import os from 'os';
 import { list, listCallback, default as defaultExport } from './index';
 import type { DriveDescriptor } from './index';
 
@@ -16,30 +16,31 @@ test('list() resolves to an array of DriveDescriptor', async () => {
     assert.strictEqual(typeof drive.device, 'string');
     assert.strictEqual(typeof drive.description, 'string');
     assert.ok(Array.isArray(drive.mountpoints));
+    assert.ok(drive.mountpoints.length > 0);
   });
 });
 
-test('list() returns empty array — no drives on stub', async () => {
+test('list() returns drives on every platform', async () => {
   const drives = await list();
-  assert.strictEqual(drives.length, 0);
+  assert.ok(drives.length > 0);
 });
 
-test('list() is always fast (no I/O)', async () => {
+test('list() is always fast (no blocking I/O beyond fs.access)', async () => {
   const start = Date.now();
   await list();
   const elapsed = Date.now() - start;
-  assert.ok(elapsed < 50, `list() should resolve in < 50ms, took ${elapsed}ms`);
+  assert.ok(elapsed < 500, `list() should resolve quickly, took ${elapsed}ms`);
 });
 
 test('list() can be called many times without issues', async () => {
   const results = await Promise.all(Array.from({ length: 10 }, () => list()));
   for (const drives of results) {
     assert.ok(Array.isArray(drives));
-    assert.strictEqual(drives.length, 0);
+    assert.ok(drives.length > 0);
   }
 });
 
-test('list() resolves with frozen/resuable array semantics', async () => {
+test('list() resolves with reusable array semantics', async () => {
   const a = await list();
   const b = await list();
   assert.notStrictEqual(a, b, 'each call returns a new array');
@@ -51,10 +52,13 @@ test('listCallback() invokes callback synchronously', () => {
   assert.strictEqual(called, true);
 });
 
-test('listCallback() passes null error and empty array', () => {
+test('listCallback() passes null error and non-empty drives on Windows', () => {
   listCallback((err, drives) => {
     assert.strictEqual(err, null);
-    assert.deepStrictEqual(drives, []);
+    assert.ok(Array.isArray(drives));
+    if (os.platform() === 'win32') {
+      assert.ok(drives.length > 0);
+    }
   });
 });
 
@@ -82,9 +86,9 @@ test('list() never rejects', async () => {
 });
 
 test('list() co-exists with listCallback() without interference', () => {
-  let callbackResult: DriveDescriptor[] | null = null;
+  let callbackResult: DriveDescriptor[] = [];
   listCallback((_err, drives) => { callbackResult = drives; });
-  assert.deepStrictEqual(callbackResult, []);
+  assert.ok(callbackResult.length > 0);
 });
 
 test('list() returns a plain array (not a subclass)', async () => {
@@ -94,6 +98,6 @@ test('list() returns a plain array (not a subclass)', async () => {
 
 test('DriveDescriptor interface is structurally valid', async () => {
   const drives = await list();
-  // Just verify the type is correct — no items in stub
   assert.ok(Array.isArray(drives));
+  assert.ok(drives.length > 0);
 });

@@ -134,7 +134,10 @@ export function registerJspScriptletJavaCompletion(
 
         try {
           const blocks = parser.findJavaBlocks(content);
-          const blockIndex = blocks.indexOf(ctx.block);
+          // Match by offsets/kind — block objects are not identity-equal across parses.
+          const blockIndex = blocks.findIndex(
+            b => b.start === ctx.block!.start && b.end === ctx.block!.end && b.kind === ctx.block!.kind,
+          );
           const blockContent = content.slice(ctx.block.start, ctx.block.end);
           const offsetInBlock = Math.max(0, ctx.offset - ctx.block.start);
           const virtualKind = toVirtualKind(ctx.blockKind);
@@ -142,6 +145,7 @@ export function registerJspScriptletJavaCompletion(
           const virtualUri = virtualUriForBlock(model.uri.toString(), blockIndex >= 0 ? blockIndex : 0);
           const virtualPos = mapOffsetToVirtualPosition(blockContent, offsetInBlock, virtualKind);
 
+          let openedVirtual = false;
           if (javaClient) {
             try {
               javaClient.didOpen({
@@ -150,42 +154,54 @@ export function registerJspScriptletJavaCompletion(
                 version: virtualVersion++,
                 text: virtualText,
               });
+              openedVirtual = true;
             } catch {
               // ignore — completion may still work via fallback
             }
           }
 
-          javaProvider.cacheSource(virtualUri, virtualText);
+          try {
+            javaProvider.cacheSource(virtualUri, virtualText);
 
-          const response = await javaProvider.provideCompletions({
-            uri: virtualUri,
-            line: virtualPos.line,
-            character: virtualPos.character,
-            triggerKind: (context.triggerKind + 1) as 1 | 2 | 3,
-            triggerCharacter: context.triggerCharacter,
-          });
-
-          if (!token.isCancellationRequested && response.items.length > 0) {
-            const javaItems = response.items.map(item => {
-              const rank = globalRecentCompletions.rank(item.label);
-              // Strip virtual-file textEdit ranges — apply as simple insert at cursor word.
-              const adapted = adaptCompletionItem(
-                {
-                  ...item,
-                  sortText: globalRecentCompletions.boostSortText(item.label, item.sortText),
-                  preselect: item.preselect === true || rank === 0,
-                  textEdit: undefined,
-                  insertRange: undefined,
-                  replaceRange: undefined,
-                  // Keep additionalTextEdits only if they target the same virtual doc — drop them for JSP.
-                  additionalTextEdits: undefined,
-                },
-                range,
-              );
-              adapted.sortText = '0' + (adapted.sortText ?? adapted.label.toString());
-              return adapted;
+            const response = await javaProvider.provideCompletions({
+              uri: virtualUri,
+              line: virtualPos.line,
+              character: virtualPos.character,
+              triggerKind: (context.triggerKind + 1) as 1 | 2 | 3,
+              triggerCharacter: context.triggerCharacter,
             });
-            suggestions.unshift(...javaItems);
+
+            if (!token.isCancellationRequested && response.items.length > 0) {
+              const javaItems = response.items.map(item => {
+                const rank = globalRecentCompletions.rank(item.label);
+                // Strip virtual-file textEdit ranges — apply as simple insert at cursor word.
+                const adapted = adaptCompletionItem(
+                  {
+                    ...item,
+                    sortText: globalRecentCompletions.boostSortText(item.label, item.sortText),
+                    preselect: item.preselect === true || rank === 0,
+                    textEdit: undefined,
+                    insertRange: undefined,
+                    replaceRange: undefined,
+                    // Keep additionalTextEdits only if they target the same virtual doc — drop them for JSP.
+                    additionalTextEdits: undefined,
+                  },
+                  range,
+                );
+                adapted.sortText = '0' + (adapted.sortText ?? adapted.label.toString());
+                return adapted;
+              });
+              suggestions.unshift(...javaItems);
+            }
+          } finally {
+            // Ephemeral completion docs must be closed (diagnostics re-opens its own).
+            if (openedVirtual && javaClient) {
+              try {
+                javaClient.didClose(virtualUri);
+              } catch {
+                // ignore
+              }
+            }
           }
         } catch {
           // snippets only

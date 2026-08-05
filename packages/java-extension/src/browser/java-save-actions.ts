@@ -2,12 +2,13 @@
  * Java Save Actions — format-on-save and organize-imports-on-save
  * for Java files.
  *
- * Listens to text document save events via MonacoWorkspace and
- * applies formatting / organize-imports edits when the
- * corresponding preferences are enabled.
+ * Runs on will-save so edits land before the file is written.
+ * Flushes pending document sync first, then applies format and
+ * organize-imports serially (never as a single stacked edit set
+ * from the same stale snapshot).
  */
 
-import { injectable, inject } from '@theia/core/shared/inversify';
+import { injectable, inject, optional } from '@theia/core/shared/inversify';
 import {
   FrontendApplicationContribution,
   FrontendApplication,
@@ -20,6 +21,7 @@ import type { MonacoEditorModel } from '@theia/monaco/lib/browser/monaco-editor-
 import * as monaco from '@theia/monaco-editor-core';
 import { JavaCompletionProvider } from './java-completion-provider';
 import { JavaOrganizeImports } from './java-organize-imports';
+import { JavaDocumentSyncContribution } from './java-document-sync';
 import { LSPTextEdit } from '../common/lsp-protocol';
 
 const JAVA_EXTENSIONS = ['.java'];
@@ -41,12 +43,27 @@ export class JavaSaveActionsService implements FrontendApplicationContribution {
   @inject(PreferenceService) protected readonly prefs!: PreferenceService;
   @inject(EditorManager) protected readonly editorManager!: EditorManager;
   @inject(MonacoWorkspace) protected readonly monacoWorkspace!: MonacoWorkspace;
+  @inject(JavaDocumentSyncContribution) @optional()
+  protected readonly documentSync?: JavaDocumentSyncContribution;
+
+  protected readonly attached = new WeakSet<object>();
 
   onStart(_app: FrontendApplication): void {
-    this.monacoWorkspace.onDidSaveTextDocument((model: MonacoEditorModel) => {
-      const uri = model.uri?.toString();
+    for (const model of this.monacoWorkspace.textDocuments) {
+      this.attachWillSave(model);
+    }
+    this.monacoWorkspace.onDidOpenTextDocument((model: MonacoEditorModel) => {
+      this.attachWillSave(model);
+    });
+  }
+
+  protected attachWillSave(model: MonacoEditorModel): void {
+    if (this.attached.has(model)) return;
+    this.attached.add(model);
+    model.onModelWillSaveModel(async (e) => {
+      const uri = e.model.uri;
       if (uri && this.isJavaFile(uri)) {
-        this.onJavaFileSaved(uri);
+        await this.runSaveActions(uri);
       }
     });
   }
@@ -55,7 +72,7 @@ export class JavaSaveActionsService implements FrontendApplicationContribution {
     return JAVA_EXTENSIONS.some(ext => uri.endsWith(ext));
   }
 
-  protected async onJavaFileSaved(uri: string): Promise<void> {
+  protected async runSaveActions(uri: string): Promise<void> {
     const formatOnSave = this.prefs.get<boolean>('kairo.java.formatOnSave', false);
     const organizeImportsOnSave = this.prefs.get<boolean>('kairo.java.organizeImportsOnSave', false);
 
@@ -70,67 +87,69 @@ export class JavaSaveActionsService implements FrontendApplicationContribution {
     const model = control.getModel();
     if (!model) return;
 
-    const operations: monaco.editor.IIdentifiedSingleEditOperation[] = [];
-
     try {
+      // Flush pending didChange so LSP sees the latest buffer before
+      // computing format / organize-imports edits.
+      this.documentSync?.flushPending(uri);
+      this.provider.cacheSource(uri, model.getValue());
+
       if (formatOnSave) {
         const tabSize = this.prefs.get<number>('kairo.java.tabSize', 4);
         const insertSpaces = this.prefs.get<boolean>('kairo.java.insertSpaces', true);
         const edits = await this.provider.provideFormatting(uri, { tabSize, insertSpaces });
         if (edits && edits.length > 0) {
-          for (const edit of edits) {
-            operations.push({
-              range: lspToMonacoRange(edit),
-              text: edit.newText,
-            });
-          }
+          this.applyEdits(control, edits);
+          // Re-sync after format so organize-imports sees the new text
+          this.documentSync?.flushPending(uri);
+          this.provider.cacheSource(uri, model.getValue());
         }
       }
 
       if (organizeImportsOnSave) {
         const result = await this.imports.organizeImports(uri);
         if (result.success && result.edit) {
+          const operations: LSPTextEdit[] = [];
           const textEdits = result.edit.changes?.[uri];
           if (textEdits) {
-            for (const te of textEdits) {
-              operations.push({
-                range: lspToMonacoRange(te),
-                text: te.newText,
-              });
-            }
+            operations.push(...textEdits);
           }
           if (result.edit.documentChanges) {
             for (const change of result.edit.documentChanges) {
               if ('kind' in change) continue;
               if (change.textDocument.uri !== uri) continue;
-              for (const te of change.edits) {
-                operations.push({
-                  range: lspToMonacoRange(te),
-                  text: te.newText,
-                });
-              }
+              operations.push(...change.edits);
             }
           }
-        }
-      }
-
-      if (operations.length > 0) {
-        // Sort edits in reverse order so earlier edits don't
-        // shift the positions of later edits.
-        operations.sort((a, b) => {
-          if (b.range.startLineNumber !== a.range.startLineNumber) {
-            return b.range.startLineNumber - a.range.startLineNumber;
+          if (operations.length > 0) {
+            this.applyEdits(control, operations);
           }
-          return b.range.startColumn - a.range.startColumn;
-        });
-        control.pushUndoStop();
-        control.executeEdits('kairo.saveActions', operations);
-        control.pushUndoStop();
+        }
       }
     } catch {
       // Silently ignore errors during save actions to avoid
       // disrupting the save flow.
     }
+  }
+
+  protected applyEdits(
+    control: monaco.editor.ICodeEditor,
+    edits: LSPTextEdit[],
+  ): void {
+    const operations: monaco.editor.IIdentifiedSingleEditOperation[] = edits.map(edit => ({
+      range: lspToMonacoRange(edit),
+      text: edit.newText,
+    }));
+    // Sort edits in reverse order so earlier edits don't
+    // shift the positions of later edits.
+    operations.sort((a, b) => {
+      if (b.range.startLineNumber !== a.range.startLineNumber) {
+        return b.range.startLineNumber - a.range.startLineNumber;
+      }
+      return b.range.startColumn - a.range.startColumn;
+    });
+    control.pushUndoStop();
+    control.executeEdits('kairo.saveActions', operations);
+    control.pushUndoStop();
   }
 
   protected findEditorForUri(uri: string): MonacoEditor | undefined {

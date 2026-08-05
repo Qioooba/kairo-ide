@@ -1,3 +1,5 @@
+//go:build unwired
+
 // Package security implements role-based access control (RBAC) for the
 // Kairo IDE runtime agent. Roles are hierarchical: Admin > Auditor >
 // Developer > Viewer. Each role maps to a set of permissions.
@@ -56,6 +58,10 @@ var rolePermissions = map[Role]map[Permission]bool{
 
 // RBACManager enforces role-based access control. It is safe for
 // concurrent use.
+//
+// UNWIRED (GO-P3-2): never constructed by bootstrap / api.Server —
+// kept for unit tests and a future remote/multi-user path. Production
+// auth is the loopback + shared-secret model only.
 type RBACManager struct {
 	mu sync.RWMutex
 }

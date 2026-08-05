@@ -46,7 +46,6 @@ interface KairoWindow {
   };
   kairoConfig?: {
     agentUrl: string;
-    agentSecret?: string;
   };
 }
 
@@ -141,16 +140,23 @@ export class RuntimeConnectionService {
   @postConstruct()
   protected init(): void {
     const fromWindow = this.tryInitFromWindow();
+    const finishBootstrap = (): void => {
+      this.eagerFetchEndpoints();
+      this.refreshEventStreamAfterConfig();
+    };
     if (!fromWindow) {
       // Browser mode: Theia often serves index.html via sendFile, so the
       // HTML <script> inject may never run. Fetch same-origin config from
       // the Theia backend (KAIRO-QA-002), then discover endpoints.
       // After late bootstrap, reopen EventStream so status bar is not stuck
       // on a pre-config WS that opened with empty URL/secret (KAIRO-QA-004).
-      void this.bootstrapFromTheiaConfig().finally(() => {
-        this.eagerFetchEndpoints();
-        this.refreshEventStreamAfterConfig();
-      });
+      void this.bootstrapFromTheiaConfig().finally(finishBootstrap);
+      return;
+    }
+    if (!this.agentSecret()) {
+      // Browser/headless: URL from HTML inject or preload agentBaseUrl, but
+      // secret is fetched same-origin from /kairo-agent-secret (S1 fix).
+      void this.ensureAgentSecretFromBackend().finally(finishBootstrap);
       return;
     }
     this.eagerFetchEndpoints();
@@ -158,6 +164,7 @@ export class RuntimeConnectionService {
 
   /**
    * Apply agent URL/secret from Electron preload / injected globals.
+   * Browser secret is fetched later via /kairo-agent-secret when absent.
    * @returns true when a concrete agent URL was applied.
    */
   protected tryInitFromWindow(): boolean {
@@ -172,7 +179,10 @@ export class RuntimeConnectionService {
     }
     const kairoCfg = (window as unknown as KairoWindow).kairoConfig;
     if (kairoCfg && kairoCfg.agentUrl) {
-      this.initialize(kairoCfg.agentUrl, kairoCfg.agentSecret ?? '');
+      // Secret is never on kairoConfig; use __kairo.getSecret() only.
+      const getSecret = (window as unknown as KairoWindow).__kairo?.getSecret;
+      const secret = typeof getSecret === 'function' ? getSecret() : '';
+      this.initialize(kairoCfg.agentUrl, secret);
       return true;
     }
     // KAIRO-RC-WEB-015: allow ?kairoAgent= override; otherwise leave
@@ -189,8 +199,8 @@ export class RuntimeConnectionService {
   }
 
   /**
-   * Load agent URL/secret from Theia backend JSON endpoint.
-   * Safe to call on reconnect when the agent was restarted with a new secret.
+   * Load agent URL from Theia backend JSON endpoint (non-secret fields only).
+   * Secret comes from preload getSecret() or /kairo-agent-secret (browser).
    */
   async bootstrapFromTheiaConfig(): Promise<boolean> {
     try {
@@ -206,9 +216,10 @@ export class RuntimeConnectionService {
         }
         return false;
       }
-      const body = await res.json() as { agentUrl?: string; agentSecret?: string };
+      const body = await res.json() as { agentUrl?: string };
       if (body?.agentUrl) {
-        this.initialize(body.agentUrl, body.agentSecret ?? '');
+        const secret = await this.resolveAgentSecret();
+        this.initialize(body.agentUrl, secret);
         this.invalidateEndpoints();
         return true;
       }
@@ -221,6 +232,56 @@ export class RuntimeConnectionService {
         this.config = { baseUrl: DEFAULT_RUNTIME_BASE_URL };
       }
       return false;
+    }
+  }
+
+  /**
+   * When URL is already known (HTML inject / query param) but secret is
+   * missing, fetch it from the Theia backend same-origin endpoint.
+   */
+  protected async ensureAgentSecretFromBackend(): Promise<void> {
+    const secret = await this.resolveAgentSecret();
+    if (!secret || !this.config.baseUrl) {
+      return;
+    }
+    this.initialize(this.config.baseUrl, secret);
+    this.invalidateEndpoints();
+  }
+
+  /**
+   * Prefer Electron preload getSecret(); fall back to same-origin backend.
+   */
+  protected async resolveAgentSecret(): Promise<string> {
+    const kairo = (window as unknown as KairoWindow).__kairo;
+    if (typeof kairo?.getSecret === 'function') {
+      const fromPreload = kairo.getSecret();
+      if (fromPreload) {
+        return fromPreload;
+      }
+    }
+    const existing = this.agentSecret();
+    if (existing) {
+      return existing;
+    }
+    return this.fetchAgentSecretFromBackend();
+  }
+
+  /** Same-origin secret channel for browser/headless (not in page source). */
+  protected async fetchAgentSecretFromBackend(): Promise<string> {
+    try {
+      const res = await fetch('/kairo-agent-secret', {
+        method: 'GET',
+        credentials: 'same-origin',
+        cache: 'no-store',
+        headers: { Accept: 'application/json' },
+      });
+      if (!res.ok) {
+        return '';
+      }
+      const body = await res.json() as { secret?: string };
+      return body?.secret ?? '';
+    } catch {
+      return '';
     }
   }
 
@@ -480,8 +541,24 @@ export class RuntimeConnectionService {
       requestId: newRequestId(),
       payload: payload as unknown as RequestEnvelope['payload'],
     };
-    const url = this.url(endpoint, init);
     const method = methodOf(endpoint);
+    // BD-P1-3 / S2: GET/HEAD never send a body, so flatten a non-empty
+    // payload into query params (call-site `init.query` wins on key clash).
+    let requestInit = init;
+    if ((method === 'GET' || method === 'HEAD') && payload != null && typeof payload === 'object' && !Array.isArray(payload)) {
+      const fromPayload: Record<string, string | number | boolean | undefined> = {};
+      for (const [k, v] of Object.entries(payload as Record<string, unknown>)) {
+        if (v === undefined || v === null) continue;
+        if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') {
+          fromPayload[k] = v;
+        }
+      }
+      requestInit = {
+        ...init,
+        query: { ...fromPayload, ...init.query },
+      };
+    }
+    const url = this.url(endpoint, requestInit);
     const headers: Record<string, string> = {
       Accept: 'application/json',
       'X-Kairo-Request-Id': env.requestId,
@@ -598,10 +675,14 @@ export class RuntimeConnectionService {
     // early produces a reconnect loop that keeps the status bar at
     // "connecting…" forever.
     if (workspaceId) {
-      if (!this.workspaceId) {
+      // BD-P1-1: switching workspace must update this.workspaceId so the
+      // EventStream reconnects against the new workspace (closing alone
+      // left ensureEventStream() reopening with the stale id).
+      if (this.workspaceId !== workspaceId) {
+        if (this.internalEventStream) {
+          this.closeEventStream();
+        }
         this.workspaceId = workspaceId;
-      } else if (this.workspaceId !== workspaceId && this.internalEventStream) {
-        this.closeEventStream();
       }
       this.ensureEventStream();
     }
@@ -675,10 +756,15 @@ export class RuntimeConnectionService {
     if (this.workspaceId) {
       wsUrl += `?workspaceId=${encodeURIComponent(this.workspaceId)}`;
     }
-    this.internalEventStream = new EventStream(wsUrl, this.agentSecret(), this.sequence);
+    const stream = new EventStream(wsUrl, this.agentSecret(), this.sequence);
+    this.internalEventStream = stream;
 
-    // Wire up status forwarding.
+    // BD-P2-2: ignore status from a replaced/closed stream so a late
+    // "disconnected" from the old socket cannot clobber a new open one.
     this.internalEventStream.onStatus(s => {
+      if (this.internalEventStream !== stream) {
+        return;
+      }
       for (const fn of this.statusSubscribers) {
         fn(s);
       }
@@ -688,6 +774,9 @@ export class RuntimeConnectionService {
     // the single EventStream is forwarded to ALL registered
     // subscribers across all workspaceIds.
     this.internalEventStream.on('*', (e: WsEvent) => {
+      if (this.internalEventStream !== stream) {
+        return;
+      }
       this.sequence = (e as WsEventWithSequence).sequence ?? this.sequence;
       this.internalEventStream?.setSequence(this.sequence);
       for (const subs of this.subscribers.values()) {

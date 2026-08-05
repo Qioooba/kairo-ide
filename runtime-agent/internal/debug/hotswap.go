@@ -518,25 +518,22 @@ func (hsm *HotSwapManager) trimHistory() {
 // ── JDWP Commands for Hot Swap ────────────────────────────────────
 
 // BuildRedefineClassesCommand builds a JDWP VirtualMachine.RedefineClasses
-// command (cmdSet=1, cmd=18).
+// command (cmdSet=1, cmd=18) per the JPDA JDWP spec:
 //
-// Format:
+//	int classes
+//	Repeated classes times:
+//	  referenceTypeID refType
+//	  int classfile (byte count)
+//	  byte classbyte[classfile]
 //
-//	int:  class count
-//	[for each class:
-//	  byte: refTypeTag (1=class)
-//	  long: refTypeID
-//	  int:  classfile version (major.minor)
-//	  int:  byte count
-//	  byte[]: new class bytes]
+// RefTypeTag / ClassVersion on ClassRedefinition are metadata for callers;
+// they are NOT encoded in the wire payload.
 func BuildRedefineClassesCommand(classes []ClassRedefinition) []byte {
 	w := NewJDWPDataWriter()
 	w.WriteInt(int32(len(classes)))
 
 	for _, c := range classes {
-		w.WriteByte(c.RefTypeTag)
 		w.WriteObjectID(c.RefTypeID)
-		w.WriteInt(c.ClassVersion)
 		w.WriteInt(int32(len(c.ClassBytes)))
 		w.data = append(w.data, c.ClassBytes...)
 	}

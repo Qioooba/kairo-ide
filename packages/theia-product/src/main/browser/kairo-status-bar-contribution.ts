@@ -66,7 +66,7 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
   private isPlaceholderText(text: string): boolean {
     // Normalize Theia codicon prefix (e.g. "$(file-directory) ") and optional session suffix.
     const normalized = text.replace(/^\$\([^)]+\)\s*/, '').replace(/\s*·\s*.*$/, '').replace(/…$/, '');
-    return /(?:Project: \(no workspace\)|Project: \(not imported\)|JDK: -|JDK: crashed|JDK: not ready|JDK: stopped|JDK: uninitialized|Encoding: -|Build: -|Build: no record|Server: stopped|Server: disconnected|Server: connecting|Agent: disconnected|Agent: closed|Agent: connecting|HotReload: -|Debug: unknown|Debug: unavailable|Debug: terminated|Debug: none|SVN: not found|调试：无|项目：\(无工作区\)|项目：\(未导入\)|JDK：-|JDK：已崩溃|JDK：未就绪|JDK：已停止|编码：-|构建：-|构建：无记录|服务器：已停止|服务器：已断开|服务器：连接中…|代理：已断开|代理：已关闭|代理：连接中…|热重载：-|SVN：未找到)$/.test(normalized);
+    return /(?:Project: \(no workspace\)|Project: \(not imported\)|JDK: -|JDK: crashed|JDK: not ready|JDK: stopped|JDK: uninitialized|Encoding: -|Build: -|Build: no record|Server: stopped|Server: disconnected|Server: unavailable|Server: connecting|Agent: disconnected|Agent: closed|Agent: connecting|HotReload: -|Debug: unknown|Debug: unavailable|Debug: terminated|Debug: none|SVN: not found|调试：无|项目：\(无工作区\)|项目：\(未导入\)|JDK：-|JDK：已崩溃|JDK：未就绪|JDK：已停止|编码：-|构建：-|构建：无记录|服务器：已停止|服务器：已断开|服务器：不可用|服务器：连接中…|代理：已断开|代理：已关闭|代理：连接中…|热重载：-|SVN：未找到)$/.test(normalized);
   }
 
   /** Build a status-bar element class name that includes its logical group and optional placeholder marker. */
@@ -502,9 +502,11 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
       return;
     }
     const port = srv.httpPort ? `:${srv.httpPort}` : '';
-    const debugPort = srv.debugPort ? ` · JDWP:${srv.debugPort}` : '';
+    const debugPort = srv.debugPort ? `· JDWP:${srv.debugPort}` : '';
     const icon = srv.state === 'running' ? '$(server-process~spin)' : '$(server-process)';
-    const text = `${t('statusBar.server', { state: srv.state })} ${port}${debugPort}`.trim();
+    const extras = [port, debugPort].filter(Boolean).join(' ');
+    const label = t('statusBar.server', { state: srv.state });
+    const text = extras ? `${label} ${extras}` : label;
     setServerElement(`${icon} ${text}`, srv.debugPort
       ? t('statusBar.serverTooltipWithPorts', { state: srv.state, id: srv.id, debugPort: srv.debugPort })
       : t('statusBar.serverTooltipNoDebug', { state: srv.state, id: srv.id }), srv.state);
@@ -559,10 +561,11 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
     try {
       const list = await this.runtime.request('GET /api/v1/servers', undefined);
       const servers = Array.isArray(list) ? list as ServerInstance[] : [];
+      const workspaceId = this.workspaceContext.context?.workspaceId || this.runtime.workspace() || '';
       for (const srv of servers) {
         this.serverStore.upsertServer({
           id: srv.id,
-          workspaceId: '',
+          workspaceId,
           projectId: srv.projectId,
           state: srv.state,
           httpPort: srv.ports.http || 0,

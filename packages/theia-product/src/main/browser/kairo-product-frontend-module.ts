@@ -123,9 +123,7 @@ import {
   KAIRO_DEBUG_TOOLBAR_FACTORY_ID,
   KAIRO_DEBUG_CONSOLE_FACTORY_ID,
   KAIRO_DEBUG_WATCH_FACTORY_ID,
-  KAIRO_DEBUG_MODULE_SELECTOR_FACTORY_ID,
   KAIRO_DEBUG_CONDITION_EDITOR_FACTORY_ID,
-  KAIRO_DEBUG_HOTSWAP_STATUS_FACTORY_ID,
   KAIRO_DEBUG_DIAGNOSTICS_FACTORY_ID,
   KAIRO_BOOKMARKS_FACTORY_ID,
   KAIRO_SHORTCUT_CHEATSHEET_FACTORY_ID as _KAIRO_SHORTCUT_CHEATSHEET_FACTORY_ID,
@@ -137,6 +135,7 @@ import { KairoColdStartTimer, KairoCompletionTimer } from './kairo-cold-start-ti
 import { KairoSearchTimer } from './kairo-search-timer';
 import { KairoMemoryTracker } from './kairo-memory-tracker';
 import { KairoPerfDashboardWidget } from './kairo-perf-dashboard-widget';
+import { KairoPerfSampler } from './kairo-perf-sampler';
 import { KairoNavigationContribution } from './kairo-navigation-contribution';
 import { KairoScreenReaderService } from './kairo-screen-reader';
 import { KairoFocusManagement } from './kairo-focus-management';
@@ -148,9 +147,7 @@ import { KairoDebugToolbarWidget } from './debug-toolbar-widget';
 import { KairoDebugConsoleWidget } from './debug-console-widget';
 import { KairoDebugWatchWidget } from './debug-watch-widget';
 import { KairoDebugConfigService } from './debug-config-service';
-import { KairoDebugModuleSelectorWidget } from './debug-module-selector-widget';
 import { KairoDebugConditionEditorWidget } from './debug-condition-editor-widget';
-import { KairoDebugHotSwapStatusWidget } from './debug-hotswap-status-widget';
 import { DebugDiagnosticsWidget } from './debug-diagnostics-widget';
 import { KairoDebugToolWindowWidget } from './debug-tool-window-widget';
 import { KairoDebugHoverProvider } from './debug-hover-provider';
@@ -166,6 +163,8 @@ import { KairoIDEAWindowsKeymapContribution } from './kairo-idea-windows-keymap'
 import { KairoIDEAMacKeymapContribution } from './kairo-idea-mac-keymap';
 import { KairoIDEAMonacoKeymapContribution } from './kairo-idea-monaco-keymap';
 import { KairoIDEAMacMonacoKeymapContribution } from './kairo-idea-mac-monaco-keymap';
+import { KairoBrowserKeyboardGuardContribution } from './kairo-browser-keyboard-guard';
+import { KairoShellLayoutContribution } from './kairo-shell-layout-contribution';
 // Import plugin-ext frontend module to initialize the VS Code Extension Host
 import '@theia/plugin-ext/lib/main/browser/plugin-ext-frontend-module';
 
@@ -191,9 +190,7 @@ export {
   KAIRO_DEBUG_TOOLBAR_FACTORY_ID,
   KAIRO_DEBUG_CONSOLE_FACTORY_ID,
   KAIRO_DEBUG_WATCH_FACTORY_ID,
-  KAIRO_DEBUG_MODULE_SELECTOR_FACTORY_ID,
   KAIRO_DEBUG_CONDITION_EDITOR_FACTORY_ID,
-  KAIRO_DEBUG_HOTSWAP_STATUS_FACTORY_ID,
   KAIRO_DEBUG_DIAGNOSTICS_FACTORY_ID,
   KAIRO_BOOKMARKS_FACTORY_ID,
   KAIRO_SHORTCUT_CHEATSHEET_FACTORY_ID,
@@ -650,6 +647,8 @@ export function bindKairoFrontend(bind: interfaces.Bind, unbind?: interfaces.Unb
     id: KAIRO_PERF_FACTORY_ID,
     createWidget: () => ctx.container.get(KairoPerfDashboardWidget),
   })).inSingletonScope();
+  bind(KairoPerfSampler).toSelf().inSingletonScope();
+  safeContribution(CommandContribution, KairoPerfSampler, 'KairoPerfSampler:cmd');
 
   // ── Kairo Remote Development ────────────────────────────────
   bind(KairoRemoteAgentService).toSelf().inSingletonScope();
@@ -712,20 +711,10 @@ export function bindKairoFrontend(bind: interfaces.Bind, unbind?: interfaces.Unb
     id: KAIRO_DEBUG_WATCH_FACTORY_ID,
     createWidget: () => ctx.container.get(KairoDebugWatchWidget),
   })).inSingletonScope();
-  bind(KairoDebugModuleSelectorWidget).toSelf();
-  bind(WidgetFactory).toDynamicValue(ctx => ({
-    id: KAIRO_DEBUG_MODULE_SELECTOR_FACTORY_ID,
-    createWidget: () => ctx.container.get(KairoDebugModuleSelectorWidget),
-  })).inSingletonScope();
   bind(KairoDebugConditionEditorWidget).toSelf();
   bind(WidgetFactory).toDynamicValue(ctx => ({
     id: KAIRO_DEBUG_CONDITION_EDITOR_FACTORY_ID,
     createWidget: () => ctx.container.get(KairoDebugConditionEditorWidget),
-  })).inSingletonScope();
-  bind(KairoDebugHotSwapStatusWidget).toSelf();
-  bind(WidgetFactory).toDynamicValue(ctx => ({
-    id: KAIRO_DEBUG_HOTSWAP_STATUS_FACTORY_ID,
-    createWidget: () => ctx.container.get(KairoDebugHotSwapStatusWidget),
   })).inSingletonScope();
   // Debug Diagnostics Widget
   bind(DebugDiagnosticsWidget).toSelf().inSingletonScope();
@@ -783,6 +772,13 @@ export function bindKairoFrontend(bind: interfaces.Bind, unbind?: interfaces.Unb
   safeContribution(FrontendApplicationContribution, KairoIDEAMonacoKeymapContribution, 'KairoIDEAMonacoKeymapContribution');
   bind(KairoIDEAMacMonacoKeymapContribution).toSelf().inSingletonScope();
   safeContribution(FrontendApplicationContribution, KairoIDEAMacMonacoKeymapContribution, 'KairoIDEAMacMonacoKeymapContribution');
+
+  // Browser-only: preventDefault for IDE chords Chrome would otherwise steal,
+  // and keep the shell/status-bar geometry correct on 2K / HiDPI screens.
+  bind(KairoBrowserKeyboardGuardContribution).toSelf().inSingletonScope();
+  safeContribution(FrontendApplicationContribution, KairoBrowserKeyboardGuardContribution, 'KairoBrowserKeyboardGuardContribution');
+  bind(KairoShellLayoutContribution).toSelf().inSingletonScope();
+  safeContribution(FrontendApplicationContribution, KairoShellLayoutContribution, 'KairoShellLayoutContribution');
 
   // ── Project Structure Dialog ───────────────────────────────
   bind(ProjectStructureContribution).toSelf().inSingletonScope();

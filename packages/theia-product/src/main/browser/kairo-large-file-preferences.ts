@@ -10,27 +10,27 @@ export const kairoLargeFilePreferenceSchema: PreferenceSchema = {
     },
     'kairo.largeFiles.largeCharacterCount': {
       type: 'integer',
-      default: 2_000_000,
+      default: 5_000_000,
       minimum: 100_000,
       description: 'Character count that enables large-file mode.',
     },
     'kairo.largeFiles.largeLineCount': {
       type: 'integer',
-      default: 20_000,
+      default: 100_000,
       minimum: 1_000,
       description: 'Line count that enables large-file mode.',
     },
     'kairo.largeFiles.hugeCharacterCount': {
       type: 'integer',
-      default: 10_000_000,
+      default: 50_000_000,
       minimum: 500_000,
-      description: 'Character count that enables lightweight plaintext mode.',
+      description: 'Character count that enables lightweight mode for non-code files.',
     },
     'kairo.largeFiles.hugeLineCount': {
       type: 'integer',
-      default: 80_000,
+      default: 500_000,
       minimum: 5_000,
-      description: 'Line count that enables lightweight plaintext mode.',
+      description: 'Line count that enables lightweight mode for non-code files.',
     },
   },
 };

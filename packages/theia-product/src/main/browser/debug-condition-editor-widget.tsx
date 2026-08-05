@@ -327,21 +327,44 @@ export class KairoDebugConditionEditorWidget extends ReactWidget {
     }
 
     protected validateCondition(condition: string): boolean {
-        if (!condition.trim()) return true;
+        const expr = condition.trim();
+        if (!expr) return true;
 
-        // Check balanced parentheses
+        // Balanced parentheses / brackets (ignore contents of string literals)
         let depth = 0;
-        for (const ch of condition) {
+        let bracket = 0;
+        let inSingle = false;
+        let inDouble = false;
+        let escaped = false;
+        for (const ch of expr) {
+            if (escaped) { escaped = false; continue; }
+            if (ch === '\\' && (inSingle || inDouble)) { escaped = true; continue; }
+            if (ch === "'" && !inDouble) { inSingle = !inSingle; continue; }
+            if (ch === '"' && !inSingle) { inDouble = !inDouble; continue; }
+            if (inSingle || inDouble) continue;
             if (ch === '(') depth++;
-            if (ch === ')') depth--;
-            if (depth < 0) return false;
+            else if (ch === ')') { depth--; if (depth < 0) return false; }
+            else if (ch === '[') bracket++;
+            else if (ch === ']') { bracket--; if (bracket < 0) return false; }
         }
-        if (depth !== 0) return false;
+        if (depth !== 0 || bracket !== 0 || inSingle || inDouble) return false;
 
-        // Check for valid operators
-        const hasValidOps = /[=!<>]=/.test(condition) || /&&/.test(condition) || /\|\|/.test(condition) || /^!/.test(condition);
-        const hasSimpleExpr = /^\s*\w+\s*$/.test(condition); // Just a variable name
-        return hasValidOps || hasSimpleExpr || condition.trim().length > 0;
+        // Whitelist Java-like expression characters
+        if (!/^[\w\s.\[\]()"'!=<>&|+\-*/%?:^,]+$/.test(expr)) return false;
+
+        // Must contain at least one identifier, number, or boolean/null literal
+        if (!/\b(?:true|false|null|\d+[lLfFdD]?|[A-Za-z_]\w*)\b/.test(expr)) return false;
+
+        // Bare identifier / boolean / null is valid
+        if (/^(?:true|false|null|[A-Za-z_]\w*)$/.test(expr)) return true;
+
+        // Otherwise require a comparison, logical op, unary !, call, or member access
+        const hasCompare = /[=!<>]=|[<>]/.test(expr);
+        const hasLogic = /&&|\|\|/.test(expr);
+        const hasUnaryNot = /(?:^|[^!=<>])!(?!=)/.test(expr) || /^!/.test(expr);
+        const hasCallOrMember = /\.\w+|\w+\s*\(/.test(expr);
+        const hasArithmetic = /[+\-*/%]/.test(expr);
+        return hasCompare || hasLogic || hasUnaryNot || hasCallOrMember || hasArithmetic;
     }
 
     protected apply(): void {

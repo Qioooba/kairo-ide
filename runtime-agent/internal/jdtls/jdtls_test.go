@@ -1011,6 +1011,53 @@ func TestDistributionStatus(t *testing.T) {
 	}
 }
 
+func TestManager_DistributionStatus_NotInstalled(t *testing.T) {
+	m := New(t.TempDir(), t.TempDir(), "", false, "", nil)
+	st := m.DistributionStatus()
+	if st.Installed {
+		t.Fatal("expected installed=false")
+	}
+	if st.Source != "none" {
+		t.Errorf("source = %q, want none", st.Source)
+	}
+	if st.Message == "" {
+		t.Error("expected message when not installed")
+	}
+}
+
+func TestManager_DistributionStatus_WithReport(t *testing.T) {
+	dataDir := t.TempDir()
+	bundled := t.TempDir()
+	home := filepath.Join(bundled, "jdtls")
+	if err := os.MkdirAll(filepath.Join(home, "plugins"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	launcher := filepath.Join(home, "plugins", "org.eclipse.equinox.launcher_1.6.400.jar")
+	if err := os.WriteFile(launcher, []byte("jar"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rep := &InstallReport{
+		Version:     "1.55.0",
+		Home:        home,
+		LauncherJAR: launcher,
+		ArchiveName: "(pre-bundled)",
+	}
+	if err := writeInstallReport(dataDir, rep); err != nil {
+		t.Fatal(err)
+	}
+	m := New(dataDir, bundled, "", false, "", nil)
+	st := m.DistributionStatus()
+	if !st.Installed {
+		t.Fatalf("expected installed=true got %+v", st)
+	}
+	if st.Source != "pre-bundled" {
+		t.Errorf("source = %q, want pre-bundled", st.Source)
+	}
+	if st.LauncherJAR != launcher {
+		t.Errorf("launcherJar = %q", st.LauncherJAR)
+	}
+}
+
 func TestInstallReport(t *testing.T) {
 	rep := InstallReport{
 		Version:       "1.0.0",

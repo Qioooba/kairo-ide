@@ -9,10 +9,11 @@
 
 import { injectable, inject } from '@theia/core/shared/inversify';
 import { execFile, ChildProcess } from 'node:child_process';
+import { promisify } from 'node:util';
+import { randomUUID } from 'node:crypto';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
-import { promisify } from 'node:util';
 import { ILogger } from '@theia/core/lib/common/logger';
 import { Emitter, Event } from '@theia/core/lib/common/event';
 import {
@@ -40,6 +41,22 @@ import {
 import { toWcRelativePath } from '../browser/svn-path-utils';
 
 const execFileAsync = promisify(execFile);
+
+/** Force C locale so human-readable svn messages stay English for parsers that need them. */
+function svnEnv(): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    LANG: 'C',
+    LC_ALL: 'C',
+    LANGUAGE: 'C',
+  };
+}
+
+/** Append `--` before path args so filenames starting with `-` are not treated as options. */
+function withPathArgs(base: string[], files: string[]): string[] {
+  if (!files.length) return base;
+  return [...base, '--', ...files];
+}
 
 const WINDOWS_CANDIDATE_PATHS = [
   'C:\\Program Files\\TortoiseSVN\\bin\\svn.exe',
@@ -83,17 +100,36 @@ interface QueuedCommand {
     trustServerCert?: boolean;
   };
   process?: ChildProcess;
+  /** Set when cancelled so the exec callback does not double-settle. */
+  cancelled?: boolean;
+  /** True after resolve/reject — prevents cancel/exit double-settle. */
+  settled?: boolean;
 }
 
+/**
+ * Per-WC queue (VC-P3-2): FIFO pending list, concurrent reads (cap),
+ * exclusive writes. Writes never jump ahead of earlier reads, and a
+ * write never starts while reads are still active.
+ */
 interface WcQueue {
-  writeQueue: QueuedCommand[];
+  pending: QueuedCommand[];
   activeReadCount: number;
   activeWrite: QueuedCommand | null;
+  /** All in-flight commands keyed by id (for cancel). */
+  activeById: Map<string, QueuedCommand>;
 }
 
 const READ_CONCURRENCY_LIMIT = 3;
 const DEFAULT_TIMEOUT = 300000;
 const STATUS_TIMEOUT = 10000;
+
+export class SvnCommandCancelledError extends Error {
+  readonly code = 'SVN_CANCELLED';
+  constructor(commandId: string, message = `SVN command cancelled: ${commandId}`) {
+    super(message);
+    this.name = 'SvnCommandCancelledError';
+  }
+}
 
 @injectable()
 export class SvnBackendServiceImpl implements SvnBackendService {
@@ -302,14 +338,14 @@ export class SvnBackendServiceImpl implements SvnBackendService {
   }
 
   // ---------------------------------------------------------------------------
-  // Command queue + exec
+  // Command queue + exec (VC-P3-2: fair FIFO + cancel)
   // ---------------------------------------------------------------------------
 
   async $exec(args: string[], cwd: string, type: 'read' | 'write'): Promise<CommandResult> {
     const wcRoot = this.getWcRootForCwd(cwd);
     return new Promise<CommandResult>((resolve, reject) => {
       const cmd: QueuedCommand = {
-        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        id: randomUUID(),
         args,
         cwd,
         type,
@@ -320,6 +356,48 @@ export class SvnBackendServiceImpl implements SvnBackendService {
     });
   }
 
+  async $cancel(commandId: string): Promise<boolean> {
+    for (const [wcRoot, queue] of this.queues) {
+      const pendingIdx = queue.pending.findIndex(c => c.id === commandId);
+      if (pendingIdx >= 0) {
+        const [cmd] = queue.pending.splice(pendingIdx, 1);
+        this.rejectCancelled(cmd);
+        this.processNext(wcRoot);
+        return true;
+      }
+      const active = queue.activeById.get(commandId);
+      if (active) {
+        this.killCommand(active, queue, wcRoot);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  async $cancelAll(cwd?: string): Promise<number> {
+    let cancelled = 0;
+    const roots = cwd
+      ? [this.getWcRootForCwd(cwd)]
+      : [...this.queues.keys()];
+    for (const wcRoot of roots) {
+      const queue = this.queues.get(wcRoot);
+      if (!queue) continue;
+      const pending = queue.pending.splice(0, queue.pending.length);
+      for (const cmd of pending) {
+        this.rejectCancelled(cmd);
+        cancelled++;
+      }
+      const active = [...queue.activeById.values()];
+      for (const cmd of active) {
+        if (this.killCommand(cmd, queue, wcRoot)) {
+          cancelled++;
+        }
+      }
+      this.processNext(wcRoot);
+    }
+    return cancelled;
+  }
+
   protected async execXml<T>(
     args: string[], cwd: string, parser: (xml: string) => T,
   ): Promise<T> {
@@ -327,51 +405,98 @@ export class SvnBackendServiceImpl implements SvnBackendService {
     return parser(r.stdout);
   }
 
-  protected enqueueCommand(wcRoot: string, cmd: QueuedCommand): void {
-    if (!this.queues.has(wcRoot)) {
-      this.queues.set(wcRoot, { writeQueue: [], activeReadCount: 0, activeWrite: null });
+  protected ensureQueue(wcRoot: string): WcQueue {
+    let queue = this.queues.get(wcRoot);
+    if (!queue) {
+      queue = {
+        pending: [],
+        activeReadCount: 0,
+        activeWrite: null,
+        activeById: new Map(),
+      };
+      this.queues.set(wcRoot, queue);
     }
-    const queue = this.queues.get(wcRoot)!;
-    if (cmd.type === 'read') {
-      if (queue.activeWrite === null && queue.activeReadCount < READ_CONCURRENCY_LIMIT) {
-        this.executeCommand(cmd, wcRoot);
-      } else {
-        queue.writeQueue.push({
-          ...cmd,
-          resolve: (r) => { cmd.resolve(r); this.processNext(wcRoot); },
-          reject: (e) => { cmd.reject(e); this.processNext(wcRoot); },
-        });
-      }
-    } else {
-      queue.writeQueue.push(cmd);
-      this.processNext(wcRoot);
+    return queue;
+  }
+
+  protected enqueueCommand(wcRoot: string, cmd: QueuedCommand): void {
+    const queue = this.ensureQueue(wcRoot);
+    queue.pending.push(cmd);
+    this.processNext(wcRoot);
+  }
+
+  /**
+   * Fair scheduler: drain leading reads up to concurrency; start a write
+   * only when it is at the head of the FIFO and no reads are active.
+   * Writes never jump ahead of earlier-queued reads (VC-P3-2).
+   */
+  protected processNext(wcRoot: string): void {
+    const queue = this.queues.get(wcRoot);
+    if (!queue || queue.activeWrite) return;
+
+    while (
+      queue.activeReadCount < READ_CONCURRENCY_LIMIT
+      && queue.pending.length > 0
+      && queue.pending[0].type === 'read'
+    ) {
+      const cmd = queue.pending.shift()!;
+      this.executeCommand(cmd, wcRoot);
+    }
+
+    if (
+      queue.activeReadCount === 0
+      && !queue.activeWrite
+      && queue.pending.length > 0
+      && queue.pending[0].type === 'write'
+    ) {
+      const cmd = queue.pending.shift()!;
+      queue.activeWrite = cmd;
+      this.executeCommand(cmd, wcRoot);
     }
   }
 
-  protected processNext(wcRoot: string): void {
-    const queue = this.queues.get(wcRoot);
-    if (!queue) return;
-    if (queue.activeWrite === null) {
-      const writeIdx = queue.writeQueue.findIndex(c => c.type === 'write');
-      if (writeIdx >= 0) {
-        const cmd = queue.writeQueue.splice(writeIdx, 1)[0];
-        queue.activeWrite = cmd;
-        this.executeCommand(cmd, wcRoot);
-        return;
-      }
-    }
-    while (queue.activeReadCount < READ_CONCURRENCY_LIMIT && queue.writeQueue.length > 0) {
-      const readIdx = queue.writeQueue.findIndex(c => c.type === 'read');
-      if (readIdx < 0) break;
-      const cmd = queue.writeQueue.splice(readIdx, 1)[0];
-      this.executeCommand(cmd, wcRoot);
+  protected rejectCancelled(cmd: QueuedCommand): void {
+    if (cmd.settled || cmd.cancelled) return;
+    cmd.cancelled = true;
+    cmd.settled = true;
+    const err = new SvnCommandCancelledError(cmd.id);
+    this.onCommandEmitter.fire({ id: cmd.id, kind: 'error', args: cmd.args, cwd: cmd.cwd });
+    this.client?.onCommandEvent?.({ id: cmd.id, kind: 'error', args: cmd.args, cwd: cmd.cwd });
+    cmd.reject(err);
+  }
+
+  /** Kill an in-flight command. Returns false if already settled/cancelled. */
+  protected killCommand(cmd: QueuedCommand, queue: WcQueue, wcRoot: string): boolean {
+    if (cmd.settled || cmd.cancelled) return false;
+    cmd.cancelled = true;
+    cmd.settled = true;
+    try {
+      cmd.process?.kill();
+    } catch { /* ignore */ }
+    this.releaseActive(cmd, queue);
+    this.onCommandEmitter.fire({ id: cmd.id, kind: 'error', args: cmd.args, cwd: cmd.cwd });
+    this.client?.onCommandEvent?.({ id: cmd.id, kind: 'error', args: cmd.args, cwd: cmd.cwd });
+    cmd.reject(new SvnCommandCancelledError(cmd.id));
+    this.processNext(wcRoot);
+    return true;
+  }
+
+  protected releaseActive(cmd: QueuedCommand, queue: WcQueue): void {
+    queue.activeById.delete(cmd.id);
+    if (cmd.type === 'read') {
+      if (queue.activeReadCount > 0) queue.activeReadCount--;
+    } else if (queue.activeWrite?.id === cmd.id) {
+      queue.activeWrite = null;
     }
   }
 
   protected executeCommand(cmd: QueuedCommand, wcRoot: string): void {
     const queue = this.queues.get(wcRoot);
     if (!queue) { cmd.reject(new Error('Queue not found')); return; }
+    if (cmd.cancelled) return;
+
     if (cmd.type === 'read') queue.activeReadCount++;
+    queue.activeById.set(cmd.id, cmd);
 
     const svnPath = this.cachedInstallation?.path || 'svn';
     const args = [...cmd.args];
@@ -401,18 +526,17 @@ export class SvnBackendServiceImpl implements SvnBackendService {
     this.client?.onCommandEvent?.({ id: cmd.id, kind: 'start', args: cmd.args, cwd: cmd.cwd });
     this.logger.info(`[svn-backend] exec ${svnPath} ${args.join(' ')} (cwd=${cmd.cwd})`);
 
-    const child = execFile(svnPath, args, {
-      cwd: cmd.cwd,
-      timeout,
-      maxBuffer: 50 * 1024 * 1024,
-      windowsHide: true,
-    }, (error, stdoutData, stderrData) => {
+    const finish = (error: Error | null | undefined, stdoutData: string, stderrData: string): void => {
       if (exited) return;
       exited = true;
+      if (cmd.settled || cmd.cancelled) {
+        this.processNext(wcRoot);
+        return;
+      }
+      cmd.settled = true;
+      this.releaseActive(cmd, queue);
       stdout = stdoutData || '';
       stderr = stderrData || '';
-      if (cmd.type === 'read') queue.activeReadCount--;
-      else queue.activeWrite = null;
 
       if (error && (error as any).code !== 0) {
         const errorCode = (error as any).code;
@@ -431,19 +555,22 @@ export class SvnBackendServiceImpl implements SvnBackendService {
         cmd.resolve({ stdout, stderr, exitCode: 0 });
       }
       this.processNext(wcRoot);
+    };
+
+    const child = execFile(svnPath, args, {
+      cwd: cmd.cwd,
+      timeout,
+      maxBuffer: 50 * 1024 * 1024,
+      windowsHide: true,
+      env: svnEnv(),
+    }, (error, stdoutData, stderrData) => {
+      finish(error, stdoutData || '', stderrData || '');
     });
     cmd.process = child;
     child.stdout?.on('data', (d: Buffer) => { stdout += d.toString(); });
     child.stderr?.on('data', (d: Buffer) => { stderr += d.toString(); });
     child.on('error', (err) => {
-      if (exited) return;
-      exited = true;
-      if (cmd.type === 'read') queue.activeReadCount--;
-      else queue.activeWrite = null;
-      this.onCommandEmitter.fire({ id: cmd.id, kind: 'error', args: cmd.args, cwd: cmd.cwd });
-      this.client?.onCommandEvent?.({ id: cmd.id, kind: 'error', args: cmd.args, cwd: cmd.cwd });
-      cmd.reject(err);
-      this.processNext(wcRoot);
+      finish(err, stdout, stderr);
     });
   }
 
@@ -477,7 +604,7 @@ export class SvnBackendServiceImpl implements SvnBackendService {
 
   async $getFileStatus(cwd: string, relPath: string): Promise<SvnStatus | undefined> {
     try {
-      const list = await this.execXml(['status', '--no-ignore', relPath], cwd, parseStatusXml);
+      const list = await this.execXml(withPathArgs(['status', '--no-ignore'], [relPath]), cwd, parseStatusXml);
       const entry = list[0];
       if (!entry) return undefined;
       return { ...entry, path: toWcRelativePath(entry.path, cwd) };
@@ -485,22 +612,21 @@ export class SvnBackendServiceImpl implements SvnBackendService {
   }
 
   async $commit(cwd: string, files: string[], message: string): Promise<CommandResult> {
-    return this.$exec(['commit', '-m', message, ...files], cwd, 'write');
+    return this.$exec(withPathArgs(['commit', '-m', message], files), cwd, 'write');
   }
 
   async $update(cwd: string, files: string[], revision?: string): Promise<CommandResult> {
     const args: string[] = ['update'];
     if (revision) args.push('-r', revision);
-    args.push(...files);
-    return this.$exec(args, cwd, 'write');
+    return this.$exec(withPathArgs(args, files), cwd, 'write');
   }
 
   async $add(cwd: string, files: string[]): Promise<CommandResult> {
-    return this.$exec(['add', '--parents', ...files], cwd, 'write');
+    return this.$exec(withPathArgs(['add', '--parents'], files), cwd, 'write');
   }
 
   async $revert(cwd: string, files: string[]): Promise<CommandResult> {
-    return this.$exec(['revert', ...files], cwd, 'write');
+    return this.$exec(withPathArgs(['revert'], files), cwd, 'write');
   }
 
   async $cleanup(cwd: string): Promise<CommandResult> {
@@ -510,27 +636,24 @@ export class SvnBackendServiceImpl implements SvnBackendService {
   async $delete(cwd: string, files: string[], force = false): Promise<CommandResult> {
     const args = ['delete'];
     if (force) args.push('--force');
-    args.push(...files);
-    return this.$exec(args, cwd, 'write');
+    return this.$exec(withPathArgs(args, files), cwd, 'write');
   }
 
   async $resolve(cwd: string, files: string[], choice: SvnResolveChoice): Promise<CommandResult> {
-    return this.$exec(['resolve', '--accept', choice, ...files], cwd, 'write');
+    return this.$exec(withPathArgs(['resolve', '--accept', choice], files), cwd, 'write');
   }
 
   async $lock(cwd: string, files: string[], message?: string, steal = false): Promise<CommandResult> {
     const args = ['lock'];
     if (message) args.push('-m', message);
     if (steal) args.push('--force');
-    args.push(...files);
-    return this.$exec(args, cwd, 'write');
+    return this.$exec(withPathArgs(args, files), cwd, 'write');
   }
 
   async $unlock(cwd: string, files: string[], breakLock = false): Promise<CommandResult> {
     const args = ['unlock'];
     if (breakLock) args.push('--force');
-    args.push(...files);
-    return this.$exec(args, cwd, 'write');
+    return this.$exec(withPathArgs(args, files), cwd, 'write');
   }
 
   async $ignore(cwd: string, patterns: string[]): Promise<CommandResult> {
@@ -572,7 +695,7 @@ export class SvnBackendServiceImpl implements SvnBackendService {
     try {
       const args = ['log', '-l', String(limit)];
       if (revision) args.push('-r', revision);
-      return await this.execXml([...args, ...files], cwd, parseLogXml);
+      return await this.execXml(withPathArgs(args, files), cwd, parseLogXml);
     } catch { return []; }
   }
 
@@ -588,8 +711,7 @@ export class SvnBackendServiceImpl implements SvnBackendService {
       // execXml appends --xml; do not pass it here (would duplicate the flag).
       const args = ['blame'];
       if (revision) args.push('-r', revision);
-      args.push(relPath);
-      return await this.execXml(args, cwd, parseBlameXml);
+      return await this.execXml(withPathArgs(args, [relPath]), cwd, parseBlameXml);
     } catch { return []; }
   }
 
@@ -597,8 +719,7 @@ export class SvnBackendServiceImpl implements SvnBackendService {
     try {
       const args = ['diff'];
       if (revision) args.push('-r', revision);
-      args.push(...files);
-      const r = await this.$exec(args, cwd, 'read');
+      const r = await this.$exec(withPathArgs(args, files), cwd, 'read');
       return { content: r.stdout };
     } catch (e: any) {
       return { content: e.stdout || '' };
@@ -618,16 +739,17 @@ export class SvnBackendServiceImpl implements SvnBackendService {
   }
 
   async $getFileAtRevision(cwd: string, relPath: string, revision: string | number): Promise<CommandResult> {
-    return this.$exec(['cat', '-r', String(revision), relPath], cwd, 'read');
+    return this.$exec(withPathArgs(['cat', '-r', String(revision)], [relPath]), cwd, 'read');
   }
 
   async $exportAtRevision(cwd: string, relPath: string, revision: string | number, outPath: string): Promise<CommandResult> {
-    const args = ['export', '-r', String(revision), '--force', relPath, outPath];
+    const args = withPathArgs(['export', '-r', String(revision), '--force'], [relPath]);
+    args.push(outPath);
     return this.$exec(args, cwd, 'read');
   }
 
   async $revertToRevision(cwd: string, relPath: string, revision: string | number): Promise<CommandResult> {
     // svn merge -r HEAD:revision path  → bring file back to that revision
-    return this.$exec(['merge', '-r', `HEAD:${revision}`, relPath], cwd, 'write');
+    return this.$exec(withPathArgs(['merge', '-r', `HEAD:${revision}`], [relPath]), cwd, 'write');
   }
 }

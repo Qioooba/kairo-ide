@@ -1,3 +1,5 @@
+//go:build unwired
+
 // Package security implements SSO / OIDC integration primitives for the
 // Kairo IDE runtime agent. It supports OIDC authorization code flow and
 // SAML 2.0 authentication.
@@ -67,6 +69,10 @@ type OIDCClaims struct {
 
 // SSOManager manages OIDC authentication flows. It is safe for
 // concurrent use.
+//
+// UNWIRED (GO-P3-2): never constructed by bootstrap / api.Server —
+// kept for unit tests and a future remote identity path. Production
+// auth is the loopback + shared-secret model only.
 type SSOManager struct {
 	mu  sync.RWMutex
 	cfg OIDCConfig

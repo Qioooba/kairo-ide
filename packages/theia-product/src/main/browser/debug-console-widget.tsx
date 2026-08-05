@@ -10,8 +10,10 @@ import * as React from 'react';
 import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import { Emitter, Event } from '@theia/core/lib/common/event';
+import { DisposableCollection } from '@theia/core/lib/common/disposable';
 import { DebugSessionManager } from '@theia/debug/lib/browser/debug-session-manager';
 import type { DebugSession } from '@theia/debug/lib/browser/debug-session';
+import type { DebugProtocol } from '@vscode/debugprotocol';
 import { KairoI18nService, type KairoI18nKey } from '@kairo/i18n';
 
 export const KAIRO_DEBUG_CONSOLE_FACTORY_ID = 'kairo-debug-console';
@@ -45,6 +47,8 @@ export interface ConsoleState {
     error: string | null;
     sessionId: string | undefined;
 }
+
+const MAX_CONSOLE_ENTRIES = 1000;
 
 /* ------------------------------------------------------------------ */
 /*  React Component                                                     */
@@ -199,6 +203,7 @@ export class KairoDebugConsoleWidget extends ReactWidget {
     protected readonly i18n!: KairoI18nService;
 
     static nextEntryId = 0;
+    static readonly MAX_ENTRIES = MAX_CONSOLE_ENTRIES;
 
     protected state: ConsoleState = {
         entries: [],
@@ -211,6 +216,7 @@ export class KairoDebugConsoleWidget extends ReactWidget {
     };
     protected readonly onStateChangeEmitter = new Emitter<ConsoleState>();
     readonly onDidStateChange: Event<ConsoleState> = this.onStateChangeEmitter.event;
+    protected readonly outputDisposables = new DisposableCollection();
 
     @postConstruct()
     protected init(): void {
@@ -224,11 +230,34 @@ export class KairoDebugConsoleWidget extends ReactWidget {
         this.addClass('kairo-widget');
         this.update();
 
-        this.sessionManager.onDidDestroyDebugSession(() => {
+        this.toDispose.push(this.outputDisposables);
+        this.toDispose.push(this.sessionManager.onDidCreateDebugSession(session => {
+            this.attachOutputListener(session);
+        }));
+        this.toDispose.push(this.sessionManager.onDidDestroyDebugSession(() => {
             if (this.state.entries.length > 0) {
                 this.addEntry({ kind: 'info', text: t('widget.debug.console.sessionEnded') });
             }
-        });
+        }));
+        for (const session of this.sessionManager.sessions) {
+            this.attachOutputListener(session);
+        }
+    }
+
+    protected attachOutputListener(session: DebugSession): void {
+        this.outputDisposables.push(session.on('output', event => this.handleDapOutput(event)));
+    }
+
+    protected handleDapOutput(event: DebugProtocol.OutputEvent): void {
+        const output = event.body?.output;
+        if (output == null || output === '') return;
+        const category = event.body.category;
+        if (category === 'telemetry') return;
+        let kind: ConsoleMessageKind = 'stdout';
+        if (category === 'stderr') kind = 'stderr';
+        else if (category === 'console' || category === 'important') kind = 'info';
+        else if (category === 'stdout' || !category) kind = 'stdout';
+        this.addEntry({ kind, text: output.replace(/\r?\n$/, '') });
     }
 
     protected onAfterShow(): void {
@@ -418,7 +447,11 @@ export class KairoDebugConsoleWidget extends ReactWidget {
 
     protected addEntry(entry: Omit<ConsoleEntry, 'id' | 'timestamp'>): void {
         const id = ++KairoDebugConsoleWidget.nextEntryId;
-        this.state.entries.push({ ...entry, id, timestamp: Date.now() });
+        const next = [...this.state.entries, { ...entry, id, timestamp: Date.now() }];
+        const entries = next.length > KairoDebugConsoleWidget.MAX_ENTRIES
+            ? next.slice(-KairoDebugConsoleWidget.MAX_ENTRIES)
+            : next;
+        this.setState({ entries });
     }
 
     protected setState(partial: Partial<ConsoleState>): void {

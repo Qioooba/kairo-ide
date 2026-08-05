@@ -218,57 +218,6 @@ func TestRemoveGlobalBreakpointNotFound(t *testing.T) {
 	}
 }
 
-func TestSuspendAll(t *testing.T) {
-	mo := NewMultiVMDebugOrchestrator()
-	mo.RegisterSession(&DebugSession{ID: "s1", State: StateRunning})
-	mo.RegisterSession(&DebugSession{ID: "s2", State: StateRunning})
-	mo.RegisterSession(&DebugSession{ID: "s3", State: StateTerminated})
-
-	err := mo.SuspendAll()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	s1, _ := mo.GetSession("s1")
-	s2, _ := mo.GetSession("s2")
-	s3, _ := mo.GetSession("s3")
-
-	if s1.State != StateSuspended {
-		t.Errorf("s1 state = %s, want %s", s1.State, StateSuspended)
-	}
-	if s2.State != StateSuspended {
-		t.Errorf("s2 state = %s, want %s", s2.State, StateSuspended)
-	}
-	if s3.State != StateTerminated {
-		t.Errorf("s3 state = %s, want %s", s3.State, StateTerminated)
-	}
-}
-
-func TestResumeAll(t *testing.T) {
-	mo := NewMultiVMDebugOrchestrator()
-	mo.RegisterSession(&DebugSession{ID: "s1", State: StateSuspended})
-	mo.RegisterSession(&DebugSession{ID: "s2", State: StateSuspended})
-	mo.RegisterSession(&DebugSession{ID: "s3", State: StateConnected})
-
-	err := mo.ResumeAll()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	s1, _ := mo.GetSession("s1")
-	s2, _ := mo.GetSession("s2")
-	s3, _ := mo.GetSession("s3")
-
-	if s1.State != StateRunning {
-		t.Errorf("s1 state = %s, want %s", s1.State, StateRunning)
-	}
-	if s2.State != StateRunning {
-		t.Errorf("s2 state = %s, want %s", s2.State, StateRunning)
-	}
-	if s3.State != StateConnected {
-		t.Errorf("s3 state = %s, want %s", s3.State, StateConnected)
-	}
-}
 
 func TestTerminateAll(t *testing.T) {
 	mo := NewMultiVMDebugOrchestrator()

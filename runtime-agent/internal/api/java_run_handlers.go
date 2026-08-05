@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -36,6 +37,7 @@ type RunJavaResponse struct {
 	Stderr      string `json:"stderr"`
 	BuildDir    string `json:"buildDir,omitempty"`
 	Classpath   string `json:"classpath,omitempty"`
+	DebugPort   int    `json:"debugPort,omitempty"`
 	Error       string `json:"error,omitempty"`
 }
 
@@ -44,6 +46,7 @@ type JavaClassInfo struct {
 	ClassName   string           `json:"className"`
 	Methods     []JavaMethodInfo `json:"methods"`
 	Mtime       int64            `json:"-"`
+	CachedAt    time.Time        `json:"-"`
 }
 
 type JavaMethodInfo struct {
@@ -56,57 +59,86 @@ type JavaMethodInfo struct {
 }
 
 var (
-	javaClassCache = make(map[string]*JavaClassInfo)
-	javaCacheMu    sync.RWMutex
-	maxScanBufSize = 1024 * 1024 // 1MB
+	javaClassCache   = make(map[string]*JavaClassInfo)
+	javaCacheMu      sync.RWMutex
+	javaCacheTTL     = 5 * time.Minute
+	maxScanBufSize   = 1024 * 1024 // 1MB
 )
 
+// normalizeJavaFsPath converts Theia URI-style paths (e.g. /g:/spaces/foo)
+// into native filesystem paths the Go runtime can stat and exec in.
+func normalizeJavaFsPath(p string) string {
+	if p == "" {
+		return p
+	}
+	s := strings.TrimSpace(p)
+	if len(s) >= 3 && s[0] == '/' && s[2] == ':' {
+		s = s[1:]
+	}
+	s = filepath.FromSlash(s)
+	return filepath.Clean(s)
+}
+
 func (s *Server) handleRunJava(w http.ResponseWriter, r *http.Request) {
-	rid, cid, _, _ := log.FromContext(r.Context())
-	env := protocol.RequestEnvelope{RequestID: rid, CorrelationID: cid}
 	if err := requireMethod(r, http.MethodPost); err != nil {
-		writeError(w, rid, cid, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: err.Error()})
+		writeError(w, "", "", protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: err.Error()})
+		return
+	}
+	env, body, readErr := readEnvelopeAndBody(r)
+	if readErr != nil {
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: readErr.Error()})
 		return
 	}
 	var req RunJavaRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, rid, cid, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: err.Error()})
+	if err := json.Unmarshal(extractPayload(body), &req); err != nil {
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: err.Error()})
 		return
 	}
+	req.ProjectRoot = normalizeJavaFsPath(req.ProjectRoot)
+	req.FilePath = normalizeJavaFsPath(req.FilePath)
 	if req.ProjectRoot == "" || req.FilePath == "" || req.ClassName == "" {
-		writeError(w, rid, cid, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: "projectRoot, filePath, className are required"})
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: "projectRoot, filePath, className are required"})
 		return
 	}
+	authorizedRoot, ok := s.authorizeAbsPath(w, env, req.ProjectRoot)
+	if !ok {
+		return
+	}
+	req.ProjectRoot = authorizedRoot
 
 	resp, err := s.compileAndRunJava(r.Context(), req)
 	if err != nil {
-		writeError(w, rid, cid, protocol.KairoError{Code: protocol.ErrInternal, Message: err.Error()})
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInternal, Message: err.Error()})
 		return
 	}
 	writeOK(w, env, resp)
 }
 
 func (s *Server) handleDetectJava(w http.ResponseWriter, r *http.Request) {
-	rid, cid, _, _ := log.FromContext(r.Context())
-	env := protocol.RequestEnvelope{RequestID: rid, CorrelationID: cid}
 	if err := requireMethod(r, http.MethodPost); err != nil {
-		writeError(w, rid, cid, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: err.Error()})
+		writeError(w, "", "", protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: err.Error()})
+		return
+	}
+	env, body, readErr := readEnvelopeAndBody(r)
+	if readErr != nil {
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: readErr.Error()})
 		return
 	}
 	var req struct {
 		FilePath string `json:"filePath"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, rid, cid, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: err.Error()})
+	if err := json.Unmarshal(extractPayload(body), &req); err != nil {
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: err.Error()})
 		return
 	}
+	req.FilePath = normalizeJavaFsPath(req.FilePath)
 	if req.FilePath == "" {
-		writeError(w, rid, cid, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: "filePath is required"})
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: "filePath is required"})
 		return
 	}
 	info, err := parseJavaFile(req.FilePath)
 	if err != nil {
-		writeError(w, rid, cid, protocol.KairoError{Code: protocol.ErrInternal, Message: err.Error()})
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInternal, Message: err.Error()})
 		return
 	}
 	writeOK(w, env, info)
@@ -192,9 +224,19 @@ func (s *Server) compileAndRunJava(ctx context.Context, req RunJavaRequest) (*Ru
 		"-cp", runCp,
 	}
 
+	debugPort := 0
 	if req.Debug {
+		port, err := pickFreeTCPPort()
+		if err != nil {
+			return &RunJavaResponse{
+				OK:       false,
+				ExitCode: 1,
+				Error:    fmt.Sprintf("allocate debug port: %v", err),
+			}, nil
+		}
+		debugPort = port
 		javaArgs = append(javaArgs,
-			"-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=18400",
+			fmt.Sprintf("-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=%d", debugPort),
 		)
 	}
 
@@ -210,7 +252,7 @@ func (s *Server) compileAndRunJava(ctx context.Context, req RunJavaRequest) (*Ru
 			}
 			if req.Debug {
 				javaArgs = append(javaArgs,
-					"-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=18400",
+					fmt.Sprintf("-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=%d", debugPort),
 				)
 			}
 			javaArgs = append(javaArgs, testRunner, fullClassName)
@@ -288,15 +330,17 @@ func (s *Server) compileAndRunJava(ctx context.Context, req RunJavaRequest) (*Ru
 			Stderr:    stderrBuf.String(),
 			BuildDir:  buildDir,
 			Classpath: runCp,
+			DebugPort: debugPort,
 		}, nil
 	case <-ctx.Done():
 		_ = javaCmd.Process.Kill()
 		return &RunJavaResponse{
-			OK:       false,
-			ExitCode: -1,
-			Stdout:   stdoutBuf.String(),
-			Stderr:   "execution timeout or cancelled",
-			Error:    ctx.Err().Error(),
+			OK:        false,
+			ExitCode:  -1,
+			Stdout:    stdoutBuf.String(),
+			Stderr:    "execution timeout or cancelled",
+			DebugPort: debugPort,
+			Error:     ctx.Err().Error(),
 		}, nil
 	}
 }
@@ -428,9 +472,12 @@ func parseJavaFile(filePath string) (*JavaClassInfo, error) {
 		return nil, err
 	}
 	currentMtime := stat.ModTime().UnixMilli()
+	now := time.Now()
 
 	javaCacheMu.RLock()
-	if cached, ok := javaClassCache[filePath]; ok && cached.Mtime >= currentMtime {
+	if cached, ok := javaClassCache[filePath]; ok &&
+		cached.Mtime >= currentMtime &&
+		now.Sub(cached.CachedAt) < javaCacheTTL {
 		javaCacheMu.RUnlock()
 		return cached, nil
 	}
@@ -443,7 +490,7 @@ func parseJavaFile(filePath string) (*JavaClassInfo, error) {
 	content := string(data)
 	lines := strings.Split(content, "\n")
 
-	info := &JavaClassInfo{Methods: []JavaMethodInfo{}, Mtime: currentMtime}
+	info := &JavaClassInfo{Methods: []JavaMethodInfo{}, Mtime: currentMtime, CachedAt: now}
 
 	if m := packageRegex.FindStringSubmatch(content); m != nil {
 		info.PackageName = m[1]
@@ -515,20 +562,29 @@ func parseJavaFile(filePath string) (*JavaClassInfo, error) {
 	}
 
 	javaCacheMu.Lock()
+	// Drop expired entries opportunistically while writing.
+	for k, v := range javaClassCache {
+		if now.Sub(v.CachedAt) >= javaCacheTTL {
+			delete(javaClassCache, k)
+		}
+	}
 	javaClassCache[filePath] = info
 	javaCacheMu.Unlock()
 
 	return info, nil
 }
 
-func init() {
-	go func() {
-		ticker := time.NewTicker(5 * time.Minute)
-		defer ticker.Stop()
-		for range ticker.C {
-			javaCacheMu.Lock()
-			javaClassCache = make(map[string]*JavaClassInfo)
-			javaCacheMu.Unlock()
-		}
-	}()
+// pickFreeTCPPort binds 127.0.0.1:0 briefly to obtain an unused port
+// for JDWP (and similar) listeners.
+func pickFreeTCPPort() (int, error) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return 0, err
+	}
+	defer l.Close()
+	addr, ok := l.Addr().(*net.TCPAddr)
+	if !ok {
+		return 0, fmt.Errorf("unexpected listener address type %T", l.Addr())
+	}
+	return addr.Port, nil
 }

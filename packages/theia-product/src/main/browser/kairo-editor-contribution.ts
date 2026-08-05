@@ -32,6 +32,7 @@ import { Message } from '@theia/core/shared/@lumino/messaging';
 import * as monaco from '@theia/monaco-editor-core';
 import { JavaOrganizeImports } from '@kairo/java-extension';
 import type { LSPWorkspaceEdit, LSPTextEdit } from '@kairo/java-extension/lib/common/lsp-protocol';
+import { KairoI18nService } from '@kairo/i18n';
 
 /* ------------------------------------------------------------------ */
 /*  B3.2: External modification conflict dialog                         */
@@ -41,6 +42,7 @@ interface ExternalChangeDialogProps extends DialogProps {
   msg: string;
   overwriteLabel: string;
   keepLabel: string;
+  reloadLabel?: string;
   compareLabel?: string;
 }
 
@@ -68,11 +70,19 @@ export class ExternalChangeDialog extends AbstractDialog<string> {
       this.resolveCustom('overwrite');
     });
 
-    // Keep (secondary)
+    // Keep (secondary) — keep the in-editor version; do not revert
     const keepBtn = this.appendButton(this.externalProps.keepLabel, false);
     keepBtn.addEventListener('click', () => {
       this.resolveCustom('keep');
     });
+
+    // Reload from Disk — discard editor changes and load external version
+    if (this.externalProps.reloadLabel) {
+      const reloadBtn = this.appendButton(this.externalProps.reloadLabel, false);
+      reloadBtn.addEventListener('click', () => {
+        this.resolveCustom('reload');
+      });
+    }
 
     // Compare (extra)
     if (this.externalProps.compareLabel) {
@@ -92,15 +102,16 @@ export class ExternalChangeDialog extends AbstractDialog<string> {
   }
 
   protected override onCloseRequest(msg: Message): void {
+    // Esc / close: no-op — do not silently revert or overwrite.
     if (this.resolve) {
-      this.resolve('keep'); // Default on close
+      this.resolve('dismissed');
       this.resolve = undefined;
     }
     super.onCloseRequest(msg);
   }
 
   get value(): string {
-    return 'keep';
+    return 'dismissed';
   }
 }
 
@@ -123,6 +134,7 @@ export class KairoEditorContribution implements FrontendApplicationContribution,
   @inject(ApplicationShell) protected readonly shell!: ApplicationShell;
   @inject(JavaOrganizeImports) protected readonly organizeImports!: JavaOrganizeImports;
   @inject(StatusBar) protected readonly statusBar!: StatusBar;
+  @inject(KairoI18nService) protected readonly i18n!: KairoI18nService;
 
   protected readonly toDispose = new DisposableCollection();
 
@@ -183,7 +195,7 @@ export class KairoEditorContribution implements FrontendApplicationContribution,
         execute: async () => {
           const editor = this.editorManager.currentEditor?.editor;
           if (!(editor instanceof MonacoEditor)) {
-            this.messages.warn('No active Java editor.');
+            this.messages.warn(this.i18n.t('widget.editor.noActiveJavaEditor'));
             return undefined;
           }
           const uri = editor.uri.toString();
@@ -210,7 +222,9 @@ export class KairoEditorContribution implements FrontendApplicationContribution,
         execute: async () => {
           const current = this.preferences.get<boolean>('kairo.java.formatOnSave', false);
           await this.preferences.set('kairo.java.formatOnSave', !current, PreferenceScope.User);
-          this.messages.info(`Format on Save: ${!current ? 'Enabled' : 'Disabled'}`);
+          this.messages.info(this.i18n.t('widget.editor.formatOnSaveToggled', {
+            state: this.i18n.t(!current ? 'common.enabled' : 'common.disabled'),
+          }));
           return undefined;
         },
         isToggled: () => this.preferences.get<boolean>('kairo.java.formatOnSave', false),
@@ -223,7 +237,9 @@ export class KairoEditorContribution implements FrontendApplicationContribution,
         execute: async () => {
           const current = this.preferences.get<boolean>('kairo.java.organizeImportsOnSave', false);
           await this.preferences.set('kairo.java.organizeImportsOnSave', !current, PreferenceScope.User);
-          this.messages.info(`Organize Imports on Save: ${!current ? 'Enabled' : 'Disabled'}`);
+          this.messages.info(this.i18n.t('widget.editor.organizeImportsOnSaveToggled', {
+            state: this.i18n.t(!current ? 'common.enabled' : 'common.disabled'),
+          }));
           return undefined;
         },
         isToggled: () => this.preferences.get<boolean>('kairo.java.organizeImportsOnSave', false),
@@ -366,11 +382,12 @@ export class KairoEditorContribution implements FrontendApplicationContribution,
     const isDirty = editor.document.dirty;
 
     const props: ExternalChangeDialogProps = {
-      title: 'File Modified Externally',
-      msg: `"${watched.uri.displayName}" was modified outside Kairo IDE.`,
-      overwriteLabel: 'Overwrite',
-      keepLabel: 'Keep',
-      compareLabel: 'Compare',
+      title: this.i18n.t('widget.editor.externalChange.title'),
+      msg: this.i18n.t('widget.editor.externalChange.message', { name: watched.uri.displayName }),
+      overwriteLabel: this.i18n.t('widget.editor.externalChange.overwrite'),
+      keepLabel: this.i18n.t('widget.editor.externalChange.keep'),
+      reloadLabel: this.i18n.t('widget.editor.externalChange.reloadFromDisk'),
+      compareLabel: this.i18n.t('widget.editor.externalChange.compare'),
     };
 
     const dialog = new ExternalChangeDialog(props);
@@ -380,23 +397,34 @@ export class KairoEditorContribution implements FrontendApplicationContribution,
       if (isDirty) {
         try {
           await Saveable.save(editor);
-          this.messages.info(`"${watched.uri.displayName}" saved.`);
+          this.messages.info(this.i18n.t('widget.editor.saved', { name: watched.uri.displayName }));
         } catch (err) {
-          this.messages.error(`Failed to save "${watched.uri.displayName}": ${(err as Error).message}`);
+          this.messages.error(this.i18n.t('widget.editor.saveFailed', {
+            name: watched.uri.displayName,
+            message: (err as Error).message,
+          }));
         }
       }
       watched.mtime = newMtime;
     } else if (result === 'keep') {
-      // Keep: revert the editor to the external version
+      // Keep: retain the in-editor version; only refresh the watched mtime
+      // so we stop re-prompting. Do NOT revert unsaved changes.
+      watched.mtime = newMtime;
+    } else if (result === 'reload') {
+      // Reload from Disk: discard editor changes and load the external version
       try {
         await editor.document.revert!();
-        this.messages.info(`"${watched.uri.displayName}" reverted to external version.`);
+        this.messages.info(this.i18n.t('widget.editor.reloadedFromDisk', { name: watched.uri.displayName }));
       } catch (err) {
-        this.messages.error(`Failed to revert "${watched.uri.displayName}": ${(err as Error).message}`);
+        this.messages.error(this.i18n.t('widget.editor.reloadFailed', {
+          name: watched.uri.displayName,
+          message: (err as Error).message,
+        }));
       }
       watched.mtime = newMtime;
     }
-    // "Compare" button closes the dialog with no action - user can inspect manually
+    // "Compare" / Esc (dismissed): no action — user keeps their version and
+    // will be prompted again on the next external-change check.
   }
 
   /* ------------------------------------------------------------------ */
@@ -415,10 +443,10 @@ export class KairoEditorContribution implements FrontendApplicationContribution,
 
     this.showReadOnlyWarning.add(uriStr);
     const props: ExternalChangeDialogProps = {
-      title: 'Read-Only File',
-      msg: `"${editor.uri.displayName}" is read-only. Attempt to override?`,
-      overwriteLabel: 'Override',
-      keepLabel: 'Keep Read-Only',
+      title: this.i18n.t('widget.editor.readOnly.title'),
+      msg: this.i18n.t('widget.editor.readOnly.message', { name: editor.uri.displayName }),
+      overwriteLabel: this.i18n.t('widget.editor.readOnly.override'),
+      keepLabel: this.i18n.t('widget.editor.readOnly.keepReadOnly'),
     };
 
     const dialog = new ExternalChangeDialog(props);
@@ -427,7 +455,7 @@ export class KairoEditorContribution implements FrontendApplicationContribution,
       if (result === 'overwrite') {
         // User chose to override - make the editor writable
         editor.getControl().updateOptions({ readOnly: false });
-        this.messages.warn(`"${editor.uri.displayName}" is now editable. Save will attempt to write to the file.`);
+        this.messages.warn(this.i18n.t('widget.editor.readOnly.nowEditable', { name: editor.uri.displayName }));
       }
     });
 
@@ -438,10 +466,7 @@ export class KairoEditorContribution implements FrontendApplicationContribution,
    * Show a clear error message on save failure for read-only files.
    */
   handleReadOnlySaveFailure(uri: URI, _error: Error): void {
-    this.messages.error(
-      `Cannot save "${uri.displayName}": The file is read-only or you do not have write permissions. ` +
-      `Check file permissions and try again.`,
-    );
+    this.messages.error(this.i18n.t('widget.editor.readOnlySaveFailed', { name: uri.displayName }));
   }
 
   /* ------------------------------------------------------------------ */

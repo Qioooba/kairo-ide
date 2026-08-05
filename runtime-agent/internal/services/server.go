@@ -17,6 +17,7 @@ import (
 
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/api"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/atomicfile"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/jdkmanager"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/log"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/runtimeplan"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/tomcat6"
@@ -147,10 +148,11 @@ func (r *realServerRunner) Start(req api.StartServerRequest) (*api.ServerRespons
 		return nil, errors.New("webappDir is required")
 	}
 	if req.JavaHome == "" {
-		req.JavaHome = os.Getenv("JAVA_HOME")
-	}
-	if req.JavaHome == "" {
-		return nil, errors.New("javaHome is required (or set JAVA_HOME)")
+		javaHome, err := jdkmanager.ResolveJavaHome(r.bundledDir)
+		if err != nil {
+			return nil, err
+		}
+		req.JavaHome = javaHome
 	}
 	if _, err := os.Stat(req.WebappDir); err != nil {
 		return nil, fmt.Errorf("webappDir not found: %w", err)
@@ -206,6 +208,8 @@ func (r *realServerRunner) Start(req api.StartServerRequest) (*api.ServerRespons
 		Logger:       r.logger,
 	})
 	if err != nil {
+		// GO-P2-10: Start failed after creating runtime/<id>; remove the orphan dir.
+		_ = os.RemoveAll(base)
 		return nil, err
 	}
 	ports := inst.Ports()
@@ -292,26 +296,29 @@ func (r *realServerRunner) Stop(id string, force bool) (*api.ServerResponse, err
 		stopErr = inst.Stop(15 * time.Second)
 	}
 	if stopErr != nil {
+		r.mu.Lock()
 		if m != nil {
 			m.State = "error"
 			m.LastError = stopErr.Error()
 		}
-		r.mu.Lock()
 		r.save()
 		r.mu.Unlock()
 		return nil, fmt.Errorf("stop server %s: %w", id, stopErr)
 	}
+	r.mu.Lock()
 	if m != nil {
 		m.State = "stopped"
 	}
-	r.mu.Lock()
 	delete(r.instances, id)
 	r.save()
-	r.mu.Unlock()
-	if m == nil {
-		return &api.ServerResponse{ID: id, State: "stopped"}, nil
+	resp := (*api.ServerResponse)(nil)
+	if m != nil {
+		resp = m.toResponse()
+	} else {
+		resp = &api.ServerResponse{ID: id, State: "stopped"}
 	}
-	return m.toResponse(), nil
+	r.mu.Unlock()
+	return resp, nil
 }
 
 // Restart stops the server (gracefully, falling back to a force
@@ -324,19 +331,21 @@ func (r *realServerRunner) Restart(id string) (*api.ServerResponse, error) {
 	r.mu.Lock()
 	inst := r.instances[id]
 	m := r.meta[id]
-	r.mu.Unlock()
 	if m == nil {
+		r.mu.Unlock()
 		return nil, fmt.Errorf("server not found: %s", id)
 	}
 	if m.JavaHome == "" || m.CatalinaBase == "" {
+		r.mu.Unlock()
 		return nil, errors.New("server is missing restart metadata")
 	}
+	r.mu.Unlock()
 	if inst != nil {
 		if err := inst.Stop(15 * time.Second); err != nil {
 			if ferr := inst.ForceStop(); ferr != nil {
+				r.mu.Lock()
 				m.State = "error"
 				m.LastError = ferr.Error()
-				r.mu.Lock()
 				r.save()
 				r.mu.Unlock()
 				return nil, fmt.Errorf("stop server %s: %w (force stop: %v)", id, err, ferr)
@@ -347,80 +356,77 @@ func (r *realServerRunner) Restart(id string) (*api.ServerResponse, error) {
 		r.mu.Unlock()
 	}
 	var httpPort, shutdownPort, ajpPort, debugPort int
+	r.mu.Lock()
 	if m.Ports != nil {
 		httpPort = m.Ports.HTTP
 		shutdownPort = m.Ports.Shutdown
 		ajpPort = m.Ports.AJP
 		debugPort = m.Ports.Debug
 	}
-	if httpPort == 0 || tomcat6.IsPortBound(httpPort) || tomcat6.IsPortBound(shutdownPort) {
-		lease, err := r.ports.AllocateServer(0, 0, debugPort, debugPort > 0)
-		if err != nil {
-			return nil, fmt.Errorf("allocate ports: %w", err)
-		}
-		defer lease.Release()
-		httpPort = lease.HTTPPort
-		shutdownPort = lease.ShutdownPort
-		debugPort = lease.DebugPort
-		ajpPort = 0
-	} else if debugPort != 0 && tomcat6.IsPortBound(debugPort) {
-		if p, err := pickFreePort(); err == nil {
-			debugPort = p
-		} else {
-			debugPort = 0
-		}
-	}
-	newInst, err := tomcat6.Start(context.Background(), tomcat6.Spec{
-		ID:           id,
-		JavaHome:     m.JavaHome,
-		CatalinaHome: r.tomcat6Home,
-		CatalinaBase: m.CatalinaBase,
-		HTTPPort:     httpPort,
-		ShutdownPort: shutdownPort,
-		AJPPort:      ajpPort,
-		DebugPort:    debugPort,
-		ContextPath:  m.ContextPath,
-		WebappDir:    m.WebappDir,
-		Logger:       r.logger,
-	})
+	javaHome := m.JavaHome
+	catalinaBase := m.CatalinaBase
+	contextPath := m.ContextPath
+	webappDir := m.WebappDir
+	r.mu.Unlock()
+
+	// GO-P3-8: prefer Start with previous ports; IsPortBound is a fast path
+	// only. On bind/readiness conflict after a free probe, reallocate once.
+	wantDebug := debugPort > 0
+	newInst, err := r.startTomcatWithPortRetry(id, javaHome, catalinaBase, contextPath, webappDir,
+		httpPort, shutdownPort, ajpPort, debugPort, wantDebug)
 	if err != nil {
+		r.mu.Lock()
 		m.State = "error"
 		m.LastError = err.Error()
-		r.mu.Lock()
 		r.save()
 		r.mu.Unlock()
 		return nil, err
 	}
 	ports := newInst.Ports()
+	r.mu.Lock()
 	m.PID = newInst.PID()
 	m.Ports = &ports
 	m.State = newInst.State()
 	m.StartedAt = newInst.StartedAt()
 	m.LastError = ""
-	r.mu.Lock()
 	r.instances[id] = newInst
 	r.save()
+	resp := m.toResponse()
 	r.mu.Unlock()
-	return m.toResponse(), nil
+	return resp, nil
 }
 
 func (r *realServerRunner) Debug(id string) (*api.ServerResponse, error) {
 	r.mu.Lock()
 	m, ok := r.meta[id]
-	r.mu.Unlock()
+	var oldInst *tomcat6.Instance
+	if ok {
+		oldInst = r.instances[id]
+	}
 	if !ok {
+		r.mu.Unlock()
 		return nil, fmt.Errorf("server not found: %s", id)
 	}
 	if m.JavaHome == "" || m.CatalinaBase == "" {
+		r.mu.Unlock()
 		return nil, errors.New("server is missing restart metadata")
 	}
 	// Persisted metadata may legitimately lack Ports (older record
 	// or null JSON). Guard before dereferencing m.Ports.HTTP below.
 	if m.Ports == nil {
+		r.mu.Unlock()
 		return nil, errors.New("server metadata missing ports; start the server first")
 	}
-	if inst, ok := r.instances[id]; ok {
-		_ = inst.Stop(10 * time.Second)
+	javaHome := m.JavaHome
+	catalinaBase := m.CatalinaBase
+	httpPort := m.Ports.HTTP
+	shutdownPort := m.Ports.Shutdown
+	ajpPort := m.Ports.AJP
+	contextPath := m.ContextPath
+	webappDir := m.WebappDir
+	r.mu.Unlock()
+	if oldInst != nil {
+		_ = oldInst.Stop(10 * time.Second)
 	}
 	debugPort, err := pickFreePort()
 	if err != nil {
@@ -428,29 +434,30 @@ func (r *realServerRunner) Debug(id string) (*api.ServerResponse, error) {
 	}
 	inst, err := tomcat6.Start(context.Background(), tomcat6.Spec{
 		ID:           id,
-		JavaHome:     m.JavaHome,
+		JavaHome:     javaHome,
 		CatalinaHome: r.tomcat6Home,
-		CatalinaBase: m.CatalinaBase,
-		HTTPPort:     m.Ports.HTTP,
-		ShutdownPort: m.Ports.Shutdown,
-		AJPPort:      m.Ports.AJP,
+		CatalinaBase: catalinaBase,
+		HTTPPort:     httpPort,
+		ShutdownPort: shutdownPort,
+		AJPPort:      ajpPort,
 		DebugPort:    debugPort,
-		ContextPath:  m.ContextPath,
-		WebappDir:    m.WebappDir,
+		ContextPath:  contextPath,
+		WebappDir:    webappDir,
 		Logger:       r.logger,
 	})
 	if err != nil {
 		return nil, err
 	}
 	ports := inst.Ports()
+	r.mu.Lock()
 	m.PID = inst.PID()
 	m.Ports = &ports
 	m.State = inst.State()
-	r.mu.Lock()
 	r.instances[id] = inst
 	r.save()
+	resp := m.toResponse()
 	r.mu.Unlock()
-	return m.toResponse(), nil
+	return resp, nil
 }
 
 // Recoverable returns servers that were running when the agent
@@ -475,69 +482,58 @@ func (r *realServerRunner) Recoverable() []*api.ServerResponse {
 func (r *realServerRunner) Recover(id string) (*api.ServerResponse, error) {
 	r.mu.Lock()
 	m, ok := r.meta[id]
-	r.mu.Unlock()
 	if !ok {
+		r.mu.Unlock()
 		return nil, fmt.Errorf("server not found: %s", id)
 	}
 	if m.State != "crashed" {
-		return nil, fmt.Errorf("server %s is not in crashed state (current: %s)", id, m.State)
+		state := m.State
+		r.mu.Unlock()
+		return nil, fmt.Errorf("server %s is not in crashed state (current: %s)", id, state)
 	}
 	if m.JavaHome == "" || m.CatalinaBase == "" {
+		r.mu.Unlock()
 		return nil, errors.New("server is missing recovery metadata")
 	}
 	if m.Ports == nil {
+		r.mu.Unlock()
 		return nil, errors.New("server metadata missing ports; cannot recover")
 	}
 
-	var httpPort, shutdownPort, debugPort int
-	httpPort = m.Ports.HTTP
-	shutdownPort = m.Ports.Shutdown
-	debugPort = m.Ports.Debug
-
-	// If the old ports are still bound, allocate fresh ones
-	if httpPort == 0 || tomcat6.IsPortBound(httpPort) || tomcat6.IsPortBound(shutdownPort) {
-		lease, err := r.ports.AllocateServer(0, 0, debugPort, debugPort > 0)
-		if err != nil {
-			return nil, fmt.Errorf("allocate ports for recovery: %w", err)
-		}
-		defer lease.Release()
-		httpPort = lease.HTTPPort
-		shutdownPort = lease.ShutdownPort
-		debugPort = lease.DebugPort
-	}
-
+	httpPort := m.Ports.HTTP
+	shutdownPort := m.Ports.Shutdown
+	debugPort := m.Ports.Debug
+	javaHome := m.JavaHome
+	catalinaBase := m.CatalinaBase
+	contextPath := m.ContextPath
+	webappDir := m.WebappDir
 	m.WasRunning = false
-	inst, err := tomcat6.Start(context.Background(), tomcat6.Spec{
-		ID:           id,
-		JavaHome:     m.JavaHome,
-		CatalinaHome: r.tomcat6Home,
-		CatalinaBase: m.CatalinaBase,
-		HTTPPort:     httpPort,
-		ShutdownPort: shutdownPort,
-		DebugPort:    debugPort,
-		ContextPath:  m.ContextPath,
-		WebappDir:    m.WebappDir,
-		Logger:       r.logger,
-	})
+	r.mu.Unlock()
+
+	// GO-P3-8: same prefer-start / bind-fail-retry path as Restart.
+	wantDebug := debugPort > 0
+	inst, err := r.startTomcatWithPortRetry(id, javaHome, catalinaBase, contextPath, webappDir,
+		httpPort, shutdownPort, 0, debugPort, wantDebug)
 	if err != nil {
+		r.mu.Lock()
 		m.State = "error"
 		m.LastError = fmt.Sprintf("recovery failed: %v", err)
-		r.mu.Lock()
 		r.save()
 		r.mu.Unlock()
 		return nil, err
 	}
 	ports := inst.Ports()
+	r.mu.Lock()
 	m.PID = inst.PID()
 	m.Ports = &ports
 	m.State = inst.State()
 	m.StartedAt = inst.StartedAt()
 	m.LastError = ""
-	r.mu.Lock()
 	r.instances[id] = inst
 	r.save()
+	resp := m.toResponse()
 	r.mu.Unlock()
-	return m.toResponse(), nil
+	return resp, nil
 }
 
 // ReloadContext triggers a Tomcat context reload by touching
@@ -745,4 +741,84 @@ func pickFreePort() (int, error) {
 		return 0, errors.New("unexpected listener address")
 	}
 	return addr.Port, nil
+}
+
+// looksLikePortConflict reports whether a Tomcat start error is likely a
+// bind race (GO-P3-8) rather than a config/JVM failure.
+func looksLikePortConflict(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	for _, needle := range []string{
+		"address already in use",
+		"bindexception",
+		"eaddrinuse",
+		"port already",
+		"already bound",
+		"bind failed",
+	} {
+		if strings.Contains(msg, needle) {
+			return true
+		}
+	}
+	// Readiness failure that mentions bind/address in the Tomcat log tail.
+	if strings.Contains(msg, "readiness") &&
+		(strings.Contains(msg, "address") || strings.Contains(msg, "bind") || strings.Contains(msg, "already in use")) {
+		return true
+	}
+	return false
+}
+
+// startTomcatWithPortRetry starts Tomcat on preferred ports when they look
+// free, and on bind conflict reallocates once (GO-P3-8). IsPortBound is only
+// a fast path when the OS still holds the port after Stop — the authoritative
+// signal is Start succeeding or failing.
+func (r *realServerRunner) startTomcatWithPortRetry(
+	id, javaHome, catalinaBase, contextPath, webappDir string,
+	httpPort, shutdownPort, ajpPort, debugPort int,
+	wantDebug bool,
+) (*tomcat6.Instance, error) {
+	start := func(http, shutdown, ajp, debug int) (*tomcat6.Instance, error) {
+		return tomcat6.Start(context.Background(), tomcat6.Spec{
+			ID:           id,
+			JavaHome:     javaHome,
+			CatalinaHome: r.tomcat6Home,
+			CatalinaBase: catalinaBase,
+			HTTPPort:     http,
+			ShutdownPort: shutdown,
+			AJPPort:      ajp,
+			DebugPort:    debug,
+			ContextPath:  contextPath,
+			WebappDir:    webappDir,
+			Logger:       r.logger,
+		})
+	}
+
+	tryPreferred := httpPort > 0 && !tomcat6.IsPortBound(httpPort) && !tomcat6.IsPortBound(shutdownPort)
+	if tryPreferred {
+		dbg := debugPort
+		if dbg != 0 && tomcat6.IsPortBound(dbg) {
+			if p, err := pickFreePort(); err == nil {
+				dbg = p
+			} else {
+				dbg = 0
+			}
+		}
+		inst, err := start(httpPort, shutdownPort, ajpPort, dbg)
+		if err == nil {
+			return inst, nil
+		}
+		if !looksLikePortConflict(err) {
+			return nil, err
+		}
+		// Fall through: probe said free, Start still lost the race.
+	}
+
+	lease, err := r.ports.AllocateServer(0, 0, 0, wantDebug)
+	if err != nil {
+		return nil, fmt.Errorf("allocate ports: %w", err)
+	}
+	defer lease.Release()
+	return start(lease.HTTPPort, lease.ShutdownPort, 0, lease.DebugPort)
 }

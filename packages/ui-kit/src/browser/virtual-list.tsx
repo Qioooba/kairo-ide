@@ -39,6 +39,8 @@ export interface VirtualListProps<T> {
    * Resets to undefined after scrolling.
    */
   scrollToIndex?: number;
+  /** Absolute index of items[0] when `items` is a window into a larger set (VC-P2-3). */
+  windowOffset?: number;
   /** Called when the user scrolls to the very bottom of the list. */
   onScrollToBottom?: () => void;
   /** Called on every scroll event with the current scroll info. */
@@ -76,6 +78,7 @@ export function VirtualList<T>({
   className,
   onKeyDown,
   scrollToIndex,
+  windowOffset = 0,
   onScrollToBottom,
   onScroll,
   keyboardNavigation = true,
@@ -87,8 +90,11 @@ export function VirtualList<T>({
   const containerRef = React.useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = React.useState(0);
   const [containerHeight, setContainerHeight] = React.useState(400);
+  const lastScrollToIndex = React.useRef<number | undefined>(undefined);
 
   const totalCount = itemCount ?? items.length;
+  // VC-P2-3: when items is a window, slice relative to windowOffset.
+  const isWindowed = itemCount !== undefined && items.length < totalCount;
 
   // --- Track container size with ResizeObserver ---
   React.useEffect(() => {
@@ -117,27 +123,51 @@ export function VirtualList<T>({
     [onScrollToBottom, onScroll],
   );
 
-  // --- Scroll to index ---
+  const scrollIndexIntoView = React.useCallback((index: number) => {
+    if (!containerRef.current || index < 0) return;
+    const container = containerRef.current;
+    const itemTop = index * rowHeight;
+    const itemBottom = itemTop + rowHeight;
+    if (itemTop < container.scrollTop) {
+      container.scrollTop = itemTop;
+      setScrollTop(itemTop);
+    } else if (itemBottom > container.scrollTop + containerHeight) {
+      const next = itemBottom - containerHeight;
+      container.scrollTop = next;
+      setScrollTop(next);
+    }
+  }, [rowHeight, containerHeight]);
+
+  // --- Scroll to index (VC-P2-4: re-run when index changes; sync scrollTop state) ---
   React.useEffect(() => {
     if (scrollToIndex === undefined || scrollToIndex < 0 || !containerRef.current) {
       return;
     }
-    const container = containerRef.current;
-    const itemTop = scrollToIndex * rowHeight;
-    const itemBottom = itemTop + rowHeight;
-    if (itemTop < container.scrollTop) {
-      container.scrollTop = itemTop;
-    } else if (itemBottom > container.scrollTop + containerHeight) {
-      container.scrollTop = itemBottom - containerHeight;
+    if (lastScrollToIndex.current === scrollToIndex) {
+      // Same index may still need a re-scroll when list length grows (auto-tail).
+      scrollIndexIntoView(scrollToIndex);
+      return;
     }
-  }, [scrollToIndex, rowHeight, containerHeight]);
+    lastScrollToIndex.current = scrollToIndex;
+    scrollIndexIntoView(scrollToIndex);
+  }, [scrollToIndex, scrollIndexIntoView]);
 
   // --- Calculate visible range ---
   const startIndex = Math.max(0, Math.floor(scrollTop / rowHeight) - overscan);
   const visibleCount = Math.ceil(containerHeight / rowHeight) + overscan * 2;
   const endIndex = Math.min(totalCount, startIndex + visibleCount);
 
-  const visibleItems = items.slice(Math.max(0, startIndex), endIndex);
+  let visibleItems: readonly T[];
+  let renderStart: number;
+  if (isWindowed) {
+    const relStart = Math.max(0, startIndex - windowOffset);
+    const relEnd = Math.min(items.length, endIndex - windowOffset);
+    visibleItems = items.slice(relStart, Math.max(relStart, relEnd));
+    renderStart = windowOffset + relStart;
+  } else {
+    visibleItems = items.slice(Math.max(0, startIndex), endIndex);
+    renderStart = startIndex;
+  }
 
   const totalHeight = totalCount * rowHeight;
 
@@ -182,11 +212,13 @@ export function VirtualList<T>({
         event.preventDefault();
         if (newIndex !== selectedIndex) {
           onSelectIndex?.(newIndex);
+          // VC-P2-4: keep the selected row in view.
+          scrollIndexIntoView(newIndex);
         }
       }
       onKeyDown?.(event);
     },
-    [keyboardNavigation, totalCount, selectedIndex, containerHeight, rowHeight, onSelectIndex, onKeyDown],
+    [keyboardNavigation, totalCount, selectedIndex, containerHeight, rowHeight, onSelectIndex, onKeyDown, scrollIndexIntoView],
   );
 
   return (
@@ -208,7 +240,7 @@ export function VirtualList<T>({
     >
       <div style={{ height: totalHeight, position: 'relative' }}>
         {visibleItems.map((item, i) => {
-          const absoluteIndex = startIndex + i;
+          const absoluteIndex = renderStart + i;
           const top = absoluteIndex * rowHeight;
           const isSelected = absoluteIndex === selectedIndex;
           return (
