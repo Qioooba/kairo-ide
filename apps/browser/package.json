@@ -47,6 +47,6 @@
   "devDependencies": {
     "@theia/cli": "1.73.1",
     "esbuild": "0.24.2",
-    "typescript": "5.5.4"
+    "typescript": "7.0.2"
   }
 }
