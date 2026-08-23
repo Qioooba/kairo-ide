@@ -58,7 +58,7 @@
     "@theia/workspace": "1.73.1"
   },
   "devDependencies": {
-    "jsdom": "^29.1.1",
+    "jsdom": "^30.0.1",
     "typescript": "5.5.4"
   }
 }
