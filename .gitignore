@@ -215,6 +215,8 @@ musespark-audit/screenshots/
 musespark-audit/issues/
 .runtime-musespark/
 docs/screenshots/windows-deep-auto/
+docs/screenshots/windows-*/
+E__AI__Temp__opencode/
 
 # Scratch files
 checksums*.sha256
