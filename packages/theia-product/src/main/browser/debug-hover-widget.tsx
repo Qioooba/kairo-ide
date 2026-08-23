@@ -52,44 +52,31 @@ interface HoverChildNodeProps {
 const HoverChildNode: React.FC<HoverChildNodeProps> = ({
     child, depth, sessionService, variablesRef, onToggleExpand,
 }) => {
-    const hasChildren = child.variablesReference && child.variablesReference > 0;
-    const indent = depth * 12;
+    const hasChildren = !!(child.variablesReference && child.variablesReference > 0);
 
     const valueClass = classifyValue(child.value);
 
     return (
         <div>
             <div
-                style={{
-                    paddingLeft: indent + 4,
-                    paddingRight: 4,
-                    paddingTop: 1,
-                    paddingBottom: 1,
-                    cursor: hasChildren ? 'pointer' : 'default',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 4,
-                    fontSize: '11px',
-                    lineHeight: '16px',
-                    whiteSpace: 'nowrap',
-                }}
+                className={`kairo-debug-hover-row ${hasChildren ? 'kairo-debug-hover-row--expandable' : 'kairo-debug-hover-row--leaf'}`}
+                style={{ '--kairo-debug-depth': depth } as React.CSSProperties}
                 onClick={() => hasChildren && onToggleExpand(child, variablesRef)}
             >
-                <span style={{ width: 10, textAlign: 'center', fontSize: '8px', flexShrink: 0, opacity: 0.6 }}>
-                    {hasChildren ? (child.expanded ? '▾' : '▸') : ' '}
-                </span>
-                <span style={{ color: 'var(--theia-debugTokenExpression-name)', flexShrink: 0 }}>
+                <span
+                    className={`kairo-debug-hover-chevron codicon ${hasChildren ? (child.expanded ? 'codicon-chevron-down' : 'codicon-chevron-right') : 'kairo-debug-hover-chevron--hidden'}`}
+                    aria-hidden="true"
+                />
+                <span className="kairo-debug-hover-name">
                     {child.name}
                 </span>
                 {child.type && (
-                    <>
-                        <span style={{ color: 'var(--theia-debugTokenExpression-type)', opacity: 0.7, fontSize: '10px', flexShrink: 0 }}>
-                            : {child.type}
-                        </span>
-                    </>
+                    <span className="kairo-debug-hover-type">
+                        : {child.type}
+                    </span>
                 )}
-                <span style={{ color: 'var(--theia-debugTokenExpression-type)', flexShrink: 0 }}>=</span>
-                <span className={`kairo-debug-hover-value ${valueClass}`} style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                <span className="kairo-debug-hover-equals">=</span>
+                <span className={`kairo-debug-hover-value kairo-debug-hover-value--child ${valueClass}`}>
                     {child.value}
                 </span>
             </div>
@@ -187,57 +174,35 @@ const DebugHoverWidgetContent: React.FC<DebugHoverWidgetProps> = ({
     return (
         <div
             className="kairo-debug-hover-widget"
-            style={{
-                background: 'var(--theia-editorWidget-background)',
-                border: '1px solid var(--theia-editorWidget-border)',
-                borderRadius: 4,
-                boxShadow: '0 4px 12px var(--theia-widget-shadow)',
-                minWidth: 200,
-                maxWidth: 400,
-                maxHeight: 350,
-                overflow: 'auto',
-                fontSize: '11px',
-                fontFamily: 'var(--theia-monaco-font-family, monospace)',
-                zIndex: 10000,
-                userSelect: 'text',
-            }}
             onMouseDown={e => e.stopPropagation()}
         >
             {/* Header / expression result */}
             <div
-                style={{
-                    padding: '6px 8px 4px',
-                    display: 'flex',
-                    alignItems: 'flex-start',
-                    gap: 4,
-                    cursor: hasChildren ? 'pointer' : 'default',
-                    borderBottom: hasChildren ? '1px solid var(--theia-panel-border)' : 'none',
-                }}
+                className={`kairo-debug-hover-header ${hasChildren ? 'kairo-debug-hover-header--expandable' : 'kairo-debug-hover-header--leaf'}`}
                 onClick={handleRootToggle}
             >
-                {hasChildren && (
-                    <span style={{ fontSize: '8px', marginTop: 3, flexShrink: 0, opacity: 0.6 }}>
-                        {expanded ? '▾' : '▸'}
-                    </span>
+                {hasChildren ? (
+                    <span className={`kairo-debug-hover-header-chevron codicon ${expanded ? 'codicon-chevron-down' : 'codicon-chevron-right'}`} aria-hidden="true" />
+                ) : (
+                    <span className="kairo-debug-hover-header-chevron--placeholder" aria-hidden="true" />
                 )}
-                {!hasChildren && <span style={{ width: 8, flexShrink: 0 }} />}
-                <div style={{ minWidth: 0, flex: 1 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
-                        <span style={{ color: 'var(--theia-debugTokenExpression-name)', fontWeight: 600 }}>
+                <div className="kairo-debug-hover-header-content">
+                    <div className="kairo-debug-hover-header-line">
+                        <span className="kairo-debug-hover-expression-name">
                             {result.expression}
                         </span>
                         {result.type && (
-                            <span style={{ color: 'var(--theia-debugTokenExpression-type)', fontSize: '10px' }}>
+                            <span className="kairo-debug-hover-type">
                                 : {result.type}
                             </span>
                         )}
-                        <span style={{ color: 'var(--theia-debugTokenExpression-type)' }}>=</span>
-                        <span className={`kairo-debug-hover-value ${valueClass}`} style={{ wordBreak: 'break-all' }}>
+                        <span className="kairo-debug-hover-equals">=</span>
+                        <span className={`kairo-debug-hover-value kairo-debug-hover-value--root ${valueClass}`}>
                             {result.result}
                         </span>
                     </div>
                     {result.error && (
-                        <div style={{ color: 'var(--theia-errorForeground)', fontSize: '10px', marginTop: 2 }}>
+                        <div className="kairo-debug-hover-error">
                             {result.error}
                         </div>
                     )}
@@ -246,9 +211,9 @@ const DebugHoverWidgetContent: React.FC<DebugHoverWidgetProps> = ({
 
             {/* Children */}
             {expanded && hasChildren && (
-                <div style={{ padding: '2px 0' }}>
+                <div className="kairo-debug-hover-children">
                     {loadingChildren && children.length === 0 && (
-                        <div style={{ padding: '4px 8px', color: 'var(--theia-descriptionForeground)', fontStyle: 'italic', fontSize: '10px' }}>
+                        <div className="kairo-debug-hover-loading">
                             Loading...
                         </div>
                     )}
@@ -266,45 +231,23 @@ const DebugHoverWidgetContent: React.FC<DebugHoverWidgetProps> = ({
             )}
 
             {/* Action bar */}
-            <div
-                style={{
-                    padding: '4px 8px',
-                    borderTop: '1px solid var(--theia-panel-border)',
-                    display: 'flex',
-                    gap: 8,
-                    background: 'var(--theia-editor-inactiveSelectionBackground)',
-                }}
-            >
+            <div className="kairo-debug-hover-action-bar">
                 <button
+                    className="kairo-debug-hover-button"
                     onClick={(e) => {
                         e.stopPropagation();
                         navigator.clipboard.writeText(result.result).catch(() => {});
-                    }}
-                    style={{
-                        background: 'transparent',
-                        border: 'none',
-                        color: 'var(--theia-textLink-foreground)',
-                        cursor: 'pointer',
-                        fontSize: '10px',
-                        padding: '1px 4px',
                     }}
                 >
                     Copy Value
                 </button>
                 {onAddToWatch && (
                     <button
+                        className="kairo-debug-hover-button"
                         onClick={(e) => {
                             e.stopPropagation();
                             onAddToWatch(result.expression);
                             onClose();
-                        }}
-                        style={{
-                            background: 'transparent',
-                            border: 'none',
-                            color: 'var(--theia-textLink-foreground)',
-                            cursor: 'pointer',
-                            fontSize: '10px',
-                            padding: '1px 4px',
                         }}
                     >
                         + Add to Watches
@@ -354,8 +297,7 @@ export function createDebugHoverWidget(
         getDomNode: () => {
             if (!rootDiv) {
                 rootDiv = document.createElement('div');
-                rootDiv.style.position = 'absolute';
-                rootDiv.style.pointerEvents = 'auto';
+                rootDiv.classList.add('kairo-debug-hover-root');
                 rootDiv.addEventListener('mouseenter', () => {
                     if (hideTimeout) {
                         clearTimeout(hideTimeout);

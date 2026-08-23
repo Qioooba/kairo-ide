@@ -1,11 +1,35 @@
 # Kairo IDE 开发交接文档
 
 > 生成时间：2026-07-23  
-> 最后更新：2026-08-01（Session 30 — 回归截图更新与截图脚本修复）  
-> 最新提交：见 `git log`（Session 22–23 已推送至 main）  
+> 最后更新：2026-08-22（Session 31 — Wave 16 Hot Reload P0 + 门禁全绿 + Browser 生产包修复）  
+> 最新提交：见 `git log`（含 Wave 16 待推送）  
 > 分支：`main`  
 > 目标读者：接手开发的 AI 工程师 / 人类开发者  
-> 本次会话模型：Kimi-K2.7-Code（TRAE）
+> 本次会话模型：muse-spark-1.2（OpenCode）
+
+---
+
+## Session 31 交付摘要 (2026-08-22) 🆕
+
+### Wave 16 — Hot Reload P0 IDEA 闭环 + 门禁全绿收官
+
+**目标**：实现 `docs/specs/HOT_RELOAD_IDEA_DESIGN.md` P0 静态资源直达 + 智能热部署闭环，修复 5 类门禁阻塞，恢复 `pnpm -r test` + `go test` + `tsc` + `browser build` 全绿。
+
+**核心改动：**
+1. **后端 `Tomcat6Provider` 集成 `HotReloadWatcher`** `tomcat6_provider.go:26/222`：`watchers map` + `startWatcher/stopWatcher`，`Start` 后 1s 轮询，`GracefulStop/ForceStop/CleanupBase` 停止；`DefaultHotReloadConfig` direct 模式 `DeploymentDir=""` 免拷贝
+2. **`hot_reload.go:263` direct 优化** + `syncCompiledClasses:400` `outputDir/.class→WEB-INF/classes`，新增 `hot_reload_test.go:368` 2 用例
+3. **`svn-backend-service.ts:502` 隔离符 bug**：`--` 前插入 `--non-interactive/--trust-server-cert/--xml`，`execXml` 同步改，`svn-backend.integration 11/11`
+4. **`java-monaco-registration.ts:1110` 空守卫**：`modelContentSubs/subs` 判空，`33/33`
+5. **`theia-product` 4 测**：`kairo-commands 47→48`（`kairo.server.update`）、`PreferenceService` mock、`FileService` 循环规避、`kairo-java-debug-adapter` jsdom，`200+65` 全过
+6. **`remote-sandbox.test.cjs:177` 锚定修复**：`temp-?` 仅单字符，`temp-AB` 改 `true`，`98/98`
+7. **`apps/browser/postbuild.cjs:226` drivelist**：JSON-only 单次出现视为可选，`browser build` 0 errors
+8. **`kairo-idea-windows-keymap.ts:109` 新增 `ctrl+f10` `kairo.server.update`**，`runtime-agent/internal/api/pure_test.go:20` 导入归并 + 动态端口
+9. **卫生**：`PLAN.md→HOT_RELOAD_IDEA_DESIGN.md` `bug.txt→hot-deploy-bug-audit-20260821.md`，`.gitignore:170` 追加 `tmp/cloc/verify-asar/screenshots/*` 等，`ls --others` 2579→2
+10. **文档**：`MILESTONES.md` 新增 Wave 16 矩阵 11 行
+
+**门禁：** `tsc 0 / go vet 0 / go test 33包 / pnpm -r test 1883+（含 svn 11/remote 98/theia 265）/ browser build 0`
+
+**已知/下一步：** `tests/e2e` 需活体 `AGENT_PORT=18080`；`files.autoSave onFocusChange` 默认值可在 `HotDeployService` 下阶段通过 `PreferenceService` 兜底；Wave 16 后可按 `HOT_RELOAD_IDEA_DESIGN` P1（增量编译编排）推进。
 
 ---
 

@@ -1108,9 +1108,11 @@ export class JavaMonacoRegistrationContribution implements FrontendApplicationCo
   }
 
   dispose(): void {
-    for (const d of this.modelContentSubs.values()) d.dispose();
-    this.modelContentSubs.clear();
-    for (const d of this.subs) d.dispose();
+    if (this.modelContentSubs) {
+      for (const d of this.modelContentSubs.values()) d.dispose();
+      this.modelContentSubs.clear();
+    }
+    for (const d of (this.subs ?? [])) d.dispose();
     this.subs = [];
   }
 }

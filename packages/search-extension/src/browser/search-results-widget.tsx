@@ -169,6 +169,11 @@ export const SearchResultsPanel: React.FC<SearchResultsPanelProps> = ({
           </button>
         )}
       </div>
+      {state.status === 'idle' && (
+        <div className="kairo-search-status kairo-empty-state" data-testid="find-tool-idle">
+          {t('widget.search.center.status.idle')}
+        </div>
+      )}
       {state.status === 'empty' && (
         <div className="kairo-search-status kairo-empty-state" data-testid="find-tool-empty">
           {t('widget.search.center.status.empty')}

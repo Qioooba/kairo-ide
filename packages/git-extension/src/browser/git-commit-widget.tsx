@@ -254,7 +254,7 @@ const GitCommitComponent: React.FC<GitCommitProps> = ({ store, preCommitChecker,
                 {/* Template Selector */}
                 <div className="kairo-git-commit-template">
                     <select
-                        className="kairo-git-template-select"
+                        className="theia-select kairo-git-template-select"
                         value={selectedTemplateIdx}
                         onChange={e => handleTemplateSelect(parseInt(e.target.value, 10))}
                         disabled={committing}
@@ -268,7 +268,7 @@ const GitCommitComponent: React.FC<GitCommitProps> = ({ store, preCommitChecker,
 
                 {/* Commit Message */}
                 <textarea
-                    className="kairo-git-commit-input"
+                    className="kairo-git-commit-input theia-input"
                     data-testid="git-commit-message"
                     placeholder={t('widget.git.commit.placeholder')}
                     value={message}

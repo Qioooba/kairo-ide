@@ -1,9 +1,9 @@
 # Kairo IDE Milestones — Current State Matrix
 
-> Last verified: 2026-08-01 (Session 27 — Phase Q 稳定性与质量收官)
+> Last verified: 2026-08-22 (Session 31 — Wave 16 Hot Reload P0 收官)
 > Baseline: Wave 0 (Bleeding Fixes Complete)
 > Status: Each item must be one of: verified, partial, not_started, deferred
-> ADR: 30 records (001-0030)
+> ADR: 30 records (001-0030) + HOT_RELOAD_IDEA_DESIGN (docs/specs)
 
 ## Wave 0 Gate Results
 
@@ -333,6 +333,23 @@ All Wave 0 gates pass. See [WAVE0_BASELINE.md](progress/WAVE0_BASELINE.md) for f
 | 代码审查 | verified | `docs/progress/releases/code-review-20260724-s9.md` | 无 critical/high 问题 |
 | 安全审查 | verified | `docs/progress/releases/security-review-20260724-s9.md` | 路径遍历/敏感信息/输入验证/端口绑定全部通过 |
 | 性能基线刷新 | verified | `docs/progress/releases/perf-gate-20260724-s9.json` | Agent 13.9MB, API 0.68ms |
+
+## Wave 16: Hot Reload P0 — IDEA-style Auto-save + Intelligent Hot Deploy (Session 30 — 2026-08-22)
+
+| Component | Status | Evidence | Notes |
+|-----------|--------|----------|-------|
+| HotReloadWatcher direct docBase | verified | `internal/provider/runtime/hot_reload.go:263` direct mode no-op, `hot_reload_test.go` DirectDocBaseNoCopy | DeploymentDir == "" skips copy, JSP/CSS即时生效 |
+| Tomcat6Provider watcher lifecycle | verified | `tomcat6_provider.go:26/222/237` watchers map + startWatcher/stopWatcher | Start后1s轮询，Stop/CleanupBase停止 |
+| syncCompiledClasses | verified | `tomcat6_provider.go:400` + `hot_reload_test.go:TestSyncCompiledClasses` | OutputDir .class → WEB-INF/classes |
+| Context reload API | verified | `POST /api/v1/servers/{id}/reload` `api/server.go:610` `hot_deploy_handlers.go:386` `TestHandleServerReload` | os.Chtimes WEB-INF/web.xml |
+| Incremental compile API | verified | `POST /api/v1/jvm/compile-incremental` `TestHandleCompileIncremental` | 前端 → 后端增量 javac |
+| HotDeployService frontend | verified | `tomcat-extension/src/browser/hot-deploy-service.ts` 374行 | debounce 500ms, onSave/onBlur/onBuildCompleted |
+| Server view Update/Reload UI | verified | `server-view-widget.tsx:41` hotReload banner + Ctrl+F10 | i18n widget.servers.hotReload.* |
+| IDEA keymap Ctrl+F10 | verified | `kairo-idea-windows-keymap.ts:109` `kairo.server.update ctrl+f10` | Shift+F10 start, Ctrl+F10 update |
+| Browser build drivelist fix | verified | `apps/browser/postbuild.cjs:226` JSON-only no-op | production bundle 0 errors |
+| SVN withPathArgs fix | verified | `svn-backend-service.ts:502` flags before --, `execXml` before -- | 11/11 integration |
+| Java Monaco dispose guard | verified | `java-monaco-registration.ts:1110` null guard | 33/33 |
+| Theia product composition | verified | `kairo-frontend-module.test.cjs` PreferenceService mock + FileService cycle guard | 200+65/200+65 |
 
 ## Deferred (post-v1)
 

@@ -79,6 +79,10 @@ const VariableNode: React.FC<VariableNodeProps> = ({ variable, depth, session, t
             <div
                 className="kairo-debug-var-row"
                 onClick={toggleExpand}
+                role={hasChildren ? 'button' : undefined}
+                aria-expanded={hasChildren ? expanded : undefined}
+                tabIndex={hasChildren ? 0 : undefined}
+                onKeyDown={e => { if (hasChildren && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); void toggleExpand(); } }}
                 style={{
                     paddingLeft: indent + 8,
                     paddingRight: 8,
@@ -92,12 +96,12 @@ const VariableNode: React.FC<VariableNodeProps> = ({ variable, depth, session, t
                     lineHeight: '20px',
                     userSelect: 'none',
                 }}
-                onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'var(--theia-list-hoverBackground)'; }}
-                onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = ''; }}
             >
-                <span style={{ width: 16, textAlign: 'center', fontSize: '10px', flexShrink: 0 }}>
-                    {hasChildren ? (expanded ? '▼' : '▶') : ' '}
-                </span>
+                <span
+                    className={hasChildren ? (expanded ? 'codicon codicon-chevron-down' : 'codicon codicon-chevron-right') : ''}
+                    style={{ width: 16, textAlign: 'center', fontSize: '12px', flexShrink: 0 }}
+                    aria-hidden="true"
+                />
                 <span className="codicon codicon-symbol-variable" style={{ fontSize: '14px', flexShrink: 0 }} />
                 <span style={{ fontWeight: 500, flexShrink: 0 }}>{variable.name}</span>
                 <span style={{ color: 'var(--theia-debugTokenExpression-type)', flexShrink: 0 }}>:</span>
@@ -152,8 +156,10 @@ const VariablesView: React.FC<VariablesViewProps> = ({ state, session, t, onExpa
                     disabled={state.busy}
                     onClick={onRefresh}
                     title={t('widget.debug.variables.refreshTooltip')}
+                    aria-label={t('widget.debug.variables.refreshTooltip')}
                 >
-                    {state.busy ? t('widget.debug.variables.loading') : '↻'}
+                    <span className={state.busy ? 'codicon codicon-loading codicon-modifier-spin' : 'codicon codicon-refresh'} aria-hidden="true" />
+                    {state.busy ? ` ${t('widget.debug.variables.loading')}` : ''}
                 </button>
             </div>
 

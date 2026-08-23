@@ -451,15 +451,32 @@ const RemotePanelComponent: React.FC<RemotePanelProps> = ({ logger, i18n }) => {
                     display: flex;
                     justify-content: space-between;
                     margin-bottom: 6px;
+                    min-width: 0;
+                }
+                .kairo-remote-panel-container-header > div {
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                    min-width: 0;
+                    flex: 1;
                 }
                 .kairo-remote-panel-container-name {
                     font-size: 13px;
                     font-weight: 600;
+                    min-width: 0;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    white-space: nowrap;
                 }
                 .kairo-remote-panel-container-image {
                     color: var(--kairo-text-secondary);
                     font-size: 11px;
                     margin-left: 8px;
+                    min-width: 0;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    white-space: nowrap;
+                    flex: 1;
                 }
                 .kairo-remote-panel-container-ports {
                     color: var(--kairo-text-secondary);
@@ -728,8 +745,8 @@ const ContainersTab: React.FC<ContainersTabProps> = ({ containers, onAction, i18
                             <button
                                 className="theia-button main"
                                 onClick={() => onAction(container.id, 'start')}
-                                title={t('widget.remote.panel.containers.action.start' as any)}
-                                aria-label={t('widget.remote.panel.containers.action.start' as any)}
+                                title={`${t('widget.remote.panel.containers.action.start' as any)} ${container.name}`}
+                                aria-label={`${t('widget.remote.panel.containers.action.start' as any)} ${container.name}`}
                             >
                                 <span className="codicon codicon-play" aria-hidden="true" />
                                 {t('widget.remote.panel.containers.action.start' as any)}
@@ -740,8 +757,8 @@ const ContainersTab: React.FC<ContainersTabProps> = ({ containers, onAction, i18
                                 <button
                                     className="theia-button secondary"
                                     onClick={() => onAction(container.id, 'stop')}
-                                    title={t('widget.remote.panel.containers.action.stop' as any)}
-                                    aria-label={t('widget.remote.panel.containers.action.stop' as any)}
+                                    title={`${t('widget.remote.panel.containers.action.stop' as any)} ${container.name}`}
+                                    aria-label={`${t('widget.remote.panel.containers.action.stop' as any)} ${container.name}`}
                                 >
                                     <span className="codicon codicon-debug-stop" aria-hidden="true" />
                                     {t('widget.remote.panel.containers.action.stop' as any)}
@@ -749,8 +766,8 @@ const ContainersTab: React.FC<ContainersTabProps> = ({ containers, onAction, i18
                                 <button
                                     className="theia-button secondary"
                                     onClick={() => onAction(container.id, 'pause')}
-                                    title={t('widget.remote.panel.containers.action.pause' as any)}
-                                    aria-label={t('widget.remote.panel.containers.action.pause' as any)}
+                                    title={`${t('widget.remote.panel.containers.action.pause' as any)} ${container.name}`}
+                                    aria-label={`${t('widget.remote.panel.containers.action.pause' as any)} ${container.name}`}
                                 >
                                     <span className="codicon codicon-debug-pause" aria-hidden="true" />
                                     {t('widget.remote.panel.containers.action.pause' as any)}

@@ -534,6 +534,7 @@ export class LocalHistoryContribution implements FrontendApplicationContribution
   @inject(WidgetManager) protected readonly widgetManager!: WidgetManager;
   @inject(LocalHistoryService) protected readonly historyService!: LocalHistoryService;
   @inject(MessageService) protected readonly messages!: MessageService;
+  @inject(KairoI18nService) protected readonly i18n!: KairoI18nService;
 
   protected toDispose = new DisposableCollection();
 

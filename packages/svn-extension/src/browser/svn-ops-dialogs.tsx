@@ -106,8 +106,13 @@ export class SvnBranchTagDialog extends ReactDialog<'ok' | undefined> {
     if (patch.kind !== undefined || patch.name !== undefined) {
       const kind = patch.kind ?? this.state.kind;
       const name = patch.name ?? this.state.name;
-      if (!this.state.message || this.state.message.startsWith('Create ')) {
-        this.state.message = name ? `Create ${kind === 'tags' ? 'tag' : 'branch'} ${name}` : '';
+      if (!this.state.message || this.state.message.startsWith('Create ') || this.state.message.startsWith('创建')) {
+        if (name) {
+          const key = kind === 'tags' ? 'widget.svn.dialog.branchTag.defaultTagMessage' : 'widget.svn.dialog.branchTag.defaultBranchMessage';
+          this.state.message = this.deps.i18n.t(key as any, { name } as any);
+        } else {
+          this.state.message = '';
+        }
       }
     }
     this.update();
@@ -122,11 +127,11 @@ export class SvnBranchTagDialog extends ReactDialog<'ok' | undefined> {
   protected async submit(): Promise<void> {
     const dest = this.destUrl();
     if (!this.state.sourceUrl || !dest) {
-      this.setState({ error: 'Repository URL and name are required.' });
+      this.setState({ error: this.deps.i18n.t('widget.svn.dialog.branchTag.repositoryUrlAndNameRequired') });
       return;
     }
     if (!this.state.message.trim()) {
-      this.setState({ error: 'Commit message is required.' });
+      this.setState({ error: this.deps.i18n.t('widget.svn.dialog.branchTag.commitMessageRequired') });
       return;
     }
     this.setState({ busy: true, error: undefined });
@@ -135,7 +140,7 @@ export class SvnBranchTagDialog extends ReactDialog<'ok' | undefined> {
         message: this.state.message.trim(),
         parents: true,
       });
-      this.deps.messageService.info(`Created ${dest} @ r${r.revision}`);
+      this.deps.messageService.info(this.deps.i18n.t('widget.svn.dialog.branchTag.created' as any, { dest, rev: r.revision } as any));
       this.state = { ...this.state, busy: false, result: 'ok' };
       this.accept();
     } catch (e) {
@@ -251,7 +256,7 @@ export class SvnSwitchDialog extends ReactDialog<'ok' | undefined> {
 
   protected async submit(): Promise<void> {
     if (!this.state.url.trim()) {
-      this.setState({ error: 'Target URL is required.' });
+      this.setState({ error: this.deps.i18n.t('widget.svn.dialog.switch.targetUrlRequired') });
       return;
     }
     this.setState({ busy: true, error: undefined });
@@ -262,7 +267,7 @@ export class SvnSwitchDialog extends ReactDialog<'ok' | undefined> {
         force: this.state.force,
       });
       await this.deps.svnStore.refresh();
-      this.deps.messageService.info(`Switched to ${this.state.url.trim()}`);
+      this.deps.messageService.info(this.deps.i18n.t('widget.svn.dialog.switch.switchedTo' as any, { url: this.state.url.trim() } as any));
       this.state = { ...this.state, busy: false, result: 'ok' };
       this.accept();
     } catch (e) {
@@ -372,7 +377,7 @@ export class SvnMergeDialog extends ReactDialog<'ok' | undefined> {
 
   protected async submit(): Promise<void> {
     if (!this.state.sourceUrl.trim()) {
-      this.setState({ error: 'Source URL is required.' });
+      this.setState({ error: this.deps.i18n.t('widget.svn.dialog.merge.sourceUrlRequired') });
       return;
     }
     this.setState({ busy: true, error: undefined, summary: undefined });
@@ -388,10 +393,10 @@ export class SvnMergeDialog extends ReactDialog<'ok' | undefined> {
       );
       await this.deps.svnStore.refresh();
       const msg = this.state.mode === 'dry'
-        ? 'Dry-run completed — no working-copy changes written.'
+        ? this.deps.i18n.t('widget.svn.dialog.merge.dryRunCompleted')
         : this.state.mode === 'record'
-          ? 'Record-only merge completed.'
-          : 'Merge applied — review Local Changes / conflicts.';
+          ? this.deps.i18n.t('widget.svn.dialog.merge.recordOnlyCompleted')
+          : this.deps.i18n.t('widget.svn.dialog.merge.mergeApplied');
       this.deps.messageService.info(msg);
       if (this.state.mode === 'dry') {
         this.setState({ busy: false, summary: msg });
@@ -517,7 +522,7 @@ export class SvnCheckoutDialog extends ReactDialog<'ok' | undefined> {
 
   protected async submit(): Promise<void> {
     if (!this.state.url.trim() || !this.state.path.trim()) {
-      this.setState({ error: 'Repository URL and local path are required.' });
+      this.setState({ error: this.deps.i18n.t('widget.svn.dialog.checkout.repositoryUrlAndLocalPathRequired') });
       return;
     }
     this.setState({ busy: true, error: undefined });
@@ -529,7 +534,7 @@ export class SvnCheckoutDialog extends ReactDialog<'ok' | undefined> {
         password: this.state.password || undefined,
       });
       this.deps.svnService.setActiveWcRoot(this.state.path.trim());
-      this.deps.messageService.info(`Checked out to ${this.state.path.trim()}`);
+      this.deps.messageService.info(this.deps.i18n.t('widget.svn.dialog.checkout.checkedOutTo' as any, { path: this.state.path.trim() } as any));
       this.state = { ...this.state, busy: false, result: 'ok' };
       this.accept();
     } catch (e) {
@@ -619,7 +624,7 @@ export class SvnImportExportDialog extends ReactDialog<'ok' | undefined> {
 
   constructor(deps: SvnOpsDialogDeps, mode: IoMode = 'import') {
     super({
-      title: mode === 'import' ? 'Import into Repository' : 'Export from Subversion',
+      title: deps.i18n.t(mode === 'import' ? 'widget.svn.dialog.importExport.importTitle' : 'widget.svn.dialog.importExport.exportTitle'),
       maxWidth: 640,
     } as DialogProps);
     this.deps = deps;
@@ -631,7 +636,7 @@ export class SvnImportExportDialog extends ReactDialog<'ok' | undefined> {
       mode,
       localPath: mode === 'export' ? '' : '',
       repoUrl: info?.url || info?.reposRootUrl || '',
-      message: mode === 'import' ? 'Initial import' : '',
+      message: mode === 'import' ? deps.i18n.t('widget.svn.dialog.importExport.initialImportMessage') : '',
       revision: '',
       force: true,
       busy: false,
@@ -649,13 +654,14 @@ export class SvnImportExportDialog extends ReactDialog<'ok' | undefined> {
     const s = this.state;
     if (s.mode === 'import') {
       if (!s.localPath.trim() || !s.repoUrl.trim()) {
-        this.setState({ error: 'Local path and repository URL are required.' });
+        this.setState({ error: this.deps.i18n.t('widget.svn.dialog.importExport.localPathAndRepositoryUrlRequired') });
         return;
       }
       this.setState({ busy: true, error: undefined });
       try {
-        const r = await this.deps.svnService.importFile(s.localPath.trim(), s.repoUrl.trim(), s.message || 'Import');
-        this.deps.messageService.info(`Imported @ r${r.revision}`);
+        const fallbackImport = this.deps.i18n.t('widget.svn.dialog.importExport.import');
+        const r = await this.deps.svnService.importFile(s.localPath.trim(), s.repoUrl.trim(), s.message || fallbackImport);
+        this.deps.messageService.info(this.deps.i18n.t('widget.svn.dialog.importExport.importedAt' as any, { rev: r.revision } as any));
         this.state = { ...this.state, busy: false, result: 'ok' };
         this.accept();
       } catch (e) {
@@ -663,7 +669,7 @@ export class SvnImportExportDialog extends ReactDialog<'ok' | undefined> {
       }
     } else {
       if (!s.repoUrl.trim() || !s.localPath.trim()) {
-        this.setState({ error: 'Source and destination are required.' });
+        this.setState({ error: this.deps.i18n.t('widget.svn.dialog.importExport.sourceAndDestinationRequired') });
         return;
       }
       this.setState({ busy: true, error: undefined });
@@ -673,7 +679,7 @@ export class SvnImportExportDialog extends ReactDialog<'ok' | undefined> {
           revision: rev && !Number.isNaN(rev) ? rev : undefined,
           force: s.force,
         });
-        this.deps.messageService.info(`Exported to ${s.localPath.trim()}`);
+        this.deps.messageService.info(this.deps.i18n.t('widget.svn.dialog.importExport.exportedTo' as any, { path: s.localPath.trim() } as any));
         this.state = { ...this.state, busy: false, result: 'ok' };
         this.accept();
       } catch (e) {
@@ -684,6 +690,7 @@ export class SvnImportExportDialog extends ReactDialog<'ok' | undefined> {
 
   protected render(): React.ReactNode {
     const s = this.state;
+    const t = this.deps.i18n.t.bind(this.deps.i18n);
     return (
       <div className="kairo-svn-dlg-shell compact">
         <div className="kairo-svn-dlg-form">
@@ -691,42 +698,42 @@ export class SvnImportExportDialog extends ReactDialog<'ok' | undefined> {
             value={s.mode}
             onChange={id => this.setState({ mode: id as IoMode })}
             options={[
-              { id: 'import', label: 'Import', icon: 'codicon-cloud-upload' },
-              { id: 'export', label: 'Export', icon: 'codicon-cloud-download' },
+              { id: 'import', label: t('widget.svn.dialog.importExport.import'), icon: 'codicon-cloud-upload' },
+              { id: 'export', label: t('widget.svn.dialog.importExport.export'), icon: 'codicon-cloud-download' },
             ]}
           />
           <div className="kairo-svn-dlg-field">
-            <label className="kairo-svn-dlg-label">{s.mode === 'import' ? 'Local folder' : 'Destination folder'}</label>
+            <label className="kairo-svn-dlg-label">{s.mode === 'import' ? t('widget.svn.dialog.importExport.localFolder') : t('widget.svn.dialog.importExport.destinationFolder')}</label>
             <input className="theia-input" value={s.localPath} onChange={e => this.setState({ localPath: e.target.value, error: undefined })} />
           </div>
           <div className="kairo-svn-dlg-field">
-            <label className="kairo-svn-dlg-label">{s.mode === 'import' ? 'Target repository URL' : 'Source URL / WC path'}</label>
+            <label className="kairo-svn-dlg-label">{s.mode === 'import' ? t('widget.svn.dialog.importExport.targetRepositoryUrl') : t('widget.svn.dialog.importExport.sourceUrlOrWcPath')}</label>
             <input className="theia-input" value={s.repoUrl} onChange={e => this.setState({ repoUrl: e.target.value, error: undefined })} />
           </div>
           {s.mode === 'import' ? (
             <div className="kairo-svn-dlg-field">
-              <label className="kairo-svn-dlg-label">Commit message</label>
+              <label className="kairo-svn-dlg-label">{t('widget.svn.dialog.importExport.commitMessage')}</label>
               <textarea className="kairo-svn-dlg-message" style={{ minHeight: 56 }} value={s.message} onChange={e => this.setState({ message: e.target.value })} />
             </div>
           ) : (
             <>
               <div className="kairo-svn-dlg-field">
-                <label className="kairo-svn-dlg-label">Revision</label>
+                <label className="kairo-svn-dlg-label">{t('widget.svn.dialog.importExport.revision')}</label>
                 <input className="theia-input" value={s.revision} placeholder="HEAD" onChange={e => this.setState({ revision: e.target.value })} />
               </div>
               <label className="kairo-svn-dlg-check">
                 <input type="checkbox" checked={s.force} onChange={e => this.setState({ force: e.target.checked })} />
-                Overwrite existing files
+                {t('widget.svn.dialog.importExport.overwriteExisting')}
               </label>
             </>
           )}
           {s.error && <div className="kairo-svn-dlg-error" role="alert">{s.error}</div>}
         </div>
         <div className="kairo-svn-dlg-footer">
-          <button className="theia-button secondary" disabled={s.busy} onClick={() => this.close()}>Cancel</button>
+          <button className="theia-button secondary" disabled={s.busy} onClick={() => this.close()}>{t('widget.svn.dialog.cancel')}</button>
           <span className="spacer" />
           <button className="theia-button main" disabled={s.busy} onClick={() => void this.submit()}>
-            {s.busy ? 'Working…' : s.mode === 'import' ? 'Import' : 'Export'}
+            {s.busy ? t('widget.svn.dialog.importExport.working') : s.mode === 'import' ? t('widget.svn.dialog.importExport.import') : t('widget.svn.dialog.importExport.export')}
           </button>
         </div>
       </div>

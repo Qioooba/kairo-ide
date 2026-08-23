@@ -20,10 +20,13 @@
     }
   },
   "scripts": {
-    "build": "theia build --mode production && node postbuild.cjs",
+    "build": "cross-env NODE_OPTIONS=--no-warnings theia build --mode production && node postbuild.cjs",
     "start": "theia start ${THEIA_WORKSPACE:-/tmp/kairo-workspace} --hostname=127.0.0.1 --port=${THEIA_PORT:-3000}",
     "dev": "theia start ${THEIA_WORKSPACE:-/tmp/kairo-workspace} --hostname=127.0.0.1 --port=${THEIA_PORT:-3000} --log-level=debug",
     "clean": "rm -rf lib"
+  },
+  "engines": {
+    "node": ">=18.0.0 <23.0.0"
   },
   "dependencies": {
     "@kairo/protocol": "workspace:*",
@@ -46,7 +49,9 @@
   },
   "devDependencies": {
     "@theia/cli": "1.73.1",
+    "cross-env": "^7.0.3",
     "esbuild": "0.24.2",
+    "jsdom": "^24.1.3",
     "typescript": "5.5.4"
   }
 }

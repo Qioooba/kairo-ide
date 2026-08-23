@@ -36,9 +36,11 @@ runtime-agent/kairo-runtime
 runtime-agent/bin/
 runtime-agent/dist/
 runtime-agent/coverage.out
+runtime-agent/coverage
 runtime-agent/coverage/
 runtime-agent/coverage*/
 runtime-agent/*.out
+scripts/dev/
 runtime-agent/cover*.out
 runtime-agent/*_cov
 runtime-agent/api.out
@@ -169,6 +171,24 @@ artifacts/playwright-install.log.err
 
 # Local scratch files (test probes, one-off scripts)
 scratchpad/
+tmp/
+tmp-i18n.out
+cloc-by-file.csv
+test-regex*.js
+verify-asar.js
+scripts/locale-additions.*
+scripts/add-setup-tmp-require.py
+scripts/auto-cleanup-after-kill.ps1
+scripts/clean-c-drive.ps1
+scripts/cleanup-stage-orphans.ps1
+scripts/close-asar-handles.ps1
+scripts/defender-exclude-artifacts.ps1
+docs/screenshots/current-ui-extra/
+docs/screenshots/highlight-compare/
+docs/screenshots/svn-ui-verify/
+docs/screenshots/ui-analysis-current/
+docs/screenshots/ui-optimization-after*/
+docs/screenshots/windows-e2e/
 
 
 # Local merge scratch (created by AI merge resolution)
@@ -187,6 +207,14 @@ coverage/
 
 # Test output files
 *test-output*.txt
+
+# MuseSpark audit transient
+musespark-audit/*.log
+musespark-audit/*.err
+musespark-audit/screenshots/
+musespark-audit/issues/
+.runtime-musespark/
+docs/screenshots/windows-deep-auto/
 
 # Scratch files
 checksums*.sha256

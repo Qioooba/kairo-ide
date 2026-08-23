@@ -6,7 +6,7 @@
   "types": "lib/index.d.ts",
   "files": ["lib", "src"],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node -e \"require('fs').cpSync('src/browser/svn-dialogs.css','lib/browser/svn-dialogs.css',{force:true})\"",
     "clean": "rm -rf lib",
     "lint": "tsc -p tsconfig.json --noEmit",
     "test": "node --test src/browser/svn-parser.test.cjs src/browser/svn-detector.test.cjs src/node/svn-backend-queue.test.cjs src/node/svn-backend.integration.test.cjs"

@@ -238,7 +238,7 @@ const SvnHistoryComponent: React.FC<SvnHistoryProps> = ({
           placeholder={t('widget.svn.history.filterAuthorPlaceholder')}
           value={filterAuthor}
           onChange={e => setFilterAuthor(e.target.value)}
-          className="kairo-svn-filter-input"
+          className="theia-input kairo-svn-filter-input"
           onKeyDown={e => e.key === 'Enter' && loadHistory()}
         />
         <input
@@ -246,7 +246,7 @@ const SvnHistoryComponent: React.FC<SvnHistoryProps> = ({
           placeholder={t('widget.svn.history.filterMessagePlaceholder')}
           value={filterMessage}
           onChange={e => setFilterMessage(e.target.value)}
-          className="kairo-svn-filter-input"
+          className="theia-input kairo-svn-filter-input"
           onKeyDown={e => e.key === 'Enter' && loadHistory()}
         />
         <button

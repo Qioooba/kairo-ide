@@ -1068,6 +1068,11 @@ body.theia-light {
     margin: 0;
 }
 
+.kairo-diagnostics-list {
+    max-height: 240px;
+    overflow: auto;
+}
+
 .kairo-build-item,
 .kairo-server-item {
     display: flex;
@@ -1534,6 +1539,8 @@ body.theia-light {
     flex-direction: column;
     align-items: flex-start;
     width: 100%;
+    min-width: 0;
+    overflow: hidden;
     text-align: left;
     padding: 8px 12px;
     gap: 2px;
@@ -1542,6 +1549,11 @@ body.theia-light {
 .recent-project-name {
     font-size: 13px;
     font-weight: 500;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
 }
 
 .recent-project-path {
@@ -2073,6 +2085,10 @@ body.theia-light {
 
 .kairo-problems-col-file {
     width: 140px;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .kairo-problems-col-line {
@@ -3076,6 +3092,17 @@ body.theia-light {
 
 .kairo-debug-var-row-idea:hover {
     background: var(--kairo-hover-overlay, rgba(255, 255, 255, 0.05));
+}
+
+.kairo-debug-var-row {
+    transition: background-color 80ms ease;
+}
+.kairo-debug-var-row:hover {
+    background: var(--theia-list-hoverBackground);
+}
+.kairo-debug-var-row:focus {
+    outline: 1px solid var(--theia-focusBorder);
+    outline-offset: -1px;
 }
 
 .kairo-debug-var-row-idea .codicon {
@@ -8577,6 +8604,18 @@ html, body {
     display: flex;
     align-items: center;
     gap: 8px;
+    min-width: 0;
+}
+
+.kairo-svn-history-path {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--kairo-text-secondary);
+    font-size: 11px;
+    font-family: var(--theia-monospace-font-family, monospace);
 }
 
 .kairo-history-refresh,
@@ -11161,6 +11200,551 @@ html, body {
     color: inherit !important;
     font-weight: inherit !important;
     font-style: inherit !important;
+}
+
+/* ================================================================ */
+/*  P1 Fix — debug-hover-widget: extract inline styles to CSS       */
+/*  Uses --kairo-debug-depth for dynamic indent, codicon-chevron    */
+/*  横平竖直: flex + gap tokens, no inline style except CSS var     */
+/* ================================================================ */
+
+.kairo-debug-hover-root {
+    position: absolute;
+    pointer-events: auto;
+}
+
+/* Root widget — replaces inline background/border/radius/shadow/size/font */
+.kairo-debug-hover-widget {
+    display: flex;
+    flex-direction: column;
+    background: var(--theia-editorWidget-background);
+    border: 1px solid var(--theia-editorWidget-border);
+    border-radius: 4px;
+    box-shadow: 0 4px 12px var(--theia-widget-shadow);
+    min-width: 200px;
+    max-width: 400px;
+    max-height: 350px;
+    overflow: auto;
+    font-size: 11px;
+    font-family: var(--theia-monaco-font-family, monospace);
+    z-index: 10000;
+    user-select: text;
+}
+
+/* Header — expression line */
+.kairo-debug-hover-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 4px;
+    padding: 6px 8px 4px;
+    cursor: default;
+    min-width: 0;
+}
+.kairo-debug-hover-header--expandable {
+    cursor: pointer;
+    border-bottom: 1px solid var(--theia-panel-border);
+}
+.kairo-debug-hover-header--expandable:hover {
+    background: var(--theia-list-hoverBackground, var(--kairo-hover-overlay));
+}
+.kairo-debug-hover-header--leaf {
+    border-bottom: none;
+}
+
+.kairo-debug-hover-header-chevron {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 12px;
+    height: 12px;
+    flex-shrink: 0;
+    margin-top: 3px;
+    font-size: 10px;
+    opacity: 0.6;
+    color: var(--theia-descriptionForeground);
+}
+.kairo-debug-hover-header-chevron--placeholder {
+    width: 8px;
+    flex-shrink: 0;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.kairo-debug-hover-header-content {
+    min-width: 0;
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.kairo-debug-hover-header-line {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-wrap: wrap;
+    min-width: 0;
+}
+
+.kairo-debug-hover-expression-name {
+    color: var(--theia-debugTokenExpression-name);
+    font-weight: 600;
+    flex-shrink: 0;
+}
+
+.kairo-debug-hover-type {
+    color: var(--theia-debugTokenExpression-type);
+    font-size: 10px;
+    opacity: 0.7;
+    flex-shrink: 0;
+}
+
+.kairo-debug-hover-equals {
+    color: var(--theia-debugTokenExpression-type);
+    flex-shrink: 0;
+}
+
+.kairo-debug-hover-value {
+    min-width: 0;
+    color: var(--theia-debugTokenExpression-value);
+}
+.kairo-debug-hover-value--child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1 1 auto;
+}
+.kairo-debug-hover-value--root {
+    word-break: break-all;
+    white-space: pre-wrap;
+    flex: 1 1 auto;
+}
+
+.kairo-debug-hover-error {
+    color: var(--theia-errorForeground);
+    font-size: 10px;
+    margin-top: 2px;
+    word-break: break-word;
+    line-height: 1.4;
+}
+
+/* Children container */
+.kairo-debug-hover-children {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    padding: 2px 0;
+    min-width: 0;
+}
+
+.kairo-debug-hover-loading {
+    padding: 4px 8px;
+    color: var(--theia-descriptionForeground);
+    font-style: italic;
+    font-size: 10px;
+    line-height: 1.4;
+}
+
+/* Row — dynamic indent via --kairo-debug-depth */
+.kairo-debug-hover-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    line-height: 16px;
+    white-space: nowrap;
+    padding-top: 1px;
+    padding-bottom: 1px;
+    padding-right: 4px;
+    padding-left: calc(var(--kairo-debug-depth, 0) * 12px + 4px);
+    cursor: default;
+    min-width: 0;
+    border-radius: 3px;
+    margin: 0 2px;
+}
+.kairo-debug-hover-row--expandable {
+    cursor: pointer;
+}
+.kairo-debug-hover-row--expandable:hover {
+    background: var(--theia-list-hoverBackground, var(--kairo-hover-overlay));
+}
+.kairo-debug-hover-row--leaf:hover {
+    background: var(--theia-list-hoverBackground, var(--kairo-hover-overlay));
+}
+
+.kairo-debug-hover-chevron {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 10px;
+    height: 12px;
+    flex-shrink: 0;
+    font-size: 10px;
+    opacity: 0.6;
+    color: var(--theia-descriptionForeground);
+}
+.kairo-debug-hover-chevron--hidden {
+    opacity: 0;
+    pointer-events: none;
+}
+
+.kairo-debug-hover-name {
+    color: var(--theia-debugTokenExpression-name);
+    flex-shrink: 0;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Action bar */
+.kairo-debug-hover-action-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 8px;
+    border-top: 1px solid var(--theia-panel-border);
+    background: var(--theia-editor-inactiveSelectionBackground);
+    flex-shrink: 0;
+}
+
+.kairo-debug-hover-button {
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--theia-textLink-foreground);
+    cursor: pointer;
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    min-height: 18px;
+    transition: background-color 80ms ease, border-color 80ms ease, color 80ms ease;
+    white-space: nowrap;
+}
+.kairo-debug-hover-button:hover {
+    background: var(--theia-list-hoverBackground, var(--kairo-hover-overlay));
+    border-color: var(--theia-panel-border, var(--kairo-border));
+    text-decoration: none;
+}
+.kairo-debug-hover-button:focus-visible {
+    outline: 1px solid var(--theia-focusBorder, var(--kairo-primary));
+    outline-offset: -1px;
+}
+.kairo-debug-hover-button:active {
+    background: color-mix(in srgb, var(--theia-textLink-foreground) 12%, transparent);
+}
+
+/* ================================================================ */
+/*  P1 Fix — kairo-shortcuts-widget: extract inline styles           */
+/*  Responsive with minmax + overflow:auto, no hardcoded width %     */
+/*  横平竖直: flex gap tokens, grid minmax for columns                */
+/* ================================================================ */
+
+.kairo-shortcuts-widget {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+    min-width: 0;
+    overflow: hidden;
+    background: var(--theia-editor-background, var(--kairo-bg));
+    color: var(--theia-foreground, var(--kairo-text));
+}
+
+.kairo-shortcuts-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+    min-width: 0;
+    padding: 12px;
+    gap: 12px;
+    box-sizing: border-box;
+    overflow: hidden;
+}
+
+.kairo-shortcuts-search {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex-shrink: 0;
+    min-width: 0;
+}
+
+.kairo-shortcuts-search-input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 8px 12px;
+    font-size: 14px;
+    line-height: 1.4;
+    border: 1px solid var(--theia-input-border, var(--kairo-border));
+    border-radius: 4px;
+    background: var(--theia-input-background, var(--kairo-input-bg));
+    color: var(--theia-input-foreground, var(--kairo-input-fg));
+    outline: none;
+    transition: border-color 120ms ease;
+    min-height: 32px;
+}
+.kairo-shortcuts-search-input:focus {
+    border-color: var(--theia-focusBorder, var(--kairo-primary));
+    outline: none;
+}
+.kairo-shortcuts-search-input::placeholder {
+    color: var(--theia-input-placeholderForeground, var(--kairo-text-secondary));
+    opacity: 0.7;
+    font-style: italic;
+}
+
+.kairo-shortcuts-count {
+    font-size: 12px;
+    color: var(--theia-descriptionForeground);
+    line-height: 1.4;
+    min-width: 0;
+    word-break: break-word;
+}
+
+.kairo-shortcuts-table-container {
+    flex: 1 1 auto;
+    min-height: 0;
+    min-width: 0;
+    overflow: auto;
+    border: 1px solid var(--theia-panel-border, var(--kairo-border));
+    border-radius: 6px;
+    background: var(--theia-editor-background, var(--kairo-bg));
+    scrollbar-width: thin;
+}
+.kairo-shortcuts-table-container::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+.kairo-shortcuts-table-container::-webkit-scrollbar-thumb {
+    background: var(--theia-scrollbarSlider-background, var(--kairo-border));
+    border-radius: 4px;
+}
+.kairo-shortcuts-table-container::-webkit-scrollbar-thumb:hover {
+    background: var(--theia-scrollbarSlider-hoverBackground, var(--kairo-text-secondary));
+}
+
+.kairo-shortcuts-category {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    margin-bottom: 16px;
+    min-width: 0;
+}
+.kairo-shortcuts-category:last-child {
+    margin-bottom: 0;
+}
+
+.kairo-shortcuts-category-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    padding: 8px 12px;
+    margin: 0 0 8px 0;
+    border-bottom: 1px solid var(--theia-sideBarSectionHeader-border, var(--kairo-border));
+    color: var(--theia-sideBarTitle-foreground, var(--kairo-text));
+    position: sticky;
+    top: 0;
+    background: var(--theia-editor-background, var(--kairo-bg));
+    z-index: 1;
+    min-width: 0;
+    min-height: 28px;
+    box-sizing: border-box;
+}
+
+.kairo-shortcuts-category-count {
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--theia-descriptionForeground);
+    flex-shrink: 0;
+}
+
+/* Table — use minmax for responsive columns, no hardcoded width % */
+.kairo-shortcuts-table {
+    width: 100%;
+    min-width: 640px;
+    border-collapse: collapse;
+    font-size: 13px;
+    table-layout: fixed;
+}
+
+.kairo-shortcuts-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--kairo-bg-secondary, var(--theia-sideBarSectionHeader-background, var(--theia-editor-background)));
+    border-bottom: 1px solid var(--theia-sideBarSectionHeader-border, var(--kairo-border));
+}
+
+.kairo-shortcuts-header-row {
+    text-align: left;
+    border-bottom: 1px solid var(--theia-sideBarSectionHeader-border, var(--kairo-border));
+}
+
+.kairo-shortcuts-th,
+.kairo-shortcuts-td {
+    text-align: left;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--theia-tree-indentGuidesStroke, var(--kairo-border));
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: middle;
+    min-width: 0;
+    box-sizing: border-box;
+}
+
+.kairo-shortcuts-th {
+    font-weight: 600;
+    color: var(--theia-descriptionForeground);
+    font-size: 12px;
+    letter-spacing: 0.2px;
+    white-space: nowrap;
+    padding: 6px 8px;
+}
+
+/* Column sizing — responsive with minmax, no hardcoded width % */
+.kairo-shortcuts-col-command {
+    min-width: 140px;
+}
+.kairo-shortcuts-col-keybinding {
+    min-width: 120px;
+}
+.kairo-shortcuts-col-label {
+    min-width: 160px;
+}
+.kairo-shortcuts-col-when {
+    min-width: 90px;
+}
+
+/* Modern grid fallback using minmax — apply when supported */
+@supports (grid-template-columns: minmax(0, 1fr)) {
+    .kairo-shortcuts-table {
+        /* Keep table layout but ensure container can use grid minmax for overall page */
+        /* Grid minmax is used for the category list on wide screens */
+    }
+    .kairo-shortcuts-table-container {
+        /* Ensure overflow:auto container works with minmax content */
+        display: block;
+    }
+}
+
+/* Use CSS grid for table header/body on narrow viewports via minmax — progressive enhancement */
+.kairo-shortcuts-table--grid {
+    display: grid;
+    grid-template-columns: minmax(140px, 1.4fr) minmax(120px, 1fr) minmax(160px, 1.6fr) minmax(90px, 0.8fr);
+}
+.kairo-shortcuts-table--grid thead,
+.kairo-shortcuts-table--grid tbody,
+.kairo-shortcuts-table--grid tr {
+    display: contents;
+}
+
+.kairo-shortcuts-row {
+    border-bottom: 1px solid var(--theia-tree-indentGuidesStroke, var(--kairo-border));
+    transition: background-color 80ms ease;
+}
+.kairo-shortcuts-row:hover {
+    background: var(--theia-list-hoverBackground, var(--kairo-hover-overlay));
+}
+
+.kairo-shortcuts-cell-command {
+    color: var(--theia-foreground);
+    min-width: 0;
+}
+
+.kairo-shortcuts-code {
+    font-size: 12px;
+    padding: 2px 4px;
+    border-radius: 3px;
+    background: var(--theia-textBlockQuote-background, var(--kairo-bg-secondary));
+    color: var(--theia-foreground);
+    font-family: var(--theia-monaco-font-family, monospace);
+    word-break: break-all;
+    white-space: pre-wrap;
+    border: 1px solid transparent;
+}
+
+.kairo-shortcuts-cell-keybinding {
+    min-width: 0;
+}
+
+.kairo-shortcuts-kbd {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    padding: 2px 6px;
+    font-size: 12px;
+    font-weight: 600;
+    border: 1px solid var(--theia-button-border, var(--kairo-border));
+    border-radius: 3px;
+    background: var(--theia-button-background, var(--kairo-bg-secondary));
+    color: var(--theia-button-foreground, var(--kairo-text));
+    font-family: monospace;
+    white-space: nowrap;
+    line-height: 1.4;
+    box-shadow: 0 1px 0 rgba(0,0,0,0.08);
+}
+
+.kairo-shortcuts-cell-label {
+    color: var(--theia-foreground);
+    white-space: normal;
+    word-break: break-word;
+    min-width: 0;
+    line-height: 1.4;
+}
+
+.kairo-shortcuts-cell-when {
+    color: var(--theia-descriptionForeground);
+    font-size: 12px;
+    font-style: italic;
+    min-width: 0;
+    line-height: 1.4;
+}
+
+.kairo-shortcuts-empty {
+    text-align: center;
+    padding: 32px 16px;
+    color: var(--theia-descriptionForeground);
+    font-size: 13px;
+    line-height: 1.5;
+    min-height: 80px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Responsive: keep 横平竖直 at narrow widths, scroll instead of squish */
+@media (max-width: 720px) {
+    .kairo-shortcuts-container {
+        padding: 8px;
+        gap: 8px;
+    }
+    .kairo-shortcuts-table {
+        min-width: 560px;
+    }
+    .kairo-shortcuts-category-header {
+        padding: 6px 8px;
+        font-size: 13px;
+    }
+    .kairo-shortcuts-th,
+    .kairo-shortcuts-td {
+        padding: 4px 6px;
+        font-size: 12px;
+    }
+}
+
+/* Extra small: allow grid to collapse with minmax auto-fit */
+@media (max-width: 480px) {
+    .kairo-shortcuts-table-container {
+        border-radius: 4px;
+    }
 }
 
 

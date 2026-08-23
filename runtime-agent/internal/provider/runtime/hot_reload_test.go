@@ -364,6 +364,81 @@ func TestHotReloadWatcher_SkipDirs(t *testing.T) {
 	}
 }
 
+func TestHotReloadWatcher_DirectDocBaseNoCopy(t *testing.T) {
+	dir := t.TempDir()
+	webappDir := filepath.Join(dir, "webapp")
+	os.MkdirAll(webappDir, 0755)
+
+	// direct mode: DeploymentDir == "" (Tomcat serves directly from WebappDir)
+	cfg := DefaultHotReloadConfig()
+	cfg.WebappDir = webappDir
+	cfg.DeploymentDir = ""
+	cfg.PollInterval = 50 * time.Millisecond
+
+	w := NewHotReloadWatcher(cfg)
+	// Directly test syncStaticFile is no-op in direct mode.
+	tmpFile := filepath.Join(webappDir, "index.jsp")
+	if err := os.WriteFile(tmpFile, []byte("v1"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.syncStaticFile(context.Background(), tmpFile); err != nil {
+		t.Errorf("direct mode sync should be no-op, got %v", err)
+	}
+	// Also with DeploymentDir == WebappDir
+	cfg2 := DefaultHotReloadConfig()
+	cfg2.WebappDir = webappDir
+	cfg2.DeploymentDir = webappDir
+	w2 := NewHotReloadWatcher(cfg2)
+	if err := w2.syncStaticFile(context.Background(), tmpFile); err != nil {
+		t.Errorf("same-dir direct mode sync should be no-op, got %v", err)
+	}
+	// Watcher should still detect changes without error.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	w.Start(ctx)
+	defer w.Stop()
+	time.Sleep(150 * time.Millisecond)
+	w.mu.RLock()
+	_, tracked := w.fileHashes[tmpFile]
+	w.mu.RUnlock()
+	if !tracked {
+		t.Error("file should be tracked in direct mode")
+	}
+}
+
+func TestSyncCompiledClasses(t *testing.T) {
+	dir := t.TempDir()
+	outputDir := filepath.Join(dir, "output")
+	webappDir := filepath.Join(dir, "webapp")
+	os.MkdirAll(filepath.Join(outputDir, "com", "example"), 0755)
+	os.MkdirAll(filepath.Join(webappDir, "WEB-INF", "classes"), 0755)
+
+	classFile := filepath.Join(outputDir, "com", "example", "App.class")
+	if err := os.WriteFile(classFile, []byte("cafebabe"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Non-class file should be ignored.
+	if err := os.WriteFile(filepath.Join(outputDir, "com", "example", "App.java"), []byte("class"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := syncCompiledClasses(outputDir, webappDir); err != nil {
+		t.Fatalf("syncCompiledClasses failed: %v", err)
+	}
+	target := filepath.Join(webappDir, "WEB-INF", "classes", "com", "example", "App.class")
+	data, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("expected synced class: %v", err)
+	}
+	if string(data) != "cafebabe" {
+		t.Errorf("unexpected synced content: %q", string(data))
+	}
+	// Ensure .java was not copied.
+	if _, err := os.Stat(filepath.Join(webappDir, "WEB-INF", "classes", "com", "example", "App.java")); !os.IsNotExist(err) {
+		t.Error("non-class file should not be synced")
+	}
+}
+
 func TestFileHash(t *testing.T) {
 	dir := t.TempDir()
 	f := filepath.Join(dir, "test.txt")

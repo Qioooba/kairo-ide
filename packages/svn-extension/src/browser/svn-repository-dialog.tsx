@@ -58,7 +58,7 @@ export class SvnRepositoryDialog extends ReactDialog<void> {
       stack: url ? [url] : [],
       panel: 'browse',
       mkdirName: '',
-      mkdirMessage: 'Create directory',
+      mkdirMessage: props.i18n.t('widget.svn.dialog.browse.createDirectoryDefault'),
       checkoutPath: '',
       busy: false,
     };
@@ -123,13 +123,14 @@ export class SvnRepositoryDialog extends ReactDialog<void> {
   protected async doMkdir(): Promise<void> {
     const name = this.state.mkdirName.trim();
     if (!name) {
-      this.setState({ error: 'Directory name is required.' });
+      this.setState({ error: this.i18n.t('widget.svn.dialog.browse.directoryNameRequired') });
       return;
     }
     this.setState({ busy: true, error: undefined });
     try {
-      await this.svnService.mkdir(this.joinUrl(this.state.url, name), this.state.mkdirMessage || `Create ${name}`, true);
-      this.messageService.info(`Created ${name}`);
+      const fallback = this.i18n.t('widget.svn.dialog.browse.createDirectoryWithName' as any, { name } as any);
+      await this.svnService.mkdir(this.joinUrl(this.state.url, name), this.state.mkdirMessage || fallback, true);
+      this.messageService.info(this.i18n.t('widget.svn.dialog.browse.created' as any, { name } as any));
       this.setState({ busy: false, mkdirName: '', panel: 'browse' });
       await this.load(this.state.url);
     } catch (e) {
@@ -140,14 +141,14 @@ export class SvnRepositoryDialog extends ReactDialog<void> {
   protected async doCheckout(): Promise<void> {
     const path = this.state.checkoutPath.trim();
     if (!path) {
-      this.setState({ error: 'Local path is required.' });
+      this.setState({ error: this.i18n.t('widget.svn.dialog.browse.localPathRequired') });
       return;
     }
     const url = this.currentSelectionUrl();
     this.setState({ busy: true, error: undefined });
     try {
       await this.svnService.checkout(url, path);
-      this.messageService.info(`Checked out ${url}`);
+      this.messageService.info(this.i18n.t('widget.svn.dialog.browse.checkedOut' as any, { url } as any));
       this.svnService.setActiveWcRoot(path);
       this.state = { ...this.state, busy: false };
       this.close();

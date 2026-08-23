@@ -179,8 +179,8 @@ test('RemoteSandboxService: matchPattern handles glob patterns', () => {
   service.configure({ forbiddenPatterns: ['*.log', 'temp-?'] });
   assert.strictEqual(service.checkPath('/path/error.log').allowed, false);
   assert.strictEqual(service.checkPath('/path/temp-A').allowed, false);
-  // temp-? matches temp-A which is a substring of temp-AB (regex is not anchored)
-  assert.strictEqual(service.checkPath('/path/temp-AB').allowed, false);
+  // VC-P2-8: anchored glob temp-? matches exactly one char, so temp-AB should NOT be blocked
+  assert.strictEqual(service.checkPath('/path/temp-AB').allowed, true);
 });
 
 test('teardown', () => { disableJSDOM(); });

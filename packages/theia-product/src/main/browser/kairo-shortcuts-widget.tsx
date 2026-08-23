@@ -45,18 +45,18 @@ interface ShortcutCategory {
   shortcuts: ShortcutEntry[];
 }
 
-/** Category definitions. */
-const CATEGORIES: Record<string, { name: string; order: number }> = {
-  general: { name: '通用 (General)', order: 1 },
-  editor: { name: '编辑器 (Editor)', order: 2 },
-  search: { name: '搜索与替换 (Search)', order: 3 },
-  navigate: { name: '导航 (Navigation)', order: 4 },
-  debug: { name: '调试 (Debug)', order: 5 },
-  git: { name: 'Git', order: 6 },
-  java: { name: 'Java', order: 7 },
-  kairo: { name: 'Kairo IDE', order: 8 },
-  terminal: { name: '终端 (Terminal)', order: 9 },
-  view: { name: '视图 (View)', order: 10 },
+/** Category definitions — names are resolved via i18n at render time. */
+const CATEGORIES: Record<string, { order: number; i18nKey: string }> = {
+  general: { order: 1, i18nKey: 'widget.shortcuts.category.general' },
+  editor: { order: 2, i18nKey: 'widget.shortcuts.category.editor' },
+  search: { order: 3, i18nKey: 'widget.shortcuts.category.search' },
+  navigate: { order: 4, i18nKey: 'widget.shortcuts.category.navigate' },
+  debug: { order: 5, i18nKey: 'widget.shortcuts.category.debug' },
+  git: { order: 6, i18nKey: 'widget.shortcuts.category.git' },
+  java: { order: 7, i18nKey: 'widget.shortcuts.category.java' },
+  kairo: { order: 8, i18nKey: 'widget.shortcuts.category.kairo' },
+  terminal: { order: 9, i18nKey: 'widget.shortcuts.category.terminal' },
+  view: { order: 10, i18nKey: 'widget.shortcuts.category.view' },
 };
 
 /** Command-to-category mapping. */
@@ -149,9 +149,9 @@ export class KairoShortcutsWidget extends BaseWidget {
     const categorized = this.categorize(filtered);
 
     return (
-      <div className="kairo-shortcuts-container" style={{ height: '100%', display: 'flex', flexDirection: 'column', padding: '12px' }}>
+      <div className="kairo-shortcuts-container">
         {/* Search Bar */}
-        <div className="kairo-shortcuts-search" style={{ marginBottom: '12px', flexShrink: 0 }}>
+        <div className="kairo-shortcuts-search">
           <input
             className="kairo-shortcuts-search-input theia-input"
             type="text"
@@ -163,98 +163,60 @@ export class KairoShortcutsWidget extends BaseWidget {
             }}
             aria-label={this.i18n.t('widget.shortcuts.searchAria')}
             role="searchbox"
-            style={{
-              width: '100%',
-              padding: '8px 12px',
-              fontSize: '14px',
-              border: '1px solid var(--theia-input-border)',
-              borderRadius: '4px',
-              background: 'var(--theia-input-background)',
-              color: 'var(--theia-input-foreground)',
-            }}
           />
-          <div style={{ marginTop: '4px', fontSize: '12px', color: 'var(--theia-descriptionForeground)' }}>
+          <div className="kairo-shortcuts-count">
             {this.i18n.t('widget.shortcuts.count', { filtered: filtered.length, total: allShortcuts.length })}
             {this.searchTerm ? this.i18n.t('widget.shortcuts.countFiltered', { total: allShortcuts.length }) : ''}
           </div>
         </div>
 
         {/* Shortcuts Table */}
-        <div className="kairo-shortcuts-table-container" style={{ flex: 1, overflow: 'auto' }}>
+        <div className="kairo-shortcuts-table-container">
           {categorized.map(category => (
-            <div key={category.name} className="kairo-shortcuts-category" style={{ marginBottom: '16px' }}>
-              <h3
-                style={{
-                  fontSize: '14px',
-                  fontWeight: 600,
-                  padding: '8px 0',
-                  margin: '0 0 8px 0',
-                  borderBottom: '1px solid var(--theia-sideBarSectionHeader-border)',
-                  color: 'var(--theia-sideBarTitle-foreground)',
-                  position: 'sticky',
-                  top: 0,
-                  background: 'var(--theia-editor-background)',
-                  zIndex: 1,
-                }}
-              >
+            <div key={category.name} className="kairo-shortcuts-category">
+              <h3 className="kairo-shortcuts-category-header">
                 {category.name}
-                <span style={{ marginLeft: '8px', fontSize: '12px', fontWeight: 400, color: 'var(--theia-descriptionForeground)' }}>
+                <span className="kairo-shortcuts-category-count">
                   ({category.shortcuts.length})
                 </span>
               </h3>
               <table
-                style={{
-                  width: '100%',
-                  borderCollapse: 'collapse',
-                  fontSize: '13px',
-                }}
+                className="kairo-shortcuts-table"
                 role="grid"
                 aria-label={`${category.name} 快捷键`}
               >
                 <thead>
-                  <tr style={{ textAlign: 'left', borderBottom: '1px solid var(--theia-sideBarSectionHeader-border)' }}>
-                    <th style={{ padding: '6px 8px', fontWeight: 600, color: 'var(--theia-descriptionForeground)', width: '30%' }}>命令</th>
-                    <th style={{ padding: '6px 8px', fontWeight: 600, color: 'var(--theia-descriptionForeground)', width: '25%' }}>快捷键</th>
-                    <th style={{ padding: '6px 8px', fontWeight: 600, color: 'var(--theia-descriptionForeground)', width: '35%' }}>标签</th>
-                    <th style={{ padding: '6px 8px', fontWeight: 600, color: 'var(--theia-descriptionForeground)', width: '10%' }}>条件</th>
+                  <tr className="kairo-shortcuts-header-row">
+                    <th className="kairo-shortcuts-th kairo-shortcuts-col-command">命令</th>
+                    <th className="kairo-shortcuts-th kairo-shortcuts-col-keybinding">快捷键</th>
+                    <th className="kairo-shortcuts-th kairo-shortcuts-col-label">标签</th>
+                    <th className="kairo-shortcuts-th kairo-shortcuts-col-when">条件</th>
                   </tr>
                 </thead>
                 <tbody>
                   {category.shortcuts.map((shortcut, idx) => (
                     <tr
                       key={`${shortcut.command}-${idx}`}
-                      style={{
-                        borderBottom: '1px solid var(--theia-tree-indentGuidesStroke)',
-                      }}
+                      className="kairo-shortcuts-row"
                       role="row"
                     >
-                      <td style={{ padding: '6px 8px', color: 'var(--theia-foreground)' }}>
-                        <code style={{ fontSize: '12px', padding: '2px 4px', borderRadius: '3px', background: 'var(--theia-textBlockQuote-background)' }}>
+                      <td className="kairo-shortcuts-td kairo-shortcuts-cell-command">
+                        <code className="kairo-shortcuts-code">
                           {shortcut.command}
                         </code>
                       </td>
-                      <td style={{ padding: '6px 8px' }}>
+                      <td className="kairo-shortcuts-td kairo-shortcuts-cell-keybinding">
                         <kbd
-                          style={{
-                            display: 'inline-block',
-                            padding: '2px 6px',
-                            fontSize: '12px',
-                            fontWeight: 600,
-                            border: '1px solid var(--theia-button-border)',
-                            borderRadius: '3px',
-                            background: 'var(--theia-button-background)',
-                            color: 'var(--theia-button-foreground)',
-                            fontFamily: 'monospace',
-                          }}
+                          className="kairo-shortcuts-kbd"
                           aria-label={`快捷键: ${shortcut.keybinding}`}
                         >
                           {shortcut.keybinding}
                         </kbd>
                       </td>
-                      <td style={{ padding: '6px 8px', color: 'var(--theia-foreground)' }}>
+                      <td className="kairo-shortcuts-td kairo-shortcuts-cell-label">
                         {shortcut.label}
                       </td>
-                      <td style={{ padding: '6px 8px', color: 'var(--theia-descriptionForeground)', fontSize: '12px', fontStyle: 'italic' }}>
+                      <td className="kairo-shortcuts-td kairo-shortcuts-cell-when">
                         {shortcut.when || ''}
                       </td>
                     </tr>
@@ -264,7 +226,7 @@ export class KairoShortcutsWidget extends BaseWidget {
             </div>
           ))}
           {categorized.length === 0 && (
-            <div style={{ textAlign: 'center', padding: '32px', color: 'var(--theia-descriptionForeground)' }}>
+            <div className="kairo-shortcuts-empty">
               {this.searchTerm ? `未找到匹配 "${this.searchTerm}" 的快捷键` : '暂无可用的快捷键'}
             </div>
           )}
@@ -324,9 +286,10 @@ export class KairoShortcutsWidget extends BaseWidget {
 
     const categories: ShortcutCategory[] = [];
     for (const [catName, catShortcuts] of categoryMap) {
-      const catDef = CATEGORIES[catName] || { name: catName, order: 99 };
+      const catDef = CATEGORIES[catName] || { i18nKey: catName, order: 99 };
+      const displayName = catDef.i18nKey.startsWith('widget.') ? (this.i18n?.t(catDef.i18nKey as any) ?? catName) : catDef.i18nKey;
       categories.push({
-        name: catDef.name,
+        name: displayName,
         order: catDef.order,
         shortcuts: catShortcuts.sort((a, b) => a.label.localeCompare(b.label)),
       });

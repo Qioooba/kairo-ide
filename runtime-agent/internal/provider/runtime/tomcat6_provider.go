@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -26,6 +29,7 @@ type Tomcat6ProviderConfig struct {
 type Tomcat6Provider struct {
 	mu             sync.RWMutex
 	instances      map[domain.ServerID]*runningInstance
+	watchers       map[domain.ServerID]*HotReloadWatcher
 	processFactory ProcessFactory
 	preparer       catalinabase.Preparer
 	eventHub       *events.EventHub
@@ -63,6 +67,7 @@ func NewTomcat6Provider(processFactory ProcessFactory, preparer catalinabase.Pre
 	}
 	return &Tomcat6Provider{
 		instances:      make(map[domain.ServerID]*runningInstance),
+		watchers:       make(map[domain.ServerID]*HotReloadWatcher),
 		processFactory: processFactory,
 		preparer:       preparer,
 		eventHub:       eventHub,
@@ -227,6 +232,12 @@ func (p *Tomcat6Provider) Start(ctx context.Context, plan domain.RuntimePlan, lo
 			PID:      obs.Identity.PID,
 		}))
 
+	// P0: start HotReloadWatcher for direct docBase mode (WebappDir is DocBase).
+	// Static files are served directly from WebappDir, so DeploymentDir is
+	// left empty to skip syncStaticFile copy. Java changes trigger compile
+	// callback that syncs OutputDir/WEB-INF/classes if available.
+	p.startWatcher(plan)
+
 	return &obs.Identity, nil
 }
 
@@ -235,6 +246,7 @@ func (p *Tomcat6Provider) GracefulStop(ctx context.Context, identity domain.Proc
 	if err != nil {
 		return err
 	}
+	p.stopWatcher(inst.plan.ServerID)
 
 	shutdownErr := tomcat6.SendShutdown(inst.plan.ShutdownPort, 5*time.Second)
 
@@ -266,6 +278,7 @@ func (p *Tomcat6Provider) ForceStop(ctx context.Context, identity domain.Process
 	if err != nil {
 		return err
 	}
+	p.stopWatcher(inst.plan.ServerID)
 	stopCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	err = inst.process.ForceStop(stopCtx, identity)
@@ -325,6 +338,7 @@ func (p *Tomcat6Provider) CleanupBase(ctx context.Context, plan domain.RuntimePl
 		delete(p.instances, plan.ServerID)
 	}
 	p.mu.Unlock()
+	p.stopWatcher(plan.ServerID)
 	return nil
 }
 
@@ -370,6 +384,84 @@ func (p *Tomcat6Provider) cleanupInstance(inst *runningInstance) {
 			return
 		}
 	}
+}
+
+func (p *Tomcat6Provider) startWatcher(plan domain.RuntimePlan) {
+	cfg := DefaultHotReloadConfig()
+	cfg.WebappDir = plan.WebappDir
+	// Direct docBase mode: WebappDir is served directly, no DeploymentDir copy needed.
+	cfg.DeploymentDir = ""
+	cfg.SourceDirs = plan.SourceDirs
+	cfg.OutputDir = plan.OutputDir
+	cfg.PollInterval = 1 * time.Second
+	watcher := NewHotReloadWatcher(cfg)
+	watcher.SetEventHub(p.eventHub, string(plan.WorkspaceID), string(plan.ServerID))
+	// Compile callback: sync OutputDir .class files to WebappDir/WEB-INF/classes
+	// (incremental javac is triggered via frontend HotDeployService -> /api/v1/jvm/compile-incremental).
+	// This callback ensures compiled output is visible to Tomcat's classloader.
+	watcher.SetCompileCallback(func(ctx context.Context, changedFiles []string) error {
+		if cfg.OutputDir == "" || cfg.WebappDir == "" {
+			return nil
+		}
+		// Best-effort: copy any .class files that changed in OutputDir to WEB-INF/classes.
+		// Full javac is handled by BuildUseCase/incremental API; watcher just syncs artifacts.
+		return syncCompiledClasses(cfg.OutputDir, cfg.WebappDir)
+	})
+	watcher.Start(context.Background())
+	p.mu.Lock()
+	p.watchers[plan.ServerID] = watcher
+	p.mu.Unlock()
+}
+
+func (p *Tomcat6Provider) stopWatcher(serverID domain.ServerID) {
+	p.mu.Lock()
+	watcher, ok := p.watchers[serverID]
+	if ok {
+		delete(p.watchers, serverID)
+	}
+	p.mu.Unlock()
+	if watcher != nil {
+		watcher.Stop()
+	}
+}
+
+// syncCompiledClasses copies .class files from outputDir to webappDir/WEB-INF/classes preserving relative paths.
+func syncCompiledClasses(outputDir, webappDir string) error {
+	targetBase := filepath.Join(webappDir, "WEB-INF", "classes")
+	return filepath.Walk(outputDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		if info.IsDir() {
+			return nil
+		}
+		if !strings.HasSuffix(strings.ToLower(path), ".class") {
+			return nil
+		}
+		rel, err := filepath.Rel(outputDir, path)
+		if err != nil {
+			return nil
+		}
+		if strings.HasPrefix(rel, "..") {
+			return nil
+		}
+		target := filepath.Join(targetBase, rel)
+		if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+			return nil
+		}
+		src, err := os.Open(path)
+		if err != nil {
+			return nil
+		}
+		defer src.Close()
+		dst, err := os.Create(target)
+		if err != nil {
+			return nil
+		}
+		defer dst.Close()
+		_, _ = io.Copy(dst, src)
+		return nil
+	})
 }
 
 // ReloadContext triggers a Tomcat context reload for the given server by

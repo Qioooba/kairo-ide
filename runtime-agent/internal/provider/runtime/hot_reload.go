@@ -260,9 +260,14 @@ func (w *HotReloadWatcher) scan(ctx context.Context) {
 
 // syncStaticFile copies a single static file from the webapp source directory
 // to the Tomcat deployment directory, preserving the relative path structure.
+// In direct docBase mode (DeploymentDir == "" or == WebappDir) the file is
+// served directly from WebappDir, so no copy is needed — return nil.
 func (w *HotReloadWatcher) syncStaticFile(_ context.Context, sourcePath string) error {
-	if w.cfg.DeploymentDir == "" || w.cfg.WebappDir == "" {
-		return fmt.Errorf("deployment dir and webapp dir must be configured")
+	if w.cfg.WebappDir == "" {
+		return fmt.Errorf("webapp dir must be configured")
+	}
+	if w.cfg.DeploymentDir == "" || w.cfg.DeploymentDir == w.cfg.WebappDir {
+		return nil
 	}
 
 	relPath, err := filepath.Rel(w.cfg.WebappDir, sourcePath)

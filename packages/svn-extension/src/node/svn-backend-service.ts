@@ -401,7 +401,9 @@ export class SvnBackendServiceImpl implements SvnBackendService {
   protected async execXml<T>(
     args: string[], cwd: string, parser: (xml: string) => T,
   ): Promise<T> {
-    const r = await this.$exec([...args, '--xml'], cwd, 'read');
+    const sep = args.indexOf('--');
+    const xmlArgs = sep >= 0 ? [...args.slice(0, sep), '--xml', ...args.slice(sep)] : [...args, '--xml'];
+    const r = await this.$exec(xmlArgs, cwd, 'read');
     return parser(r.stdout);
   }
 
@@ -499,7 +501,7 @@ export class SvnBackendServiceImpl implements SvnBackendService {
     queue.activeById.set(cmd.id, cmd);
 
     const svnPath = this.cachedInstallation?.path || 'svn';
-    const args = [...cmd.args];
+    const rawArgs = [...cmd.args];
     const merged = {
       nonInteractive: true,
       trustServerCert: true,
@@ -509,10 +511,16 @@ export class SvnBackendServiceImpl implements SvnBackendService {
       }),
       ...(cmd.options || {}),
     };
-    if (merged.nonInteractive) args.push('--non-interactive');
-    if (merged.trustServerCert) args.push('--trust-server-cert');
-    if (merged.username) args.push('--username', merged.username);
-    if (merged.password) args.push('--password', merged.password);
+    const extraFlags: string[] = [];
+    if (merged.nonInteractive) extraFlags.push('--non-interactive');
+    if (merged.trustServerCert) extraFlags.push('--trust-server-cert');
+    if (merged.username) extraFlags.push('--username', merged.username);
+    if (merged.password) extraFlags.push('--password', merged.password);
+    // Insert flags before '--' separator so they are not treated as paths (see withPathArgs).
+    const sepIdx = rawArgs.indexOf('--');
+    const args = sepIdx >= 0
+      ? [...rawArgs.slice(0, sepIdx), ...extraFlags, ...rawArgs.slice(sepIdx)]
+      : [...rawArgs, ...extraFlags];
 
     const timeout =
       cmd.options?.timeout ||

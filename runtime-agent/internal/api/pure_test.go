@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -1713,7 +1714,20 @@ func TestParseNetstatOutput(t *testing.T) {
 	}
 }
 
+// findFreeTestPort returns a currently-unused TCP port so tests that
+// assert "not occupied" are not environment-sensitive.
+func findFreeTestPort(t *testing.T) int {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("findFreeTestPort: %v", err)
+	}
+	defer ln.Close()
+	return ln.Addr().(*net.TCPAddr).Port
+}
+
 func TestDiagnosePort(t *testing.T) {
+	freePort := findFreeTestPort(t)
 	tests := []struct {
 		name       string
 		port       int
@@ -1722,7 +1736,7 @@ func TestDiagnosePort(t *testing.T) {
 		{"zero port", 0, false},
 		{"negative port", -1, false},
 		{"port above max", 65536, false},
-		{"valid port (not occupied)", 54321, false},
+		{"valid port (not occupied)", freePort, false},
 		{"port 65535", 65535, false},
 	}
 

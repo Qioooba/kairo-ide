@@ -535,7 +535,7 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
                 />
               </div>
               <select
-                className="kairo-search-scope-select"
+                className="theia-select kairo-search-scope-select"
                 value={scope}
                 onChange={event => { setScope(event.target.value as SearchScope); scopeModel?.setScope(event.target.value as SearchScope); }}
                 aria-label={t('widget.search.center.ariaLabel.scope')}

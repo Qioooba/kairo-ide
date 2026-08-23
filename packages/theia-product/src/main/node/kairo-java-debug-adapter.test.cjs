@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 const fs = require('node:fs');
 require('../../../../../tests/setup-tmp.cjs'); // KAIRO_TMP override
+try { require('../../../test/frontend-setup.cjs'); } catch { /* fallback: provide minimal document for lumino */ if (typeof global.document === 'undefined') global.document = { createElement: () => ({ style: {} }), body: {} }; }
 const os = require('node:os');
 const { Container } = require('inversify');
 const { DebugAdapterContribution } = require('@theia/debug/lib/common/debug-model');

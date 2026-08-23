@@ -136,7 +136,7 @@ const StashComponent: React.FC<StashWidgetProps> = ({ stashService, i18n }) => {
                 <div className="kairo-stash-push-body">
                     <input
                         type="text"
-                        className="kairo-history-search-input kairo-stash-message-input"
+                        className="kairo-history-search-input kairo-stash-message-input theia-input"
                         placeholder={t('widget.git.stash.messagePlaceholder')}
                         value={message}
                         onChange={e => setMessage(e.target.value)}

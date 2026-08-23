@@ -44,6 +44,7 @@ const { EncodingRegistry } = require('@theia/core/lib/browser/encoding-registry'
 const { EncodingService } = require('@theia/core/lib/common/encoding-service');
 const { FileServiceContribution } = require('@theia/filesystem/lib/browser/file-service');
 const { FileSystemWatcherErrorHandler } = require('@theia/filesystem/lib/browser/filesystem-watcher-error-handler');
+const { PreferenceService } = require('@theia/core/lib/common/preferences');
 
 // Mock logger for bare container (no Theia core module loaded)
 const mockLogger = {
@@ -75,6 +76,13 @@ function compose() {
       if (!isBound(EncodingService)) bind(EncodingService).toConstantValue({ decode: (b) => b.toString(), encode: (s) => Buffer.from(s) });
       if (!isBound(FileServiceContribution)) bind(FileServiceContribution).toConstantValue({});
       if (!isBound(FileSystemWatcherErrorHandler)) bind(FileSystemWatcherErrorHandler).toConstantValue({});
+      if (!isBound(PreferenceService)) bind(PreferenceService).toConstantValue({
+        get: () => undefined,
+        getBoolean: () => false,
+        getString: () => undefined,
+        onPreferenceChanged: () => ({ dispose: () => {} }),
+        ready: Promise.resolve(),
+      });
       bindKairoFrontend(bind, undefined, isBound, rebind);
       bindKairoProduct(bind, isBound, rebind);
     }),

@@ -106,6 +106,7 @@ const IDEA_WINDOWS_KEYBINDINGS: IDEAKeybinding[] = [
 
   { command: 'kairo.build', keybinding: 'ctrl+f9' },
   { command: 'kairo.buildAndDeploy', keybinding: 'ctrl+shift+f9' },
+  { command: 'kairo.server.update', keybinding: 'ctrl+f10' },
   { command: 'kairo.server.start', keybinding: 'shift+f10' },
   { command: 'kairo.server.debug', keybinding: 'shift+f9' },
   { command: 'kairo.server.stop', keybinding: 'ctrl+f2', when: '!inDebugMode' },

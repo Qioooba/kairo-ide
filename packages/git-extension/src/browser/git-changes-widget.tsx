@@ -106,6 +106,7 @@ const GitChangesComponent: React.FC<GitChangesProps> = ({ store, i18n }) => {
                             checked={selected.has(f.path)}
                             onChange={() => onToggle(f.path)}
                             className="kairo-git-file-checkbox"
+                            aria-label={f.path}
                         />
                         <span className={`kairo-git-status-badge ${statusClass(f.status)}`} aria-hidden="true">
                             <span className={`codicon ${statusIconClass(f.status)}`} />
