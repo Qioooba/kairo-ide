@@ -111,7 +111,11 @@ export class KairoTelemetry {
   }
 
   @postConstruct()
-  protected async init(): Promise<void> {
+  protected init(): void {
+    void this.initAsync();
+  }
+
+  protected async initAsync(): Promise<void> {
     await this.loadConfig();
     await this.loadEvents();
 

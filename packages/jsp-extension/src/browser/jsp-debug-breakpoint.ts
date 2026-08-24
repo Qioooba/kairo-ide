@@ -213,7 +213,11 @@ export class JspDebugBreakpointMapper {
   }
 
   @postConstruct()
-  protected async init(): Promise<void> {
+  protected init(): void {
+    void this.initAsync();
+  }
+
+  protected async initAsync(): Promise<void> {
     this.logger.info('JSP 断点映射器已初始化');
     await this.loadConfig();
   }

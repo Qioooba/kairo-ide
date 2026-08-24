@@ -221,6 +221,39 @@ function patchTerminalInitLog(filePath) {
 
 patchTerminalInitLog(frontendBundle);
 
+// ── Phase 3.5: Patch web-worker bundles ─────────────────────
+// N-059: the generated worker bundles open with
+//   `var process = window.process || {...}`
+// but Worker scope has no `window` global (only `self`/`globalThis`),
+// so editor.worker.js throws "window is not defined" on load. The dead
+// editor worker breaks monaco-backed save participants (Format on Save
+// hangs → FileService write ends "Canceled") and code intelligence.
+// Alias `window` to the worker global before the bundle code runs.
+function patchWorkerWindow(filePath) {
+  if (!fs.existsSync(filePath)) {
+    console.warn('[postbuild] worker window patch: target not found:', filePath);
+    return;
+  }
+  let content = fs.readFileSync(filePath, 'utf8');
+  const marker = '/*[postbuild] worker window shim*/';
+  if (content.startsWith(marker)) {
+    console.log('[postbuild] worker window patch: already patched', path.basename(filePath));
+    return;
+  }
+  if (!content.startsWith('var process = window.process')) {
+    console.log('[postbuild] worker window patch: pattern not found (bundle shape changed?)', path.basename(filePath));
+    return;
+  }
+  content = marker + '\n'
+    + 'var window = self; // worker-scope alias (N-059)\n'
+    + 'var localStorage = (function () { var m = new Map(); return { getItem: function (k) { return m.has(k) ? m.get(k) : null; }, setItem: function (k, v) { m.set(k, String(v)); }, removeItem: function (k) { m.delete(k); }, clear: function () { m.clear(); }, key: function (i) { return Array.from(m.keys())[i] ?? null; }, get length() { return m.size; } }; })(); // worker has no storage (N-059)\n'
+    + content;
+  fs.writeFileSync(filePath, content, 'utf8');
+  console.log('[postbuild] worker window patched:', path.basename(filePath));
+}
+patchWorkerWindow(path.join(outDir, 'editor.worker.js'));
+patchWorkerWindow(path.join(outDir, 'plugin-worker.js'));
+
 const backendMain = path.join(__dirname, 'lib', 'backend', 'main.js');
 
 // The esbuild bundle inlines the native module require as part of a

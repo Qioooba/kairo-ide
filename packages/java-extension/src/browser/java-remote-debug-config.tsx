@@ -41,7 +41,11 @@ export class RemoteDebugConfigWidget extends ReactWidget {
   }
 
   @postConstruct()
-  protected async init(): Promise<void> {
+  protected init(): void {
+    void this.initAsync();
+  }
+
+  protected async initAsync(): Promise<void> {
     this.updateTitle();
     this.toDispose.push(this.i18n.onDidChangeLanguage(() => {
       this.updateTitle();

@@ -131,7 +131,14 @@ export class KairoAuditLog {
   }
 
   @postConstruct()
-  protected async init(): Promise<void> {
+  protected init(): void {
+    // N-055: FrontendApplicationContribution must not have async
+    // postConstruct — Theia resolves contributions synchronously and
+    // inversify throws "asynchronous dependencies" on boot.
+    void this.initAsync();
+  }
+
+  protected async initAsync(): Promise<void> {
     this.logger.info('审计日志服务已初始化');
     await this.loadConfig();
     await this.loadEntries();

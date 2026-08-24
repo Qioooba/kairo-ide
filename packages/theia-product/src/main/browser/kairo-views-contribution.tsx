@@ -696,6 +696,43 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
 
     // Locale may finish loading after registerCommands; refresh once more.
     this.refreshCommandLabels();
+    // N-052: submenu labels are registered via MenuModelRegistry with a static
+    // string; they do not auto-update when the language pack loads after
+    // registerMenus. Refresh them once the i18n is ready and on every
+    // subsequent language change.
+    setTimeout(() => this.refreshMenuLabels(), 1500);
+    this.i18n.onDidChangeLanguage(() => {
+      this.refreshCommandLabels();
+      this.refreshMenuLabels();
+    });
+  }
+
+  /** Update top-level Kairo submenu labels after i18n language change (N-052). */
+  protected refreshMenuLabels(): void {
+    try {
+      const bar = document.querySelector('[role="menubar"]');
+      if (!bar) return;
+      const map: Record<string, string> = {
+        'Build && Run': this.i18n.t('menu.kairo.buildAndRun'),
+        'View': this.i18n.t('menu.kairo.view'),
+        'Debug': this.i18n.t('menu.kairo.debug'),
+        'Window': this.i18n.t('menu.kairo.window'),
+      };
+      for (const item of bar.querySelectorAll('.lm-MenuBar-item')) {
+        const labelEl = item.querySelector('.lm-MenuBar-itemLabel') ?? item;
+        const cur = (labelEl.textContent ?? '').trim();
+        if (map[cur] && map[cur] !== cur) {
+          labelEl.textContent = map[cur];
+        }
+        // submenu items inside the open Kairo menu (if visible)
+        for (const sub of document.querySelectorAll('.lm-Menu .lm-Menu-itemLabel')) {
+          const txt = (sub.textContent ?? '').trim();
+          if (map[txt] && map[txt] !== txt) sub.textContent = map[txt];
+        }
+      }
+    } catch {
+      /* non-browser or menu not yet rendered */
+    }
   }
 
   protected async maybeOpenWelcome(): Promise<void> {

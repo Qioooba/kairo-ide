@@ -79,6 +79,7 @@ const IDEA_WINDOWS_KEYBINDINGS: IDEAKeybinding[] = [
   { command: 'kairo.find.action', keybinding: 'ctrl+shift+a' },
   { command: 'kairo.navigation.goToLine', keybinding: 'ctrl+g' },
   { command: 'editor.action.revealDefinition', keybinding: 'ctrl+b', when: 'editorTextFocus' },
+  { command: 'workbench.action.toggleSidebar', keybinding: 'ctrl+b', when: '!editorTextFocus' },
   { command: 'editor.action.peekDefinition', keybinding: 'ctrl+shift+i', when: 'editorTextFocus' },
   { command: 'editor.action.goToImplementation', keybinding: 'ctrl+alt+b', when: 'editorTextFocus' },
   { command: 'kairo.java.goToTypeDefinition', keybinding: 'ctrl+shift+b', when: 'editorTextFocus && editorLangId == java' },
@@ -118,7 +119,12 @@ const IDEA_WINDOWS_KEYBINDINGS: IDEAKeybinding[] = [
   { command: 'workbench.action.debug.continue', keybinding: 'f9', when: 'inDebugMode' },
   { command: 'editor.debug.action.runToCursor', keybinding: 'alt+f9', when: 'inDebugMode' },
 
-  { command: 'workbench.action.files.saveAll', keybinding: 'ctrl+s' },
+  // N-057: do NOT rebind ctrl+s here. Theia already binds ctrl+s →
+  // `core.save` (File > Save). Adding a second ctrl+s chord for
+  // `core.saveAll` made both menu items claim Ctrl+S and the resolved
+  // chord executed NOTHING (silent no-op save). Users who want Save All
+  // can use File > Save All; Ctrl+S keeps saving the active editor.
+  { command: 'core.save', keybinding: 'ctrl+s', when: 'editorTextFocus' },
   { command: 'kairo.terminal.toggle', keybinding: 'alt+f12' },
   { command: 'kairo.shortcuts.cheatsheet', keybinding: 'ctrl+shift+k' },
   { command: 'workbench.action.closeActiveEditor', keybinding: 'ctrl+f4' },

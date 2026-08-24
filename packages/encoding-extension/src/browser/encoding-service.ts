@@ -30,7 +30,7 @@
  * the agent's recode endpoint as the authoritative source.
  */
 
-import { injectable, inject } from '@theia/core/shared/inversify';
+import { injectable, inject, Container } from '@theia/core/shared/inversify';
 import URI from '@theia/core/lib/common/uri';
 import { FileUri } from '@theia/core/lib/common/file-uri';
 import { EncodingRegistry } from '@theia/core/lib/browser/encoding-registry';
@@ -94,7 +94,24 @@ export type EncodingOverrideScope = 'file';
 @injectable()
 export class KairoEncodingServiceImpl {
   @inject(RuntimeConnectionService) protected runtime!: RuntimeConnectionService;
-  @inject(FileService) protected fileService!: FileService;
+  /**
+   * N-054: FileService is resolved LAZILY. The production (minified)
+   * bundle rebinds FileService to KairoFileService, which injects
+   * KairoEncodingServiceImpl — an eager @inject(FileService) here
+   * creates the construction-time cycle
+   * FileService → KairoEncodingServiceImpl → FileService
+   * ("Circular dependency found" on frontend boot). Resolving through
+   * the container on first use breaks the cycle: by the time any
+   * encoding API runs, the FileService singleton already exists.
+   */
+  @inject(Container) protected readonly container!: Container;
+  protected _fileService: FileService | undefined;
+  protected get fileService(): FileService {
+    if (!this._fileService) {
+      this._fileService = this.container.get(FileService);
+    }
+    return this._fileService;
+  }
   @inject(EncodingRegistry) protected encodingRegistry!: EncodingRegistry;
   @inject(MessageService) protected messages!: MessageService;
 

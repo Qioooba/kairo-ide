@@ -126,7 +126,11 @@ export class KairoComplianceSuite {
   }
 
   @postConstruct()
-  protected async init(): Promise<void> {
+  protected init(): void {
+    void this.initAsync();
+  }
+
+  protected async initAsync(): Promise<void> {
     this.logger.info('合规性套件已初始化');
     await this.loadRole();
   }

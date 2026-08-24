@@ -227,7 +227,9 @@ func (c *Compiler) Compile(ctx context.Context, req Request) (*Result, error) {
 			args = append(args, "-d", req.OutputDir)
 		}
 		// Always emit LocalVariableTable so JDWP/DAP can show locals (req/name/this).
-		args = append(args, "-g", "-Xlint:all")
+		// Suppress the noisy -options warning that modern JDKs emit when
+		// compiling legacy -source 6/7 projects (bootstrap classpath warning).
+		args = append(args, "-g", "-Xlint:all,-options")
 		if shouldUseJavacArgFile(args, req.Sources) {
 			argFile, err := writeJavacArgFile(req.ProjectRoot, req.Sources)
 			if err != nil {

@@ -65,6 +65,7 @@ const IDEA_MAC_KEYBINDINGS: IDEAKeybinding[] = [
   { command: 'kairo.find.action', keybinding: 'cmd+shift+a' },
   { command: 'kairo.navigation.goToLine', keybinding: 'cmd+l' },
   { command: 'editor.action.revealDefinition', keybinding: 'cmd+b', when: 'editorTextFocus' },
+  { command: 'workbench.action.toggleSidebar', keybinding: 'cmd+b', when: '!editorTextFocus' },
   { command: 'editor.action.peekDefinition', keybinding: 'cmd+shift+i', when: 'editorTextFocus' },
   { command: 'editor.action.goToImplementation', keybinding: 'cmd+alt+b', when: 'editorTextFocus' },
   { command: 'editor.action.referenceSearch.trigger', keybinding: 'alt+f7', when: 'editorTextFocus && editorLangId != java' },
@@ -119,8 +120,9 @@ const IDEA_MAC_KEYBINDINGS: IDEAKeybinding[] = [
   { command: 'editor.action.changeSignature', keybinding: 'cmd+f6', when: 'editorTextFocus' },
 
   // ── General / IDE ───────────────────────────────────────────
-  { command: 'workbench.action.files.saveAll', keybinding: 'cmd+s' },
-  { command: 'workbench.action.files.save', keybinding: 'cmd+s', when: 'editorTextFocus' },
+  // N-057: Theia already binds cmd+s → `core.save`. The previous double
+  // binding (save + saveAll on the same chord) dead-locked the key.
+  { command: 'core.save', keybinding: 'cmd+s', when: 'editorTextFocus' },
   { command: 'kairo.terminal.toggle', keybinding: 'alt+f12' },
   { command: 'kairo.shortcuts.cheatsheet', keybinding: 'cmd+shift+k' },
   { command: 'workbench.action.closeActiveEditor', keybinding: 'cmd+w' },
