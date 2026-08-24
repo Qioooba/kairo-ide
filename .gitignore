@@ -250,3 +250,10 @@ bundled/tomcat6/tomcat6
 app.asar.unpacked/
 artifacts/
 backend*.log
+
+# Test-run residue (accidental browser profile at repo root, import copies,
+# IDE local history snapshots)
+/spaceskairo-ideartifactswindows-jdb-tomcat/
+legacy-sample/__test_import_copy/
+legacy-sample/.kairo/local-history/
+legacy-sample/.kairo/*.bak
