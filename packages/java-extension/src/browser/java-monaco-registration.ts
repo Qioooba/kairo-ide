@@ -54,6 +54,7 @@ import type {
   LSPSymbolInformation,
   LSPTextEdit,
   LSPWorkspaceEdit,
+  LSPWorkspaceSymbolResult,
   LSPCodeAction,
   LSPDiagnostic,
   LSPCodeLens,
@@ -374,6 +375,13 @@ export class JavaMonacoRegistrationContribution implements FrontendApplicationCo
           if (token.isCancellationRequested) return [];
           const result = await this.provider.provideDocumentSymbols(model.uri.toString());
           return token.isCancellationRequested ? [] : adaptDocumentSymbols(result);
+        },
+      }),
+      monaco.languages.registerWorkspaceSymbolProvider(JAVA_LANGUAGE_ID, {
+        provideWorkspaceSymbols: async (query, token) => {
+          if (token.isCancellationRequested || !query.trim()) return [];
+          const result = await this.provider.provideWorkspaceSymbols(query);
+          return token.isCancellationRequested ? [] : adaptWorkspaceSymbols(result);
         },
       }),
       monaco.languages.registerRenameProvider(JAVA_LANGUAGE_ID, {
@@ -1376,6 +1384,18 @@ export function adaptSignatureHelp(help: LSPSignatureHelp | null): monaco.langua
     activeSignature: help.activeSignature ?? 0,
     activeParameter: help.activeParameter ?? 0,
   };
+}
+
+export function adaptWorkspaceSymbols(result: LSPWorkspaceSymbolResult): monaco.languages.WorkspaceSymbol[] {
+  if (!result) return [];
+  return result.map(symbol => ({
+    name: symbol.name,
+    containerName: symbol.containerName,
+    kind: toMonacoSymbolKind(symbol.kind),
+    tags: adaptSymbolTags(symbol.tags, symbol.deprecated),
+    range: adaptRange(symbol.location.range),
+    uri: monaco.Uri.parse(symbol.location.uri),
+  }));
 }
 
 export function adaptDocumentSymbols(result: LSPDocumentSymbolResult): monaco.languages.DocumentSymbol[] {
