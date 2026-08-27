@@ -115,6 +115,7 @@ export class JavaJUnitRunner {
    */
   async discoverTests(): Promise<JUnitTestItem[]> {
     const items: JUnitTestItem[] = [];
+    const seenClassNames = new Set<string>();
 
     try {
       // Query for @Test annotation symbols
@@ -147,8 +148,10 @@ export class JavaJUnitRunner {
               continue;
             }
             const id = `class:${sym.name}`;
-            // Avoid duplicates
-            if (!items.some(item => item.className === sym.name)) {
+            // Avoid duplicates — Set lookup keeps this O(1) per symbol
+            // instead of a linear scan over all discovered items.
+            if (!seenClassNames.has(sym.name)) {
+              seenClassNames.add(sym.name);
               items.push({
                 id,
                 kind: 'class',
@@ -189,55 +192,61 @@ export class JavaJUnitRunner {
       const rootUri = URI.fromFilePath(rootPath);
       const javaFiles = await this.findJavaFiles(rootUri);
 
-      for (const fileUri of javaFiles) {
-        try {
-          const content = await this.fileService.readFile(fileUri);
-          const text = content.value.toString();
-          const filePath = fileUri.path.toString();
+      // Read files in bounded parallel batches — strictly sequential reads
+      // turned large workspaces into thousands of serialized round-trips.
+      const BATCH = 8;
+      for (let i = 0; i < javaFiles.length; i += BATCH) {
+        const batch = javaFiles.slice(i, i + BATCH);
+        await Promise.all(batch.map(async fileUri => {
+          try {
+            const content = await this.fileService.readFile(fileUri);
+            const text = content.value.toString();
+            const filePath = fileUri.path.toString();
 
-          // Extract class name from file path
-          const className = this.extractClassNameFromPath(filePath);
-          if (!className) continue;
+            // Extract class name from file path
+            const className = this.extractClassNameFromPath(filePath);
+            if (!className) return;
 
-          // Find @Test annotated methods
-          const testMethodRegex = /@Test\s*(?:\([^)]*\))?\s*\n\s*(?:public|protected|private)?\s+\w+\s+(\w+)\s*\(/g;
-          let match: RegExpExecArray | null;
-          let hasTests = false;
+            // Find @Test annotated methods
+            const testMethodRegex = /@Test\s*(?:\([^)]*\))?\s*\n\s*(?:public|protected|private)?\s+\w+\s+(\w+)\s*\(/g;
+            let match: RegExpExecArray | null;
+            let hasTests = false;
 
-          while ((match = testMethodRegex.exec(text)) !== null) {
-            hasTests = true;
-            const methodName = match[1];
-            const id = `method:${className}#${methodName}`;
-            if (seenIds.has(id)) continue;
-            seenIds.add(id);
+            while ((match = testMethodRegex.exec(text)) !== null) {
+              hasTests = true;
+              const methodName = match[1];
+              const id = `method:${className}#${methodName}`;
+              if (seenIds.has(id)) continue;
+              seenIds.add(id);
 
-            // Calculate line number
-            const line = text.substring(0, match.index).split('\n').length - 1;
+              // Calculate line number
+              const line = text.substring(0, match.index).split('\n').length - 1;
 
-            items.push({
-              id,
-              kind: 'method',
-              className,
-              methodName,
-              label: `${className}.${methodName}`,
-              filePath: fileUri.toString(),
-              line,
-            });
+              items.push({
+                id,
+                kind: 'method',
+                className,
+                methodName,
+                label: `${className}.${methodName}`,
+                filePath: fileUri.toString(),
+                line,
+              });
+            }
+
+            if (hasTests && !seenIds.has(`class:${className}`)) {
+              seenIds.add(`class:${className}`);
+              items.push({
+                id: `class:${className}`,
+                kind: 'class',
+                className,
+                label: className,
+                filePath: fileUri.toString(),
+              });
+            }
+          } catch {
+            // Skip files that can't be read
           }
-
-          if (hasTests && !seenIds.has(`class:${className}`)) {
-            seenIds.add(`class:${className}`);
-            items.push({
-              id: `class:${className}`,
-              kind: 'class',
-              className,
-              label: className,
-              filePath: fileUri.toString(),
-            });
-          }
-        } catch {
-          // Skip files that can't be read
-        }
+        }));
       }
     } catch (error) {
       this.logger.error(`[JUnit] File-based discovery failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -257,6 +266,9 @@ export class JavaJUnitRunner {
   protected async findJavaFiles(rootUri: URI): Promise<URI[]> {
     const javaFiles: URI[] = [];
     const stack = [rootUri];
+    // Directories that never contain project test sources; descending into
+    // them made discovery walk entire dependency/build trees.
+    const skipDirs = new Set(['.git', '.svn', 'node_modules', 'target', 'build', 'dist', 'out', '.settings', '.idea']);
 
     while (stack.length > 0) {
       const currentUri = stack.pop()!;
@@ -264,6 +276,9 @@ export class JavaJUnitRunner {
         const stat = await this.fileService.resolve(currentUri);
         if (stat.isDirectory) {
           for (const child of stat.children || []) {
+            if (child.isDirectory && skipDirs.has(child.resource.path.base)) {
+              continue;
+            }
             stack.push(child.resource);
           }
         } else if (stat.isFile && currentUri.path.toString().endsWith('.java')) {

@@ -24,9 +24,20 @@ export class SvnGutterDecorator {
 
   protected currentDecorations: Map<string, any> = new Map();
 
+  /**
+   * Bumps on every status broadcast. Diff results are cached per
+   * (uri, store generation, model version) so the polling cadence does not
+   * re-run `svn diff` for an unchanged, unedited file.
+   */
+  protected storeGeneration = 0;
+  protected diffCache = new Map<string, { storeGen: number; versionId: number; decorations: any[] }>();
+
   @postConstruct()
   protected init(): void {
-    this.svnStore.onDidChange(() => this.updateDecorations());
+    this.svnStore.onDidChange(() => {
+      this.storeGeneration++;
+      this.updateDecorations();
+    });
     this.setupEditorListener();
   }
 
@@ -52,15 +63,28 @@ export class SvnGutterDecorator {
     const uri = editor.getResourceUri();
     if (!uri) return;
 
-    const filePath = this.getRelativePath(uri.toString());
+    const key = uri.toString();
+    const filePath = this.getRelativePath(key);
     const entry = this.svnService.getFileStatus(filePath);
-    if (!entry) return;
-
     const model = monacoEditor.getModel();
     if (!model) return;
+    const lineCount = model.getLineCount() as number;
+    const versionId = model.getVersionId?.() as number | undefined;
+    const cacheKey = `${key}@${entry ? entry.status : 'none'}`;
+    const cached = this.diffCache.get(cacheKey);
+    if (cached && cached.storeGen === this.storeGeneration && versionId !== undefined && cached.versionId === versionId) {
+      // Nothing changed since the last computation — reuse the result
+      // instead of spawning another `svn diff`.
+      this.applyDecorations(monacoEditor, key, cached.decorations);
+      return;
+    }
+    if (!entry) {
+      this.diffCache.set(cacheKey, { storeGen: this.storeGeneration, versionId: versionId ?? -1, decorations: [] });
+      this.applyDecorations(monacoEditor, key, []);
+      return;
+    }
 
     const decorations: any[] = [];
-    const lineCount = model.getLineCount() as number;
 
     if (entry.status === 'added') {
       for (let i = 1; i <= lineCount; i++) {
@@ -122,14 +146,21 @@ export class SvnGutterDecorator {
       }
     }
 
+    if (decorations.length > 0 || cached) {
+      this.diffCache.set(cacheKey, { storeGen: this.storeGeneration, versionId: versionId ?? -1, decorations });
+    }
+    this.applyDecorations(monacoEditor, key, decorations);
+  }
+
+  /** Replaces the decoration collection for an editor, clearing stale marks. */
+  protected applyDecorations(monacoEditor: any, key: string, decorations: any[]): void {
+    const existing = this.currentDecorations.get(key);
+    if (existing) {
+      existing.clear();
+      this.currentDecorations.delete(key);
+    }
     if (decorations.length > 0) {
-      const editorDecorations = monacoEditor.createDecorationsCollection(decorations);
-      const key = editor.getResourceUri().toString();
-      const existing = this.currentDecorations.get(key);
-      if (existing) {
-        existing.clear();
-      }
-      this.currentDecorations.set(key, editorDecorations);
+      this.currentDecorations.set(key, monacoEditor.createDecorationsCollection(decorations));
     }
   }
 

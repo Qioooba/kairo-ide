@@ -123,7 +123,11 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
   }, [initialQuery]);
 
   const matches = state.matches;
-  const groups = React.useMemo(() => groupMatchesByFile(matches), [matches]);
+  // Streaming accumulates into a stable array; the revision counter marks
+  // new data. Keying off both keeps grouping correct without re-running on
+  // every unrelated state tick.
+  const streamRevision = state.streamState?.revision ?? 0;
+  const groups = React.useMemo(() => groupMatchesByFile(matches), [matches, streamRevision]);
 
   const flatItems = React.useMemo((): FlatSearchItem[] => {
     let idx = 0;
@@ -172,16 +176,23 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
   // "Replace All" button; without it the button never appears and the replace
   // workflow is a dead end. Rebuild it whenever a new search completes or the
   // replacement text changes, and drop it when matches are cleared.
+  // Plan creation reads every matched file, so it is debounced: typing a
+  // replacement word must not re-read the whole result set per keystroke.
   React.useEffect(() => {
     if (currentMode !== 'replace' || !onCreateReplacePlan || !replacement.trim() || state.matches.length === 0) {
       setReplacePlan(undefined);
       return;
     }
     let cancelled = false;
-    onCreateReplacePlan(state.matches, replacement.trim())
-      .then(plan => { if (!cancelled) setReplacePlan(plan); })
-      .catch(() => { if (!cancelled) setReplacePlan(undefined); });
-    return () => { cancelled = true; };
+    const timer = setTimeout(() => {
+      onCreateReplacePlan(state.matches, replacement.trim())
+        .then(plan => { if (!cancelled) setReplacePlan(plan); })
+        .catch(() => { if (!cancelled) setReplacePlan(undefined); });
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
     // state.matches is bound to state.requestId; the request id + status are
     // the stable keys for "a new result set arrived".
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -662,7 +673,9 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
                     aria-selected={isSelected}
                     className={`kairo-search-result-item${isSelected ? ' is-selected' : ''}`}
                     onMouseEnter={() => {
-                      setSelectedIndex(item.flatIndex);
+                      if (item.flatIndex !== selectedIndex) {
+                        setSelectedIndex(item.flatIndex);
+                      }
                     }}
                     onClick={() => {
                       setSelectedIndex(item.flatIndex);

@@ -23,10 +23,19 @@ export class GitBlameDecorator extends EditorDecorator {
   /** Cache entries expire so blame doesn't show stale authors (VC-P2-9). */
   protected blameCacheAt = new Map<string, number>();
   protected static readonly CACHE_TTL_MS = 60_000;
+  /** Upper bound for cached files so long sessions cannot grow unbounded. */
+  protected static readonly CACHE_MAX_ENTRIES = 32;
+  /**
+   * Debounce for content-change refreshes. Every keystroke previously
+   * invalidated the cache and spawned a full `git blame` process; typing
+   * bursts now coalesce into a single refresh after the user pauses.
+   */
+  protected static readonly BLAME_REFRESH_DELAY_MS = 800;
 
   protected activeWidget: EditorWidget | undefined;
   protected editorDisposable: { dispose(): void } | undefined;
   protected docChangeDisposable: { dispose(): void } | undefined;
+  protected blameRefreshTimer: ReturnType<typeof setTimeout> | undefined;
 
   activate(): void {
     this.editorDisposable = this.editorManager.onCurrentEditorChanged(widget => {
@@ -46,6 +55,10 @@ export class GitBlameDecorator extends EditorDecorator {
     this.editorDisposable = undefined;
     this.docChangeDisposable?.dispose();
     this.docChangeDisposable = undefined;
+    if (this.blameRefreshTimer !== undefined) {
+      clearTimeout(this.blameRefreshTimer);
+      this.blameRefreshTimer = undefined;
+    }
     if (this.activeWidget) {
       this.setDecorations(this.activeWidget.editor, []);
       this.activeWidget = undefined;
@@ -59,7 +72,9 @@ export class GitBlameDecorator extends EditorDecorator {
     const doc = widget.editor.document as unknown as {
       onDidChangeContent?: (cb: () => void) => { dispose(): void };
     };
-    // Invalidate on edit so blame doesn't linger on wrong lines.
+    // Invalidate on edit so blame doesn't linger on wrong lines, but
+    // debounce the refresh: a `git blame` process per keystroke caused
+    // CPU spikes and process pile-up while typing.
     if (typeof doc.onDidChangeContent === 'function') {
       this.docChangeDisposable = doc.onDidChangeContent(() => {
         const uri = widget.editor.document.uri;
@@ -70,9 +85,19 @@ export class GitBlameDecorator extends EditorDecorator {
             this.invalidateCache(relativePath);
           }
         }
-        void this.updateBlame();
+        this.scheduleBlameRefresh();
       });
     }
+  }
+
+  protected scheduleBlameRefresh(): void {
+    if (this.blameRefreshTimer !== undefined) {
+      clearTimeout(this.blameRefreshTimer);
+    }
+    this.blameRefreshTimer = setTimeout(() => {
+      this.blameRefreshTimer = undefined;
+      void this.updateBlame();
+    }, GitBlameDecorator.BLAME_REFRESH_DELAY_MS);
   }
 
   protected async updateBlame(): Promise<void> {
@@ -115,6 +140,7 @@ export class GitBlameDecorator extends EditorDecorator {
       }));
       this.blameCache.set(relativePath, blameLines);
       this.blameCacheAt.set(relativePath, now);
+      this.trimBlameCache();
     }
 
     if (this.activeWidget !== widgetAtStart) {
@@ -153,6 +179,19 @@ export class GitBlameDecorator extends EditorDecorator {
     } else {
       this.blameCache.clear();
       this.blameCacheAt.clear();
+    }
+  }
+
+  /** Evicts the oldest cache entries when the cache grows past its cap. */
+  protected trimBlameCache(): void {
+    let excess = this.blameCache.size - GitBlameDecorator.CACHE_MAX_ENTRIES;
+    if (excess <= 0) return;
+    const oldest = [...this.blameCacheAt.entries()].sort((a, b) => a[1] - b[1]);
+    for (const [path] of oldest) {
+      if (excess <= 0) break;
+      this.blameCache.delete(path);
+      this.blameCacheAt.delete(path);
+      excess--;
     }
   }
 }

@@ -601,6 +601,9 @@ func (s *Server) routes() {
 	s.router.HandleFunc("/api/v1/sql/test-connection", s.handleSQLTestConnection)
 	// Debug adapter status
 	s.router.HandleFunc("/api/v1/debug/adapter/status", s.handleDebugAdapterStatus)
+
+	s.router.HandleFunc("/api/v1/debug/tunnel/connect", s.handleDebugTunnelConnect)
+	s.router.HandleFunc("/api/v1/debug/tunnel/disconnect", s.handleDebugTunnelDisconnect)
 	// JDK download
 	s.router.HandleFunc("/api/v1/debug/jdk/download", s.handleJDKDownload)
 	// Java run/detect main/test methods (IDEA-style one-click run)

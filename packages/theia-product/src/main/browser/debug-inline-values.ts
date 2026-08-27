@@ -30,6 +30,12 @@ function stripStringLiterals(line: string): string {
     return out;
 }
 
+// Module-level regexes: re-creating these per call/loop iteration caused
+// avoidable allocation churn in a scroll-driven hot path.
+const VAR_DECLARATION_RE = /(?:int|long|double|float|boolean|char|byte|short|String|var|final\s+\w+)\s+(\w+)\s*(?:=|;)/g;
+const ASSIGNMENT_PATTERN_RE = /(\w+)\s*=(?!=)/g;
+const COMPARISON_BEFORE_RE = /[=!<>]/;
+
 @injectable()
 export class KairoDebugInlineValuesService implements FrontendApplicationContribution {
     @inject(EditorManager)
@@ -42,9 +48,16 @@ export class KairoDebugInlineValuesService implements FrontendApplicationContrib
     protected disposables: monaco.IDisposable[] = [];
     protected currentValues: Map<string, InlineValueInfo[]> = new Map();
     protected refreshTimeout: number | null = null;
+    /** Bumped on every debug-state transition; keys the variable cache. */
+    protected suspendGeneration = 0;
+    protected cachedVarMap: Map<string, string> | undefined;
+    protected cachedVarMapGeneration = -1;
 
     initialize(): void {
         this.debugSession.onDidChangeState(state => {
+            // Variables for the current frame cannot change while execution
+            // stays suspended — cache scopes/variables per suspension.
+            this.suspendGeneration++;
             if (state.isSuspended) {
                 this.scheduleRefresh(300);
             } else {
@@ -116,15 +129,16 @@ export class KairoDebugInlineValuesService implements FrontendApplicationContrib
     protected async refreshInlineValues(): Promise<void> {
         if (!this.debugSession.isSuspended) return;
 
-        const currentEditors = this.editorManager.all;
-        for (const editorWidget of currentEditors) {
-            const editor = getMonacoControl(editorWidget);
-            if (!editor) continue;
-            const model = editor.getModel();
-            if (!model) continue;
+        // Only the visible editor matters for inline decorations; refreshing
+        // every open editor turned each scroll tick into N DAP round-trips.
+        const activeWidget = this.editorManager.currentEditor;
+        if (!activeWidget) return;
+        const editor = getMonacoControl(activeWidget);
+        if (!editor) return;
+        const model = editor.getModel();
+        if (!model) return;
 
-            await this.refreshEditor(editor, model);
-        }
+        await this.refreshEditor(editor, model);
     }
 
     /** Lines to scan: visible viewport (±2) plus current stack frame line when known. */
@@ -152,20 +166,25 @@ export class KairoDebugInlineValuesService implements FrontendApplicationContrib
     }
 
     protected async refreshEditor(editor: monaco.editor.ICodeEditor, model: monaco.editor.ITextModel): Promise<void> {
-        const scopes = await this.debugSession.fetchScopes();
-        if (!scopes || scopes.length === 0) return;
+        let varMap = this.cachedVarMap;
+        if (!varMap || this.cachedVarMapGeneration !== this.suspendGeneration) {
+            const scopes = await this.debugSession.fetchScopes();
+            if (!scopes || scopes.length === 0) return;
 
-        const allVariableRefs = scopes
-            .filter(s => s.variablesReference > 0)
-            .map(s => s.variablesReference);
+            const allVariableRefs = scopes
+                .filter(s => s.variablesReference > 0)
+                .map(s => s.variablesReference);
 
-        const results = await this.debugSession.batchGetVariables(allVariableRefs);
+            const results = await this.debugSession.batchGetVariables(allVariableRefs);
 
-        const varMap = new Map<string, string>();
-        for (const r of results) {
-            for (const v of r.variables) {
-                varMap.set(v.name, this.formatValue(v));
+            varMap = new Map<string, string>();
+            for (const r of results) {
+                for (const v of r.variables) {
+                    varMap.set(v.name, this.formatValue(v));
+                }
             }
+            this.cachedVarMap = varMap;
+            this.cachedVarMapGeneration = this.suspendGeneration;
         }
 
         const values: InlineValueInfo[] = [];
@@ -210,9 +229,9 @@ export class KairoDebugInlineValuesService implements FrontendApplicationContrib
 
     protected extractDeclarations(lineContent: string): string[] {
         const declarations: string[] = [];
-        const varPattern = /(?:int|long|double|float|boolean|char|byte|short|String|var|final\s+\w+)\s+(\w+)\s*(?:=|;)/g;
+        VAR_DECLARATION_RE.lastIndex = 0;
         let match: RegExpExecArray | null;
-        while ((match = varPattern.exec(lineContent)) !== null) {
+        while ((match = VAR_DECLARATION_RE.exec(lineContent)) !== null) {
             if (match[1]) declarations.push(match[1]);
         }
         return declarations;
@@ -221,14 +240,14 @@ export class KairoDebugInlineValuesService implements FrontendApplicationContrib
     protected extractAssignments(lineContent: string): { name: string }[] {
         const assignments: { name: string }[] = [];
         // Match `name =` but not `==`, `!=`, `<=`, `>=`, `===`
-        const assignPattern = /(\w+)\s*=(?!=)/g;
+        ASSIGNMENT_PATTERN_RE.lastIndex = 0;
         let match: RegExpExecArray | null;
-        while ((match = assignPattern.exec(lineContent)) !== null) {
+        while ((match = ASSIGNMENT_PATTERN_RE.exec(lineContent)) !== null) {
             const name = match[1];
             if (!name || ['if', 'for', 'while', 'switch', 'return'].includes(name)) continue;
             // Reject when the char immediately before the identifier is a comparison op
             const before = lineContent.slice(Math.max(0, match.index - 1), match.index);
-            if (/[=!<>]/.test(before)) continue;
+            if (COMPARISON_BEFORE_RE.test(before)) continue;
             assignments.push({ name });
         }
         return assignments;
@@ -280,6 +299,8 @@ export class KairoDebugInlineValuesService implements FrontendApplicationContrib
         }
         this.decorations.clear();
         this.currentValues.clear();
+        this.cachedVarMap = undefined;
+        this.cachedVarMapGeneration = -1;
     }
 
     stop(): void {

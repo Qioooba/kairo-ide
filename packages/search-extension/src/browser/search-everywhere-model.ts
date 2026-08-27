@@ -34,6 +34,9 @@ export interface SearchEverywhereProvider {
 export const SearchEverywhereProvider = Symbol('SearchEverywhereProvider');
 export type SearchEverywhereListener = (state: SearchEverywhereState) => void;
 
+/** Module-level so the hot fuzzy-scoring loop does not allocate per call. */
+const WORD_BOUNDARY_RE = /[/\\._\-\s]/;
+
 export function fuzzyScore(query: string, value: string): number | undefined {
   const needle = query.trim().toLocaleLowerCase();
   const haystack = value.toLocaleLowerCase();
@@ -47,7 +50,7 @@ export function fuzzyScore(query: string, value: string): number | undefined {
     const found = haystack.indexOf(char, cursor);
     if (found < 0) return undefined;
     score += last < 0 ? 100 - found : Math.max(1, 40 - (found - last - 1) * 5);
-    if (found === 0 || /[/\\._\-\s]/.test(haystack[found - 1])) score += 30;
+    if (found === 0 || WORD_BOUNDARY_RE.test(haystack[found - 1])) score += 30;
     last = found;
     cursor = found + 1;
   }

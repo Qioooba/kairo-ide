@@ -363,6 +363,14 @@ func (t *SSHTunnel) startPortForwarding() error {
 	}
 	t.listener = listener
 
+	// Reflect the actually bound port back into cfg so Status()/callers see
+	// the real endpoint when LocalPort was left 0 (ephemeral).
+	if tcpAddr, ok := listener.Addr().(*net.TCPAddr); ok && t.cfg.LocalPort == 0 {
+		t.mu.Lock()
+		t.cfg.LocalPort = tcpAddr.Port
+		t.mu.Unlock()
+	}
+
 	remoteAddr := fmt.Sprintf("%s:%d", t.cfg.RemoteHost, t.cfg.RemotePort)
 
 	go func() {

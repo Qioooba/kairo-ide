@@ -65,7 +65,7 @@ export const LogViewer: React.FC<Props> = ({ serverStore, runtime, workspaceCont
     const pending = React.useRef<KairoLogLine[]>([]);
     const liveVersion = React.useRef(0);
     const loadGeneration = React.useRef(0);
-    const timer = React.useRef<ReturnType<typeof setTimeout>>();
+    const timer = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
     const publish = React.useCallback(() => setLines([...bufferRef.current.snapshot]), []);
     const flush = React.useCallback(() => {
@@ -139,7 +139,7 @@ export const LogViewer: React.FC<Props> = ({ serverStore, runtime, workspaceCont
         publish();
         void loadHistory();
     }, [loadHistory, publish]);
-    const previousConnection = React.useRef<ConnectionStatus>();
+    const previousConnection = React.useRef<ConnectionStatus | undefined>(undefined);
     React.useEffect(() => {
         const previous = previousConnection.current;
         previousConnection.current = connection;

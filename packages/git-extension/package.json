@@ -18,7 +18,8 @@
     "@theia/core": "1.73.1",
     "@theia/editor": "1.73.1",
     "@theia/filesystem": "1.73.1",
-    "@theia/navigator": "1.73.1"
+    "@theia/navigator": "1.73.1",
+    "@theia/workspace": "1.73.1"
   },
   "devDependencies": {
     "typescript": "5.5.4"

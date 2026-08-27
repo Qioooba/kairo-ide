@@ -32,15 +32,21 @@ files:
   - lib/tomcat-check.js
   - lib/frontend/**/*
   - lib/backend/**/*
-  - lib/prebuilds/**/*
   - package.json
   # Exclude source maps — production builds don't need them (~133 MB saved).
   - "!lib/**/*.map"
   # Exclude test files from the production package.
   - "!lib/**/*.test.js"
+  # Natives are mirrored to app.asar.unpacked by scripts/after-pack.cjs;
+  # keeping the originals inside the asar duplicated ~7 MB.
+  - "!lib/backend/native/**"
+  - "!lib/prebuilds/**"
   # Node_modules are controlled by the dependencies field in package.json.
   # Only @kairo/protocol is listed as a runtime dependency; all other packages
   # are in devDependencies so electron-builder won't include them.
+  # Strip sourcemaps / build intermediates that leak in via workspace deps.
+  - "!node_modules/**/*.map"
+  - "!node_modules/**/tsconfig.tsbuildinfo"
 asar: true
 # asarUnpack is intentionally NOT used here: with pnpm workspace-linked
 # deps (@kairo/protocol), electron-builder's unpack filter throws
@@ -53,7 +59,16 @@ extraResources:
     filter: ["**/*"]
   - from: bundled/jdtls
     to: bundled/jdtls
-    filter: ["**/*"]
+    filter:
+      - "**/*"
+      # OSGi runtime cache regenerated on first launch (~10 MB of stale state).
+      - "!config_*/org.eclipse.osgi/**"
+      # Other platforms' JDT LS launch configs never run on this target.
+      - "!config_linux/**"
+      - "!config_mac/**"
+      - "!config_ss_linux/**"
+      - "!config_ss_mac/**"
+      - "!config_ss_win/**"
   - from: bundled/kairo-jdi-bridge.jar
     to: bundled/kairo-jdi-bridge.jar
 

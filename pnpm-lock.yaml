@@ -35,8 +35,8 @@ importers:
         specifier: ^4.13.0
         version: 4.13.0(playwright-core@1.62.1)
       '@types/node':
-        specifier: 26.1.2
-        version: 26.1.2
+        specifier: 20.17.0
+        version: 20.17.0
       '@typescript-eslint/eslint-plugin':
         specifier: ^8.67.0
         version: 8.68.0(@typescript-eslint/parser@8.68.0(eslint@10.9.1(jiti@2.7.0))(typescript@5.5.4))(eslint@10.9.1(jiti@2.7.0))(typescript@5.5.4)
@@ -269,6 +269,9 @@ importers:
       '@theia/navigator':
         specifier: 1.73.1
         version: 1.73.1(@theia/electron@1.73.1(electron@39.8.10))(@types/react-dom@18.3.5(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.5.4)
+      '@theia/workspace':
+        specifier: 1.73.1
+        version: 1.73.1(@theia/electron@1.73.1(electron@39.8.10))(@types/react-dom@18.3.5(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.5.4)
     devDependencies:
       typescript:
         specifier: 5.5.4
@@ -432,8 +435,8 @@ importers:
   packages/protocol:
     devDependencies:
       '@types/node':
-        specifier: 26.1.2
-        version: 26.1.2
+        specifier: 20.17.0
+        version: 20.17.0
       typescript:
         specifier: 5.5.4
         version: 5.5.4
@@ -602,6 +605,9 @@ importers:
       '@kairo/encoding-extension':
         specifier: workspace:*
         version: link:../encoding-extension
+      '@kairo/git-extension':
+        specifier: workspace:*
+        version: link:../git-extension
       '@kairo/i18n':
         specifier: workspace:*
         version: link:../i18n
@@ -2321,6 +2327,9 @@ packages:
 
   '@types/node-fetch@2.6.13':
     resolution: {integrity: sha512-QGpRVpzSaUs30JBSGPjOg4Uveu384erbHBoT1zeONvyCfwQxIkUshLAOqN/k9EjGviPRmWTTe6aH2qySWKTVSw==}
+
+  '@types/node@20.17.0':
+    resolution: {integrity: sha512-a7zRo0f0eLo9K5X9Wp5cAqTUNGzuFLDG2R7C4HY2BhcMAsxgSPuRvAC1ZB6QkuUQXf0YZAgfOX2ZyrBa2n4nHQ==}
 
   '@types/node@22.20.1':
     resolution: {integrity: sha512-EANqOCF9QFyra+4pfxUcX9STKJpCLjMbObVzljIJomAWSnuSIEAvyzEU53GaajbXJEgdh0iEcPL+DGvpUd4k1Q==}
@@ -6323,6 +6332,9 @@ packages:
   unbzip2-stream@1.4.3:
     resolution: {integrity: sha512-mlExGW4w71ebDJviH16lQLtZS32VKqsSfk80GCfUlwT/4/hNRFsoscrF/c++9xinkMzECL1uL9DDwXqFWkruPg==}
 
+  undici-types@6.19.8:
+    resolution: {integrity: sha512-ve2KP6f/JnbPBFyobGHuerC9g1FYGn/F8n1LWTwNxCEzd6IfqTwUQcNXgEtmmQ6DlRrC1hrSrBnCZPokRrDHjw==}
+
   undici-types@6.21.0:
     resolution: {integrity: sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ==}
 
@@ -9398,6 +9410,10 @@ snapshots:
     dependencies:
       '@types/node': 26.1.2
       form-data: 4.0.6
+
+  '@types/node@20.17.0':
+    dependencies:
+      undici-types: 6.19.8
 
   '@types/node@22.20.1':
     dependencies:
@@ -13964,6 +13980,8 @@ snapshots:
     dependencies:
       buffer: 5.7.1
       through: 2.3.8
+
+  undici-types@6.19.8: {}
 
   undici-types@6.21.0: {}
 

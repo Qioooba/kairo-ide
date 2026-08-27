@@ -32,10 +32,9 @@ import { KairoI18nService } from '@kairo/i18n';
 interface MonacoNamespace {
   CancellationTokenSource: { new(): { token: unknown } };
   languages: {
-    /** Internal document symbol providers (not part of the public API). */
-    _documentSymbolProviders: MonacoDocumentSymbolProvider[];
-    /** Internal workspace symbol providers (not part of the public API). */
-    _workspaceSymbolProviders: MonacoWorkspaceSymbolProvider[];
+    /** Kairo-owned registries (populated by java-monaco-registration). */
+    __kairoDocumentSymbolProviders?: KairoDocumentSymbolProvider[];
+    __kairoWorkspaceSymbolProviders?: KairoWorkspaceSymbolProvider[];
   };
   Selection: { new(line: number, col: number, line2: number, col2: number): unknown };
   Range: { new(line: number, col: number, line2: number, col2: number): unknown };
@@ -49,12 +48,20 @@ interface MonacoTextModel {
   getLineMaxColumn(line: number): number;
 }
 
-interface MonacoDocumentSymbolProvider {
+interface KairoDocumentSymbolProvider {
   provideDocumentSymbols: (model: unknown, token: unknown) => Promise<MonacoSymbol[] | undefined>;
 }
 
-interface MonacoWorkspaceSymbolProvider {
-  provideWorkspaceSymbols: (query: { query: string }, token: unknown) => Promise<MonacoSymbol[] | undefined>;
+interface KairoWorkspaceSymbolProvider {
+  provideWorkspaceSymbols: (query: string | { query?: string }, token: unknown) => Promise<KairoWorkspaceSymbol[] | undefined>;
+}
+
+interface KairoWorkspaceSymbol {
+  name: string;
+  containerName?: string;
+  kind: number;
+  range: { startLineNumber: number; startColumn: number; endLineNumber: number; endColumn: number };
+  uriString: string;
 }
 
 interface MonacoSymbol {
@@ -254,8 +261,9 @@ export class KairoNavigationContribution implements CommandContribution, Keybind
         return;
       }
 
-      const providers = monaco.languages._documentSymbolProviders;
-      if (!providers) {
+      // Kairo-owned registry populated by java-monaco-registration
+      const providers = monaco.languages.__kairoDocumentSymbolProviders;
+      if (!providers || providers.length === 0) {
         this.messages.info(this.i18n.t('navigation.noSymbolProvider'));
         return;
       }
@@ -296,9 +304,9 @@ export class KairoNavigationContribution implements CommandContribution, Keybind
   private async getModelSymbols(model: unknown, monaco: MonacoNamespace): Promise<SymbolQuickPickItem[]> {
     const result: SymbolQuickPickItem[] = [];
     try {
-      // Access internal document symbol providers
-      const providers = monaco.languages._documentSymbolProviders;
-      if (!providers) return result;
+      // Kairo-owned registry populated by java-monaco-registration
+      const providers = monaco.languages.__kairoDocumentSymbolProviders;
+      if (!providers || providers.length === 0) return result;
 
       const token = new monaco.CancellationTokenSource().token;
       for (const provider of providers) {
@@ -540,15 +548,15 @@ export class KairoNavigationContribution implements CommandContribution, Keybind
         return;
       }
 
-      // Access internal workspace symbol providers
-      const providers = monaco.languages._workspaceSymbolProviders;
+      // Kairo-owned registry populated by java-monaco-registration
+      const providers = monaco.languages.__kairoWorkspaceSymbolProviders;
       if (!providers || providers.length === 0) {
         this.messages.warn(this.i18n.t('navigation.noWorkspaceSymbolProvider'));
         return;
       }
 
       const token = new monaco.CancellationTokenSource().token;
-      const allResults: MonacoSymbol[] = [];
+      const allResults: KairoWorkspaceSymbol[] = [];
       for (const provider of providers) {
         if (!provider.provideWorkspaceSymbols) continue;
         try {
@@ -571,9 +579,9 @@ export class KairoNavigationContribution implements CommandContribution, Keybind
         .map(sym => ({
           label: `${this.getSymbolKindIcon(sym.kind)} ${sym.name}`,
           description: sym.containerName || '',
-          detail: sym.location?.uri?.toString() || '',
-          line: sym.location?.range?.startLineNumber || 1,
-          column: sym.location?.range?.startColumn || 1,
+          detail: sym.uriString || '',
+          line: sym.range?.startLineNumber || 1,
+          column: sym.range?.startColumn || 1,
         }));
 
       const pick = await this.quickInput.showQuickPick(items, {

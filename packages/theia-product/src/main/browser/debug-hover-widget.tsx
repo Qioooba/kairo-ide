@@ -337,20 +337,19 @@ export function createDebugHoverWidget(
         if (!rootDiv) {
             contentWidget.getDomNode();
         }
-        if (rootDiv && root) {
-            root.unmount();
-        }
-        if (rootDiv) {
+        if (rootDiv && !root) {
+            // Create the React root once; re-creating it per hover unmounted
+            // and remounted the whole tree on every variable inspection.
             root = createRoot(rootDiv);
-            root.render(
-                React.createElement(DebugHoverWidgetContent, {
-                    result,
-                    sessionService,
-                    onAddToWatch,
-                    onClose: hide,
-                }),
-            );
         }
+        root?.render(
+            React.createElement(DebugHoverWidgetContent, {
+                result,
+                sessionService,
+                onAddToWatch,
+                onClose: hide,
+            }),
+        );
     }
 
     function hide() {

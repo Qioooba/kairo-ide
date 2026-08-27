@@ -63,6 +63,37 @@ import type {
   LSPDocumentHighlight,
 } from '../common/lsp-protocol';
 
+/**
+ * Kairo-owned provider registries on the Monaco languages namespace.
+ * Monaco 1.108 exposes neither `_documentSymbolProviders` nor
+ * `_workspaceSymbolProviders`; these well-known fields give tool windows
+ * (Quick Outline, Go to Type) access to the registered providers.
+ */
+interface KairoWorkspaceSymbolEntry {
+  name: string;
+  containerName?: string;
+  kind: number;
+  range: { startLineNumber: number; startColumn: number; endLineNumber: number; endColumn: number };
+  uriString: string;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function kairoSymbolRegistries(languagesNs: any): {
+  document: Array<{ provideDocumentSymbols: (model: unknown, token: unknown) => Promise<unknown> }>;
+  workspace: Array<{ provideWorkspaceSymbols: (query: string | { query?: string }, token: unknown) => Promise<KairoWorkspaceSymbolEntry[] | undefined> }>;
+} {
+  if (!languagesNs.__kairoDocumentSymbolProviders) {
+    languagesNs.__kairoDocumentSymbolProviders = [];
+  }
+  if (!languagesNs.__kairoWorkspaceSymbolProviders) {
+    languagesNs.__kairoWorkspaceSymbolProviders = [];
+  }
+  return {
+    document: languagesNs.__kairoDocumentSymbolProviders,
+    workspace: languagesNs.__kairoWorkspaceSymbolProviders,
+  };
+}
+
 /** Set by Smart Completion command; consumed by the next provideCompletionItems.
  * Repeated Ctrl+Shift+Space cycles filter strictness (IDEA-like). */
 let pendingSmartCompletion = false;
@@ -377,13 +408,24 @@ export class JavaMonacoRegistrationContribution implements FrontendApplicationCo
           return token.isCancellationRequested ? [] : adaptDocumentSymbols(result);
         },
       }),
-      monaco.languages.registerWorkspaceSymbolProvider(JAVA_LANGUAGE_ID, {
-        provideWorkspaceSymbols: async (query, token) => {
-          if (token.isCancellationRequested || !query.trim()) return [];
-          const result = await this.provider.provideWorkspaceSymbols(query);
-          return token.isCancellationRequested ? [] : adaptWorkspaceSymbols(result);
-        },
-      }),
+      (() => {
+        // Monaco has no public workspace-symbol API in 1.108; expose via Kairo registry
+        const registries = kairoSymbolRegistries(monaco.languages);
+        registries.workspace.push({
+          provideWorkspaceSymbols: async (query, token) => {
+            const text = typeof query === 'string'
+              ? query
+              : (query as { query?: string } | undefined)?.query ?? '';
+            if ((token as { isCancellationRequested?: boolean })?.isCancellationRequested || !text.trim()) return [];
+            const result = await this.provider.provideWorkspaceSymbols(text);
+            if ((token as { isCancellationRequested?: boolean })?.isCancellationRequested) return [];
+            return adaptWorkspaceSymbols(result);
+          },
+        });
+        return Disposable.create(() => {
+          // no-op: registry lives for the app lifetime
+        });
+      })(),
       monaco.languages.registerRenameProvider(JAVA_LANGUAGE_ID, {
         provideRenameEdits: async (model, position, newName, token) => {
           if (token.isCancellationRequested) return { edits: [], rejectReason: 'Rename cancelled.' };
@@ -1386,15 +1428,14 @@ export function adaptSignatureHelp(help: LSPSignatureHelp | null): monaco.langua
   };
 }
 
-export function adaptWorkspaceSymbols(result: LSPWorkspaceSymbolResult): monaco.languages.WorkspaceSymbol[] {
+export function adaptWorkspaceSymbols(result: LSPWorkspaceSymbolResult): KairoWorkspaceSymbolEntry[] {
   if (!result) return [];
   return result.map(symbol => ({
     name: symbol.name,
     containerName: symbol.containerName,
     kind: toMonacoSymbolKind(symbol.kind),
-    tags: adaptSymbolTags(symbol.tags, symbol.deprecated),
     range: adaptRange(symbol.location.range),
-    uri: monaco.Uri.parse(symbol.location.uri),
+    uriString: symbol.location.uri,
   }));
 }
 

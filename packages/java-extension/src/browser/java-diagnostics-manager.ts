@@ -22,6 +22,7 @@ import { ProblemManager } from '@theia/markers/lib/browser/problem/problem-manag
 import { Diagnostic } from '@theia/core/shared/vscode-languageserver-protocol';
 import { JavaLanguageClient } from './java-language-client';
 import { JavaIntelliSenseProvider } from './java-intellisense-provider';
+import { JavaCompletionProvider } from './java-completion-provider';
 import type { LSPDiagnostic } from '../common/lsp-protocol';
 import * as monaco from '@theia/monaco-editor-core';
 
@@ -43,12 +44,14 @@ export class JavaDiagnosticsManager implements FrontendApplicationContribution {
   @inject(ProblemManager)
   protected readonly problemManager!: ProblemManager;
 
+  /** Shared per-URI source cache owned by the completion provider. */
+  @inject(JavaCompletionProvider)
+  protected readonly completionProvider!: JavaCompletionProvider;
+
   protected subs: Disposable[] = [];
   /** Per-model content listeners — disposed on model dispose so `subs` does not grow forever. */
   protected modelContentSubs = new Map<string, Disposable>();
 
-  /** Track source text for fallback diagnostics. */
-  private sourceCache = new Map<string, string>();
   /** Per-URI debounce timers for fallback diagnostics. */
   private fallbackTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
@@ -72,11 +75,13 @@ export class JavaDiagnosticsManager implements FrontendApplicationContribution {
         return;
       }
       const uriStr = model.uri.toString();
-      this.sourceCache.set(uriStr, model.getValue());
       this.scheduleFallbackDiagnostics(uriStr);
       this.modelContentSubs.get(uriStr)?.dispose();
       this.modelContentSubs.set(uriStr, model.onDidChangeContent(() => {
-        this.sourceCache.set(model.uri.toString(), model.getValue());
+        // No model.getValue() here: the completion provider's own content
+        // listener already mirrors the text into the shared cache, and
+        // fallback analysis runs debounced afterwards — a full-document
+        // copy per keystroke was pure overhead.
         this.scheduleFallbackDiagnostics(model.uri.toString());
       }));
     };
@@ -96,7 +101,7 @@ export class JavaDiagnosticsManager implements FrontendApplicationContribution {
           contentSub.dispose();
           this.modelContentSubs.delete(uriStr);
         }
-        this.sourceCache.delete(uriStr);
+        this.completionProvider.clearSource(uriStr);
         const timer = this.fallbackTimers.get(uriStr);
         if (timer) {
           clearTimeout(timer);
@@ -128,7 +133,7 @@ export class JavaDiagnosticsManager implements FrontendApplicationContribution {
     } catch {
       // Can't check state, run fallback anyway.
     }
-    const source = this.sourceCache.get(uriStr);
+    const source = this.completionProvider.getSource(uriStr);
     if (!source) return;
     const diags = this.intellisense.provideDiagnostics(source, uriStr);
     const vscodeDiags: Diagnostic[] = diags.map(d => ({

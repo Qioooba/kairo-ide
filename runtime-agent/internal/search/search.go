@@ -65,6 +65,14 @@ var headBufPool = sync.Pool{
 	},
 }
 
+// errFileTooLarge is reported when a file exceeds MaxFileBytes.
+var errFileTooLarge = errors.New("file exceeds size limit; skipped")
+
+// defaultMaxFileBytes caps per-file memory during search (10 MB). Files
+// larger than this are skipped and reported instead of being fully
+// buffered and decoded.
+const defaultMaxFileBytes = 10 << 20
+
 // Options configures a search.
 type Options struct {
 	Query           string
@@ -80,6 +88,9 @@ type Options struct {
 	EncodingAliases encoding.Aliases
 	// Workers overrides the parallel reader count. 0 = auto (NumCPU, clamped).
 	Workers int
+	// MaxFileBytes skips files larger than this many bytes (reported via
+	// ErroredFiles). 0 = default (10 MB); negative = unlimited.
+	MaxFileBytes int
 	// Cancel is checked periodically; if it returns Done, walk aborts.
 	Cancel context.Context
 }
@@ -137,6 +148,9 @@ func Search(root string, opts Options) (*Result, error) {
 	if opts.MaxResults == 0 {
 		opts.MaxResults = 100_000
 	}
+	if opts.MaxFileBytes == 0 {
+		opts.MaxFileBytes = defaultMaxFileBytes
+	}
 	if opts.Cancel == nil {
 		opts.Cancel = context.Background()
 	}
@@ -182,6 +196,9 @@ func SearchStreaming(ctx context.Context, root string, opts Options, callback fu
 	}
 	if opts.MaxResults == 0 {
 		opts.MaxResults = 100_000
+	}
+	if opts.MaxFileBytes == 0 {
+		opts.MaxFileBytes = defaultMaxFileBytes
 	}
 	if opts.Cancel == nil {
 		opts.Cancel = ctx
@@ -527,6 +544,19 @@ func buildMatcher(opts Options) (*compiledMatcher, error) {
 	}, nil
 }
 
+// errorReporter is optionally implemented by match sinks to record
+// per-file problems (oversized files, over-long lines, read errors).
+type errorReporter interface {
+	recordError(path string, err error)
+}
+
+// reportFileError records err against rel when the sink supports it.
+func reportFileError(sink matchSink, rel string, err error) {
+	if rep, ok := sink.(errorReporter); ok {
+		rep.recordError(rel, err)
+	}
+}
+
 // searchFileToSink reads a file, detects encoding, and sends matches to the sink.
 func searchFileToSink(
 	absPath, rel, root string,
@@ -549,50 +579,56 @@ func searchFileToSink(
 		return nil
 	}
 	defer f.Close()
+
+	// Skip oversized files instead of buffering them in memory.
+	if opts.MaxFileBytes > 0 {
+		if fi, statErr := f.Stat(); statErr == nil && fi.Size() > int64(opts.MaxFileBytes) {
+			reportFileError(sink, rel, fmt.Errorf("%s (%d bytes > %d limit)", errFileTooLarge, fi.Size(), opts.MaxFileBytes))
+			return nil
+		}
+	}
+
 	// Sniff a small sample to detect encoding using a pooled buffer.
 	headPtr := headBufPool.Get().(*[]byte)
 	head := *headPtr
 	n, _ := f.Read(head)
-	detID, _, _, _ := encoding.Detect(head[:n], opts.ProjectEncoding, opts.EncodingAliases)
+	detID, confidence, _, _ := encoding.Detect(head[:n], opts.ProjectEncoding, opts.EncodingAliases)
+
+	// ASCII fast path: when Detect could only fall back to the project
+	// default (low confidence) but the sample is pure ASCII, the file is
+	// indistinguishable from UTF-8/GBK — prefer the zero-copy streaming
+	// path. ASCII is a subset of both encodings, so raw-byte line matching
+	// keeps queries correct without a full-file decode buffer.
+	if n > 0 && confidence <= 0.55 && isAllASCII(head[:n]) {
+		detID = encoding.UTF8
+	}
 	headBufPool.Put(headPtr)
 
 	// Seek back to start for line-by-line scanning.
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
 		return nil
 	}
-	scanner := bufio.NewScanner(f)
-	const maxLine = 4 * 1024 * 1024
-	bufPtr := scannerBufPool.Get().(*[]byte)
-	scanner.Buffer(*bufPtr, maxLine)
-	defer func() {
-		scannerBufPool.Put(bufPtr)
-	}()
-
-	emit := func(match Match) bool {
-		if matchedCount != nil {
-			n := matchedCount.Add(1)
-			if n > int64(maxResults) {
-				matchedCount.Add(-1)
-				if stop != nil {
-					stop.Store(true)
-				}
-				return false
-			}
-		}
-		sink.addMatch(match)
-		return true
-	}
 
 	if detID == encoding.UTF8 || detID == encoding.UTF8BOM {
-		return scanUTF8ToSink(scanner, rel, m, opts, emit)
+		scanner, cleanup := newPooledScanner(f)
+		defer cleanup()
+		err := scanUTF8ToSink(scanner, rel, m, opts, sink, emitFor(sink, matchedCount, maxResults, stop))
+		if serr := scanner.Err(); serr != nil {
+			reportFileError(sink, rel, fmt.Errorf("line scan aborted: %w", serr))
+		}
+		return err
 	}
 	if err := opts.Cancel.Err(); err != nil {
 		return err
 	}
-	data, err := readAllContext(opts.Cancel, f)
+	data, err := readAllContext(opts.Cancel, f, int64(opts.MaxFileBytes))
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return err
+		}
+		if errors.Is(err, errFileTooLarge) {
+			reportFileError(sink, rel, err)
+			return nil
 		}
 		return nil
 	}
@@ -606,13 +642,44 @@ func searchFileToSink(
 	if err := opts.Cancel.Err(); err != nil {
 		return err
 	}
-	return scanBytesToSink(decoded, rel, m, opts, emit)
+	return scanBytesToSink(decoded, rel, m, opts, sink, emitFor(sink, matchedCount, maxResults, stop))
+}
+
+// emitFor builds the bounded emit callback shared by both scan paths.
+func emitFor(sink matchSink, matchedCount *atomic.Int64, maxResults int, stop *atomic.Bool) emitFn {
+	return func(match Match) bool {
+		if matchedCount != nil {
+			n := matchedCount.Add(1)
+			if n > int64(maxResults) {
+				matchedCount.Add(-1)
+				if stop != nil {
+					stop.Store(true)
+				}
+				return false
+			}
+		}
+		sink.addMatch(match)
+		return true
+	}
+}
+
+// newPooledScanner wraps r with a bufio.Scanner backed by a pooled buffer.
+func newPooledScanner(r io.Reader) (*bufio.Scanner, func()) {
+	scanner := bufio.NewScanner(r)
+	const maxLine = 4 * 1024 * 1024
+	bufPtr := scannerBufPool.Get().(*[]byte)
+	scanner.Buffer(*bufPtr, maxLine)
+	return scanner, func() {
+		scannerBufPool.Put(bufPtr)
+	}
 }
 
 // readAllContext bounds cancellation latency for large/non-UTF files to one
 // filesystem read chunk. It intentionally avoids a helper goroutine, which
 // could leak forever when a network filesystem blocks in Read.
-func readAllContext(ctx context.Context, reader io.Reader) ([]byte, error) {
+// maxBytes bounds the accumulated buffer; exceeding it fails with
+// errFileTooLarge instead of growing without limit.
+func readAllContext(ctx context.Context, reader io.Reader, maxBytes int64) ([]byte, error) {
 	var out bytes.Buffer
 	chunkPtr := chunkBufPool.Get().(*[]byte)
 	chunk := *chunkPtr
@@ -623,6 +690,9 @@ func readAllContext(ctx context.Context, reader io.Reader) ([]byte, error) {
 		}
 		n, err := reader.Read(chunk)
 		if n > 0 {
+			if maxBytes > 0 && int64(out.Len())+int64(n) > maxBytes {
+				return nil, errFileTooLarge
+			}
 			_, _ = out.Write(chunk[:n])
 		}
 		if err != nil {
@@ -637,9 +707,19 @@ func readAllContext(ctx context.Context, reader io.Reader) ([]byte, error) {
 	}
 }
 
+// isAllASCII reports whether b contains only ASCII bytes.
+func isAllASCII(b []byte) bool {
+	for _, c := range b {
+		if c > 0x7F {
+			return false
+		}
+	}
+	return true
+}
+
 type emitFn func(Match) bool
 
-func scanUTF8ToSink(scanner *bufio.Scanner, rel string, m *compiledMatcher, opts Options, emit emitFn) error {
+func scanUTF8ToSink(scanner *bufio.Scanner, rel string, m *compiledMatcher, opts Options, sink matchSink, emit emitFn) error {
 	return scanWithContext(func() ([]byte, bool) {
 		if !scanner.Scan() {
 			return nil, false
@@ -652,13 +732,13 @@ func scanUTF8ToSink(scanner *bufio.Scanner, rel string, m *compiledMatcher, opts
 	}, rel, m, opts, emit)
 }
 
-func scanBytesToSink(data []byte, rel string, m *compiledMatcher, opts Options, emit emitFn) error {
+func scanBytesToSink(data []byte, rel string, m *compiledMatcher, opts Options, sink matchSink, emit emitFn) error {
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	const maxLine = 4 * 1024 * 1024
 	bufPtr := scannerBufPool.Get().(*[]byte)
 	scanner.Buffer(*bufPtr, maxLine)
 	defer scannerBufPool.Put(bufPtr)
-	return scanWithContext(func() ([]byte, bool) {
+	err := scanWithContext(func() ([]byte, bool) {
 		if !scanner.Scan() {
 			return nil, false
 		}
@@ -667,6 +747,12 @@ func scanBytesToSink(data []byte, rel string, m *compiledMatcher, opts Options, 
 		copy(cp, b)
 		return cp, true
 	}, rel, m, opts, emit)
+	if err == nil {
+		if serr := scanner.Err(); serr != nil {
+			reportFileError(sink, rel, fmt.Errorf("line scan aborted: %w", serr))
+		}
+	}
+	return err
 }
 
 func scanWithContext(next func() ([]byte, bool), rel string, m *compiledMatcher, opts Options, emit emitFn) error {

@@ -408,6 +408,9 @@ func findJavaFiles(dir string, maxFiles int) ([]string, error) {
 			return nil
 		}
 		if info.IsDir() {
+			if path != dir && isSkippableDirName(info.Name()) {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		if strings.HasSuffix(strings.ToLower(info.Name()), ".java") {
@@ -419,6 +422,17 @@ func findJavaFiles(dir string, maxFiles int) ([]string, error) {
 		return nil
 	})
 	return files, err
+}
+
+// isSkippableDirName reports whether a directory never contains project
+// Java sources and can be pruned from discovery walks.
+func isSkippableDirName(name string) bool {
+	switch name {
+	case ".git", ".svn", ".hg", "node_modules", "target", "build", "dist",
+		"out", "bin", "logs", "work", "temp", ".settings", ".idea":
+		return true
+	}
+	return false
 }
 
 // detectFileEncoding detects encoding from a file by checking BOM

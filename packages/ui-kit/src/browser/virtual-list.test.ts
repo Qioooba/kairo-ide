@@ -17,12 +17,13 @@ const source = readFileSync(join(__dirname, 'virtual-list.tsx'), 'utf8');
 
 // ---- Component existence ----
 
-test('VirtualList is an exported function component', () => {
-  assert.match(source, /export function VirtualList/);
+test('VirtualList is an exported component (memoized)', () => {
+  assert.match(source, /export const VirtualList = React\.memo\(VirtualListImpl\)/);
 });
 
 test('VirtualList is a generic component with type parameter T', () => {
-  assert.match(source, /export function VirtualList<T>/);
+  assert.match(source, /VirtualListImpl<T>/);
+  assert.match(source, /as <T>\(/);
 });
 
 // ---- Props interface ----

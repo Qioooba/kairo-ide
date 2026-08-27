@@ -21,6 +21,7 @@ const GitDiffComponent: React.FC<GitDiffProps> = ({ store, gitService, i18n }) =
     const [diffLines, setDiffLines] = React.useState<DiffLine[]>([]);
     const [loading, setLoading] = React.useState<boolean>(false);
     const [error, setError] = React.useState<string>('');
+    const [useFallback, setUseFallback] = React.useState<boolean>(false);
 
     React.useEffect(() => {
         const sub = store.onDiffRequest(req => {
@@ -28,6 +29,7 @@ const GitDiffComponent: React.FC<GitDiffProps> = ({ store, gitService, i18n }) =
             setStaged(req.staged);
             setDiffLines([]);
             setError('');
+            setUseFallback(false);
             loadDiff(req.file, req.staged);
         });
         return () => sub.dispose();
@@ -99,7 +101,17 @@ const GitDiffComponent: React.FC<GitDiffProps> = ({ store, gitService, i18n }) =
                 </div>
             )}
 
-            {!loading && diffLines.length > 0 && (
+            {!loading && diffLines.length > 0 && !useFallback && (
+                <div className="kairo-diff-container kairo-diff-container-monaco" data-testid="git-diff-content">
+                    <MonacoDiffViewer
+                        original={reconstructSide(diffLines, 'old')}
+                        modified={reconstructSide(diffLines, 'new')}
+                        onUnavailable={() => setUseFallback(true)}
+                    />
+                </div>
+            )}
+
+            {!loading && diffLines.length > 0 && useFallback && (
                 <div className="kairo-diff-container" data-testid="git-diff-content">
                     <pre className="kairo-diff-pre">
                         {diffLines.map((l, i) => (
@@ -118,6 +130,75 @@ const GitDiffComponent: React.FC<GitDiffProps> = ({ store, gitService, i18n }) =
             )}
         </div>
     );
+};
+
+/** Rebuild one side's text from the parsed unified diff. */
+function reconstructSide(lines: DiffLine[], side: 'old' | 'new'): string {
+    const out: string[] = [];
+    for (const l of lines) {
+        if (l.type === 'add') {
+            if (side === 'new') out.push(l.content);
+        } else if (l.type === 'remove') {
+            if (side === 'old') out.push(l.content);
+        } else if (l.type === 'context') {
+            out.push(l.content);
+        }
+        // header/hunk/meta lines are skipped
+    }
+    return out.join('\n');
+}
+
+interface MonacoDiffViewerProps {
+    original: string;
+    modified: string;
+    onUnavailable: () => void;
+}
+
+/**
+ * Side-by-side Monaco DiffEditor with graceful fallback: when the editor
+ * module cannot load (e.g. mocked test environment) the parent falls back to
+ * the plain-text rendering.
+ */
+const MonacoDiffViewer: React.FC<MonacoDiffViewerProps> = ({ original, modified, onUnavailable }) => {
+    const containerRef = React.useRef<HTMLDivElement | null>(null);
+
+    React.useEffect(() => {
+        let disposed = false;
+        let editorInstance: { dispose(): void; getModel(): unknown } | undefined;
+        const createdModels: Array<{ dispose(): void }> = [];
+
+        (async () => {
+            try {
+                const monaco = await import('@theia/monaco-editor-core');
+                if (disposed || !containerRef.current) return;
+                const editor = monaco.editor.createDiffEditor(containerRef.current, {
+                    readOnly: true,
+                    automaticLayout: true,
+                    renderSideBySide: true,
+                    scrollBeyondLastLine: false,
+                    minimap: { enabled: false },
+                    lineNumbersMinChars: 4,
+                });
+                const oldModel = monaco.editor.createModel(original, 'plaintext');
+                const newModel = monaco.editor.createModel(modified, 'plaintext');
+                createdModels.push(oldModel, newModel);
+                editor.setModel({ original: oldModel, modified: newModel });
+                editorInstance = editor as unknown as { dispose(): void; getModel(): unknown };
+            } catch {
+                if (!disposed) onUnavailable();
+            }
+        })();
+
+        return () => {
+            disposed = true;
+            try { editorInstance?.dispose(); } catch { /* ignore */ }
+            for (const m of createdModels) {
+                try { m.dispose(); } catch { /* ignore */ }
+            }
+        };
+    }, [original, modified, onUnavailable]);
+
+    return <div ref={containerRef} className="kairo-git-diff-monaco" />;
 };
 
 @injectable()

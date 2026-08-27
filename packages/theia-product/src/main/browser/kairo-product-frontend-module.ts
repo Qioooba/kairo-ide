@@ -54,6 +54,7 @@ import { FileService } from '@theia/filesystem/lib/browser/file-service';
 import { BuildViewWidget } from '@kairo/build-extension';
 import { ServerViewWidget, LogViewerWidget, HotDeployService } from '@kairo/tomcat-extension';
 import { bindSvnExtension } from '@kairo/svn-extension';
+import { bindGitExtension } from '@kairo/git-extension';
 import { bindKairoI18n } from '@kairo/i18n';
 import {
   RuntimeConnectionService,
@@ -75,6 +76,7 @@ import { KairoEditorPreferenceContribution, KairoEditorAutoSaveSync } from './ka
 import { KairoSettingsPreferenceContribution } from './kairo-settings-preferences';
 import { KairoSettingsService } from './kairo-settings-service';
 import { KairoKeymapWidget, KAIRO_KEYMAP_FACTORY_ID } from './kairo-keymap-widget';
+import { KairoOutlineWidget, KairoOutlineViewContribution } from './kairo-outline-widget';
 import { MavenViewWidget } from './maven-view-widget';
 import { KairoTodoWidget, KAIRO_TODO_FACTORY_ID } from './kairo-todo-widget';
 import { KairoEditorContribution } from './kairo-editor-contribution';
@@ -154,6 +156,7 @@ import { KairoDebugHoverProvider } from './debug-hover-provider';
 import { KairoDebugInlineValuesService } from './debug-inline-values';
 import {
   KAIRO_DEBUG_TOOL_WINDOW_FACTORY_ID,
+  KAIRO_OUTLINE_FACTORY_ID,
 } from './kairo-factory-ids';
 import { BookmarkService } from './kairo-bookmark-service';
 import { KairoBookmarksWidget } from './kairo-bookmark-widget';
@@ -181,6 +184,7 @@ export {
   KAIRO_TOOLBAR_FACTORY_ID,
   KAIRO_PROBLEMS_FACTORY_ID,
   KAIRO_KEYMAP_FACTORY_ID,
+  KAIRO_OUTLINE_FACTORY_ID,
   KAIRO_TODO_FACTORY_ID,
   KAIRO_TESTS_FACTORY_ID,
   KAIRO_PERF_FACTORY_ID,
@@ -525,6 +529,10 @@ export function bindKairoFrontend(bind: interfaces.Bind, unbind?: interfaces.Unb
   bind(MavenViewWidget).toSelf();
   bind(KairoTodoWidget).toSelf();
   bind(KairoKeymapWidget).toSelf();
+  bind(KairoOutlineWidget).toSelf();
+  bind(KairoOutlineViewContribution).toSelf().inSingletonScope();
+  safeContribution(CommandContribution, KairoOutlineViewContribution, 'KairoOutlineViewContribution:cmd');
+  safeContribution(MenuContribution, KairoOutlineViewContribution, 'KairoOutlineViewContribution:menu');
 
   // Register widget factories so the WidgetManager can lazily
   // construct each view the first time the user opens it.
@@ -559,6 +567,10 @@ export function bindKairoFrontend(bind: interfaces.Bind, unbind?: interfaces.Unb
   bind(WidgetFactory).toDynamicValue(ctx => ({
     id: KAIRO_KEYMAP_FACTORY_ID,
     createWidget: () => ctx.container.get(KairoKeymapWidget),
+  })).inSingletonScope();
+  bind(WidgetFactory).toDynamicValue(ctx => ({
+    id: KAIRO_OUTLINE_FACTORY_ID,
+    createWidget: () => ctx.container.get(KairoOutlineWidget),
   })).inSingletonScope();
   bind(WidgetFactory).toDynamicValue(ctx => ({
     id: KAIRO_MAVEN_FACTORY_ID,
@@ -790,6 +802,13 @@ export function bindKairoFrontend(bind: interfaces.Bind, unbind?: interfaces.Unb
     bindSvnExtension(bind);
   } catch (e) {
     console.error('[kairo] bindSvnExtension FAILED', e);
+  }
+
+  // ── Git Integration (Kairo-owned; @theia/git is not installed) ──
+  try {
+    bindGitExtension(bind);
+  } catch (e) {
+    console.error('[kairo] bindGitExtension FAILED', e);
   }
 
   // ── Plugin Extension (VS Code Extension Support) ──────────────

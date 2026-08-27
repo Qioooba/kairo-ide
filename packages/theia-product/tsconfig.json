@@ -26,6 +26,7 @@
     { "path": "../encoding-extension" },
     { "path": "../plugin-extension" },
     { "path": "../svn-extension" },
+    { "path": "../git-extension" },
     { "path": "../i18n" }
   ]
 }

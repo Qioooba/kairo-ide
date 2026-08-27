@@ -242,7 +242,8 @@ export interface LSPInitializeParams {
       symbol?: { dynamicRegistration?: boolean };
     };
     textDocument?: {
-      synchronization?: { dynamicRegistration?: boolean; willSave?: boolean; didSave?: boolean };
+      /** TextDocumentSyncKind: 0=None, 1=Full, 2=Incremental. */
+      synchronization?: { dynamicRegistration?: boolean; willSave?: boolean; didSave?: boolean; didChange?: 0 | 1 | 2 };
       completion?: {
         dynamicRegistration?: boolean;
         completionItem?: {

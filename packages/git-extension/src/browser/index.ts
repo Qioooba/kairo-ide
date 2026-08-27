@@ -1,5 +1,6 @@
 import type { interfaces } from '@theia/core/shared/inversify';
 import { FrontendApplicationContribution, WidgetFactory } from '@theia/core/lib/browser';
+import { CommandContribution, MenuContribution } from '@theia/core/lib/common';
 import { TabBarDecorator } from '@theia/core/lib/browser/shell/tab-bar-decorator';
 import { bindViewContribution } from '@theia/core/lib/browser/shell/view-contribution';
 import { NavigatorTreeDecorator } from '@theia/navigator/lib/browser/navigator-decorator-service';
@@ -23,6 +24,9 @@ import { GitStashWidget } from './git-stash-widget';
 import { GitStashContribution } from './git-stash-contribution';
 import { GitCherryPickService } from './git-cherrypick-service';
 import { GitCherryPickContribution } from './git-cherrypick-contribution';
+import { GitSyncContribution, GIT_PULL_COMMAND, GIT_PUSH_COMMAND, GIT_FETCH_COMMAND, GIT_BRANCH_CREATE_COMMAND, GIT_BRANCH_SWITCH_COMMAND, GIT_DISCARD_COMMAND } from './git-sync-contribution';
+import { GitRepoDetector } from './git-repo-detector';
+import { GitGutterDecorator } from './git-gutter-decorator';
 
 export { GitService } from './git-service';
 export type { GitFileStatus, GitStatusResult, GitCommit, GitBlameLine, GitDiffResult, GitCommitResult, GitCommitOptions } from './git-service';
@@ -58,6 +62,17 @@ export { GitStashContribution, GIT_STASH_TOGGLE_COMMAND } from './git-stash-cont
 export { GitCherryPickService } from './git-cherrypick-service';
 export type { CherryPickState, CherryPickStatus } from './git-cherrypick-service';
 export { GitCherryPickContribution, GIT_CHERRY_PICK_COMMAND, GIT_CHERRY_PICK_CONTINUE_COMMAND, GIT_CHERRY_PICK_ABORT_COMMAND } from './git-cherrypick-contribution';
+export {
+  GitSyncContribution,
+  GIT_PULL_COMMAND,
+  GIT_PUSH_COMMAND,
+  GIT_FETCH_COMMAND,
+  GIT_BRANCH_CREATE_COMMAND,
+  GIT_BRANCH_SWITCH_COMMAND,
+  GIT_DISCARD_COMMAND,
+} from './git-sync-contribution';
+export { GitRepoDetector } from './git-repo-detector';
+export { GitGutterDecorator } from './git-gutter-decorator';
 
 export function bindGitExtension(bind: interfaces.Bind): void {
   // Core services
@@ -119,4 +134,17 @@ export function bindGitExtension(bind: interfaces.Bind): void {
 
   // Cherry-pick contribution
   bind(GitCherryPickContribution).toSelf().inSingletonScope();
+
+  // Sync / branch / discard commands
+  bind(GitSyncContribution).toSelf().inSingletonScope();
+  bind(CommandContribution).toService(GitSyncContribution);
+  bind(MenuContribution).toService(GitSyncContribution);
+
+  // Workspace repo discovery
+  bind(GitRepoDetector).toSelf().inSingletonScope();
+  bind(FrontendApplicationContribution).toService(GitRepoDetector);
+
+  // Dirty-diff gutter marks
+  bind(GitGutterDecorator).toSelf().inSingletonScope();
+  bind(FrontendApplicationContribution).toService(GitGutterDecorator);
 }

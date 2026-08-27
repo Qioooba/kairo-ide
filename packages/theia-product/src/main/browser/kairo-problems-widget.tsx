@@ -48,6 +48,8 @@ interface MarkerEntry {
   message: string;
   source: string;
   uri: monaco.Uri;
+  /** Detected problem type, computed once when entries are built. */
+  type?: string;
 }
 
 interface FilterState {
@@ -94,18 +96,23 @@ function detectType(entry: MarkerEntry): string {
 }
 
 function markersToEntries(markers: monaco.editor.IMarker[], t: (key: string) => string): MarkerEntry[] {
-  return markers.map((m, i) => ({
-    key: `${m.resource.toString()}:${m.startLineNumber}:${m.startColumn}:${i}`,
-    severity: m.severity,
-    severityLabel: severityLabel(m.severity, t),
-    file: m.resource.path.split('/').pop() ?? m.resource.path,
-    filePath: m.resource.path,
-    line: m.startLineNumber,
-    column: m.startColumn,
-    message: m.message,
-    source: sourceLabel(m.owner),
-    uri: m.resource,
-  }));
+  return markers.map((m, i) => {
+    const entry: MarkerEntry = {
+      key: `${m.resource.toString()}:${m.startLineNumber}:${m.startColumn}:${i}`,
+      severity: m.severity,
+      severityLabel: severityLabel(m.severity, t),
+      file: m.resource.path.split('/').pop() ?? m.resource.path,
+      filePath: m.resource.path,
+      line: m.startLineNumber,
+      column: m.startColumn,
+      message: m.message,
+      source: sourceLabel(m.owner),
+      uri: m.resource,
+    };
+    // Compute once here instead of twice per rendered row.
+    entry.type = detectType(entry);
+    return entry;
+  });
 }
 
 function loadFilterState(): FilterState {
@@ -180,8 +187,20 @@ const KairoProblems: React.FC<KairoProblemsProps> = ({ openerService, editorMana
 
   React.useEffect(() => {
     refresh();
-    const disposable = monaco.editor.onDidChangeMarkers(() => refresh());
-    return () => disposable.dispose();
+    // Diagnostics churn constantly while typing; debounce so marker storms
+    // coalesce into one refresh instead of one per keystroke.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const disposable = monaco.editor.onDidChangeMarkers(() => {
+      if (timer !== undefined) clearTimeout(timer);
+      timer = setTimeout(() => {
+        timer = undefined;
+        refresh();
+      }, 200);
+    });
+    return () => {
+      if (timer !== undefined) clearTimeout(timer);
+      disposable.dispose();
+    };
   }, [refresh]);
 
   // Detect disabled state: no editor open = problems view is not applicable
@@ -227,7 +246,7 @@ const KairoProblems: React.FC<KairoProblemsProps> = ({ openerService, editorMana
 
       // Type filter
       if (filterState.typeFilter !== 'All') {
-        if (detectType(e) !== filterState.typeFilter) return false;
+        if ((e.type ?? detectType(e)) !== filterState.typeFilter) return false;
       }
 
       // Current file only
@@ -476,8 +495,8 @@ const KairoProblems: React.FC<KairoProblemsProps> = ({ openerService, editorMana
                   <td className="kairo-problems-col-line">{entry.line}</td>
                   <td className="kairo-problems-col-message">{entry.message}</td>
                   <td className="kairo-problems-col-source">
-                    <span className={`kairo-problems-source-badge kairo-problems-source-${detectType(entry).toLowerCase()}`}>
-                      {detectType(entry)}
+                    <span className={`kairo-problems-source-badge kairo-problems-source-${(entry.type ?? detectType(entry)).toLowerCase()}`}>
+                      {entry.type ?? detectType(entry)}
                     </span>
                   </td>
                 </tr>

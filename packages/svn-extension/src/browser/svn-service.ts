@@ -121,6 +121,9 @@ export class SvnService implements SvnFrontendClient {
   protected wcInfo: SvnInfo | undefined;
   protected cachedStatus: SvnStatusEntry[] = [];
   protected pollingTimer: ReturnType<typeof setInterval> | undefined;
+  protected statusRefreshInFlight = false;
+  protected hasPublishedStatus = false;
+  protected wcInfoTick = 0;
   protected svnAvailable = false;
   protected cachedInstallation: SvnInstallation | undefined;
   protected credentials: SvnCredential | undefined;
@@ -273,6 +276,7 @@ export class SvnService implements SvnFrontendClient {
   setActiveWcRoot(root: string | undefined): void {
     const previous = this.activeWcRoot;
     this.activeWcRoot = root;
+    this.hasPublishedStatus = false;
     if (root) {
       this.refreshStatus().catch(() => {});
       this.startStatusPolling();
@@ -298,7 +302,7 @@ export class SvnService implements SvnFrontendClient {
   // Polling + status
   // ---------------------------------------------------------------------------
 
-  startStatusPolling(interval: number = 3000): void {
+  startStatusPolling(interval: number = 10_000): void {
     this.stopStatusPolling();
     this.pollingTimer = setInterval(() => {
       if (this.activeWcRoot) {
@@ -316,16 +320,35 @@ export class SvnService implements SvnFrontendClient {
 
   async refreshStatus(_options: SvnStatusRefreshOptions = {}): Promise<SvnStatusEntry[]> {
     if (!this.activeWcRoot) return [];
+    if (this.statusRefreshInFlight) return this.cachedStatus;
+    this.statusRefreshInFlight = true;
     try {
       const entries = await this.requireProxy().$getStatus(this.activeWcRoot);
+      const changed = this.statusSignature(entries) !== this.statusSignature(this.cachedStatus);
       this.cachedStatus = entries;
-      this.onDidChangeStatusEmitter.fire(entries);
-      // Always refresh WC info so revision / URL stay current after update/commit.
-      this.wcInfo = await this.getWcInfo(this.activeWcRoot) || undefined;
+      // WC info (revision/URL) only changes after update/commit/switch, which
+      // also shows up in status — refresh it when something changed, or once
+      // every ~10 polls as a low-frequency safety net instead of every tick.
+      if (changed || !this.wcInfo || ++this.wcInfoTick >= 10) {
+        this.wcInfoTick = 0;
+        this.wcInfo = await this.getWcInfo(this.activeWcRoot) || undefined;
+      }
+      if (changed || !this.hasPublishedStatus) {
+        this.hasPublishedStatus = true;
+        this.onDidChangeStatusEmitter.fire(entries);
+      }
       return entries;
     } catch (_e) {
       return this.cachedStatus;
+    } finally {
+      this.statusRefreshInFlight = false;
     }
+  }
+
+  /** Compact fingerprint used to dedupe identical poll results. */
+  protected statusSignature(entries: SvnStatusEntry[] | undefined): string {
+    if (!entries) return '';
+    return entries.map(e => `${e.path}|${e.status}|${e.props ?? ''}|${e.reposStatus ?? ''}`).join('\n');
   }
 
   /** Incoming changes from the repository (`svn status -u`). */

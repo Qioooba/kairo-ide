@@ -67,7 +67,7 @@ const DEFAULT_OVERSCAN = 5;
  * overscan buffer), so the DOM stays lightweight even with hundreds of
  * thousands of items.
  */
-export function VirtualList<T>({
+function VirtualListImpl<T>({
   items,
   rowHeight = DEFAULT_ROW_HEIGHT,
   itemCount,
@@ -109,19 +109,37 @@ export function VirtualList<T>({
     return () => observer.disconnect();
   }, []);
 
-  // --- Scroll handler ---
+  // --- Scroll handler (coalesced to animation frames) ---
+  // Scroll events can fire more often than the display refreshes; without
+  // coalescing each one forces a synchronous state update and re-render.
+  const scrollRaf = React.useRef<number | undefined>(undefined);
+  const pendingScrollTop = React.useRef(0);
   const handleScroll = React.useCallback(
     (e: React.UIEvent<HTMLDivElement>) => {
       const { scrollTop: st, scrollHeight, clientHeight } = e.currentTarget;
-      setScrollTop(st);
-      // Detect scroll to bottom
-      if (onScrollToBottom && st + clientHeight >= scrollHeight - 2) {
-        onScrollToBottom();
+      pendingScrollTop.current = st;
+      if (scrollRaf.current !== undefined) {
+        return;
       }
-      onScroll?.({ scrollTop: st, scrollHeight, clientHeight });
+      scrollRaf.current = requestAnimationFrame(() => {
+        scrollRaf.current = undefined;
+        const current = pendingScrollTop.current;
+        setScrollTop(current);
+        // Detect scroll to bottom
+        if (onScrollToBottom && current + clientHeight >= scrollHeight - 2) {
+          onScrollToBottom();
+        }
+        onScroll?.({ scrollTop: current, scrollHeight, clientHeight });
+      });
     },
     [onScrollToBottom, onScroll],
   );
+
+  React.useEffect(() => () => {
+    if (scrollRaf.current !== undefined) {
+      cancelAnimationFrame(scrollRaf.current);
+    }
+  }, []);
 
   const scrollIndexIntoView = React.useCallback((index: number) => {
     if (!containerRef.current || index < 0) return;
@@ -263,3 +281,12 @@ export function VirtualList<T>({
     </div>
   );
 }
+
+/**
+ * Memoized so parent re-renders (input changes, hover state elsewhere)
+ * skip list reconciliation when props are unchanged. Callers should keep
+ * `renderItem`/`onSelectIndex` stable via useCallback.
+ */
+export const VirtualList = React.memo(VirtualListImpl) as <T>(
+  props: VirtualListProps<T>,
+) => React.ReactElement;

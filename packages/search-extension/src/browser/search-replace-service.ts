@@ -19,14 +19,39 @@ export class SearchReplaceService {
   @inject(WorkspaceContextService) protected readonly workspace!: WorkspaceContextService;
   protected lastApply: AppliedFile[] | undefined;
 
+  /**
+   * Short-lived read cache for plan creation. Re-generating a plan (e.g.
+   * while typing the replacement word) reuses recently read files instead
+   * of hitting the filesystem once per keystroke per file.
+   */
+  protected static readonly READ_CACHE_TTL_MS = 5_000;
+  protected static readonly READ_CACHE_MAX_ENTRIES = 64;
+  protected readCache = new Map<string, { value: string; encoding: string; mtime: number; etag: string; at: number }>();
+
   async createPlan(matches: readonly SearchMatch[], replacement: string): Promise<ReplacePlan> {
     const grouped = new Map<string, SearchMatch[]>();
     for (const match of matches) grouped.set(match.file, [...(grouped.get(match.file) ?? []), match]);
     const context = this.workspace.requireContext();
     const plans: ReplaceFilePlan[] = [];
+    const now = Date.now();
+    if (this.readCache.size > 0) {
+      for (const [key, entry] of this.readCache) {
+        if (now - entry.at > SearchReplaceService.READ_CACHE_TTL_MS) this.readCache.delete(key);
+      }
+    }
     for (const [file, fileMatches] of grouped) {
       const uri = resolveWorkspaceMatchUri(context.workspaceRoot, file);
-      const read = await this.files.read(uri, { acceptTextOnly: true, limits: { size: SEARCH_REPLACE_MAX_FILE_BYTES } });
+      const cacheKey = uri.toString();
+      let read = this.readCache.get(cacheKey);
+      if (!read || now - read.at > SearchReplaceService.READ_CACHE_TTL_MS) {
+        const fresh = await this.files.read(uri, { acceptTextOnly: true, limits: { size: SEARCH_REPLACE_MAX_FILE_BYTES } });
+        read = { value: fresh.value, encoding: fresh.encoding, mtime: fresh.mtime, etag: fresh.etag, at: now };
+        if (this.readCache.size >= SearchReplaceService.READ_CACHE_MAX_ENTRIES) {
+          const oldest = this.readCache.keys().next().value;
+          if (oldest !== undefined) this.readCache.delete(oldest);
+        }
+        this.readCache.set(cacheKey, read);
+      }
       if (new TextEncoder().encode(read.value).byteLength > SEARCH_REPLACE_MAX_FILE_BYTES) throw new Error(`File exceeds replace limit: ${file}`);
       if (read.value.includes('\0')) throw new Error(`Binary file cannot be replaced: ${file}`);
       const edits = locateEdits(read.value, fileMatches, replacement);
@@ -164,12 +189,32 @@ export function locateEdits(content: string, matches: readonly SearchMatch[], re
 }
 
 export function applyEdits(content: string, edits: readonly ReplaceEdit[]): string {
-  const withOffsets = locateEdits(content, edits.map(edit => ({ file: '', line: edit.line, column: edit.column, matchText: edit.before, contextBefore: '', contextAfter: '' })), '').map((edit, i) => ({ ...edit, after: edits[i].after }));
-  let value = content;
-  const starts = [0]; for (let i = 0; i < content.length; i++) if (content[i] === '\n') starts.push(i + 1);
-  const positioned = withOffsets.map(edit => ({ edit, offset: starts[edit.line - 1] + [...content.slice(starts[edit.line - 1], content.indexOf('\n', starts[edit.line - 1]) < 0 ? content.length : content.indexOf('\n', starts[edit.line - 1]))].slice(0, edit.column - 1).join('').length })).sort((a, b) => b.offset - a.offset);
-  for (const { edit, offset } of positioned) value = value.slice(0, offset) + edit.after + value.slice(offset + edit.before.length);
-  return value;
+  if (edits.length === 0) return content;
+  const starts = [0];
+  for (let i = 0; i < content.length; i++) if (content[i] === '\n') starts.push(i + 1);
+  // Resolve each edit's offset once (columns are rune-based), verify the
+  // anchor text still matches, then assemble the result in a single pass.
+  const positioned = edits.map(edit => {
+    const lineStart = starts[edit.line - 1];
+    if (lineStart === undefined) throw new Error(`Stale edit line ${edit.line}`);
+    const lineEnd = content.indexOf('\n', lineStart);
+    const line = content.slice(lineStart, lineEnd < 0 ? content.length : lineEnd);
+    const prefix = [...line].slice(0, Math.max(0, edit.column - 1)).join('');
+    const offset = lineStart + prefix.length;
+    if (content.slice(offset, offset + edit.before.length) !== edit.before) {
+      throw new Error('File content drift during replace preview');
+    }
+    return { edit, offset };
+  }).sort((a, b) => a.offset - b.offset);
+  let out = '';
+  let pos = 0;
+  for (const { edit, offset } of positioned) {
+    if (offset < pos) throw new Error('Overlapping replace matches');
+    out += content.slice(pos, offset) + edit.after;
+    pos = offset + edit.before.length;
+  }
+  out += content.slice(pos);
+  return out;
 }
 
 export function fingerprint(value: string): string {

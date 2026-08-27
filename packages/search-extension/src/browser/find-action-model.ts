@@ -22,6 +22,8 @@ export interface FindActionState {
 
 export type FindActionListener = (state: FindActionState) => void;
 
+interface CatalogEntry { id: string; label: string; category: string; shortcut: string; }
+
 @injectable()
 export class FindActionModel {
   @inject(CommandRegistry) protected readonly commands!: CommandRegistry;
@@ -31,12 +33,44 @@ export class FindActionModel {
   protected readonly listeners = new Set<FindActionListener>();
   protected generation = 0;
 
+  /**
+   * Cached visible-command catalog. Building it requires an O(commands ×
+   * keybindings) scan plus a visibility check per command; caching turns
+   * every keystroke's cost back into a plain fuzzy-score pass.
+   */
+  protected catalog: CatalogEntry[] | undefined;
+  protected catalogUnsubscribe: (() => void) | undefined;
+
   get snapshot(): FindActionState { return this.state; }
 
   subscribe(listener: FindActionListener): () => void {
     this.listeners.add(listener);
     listener(this.state);
     return () => this.listeners.delete(listener);
+  }
+
+  protected getCatalog(): CatalogEntry[] {
+    if (!this.catalog) {
+      this.catalog = [...this.commands.getAllCommands()]
+        .filter(command => {
+          if (!command.label) return false;
+          if (command.id.startsWith('_')) return false;
+          return this.commands.isVisible(command.id);
+        })
+        .map(command => {
+          const bindings = this.keybindings.getKeybindingsForCommand(command.id);
+          const shortcut = bindings.length > 0
+            ? bindings[0].keybinding.replace(/ctrlcmd/g, isOSX ? 'Cmd' : 'Ctrl').replace(/([+])/g, ' $1 ')
+            : '';
+          return { id: command.id, label: command.label!, category: command.category ?? '', shortcut };
+        });
+      if (!this.catalogUnsubscribe) {
+        this.keybindings.onKeybindingsChanged(() => { this.catalog = undefined; });
+        // Event subscriptions from a singleton live for the app lifetime.
+        this.catalogUnsubscribe = () => { /* kept intentionally */ };
+      }
+    }
+    return this.catalog;
   }
 
   query(query: string, limit = 30): FindActionState {
@@ -51,29 +85,18 @@ export class FindActionModel {
     this.publish({ status: 'loading', query: trimmed, items: [], selectedIndex: 0 });
 
     try {
-      const allCommands = [...this.commands.getAllCommands()];
-      const items = allCommands
-        .filter(command => {
-          if (!command.label) return false;
-          if (command.id.startsWith('_')) return false;
-          return this.commands.isVisible(command.id);
-        })
-        .map(command => {
-          const keybindings = this.keybindings.getKeybindingsForCommand(command.id);
-          const shortcut = keybindings.length > 0
-            ? keybindings[0].keybinding.replace(/ctrlcmd/g, isOSX ? 'Cmd' : 'Ctrl').replace(/([+])/g, ' $1 ')
-            : '';
-          const detail = shortcut || command.category || '';
-          const score = fuzzyScore(trimmed, `${command.label} ${command.category ?? ''}`) ?? 0;
+      const items = this.getCatalog()
+        .map(entry => {
+          const detail = entry.shortcut || entry.category;
+          const score = fuzzyScore(trimmed, `${entry.label} ${entry.category}`) ?? 0;
           return {
-            id: `action:${command.id}`,
-            label: command.label,
+            id: `action:${entry.id}`,
+            label: entry.label,
             detail,
-            commandId: command.id,
+            commandId: entry.id,
             score,
           };
         })
-        .filter((item): item is { id: string; label: string; detail: string; commandId: string; score: number } => item.score !== undefined)
         .sort((a, b) => (b.score - a.score) || a.label.localeCompare(b.label))
         .slice(0, limit);
 

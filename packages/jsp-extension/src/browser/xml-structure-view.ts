@@ -373,9 +373,24 @@ export class XmlStructureViewProvider implements monaco.languages.DocumentSymbol
 /**
  * Register the XML/JSP document symbol provider with Monaco.
  * Registered for both 'xml' and 'jsp' languages.
+ * Also pushed into the Kairo-owned symbol registry so Quick Outline
+ * (Ctrl+F12) can enumerate it — Monaco 1.108 has no public provider list.
  */
 export function registerXmlStructureView(): monaco.IDisposable {
   const provider = new XmlStructureViewProvider();
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const langs = monaco.languages as any;
+  if (!langs.__kairoDocumentSymbolProviders) {
+    langs.__kairoDocumentSymbolProviders = [];
+  }
+  langs.__kairoDocumentSymbolProviders.push({
+    provideDocumentSymbols: (model: unknown, token: unknown) =>
+      provider.provideDocumentSymbols(
+        model as monaco.editor.ITextModel,
+        token as monaco.CancellationToken,
+      ),
+  });
 
   const xmlDisposable = monaco.languages.registerDocumentSymbolProvider(
     'xml',

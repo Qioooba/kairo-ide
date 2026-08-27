@@ -89,10 +89,14 @@ export class AntClasspathService {
         const disposables: Disposable[] = [];
 
         try {
-            this.fileService.watch(watchParentUri);
+            // Hold the watcher disposable — dropping it leaked one underlying
+            // FileService watcher per project switch.
+            disposables.push(this.fileService.watch(watchParentUri));
             const fileChangeListener = this.fileService.onDidFilesChange(event => {
                 for (const change of event.changes) {
-                    if (change.resource.path.toString().endsWith('build.xml')) {
+                    // Only react to this project's build.xml, not any file
+                    // with the same name elsewhere under a watched parent.
+                    if (change.resource.toString() === buildXmlUri.toString()) {
                         if (debounceTimer) clearTimeout(debounceTimer);
                         debounceTimer = setTimeout(async () => {
                             await this.analyze(projectRoot);

@@ -35,6 +35,7 @@
     "@kairo/runtime-extension": "workspace:*",
     "@kairo/search-extension": "workspace:*",
     "@kairo/svn-extension": "workspace:*",
+    "@kairo/git-extension": "workspace:*",
     "@kairo/test-extension": "workspace:*",
     "@kairo/tomcat-extension": "workspace:*",
     "@kairo/ui-kit": "workspace:*",

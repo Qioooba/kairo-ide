@@ -178,6 +178,8 @@ export class RemoteDebugConfigWidget extends ReactWidget {
       host: c.host,
       port: c.port,
       authType: c.authType,
+      user: c.user,
+      sshPort: c.sshPort,
       sshKeyPath: c.sshKeyPath,
       // Token is stored via SecretStorage separately
       localPort: c.localPort,
@@ -371,6 +373,31 @@ const RemoteDebugConfigPanel: React.FC<RemoteDebugConfigPanelProps> = ({
               type="number"
               value={draft.port}
               onChange={e => setDraft({ ...draft, port: parseInt(e.target.value, 10) || 0 })}
+              min={1}
+              max={65535}
+              className="theia-input"
+            />
+          </div>
+          <div className="kairo-remote-debug-field">
+            <label>{t('widget.java.remoteDebug.label.user')}</label>
+            <input
+              type="text"
+              value={draft.user || ''}
+              onChange={e => setDraft({ ...draft, user: e.target.value })}
+              placeholder={t('widget.java.remoteDebug.placeholder.user')}
+              className="theia-input"
+            />
+          </div>
+          <div className="kairo-remote-debug-field">
+            <label>{t('widget.java.remoteDebug.label.sshPort')}</label>
+            <input
+              type="number"
+              value={draft.sshPort || ''}
+              onChange={e => {
+                const v = parseInt(e.target.value, 10);
+                setDraft({ ...draft, sshPort: isNaN(v) ? undefined : v });
+              }}
+              placeholder="22"
               min={1}
               max={65535}
               className="theia-input"

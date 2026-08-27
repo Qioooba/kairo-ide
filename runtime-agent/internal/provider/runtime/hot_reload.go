@@ -68,11 +68,20 @@ func DefaultHotReloadConfig() HotReloadConfig {
 	}
 }
 
+// fileStamp caches the cheap stat identity of a file along with its
+// last computed content hash. Files whose size+mtime are unchanged
+// since the previous scan are not re-read or re-hashed.
+type fileStamp struct {
+	size    int64
+	modTime time.Time
+	hash    string
+}
+
 // HotReloadWatcher polls directories for file changes and syncs them.
 type HotReloadWatcher struct {
 	mu             sync.RWMutex
 	cfg            HotReloadConfig
-	fileHashes     map[string]string
+	fileHashes     map[string]fileStamp
 	status         HotReloadStatus
 	onStatusChange func(HotReloadStatus)
 	onCompile      CompileCallback
@@ -96,7 +105,7 @@ func NewHotReloadWatcher(cfg HotReloadConfig) *HotReloadWatcher {
 	}
 	return &HotReloadWatcher{
 		cfg:        cfg,
-		fileHashes: make(map[string]string),
+		fileHashes: make(map[string]fileStamp),
 		status:     HotReloadSynced,
 	}
 }
@@ -196,7 +205,7 @@ func (w *HotReloadWatcher) poll(ctx context.Context) {
 func (w *HotReloadWatcher) scan(ctx context.Context) {
 	var staticChanges []FileChange
 	var javaChanges []FileChange
-	newHashes := make(map[string]string)
+	newHashes := make(map[string]fileStamp)
 
 	// Scan webapp directory for static files.
 	if w.cfg.WebappDir != "" {
@@ -303,9 +312,9 @@ func (w *HotReloadWatcher) syncStaticFile(_ context.Context, sourcePath string) 
 	return nil
 }
 
-func (w *HotReloadWatcher) scanDir(ctx context.Context, dir string, filter func(string) bool, changeType ChangeType) ([]FileChange, map[string]string) {
+func (w *HotReloadWatcher) scanDir(ctx context.Context, dir string, filter func(string) bool, changeType ChangeType) ([]FileChange, map[string]fileStamp) {
 	var changes []FileChange
-	hashes := make(map[string]string)
+	hashes := make(map[string]fileStamp)
 
 	_ = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -324,17 +333,26 @@ func (w *HotReloadWatcher) scanDir(ctx context.Context, dir string, filter func(
 			return nil
 		}
 
+		// Cheap stat precheck: skip hashing entirely when size+mtime are
+		// unchanged since the previous scan. This avoids re-reading and
+		// re-hashing every file on every tick.
+		stamp := fileStamp{size: info.Size(), modTime: info.ModTime()}
+		w.mu.RLock()
+		old, exists := w.fileHashes[path]
+		w.mu.RUnlock()
+		if exists && old.size == stamp.size && old.modTime.Equal(stamp.modTime) {
+			hashes[path] = old
+			return nil
+		}
+
 		hash, err := fileHash(path)
 		if err != nil {
 			return nil
 		}
-		hashes[path] = hash
+		stamp.hash = hash
+		hashes[path] = stamp
 
-		w.mu.RLock()
-		oldHash, exists := w.fileHashes[path]
-		w.mu.RUnlock()
-
-		if !exists || oldHash != hash {
+		if !exists || old.hash != hash {
 			changes = append(changes, FileChange{
 				Path:       path,
 				ChangeType: changeType,

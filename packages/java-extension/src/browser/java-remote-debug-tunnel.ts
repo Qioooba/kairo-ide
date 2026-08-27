@@ -27,9 +27,13 @@ export interface RemoteDebugConfig {
   host: string;
   port: number;
   authType: RemoteDebugAuthType;
+  /** SSH login user (required by the agent SSH tunnel). */
+  user?: string;
+  /** SSH server port on the remote host (default 22). */
+  sshPort?: number;
   /** SSH key path for SSH key auth. */
   sshKeyPath?: string;
-  /** Token for token-based auth. */
+  /** Token/password for token-based auth. */
   token?: string;
   /** Local port to bind the tunnel. */
   localPort?: number;
@@ -182,6 +186,8 @@ export class RemoteDebugTunnel {
         {
           host: config.host,
           port: config.port,
+          sshPort: config.sshPort,
+          user: config.user,
           authType: config.authType,
           sshKeyPath: config.sshKeyPath,
           token: config.token,

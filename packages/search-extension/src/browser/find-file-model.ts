@@ -11,6 +11,8 @@ export interface FindFileItem {
   detail: string;
   uri: string;
   score: number;
+  /** Precomputed path weight so sorting does not recompute it per comparison. */
+  weight?: number;
 }
 
 export interface FindFileState {
@@ -94,8 +96,8 @@ export class FindFileModel {
         })
         .filter((item): item is FindFileItem & { score: number } => item.score !== undefined)
         .sort((a, b) => {
-          const pwA = pathWeight(a.detail);
-          const pwB = pathWeight(b.detail);
+          const pwA = a.weight ?? 0;
+          const pwB = b.weight ?? 0;
           const scoreDiff = (b.score + pwB * 100) - (a.score + pwA * 100);
           if (scoreDiff !== 0) return scoreDiff;
           return a.label.localeCompare(b.label);
@@ -145,6 +147,7 @@ export class FindFileModel {
           detail: entry.path,
           uri: uri.toString(),
           score: 0,
+          weight: pathWeight(entry.path),
         };
       });
       this.fileCache = results;
@@ -180,6 +183,7 @@ export class FindFileModel {
             detail: relative,
             uri: child.resource.toString(),
             score: 0,
+            weight: pathWeight(relative),
           });
         }
       }

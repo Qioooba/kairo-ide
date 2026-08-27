@@ -368,7 +368,7 @@ export class JavaLanguageClient implements JdtLsFrontendClient, Disposable {
     void this.backend?.$didOpen(p);
   }
 
-  didChange(p: { uri: string; version: number; changes: { text: string; rangeLength?: number }[] }): void {
+  didChange(p: { uri: string; version: number; changes: { range?: { start: { line: number; character: number }; end: { line: number; character: number } }; rangeLength?: number; text: string }[] }): void {
     const proxy = this.proxy();
     if (proxy) {
       proxy.$didChange(p).catch(err => this.markRpcFailed(err));

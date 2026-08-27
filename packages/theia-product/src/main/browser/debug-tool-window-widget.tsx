@@ -77,6 +77,7 @@ const DebugToolWindowView: React.FC<DebugToolWindowViewProps> = ({ sessionServic
     const draggingRef = React.useRef(false);
     const startYRef = React.useRef(0);
     const startHeightRef = React.useRef(0);
+    const dragRafRef = React.useRef<number | undefined>(undefined);
 
     const onSplitterMouseDown = React.useCallback((e: React.MouseEvent) => {
         draggingRef.current = true;
@@ -86,11 +87,22 @@ const DebugToolWindowView: React.FC<DebugToolWindowViewProps> = ({ sessionServic
     }, [framesHeight]);
 
     React.useEffect(() => {
-        const onMouseMove = (e: MouseEvent) => {
-            if (!draggingRef.current) return;
-            const delta = e.clientY - startYRef.current;
+        let pendingClientY: number | undefined;
+        const applyHeight = () => {
+            dragRafRef.current = undefined;
+            if (pendingClientY === undefined) return;
+            const delta = pendingClientY - startYRef.current;
+            pendingClientY = undefined;
             const newHeight = Math.max(60, Math.min(500, startHeightRef.current + delta));
             setFramesHeight(newHeight);
+        };
+        const onMouseMove = (e: MouseEvent) => {
+            if (!draggingRef.current) return;
+            // Coalesce to one state update per frame; mousemove fires faster.
+            pendingClientY = e.clientY;
+            if (dragRafRef.current === undefined) {
+                dragRafRef.current = requestAnimationFrame(applyHeight);
+            }
         };
         const onMouseUp = () => {
             draggingRef.current = false;
@@ -100,6 +112,10 @@ const DebugToolWindowView: React.FC<DebugToolWindowViewProps> = ({ sessionServic
         return () => {
             window.removeEventListener('mousemove', onMouseMove);
             window.removeEventListener('mouseup', onMouseUp);
+            if (dragRafRef.current !== undefined) {
+                cancelAnimationFrame(dragRafRef.current);
+                dragRafRef.current = undefined;
+            }
         };
     }, []);
 

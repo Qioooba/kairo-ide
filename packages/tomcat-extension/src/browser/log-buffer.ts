@@ -87,4 +87,7 @@ export function safeLogFilename(serverId: string): string {
     return `kairo-tomcat-${safeServerId}.log`;
 }
 
-function byteLength(entry: KairoLogLine): number { return new TextEncoder().encode(`${entry.ts}\t${entry.stream}\t${entry.line}\n`).byteLength; }
+/** Module-level singleton: allocating a TextEncoder per line was pure GC churn. */
+const TEXT_ENCODER = new TextEncoder();
+
+function byteLength(entry: KairoLogLine): number { return TEXT_ENCODER.encode(`${entry.ts}\t${entry.stream}\t${entry.line}\n`).byteLength; }

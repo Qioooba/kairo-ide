@@ -128,9 +128,21 @@ export class JavaDocumentSyncContribution implements FrontendApplicationContribu
           this.sync?.closeDocument(uri);
         }
       }),
-      model.onDidChangeContent(() => {
+      model.onDidChangeContent(event => {
         if (model.getLanguageId() === JAVA_LANGUAGE_ID && this.openUris.has(uri)) {
-          this.sync?.changeDocument(uri, model.getVersionId(), model.getValue());
+          // Forward ranged edits instead of copying the whole buffer per
+          // keystroke; the sync core maintains a shadow text for didOpen.
+          const changes = event.changes.map(c => ({
+            range: {
+              start: { line: c.range.startLineNumber - 1, character: c.range.startColumn - 1 },
+              end: { line: c.range.endLineNumber - 1, character: c.range.endColumn - 1 },
+            },
+            rangeLength: c.rangeLength,
+            text: c.text,
+            offset: c.rangeOffset,
+            endOffset: c.rangeOffset + c.rangeLength,
+          }));
+          this.sync?.changeDocumentIncremental(uri, model.getVersionId(), changes);
         }
       }),
       model.onWillDispose(() => {

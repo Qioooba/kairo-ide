@@ -6,7 +6,10 @@ import URI from '@theia/core/lib/common/uri';
 import { CommandService } from '@theia/core/lib/common/command';
 import { EditorManager } from '@theia/editor/lib/browser/editor-manager';
 import { KairoI18nService } from '@kairo/i18n';
+import { VirtualList } from '@kairo/ui-kit';
 import { SearchEverywhereModel, type SearchEverywhereCategory, type SearchEverywhereItem, type SearchEverywhereState } from './search-everywhere-model';
+
+const ROW_HEIGHT = 28;
 
 const CATEGORIES: SearchEverywhereCategory[] = ['all', 'files', 'types', 'symbols', 'actions'];
 
@@ -111,11 +114,25 @@ export const SearchEverywhereComponent: React.FC<SearchEverywhereProps> = ({ mod
     <nav className="kairo-everywhere-tabs" aria-label={t('widget.search.everywhere.ariaLabel.categories')}>
       {CATEGORIES.map(category => <button key={category} type="button" className={state.category === category ? 'is-active' : ''} aria-label={t('widget.search.everywhere.category.ariaLabel', { category: t(`widget.search.everywhere.category.${category}`) })} aria-pressed={state.category === category} onClick={() => void model.query(query, category, 100)} data-testid={`category-${category}`}><span className={`codicon ${categoryIcon(category)}`} aria-hidden="true" /> {t(`widget.search.everywhere.category.${category}`)}</button>)}
     </nav>
-    <div className="kairo-everywhere-body" role="listbox">
+    <div className="kairo-everywhere-body">
       {renderStatus()}
-      {state.items.map((item, index) => <button type="button" role="option" aria-selected={index === state.selectedIndex} className={`kairo-everywhere-item${index === state.selectedIndex ? ' is-selected' : ''}`} key={item.id} onMouseEnter={() => model.select(index)} onClick={() => void openItem(item)} data-testid="everywhere-item">
-        <span className="kairo-everywhere-kind"><span className={`codicon ${item.kind !== undefined ? symbolKindIcon(item.kind) : categoryIcon(item.category)}`} aria-hidden="true" /></span><span>{item.label}</span><small>{item.detail}</small>
-      </button>)}
+      {state.items.length > 0 && (
+        <VirtualList
+          items={state.items}
+          rowHeight={ROW_HEIGHT}
+          selectedIndex={state.selectedIndex}
+          className="kairo-everywhere-list"
+          role="listbox"
+          ariaLabel={t('widget.search.everywhere.ariaLabel.query')}
+          keyboardNavigation={false}
+          scrollToIndex={state.selectedIndex}
+          renderItem={(item, index, isSelected) => (
+            <button type="button" role="option" aria-selected={isSelected} className={`kairo-everywhere-item${isSelected ? ' is-selected' : ''}`} key={item.id} onMouseEnter={() => { if (index !== state.selectedIndex) model.select(index); }} onClick={() => void openItem(item)} data-testid="everywhere-item">
+              <span className="kairo-everywhere-kind"><span className={`codicon ${item.kind !== undefined ? symbolKindIcon(item.kind) : categoryIcon(item.category)}`} aria-hidden="true" /></span><span>{item.label}</span><small>{item.detail}</small>
+            </button>
+          )}
+        />
+      )}
     </div>
   </div>;
 };

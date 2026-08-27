@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"net/http"
@@ -74,17 +75,18 @@ func (s *Server) handleSearchStream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		WorkspaceID    string   `json:"workspaceId"`
-		RootPath       string   `json:"rootPath"`
-		Query          string   `json:"query"`
-		IsRegex        bool     `json:"isRegex"`
-		CaseSensitive  bool     `json:"caseSensitive"`
-		WholeWord      bool     `json:"wholeWord"`
-		Include        []string `json:"include"`
-		Exclude        []string `json:"exclude"`
-		ContextLines   int      `json:"contextLines"`
-		MaxResults     int      `json:"maxResults"`
-		PreviewReplace string   `json:"previewReplace"`
+		WorkspaceID     string   `json:"workspaceId"`
+		RootPath        string   `json:"rootPath"`
+		Query           string   `json:"query"`
+		IsRegex         bool     `json:"isRegex"`
+		CaseSensitive   bool     `json:"caseSensitive"`
+		WholeWord       bool     `json:"wholeWord"`
+		Include         []string `json:"include"`
+		Exclude         []string `json:"exclude"`
+		ContextLines    int      `json:"contextLines"`
+		MaxResults      int      `json:"maxResults"`
+		PreviewReplace  string   `json:"previewReplace"`
+		ProjectEncoding string   `json:"projectEncoding"`
 	}
 	if err := json.Unmarshal(msg, &req); err != nil {
 		sendSearchError(conn, "parse request: "+err.Error())
@@ -117,10 +119,69 @@ func (s *Server) handleSearchStream(w http.ResponseWriter, r *http.Request) {
 		root = authorized
 	}
 
-	// Clear the read deadline for streaming.
+	// Clear the initial request read deadline; keepalive below manages
+	// deadlines from here on.
 	_ = conn.SetReadDeadline(time.Time{})
 
+	// r.Context() is NOT cancelled when a hijacked (WebSocket) connection
+	// closes — the http.Server keeps it alive until ServeHTTP returns. To
+	// make client disconnects actually abort the filesystem scan we derive
+	// our own context and cancel it from close frames, pong timeouts, and
+	// ping write failures.
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+
+	const pongWait = 30 * time.Second
+	conn.SetPongHandler(func(string) error {
+		return conn.SetReadDeadline(time.Now().Add(pongWait))
+	})
+	conn.SetCloseHandler(func(code int, text string) error {
+		cancel()
+		_ = conn.WriteControl(
+			websocket.CloseMessage,
+			websocket.FormatCloseMessage(code, ""),
+			time.Now().Add(5*time.Second),
+		)
+		return nil
+	})
+
+	// Pump reads so control frames are processed: gorilla only observes
+	// close/pong frames during Read calls.
+	go func() {
+		defer cancel()
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+			_ = conn.SetReadDeadline(time.Now().Add(pongWait))
+		}
+	}()
+
+	// Ping ticker: browsers answer pongs while alive; a dead or crashed
+	// peer stops answering and the read deadline / WriteControl error
+	// triggers cancellation.
+	go func() {
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(5*time.Second)); err != nil {
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+
 	taskID := "search_" + randomID(12)
+
+	projectEncoding := encoding.ID(req.ProjectEncoding)
+	if projectEncoding == "" {
+		projectEncoding = encoding.UTF8
+	}
 
 	opts := search.Options{
 		Query:           req.Query,
@@ -132,11 +193,11 @@ func (s *Server) handleSearchStream(w http.ResponseWriter, r *http.Request) {
 		ContextLines:    req.ContextLines,
 		MaxResults:      req.MaxResults,
 		PreviewReplace:  req.PreviewReplace,
-		ProjectEncoding: encoding.UTF8,
-		Cancel:          r.Context(),
+		ProjectEncoding: projectEncoding,
+		Cancel:          ctx,
 	}
 
-	err = search.SearchStreaming(r.Context(), root, opts, func(batch []search.Match, batchIndex int, total int) error {
+	err = search.SearchStreaming(ctx, root, opts, func(batch []search.Match, batchIndex int, total int) error {
 		ev := protocol.SearchStreamEvent{
 			Kind:       "searchStream",
 			TaskID:     taskID,

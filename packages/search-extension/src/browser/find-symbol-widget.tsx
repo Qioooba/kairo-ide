@@ -140,7 +140,7 @@ export const FindSymbolComponent: React.FC<FindSymbolProps> = ({ model, state, o
   const [selectedIndex, setSelectedIndex] = React.useState(0);
   const [openError, setOpenError] = React.useState<Error | undefined>();
   const containerRef = React.useRef<HTMLDivElement>(null);
-  const debounceRef = React.useRef<ReturnType<typeof setTimeout>>();
+  const debounceRef = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   React.useEffect(() => {
     clearTimeout(debounceRef.current);
@@ -257,7 +257,7 @@ export const FindSymbolComponent: React.FC<FindSymbolProps> = ({ model, state, o
                 role="option"
                 aria-selected={isSelected}
                 className={`kairo-find-item${isSelected ? ' is-selected' : ''}`}
-                onMouseEnter={() => { setSelectedIndex(_index); model.select(_index); }}
+                onMouseEnter={() => { if (_index !== selectedIndex) { setSelectedIndex(_index); model.select(_index); } }}
                 onClick={() => void openItem(item)}
                 data-testid="find-symbol-result"
               >

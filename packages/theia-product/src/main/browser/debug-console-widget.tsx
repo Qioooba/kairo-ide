@@ -218,6 +218,15 @@ export class KairoDebugConsoleWidget extends ReactWidget {
     readonly onDidStateChange: Event<ConsoleState> = this.onStateChangeEmitter.event;
     protected readonly outputDisposables = new DisposableCollection();
 
+    /**
+     * DAP output events can arrive in bursts of hundreds per second while a
+     * debuggee starts up. Buffer them and flush at most once per window so
+     * each burst costs one state update / render instead of one per event.
+     */
+    protected static readonly OUTPUT_FLUSH_INTERVAL_MS = 50;
+    protected pendingEntries: ConsoleEntry[] = [];
+    protected flushTimer: ReturnType<typeof setTimeout> | undefined;
+
     @postConstruct()
     protected init(): void {
         const t: TFunction = (this.i18n?.t.bind(this.i18n)) as TFunction | undefined
@@ -231,6 +240,7 @@ export class KairoDebugConsoleWidget extends ReactWidget {
         this.update();
 
         this.toDispose.push(this.outputDisposables);
+        this.toDispose.push({ dispose: () => this.clearFlushTimer() });
         this.toDispose.push(this.sessionManager.onDidCreateDebugSession(session => {
             this.attachOutputListener(session);
         }));
@@ -241,6 +251,13 @@ export class KairoDebugConsoleWidget extends ReactWidget {
         }));
         for (const session of this.sessionManager.sessions) {
             this.attachOutputListener(session);
+        }
+    }
+
+    protected clearFlushTimer(): void {
+        if (this.flushTimer !== undefined) {
+            clearTimeout(this.flushTimer);
+            this.flushTimer = undefined;
         }
     }
 
@@ -257,7 +274,7 @@ export class KairoDebugConsoleWidget extends ReactWidget {
         if (category === 'stderr') kind = 'stderr';
         else if (category === 'console' || category === 'important') kind = 'info';
         else if (category === 'stdout' || !category) kind = 'stdout';
-        this.addEntry({ kind, text: output.replace(/\r?\n$/, '') });
+        this.queueEntry({ kind, text: output.replace(/\r?\n$/, '') });
     }
 
     protected onAfterShow(): void {
@@ -446,11 +463,37 @@ export class KairoDebugConsoleWidget extends ReactWidget {
     }
 
     protected addEntry(entry: Omit<ConsoleEntry, 'id' | 'timestamp'>): void {
+        // Preserve chronological order with any buffered DAP output first.
+        this.flushPendingEntries();
         const id = ++KairoDebugConsoleWidget.nextEntryId;
         const next = [...this.state.entries, { ...entry, id, timestamp: Date.now() }];
         const entries = next.length > KairoDebugConsoleWidget.MAX_ENTRIES
             ? next.slice(-KairoDebugConsoleWidget.MAX_ENTRIES)
             : next;
+        this.setState({ entries });
+    }
+
+    /** Buffers a DAP output entry for batched publication. */
+    protected queueEntry(entry: Omit<ConsoleEntry, 'id' | 'timestamp'>): void {
+        const id = ++KairoDebugConsoleWidget.nextEntryId;
+        this.pendingEntries.push({ ...entry, id, timestamp: Date.now() });
+        if (this.flushTimer === undefined) {
+            this.flushTimer = setTimeout(() => {
+                this.flushTimer = undefined;
+                this.flushPendingEntries();
+            }, KairoDebugConsoleWidget.OUTPUT_FLUSH_INTERVAL_MS);
+        }
+    }
+
+    protected flushPendingEntries(): void {
+        this.clearFlushTimer();
+        if (this.pendingEntries.length === 0) return;
+        const batch = this.pendingEntries;
+        this.pendingEntries = [];
+        const merged = this.state.entries.concat(batch);
+        const entries = merged.length > KairoDebugConsoleWidget.MAX_ENTRIES
+            ? merged.slice(-KairoDebugConsoleWidget.MAX_ENTRIES)
+            : merged;
         this.setState({ entries });
     }
 

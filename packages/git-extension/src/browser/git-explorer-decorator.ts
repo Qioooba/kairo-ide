@@ -49,6 +49,13 @@ export class GitExplorerDecorator implements TreeDecorator {
     const statusResult = this.gitService.getCachedStatus();
     if (!statusResult) return result;
 
+    // Index by path once: a linear .find() per node made decoration
+    // O(visible nodes × changed files), which spikes on large repos.
+    const statusByPath = new Map<string, (typeof statusResult.files)[number]>();
+    for (const f of statusResult.files) {
+      statusByPath.set(f.path, f);
+    }
+
     for (const node of this.collectNodes(tree.root)) {
       const filePath = this.getFilePath(node);
       if (!filePath) continue;
@@ -56,9 +63,7 @@ export class GitExplorerDecorator implements TreeDecorator {
       const relative = toRepoRelativePath(filePath, repoRoot);
       if (relative === undefined) continue;
 
-      const fileStatus = statusResult.files.find(
-        (f: { path: string }) => f.path === relative,
-      );
+      const fileStatus = statusByPath.get(relative);
       if (!fileStatus) continue;
 
       const color = STATUS_COLORS[fileStatus.status] || STATUS_COLORS['?'];

@@ -17,6 +17,13 @@ export interface SearchStreamState {
   totalMatches: number;
   batchIndex: number;
   error?: string;
+  /**
+   * Bumped whenever `matches` gains entries. Matches are accumulated in one
+   * mutable buffer (avoids copying the whole result set per WebSocket
+   * batch); consumers should key expensive recomputation off this counter
+   * instead of array identity.
+   */
+  revision?: number;
 }
 
 export type SearchStreamListener = (state: SearchStreamState) => void;
@@ -31,12 +38,25 @@ const INITIAL_STREAM_STATE: SearchStreamState = {
 /** Abort hung streams that never send done/close (avoids eternal loading). */
 const SEARCH_STREAM_IDLE_MS = 60_000;
 
+/**
+ * Coalesce stream notifications so each WS batch does not trigger a full
+ * UI recomputation. Results keep accumulating; listeners see them at most
+ * this often while streaming.
+ */
+const STREAM_NOTIFY_INTERVAL_MS = 120;
+
 @injectable()
 export class SearchStreamService {
   @inject(RuntimeConnectionService) protected readonly runtime!: RuntimeConnectionService;
 
   protected ws: WebSocket | null = null;
   protected state: SearchStreamState = INITIAL_STREAM_STATE;
+  /** Mutable accumulation buffer exposed via `state.matches` (same reference). */
+  protected matchBuffer: SearchMatch[] = [];
+  protected revision = 0;
+  protected notifyTimer: ReturnType<typeof setTimeout> | undefined;
+  protected pendingTotal = 0;
+  protected pendingBatchIndex = 0;
   protected readonly listeners = new Set<SearchStreamListener>();
   protected currentAbort: AbortController | null = null;
   protected completionResolve: (() => void) | undefined;
@@ -64,11 +84,17 @@ export class SearchStreamService {
     this.currentAbort = new AbortController();
     const signal = this.currentAbort.signal;
 
+    this.matchBuffer = [];
+    this.revision = 0;
+    this.pendingTotal = 0;
+    this.pendingBatchIndex = 0;
+    this.clearNotifyTimer();
     this.setState({
       status: 'streaming',
-      matches: [],
+      matches: this.matchBuffer,
       totalMatches: 0,
       batchIndex: 0,
+      revision: this.revision,
     });
 
     const baseUrl = this.runtime.baseUrl().replace(/\/$/, '');
@@ -97,10 +123,11 @@ export class SearchStreamService {
           const msg = 'Search timed out waiting for results';
           this.setState({
             status: 'error',
-            matches: this.state.matches,
+            matches: this.matchBuffer,
             totalMatches: this.state.totalMatches,
             batchIndex: this.state.batchIndex,
             error: msg,
+            revision: this.revision,
           });
           try { this.ws?.close(); } catch { /* ignore */ }
           this.ws = null;
@@ -175,35 +202,40 @@ export class SearchStreamService {
             return;
           }
           if (event.error) {
+            this.clearNotifyTimer();
             this.setState({
               status: 'error',
-              matches: this.state.matches,
+              matches: this.matchBuffer,
               totalMatches: this.state.totalMatches,
               batchIndex: this.state.batchIndex,
               error: event.error,
+              revision: this.revision,
             });
             ws.close();
             finish(new Error(event.error));
             return;
           }
           if (event.done) {
+            this.clearNotifyTimer();
+            this.revision++;
             this.setState({
               status: 'done',
-              matches: this.state.matches,
-              totalMatches: event.total || this.state.totalMatches,
+              matches: this.matchBuffer,
+              totalMatches: event.total || this.matchBuffer.length,
               batchIndex: this.state.batchIndex,
+              revision: this.revision,
             });
             ws.close();
             finish();
             return;
           }
-          const newMatches = [...this.state.matches, ...(event.batch ?? [])];
-          this.setState({
-            status: 'streaming',
-            matches: newMatches,
-            totalMatches: event.total ?? newMatches.length,
-            batchIndex: event.batchIndex,
-          });
+          const batch = event.batch ?? [];
+          if (batch.length > 0) {
+            for (const match of batch) {
+              this.matchBuffer.push(match);
+            }
+            this.scheduleStreamingUpdate(event.total ?? this.matchBuffer.length, event.batchIndex);
+          }
         } catch {
           // ignore malformed messages
         }
@@ -215,11 +247,13 @@ export class SearchStreamService {
           return;
         }
         if (this.state.status === 'streaming') {
+          this.clearNotifyTimer();
           this.setState({
             status: 'done',
-            matches: this.state.matches,
+            matches: this.matchBuffer,
             totalMatches: this.state.totalMatches,
             batchIndex: this.state.batchIndex,
+            revision: this.revision,
           });
           finish();
         }
@@ -229,12 +263,14 @@ export class SearchStreamService {
         if (signal.aborted) {
           return;
         }
+        this.clearNotifyTimer();
         this.setState({
           status: 'error',
-          matches: this.state.matches,
+          matches: this.matchBuffer,
           totalMatches: this.state.totalMatches,
           batchIndex: this.state.batchIndex,
           error: 'WebSocket connection error',
+          revision: this.revision,
         });
         this.ws = null;
         finish(new Error('WebSocket connection error'));
@@ -247,6 +283,7 @@ export class SearchStreamService {
       clearTimeout(this.idleTimer);
       this.idleTimer = undefined;
     }
+    this.clearNotifyTimer();
     this.currentAbort?.abort();
     this.currentAbort = null;
     if (this.ws) {
@@ -258,7 +295,38 @@ export class SearchStreamService {
     this.completionReject = undefined;
     reject?.(new _KairoSearchCancelledError());
     if (this.state.status === 'streaming') {
+      this.matchBuffer = [];
       this.setState({ ...INITIAL_STREAM_STATE });
+    }
+  }
+
+  /** Publishes accumulated matches at most once per throttle window. */
+  protected scheduleStreamingUpdate(totalMatches: number, batchIndex: number): void {
+    this.pendingTotal = totalMatches;
+    this.pendingBatchIndex = batchIndex;
+    if (this.notifyTimer !== undefined) {
+      return;
+    }
+    this.notifyTimer = setTimeout(() => {
+      this.notifyTimer = undefined;
+      if (this.currentAbort?.signal.aborted || this.state.status !== 'streaming') {
+        return;
+      }
+      this.revision++;
+      this.setState({
+        status: 'streaming',
+        matches: this.matchBuffer,
+        totalMatches: this.pendingTotal,
+        batchIndex: this.pendingBatchIndex,
+        revision: this.revision,
+      });
+    }, STREAM_NOTIFY_INTERVAL_MS);
+  }
+
+  protected clearNotifyTimer(): void {
+    if (this.notifyTimer !== undefined) {
+      clearTimeout(this.notifyTimer);
+      this.notifyTimer = undefined;
     }
   }
 

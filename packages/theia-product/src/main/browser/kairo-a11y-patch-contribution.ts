@@ -27,6 +27,10 @@ const NOTIFICATION_CENTER_ID = 'status-bar-theia-notification-center';
 @injectable()
 export class KairoA11yPatchContribution implements FrontendApplicationContribution {
   protected observer: MutationObserver | undefined;
+  /** Per-tab-bar class watchers — far cheaper than watching the whole body. */
+  protected readonly tabBarObservers = new Set<MutationObserver>();
+  protected readonly seenTabBars = new WeakSet<Element>();
+  protected patchScheduled = false;
 
   onStart(): void {
     // Poll for elements that may not exist yet when onStart fires.
@@ -40,17 +44,31 @@ export class KairoA11yPatchContribution implements FrontendApplicationContributi
         clearInterval(interval);
       }
     }, 250);
-    this.observer = new MutationObserver(() => this.patchAll());
+    // Body-level watcher: childList only. Watching attributes here made
+    // every hover/tab-switch class toggle trigger full-document scans.
+    this.observer = new MutationObserver(() => this.schedulePatch());
     this.observer.observe(document.body, {
       childList: true,
       subtree: true,
-      attributes: true,
-      attributeFilter: ['class'],
     });
   }
 
   onStop(): void {
     this.observer?.disconnect();
+    for (const obs of this.tabBarObservers) {
+      obs.disconnect();
+    }
+    this.tabBarObservers.clear();
+  }
+
+  /** Coalesces mutation bursts into one patch pass per animation frame. */
+  protected schedulePatch(): void {
+    if (this.patchScheduled) return;
+    this.patchScheduled = true;
+    requestAnimationFrame(() => {
+      this.patchScheduled = false;
+      this.patchAll();
+    });
   }
 
   protected patchAll(): void {
@@ -98,6 +116,22 @@ export class KairoA11yPatchContribution implements FrontendApplicationContributi
       if (name && tab.getAttribute('aria-label') !== name) {
         tab.setAttribute('aria-label', name);
       }
+    }
+
+    // Watch class changes inside each tab bar locally: aria-selected must
+    // track lm-mod-current, and scoping the attribute observer to the
+    // (small) tab bar subtree avoids document-wide rescan storms.
+    for (const content of document.querySelectorAll('ul.lm-TabBar-content')) {
+      if (this.seenTabBars.has(content)) continue;
+      this.seenTabBars.add(content);
+      const obs = new MutationObserver(() => this.schedulePatch());
+      obs.observe(content, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['class'],
+      });
+      this.tabBarObservers.add(obs);
     }
   }
 

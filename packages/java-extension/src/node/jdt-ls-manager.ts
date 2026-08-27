@@ -379,7 +379,10 @@ export class JdtLsManager implements Disposable {
             symbol: { dynamicRegistration: true },
           },
           textDocument: {
-            synchronization: { dynamicRegistration: true, willSave: true, didSave: true },
+            // TextDocumentSyncKind.Incremental: the browser sync core sends
+            // ranged contentChanges, avoiding full-document transfers per
+            // debounce window on large files.
+            synchronization: { dynamicRegistration: true, willSave: true, didSave: true, didChange: 2 },
             completion: {
               dynamicRegistration: true,
               completionItem: {
@@ -533,7 +536,7 @@ export class JdtLsManager implements Disposable {
     });
   }
 
-  didChange(params: { uri: string; version: number; changes: { text: string; rangeLength?: number }[] }): void {
+  didChange(params: { uri: string; version: number; changes: { range?: { start: { line: number; character: number }; end: { line: number; character: number } }; rangeLength?: number; text: string }[] }): void {
     if (!this.connection || this.state !== 'ready') {
       return;
     }

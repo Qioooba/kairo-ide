@@ -462,28 +462,10 @@ func BuildBreakpointSetCommand(classID, methodID int64, lineNumber int32, suspen
 	return w.Bytes()
 }
 
-// BuildBreakpointSetConditionalCommand builds an EventRequest.Set
-// command for a line breakpoint with a condition expression.
-func BuildBreakpointSetConditionalCommand(classID, methodID int64, lineNumber int32, suspendPolicy byte, condition string) []byte {
-	w := NewJDWPDataWriter()
-	w.WriteByte(eventKindBreakpoint)
-	w.WriteByte(suspendPolicy)
-	w.WriteInt(2) // two modifiers
-
-	// LocationOnly modifier
-	w.WriteByte(7) // ModKind.LocationOnly = 7
-	w.WriteByte(1) // typeTag
-	w.WriteObjectID(classID)
-	w.WriteObjectID(methodID)
-	w.WriteLong(int64(lineNumber))
-
-	// Conditional modifier
-	w.WriteByte(4) // ModKind.Conditional = 4
-	w.WriteInt(int32(len(condition)))
-	w.WriteLong(int64(len(condition))) // placeholder for exprID
-
-	return w.Bytes()
-}
+// NOTE: there is deliberately no "conditional breakpoint" command builder.
+// The JDWP Conditional modifier (modKind 2) is reserved and not implemented
+// by HotSpot; condition evaluation happens in the JDI bridge (ExprEval), which
+// evaluates on hit and decides whether to stop.
 
 // BuildMethodEntryBreakpointCommand builds an EventRequest.Set command
 // for method entry breakpoints.

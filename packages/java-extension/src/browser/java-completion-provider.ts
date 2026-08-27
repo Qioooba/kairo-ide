@@ -91,6 +91,11 @@ export class JavaCompletionProvider {
     this.sourceCache.set(uri, source);
   }
 
+  /** Returns the cached source text for a URI, if any. */
+  getSource(uri: string): string | undefined {
+    return this.sourceCache.get(uri);
+  }
+
   /** Clear cached source when a document is closed. */
   clearSource(uri: string): void {
     this.sourceCache.delete(uri);

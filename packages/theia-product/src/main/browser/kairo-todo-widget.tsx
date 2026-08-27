@@ -240,6 +240,7 @@ export class KairoTodoWidget extends ReactWidget {
     try {
       const results: SearchInWorkspaceResult[] = [];
       let done = false;
+      let timeoutGuard: ReturnType<typeof setTimeout> | undefined;
 
       const searchId = await this.searchService.search(
         TODO_PATTERN,
@@ -250,6 +251,10 @@ export class KairoTodoWidget extends ReactWidget {
           onDone: (_searchId: number, error?: string) => {
             if (done) return;
             done = true;
+            if (timeoutGuard !== undefined) {
+              clearTimeout(timeoutGuard);
+              timeoutGuard = undefined;
+            }
             if (error) {
               this.error = error;
             } else {
@@ -267,7 +272,8 @@ export class KairoTodoWidget extends ReactWidget {
       );
 
       // Timeout guard: if the search somehow hangs, cancel after 30s
-      setTimeout(() => {
+      timeoutGuard = setTimeout(() => {
+        timeoutGuard = undefined;
         if (!done) {
           done = true;
           this.error = this.i18n.t('widget.todo.timeout');

@@ -393,7 +393,7 @@ func (p *Tomcat6Provider) startWatcher(plan domain.RuntimePlan) {
 	cfg.DeploymentDir = ""
 	cfg.SourceDirs = plan.SourceDirs
 	cfg.OutputDir = plan.OutputDir
-	cfg.PollInterval = 1 * time.Second
+	cfg.PollInterval = 2 * time.Second
 	watcher := NewHotReloadWatcher(cfg)
 	watcher.SetEventHub(p.eventHub, string(plan.WorkspaceID), string(plan.ServerID))
 	// Compile callback: sync OutputDir .class files to WebappDir/WEB-INF/classes

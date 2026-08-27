@@ -2166,6 +2166,95 @@ body.theia-light {
 }
 
 /* ================================================================ */
+/*  Dirty-diff gutter marks (Git + SVN)                               */
+/* ================================================================ */
+
+.git-gutter-added,
+.svn-gutter-added {
+    background-color: var(--kairo-success, #3fb950);
+    opacity: 0.85;
+}
+
+.git-gutter-modified,
+.svn-gutter-modified {
+    background-color: var(--kairo-info, #58a6ff);
+    opacity: 0.85;
+}
+
+.git-gutter-deleted,
+.svn-gutter-deleted {
+    background-color: var(--kairo-error, #f85149);
+    opacity: 0.85;
+}
+
+/* Monaco side-by-side diff viewer (Git Diff view) */
+.kairo-diff-container-monaco {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 320px;
+    overflow: hidden;
+}
+
+.kairo-git-diff-monaco {
+    flex: 1;
+    min-height: 0;
+}
+
+/* ================================================================ */
+/*  Persistent Outline view                                          */
+/* ================================================================ */
+
+.kairo-outline {
+    display: flex;
+    flex-direction: column;
+}
+
+.kairo-outline-file {
+    color: var(--theia-descriptionForeground, #888);
+    font-size: 11px;
+    margin-left: auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.kairo-outline-body {
+    flex: 1;
+    overflow: auto;
+    padding: 4px 0;
+}
+
+.kairo-outline-row {
+    align-items: center;
+    background: transparent;
+    border: none;
+    color: inherit;
+    cursor: pointer;
+    display: flex;
+    font-size: 12px;
+    gap: 6px;
+    padding: 3px 8px;
+    text-align: left;
+    width: 100%;
+}
+
+.kairo-outline-row:hover {
+    background: var(--theia-list-hoverBackground, rgba(128, 128, 128, 0.15));
+}
+
+.kairo-outline-row .codicon {
+    color: var(--theia-symbolIcon-classForeground, var(--kairo-accent, #7aa2f7));
+    flex-shrink: 0;
+}
+
+.kairo-outline-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* ================================================================ */
 /*  IDEA-style Debug Tool Window                                      */
 /* ================================================================ */
 

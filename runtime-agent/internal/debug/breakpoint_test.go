@@ -806,21 +806,6 @@ func TestBuildBreakpointSetCommand(t *testing.T) {
 	}
 }
 
-func TestBuildBreakpointSetConditionalCommand(t *testing.T) {
-	data := BuildBreakpointSetConditionalCommand(0x100, 0x200, 42, suspendAll, "x > 0")
-	r := NewJDWPDataReader(data)
-
-	eventKind, _ := r.ReadByte()
-	if eventKind != eventKindBreakpoint {
-		t.Errorf("eventKind = %d", eventKind)
-	}
-	r.ReadByte() // suspendPolicy
-	modCount, _ := r.ReadInt()
-	if modCount != 2 {
-		t.Errorf("modCount = %d, want 2", modCount)
-	}
-}
-
 func TestBuildMethodEntryBreakpointCommand(t *testing.T) {
 	data := BuildMethodEntryBreakpointCommand(0x100, 0x200, suspendAll)
 	r := NewJDWPDataReader(data)

@@ -369,15 +369,24 @@ function Invoke-StaleCleanup {
         [int]$KeepLatest = 1
     )
 
+    # 每组可单独指定保留数量:
+    #   - 模式化旁路目录保留最近 1 套;
+    #   - 固定名校验/运行 scratch 目录(asar-*、kairo-extract、kairo-run、run)
+    #     是纯临时产物,全部回收(占用中会走 .zombie 兜底)。此前它们不在
+    #     清理范围内,曾累积到 ~12.9 GB。
     $patterns = @(
-        @{ Dir = $DistDir;    Globs = @(
+        @{ Dir = $DistDir;    Keep = $KeepLatest; Globs = @(
             "dist-locked-*", "dist-stage-*",
             "win-unpacked.locked-*", "win-unpacked.stale-*",
             "*.zombie", "*.orphan"        # ConvertTo-ZombiePath 兜底产物
         ) },
-        @{ Dir = $DesktopDir; Globs = @(
+        @{ Dir = $DesktopDir; Keep = $KeepLatest; Globs = @(
             "dist-locked-*", "dist-stage-*",
             "*.zombie", "*.orphan"        # 历史遗留 + zombie 兜底
+        ) },
+        @{ Dir = $DistDir;    Keep = 0;           Globs = @(
+            "asar-old", "asar-temp", "asar-verify", "kairo-extract",
+            "kairo-run", "run"
         ) }
     )
 
@@ -389,7 +398,7 @@ function Invoke-StaleCleanup {
             $hits = @(Get-ChildItem -Path $p.Dir -Filter $glob -Force -ErrorAction SilentlyContinue |
                     Sort-Object LastWriteTime -Descending)
             if ($hits.Count -eq 0) { continue }
-            $skip = [Math]::Min($KeepLatest, $hits.Count)
+            $skip = [Math]::Min($p.Keep, $hits.Count)
             $staleList = $hits | Select-Object -Skip $skip
             foreach ($s in $staleList) {
                 $size = if ($s.PSIsContainer) {
@@ -430,9 +439,19 @@ if (-not $SkipLockCleanup) {
 
 Invoke-StaleCleanup -KeepLatest 1
 
-# ─── 阶段 1: 构建 ──────────────────────────────────────────
+# ─── 阶段 1+2: 构建(浏览器前端 ∥ Go Agent 并行) ───────────
 if (-not $SkipBuild) {
-    Step "阶段 1/5: 构建浏览器前端"
+    Step "阶段 1/5: 构建浏览器前端 (Go Agent 构建已并行启动)"
+    # Go Agent 构建与浏览器构建互不依赖;放到后台 Job 与最慢的
+    # 浏览器 esbuild 同时执行,缩短总墙钟时间。
+    $agentJob = Start-Job -ScriptBlock {
+        param($desktopDir)
+        Set-Location $desktopDir
+        node scripts/build-agent.js
+        # 把子命令退出码带回主进程
+        $global:AGENT_EXIT = if ($LASTEXITCODE -ne 0) { $LASTEXITCODE } else { 0 }
+    } -ArgumentList $DesktopDir
+
     Push-Location $RepoRoot
     try {
         pnpm --filter @kairo/browser build
@@ -440,13 +459,13 @@ if (-not $SkipBuild) {
         Ok "浏览器前端构建完成"
     } finally { Pop-Location }
 
-    Step "阶段 2/5: 构建 Go Runtime Agent"
-    Push-Location $DesktopDir
-    try {
-        node scripts/build-agent.js
-        if ($LASTEXITCODE -ne 0) { Err "Go Agent 构建失败" }
-        Ok "Go Runtime Agent 构建完成"
-    } finally { Pop-Location }
+    Step "阶段 2/5: 等待 Go Runtime Agent 构建完成"
+    Receive-Job -Job $agentJob -Wait | Out-Null
+    $agentFailed = ($agentJob.State -eq 'Failed') -or ($agentJob.ChildJobs[0].JobStateInfo.State -eq 'Failed')
+    $agentExit   = if ($null -ne $agentJob.ChildJobs[0].Output) { @($agentJob.ChildJobs[0].Output)[-1] } else { 0 }
+    Remove-Job -Job $agentJob -Force -ErrorAction SilentlyContinue
+    if ($agentFailed -or ($agentExit -is [int] -and $agentExit -ne 0)) { Err "Go Agent 构建失败" }
+    Ok "Go Runtime Agent 构建完成"
 
     Step "阶段 3/5: 准备 bundled 资源"
     $bundledDir = Join-Path $DesktopDir "bundled"
@@ -726,7 +745,7 @@ if (Test-Path $licenseFile2) {
 $jdtlsDir = Join-Path $liveUnpackedDir "resources/bundled/jdtls"
 if (Test-Path $jdtlsDir) {
     Get-ChildItem $jdtlsDir -Directory | Where-Object {
-        $_.Name -match 'config_(linux|mac|ss_linux|ss_mac)'
+        $_.Name -match 'config_(linux|mac|ss_linux|ss_mac|ss_win)'
     } | ForEach-Object {
         $m2 = Get-ChildItem $_.FullName -Recurse -File | Measure-Object -Property Length -Sum
         $removedSize += if ($null -eq $m2) { 0 } else { $m2.Sum }

@@ -14,11 +14,23 @@ import {
 @injectable()
 export class KairoShellLayoutContribution implements FrontendApplicationContribution {
   protected resizeHandler?: () => void;
+  protected resizeRaf?: number;
 
   onStart(app: FrontendApplication): void {
     const sync = () => this.ensureShellFillsWindow(app);
     requestAnimationFrame(sync);
-    this.resizeHandler = sync;
+    // Continuous window dragging fires resize faster than frames; coalescing
+    // to one geometry pass per animation frame avoids layout thrashing
+    // (read clientHeight/Width → write style → Lumino update per event).
+    this.resizeHandler = () => {
+      if (this.resizeRaf !== undefined) {
+        return;
+      }
+      this.resizeRaf = requestAnimationFrame(() => {
+        this.resizeRaf = undefined;
+        sync();
+      });
+    };
     window.addEventListener('resize', this.resizeHandler);
     // Second pass after Theia finishes restoring layout.
     window.setTimeout(sync, 500);
@@ -26,6 +38,10 @@ export class KairoShellLayoutContribution implements FrontendApplicationContribu
   }
 
   onStop(): void {
+    if (this.resizeRaf !== undefined) {
+      cancelAnimationFrame(this.resizeRaf);
+      this.resizeRaf = undefined;
+    }
     if (this.resizeHandler) {
       window.removeEventListener('resize', this.resizeHandler);
       this.resizeHandler = undefined;

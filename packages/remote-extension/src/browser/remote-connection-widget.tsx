@@ -579,7 +579,7 @@ export class RemoteConnectionWidget extends ReactWidget {
                 </div>
                 <div
                   className="kairo-remote-connection-terminal-body"
-                  ref={(el) => el && this.attachTerminal(session.id, el)}
+                  ref={(el) => { if (el) this.attachTerminal(session.id, el); }}
                 />
               </div>
             ))}

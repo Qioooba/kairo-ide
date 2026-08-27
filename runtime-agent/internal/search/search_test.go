@@ -155,7 +155,7 @@ func TestSearch_MissingRootIsError(t *testing.T) {
 func TestReadAllContext_CancelsBetweenChunks(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	reader := &cancelAfterFirstRead{reader: bytes.NewReader(bytes.Repeat([]byte("x"), 256*1024)), cancel: cancel}
-	result, err := readAllContext(ctx, reader)
+	result, err := readAllContext(ctx, reader, 0)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("readAllContext error=%v, want context.Canceled", err)
 	}

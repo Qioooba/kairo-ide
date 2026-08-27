@@ -54,7 +54,7 @@ const PerfDashboard: React.FC<PerfDashboardProps> = ({
   const [memoryAvailable, setMemoryAvailable] = React.useState(true);
   const [lsError, setLsError] = React.useState(false);
   const [initialLoading, setInitialLoading] = React.useState(true);
-  const intervalRef = React.useRef<ReturnType<typeof setInterval> | undefined>();
+  const intervalRef = React.useRef<ReturnType<typeof setInterval> | undefined>(undefined);
 
   React.useEffect(() => {
     const disposable = i18n.onDidChangeLanguage(() => forceUpdate());

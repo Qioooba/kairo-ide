@@ -38,6 +38,22 @@ export interface GitStatusResult {
   behind: number;
 }
 
+/** Deep-enough equality for poll deduplication. */
+export function gitStatusEquals(a: GitStatusResult | undefined, b: GitStatusResult | undefined): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  if (a.branch !== b.branch || a.ahead !== b.ahead || a.behind !== b.behind) return false;
+  if (a.files.length !== b.files.length) return false;
+  for (let i = 0; i < a.files.length; i++) {
+    const fa = a.files[i];
+    const fb = b.files[i];
+    if (fa.path !== fb.path || fa.status !== fb.status || fa.staged !== fb.staged || fa.origPath !== fb.origPath) {
+      return false;
+    }
+  }
+  return true;
+}
+
 export interface GitCommit {
   hash: string;
   author: string;
@@ -64,6 +80,11 @@ export interface GitCommitOptions {
   amend?: boolean;
   signoff?: boolean;
   noVerify?: boolean;
+}
+
+export interface GitBranchList {
+  current: string;
+  branches: string[];
 }
 
 export interface GitCommitResult {
@@ -127,8 +148,13 @@ export class GitService {
     this.refreshInFlight = true;
     try {
       const result = await this.getStatus();
-      this.cachedStatus = result;
-      this.onDidChangeStatusEmitter.fire(result);
+      // Only broadcast when something actually changed — the poll timer
+      // fires constantly, and unconditional events force every decorator
+      // and the status bar through a full refresh cycle.
+      if (!gitStatusEquals(this.cachedStatus, result)) {
+        this.cachedStatus = result;
+        this.onDidChangeStatusEmitter.fire(result);
+      }
     } catch {
       // Silently ignore - repo might not be initialized or git not available
     } finally {
@@ -343,5 +369,70 @@ export class GitService {
     this.refreshStatus();
     this.onDidChangeEmitter.fire();
     return { hash, message, filesChanged };
+  }
+
+  /** Run a git command and return combined, trimmed output. */
+  protected async run(args: string[]): Promise<string> {
+    if (!this.repoRoot) throw new Error('No git repository');
+    try {
+      const { stdout } = await execFileAsync('git', args, gitOpts(this.repoRoot));
+      this.refreshStatus();
+      this.onDidChangeEmitter.fire();
+      return stdout.trim();
+    } catch (err) {
+      const e = err as { stderr?: string; message?: string };
+      const detail = (e.stderr || e.message || 'git failed').trim();
+      throw new Error(detail);
+    }
+  }
+
+  async push(remote?: string, branch?: string): Promise<string> {
+    const args = ['push'];
+    if (remote) args.push(remote);
+    if (branch) args.push(branch);
+    return this.run(args);
+  }
+
+  async pull(remote?: string, branch?: string): Promise<string> {
+    const args = ['pull'];
+    if (remote) args.push(remote);
+    if (branch) args.push(branch);
+    return this.run(args);
+  }
+
+  async fetch(remote?: string): Promise<string> {
+    const args = ['fetch', '--prune'];
+    if (remote) args.push(remote);
+    return this.run(args);
+  }
+
+  async listBranches(): Promise<GitBranchList> {
+    const out = await this.run(['branch', '--format=%(refname:short)']);
+    const branches = out.split('\n').map(b => b.trim()).filter(Boolean);
+    let current = '';
+    try {
+      current = (await this.run(['rev-parse', '--abbrev-ref', 'HEAD'])) || '';
+    } catch {
+      // detached HEAD etc.
+    }
+    return { current, branches };
+  }
+
+  async createBranch(name: string, checkout: boolean = true): Promise<string> {
+    if (!name.trim()) throw new Error('Branch name required');
+    return checkout ? this.run(['checkout', '-b', name.trim()]) : this.run(['branch', name.trim()]);
+  }
+
+  async switchBranch(name: string): Promise<string> {
+    return this.run(['checkout', name.trim()]);
+  }
+
+  /**
+   * Discard unstaged changes of tracked files. Untracked files are left
+   * untouched on purpose — destructive clean is a separate decision.
+   */
+  async discardFileChanges(files: string[]): Promise<string> {
+    if (!files.length) throw new Error('No files to discard');
+    return this.run(['checkout', '--', ...files]);
   }
 }

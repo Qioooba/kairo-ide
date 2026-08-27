@@ -336,6 +336,9 @@ export class HotDeployService implements FrontendApplicationContribution {
     timeoutMs: number,
   ): Promise<{ state?: string; filesCompiled?: number }> {
     const deadline = Date.now() + timeoutMs;
+    // Exponential backoff (500ms → 2s cap): compiles typically take tens of
+    // seconds; fixed 500ms polling burned ~240 HTTP round-trips per build.
+    let delay = 500;
     while (Date.now() < deadline) {
       try {
         const b = await this.runtime.request(
@@ -349,7 +352,8 @@ export class HotDeployService implements FrontendApplicationContribution {
       } catch {
         // keep polling
       }
-      await new Promise(r => setTimeout(r, 500));
+      await new Promise(r => setTimeout(r, delay));
+      delay = Math.min(delay * 2, 2000);
     }
     return { state: 'failure' };
   }
