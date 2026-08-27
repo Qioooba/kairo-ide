@@ -685,6 +685,13 @@ async function startTheiaBackend(): Promise<number> {
     ELECTRON_RUN_AS_NODE: '1',
     KAIRO_DESKTOP: '1',
     KAIRO_AGENT_URL: `http://127.0.0.1:${agentPort}`,
+    // If the operator passes a workspace path, Theia reads it
+    // from THEIA_DEFAULT_FOLDER and opens it on startup. This
+    // makes "Kairo IDE" show files when the user has never opened
+    // a project before (e.g. on a fresh install with no userData).
+    ...(process.env.KAIRO_OPEN_FOLDER
+      ? { THEIA_DEFAULT_FOLDER: process.env.KAIRO_OPEN_FOLDER }
+      : {}),
   };
   if (isHeadless) {
     theiaEnv.KAIRO_HEADLESS = '1';

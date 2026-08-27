@@ -166,7 +166,7 @@ export class SvnConflictDialog extends ReactDialog<'resolved' | undefined> {
       await this.svnStore.refresh();
       const files = this.svnStore.getState().conflictedFiles;
       if (files.length === 0) {
-        this.messageService.info('All conflicts resolved');
+        this.messageService.info(this.i18n.t('widget.svn.dialog.conflict.allResolved'));
         this.state = { ...this.state, resolving: false, files, result: 'resolved' };
         this.accept();
         return;
@@ -186,11 +186,11 @@ export class SvnConflictDialog extends ReactDialog<'resolved' | undefined> {
         <div className="kairo-svn-dlg-shell compact">
           <div className="kairo-svn-dlg-diff-empty" style={{ minHeight: 240 }}>
             <span className="codicon codicon-check" />
-            <span>No conflicted files</span>
+            <span>{this.i18n.t('widget.svn.dialog.conflict.noConflictedFiles')}</span>
           </div>
           <div className="kairo-svn-dlg-footer">
             <span className="spacer" />
-            <button className="theia-button main" onClick={() => this.close()}>Close</button>
+            <button className="theia-button main" onClick={() => this.close()}>{this.i18n.t('widget.svn.dialog.conflict.close')}</button>
           </div>
         </div>
       );
@@ -199,7 +199,7 @@ export class SvnConflictDialog extends ReactDialog<'resolved' | undefined> {
     return (
       <div className="kairo-svn-dlg-shell">
         <div className="kairo-svn-dlg-pane-header">
-          Conflicted files
+          {this.i18n.t('widget.svn.dialog.conflict.conflictedFiles')}
           <span className="count">{s.files.length}</span>
           <select
             className="theia-select"
@@ -218,22 +218,22 @@ export class SvnConflictDialog extends ReactDialog<'resolved' | undefined> {
         {s.loading ? (
           <div className="kairo-svn-dlg-progress">
             <span className="codicon codicon-loading codicon-modifier-spin" />
-            <div>Loading conflict sides…</div>
+            <div>{this.i18n.t('widget.svn.dialog.conflict.loadingSides')}</div>
           </div>
         ) : (
           <div className="kairo-svn-dlg-tri">
             <div className="kairo-svn-dlg-tri-pane theirs">
               <div className="kairo-svn-dlg-pane-header">
-                Theirs (repository)
+                {this.i18n.t('widget.svn.dialog.conflict.theirs')}
                 <button className="theia-button secondary" style={{ marginLeft: 'auto', textTransform: 'none' }} onClick={() => void this.acceptSide('theirs')}>
-                  Accept →
+                  {this.i18n.t('widget.svn.dialog.conflict.acceptTheirs')} →
                 </button>
               </div>
               <textarea className="kairo-svn-dlg-code" readOnly value={s.theirs} />
             </div>
             <div className="kairo-svn-dlg-tri-pane merged">
               <div className="kairo-svn-dlg-pane-header">
-                Result (editable)
+                {this.i18n.t('widget.svn.dialog.conflict.result')}
               </div>
               <textarea
                 className="kairo-svn-dlg-code"
@@ -244,9 +244,9 @@ export class SvnConflictDialog extends ReactDialog<'resolved' | undefined> {
             <div className="kairo-svn-dlg-tri-pane mine">
               <div className="kairo-svn-dlg-pane-header">
                 <button className="theia-button secondary" style={{ textTransform: 'none' }} onClick={() => void this.acceptSide('mine')}>
-                  ← Accept
+                  ← {this.i18n.t('widget.svn.dialog.conflict.acceptMine')}
                 </button>
-                Mine (local)
+                {this.i18n.t('widget.svn.dialog.conflict.mine')}
               </div>
               <textarea className="kairo-svn-dlg-code" readOnly value={s.mine} />
             </div>
@@ -254,16 +254,16 @@ export class SvnConflictDialog extends ReactDialog<'resolved' | undefined> {
         )}
 
         <div className="kairo-svn-dlg-footer">
-          <button className="theia-button secondary" disabled={s.resolving} onClick={() => this.close()}>Cancel</button>
+          <button className="theia-button secondary" disabled={s.resolving} onClick={() => this.close()}>{this.i18n.t('widget.svn.dialog.conflict.cancel')}</button>
           <button className="theia-button secondary" disabled={s.resolving} onClick={() => void this.resolveWith('theirs-full')}>
-            Accept theirs
+            {this.i18n.t('widget.svn.dialog.conflict.acceptTheirs')}
           </button>
           <button className="theia-button secondary" disabled={s.resolving} onClick={() => void this.resolveWith('mine-full')}>
-            Accept mine
+            {this.i18n.t('widget.svn.dialog.conflict.acceptMine')}
           </button>
           <span className="spacer" />
           <button className="theia-button main" disabled={s.resolving || s.loading} onClick={() => void this.resolveWith('working', true)}>
-            {s.resolving ? 'Resolving…' : 'Mark as resolved'}
+            {s.resolving ? this.i18n.t('widget.svn.dialog.conflict.resolving') : this.i18n.t('widget.svn.dialog.conflict.markResolved')}
           </button>
         </div>
       </div>

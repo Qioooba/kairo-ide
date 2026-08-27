@@ -148,7 +148,7 @@ export class SvnCommitDialog extends ReactDialog<'committed' | undefined> {
     } catch (e) {
       this.setState({
         loadingDiff: false,
-        diffLines: [{ text: (e as Error).message || 'Failed to load diff', kind: 'del' }],
+        diffLines: [{ text: (e as Error).message || this.i18n.t('widget.svn.dialog.commit.loadDiffFailed'), kind: 'del' }],
       });
     }
   }
@@ -190,11 +190,11 @@ export class SvnCommitDialog extends ReactDialog<'committed' | undefined> {
   protected async doCommit(): Promise<void> {
     const paths = Array.from(this.state.selected);
     if (paths.length === 0) {
-      this.setState({ error: 'Select at least one file to commit.' });
+      this.setState({ error: this.i18n.t('widget.svn.dialog.commit.selectAtLeastOne') });
       return;
     }
     if (!this.state.message.trim()) {
-      this.setState({ error: 'Commit message is required.' });
+      this.setState({ error: this.i18n.t('widget.svn.dialog.commit.messageRequired') });
       return;
     }
     this.setState({ committing: true, error: undefined });
@@ -207,7 +207,7 @@ export class SvnCommitDialog extends ReactDialog<'committed' | undefined> {
       const info = await this.svnService.commit(paths, this.state.message, {
         keepLocks: this.state.keepLocks,
       });
-      this.messageService.info(`Committed revision ${info.revision}`);
+      this.messageService.info(this.i18n.t('widget.svn.dialog.commit.committedRevision', { rev: String(info.revision) }));
       this.state = { ...this.state, committing: false, result: 'committed' };
       this.accept();
     } catch (e) {
@@ -241,11 +241,16 @@ export class SvnCommitDialog extends ReactDialog<'committed' | undefined> {
                   {g.files.map(f => (
                     <li
                       key={f.path}
+                      role="option"
+                      aria-selected={s.activePath === f.path}
+                      tabIndex={0}
                       className={`kairo-svn-dlg-file-item ${s.activePath === f.path ? 'active' : ''}`}
                       onClick={() => void this.loadDiff(f.path)}
+                      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); void this.loadDiff(f.path); } }}
                     >
                       <input
                         type="checkbox"
+                        aria-label={f.path}
                         checked={s.selected.has(f.path)}
                         onChange={e => { e.stopPropagation(); this.toggle(f.path); }}
                         onClick={e => e.stopPropagation()}
