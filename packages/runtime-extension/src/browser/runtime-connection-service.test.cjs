@@ -130,26 +130,6 @@ test('KairoRuntimeConfig: valid structure', () => {
   assert.strictEqual(config.maxRetries, 2);
 });
 
-test('KairoRuntimeConfig: with bearerToken fallback', () => {
-  const config = {
-    baseUrl: 'http://127.0.0.1:18080',
-    bearerToken: 'legacy-token',
-    csrfToken: 'csrf-456',
-  };
-  assert.strictEqual(config.bearerToken, 'legacy-token');
-  assert.strictEqual(config.csrfToken, 'csrf-456');
-});
-
-test('KairoRuntimeConfig: agentSecret wins over bearerToken', () => {
-  const config = {
-    baseUrl: 'http://127.0.0.1:18080',
-    agentSecret: 'new-secret',
-    bearerToken: 'old-token',
-  };
-  const secret = config.agentSecret ?? config.bearerToken;
-  assert.strictEqual(secret, 'new-secret');
-});
-
 // ---- KairoRequestInit -------------------------------------------------------
 
 test('KairoRequestInit: pathParams substitution', () => {

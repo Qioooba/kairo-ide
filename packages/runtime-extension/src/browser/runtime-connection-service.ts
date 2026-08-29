@@ -76,17 +76,9 @@ export interface KairoRuntimeConfig {
    * Agent shared secret. Sent as `X-Kairo-Secret` on every
    * HTTP request and as a WebSocket subprotocol token on
    * `/api/v1/events`. The frontend no longer uses
-   * `Authorization: Bearer` — that pattern is gone.
+   * `Authorization: Bearer`.
    */
   agentSecret?: string;
-  /**
-   * Backwards-compat alias for `agentSecret`. If both are
-   * set, `agentSecret` wins. Existing callers that still
-   * pass `bearerToken` keep working until the migration
-   * is complete.
-   * @deprecated use `agentSecret`
-   */
-  bearerToken?: string;
   /** Default request timeout in ms. Defaults to 60_000. */
   defaultTimeoutMs?: number;
   /** Max number of automatic retries for transient errors. */
@@ -375,14 +367,6 @@ export class RuntimeConnectionService {
     return this.workspaceId;
   }
 
-  /**
-   * @deprecated use `setAgentSecret` — the `Authorization: Bearer`
-   * header is no longer used; secrets are sent as `X-Kairo-Secret`.
-   */
-  setBearerToken(token: string | undefined): void {
-    this.config.agentSecret = token;
-  }
-
   /** Set the agent shared secret (sent as `X-Kairo-Secret`). */
   setAgentSecret(secret: string | undefined): void {
     this.config.agentSecret = secret;
@@ -402,12 +386,10 @@ export class RuntimeConnectionService {
   }
 
   /**
-   * The active agent secret, or undefined if none was
-   * configured. Sourced from either `agentSecret` (preferred)
-   * or the legacy `bearerToken` alias.
+   * The active agent secret, or undefined if none was configured.
    */
   protected agentSecret(): string | undefined {
-    return this.config.agentSecret ?? this.config.bearerToken;
+    return this.config.agentSecret;
   }
 
   url(endpoint: string, init: KairoRequestInit = {}): string {
@@ -703,38 +685,17 @@ export class RuntimeConnectionService {
   }
 
   /**
-   * @deprecated Use `subscribeEvents` instead — the old
-   * single-callback model is replaced by multi-subscriber
-   * dispatch on the single shared EventStream.
+   * Force the shared EventStream to reconnect: close the current
+   * WebSocket and reopen it against the freshly discovered
+   * endpoints. Call this after `invalidateEndpoints()` when the
+   * agent restarted (or re-bound a different port) so status and
+   * event subscribers move onto the new socket. Existing
+   * subscriptions are preserved — events resume once the new
+   * stream is open.
    */
-  connectEvents(workspaceId: string, onEvent: (event: WsEvent) => void): void {
-    this.subscribeEvents(workspaceId, onEvent);
-  }
-
-  /**
-   * @deprecated Prefer the unsubscribe function returned by
-   * `subscribeEvents`. Calling this forces the WebSocket
-   * closed for ALL subscribers.
-   */
-  disconnectEvents(): void {
+  reconnectEventStream(): void {
     this.closeEventStream();
-  }
-
-  /**
-   * Open the EventStream / WebSocket. The WS URL is built
-   * from the cached `RuntimeEndpoints.events` value (NOT
-   * the hardcoded 18099), and the secret rides in the
-   * subprotocol token per 搂1.2.
-   *
-   * @deprecated Use `subscribeEvents` + `onStatusChange`
-   * instead. Each call to `openEvents()` used to create a
-   * separate WebSocket; now it returns the single shared
-   * EventStream. New code should prefer the
-   * RuntimeConnectionService methods directly.
-   */
-  openEvents(): EventStream {
     this.ensureEventStream();
-    return this.internalEventStream!;
   }
 
   // --- Private: single EventStream management ---

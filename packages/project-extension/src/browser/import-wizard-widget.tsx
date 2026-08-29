@@ -10,7 +10,14 @@ import { ActiveProjectService } from './active-project-service';
 import { RuntimeConnectionService } from '@kairo/runtime-extension';
 import { WorkspaceContextService } from '@kairo/runtime-extension';
 import { KairoI18nService, type KairoI18nKey } from '@kairo/i18n';
-import type { ProjectDetection, ProjectImportConfirmRequest } from '@kairo/protocol';
+import type { ProjectConfig, ProjectDetection, ProjectImportConfirmRequest } from '@kairo/protocol';
+
+/** Minimal shape of an imported project as returned by the agent. */
+interface ProjectImportResult {
+    id: string;
+    name?: string;
+    rootPath?: string;
+}
 
 /** Normalize a user-visible encoding label to the wire encoding id. */
 function normalizeEncodingId(encoding: string): string {
@@ -244,7 +251,50 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
                 contextPath: contextPath.trim() || '/',
             };
 
-            const saved = await projectService.importProjectNew(params);
+            // TC-IMP-023: re-importing the same root makes the backend
+            // reject the second POST /projects/import with 409 Conflict.
+            // Instead of dead-ending on an error banner, match the
+            // existing binding (workspace-scoped first, then the global
+            // catalog) and continue with it — same strategy as
+            // ActiveProjectService.tryAutoBindFromYaml.
+            const findExistingBinding = async (): Promise<ProjectImportResult | undefined> => {
+                const norm = (s: string) => s.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+                const want = norm(normalizedWorkspacePath);
+                const pick = (list: ProjectImportResult[]) => list.find(p =>
+                    p.name === trimmedName
+                    || norm(String((p as { rootPath?: string }).rootPath ?? '')) === want
+                    || p.id === `${trimmedName.toLowerCase().replace(/[^a-z0-9_.-]+/g, '-')}`
+                );
+                let scoped: ProjectImportResult[] | undefined;
+                try {
+                    scoped = await projectService.listProjects(confirmedWorkspaceId);
+                    const hit = pick(scoped || []);
+                    if (hit) return hit;
+                } catch {
+                    /* fall through to global catalog */
+                }
+                try {
+                    const globalList = await projectService.listProjects(undefined);
+                    return pick(globalList || []);
+                } catch {
+                    return undefined;
+                }
+            };
+
+            let saved: ProjectImportResult;
+            try {
+                saved = await projectService.importProjectNew(params) as ProjectImportResult;
+            } catch (conflictErr) {
+                const msg = conflictErr instanceof Error ? conflictErr.message : String(conflictErr);
+                if (!/409|already exists|already imported|conflict/i.test(msg)) {
+                    throw conflictErr;
+                }
+                const existing = await findExistingBinding();
+                if (!existing) {
+                    throw conflictErr;
+                }
+                saved = existing;
+            }
 
             const finalRootPath = saved.rootPath ? normalizePathForApi(saved.rootPath) : normalizedWorkspacePath;
             try {
@@ -257,7 +307,7 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
             await activeProject.setProject({
                 workspaceId: confirmedWorkspaceId,
                 projectId: saved.id,
-                name: saved.name,
+                name: saved.name || trimmedName,
                 root: finalRootPath,
                 encoding: normalizeEncodingId(defaultEncoding),
             });
@@ -612,6 +662,8 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
                             {t('widget.importWizard.importReady', { name: importedSummary.name })}
                         </p>
                         <dl className="kairo-info-list">
+                            <dt>{t('widget.importWizard.projectName')}</dt>
+                            <dd data-testid="ready-name">{importedSummary.name}</dd>
                             <dt>{t('widget.importWizard.location')}</dt>
                             <dd data-testid="ready-root">{importedSummary.root}</dd>
                             <dt>{t('widget.importWizard.importedEncoding')}</dt>

@@ -30,7 +30,7 @@
 // well as in a dev shell.
 
 import { spawn, ChildProcess, SpawnOptions } from 'child_process';
-import { existsSync, readdirSync, readFileSync, statSync } from 'fs';
+import { existsSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs';
 import { dirname, join, resolve } from 'path';
 import { Readable, Writable } from 'stream';
 import {
@@ -243,7 +243,11 @@ export class JdtLsManager implements Disposable {
    * be resolved; the caller should catch and report the
    * `{ kind, message }` error to the UI.
    */
+  /** -data dir of the current/last LS process (for the clean-exit marker). */
+  protected currentWorkspaceDataDir: string | undefined;
+
   async start(opts: { rootUri: string; workspaceDataDir: string; sourceLevel?: string; home?: string; jreHome?: string }): Promise<void> {
+    this.currentWorkspaceDataDir = opts.workspaceDataDir;
     if (this.state === 'starting' || this.state === 'initializing' || this.state === 'ready' || this.state === 'stopping' || this.stopPromise) {
       throw new Error(`JDT LS already in state ${this.state}`);
     }
@@ -283,6 +287,36 @@ export class JdtLsManager implements Disposable {
       args.push('-configuration', dist.configDir);
     }
     args.push('-data', opts.workspaceDataDir);
+    // BUG-20260826-403: if the previous session ended uncleanly (kill/crash
+    // — common right after a start when the lifecycle restarts the LS), the
+    // Equinox workspace in `workspaceDataDir` is restored in a half-saved
+    // state where the project is registered but its model is broken; the
+    // EclipseProjectImporter then never re-imports (references,
+    // implementations and workspace/symbol silently return nothing) and
+    // `-clean` only clears the OSGi bundle cache, not the poisoned
+    // .metadata. Reset the whole per-workspace data dir instead — JDT
+    // re-imports from scratch (a few seconds for typical projects).
+    const cleanExitMarker = join(opts.workspaceDataDir, '.kairo-clean-exit');
+    const hadMetadata = existsSync(join(opts.workspaceDataDir, '.metadata'));
+    let lastExitClean = false;
+    try {
+      lastExitClean = hadMetadata && existsSync(cleanExitMarker);
+    } catch {
+      lastExitClean = false;
+    }
+    try {
+      rmSync(cleanExitMarker, { force: true });
+    } catch {
+      // best effort
+    }
+    if (hadMetadata && !lastExitClean) {
+      this.logger?.info('[JDT LS] unclean previous shutdown detected — resetting the LS workspace data dir to force a clean re-import');
+      try {
+        rmSync(opts.workspaceDataDir, { recursive: true, force: true });
+      } catch (err) {
+        this.logger?.warn(`[JDT LS] failed to reset workspace data dir: ${String(err)}`);
+      }
+    }
 
     // Remember sourceLevel for javaSettings() (project prefs), not _JAVA_OPTIONS.
     this.requestedSourceLevel = opts.sourceLevel;
@@ -357,6 +391,36 @@ export class JdtLsManager implements Disposable {
     this.connection.onNotification('$/progress', (params: LSPProgressParams) => {
       this.fire({ kind: 'progress', params });
     });
+
+    // JDT LS reports build/index progress through its private
+    // `language/progressReport` notification (enabled via
+    // extendedClientCapabilities.progressReportProvider) rather than
+    // standard $/progress — translate it so the UI can render it.
+    const progressReportTasks = new Set<string>();
+    this.connection.onNotification(
+      'language/progressReport',
+      (p: { id?: string; task: string; status?: string; totalWork?: number; workDone?: number; complete?: boolean }) => {
+        const token = p.id ?? p.task;
+        const percentage =
+          typeof p.totalWork === 'number' && p.totalWork > 0
+            ? Math.round(((p.workDone ?? 0) / p.totalWork) * 100)
+            : undefined;
+        const message = p.status;
+        if (p.complete) {
+          if (progressReportTasks.has(token)) {
+            progressReportTasks.delete(token);
+            this.fire({ kind: 'progress', params: { token, value: { kind: 'end', message } } });
+          }
+          return;
+        }
+        if (!progressReportTasks.has(token)) {
+          progressReportTasks.add(token);
+          this.fire({ kind: 'progress', params: { token, value: { kind: 'begin', title: p.task, percentage, message } } });
+        } else {
+          this.fire({ kind: 'progress', params: { token, value: { kind: 'report', percentage, message } } });
+        }
+      },
+    );
 
     this.connection.listen();
 
@@ -859,6 +923,21 @@ export class JdtLsManager implements Disposable {
         resolve();
       });
     });
+    this.markCleanExit();
+  }
+
+  /**
+   * Persist a "last shutdown was clean" marker for `workspaceDataDir`
+   * (BUG-20260826-403): the next start skips the Equinox `-clean` pass.
+   */
+  protected markCleanExit(): void {
+    const dir = this.currentWorkspaceDataDir;
+    if (!dir) return;
+    try {
+      writeFileSync(join(dir, '.kairo-clean-exit'), new Date().toISOString());
+    } catch {
+      // best effort — worst case the next start runs with -clean
+    }
   }
 
   protected stopGracePeriodMs(): number {
@@ -1078,6 +1157,15 @@ async function resolveHostJre21(explicit?: string): Promise<string | undefined> 
  * Prefers the JDK `release` file (no process spawn), then falls
  * back to a short async `java -version` with aggressive caching.
  */
+/** Resolve the major version of the JDK that backs a `bin` dir — or a direct java binary path. @internal exported for the backend service */
+export async function probeJavaMajorForBinDir(binDirOrBin: string): Promise<number | undefined> {
+  const javaExe = process.platform === 'win32' ? 'java.exe' : 'java';
+  const normalized = binDirOrBin.replace(/\\/g, '/');
+  const bin = /\/java(?:\.exe)?$/i.test(normalized) ? binDirOrBin : join(binDirOrBin, javaExe);
+  if (!existsSync(bin)) return undefined;
+  return probeJavaMajor(bin);
+}
+
 async function probeJavaMajor(javaBin: string): Promise<number | undefined> {
   const abs = resolve(javaBin);
   if (javaMajorCache.has(abs)) {

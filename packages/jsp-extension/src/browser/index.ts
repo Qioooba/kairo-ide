@@ -1,5 +1,6 @@
 export { bindJspExtension } from './jsp-grammar';
 export * from './jsp-grammar';
+export * from './workspace-layout';
 export * from './jsp-navigation';
 export * from './jsp-find-usages';
 export * from './jsp-java-nav';

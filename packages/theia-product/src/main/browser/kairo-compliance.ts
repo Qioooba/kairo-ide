@@ -13,6 +13,7 @@ import { injectable, inject, postConstruct } from '@theia/core/shared/inversify'
 import { ILogger } from '@theia/core/lib/common/logger';
 import { MessageService } from '@theia/core/lib/common/message-service';
 import { StorageService } from '@theia/core/lib/browser';
+import { KairoI18nService } from '@kairo/i18n';
 import { KairoAuditLog, type AuditActionType, type AuditLogFilter } from './kairo-audit-log';
 
 /** 用户角色定义。 */
@@ -106,6 +107,7 @@ export class KairoComplianceSuite {
   @inject(MessageService) protected readonly messages!: MessageService;
   @inject(StorageService) protected readonly storage!: StorageService;
   @inject(KairoAuditLog) protected readonly auditLog!: KairoAuditLog;
+  @inject(KairoI18nService) protected readonly i18n!: KairoI18nService;
 
   protected currentRole: UserRole = 'developer';
 
@@ -153,24 +155,15 @@ export class KairoComplianceSuite {
     await this.auditLog.log('command.execute', `switchRole:${role}`, 'success');
 
     const roleLabels: Record<UserRole, string> = {
-      developer: '开发者',
-      viewer: '查看者（只读）',
-      admin: '管理员',
+      developer: this.i18n.t('compliance.role.developer'),
+      viewer: this.i18n.t('compliance.role.viewer'),
+      admin: this.i18n.t('compliance.role.admin'),
     };
 
-    this.messages.info(`角色已切换为: ${roleLabels[role]}`);
+    this.messages.info(this.i18n.t('compliance.role.switched', { role: roleLabels[role] }));
 
     if (role === 'viewer') {
-      this.messages.warn(
-        '只读查看模式\n\n' +
-        '当前处于只读模式，以下操作被禁用：\n' +
-        '• 编辑文件\n' +
-        '• 保存文件\n' +
-        '• 构建\n' +
-        '• 部署\n' +
-        '• 调试\n\n' +
-        '通过命令面板切换角色以恢复完整功能。',
-      );
+      this.messages.warn(this.i18n.t('compliance.readonly.dialog'));
     }
   }
 
@@ -202,7 +195,7 @@ export class KairoComplianceSuite {
       try {
         const settings = this.collectSettings();
         exportData.settings = settings;
-        includedModules.push('设置');
+        includedModules.push(this.i18n.t('compliance.export.settings'));
       } catch (err) {
         this.logger.warn(`导出设置失败: ${String(err)}`);
       }
@@ -213,7 +206,7 @@ export class KairoComplianceSuite {
       try {
         const keymaps = this.collectKeymaps();
         exportData.keymaps = keymaps;
-        includedModules.push('快捷键');
+        includedModules.push(this.i18n.t('compliance.export.keymaps'));
       } catch (err) {
         this.logger.warn(`导出 Keymap 失败: ${String(err)}`);
       }
@@ -224,7 +217,7 @@ export class KairoComplianceSuite {
       try {
         const connConfigs = this.collectConnectionConfigs();
         exportData.connectionConfigs = connConfigs;
-        includedModules.push('连接配置');
+        includedModules.push(this.i18n.t('compliance.export.connectionConfigs'));
       } catch (err) {
         this.logger.warn(`导出连接配置失败: ${String(err)}`);
       }
@@ -235,7 +228,7 @@ export class KairoComplianceSuite {
       try {
         const auditData = JSON.parse(this.auditLog.exportToJSON());
         exportData.auditLogs = auditData;
-        includedModules.push('审计日志');
+        includedModules.push(this.i18n.t('compliance.export.auditLogs'));
       } catch (err) {
         this.logger.warn(`导出审计日志失败: ${String(err)}`);
       }
@@ -246,7 +239,7 @@ export class KairoComplianceSuite {
       try {
         const diagnostics = this.collectDiagnostics();
         exportData.diagnostics = diagnostics;
-        includedModules.push('诊断数据');
+        includedModules.push(this.i18n.t('compliance.export.diagnostics'));
       } catch (err) {
         this.logger.warn(`导出诊断数据失败: ${String(err)}`);
       }
@@ -261,7 +254,7 @@ export class KairoComplianceSuite {
       size: new Blob([jsonStr]).size,
     };
 
-    await this.auditLog.log('command.execute', 'compliance.export', 'success', `导出模块: ${includedModules.join(', ')}`);
+    await this.auditLog.log('command.execute', 'compliance.export', 'success', this.i18n.t('compliance.export.modulesDetail', { modules: includedModules.join(', ') }));
 
     return result;
   }

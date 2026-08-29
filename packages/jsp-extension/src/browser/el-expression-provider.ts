@@ -16,150 +16,164 @@
  */
 
 import * as monaco from '@theia/monaco-editor-core';
+import type { I18nService } from '@kairo/i18n';
 import { injectable } from '@theia/core/shared/inversify';
 import { JSP_LANGUAGE_ID } from './jsp-monarch';
+import { setJspI18n, t } from './i18n-context';
 
-/** EL implicit object type mappings. */
-export const EL_IMPLICIT_OBJECTS: Record<string, { type: string; description: string; properties?: Record<string, { type: string; description: string }> }> = {
-  pageContext: {
-    type: 'javax.servlet.jsp.PageContext',
-    description: '当前页面的 PageContext 对象，提供对 JSP 隐式对象的访问。',
-    properties: {
-      request: { type: 'javax.servlet.http.HttpServletRequest', description: '获取 HttpServletRequest 对象。' },
-      response: { type: 'javax.servlet.http.HttpServletResponse', description: '获取 HttpServletResponse 对象。' },
-      session: { type: 'javax.servlet.http.HttpSession', description: '获取 HttpSession 对象。' },
-      out: { type: 'javax.servlet.jsp.JspWriter', description: '获取 JspWriter 输出流。' },
-      servletContext: { type: 'javax.servlet.ServletContext', description: '获取 ServletContext 对象。' },
-      servletConfig: { type: 'javax.servlet.ServletConfig', description: '获取 ServletConfig 对象。' },
-    },
-  },
-  pageScope: {
-    type: 'java.util.Map',
-    description: '页面作用域的属性集合。',
-    properties: {
-      size: { type: 'int', description: '返回 Map 中的条目数。' },
-      isEmpty: { type: 'boolean', description: '如果 Map 为空返回 true。' },
-    },
-  },
-  requestScope: {
-    type: 'java.util.Map',
-    description: '请求作用域的属性集合。',
-    properties: {
-      size: { type: 'int', description: '返回 Map 中的条目数。' },
-      isEmpty: { type: 'boolean', description: '如果 Map 为空返回 true。' },
-    },
-  },
-  sessionScope: {
-    type: 'java.util.Map',
-    description: '会话作用域的属性集合。',
-    properties: {
-      size: { type: 'int', description: '返回 Map 中的条目数。' },
-      isEmpty: { type: 'boolean', description: '如果 Map 为空返回 true。' },
-    },
-  },
-  applicationScope: {
-    type: 'java.util.Map',
-    description: '应用作用域的属性集合。',
-    properties: {
-      size: { type: 'int', description: '返回 Map 中的条目数。' },
-      isEmpty: { type: 'boolean', description: '如果 Map 为空返回 true。' },
-    },
-  },
-  param: {
-    type: 'java.util.Map',
-    description: '请求参数的集合，${param.name} 等价于 request.getParameter("name")。',
-    properties: {
-      size: { type: 'int', description: '返回参数个数。' },
-    },
-  },
-  paramValues: {
-    type: 'java.util.Map',
-    description: '请求参数的多值集合，${paramValues.name[0]} 获取第一个值。',
-    properties: {
-      size: { type: 'int', description: '返回参数个数。' },
-    },
-  },
-  header: {
-    type: 'java.util.Map',
-    description: 'HTTP 请求头的集合，${header["User-Agent"]} 获取请求头。',
-    properties: {
-      size: { type: 'int', description: '返回请求头个数。' },
-    },
-  },
-  headerValues: {
-    type: 'java.util.Map',
-    description: 'HTTP 请求头的多值集合。',
-    properties: {
-      size: { type: 'int', description: '返回请求头个数。' },
-    },
-  },
-  cookie: {
-    type: 'java.util.Map',
-    description: 'Cookie 的集合，${cookie.name.value} 获取 Cookie 值。',
-    properties: {
-      size: { type: 'int', description: '返回 Cookie 个数。' },
-    },
-  },
-  initParam: {
-    type: 'java.util.Map',
-    description: '上下文初始化参数的集合，${initParam.name} 获取参数值。',
-    properties: {
-      size: { type: 'int', description: '返回参数个数。' },
-    },
-  },
-};
+interface ElImplicitObjectInfo {
+  type: string;
+  description: string;
+  properties?: Record<string, { type: string; description: string }>;
+}
 
-/** Common bean property patterns for EL completion. */
-const COMMON_BEAN_PROPERTIES: Record<string, { type: string; description: string }> = {
-  id: { type: 'java.lang.String', description: '对象标识符。' },
-  name: { type: 'java.lang.String', description: '对象名称。' },
-  value: { type: 'java.lang.String', description: '对象值。' },
-  description: { type: 'java.lang.String', description: '对象描述。' },
-  title: { type: 'java.lang.String', description: '标题。' },
-  size: { type: 'int', description: '集合大小。' },
-  length: { type: 'int', description: '数组/字符串长度。' },
-  empty: { type: 'boolean', description: '是否为空。' },
-  class: { type: 'java.lang.Class', description: '对象的类。' },
-  hash: { type: 'int', description: '哈希码。' },
-  count: { type: 'int', description: '计数。' },
-  status: { type: 'java.lang.String', description: '状态。' },
-  message: { type: 'java.lang.String', description: '消息。' },
-  code: { type: 'java.lang.String', description: '代码。' },
-  type: { type: 'java.lang.String', description: '类型。' },
-  date: { type: 'java.util.Date', description: '日期。' },
-  time: { type: 'java.util.Date', description: '时间。' },
-  url: { type: 'java.lang.String', description: 'URL 地址。' },
-  email: { type: 'java.lang.String', description: '电子邮件地址。' },
-  username: { type: 'java.lang.String', description: '用户名。' },
-  password: { type: 'java.lang.String', description: '密码。' },
-  enabled: { type: 'boolean', description: '是否启用。' },
-  active: { type: 'boolean', description: '是否激活。' },
-  created: { type: 'java.util.Date', description: '创建时间。' },
-  updated: { type: 'java.util.Date', description: '更新时间。' },
-  version: { type: 'java.lang.String', description: '版本号。' },
-};
+/** EL implicit object type mappings. Built on demand so descriptions follow the current language. */
+export function buildElImplicitObjects(): Record<string, ElImplicitObjectInfo> {
+  const mapSizeDesc = t('completion.el.member.mapSize.description');
+  const isEmptyDesc = t('completion.el.member.isEmpty.description');
+  return {
+    pageContext: {
+      type: 'javax.servlet.jsp.PageContext',
+      description: t('completion.el.implicit.pageContext.description'),
+      properties: {
+        request: { type: 'javax.servlet.http.HttpServletRequest', description: t('completion.el.implicit.pageContext.member.request.description') },
+        response: { type: 'javax.servlet.http.HttpServletResponse', description: t('completion.el.implicit.pageContext.member.response.description') },
+        session: { type: 'javax.servlet.http.HttpSession', description: t('completion.el.implicit.pageContext.member.session.description') },
+        out: { type: 'javax.servlet.jsp.JspWriter', description: t('completion.el.implicit.pageContext.member.out.description') },
+        servletContext: { type: 'javax.servlet.ServletContext', description: t('completion.el.implicit.pageContext.member.servletContext.description') },
+        servletConfig: { type: 'javax.servlet.ServletConfig', description: t('completion.el.implicit.pageContext.member.servletConfig.description') },
+      },
+    },
+    pageScope: {
+      type: 'java.util.Map',
+      description: t('completion.el.implicit.pageScope.description'),
+      properties: {
+        size: { type: 'int', description: mapSizeDesc },
+        isEmpty: { type: 'boolean', description: isEmptyDesc },
+      },
+    },
+    requestScope: {
+      type: 'java.util.Map',
+      description: t('completion.el.implicit.requestScope.description'),
+      properties: {
+        size: { type: 'int', description: mapSizeDesc },
+        isEmpty: { type: 'boolean', description: isEmptyDesc },
+      },
+    },
+    sessionScope: {
+      type: 'java.util.Map',
+      description: t('completion.el.implicit.sessionScope.description'),
+      properties: {
+        size: { type: 'int', description: mapSizeDesc },
+        isEmpty: { type: 'boolean', description: isEmptyDesc },
+      },
+    },
+    applicationScope: {
+      type: 'java.util.Map',
+      description: t('completion.el.implicit.applicationScope.description'),
+      properties: {
+        size: { type: 'int', description: mapSizeDesc },
+        isEmpty: { type: 'boolean', description: isEmptyDesc },
+      },
+    },
+    param: {
+      type: 'java.util.Map',
+      description: t('completion.el.implicit.param.description'),
+      properties: {
+        size: { type: 'int', description: t('completion.el.member.paramCount.description') },
+      },
+    },
+    paramValues: {
+      type: 'java.util.Map',
+      description: t('completion.el.implicit.paramValues.description'),
+      properties: {
+        size: { type: 'int', description: t('completion.el.member.paramCount.description') },
+      },
+    },
+    header: {
+      type: 'java.util.Map',
+      description: t('completion.el.implicit.header.description'),
+      properties: {
+        size: { type: 'int', description: t('completion.el.member.headerCount.description') },
+      },
+    },
+    headerValues: {
+      type: 'java.util.Map',
+      description: t('completion.el.implicit.headerValues.description'),
+      properties: {
+        size: { type: 'int', description: t('completion.el.member.headerCount.description') },
+      },
+    },
+    cookie: {
+      type: 'java.util.Map',
+      description: t('completion.el.implicit.cookie.description'),
+      properties: {
+        size: { type: 'int', description: t('completion.el.member.cookieCount.description') },
+      },
+    },
+    initParam: {
+      type: 'java.util.Map',
+      description: t('completion.el.implicit.initParam.description'),
+      properties: {
+        size: { type: 'int', description: t('completion.el.member.paramCount.description') },
+      },
+    },
+  };
+}
+
+/** Common bean property patterns for EL completion. Built on demand. */
+function buildCommonBeanProperties(): Record<string, { type: string; description: string }> {
+  return {
+    id: { type: 'java.lang.String', description: t('completion.el.bean.id.description') },
+    name: { type: 'java.lang.String', description: t('completion.el.bean.name.description') },
+    value: { type: 'java.lang.String', description: t('completion.el.bean.value.description') },
+    description: { type: 'java.lang.String', description: t('completion.el.bean.description.description') },
+    title: { type: 'java.lang.String', description: t('completion.el.bean.title.description') },
+    size: { type: 'int', description: t('completion.el.bean.size.description') },
+    length: { type: 'int', description: t('completion.el.bean.length.description') },
+    empty: { type: 'boolean', description: t('completion.el.bean.empty.description') },
+    class: { type: 'java.lang.Class', description: t('completion.el.bean.class.description') },
+    hash: { type: 'int', description: t('completion.el.bean.hash.description') },
+    count: { type: 'int', description: t('completion.el.bean.count.description') },
+    status: { type: 'java.lang.String', description: t('completion.el.bean.status.description') },
+    message: { type: 'java.lang.String', description: t('completion.el.bean.message.description') },
+    code: { type: 'java.lang.String', description: t('completion.el.bean.code.description') },
+    type: { type: 'java.lang.String', description: t('completion.el.bean.type.description') },
+    date: { type: 'java.util.Date', description: t('completion.el.bean.date.description') },
+    time: { type: 'java.util.Date', description: t('completion.el.bean.time.description') },
+    url: { type: 'java.lang.String', description: t('completion.el.bean.url.description') },
+    email: { type: 'java.lang.String', description: t('completion.el.bean.email.description') },
+    username: { type: 'java.lang.String', description: t('completion.el.bean.username.description') },
+    password: { type: 'java.lang.String', description: t('completion.el.bean.password.description') },
+    enabled: { type: 'boolean', description: t('completion.el.bean.enabled.description') },
+    active: { type: 'boolean', description: t('completion.el.bean.active.description') },
+    created: { type: 'java.util.Date', description: t('completion.el.bean.created.description') },
+    updated: { type: 'java.util.Date', description: t('completion.el.bean.updated.description') },
+    version: { type: 'java.lang.String', description: t('completion.el.bean.version.description') },
+  };
+}
 
 /** EL expression pattern: ${...} or #{...} */
 const EL_EXPR_RE = /([$#])\{/g;
 
-/** EL operator completions. */
-const EL_OPERATORS: Array<{ label: string; insertText: string; detail: string }> = [
-  { label: 'empty', insertText: 'empty ', detail: '检查集合是否为空或 null' },
-  { label: 'not empty', insertText: 'not empty ', detail: '检查集合非空' },
-  { label: 'eq', insertText: ' eq ', detail: '等于 (==)' },
-  { label: 'ne', insertText: ' ne ', detail: '不等于 (!=)' },
-  { label: 'lt', insertText: ' lt ', detail: '小于 (<)' },
-  { label: 'gt', insertText: ' gt ', detail: '大于 (>)' },
-  { label: 'le', insertText: ' le ', detail: '小于等于 (<=)' },
-  { label: 'ge', insertText: ' ge ', detail: '大于等于 (>=)' },
-  { label: 'and', insertText: ' and ', detail: '逻辑与' },
-  { label: 'or', insertText: ' or ', detail: '逻辑或' },
-  { label: 'not', insertText: ' not ', detail: '逻辑非' },
-  { label: 'mod', insertText: ' mod ', detail: '取模' },
-  { label: 'div', insertText: ' div ', detail: '除法' },
-  { label: 'null', insertText: 'null', detail: 'null 值' },
-  { label: 'true', insertText: 'true', detail: '布尔值 true' },
-  { label: 'false', insertText: 'false', detail: '布尔值 false' },
+/** EL operator completions. Built on demand so details follow the current language. */
+const buildElOperators = (): Array<{ label: string; insertText: string; detail: string }> => [
+  { label: 'empty', insertText: 'empty ', detail: t('completion.el.operator.empty') },
+  { label: 'not empty', insertText: 'not empty ', detail: t('completion.el.operator.notEmpty') },
+  { label: 'eq', insertText: ' eq ', detail: t('completion.el.operator.eq') },
+  { label: 'ne', insertText: ' ne ', detail: t('completion.el.operator.ne') },
+  { label: 'lt', insertText: ' lt ', detail: t('completion.el.operator.lt') },
+  { label: 'gt', insertText: ' gt ', detail: t('completion.el.operator.gt') },
+  { label: 'le', insertText: ' le ', detail: t('completion.el.operator.le') },
+  { label: 'ge', insertText: ' ge ', detail: t('completion.el.operator.ge') },
+  { label: 'and', insertText: ' and ', detail: t('completion.el.operator.and') },
+  { label: 'or', insertText: ' or ', detail: t('completion.el.operator.or') },
+  { label: 'not', insertText: ' not ', detail: t('completion.el.operator.not') },
+  { label: 'mod', insertText: ' mod ', detail: t('completion.el.operator.mod') },
+  { label: 'div', insertText: ' div ', detail: t('completion.el.operator.div') },
+  { label: 'null', insertText: 'null', detail: t('completion.el.operator.null') },
+  { label: 'true', insertText: 'true', detail: t('completion.el.operator.true') },
+  { label: 'false', insertText: 'false', detail: t('completion.el.operator.false') },
 ];
 
 /** Map a 0-based absolute content offset to 1-based line/column. */
@@ -302,7 +316,7 @@ export class ElExpressionCompletionProvider implements monaco.languages.Completi
 
     // ── Phase 1: Root level — suggest implicit objects ─────────
     if (!parsed.path || parsed.path === '') {
-      for (const [name, info] of Object.entries(EL_IMPLICIT_OBJECTS)) {
+      for (const [name, info] of Object.entries(buildElImplicitObjects())) {
         if (parsed.root === '' || name.startsWith(parsed.root)) {
           suggestions.push(ci(range, {
             label: name,
@@ -317,7 +331,7 @@ export class ElExpressionCompletionProvider implements monaco.languages.Completi
 
       // Also suggest EL operators when at root level
       if (parsed.root === '') {
-        for (const op of EL_OPERATORS) {
+        for (const op of buildElOperators()) {
           suggestions.push(ci(range, {
             label: op.label,
             kind: monaco.languages.CompletionItemKind.Keyword,
@@ -331,7 +345,7 @@ export class ElExpressionCompletionProvider implements monaco.languages.Completi
 
     // ── Phase 2: Property access — suggest bean properties ─────
     if (parsed.path) {
-      const implicitInfo = EL_IMPLICIT_OBJECTS[parsed.root];
+      const implicitInfo = buildElImplicitObjects()[parsed.root];
 
       if (implicitInfo?.properties) {
         // Known implicit object with known properties
@@ -350,7 +364,7 @@ export class ElExpressionCompletionProvider implements monaco.languages.Completi
       }
 
       // Always suggest common bean properties as fallback
-      for (const [propName, propInfo] of Object.entries(COMMON_BEAN_PROPERTIES)) {
+      for (const [propName, propInfo] of Object.entries(buildCommonBeanProperties())) {
         if (parsed.lastPart === '' || propName.startsWith(parsed.lastPart)) {
           // Avoid duplicates if already added from implicit object properties
           if (!suggestions.some(s => (typeof s.label === 'string' ? s.label : s.label.label) === propName)) {
@@ -371,10 +385,10 @@ export class ElExpressionCompletionProvider implements monaco.languages.Completi
     if (parsed.path && parsed.lastPart === '') {
       // Suggest common method invocations when after a dot
       const methodSnippets = [
-        { label: 'toString()', insertText: 'toString()', detail: 'java.lang.String', desc: '转换为字符串。' },
-        { label: 'equals()', insertText: 'equals(${1:obj})', detail: 'boolean', desc: '比较是否相等。' },
-        { label: 'hashCode()', insertText: 'hashCode()', detail: 'int', desc: '获取哈希码。' },
-        { label: 'getClass()', insertText: 'getClass()', detail: 'java.lang.Class', desc: '获取类对象。' },
+        { label: 'toString()', insertText: 'toString()', detail: 'java.lang.String', desc: t('completion.el.method.toString.description') },
+        { label: 'equals()', insertText: 'equals(${1:obj})', detail: 'boolean', desc: t('completion.el.method.equals.description') },
+        { label: 'hashCode()', insertText: 'hashCode()', detail: 'int', desc: t('completion.el.method.hashCode.description') },
+        { label: 'getClass()', insertText: 'getClass()', detail: 'java.lang.Class', desc: t('completion.el.method.getClass.description') },
       ];
       for (const ms of methodSnippets) {
         suggestions.push(ci(range, {
@@ -400,7 +414,7 @@ export class ElExpressionCompletionProvider implements monaco.languages.Completi
     _token: monaco.CancellationToken,
   ): monaco.languages.ProviderResult<monaco.languages.CompletionItem> {
     const label = typeof item.label === 'string' ? item.label : item.label.label;
-    const implicitInfo = EL_IMPLICIT_OBJECTS[label];
+    const implicitInfo = buildElImplicitObjects()[label];
     if (implicitInfo && !item.documentation) {
       item.documentation = implicitInfo.description;
     }
@@ -428,14 +442,14 @@ export class ElExpressionHoverProvider implements monaco.languages.HoverProvider
     const parts: string[] = [];
 
     // Check if it's an implicit object
-    const implicitInfo = EL_IMPLICIT_OBJECTS[parsed.root];
+    const implicitInfo = buildElImplicitObjects()[parsed.root];
     if (implicitInfo) {
-      parts.push('**EL 表达式**');
+      parts.push(t('completion.el.hover.title'));
       parts.push(`\`${expr}\``);
       parts.push('');
-      parts.push(`**根对象**: \`${parsed.root}\``);
-      parts.push(`**类型**: \`${implicitInfo.type}\``);
-      parts.push(`**说明**: ${implicitInfo.description}`);
+      parts.push(t('completion.el.hover.rootObject', { root: parsed.root }));
+      parts.push(t('completion.el.hover.type', { type: implicitInfo.type }));
+      parts.push(t('completion.el.hover.description', { description: implicitInfo.description }));
 
       // Show property info if accessing a known property
       if (parsed.path && implicitInfo.properties) {
@@ -443,7 +457,7 @@ export class ElExpressionHoverProvider implements monaco.languages.HoverProvider
         const propInfo = implicitInfo.properties[propName];
         if (propInfo) {
           parts.push('');
-          parts.push(`**属性 \`${propName}\`**: \`${propInfo.type}\``);
+          parts.push(t('completion.el.hover.property', { name: propName, type: propInfo.type }));
           parts.push(propInfo.description);
         }
       }
@@ -455,11 +469,11 @@ export class ElExpressionHoverProvider implements monaco.languages.HoverProvider
     }
 
     // Generic EL expression
-    parts.push('**EL 表达式**');
+    parts.push(t('completion.el.hover.title'));
     parts.push(`\`${expr}\``);
     if (elInfo.marker === '#') {
       parts.push('');
-      parts.push('*延迟表达式 (Deferred Expression)* — 在 JSP 生命周期的适当阶段求值。');
+      parts.push(t('completion.el.hover.deferred'));
     }
 
     return {
@@ -472,7 +486,8 @@ export class ElExpressionHoverProvider implements monaco.languages.HoverProvider
 /**
  * Register EL completion and hover providers with Monaco.
  */
-export function registerElExpressionProviders(): monaco.IDisposable {
+export function registerElExpressionProviders(i18n?: I18nService): monaco.IDisposable {
+  setJspI18n(i18n);
   const completionDisposable = monaco.languages.registerCompletionItemProvider(
     JSP_LANGUAGE_ID,
     new ElExpressionCompletionProvider(),

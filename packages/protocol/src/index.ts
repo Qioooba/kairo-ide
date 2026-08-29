@@ -563,6 +563,8 @@ export interface JdtStatus {
   stoppedAt?: string;
   /** JRE the agent is using to run the JDT LS. */
   jre?: string;
+  /** Probed major version of the host JRE (e.g. 21), when known. */
+  javaMajor?: number;
   /** Resolved path to the JDT LS launcher JAR. */
   jar?: string;
   /** Equinox launcher JAR (same as `jar`; kept for legacy UI). */

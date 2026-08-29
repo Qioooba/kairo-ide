@@ -1,4 +1,4 @@
-import { injectable, inject } from '@theia/core/shared/inversify';
+import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
 import { TreeDecorator } from '@theia/core/lib/browser/tree/tree-decorator';
 import { Tree, TreeNode, CompositeTreeNode } from '@theia/core/lib/browser/tree';
 import { Emitter, Event, MaybePromise } from '@theia/core/lib/common';
@@ -31,7 +31,10 @@ export class GitExplorerDecorator implements TreeDecorator {
   protected readonly emitter = new Emitter<(tree: Tree) => Map<string, WidgetDecoration.Data>>();
   readonly onDidChangeDecorations: Event<(tree: Tree) => Map<string, WidgetDecoration.Data>> = this.emitter.event;
 
-  constructor() {
+  // Subscribe in @postConstruct — injected properties are not available in
+  // the constructor (property injection happens after construction).
+  @postConstruct()
+  protected init(): void {
     this.gitService.onDidChangeStatus(() => {
       this.emitter.fire(tree => this.computeDecorations(tree));
     });

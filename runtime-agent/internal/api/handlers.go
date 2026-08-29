@@ -231,9 +231,43 @@ func (s *Server) handleProjectByID(w http.ResponseWriter, r *http.Request) {
 		writeOK(w, env, map[string]bool{"ok": true})
 	case http.MethodPut:
 		var project domain.Project
-		if err := json.Unmarshal(extractPayload(body), &project); err != nil {
-			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: err.Error()})
-			return
+		payload := extractPayload(body)
+		if err := json.Unmarshal(payload, &project); err != nil {
+			// Frontend sends ProjectConfig with encoding:{default:"..."} (protocol),
+			// while domain.Project expects encoding:"...". Handle both.
+			if strings.Contains(err.Error(), "encoding") {
+				var m map[string]json.RawMessage
+				if err2 := json.Unmarshal(payload, &m); err2 == nil {
+					if rawEnc, ok := m["encoding"]; ok {
+						// Try object form {default:"gbk", ...}
+						var encObj map[string]json.RawMessage
+						if err3 := json.Unmarshal(rawEnc, &encObj); err3 == nil {
+							if defRaw, ok := encObj["default"]; ok {
+								var defStr string
+								if err4 := json.Unmarshal(defRaw, &defStr); err4 == nil {
+									m["encoding"] = json.RawMessage(`"` + defStr + `"`)
+									if fixed, err5 := json.Marshal(m); err5 == nil {
+										if err6 := json.Unmarshal(fixed, &project); err6 == nil {
+											payload = fixed
+										} else {
+											writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: err.Error()})
+											return
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+				if project.Encoding == "" && project.ID == "" {
+					// still failed after fix attempt
+					writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: err.Error()})
+					return
+				}
+			} else {
+				writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: err.Error()})
+				return
+			}
 		}
 		if s.Services.ProjectStore == nil {
 			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInternal, Message: "ProjectStore not configured"})
@@ -318,7 +352,13 @@ func convertToProjectDetection(raw map[string]any) protocol.ProjectDetection {
 		// Layout is already populated by scanWorkspace
 	}
 	if layout, ok := raw["layout"].(map[string]any); ok {
-		if src, ok := layout["src"].([]any); ok {
+		// BUG-20260826-200: detectLayout stores "src" as []string, so the
+		// previous .([]any) assertion never matched and sourceDirs was
+		// always serialized as null. Accept both shapes.
+		switch src := layout["src"].(type) {
+		case []string:
+			pd.SourceDirs = append(pd.SourceDirs, src...)
+		case []any:
 			for _, s := range src {
 				if ss, ok := s.(string); ok {
 					pd.SourceDirs = append(pd.SourceDirs, ss)
@@ -348,7 +388,13 @@ func convertToProjectDetection(raw map[string]any) protocol.ProjectDetection {
 	}
 	if jdk, ok := raw["detectedJdk"].(map[string]any); ok {
 		if v, ok := jdk["version"].(string); ok {
-			pd.JDKVersion = v
+			// BUG-20260826-201: findJdkOnPath reports "unknown" when it can
+			// only locate JAVA_HOME. Emitting that placeholder made the
+			// import wizard prefill the JDK field with the literal string
+			// "unknown"; omit it so callers fall back to their default.
+			if v != "" && !strings.EqualFold(v, "unknown") {
+				pd.JDKVersion = v
+			}
 		}
 	}
 	if pd.BuildScript == "build.xml" {
@@ -369,6 +415,16 @@ func convertToProjectDetection(raw map[string]any) protocol.ProjectDetection {
 				pd.Warnings = append(pd.Warnings, ws)
 			}
 		}
+	}
+	// BUG-20260826-205: scanWorkspace never produced human-readable
+	// warnings, so the import wizard's warnings block was unreachable.
+	// Surface the two most common gaps so users can review them on
+	// step 2 before importing.
+	if pd.BuildScript == "" {
+		pd.Warnings = append(pd.Warnings, "No Ant build script (build.xml) found — the project will build with javac only.")
+	}
+	if len(pd.SourceDirs) == 0 {
+		pd.Warnings = append(pd.Warnings, "No Java source directory detected — verify the source layout before importing.")
 	}
 	return pd
 }

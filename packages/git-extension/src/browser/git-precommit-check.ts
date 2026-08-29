@@ -1,5 +1,6 @@
 import { injectable, inject } from '@theia/core/shared/inversify';
 import { Emitter, Event } from '@theia/core/lib/common/event';
+import { KairoI18nService } from '@kairo/i18n';
 import { GitService } from './git-service';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -78,6 +79,7 @@ const TIMEOUTS: Record<string, number> = {
 @injectable()
 export class GitPreCommitChecker {
     @inject(GitService) protected readonly gitService!: GitService;
+    @inject(KairoI18nService) protected readonly i18n!: KairoI18nService;
 
     protected readonly onDidChangeStatusEmitter = new Emitter<PreCommitCheckSummary>();
     readonly onDidChangeStatus: Event<PreCommitCheckSummary> = this.onDidChangeStatusEmitter.event;
@@ -181,7 +183,7 @@ export class GitPreCommitChecker {
                 this.summary.results.push({
                     type: check.type,
                     status: 'error',
-                    message: `检查执行失败: ${err instanceof Error ? err.message : String(err)}`,
+                    message: this.i18n.t('git.precommit.checkRunFailed', { msg: err instanceof Error ? err.message : String(err) }),
                 });
             }
         }
@@ -212,7 +214,7 @@ export class GitPreCommitChecker {
             return {
                 type: 'build',
                 status: 'error',
-                message: '未找到 Git 仓库根目录',
+                message: this.i18n.t('git.precommit.noRepoRoot'),
             };
         }
 
@@ -230,7 +232,7 @@ export class GitPreCommitChecker {
                 return {
                     type: 'build',
                     status: 'failed',
-                    message: `构建失败，${errorCount} 个错误`,
+                    message: this.i18n.t('git.precommit.buildFailed', { count: errorCount }),
                     details: output.slice(-2000),
                     errorCount,
                 };
@@ -238,7 +240,7 @@ export class GitPreCommitChecker {
             return {
                 type: 'build',
                 status: 'passed',
-                message: '构建通过',
+                message: this.i18n.t('git.precommit.buildPassed'),
                 details: output.slice(-500),
                 errorCount: 0,
             };
@@ -248,7 +250,7 @@ export class GitPreCommitChecker {
                 return {
                     type: 'build',
                     status: 'timed_out',
-                    message: '构建超时（120秒）',
+                    message: this.i18n.t('git.precommit.buildTimedOut'),
                     errorCount: NaN,
                 };
             }
@@ -259,7 +261,7 @@ export class GitPreCommitChecker {
             return {
                 type: 'build',
                 status: 'failed',
-                message: `构建失败，${errorCount} 个错误`,
+                message: this.i18n.t('git.precommit.buildFailed', { count: errorCount }),
                 details: output.slice(-2000),
                 errorCount,
             };
@@ -273,7 +275,7 @@ export class GitPreCommitChecker {
             return {
                 type: 'test',
                 status: 'error',
-                message: '未找到 Git 仓库根目录',
+                message: this.i18n.t('git.precommit.noRepoRoot'),
             };
         }
 
@@ -291,7 +293,7 @@ export class GitPreCommitChecker {
                 return {
                     type: 'test',
                     status: 'failed',
-                    message: `测试失败: ${passCount} 通过, ${failCount} 失败`,
+                    message: this.i18n.t('git.precommit.testFailed', { pass: passCount, fail: failCount }),
                     details: output.slice(-2000),
                     passCount,
                     failCount,
@@ -300,7 +302,7 @@ export class GitPreCommitChecker {
             return {
                 type: 'test',
                 status: 'passed',
-                message: `测试通过: ${passCount} 个测试全部通过`,
+                message: this.i18n.t('git.precommit.testPassed', { count: passCount }),
                 passCount,
                 failCount: 0,
             };
@@ -310,7 +312,7 @@ export class GitPreCommitChecker {
                 return {
                     type: 'test',
                     status: 'timed_out',
-                    message: '测试超时（120秒）',
+                    message: this.i18n.t('git.precommit.testTimedOut'),
                 };
             }
             const stderr = execErr.stderr || '';
@@ -320,7 +322,7 @@ export class GitPreCommitChecker {
             return {
                 type: 'test',
                 status: 'failed',
-                message: `测试失败: ${passCount} 通过, ${failCount} 失败`,
+                message: this.i18n.t('git.precommit.testFailed', { pass: passCount, fail: failCount }),
                 details: output.slice(-2000),
                 passCount,
                 failCount,
@@ -335,7 +337,7 @@ export class GitPreCommitChecker {
             return {
                 type: 'lint',
                 status: 'error',
-                message: '未找到 Git 仓库根目录',
+                message: this.i18n.t('git.precommit.noRepoRoot'),
             };
         }
 
@@ -359,7 +361,7 @@ export class GitPreCommitChecker {
                 return {
                     type: 'lint',
                     status: 'passed',
-                    message: '没有暂存的 Java 文件需要检查',
+                    message: this.i18n.t('git.precommit.lintNoStagedFiles'),
                     errorCount: 0,
                 };
             }
@@ -378,7 +380,7 @@ export class GitPreCommitChecker {
                     return {
                         type: 'lint',
                         status: 'failed',
-                        message: `编译检查发现 ${errorCount} 个问题`,
+                        message: this.i18n.t('git.precommit.lintFoundIssues', { count: errorCount }),
                         details: output.slice(-2000),
                         errorCount,
                     };
@@ -386,7 +388,7 @@ export class GitPreCommitChecker {
                 return {
                     type: 'lint',
                     status: 'passed',
-                    message: '编译检查通过，未发现问题',
+                    message: this.i18n.t('git.precommit.lintPassed'),
                     errorCount: 0,
                 };
             } catch (err: unknown) {
@@ -395,7 +397,7 @@ export class GitPreCommitChecker {
                     return {
                         type: 'lint',
                         status: 'timed_out',
-                        message: '编译检查超时（30秒）',
+                        message: this.i18n.t('git.precommit.lintTimedOut'),
                     };
                 }
                 const stderr = execErr.stderr || '';
@@ -405,7 +407,7 @@ export class GitPreCommitChecker {
                 return {
                     type: 'lint',
                     status: 'failed',
-                    message: `编译检查发现 ${errorCount} 个问题`,
+                    message: this.i18n.t('git.precommit.lintFoundIssues', { count: errorCount }),
                     details: output.slice(-2000),
                     errorCount,
                 };
@@ -414,7 +416,7 @@ export class GitPreCommitChecker {
             return {
                 type: 'lint',
                 status: 'error',
-                message: `编译检查执行失败: ${err instanceof Error ? err.message : String(err)}`,
+                message: this.i18n.t('git.precommit.lintRunFailed', { msg: err instanceof Error ? err.message : String(err) }),
             };
         }
     }

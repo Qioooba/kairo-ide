@@ -13,8 +13,7 @@ import { CommandContribution, MenuContribution } from '@theia/core/lib/common';
 import { KeybindingContribution } from '@theia/core/lib/browser/keybinding';
 import { KairoExtensionsWidget } from './kairo-extensions-widget';
 import { KairoExtensionsContribution } from './kairo-extensions-contribution';
-import { KairoExtensionService } from '../common/kairo-extension-protocol';
-import { KAIRO_EXTENSION_SERVICE_PATH } from '../node/kairo-extensions-backend-module';
+import { KairoExtensionService, KAIRO_EXTENSION_SERVICE_PATH } from '../common/kairo-extension-protocol';
 import { WebSocketConnectionProvider } from '@theia/core/lib/browser';
 
 export const KAIRO_EXTENSIONS_FACTORY_ID = 'kairo-extensions';

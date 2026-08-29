@@ -576,17 +576,38 @@ func (l *layout) layoutVersion() int {
 
 // hostConfigDir returns the absolute path to the JDT LS
 // config directory for the OS this agent is running on.
+// On arm64 macOS/Linux it prefers the _arm variant (e.g. config_mac_arm)
+// — picking the x86 config on an arm64 host makes the Equinox launcher
+// exit code=1 immediately (KAIRO-RC-WEB-251, also BUG-20260826-403).
 func hostConfigDir(root string) (string, error) {
+	var base string
 	switch runtime.GOOS {
 	case "linux":
-		return filepath.Join(root, "config_linux"), nil
+		base = "config_linux"
 	case "darwin":
-		return filepath.Join(root, "config_mac"), nil
+		base = "config_mac"
 	case "windows":
-		return filepath.Join(root, "config_win"), nil
+		base = "config_win"
 	default:
 		return "", fmt.Errorf("jdtls: unsupported OS %q", runtime.GOOS)
 	}
+	// Prefer _arm variant on arm64 where JDT LS ships per-arch configs.
+	if runtime.GOARCH == "arm64" && runtime.GOOS != "windows" {
+		arm := filepath.Join(root, base+"_arm")
+		if st, err := os.Stat(arm); err == nil && st.IsDir() {
+			return arm, nil
+		}
+	}
+	candidate := filepath.Join(root, base)
+	if st, err := os.Stat(candidate); err == nil && st.IsDir() {
+		return candidate, nil
+	}
+	// Fallback to generic config (older distributions)
+	fallback := filepath.Join(root, "config")
+	if st, err := os.Stat(fallback); err == nil && st.IsDir() {
+		return fallback, nil
+	}
+	return candidate, nil
 }
 
 // launcherVersionFromFilename extracts the version suffix from

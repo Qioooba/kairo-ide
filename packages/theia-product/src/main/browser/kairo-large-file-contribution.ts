@@ -85,18 +85,39 @@ implements FrontendApplicationContribution, CommandContribution {
     if (!(editor instanceof MonacoEditor) || this.states.has(editor)) {
       return;
     }
-    const control = editor.getControl();
-    const model = control.getModel();
-    if (!model) {
-      return;
-    }
+    // BUG-20260826-111: at onCreated time the Monaco model may not be
+    // attached yet (large documents load asynchronously). Wait for it
+    // instead of silently returning — otherwise the file is never tracked.
+    const attachWhenReady = (): void => {
+      if (this.states.has(editor)) return;
+      const control = editor.getControl();
+      const model = control?.getModel();
+      if (!control || !model) {
+        setTimeout(attachWhenReady, 200);
+        return;
+      }
+      this.trackEditorModel(widget, editor, control, model);
+    };
+    attachWhenReady();
+  }
 
+  protected trackEditorModel(widget: EditorWidget, editor: MonacoEditor, control: ReturnType<MonacoEditor['getControl']>, model: NonNullable<ReturnType<ReturnType<MonacoEditor['getControl']>['getModel']>>): void {
     this.states.set(editor, {
       tier: 'normal',
       forcedFullFeatures: false,
       originalLanguage: model.getLanguageId(),
       originalOptions: control.getRawOptions(),
     });
+    // BUG-20260826-111: large documents are usually not loaded yet at
+    // creation (getValueLength() === 0), so the initial classify always
+    // produced 'normal'. Re-classify once the content arrives.
+    if (model.getValueLength() === 0) {
+      const once = model.onDidChangeContent(() => {
+        once.dispose();
+        this.applyPolicy(editor);
+      });
+      this.toDispose.push(once);
+    }
     this.applyPolicy(editor);
 
     this.toDispose.push(editor.onDocumentContentChanged(() => {

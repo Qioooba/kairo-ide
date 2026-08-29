@@ -6,12 +6,10 @@
  */
 
 import { ContainerModule } from '@theia/core/shared/inversify';
-import { KairoExtensionService } from '../common/kairo-extension-protocol';
 import { KairoExtensionServiceImpl } from './kairo-extension-service';
 import { JsonRpcConnectionHandler, ConnectionHandler } from '@theia/core/lib/common/messaging';
 
-export const KAIRO_EXTENSION_SERVICE_PATH = '/services/kairo-extensions';
-
+import { KairoExtensionService, KAIRO_EXTENSION_SERVICE_PATH } from '../common/kairo-extension-protocol';
 export default new ContainerModule((bind, unbind, isBound, rebind) => {
   // Bind the extension service implementation
   bind(KairoExtensionServiceImpl).toSelf().inSingletonScope();

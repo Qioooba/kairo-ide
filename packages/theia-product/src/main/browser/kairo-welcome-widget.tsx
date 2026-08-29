@@ -15,6 +15,7 @@
 import * as React from 'react';
 import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
+import { PreferenceService } from '@theia/core/lib/common/preferences';
 import { Message } from '@theia/core/shared/@lumino/messaging';
 import { CommandService } from '@theia/core/lib/common/command';
 import { MessageService } from '@theia/core/lib/common/message-service';
@@ -25,6 +26,17 @@ import { KairoI18nService, I18nContext } from '@kairo/i18n';
 import type { RecentProject } from '@kairo/protocol';
 
 export const KAIRO_WELCOME_FACTORY_ID = 'kairo-welcome';
+
+/**
+ * Marks a Welcome opening as an explicit user/startup request for THIS
+ * session. Layout-restorer recreations of last-session state do not set
+ * it, so a restored tab still honors kairo.general.showWelcome=false.
+ */
+let welcomeExplicitlyRequested = false;
+
+export function markWelcomeExplicitlyRequested(): void {
+  welcomeExplicitlyRequested = true;
+}
 
 interface WelcomeAction {
   testId: string;
@@ -44,6 +56,7 @@ export class KairoWelcomeWidget extends ReactWidget {
   @inject(KairoProjectService) protected readonly projectService!: KairoProjectService;
   @inject(WorkspaceService) protected readonly workspaceService!: WorkspaceService;
   @inject(KairoI18nService) protected readonly i18n!: KairoI18nService;
+  @inject(PreferenceService) protected readonly preferences!: PreferenceService;
 
   constructor() {
     super();
@@ -57,6 +70,50 @@ export class KairoWelcomeWidget extends ReactWidget {
   protected init(): void {
     this.updateTitle();
     this.toDispose.push(this.i18n.onDidChangeLanguage(() => this.updateTitle()));
+    this.installShowWelcomeGuard();
+  }
+
+  /**
+   * BUG-20260826-200 (TC-WELC-011): the shell-layout restorer re-creates
+   * whatever was open last session, so a Welcome tab auto-opened before
+   * the user set kairo.general.showWelcome=false would resurrect on every
+   * restart even though maybeOpenWelcome skips opening. Guard the tab
+   * itself: whenever the (possibly late-syncing) preference service reports
+   * showWelcome=false and this tab was not explicitly requested this
+   * session, close it. Subscribing (instead of a one-shot check) keeps the
+   * guard correct no matter when the user settings actually arrive.
+   */
+  protected installShowWelcomeGuard(): void {
+    let disposed = false;
+    const disposeSub = () => { disposed = true; };
+    const evaluate = (): boolean => {
+      try {
+        const showWelcome = this.preferences.get('kairo.general.showWelcome', true) as unknown as boolean; // TEMP-DEBUG
+        if (!welcomeExplicitlyRequested && showWelcome === false && this.isAttached) {
+          this.close();
+          return true;
+        }
+      } catch {
+        /* preference service unavailable — keep the tab */
+      }
+      return false;
+    };
+    void (async () => {
+      try {
+        await this.preferences.ready;
+      } catch {
+        return;
+      }
+      if (disposed || evaluate()) return;
+      try {
+        const sub = this.preferences.onPreferenceChanged(() => {
+          if (disposed || evaluate()) sub.dispose();
+        });
+        this.toDispose.push(sub);
+      } catch {
+        /* service went away */
+      }
+    })();
   }
 
   protected override onActivateRequest(msg: Message): void {

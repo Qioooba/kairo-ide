@@ -10,7 +10,7 @@ import { injectable, inject, postConstruct } from '@theia/core/shared/inversify'
 import { ILogger } from '@theia/core/lib/common/logger';
 import { Disposable } from '@theia/core/lib/common/disposable';
 import { Emitter, Event } from '@theia/core/lib/common/event';
-import { JdtLsManager, JdtLsEvent, JdtLsState, JdtLsDistribution } from './jdt-ls-manager';
+import { JdtLsManager, JdtLsEvent, JdtLsState, JdtLsDistribution, probeJavaMajorForBinDir } from './jdt-ls-manager';
 import {
   LSPPublishDiagnosticsParams,
   LSPCompletionList,
@@ -55,6 +55,8 @@ export class JdtLsService implements JdtLsBackendService {
   protected readonly onEventEmitter = new Emitter<JdtLsServiceEvent>();
   readonly onEvent: Event<JdtLsServiceEvent> = this.onEventEmitter.event;
   protected subscription: Disposable | undefined;
+  /** home/jreHome of the last successful start request (for $inspect). */
+  protected lastStartOpts: { home?: string; jreHome?: string } | undefined;
   /**
    * The frontend client proxy, set by the messaging
    * ConnectionHandler when a browser connects. Events are
@@ -92,6 +94,10 @@ export class JdtLsService implements JdtLsBackendService {
   }
 
   async start(opts: { rootUri: string; workspaceDataDir: string; sourceLevel?: string; home?: string; jreHome?: string }): Promise<void> {
+    // Remember the resolved install/JRE so a later $inspect() can reuse
+    // them even when KAIRO_JDT_LS_HOME is not set in the environment
+    // (launch-descriptor driven starts).
+    this.lastStartOpts = { home: opts.home, jreHome: opts.jreHome };
     if (!this.manager) {
       this.manager = new JdtLsManager(this.logger);
       this.subscription = this.manager.onEvent(e => this.handleManagerEvent(e));
@@ -304,12 +310,13 @@ export class JdtLsService implements JdtLsBackendService {
     return this.state();
   }
 
-  async $inspect(): Promise<{ ok: true; home: string; jre: string; launcherJar: string } | { ok: false; reason: string }> {
-    const r = await this.inspect();
+  async $inspect(): Promise<{ ok: true; home: string; jre: string; launcherJar: string; javaMajor?: number } | { ok: false; reason: string }> {
+    const r = await this.inspect(this.lastStartOpts?.home, this.lastStartOpts?.jreHome);
     if (!r.ok) {
       return r;
     }
-    return { ok: true, home: r.dist.home, jre: r.dist.jre, launcherJar: r.dist.launcherJar };
+    const javaMajor = await probeJavaMajorForBinDir(r.dist.jre);
+    return { ok: true, home: r.dist.home, jre: r.dist.jre, launcherJar: r.dist.launcherJar, javaMajor };
   }
 
   async $didOpen(p: { uri: string; languageId: string; version: number; text: string }): Promise<void> {

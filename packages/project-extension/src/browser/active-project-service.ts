@@ -279,9 +279,14 @@ export class ActiveProjectService {
     }
 
     protected projectInfoFromYaml(ctx: WorkspaceContext, yaml: KairoProjectYaml): ProjectInfo {
+        // BUG-20260826-301: prefer the folder that actually owns the
+        // detected .kairo/project.yaml (the project may live in a
+        // subfolder of the workspace, e.g. workspace/legacy-sample).
+        const detectedRoot = this.workspaceContext.detectedProjectRoot;
+        const base = detectedRoot ?? ctx.workspaceRoot;
         const root = !yaml.root || yaml.root === '.'
-            ? ctx.workspaceRoot
-            : `${ctx.workspaceRoot.replace(/[/\\]+$/, '')}/${yaml.root}`.replace(/\\/g, '/');
+            ? base
+            : `${base.replace(/[/\\]+$/, '')}/${yaml.root}`.replace(/\\/g, '/');
         const projectId = (yaml.name || 'project')
             .toLowerCase()
             .replace(/[^a-z0-9_.-]+/g, '-')

@@ -7,7 +7,7 @@
  *  - Lifecycle tasks as runnable buttons
  */
 import * as React from 'react';
-import { injectable, inject } from '@theia/core/shared/inversify';
+import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import { MessageService } from '@theia/core/lib/common';
 import { RuntimeConnectionService } from '@kairo/runtime-extension';
@@ -244,11 +244,24 @@ export class MavenViewWidget extends ReactWidget {
   constructor() {
     super();
     this.id = MavenViewWidget.ID;
-    const t: TFunction = (this.i18n?.t.bind(this.i18n)) as TFunction | undefined
-      ?? ((key: KairoI18nKey) => String(key));
-    this.title.label = t('widget.maven.title');
-    this.title.caption = t('widget.maven.caption');
     this.addClass('kairo-widget');
+  }
+
+  /**
+   * Title must be applied after DI completes and re-applied when the
+   * i18n pack finishes loading — resolving it in the constructor left
+   * the raw key "widget.maven.title" as the visible tab label
+   * (BUG-20260826-107).
+   */
+  @postConstruct()
+  protected init(): void {
+    const apply = (): void => {
+      this.title.label = this.i18n.t('widget.maven.title');
+      this.title.caption = this.i18n.t('widget.maven.caption');
+      this.update();
+    };
+    apply();
+    this.toDispose.push(this.i18n.onDidChangeLanguage(apply));
   }
 
   protected render(): React.ReactNode {

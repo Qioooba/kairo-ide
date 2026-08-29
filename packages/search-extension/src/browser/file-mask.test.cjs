@@ -29,6 +29,19 @@ test('parseFileMask supports IDEA ! excludes and comma lists', () => {
   assert.deepStrictEqual(parseFileMask('  ,  '), { include: undefined, exclude: undefined });
 });
 
+test('parseFileMask expands bare exclude words to filename-substring globs', () => {
+  // "!Test" must exclude TestHolder.java — an include-style "*.Test"
+  // pseudo-extension would never match a real file name.
+  assert.deepStrictEqual(parseFileMask('java, !Test'), {
+    include: ['*.java'],
+    exclude: ['*Test*'],
+  });
+  assert.deepStrictEqual(parseFileMask('!Test*.java'), {
+    include: undefined,
+    exclude: ['Test*.java'], // already a glob — kept verbatim
+  });
+});
+
 test('mergeGlobs deduplicates', () => {
   assert.deepStrictEqual(mergeGlobs(['*.java'], ['*.java', '*.xml']), ['*.java', '*.xml']);
   assert.strictEqual(mergeGlobs(undefined, undefined), undefined);

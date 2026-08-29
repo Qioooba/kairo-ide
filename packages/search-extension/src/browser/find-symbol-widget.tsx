@@ -79,7 +79,14 @@ export class FindSymbolModel {
     this.publish({ status: 'loading', query: trimmed, items: [], selectedIndex: 0 });
 
     try {
-      const symbols = await this.java.workspaceSymbols(trimmed);
+      // An unavailable language server must degrade to "No results", not an
+      // error — the LS being stopped is a normal state, not a failure.
+      let symbols: Awaited<ReturnType<JavaLanguageClient['workspaceSymbols']>> = [];
+      try {
+        symbols = await this.java.workspaceSymbols(trimmed);
+      } catch {
+        symbols = [];
+      }
       if (controller.signal.aborted || generation !== this.generation) return this.state;
 
       const items = (symbols ?? [])
@@ -311,8 +318,23 @@ export class FindSymbolWidget extends ReactWidget {
     }));
   }
 
+  /** IDEA popups close on Escape regardless of inner focus. */
+  protected readonly handleEscape = (event: KeyboardEvent): void => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      this.close();
+    }
+  };
+
+  protected override onBeforeDetach(message: Message): void {
+    window.removeEventListener('keydown', this.handleEscape, true);
+    super.onBeforeDetach(message);
+  }
+
   protected onAfterAttach(message: Message): void {
     super.onAfterAttach(message);
+    window.addEventListener('keydown', this.handleEscape, true);
     this.unsubscribe ??= this.model.subscribe(state => {
       this.state = state;
       this.update();

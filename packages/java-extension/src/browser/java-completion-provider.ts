@@ -305,8 +305,9 @@ export class JavaCompletionProvider {
 
   async provideImplementation(uri: string, line: number, character: number): Promise<LSPLocation[]> {
     const result = await this.whenReady('implementation', null, () => this.client.implementation({ uri, line, character }));
-    if (!result) return [];
-    return Array.isArray(result) ? result : [result];
+    const arr = (!result) ? [] : Array.isArray(result) ? result : [result];
+    console.info(`[kairo-java] provideImplementation uri=${uri} pos=${line}:${character} -> ${arr.length}`);
+    return arr;
   }
 
   async provideHover(uri: string, line: number, character: number): Promise<LSPHover | null> {
@@ -371,11 +372,26 @@ export class JavaCompletionProvider {
   }
 
   protected async whenReady<T>(feature: string, empty: T, request: () => Promise<T>): Promise<T> {
-    if (await this.client.fetchState() !== 'ready') {
-      return empty;
+    let st = await this.client.fetchState();
+    if (st !== 'ready') {
+      // For interactive features like formatting, wait a bit for JDT to become ready
+      // (it is often still initializing when the user first triggers a command).
+      if (st === 'starting' || st === 'initializing' || st === 'uninitialized') {
+        for (let i = 0; i < 10; i++) {
+          await new Promise(r => setTimeout(r, 500));
+          st = await this.client.fetchState();
+          if (st === 'ready') break;
+        }
+      }
+      if (st !== 'ready') {
+        this.logger.warn(`[JavaCompletionProvider] ${feature} skipped: JDT LS state=${st}`);
+        return empty;
+      }
     }
     try {
-      return await request();
+      const res = await request();
+      this.logger.info(`[JavaCompletionProvider] ${feature} succeeded len=${(res as any)?.length ?? 0}`);
+      return res;
     } catch (err) {
       this.logger.warn(`[JavaCompletionProvider] ${feature} failed: ${String(err)}`);
       return empty;

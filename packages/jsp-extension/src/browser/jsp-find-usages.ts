@@ -23,42 +23,27 @@ import { WorkspaceService } from '@theia/workspace/lib/browser/workspace-service
 import { JSP_LANGUAGE_ID } from './jsp-monarch';
 import { JspJavaParser } from './jsp-java-nav';
 import type { JspNavServices } from './jsp-nav-services';
-import { parseWebXml, type ServletMapping as _ServletMapping } from './webxml-parser';
+import {
+  WEB_XML_RE,
+  findWebXmlClassReferences,
+  getWorkspaceRootUri,
+  isInsideXmlElement,
+  isJavaClassName,
+  resolveWorkspaceJavaClass,
+  walkWorkspaceFiles,
+} from './workspace-layout';
 
 /** Timeout for each search phase. */
 const SEARCH_TIMEOUT_MS = 30_000;
-
-/** Common Java source roots. */
-const _SRC_ROOTS = [
-  'src/main/java',
-  'src',
-  'src/java',
-  'WEB-INF/src',
-  'web/WEB-INF/src',
-];
-
-/** Common web.xml locations relative to workspace root. */
-const WEB_XML_PATHS = [
-  'WEB-INF/web.xml',
-  'web/WEB-INF/web.xml',
-  'webapp/WEB-INF/web.xml',
-  'WebContent/WEB-INF/web.xml',
-  'src/main/webapp/WEB-INF/web.xml',
-];
 
 /** JSP file extensions. */
 const JSP_EXTENSIONS = ['.jsp', '.jspx', '.tag', '.tagx'];
 
 /** JSP reference patterns that indicate use of a Java class. */
 const USE_BEAN_RE = /<jsp:useBean\b[^>]*\bclass\s*=\s*["']([^"']+)["']/gi;
-const _TAGLIB_RE = /<%@\s+taglib\b[^>]*\buri\s*=\s*["']([^"']+)["']/gi;
-const _IMPORT_RE = /<%@\s+page\s+[^%]*\bimport\s*=\s*["']([^"']+)["'][^%]*%>/gi;
 
 /** URI pattern for servlet URL references in JSP: action="..." or form action="..." */
 const SERVLET_URL_RE = /(?:action|href)\s*=\s*["']([^"']+)["']/gi;
-
-/** Matches WEB-INF/web.xml in the URI path. */
-const WEB_XML_RE = /WEB-INF[/\\]web\.xml$/i;
 
 /** Result of a find-usages search. */
 export interface JspFindUsagesResult {
@@ -182,12 +167,11 @@ export class JspFindUsagesProvider {
     className: string,
     token: monaco.CancellationToken,
   ): Promise<monaco.languages.Location[]> {
-    const roots = await this.workspaceService.roots;
-    if (roots.length === 0) return [];
+    const rootUri = await getWorkspaceRootUri(this.workspaceService);
+    if (!rootUri) return [];
 
     const results: monaco.languages.Location[] = [];
     const simpleName = className.split('.').pop()!;
-    const rootUri = URI.fromFilePath(roots[0].resource.path.toString());
 
     // Walk the workspace to find JSP files
     const jspFiles = await this.findJspFiles(rootUri, token);
@@ -283,11 +267,10 @@ export class JspFindUsagesProvider {
     urlPattern: string,
     token: monaco.CancellationToken,
   ): Promise<monaco.languages.Location[]> {
-    const roots = await this.workspaceService.roots;
-    if (roots.length === 0) return [];
+    const rootUri = await getWorkspaceRootUri(this.workspaceService);
+    if (!rootUri) return [];
 
     const results: monaco.languages.Location[] = [];
-    const rootUri = URI.fromFilePath(roots[0].resource.path.toString());
 
     const jspFiles = await this.findJspFiles(rootUri, token);
     if (token.isCancellationRequested) return results;
@@ -331,32 +314,7 @@ export class JspFindUsagesProvider {
     className: string,
     token: monaco.CancellationToken,
   ): Promise<monaco.languages.Location[]> {
-    const roots = await this.workspaceService.roots;
-    if (roots.length === 0) return [];
-
-    const results: monaco.languages.Location[] = [];
-    const rootUri = URI.fromFilePath(roots[0].resource.path.toString());
-
-    for (const webXmlPath of WEB_XML_PATHS) {
-      if (token.isCancellationRequested) break;
-      const webXmlUri = rootUri.resolve(webXmlPath);
-      try {
-        const content = await this.fileService.read(webXmlUri, { encoding: 'utf-8' });
-        const parsed = parseWebXml(content.value);
-        if (!parsed) continue;
-        if (parsed.classToServlet[className]) {
-          const line = findLineInContent(content.value, className);
-          results.push({
-            uri: monaco.Uri.parse(webXmlUri.toString()),
-            range: new monaco.Range(line, 1, line, 1),
-          });
-        }
-      } catch {
-        // web.xml not found at this path
-      }
-    }
-
-    return results;
+    return findWebXmlClassReferences(this.fileService, this.workspaceService, className, token);
   }
 
   // ── File discovery ────────────────────────────────────────────
@@ -364,42 +322,18 @@ export class JspFindUsagesProvider {
   /**
    * Recursively find all JSP files in the workspace.
    */
-  private async findJspFiles(
+  private findJspFiles(
     rootUri: URI,
     token: monaco.CancellationToken,
     maxFiles: number = 500,
   ): Promise<URI[]> {
-    const results: URI[] = [];
-    await this.walkDir(rootUri, token, results, maxFiles);
-    return results;
-  }
-
-  private async walkDir(
-    uri: URI,
-    token: monaco.CancellationToken,
-    results: URI[],
-    maxFiles: number,
-  ): Promise<void> {
-    if (token.isCancellationRequested || results.length >= maxFiles) return;
-    try {
-      const stat = await this.fileService.resolve(uri, { resolveMetadata: false });
-      if (!stat.children) return;
-      for (const child of stat.children) {
-        if (token.isCancellationRequested || results.length >= maxFiles) return;
-        if (child.isDirectory) {
-          // Skip known non-source directories
-          const basename = child.resource.path.base;
-          if (basename.startsWith('.') || basename === 'node_modules' || basename === 'lib' || basename === 'dist') {
-            continue;
-          }
-          await this.walkDir(child.resource, token, results, maxFiles);
-        } else if (JSP_EXTENSIONS.some(ext => child.resource.path.base.endsWith(ext))) {
-          results.push(child.resource);
-        }
-      }
-    } catch {
-      // Skip unreadable directories
-    }
+    return walkWorkspaceFiles(
+      this.fileService,
+      rootUri,
+      base => JSP_EXTENSIONS.some(ext => base.endsWith(ext)),
+      token,
+      maxFiles,
+    );
   }
 }
 
@@ -471,7 +405,7 @@ export function registerJspFindUsages(services: JspNavServices): monaco.IDisposa
         if (!isJavaClassName(className)) return [];
 
         // Check if we're inside a servlet-class element
-        if (!isInsideServletClass(model, position)) return [];
+        if (!isInsideXmlElement(model, position, 'servlet-class')) return [];
 
         const result = await provider.findUsages(className, model.uri.toString(), token);
         return [...result.jspReferences, ...result.javaReferences, ...result.webXmlReferences];
@@ -494,34 +428,4 @@ function isJavaIdentChar(code: number): boolean {
     code === 0x5f ||
     code === 0x24
   );
-}
-
-function isJavaClassName(name: string): boolean {
-  return /^[a-zA-Z_][\w]*(?:\.[a-zA-Z_][\w]*)+$/.test(name);
-}
-
-function isInsideServletClass(
-  model: monaco.editor.ITextModel,
-  position: monaco.Position,
-): boolean {
-  const text = model.getValue();
-  const offset = model.getOffsetAt(position);
-  const before = text.substring(0, offset);
-  const openIdx = before.lastIndexOf('<servlet-class>');
-  if (openIdx === -1) return false;
-  const closeIdx = before.lastIndexOf('</servlet-class>');
-  if (closeIdx > openIdx) return false;
-  const after = text.substring(offset);
-  const endCloseIdx = after.indexOf('</servlet-class>');
-  return endCloseIdx !== -1;
-}
-
-function findLineInContent(content: string, search: string): number {
-  const lines = content.split('\n');
-  for (let i = 0; i < lines.length; i++) {
-    if (lines[i].includes(search)) {
-      return i + 1;
-    }
-  }
-  return 1;
 }

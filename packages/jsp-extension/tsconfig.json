@@ -10,6 +10,7 @@
   "include": ["src/**/*.ts"],
   "exclude": ["node_modules", "lib", "**/*.test.ts"],
   "references": [
+    { "path": "../i18n" },
     { "path": "../java-extension" },
     { "path": "../protocol" },
     { "path": "../runtime-extension" }

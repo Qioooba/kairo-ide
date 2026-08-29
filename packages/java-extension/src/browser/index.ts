@@ -138,6 +138,7 @@ import { JavaClassDecompilerContribution } from './java-class-decompiler';
 import { JavaDocumentSyncContribution } from './java-document-sync';
 import { JavaDiagnosticsManager } from './java-diagnostics-manager';
 import { JavaIndexProgressService } from './java-index-progress';
+import { JavaIndexProgressUiContribution } from './java-index-progress-ui';
 import { JavaOrganizeImports } from './java-organize-imports';
 import { JavaSafeDelete } from './java-safe-delete';
 import { JavaRefactoring } from './java-refactoring';
@@ -200,6 +201,9 @@ export function bindJavaLanguageClientContribution(bind: interfaces.Bind): void 
     // so they appear in the Problems panel alongside editor markers.
     bind(FrontendApplicationContribution).toService(JavaDiagnosticsManager);
     bind(JavaIndexProgressService).toSelf().inSingletonScope();
+    bind(JavaIndexProgressUiContribution).toSelf().inSingletonScope();
+    bind(FrontendApplicationContribution).toService(JavaIndexProgressUiContribution);
+    bind(CommandContribution).toService(JavaIndexProgressUiContribution);
     bind(JavaOrganizeImports).toSelf().inSingletonScope();
     bind(JavaSafeDelete).toSelf().inSingletonScope();
     bind(JavaRefactoring).toSelf().inSingletonScope();

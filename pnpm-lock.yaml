@@ -329,6 +329,9 @@ importers:
 
   packages/jsp-extension:
     dependencies:
+      '@kairo/i18n':
+        specifier: workspace:*
+        version: link:../i18n
       '@kairo/java-extension':
         specifier: workspace:*
         version: link:../java-extension

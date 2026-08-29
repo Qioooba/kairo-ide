@@ -5,6 +5,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -63,6 +64,68 @@ type LinkedResource struct {
 	LocationURI string `xml:"locationURI,omitempty"`
 }
 
+// minJDTCompliance is the lowest compiler compliance the bundled
+// JDT LS can actually build with. JDT 1.5x running on a host JDK 21
+// cannot resolve compliance/source/target below 1.8: the project
+// still imports and syntax diagnostics run, but JDT's compiler
+// environment fails to initialise and the search engine silently
+// dies — textDocument/implementation and textDocument/references
+// return [] for every symbol (BUG-20260826-400). Legacy 1.5–1.7
+// sources compile cleanly under 1.8 semantics, so the *Eclipse*
+// project model is clamped up while KairoJavaConfig.ini keeps the
+// real project level for javac/Ant builds (ADR-0017 降级策略).
+const minJDTCompliance = "1.8"
+
+// clampCompliance returns level raised to minJDTCompliance when it
+// denotes an older release. Accepts "1.5".."1.8" and bare majors
+// ("8", "11", "17"); unknown strings are returned unchanged.
+func clampCompliance(level string) string {
+	lv, ok := complianceValue(level)
+	if !ok {
+		return level
+	}
+	floor, _ := complianceValue(minJDTCompliance)
+	if lv < floor {
+		return minJDTCompliance
+	}
+	return normalizeCompliance(level)
+}
+
+// complianceValue maps a release string to a comparable integer:
+// "1.6" → 6, "8" → 8, "11" → 11.
+func complianceValue(level string) (int, bool) {
+	level = strings.TrimSpace(level)
+	if level == "" {
+		return 0, false
+	}
+	parts := strings.SplitN(level, ".", 2)
+	major, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return 0, false
+	}
+	if major != 1 || len(parts) == 1 {
+		return major, true
+	}
+	minor, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return 0, false
+	}
+	return minor, true
+}
+
+// normalizeCompliance renders a release in Eclipse's canonical
+// "1.x" form for legacy levels and bare form for modern ones.
+func normalizeCompliance(level string) string {
+	v, ok := complianceValue(level)
+	if !ok {
+		return level
+	}
+	if v <= 8 {
+		return fmt.Sprintf("1.%d", v)
+	}
+	return fmt.Sprintf("%d", v)
+}
+
 func renderClasspath(proj Project, srcRoots, testSrcRoots []string, output string, libs, refLibs []string) Classpath {
 	cp := Classpath{ProjectID: proj.ProjectID}
 	// Eclipse resolves src/output paths against the PROJECT
@@ -95,7 +158,7 @@ func renderClasspath(proj Project, srcRoots, testSrcRoots []string, output strin
 	// returned zero completions everywhere (KAIRO-RC-WEB-251).
 	jreName := "org.eclipse.jdt.launching.JRE_CONTAINER"
 	if proj.SourceLevel != "" {
-		jreName += "/org.eclipse.jdt.internal.debug.ui.launcher.StandardVMType/JavaSE-" + proj.SourceLevel
+		jreName += "/org.eclipse.jdt.internal.debug.ui.launcher.StandardVMType/JavaSE-" + clampCompliance(proj.SourceLevel)
 	}
 	cp.ClasspathEntries = append(cp.ClasspathEntries, ClasspathEntry{
 		Kind: "con",
@@ -148,13 +211,17 @@ func renderKairoConfig(proj Project) string {
 }
 
 func renderJDTCorePrefs(proj Project) string {
+	// Clamp to minJDTCompliance — see the constant's comment: lower
+	// levels silently kill JDT's search engine on host JDK 21.
+	source := clampCompliance(proj.SourceLevel)
+	target := clampCompliance(proj.TargetLevel)
 	var b strings.Builder
 	b.WriteString("eclipse.preferences.version=1\n")
-	fmt.Fprintf(&b, "org.eclipse.jdt.core.compiler.compliance=%s\n", proj.SourceLevel)
-	fmt.Fprintf(&b, "org.eclipse.jdt.core.compiler.source=%s\n", proj.SourceLevel)
-	fmt.Fprintf(&b, "org.eclipse.jdt.core.compiler.target=%s\n", proj.TargetLevel)
+	fmt.Fprintf(&b, "org.eclipse.jdt.core.compiler.compliance=%s\n", source)
+	fmt.Fprintf(&b, "org.eclipse.jdt.core.compiler.source=%s\n", source)
+	fmt.Fprintf(&b, "org.eclipse.jdt.core.compiler.target=%s\n", target)
 	fmt.Fprintf(&b, "org.eclipse.jdt.core.compiler.encoding=%s\n", encodingIDForJDT(string(proj.Encoding)))
-	fmt.Fprintf(&b, "org.eclipse.jdt.core.compiler.codegen.targetPlatform=%s\n", proj.TargetLevel)
+	fmt.Fprintf(&b, "org.eclipse.jdt.core.compiler.codegen.targetPlatform=%s\n", target)
 	b.WriteString("org.eclipse.jdt.core.compiler.problem.assertIdentifier=error\n")
 	return b.String()
 }

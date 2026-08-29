@@ -15,7 +15,7 @@
  */
 
 import * as monaco from '@theia/monaco-editor-core';
-import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
+import { injectable, inject, postConstruct, optional } from '@theia/core/shared/inversify';
 import { Emitter, Event } from '@theia/core/lib/common/event';
 import { ILogger } from '@theia/core/lib/common/logger';
 import { MessageService } from '@theia/core/lib/common/message-service';
@@ -24,8 +24,11 @@ import { WorkspaceService } from '@theia/workspace/lib/browser/workspace-service
 import URI from '@theia/core/lib/common/uri';
 import { StorageService } from '@theia/core/lib/browser';
 import { EditorManager } from '@theia/editor/lib/browser';
+import type { I18nService } from '@kairo/i18n';
+import { KairoI18nService } from '@kairo/i18n';
 import { JSP_LANGUAGE_ID } from './jsp-monarch';
 import { JspJavaParser } from './jsp-java-nav';
+import { setJspI18n, t } from './i18n-context';
 
 /** A single line mapping: JSP line → Servlet Java line. */
 export interface JspLineMapping {
@@ -63,9 +66,11 @@ const JSP_DEBUG_CONFIG_KEY = 'kairo.jsp.debugBreakpoints';
 /** Classic Jasper `// line N` (and loose variants). */
 const JSP_LINE_COMMENT_REGEX = /\/\/\s*(?:HTML\s*\/\/\s*)?(?:from\s+)?line\s+#?(\d+)/i;
 const JSP_FILE_EXTENSION = '.jsp';
-const NO_MAPPING_MSG =
-  '生成的 Servlet 源码中未找到 JSP 行号映射（需要 // line N 注释或 SMAP）。' +
-  '请确认 Jasper keepgenerated/映射信息已启用，或手动配置正确的 Servlet 源码目录。';
+
+/** Message shown when no JSP→Servlet line mapping could be parsed. */
+function noMappingMessage(): string {
+  return t('jsp.debugBreakpoint.noMapping');
+}
 
 /**
  * Basename of a filesystem path that may use `/` or `\\`.
@@ -198,6 +203,7 @@ export class JspDebugBreakpointMapper {
   @inject(FileService) protected readonly fileService!: FileService;
   @inject(WorkspaceService) protected readonly workspaceService!: WorkspaceService;
   @inject(StorageService) protected readonly storage!: StorageService;
+  @inject(KairoI18nService) @optional() protected readonly i18n?: KairoI18nService;
 
   protected readonly onDidChangeConfigEmitter = new Emitter<JspDebugConfig>();
   readonly onDidChangeConfig: Event<JspDebugConfig> = this.onDidChangeConfigEmitter.event;
@@ -214,6 +220,7 @@ export class JspDebugBreakpointMapper {
 
   @postConstruct()
   protected init(): void {
+    setJspI18n(this.i18n);
     void this.initAsync();
   }
 
@@ -237,15 +244,7 @@ export class JspDebugBreakpointMapper {
   async setEnabled(enabled: boolean): Promise<void> {
     if (enabled && !this.config.enabled) {
       // First-time enable — show experimental warning
-      this.messages.warn(
-        'JSP 断点调试是实验性功能。\n\n' +
-        '已知限制：\n' +
-        '• 需要 Tomcat 生成的 Servlet 源码可用\n' +
-        '• 行号映射依赖 // line N 注释或 SMAP\n' +
-        '• 行号映射可能有偏移\n' +
-        '• 如果生成的 Servlet 源码不可用，断点将无法设置\n\n' +
-        '此功能默认关闭，需要手动启用。',
-      );
+      this.messages.warn(t('jsp.debugBreakpoint.experimentalWarning'));
     }
 
     this.config.enabled = enabled;
@@ -295,7 +294,7 @@ export class JspDebugBreakpointMapper {
       mapping.mappings = parseServletLineMappings(text, javaFilePath);
 
       if (mapping.mappings.length === 0) {
-        mapping.error = NO_MAPPING_MSG;
+        mapping.error = noMappingMessage();
         this.logger.warn(`JSP 断点映射解析失败: ${jspFilePath} — ${mapping.error}`);
       } else {
         this.logger.info(
@@ -331,18 +330,14 @@ export class JspDebugBreakpointMapper {
     // Find the generated Servlet Java file path
     const javaFilePath = this.deriveJavaFilePath(jspFilePath);
     if (!javaFilePath) {
-      this.messages.warn(
-        'JSP 断点: 未配置 Servlet 源码目录，无法映射行号。请先设置生成的 _jsp.java 所在目录。',
-      );
+      this.messages.warn(t('jsp.debugBreakpoint.noSourceDirWarning'));
       return null;
     }
 
     const mapping = await this.parseMapping(jspFilePath, javaFilePath);
 
     if (!mapping.servletSourceAvailable) {
-      this.messages.warn(
-        `JSP 断点: 找不到生成的 Servlet 源码 — ${javaFilePath}`,
-      );
+      this.messages.warn(t('jsp.debugBreakpoint.servletSourceMissingWarning', { javaFile: javaFilePath }));
       this.logger.warn(
         `JSP 断点警告: 生成的 Servlet 源码不可用 — ${javaFilePath}`,
       );
@@ -350,7 +345,7 @@ export class JspDebugBreakpointMapper {
     }
 
     if (mapping.mappings.length === 0) {
-      this.messages.warn(mapping.error || NO_MAPPING_MSG);
+      this.messages.warn(mapping.error || noMappingMessage());
       return null;
     }
 
@@ -371,7 +366,7 @@ export class JspDebugBreakpointMapper {
 
     if (!bestMapping) {
       this.messages.warn(
-        `JSP 断点: 无法将第 ${jspLine} 行映射到 Servlet 源码。`,
+        t('jsp.debugBreakpoint.cannotMapLineWarning', { line: jspLine }),
       );
       return null;
     }
@@ -428,16 +423,16 @@ export class JspDebugBreakpointMapper {
   }
 
   /**
-   * Get a human-readable status message in Chinese.
+   * Get a human-readable status message in the current language.
    */
   getStatusMessage(): string {
     if (!this.config.enabled) {
-      return 'JSP 断点调试已禁用。在设置中启用 experimental 选项以使用此功能。';
+      return t('jsp.debugBreakpoint.statusDisabled');
     }
     if (!this.config.servletSourceDir) {
-      return 'JSP 断点调试已启用，但未配置 Servlet 源码目录。请设置 Servlet 源码路径。';
+      return t('jsp.debugBreakpoint.statusMissingSourceDir');
     }
-    return `JSP 断点调试已启用。Servlet 源码目录: ${this.config.servletSourceDir}`;
+    return t('jsp.debugBreakpoint.statusEnabled', { dir: this.config.servletSourceDir });
   }
 
   /** Surface a successful mapping to the user (CodeLens command). */
@@ -482,7 +477,8 @@ export function setJspDebugCodeLensEnabled(enabled: boolean): void {
  * Gated behind the experimental flag — without the gate every
  * Java line sprouts a CodeLens and drowns syntax highlighting.
  */
-export function registerJspDebugCodeLens(): monaco.IDisposable {
+export function registerJspDebugCodeLens(i18n?: I18nService): monaco.IDisposable {
+  setJspI18n(i18n);
   const javaParser = new JspJavaParser();
 
   return monaco.languages.registerCodeLensProvider(JSP_LANGUAGE_ID, {
@@ -521,7 +517,7 @@ export function registerJspDebugCodeLens(): monaco.IDisposable {
           range: new monaco.Range(lineNum, 1, lineNum, 1),
           command: {
             id: 'kairo.jsp.toggleBreakpoint',
-            title: 'Toggle Breakpoint',
+            title: t('jsp.debugBreakpoint.toggleCodelensTitle'),
             arguments: [model.uri.toString(), lineNum],
           },
         });
@@ -546,11 +542,13 @@ export function registerJspDebugCodeLens(): monaco.IDisposable {
  */
 export function registerJspBreakpointCommand(
   mapper: JspDebugBreakpointMapper,
+  i18n?: I18nService,
 ): monaco.IDisposable {
+  setJspI18n(i18n);
   // Register a Monaco action for the CodeLens command
   const disposable = monaco.editor.addEditorAction({
     id: 'kairo.jsp.toggleBreakpoint',
-    label: 'JSP: Toggle Breakpoint',
+    label: t('jsp.debugBreakpoint.toggleCommandLabel'),
     contextMenuGroupId: 'debug',
     run: async (editor: monaco.editor.ICodeEditor, ...args: unknown[]): Promise<void> => {
       const jspUri = args[0] as string;
@@ -566,7 +564,7 @@ export function registerJspBreakpointCommand(
       if (result) {
         const jspFileName = fsPathBasename(jspFilePath) || jspFilePath;
         mapper.notifyMapping(
-          `JSP 断点: ${jspFileName} 第 ${jspLine} 行 → _jspService() 第 ${result.javaLine} 行`,
+          t('jsp.debugBreakpoint.mappedNotice', { file: jspFileName, line: jspLine, javaLine: result.javaLine }),
         );
       }
       // Failure paths already surface MessageService warnings from the mapper.

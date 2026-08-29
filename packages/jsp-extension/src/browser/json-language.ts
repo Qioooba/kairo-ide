@@ -10,7 +10,9 @@
  */
 
 import * as monaco from '@theia/monaco-editor-core';
+import type { I18nService } from '@kairo/i18n';
 import { JSON_LANGUAGE_ID, JSON_MONARCH, JSONC_LANGUAGE_ID, JSONC_MONARCH } from './json-monarch';
+import { setJspI18n, t } from './i18n-context';
 
 /** Owner string for JSON validation markers. */
 const JSON_MARKER_OWNER = 'kairo-json-validate';
@@ -20,64 +22,72 @@ const MAX_JSON_SIZE = 1 * 1024 * 1024;
 
 /**
  * Common JSON Schema completions for well-known JSON file types.
+ * Built per provide call so detail strings follow the current language.
  */
-const COMMON_JSON_SCHEMAS: Record<string, monaco.languages.CompletionItem[]> = {
-  'package.json': [
-    createCompletion('name', 'Property', '项目名称', 'name'),
-    createCompletion('version', 'Property', '项目版本号', 'version'),
-    createCompletion('description', 'Property', '项目描述', 'description'),
-    createCompletion('main', 'Property', '入口文件', 'main'),
-    createCompletion('scripts', 'Property', 'NPM 脚本', 'scripts'),
-    createCompletion('dependencies', 'Property', '生产依赖', 'dependencies'),
-    createCompletion('devDependencies', 'Property', '开发依赖', 'devDependencies'),
-    createCompletion('peerDependencies', 'Property', '对等依赖', 'peerDependencies'),
-    createCompletion('keywords', 'Property', '关键词列表', 'keywords'),
-    createCompletion('author', 'Property', '作者信息', 'author'),
-    createCompletion('license', 'Property', '许可证', 'license'),
-    createCompletion('repository', 'Property', '代码仓库', 'repository'),
-    createCompletion('type', 'Enum', '模块类型', 'type'),
-    createCompletion('exports', 'Property', '导出配置', 'exports'),
-    createCompletion('engines', 'Property', '引擎要求', 'engines'),
-  ],
-  'tsconfig.json': [
-    createCompletion('compilerOptions', 'Property', '编译选项', 'compilerOptions'),
-    createCompletion('include', 'Property', '包含的文件', 'include'),
-    createCompletion('exclude', 'Property', '排除的文件', 'exclude'),
-    createCompletion('extends', 'Property', '继承的配置', 'extends'),
-    createCompletion('references', 'Property', '项目引用', 'references'),
-  ],
-  '.eslintrc.json': [
-    createCompletion('env', 'Property', '运行环境', 'env'),
-    createCompletion('extends', 'Property', '继承的配置', 'extends'),
-    createCompletion('parser', 'Property', '解析器', 'parser'),
-    createCompletion('parserOptions', 'Property', '解析器选项', 'parserOptions'),
-    createCompletion('plugins', 'Property', '插件列表', 'plugins'),
-    createCompletion('rules', 'Property', '规则配置', 'rules'),
-    createCompletion('settings', 'Property', '共享设置', 'settings'),
-    createCompletion('overrides', 'Property', '覆盖配置', 'overrides'),
-    createCompletion('ignorePatterns', 'Property', '忽略模式', 'ignorePatterns'),
-  ],
-};
+function buildCommonJsonSchemas(): Record<string, monaco.languages.CompletionItem[]> {
+  return {
+    'package.json': [
+      createCompletion('name', 'Property', t('completion.json.property.name'), 'name'),
+      createCompletion('version', 'Property', t('completion.json.property.version'), 'version'),
+      createCompletion('description', 'Property', t('completion.json.property.description'), 'description'),
+      createCompletion('main', 'Property', t('completion.json.property.main'), 'main'),
+      createCompletion('scripts', 'Property', t('completion.json.property.scripts'), 'scripts'),
+      createCompletion('dependencies', 'Property', t('completion.json.property.dependencies'), 'dependencies'),
+      createCompletion('devDependencies', 'Property', t('completion.json.property.devDependencies'), 'devDependencies'),
+      createCompletion('peerDependencies', 'Property', t('completion.json.property.peerDependencies'), 'peerDependencies'),
+      createCompletion('keywords', 'Property', t('completion.json.property.keywords'), 'keywords'),
+      createCompletion('author', 'Property', t('completion.json.property.author'), 'author'),
+      createCompletion('license', 'Property', t('completion.json.property.license'), 'license'),
+      createCompletion('repository', 'Property', t('completion.json.property.repository'), 'repository'),
+      createCompletion('type', 'Enum', t('completion.json.property.type'), 'type'),
+      createCompletion('exports', 'Property', t('completion.json.property.exports'), 'exports'),
+      createCompletion('engines', 'Property', t('completion.json.property.engines'), 'engines'),
+    ],
+    'tsconfig.json': [
+      createCompletion('compilerOptions', 'Property', t('completion.json.property.compilerOptions'), 'compilerOptions'),
+      createCompletion('include', 'Property', t('completion.json.property.include'), 'include'),
+      createCompletion('exclude', 'Property', t('completion.json.property.exclude'), 'exclude'),
+      createCompletion('extends', 'Property', t('completion.json.property.extends'), 'extends'),
+      createCompletion('references', 'Property', t('completion.json.property.references'), 'references'),
+    ],
+    '.eslintrc.json': [
+      createCompletion('env', 'Property', t('completion.json.property.env'), 'env'),
+      createCompletion('extends', 'Property', t('completion.json.property.extends'), 'extends'),
+      createCompletion('parser', 'Property', t('completion.json.property.parser'), 'parser'),
+      createCompletion('parserOptions', 'Property', t('completion.json.property.parserOptions'), 'parserOptions'),
+      createCompletion('plugins', 'Property', t('completion.json.property.plugins'), 'plugins'),
+      createCompletion('rules', 'Property', t('completion.json.property.rules'), 'rules'),
+      createCompletion('settings', 'Property', t('completion.json.property.settings'), 'settings'),
+      createCompletion('overrides', 'Property', t('completion.json.property.overrides'), 'overrides'),
+      createCompletion('ignorePatterns', 'Property', t('completion.json.property.ignorePatterns'), 'ignorePatterns'),
+    ],
+  };
+}
 
 /** JSON-specific keyword completions. */
-const JSON_KEYWORD_COMPLETIONS: monaco.languages.CompletionItem[] = [
-  createCompletion('true', 'Keyword', '布尔值 true', 'true'),
-  createCompletion('false', 'Keyword', '布尔值 false', 'false'),
-  createCompletion('null', 'Keyword', '空值 null', 'null'),
-];
+function buildJsonKeywordCompletions(): monaco.languages.CompletionItem[] {
+  return [
+    createCompletion('true', 'Keyword', t('completion.json.keyword.true'), 'true'),
+    createCompletion('false', 'Keyword', t('completion.json.keyword.false'), 'false'),
+    createCompletion('null', 'Keyword', t('completion.json.keyword.null'), 'null'),
+  ];
+}
 
 /** JSON value completions (object, array, string, number). */
-const JSON_VALUE_COMPLETIONS: monaco.languages.CompletionItem[] = [
-  createSnippetCompletion('{}', 'Snippet', '空对象', '{\n\t$1\n}'),
-  createSnippetCompletion('[]', 'Snippet', '空数组', '[\n\t$1\n]'),
-  createSnippetCompletion('""', 'Snippet', '字符串', '"$1"'),
-];
+function buildJsonValueCompletions(): monaco.languages.CompletionItem[] {
+  return [
+    createSnippetCompletion('{}', 'Snippet', t('completion.json.snippet.emptyObject'), '{\n\t$1\n}'),
+    createSnippetCompletion('[]', 'Snippet', t('completion.json.snippet.emptyArray'), '[\n\t$1\n]'),
+    createSnippetCompletion('""', 'Snippet', t('completion.json.snippet.string'), '"$1"'),
+  ];
+}
 
 function createCompletion(
   label: string,
   kind: string,
   detail: string,
   insertText: string,
+  range?: monaco.IRange,
 ): monaco.languages.CompletionItem {
   const kindMap: Record<string, monaco.languages.CompletionItemKind> = {
     'Property': monaco.languages.CompletionItemKind.Property,
@@ -91,7 +101,7 @@ function createCompletion(
     kind: kindMap[kind] ?? monaco.languages.CompletionItemKind.Text,
     detail,
     insertText,
-    range: { startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 1 },
+    ...(range ? { range } : {}),
   } as monaco.languages.CompletionItem;
 }
 
@@ -100,6 +110,7 @@ function createSnippetCompletion(
   kind: string,
   detail: string,
   insertText: string,
+  range?: monaco.IRange,
 ): monaco.languages.CompletionItem {
   return {
     label,
@@ -107,7 +118,7 @@ function createSnippetCompletion(
     detail,
     insertText,
     insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-    range: { startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 1 },
+    ...(range ? { range } : {}),
   } as monaco.languages.CompletionItem;
 }
 
@@ -150,26 +161,29 @@ class JsonCompletionProvider implements monaco.languages.CompletionItemProvider 
     const lineContent = model.getLineContent(position.lineNumber);
     const lineBeforeCursor = lineContent.substring(0, position.column - 1);
     const fileName = getFileName(model.uri.path);
+    const word = model.getWordUntilPosition(position);
+    const range = new monaco.Range(position.lineNumber, word.startColumn, position.lineNumber, word.endColumn);
+    const withRange = (items: monaco.languages.CompletionItem[]) => items.map(it => ({ ...it, range } as monaco.languages.CompletionItem));
 
     const suggestions: monaco.languages.CompletionItem[] = [];
 
     if (isAfterColon(lineBeforeCursor)) {
       // Value completion — suggest JSON values
-      suggestions.push(...JSON_VALUE_COMPLETIONS);
-      suggestions.push(...JSON_KEYWORD_COMPLETIONS);
+      suggestions.push(...withRange(buildJsonValueCompletions()));
+      suggestions.push(...withRange(buildJsonKeywordCompletions()));
     } else if (isInsideString(lineBeforeCursor)) {
       // Key completion — suggest schema keys
-      const schemaCompletions = COMMON_JSON_SCHEMAS[fileName];
+      const schemaCompletions = buildCommonJsonSchemas()[fileName];
       if (schemaCompletions) {
-        suggestions.push(...schemaCompletions);
+        suggestions.push(...withRange(schemaCompletions));
       }
     } else {
       // General — suggest both
-      const schemaCompletions = COMMON_JSON_SCHEMAS[fileName];
+      const schemaCompletions = buildCommonJsonSchemas()[fileName];
       if (schemaCompletions) {
-        suggestions.push(...schemaCompletions);
+        suggestions.push(...withRange(schemaCompletions));
       }
-      suggestions.push(...JSON_VALUE_COMPLETIONS);
+      suggestions.push(...withRange(buildJsonValueCompletions()));
     }
 
     return { suggestions };
@@ -182,40 +196,40 @@ class JsonCompletionProvider implements monaco.languages.CompletionItemProvider 
 function validateJsonContent(content: string): monaco.editor.IMarkerData[] {
   const markers: monaco.editor.IMarkerData[] = [];
 
-  try {
-    JSON.parse(content);
-  } catch (e) {
-    if (e instanceof SyntaxError) {
-      const message = e.message;
-      // Try to extract line/column from the error message
-      const posMatch = message.match(/at position (\d+)/);
-      if (posMatch) {
-        const pos = parseInt(posMatch[1], 10);
-        const lines = content.substring(0, pos).split('\n');
-        const line = lines.length;
-        const column = lines[lines.length - 1].length + 1;
-        markers.push({
-          severity: monaco.MarkerSeverity.Error,
-          message: `JSON 解析错误: ${message}`,
-          source: 'JSON 验证',
-          startLineNumber: line,
-          startColumn: column,
-          endLineNumber: line,
-          endColumn: column + 1,
-        });
-      } else {
-        markers.push({
-          severity: monaco.MarkerSeverity.Error,
-          message: `JSON 解析错误: ${message}`,
-          source: 'JSON 验证',
-          startLineNumber: 1,
-          startColumn: 1,
-          endLineNumber: 1,
-          endColumn: 1,
-        });
+    try {
+      JSON.parse(content);
+    } catch (e) {
+      if (e instanceof SyntaxError) {
+        const message = e.message;
+        // Try to extract line/column from the error message
+        const posMatch = message.match(/at position (\d+)/);
+        if (posMatch) {
+          const pos = parseInt(posMatch[1], 10);
+          const lines = content.substring(0, pos).split('\n');
+          const line = lines.length;
+          const column = lines[lines.length - 1].length + 1;
+          markers.push({
+            severity: monaco.MarkerSeverity.Error,
+            message: t('validator.json.parseError', { message }),
+            source: t('validator.json.source'),
+            startLineNumber: line,
+            startColumn: column,
+            endLineNumber: line,
+            endColumn: column + 1,
+          });
+        } else {
+          markers.push({
+            severity: monaco.MarkerSeverity.Error,
+            message: t('validator.json.parseError', { message }),
+            source: t('validator.json.source'),
+            startLineNumber: 1,
+            startColumn: 1,
+            endLineNumber: 1,
+            endColumn: 1,
+          });
+        }
       }
     }
-  }
 
   return markers;
 }
@@ -223,7 +237,8 @@ function validateJsonContent(content: string): monaco.editor.IMarkerData[] {
 /**
  * Register JSON language with Monaco.
  */
-export function registerJsonLanguage(): void {
+export function registerJsonLanguage(i18n?: I18nService): void {
+  setJspI18n(i18n);
   if (!monaco.languages.getLanguages().some(l => l.id === JSON_LANGUAGE_ID)) {
     monaco.languages.register({
       id: JSON_LANGUAGE_ID,
@@ -301,8 +316,8 @@ function validateJsonModel(model: monaco.editor.ITextModel): void {
   if (size > MAX_JSON_SIZE) {
     monaco.editor.setModelMarkers(model, JSON_MARKER_OWNER, [{
       severity: monaco.MarkerSeverity.Warning,
-      message: `文件过大 (${(size / 1024 / 1024).toFixed(1)} MB)，跳过 JSON 验证 (>1MB)`,
-      source: 'JSON 验证',
+      message: t('validator.json.tooLarge', { size: (size / 1024 / 1024).toFixed(1) }),
+      source: t('validator.json.source'),
       startLineNumber: 1,
       startColumn: 1,
       endLineNumber: 1,

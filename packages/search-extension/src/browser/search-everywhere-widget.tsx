@@ -50,10 +50,11 @@ export interface SearchEverywhereProps {
   model: SearchEverywhereModel;
   state: SearchEverywhereState;
   onOpen: (item: SearchEverywhereItem) => unknown;
+  onClose: () => void;
   i18n: KairoI18nService;
 }
 
-export const SearchEverywhereComponent: React.FC<SearchEverywhereProps> = ({ model, state, onOpen, i18n }) => {
+export const SearchEverywhereComponent: React.FC<SearchEverywhereProps> = ({ model, state, onOpen, onClose, i18n }) => {
   const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
   const [query, setQuery] = React.useState(state.query);
   const [openError, setOpenError] = React.useState<Error | undefined>();
@@ -67,7 +68,12 @@ export const SearchEverywhereComponent: React.FC<SearchEverywhereProps> = ({ mod
     if (event.key === 'ArrowDown') { event.preventDefault(); model.select(state.selectedIndex + 1); }
     else if (event.key === 'ArrowUp') { event.preventDefault(); model.select(state.selectedIndex - 1); }
     else if (event.key === 'Enter' && state.items[state.selectedIndex]) { event.preventDefault(); void openItem(state.items[state.selectedIndex]); }
-    else if (event.key === 'Escape') { /* handled by widget close */ }
+    else if (event.key === 'Escape') {
+      // IDEA closes Search Everywhere on Escape.
+      event.preventDefault();
+      event.stopPropagation();
+      onClose();
+    }
     else if (event.key === 'Tab') {
       // Trap focus inside the modal (D4.1)
       event.preventDefault();
@@ -165,12 +171,31 @@ export class SearchEverywhereWidget extends ReactWidget {
     }));
   }
 
-  protected onAfterAttach(message: Message): void { super.onAfterAttach(message); this.unsubscribe ??= this.model.subscribe(state => { this.state = state; this.update(); }); }
+  /** IDEA closes Search Everywhere on Escape regardless of inner focus. */
+  protected readonly handleEscape = (event: KeyboardEvent): void => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      this.close();
+    }
+  };
+
+  protected onAfterAttach(message: Message): void {
+    super.onAfterAttach(message);
+    window.addEventListener('keydown', this.handleEscape, true);
+    this.unsubscribe ??= this.model.subscribe(state => { this.state = state; this.update(); });
+  }
+
+  protected onBeforeDetach(message: Message): void {
+    window.removeEventListener('keydown', this.handleEscape, true);
+    super.onBeforeDetach(message);
+  }
+
   dispose(): void { this.unsubscribe?.(); this.model.cancel(); super.dispose(); }
   protected async open(item: SearchEverywhereItem): Promise<void> {
     this.model.remember(item);
     if (item.commandId) await this.commands.executeCommand(item.commandId);
     else if (item.uri) await this.editors.open(new URI(item.uri), { mode: 'activate', selection: item.line === undefined ? undefined : { start: { line: item.line, character: item.character ?? 0 } } });
   }
-  protected render(): React.ReactNode { return <SearchEverywhereComponent model={this.model} state={this.state} onOpen={item => void this.open(item)} i18n={this.i18n} />; }
+  protected render(): React.ReactNode { return <SearchEverywhereComponent model={this.model} state={this.state} onOpen={item => void this.open(item)} onClose={() => this.close()} i18n={this.i18n} />; }
 }

@@ -27,7 +27,10 @@ export const kairoEditorPreferenceSchema: PreferenceSchema = {
     'editor.autoSave': {
       type: 'string',
       enum: ['off', 'afterDelay', 'onFocusChange'],
-      default: 'onFocusChange',
+      // BUG-20260826-305: was 'onFocusChange', which KairoEditorAutoSaveSync
+      // then force-wrote into files.autoSave on every startup — the IDE could
+      // never honor the documented/app-configured default ('off').
+      default: 'off',
       description: 'Controls auto-save of editors that have unsaved changes.',
     },
     'editor.autoSaveDelay': {

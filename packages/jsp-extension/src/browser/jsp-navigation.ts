@@ -21,15 +21,7 @@ import { WorkspaceService } from '@theia/workspace/lib/browser/workspace-service
 import { JSP_LANGUAGE_ID } from './jsp-monarch';
 import { JspJavaParser } from './jsp-java-nav';
 import type { JspNavServices } from './jsp-nav-services';
-
-/** Common Java source roots in legacy web projects. */
-const SRC_ROOTS = [
-  'src/main/java',
-  'src',
-  'src/java',
-  'WEB-INF/src',
-  'web/WEB-INF/src',
-];
+import { resolveWorkspaceJavaClass } from './workspace-layout';
 
 interface PathExtractor {
   /** Regex that captures the file path in group 1. */
@@ -56,7 +48,8 @@ const EXTRACTORS: PathExtractor[] = [
   { regex: /<img\b[^>]*\bsrc\s*=\s*["']([^"']+)["']/gi },
 ];
 
-function isAbsoluteUrl(path: string): boolean {
+/** Non-resolvable absolute URLs (http://, mailto:, data: …). */
+export function isAbsoluteUrl(path: string): boolean {
   return /^(https?:|ftp:|mailto:|javascript:|data:)/i.test(path);
 }
 
@@ -149,7 +142,7 @@ export class JspNavigationProvider implements monaco.languages.DefinitionProvide
     }
     if (!fqn) return [];
 
-    return this.resolveJavaClass(fqn, _token);
+    return resolveWorkspaceJavaClass(this.fileService, this.workspaceService, fqn, _token);
   }
 
   /**
@@ -189,35 +182,6 @@ export class JspNavigationProvider implements monaco.languages.DefinitionProvide
     } catch {
       return undefined;
     }
-  }
-
-  /**
-   * Resolve a fully qualified Java class name to a file URI in the
-   * workspace. Returns the first matching source file found.
-   */
-  private async resolveJavaClass(
-    className: string,
-    token: monaco.CancellationToken,
-  ): Promise<monaco.languages.Location[]> {
-    const relativePath = className.replace(/\./g, '/') + '.java';
-    const roots = await this.workspaceService.roots;
-    if (roots.length === 0) return [];
-
-    const rootUri = URI.fromFilePath(roots[0].resource.path.toString());
-    for (const srcRoot of SRC_ROOTS) {
-      if (token.isCancellationRequested) return [];
-      const candidate = rootUri.resolve(srcRoot).resolve(relativePath);
-      try {
-        await this.fileService.resolve(candidate, { resolveMetadata: false });
-        return [{
-          uri: monaco.Uri.parse(candidate.toString()),
-          range: new monaco.Range(1, 1, 1, 1),
-        }];
-      } catch {
-        // File doesn't exist at this path; try next.
-      }
-    }
-    return [];
   }
 }
 

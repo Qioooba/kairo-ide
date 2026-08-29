@@ -13,7 +13,9 @@ import { Emitter, Event } from '@theia/core/lib/common/event';
 import { ILogger } from '@theia/core/lib/common/logger';
 import { MessageService } from '@theia/core/lib/common/message-service';
 import { CommandContribution, CommandRegistry } from '@theia/core/lib/common/command';
+import { DisposableCollection } from '@theia/core/lib/common/disposable';
 import { StatusBar, StatusBarAlignment } from '@theia/core/lib/browser';
+import { KairoI18nService } from '@kairo/i18n';
 
 export const KAIRO_PERF_TOGGLE_GRAPH = {
   id: 'kairo.perf.toggleGraph',
@@ -86,6 +88,7 @@ export class KairoPerfSampler implements CommandContribution {
   @inject(ILogger) protected readonly logger!: ILogger;
   @inject(MessageService) protected readonly messages!: MessageService;
   @inject(StatusBar) protected readonly statusBar!: StatusBar;
+  @inject(KairoI18nService) protected readonly i18n!: KairoI18nService;
 
   protected readonly onDidSampleEmitter = new Emitter<PerfSample>();
   readonly onDidSample: Event<PerfSample> = this.onDidSampleEmitter.event;
@@ -93,12 +96,16 @@ export class KairoPerfSampler implements CommandContribution {
   protected readonly onDidAlertEmitter = new Emitter<PerfAlert>();
   readonly onDidAlert: Event<PerfAlert> = this.onDidAlertEmitter.event;
 
+  protected readonly toDispose = new DisposableCollection();
+
   protected config: PerfSamplerConfig = { ...DEFAULT_CONFIG };
   protected samples: PerfSample[] = [];
   protected timer: ReturnType<typeof setInterval> | undefined;
   protected running = false;
   protected cpuSustainedCounter = 0;
   protected lastGCTimestamp = 0;
+  protected lastSample: PerfSample | undefined;
+  protected statusBarState: 'idle' | 'sampling' | 'stopped' = 'idle';
 
   get isRunning(): boolean {
     return this.running;
@@ -115,13 +122,12 @@ export class KairoPerfSampler implements CommandContribution {
   @postConstruct()
   protected init(): void {
     this.logger.info('Kairo 性能采样器已初始化');
-    this.statusBar.setElement('kairo.perf', {
-      text: '$(dashboard) 性能: 空闲',
-      tooltip: '性能监控已就绪。点击切换图表。',
-      alignment: StatusBarAlignment.RIGHT,
-      priority: 0,
-      command: KAIRO_PERF_TOGGLE_GRAPH.id,
-    });
+    this.showIdleStatusBar();
+    this.toDispose.push(this.i18n.onDidChangeLanguage(() => this.refreshStatusBar()));
+  }
+
+  dispose(): void {
+    this.toDispose.dispose();
   }
 
   registerCommands(registry: CommandRegistry): void {
@@ -143,6 +149,7 @@ export class KairoPerfSampler implements CommandContribution {
     }
 
     this.running = true;
+    this.statusBarState = 'sampling';
     this.logger.info('性能采样器已启动');
 
     // Take an immediate sample
@@ -164,12 +171,41 @@ export class KairoPerfSampler implements CommandContribution {
       this.timer = undefined;
     }
     this.logger.info('性能采样器已停止');
+    this.statusBarState = 'stopped';
+    this.showStoppedStatusBar();
+  }
+
+  protected showIdleStatusBar(): void {
     this.statusBar.setElement('kairo.perf', {
-      text: '$(dashboard) 性能: 已停止',
-      tooltip: '性能监控已停止。',
+      text: this.i18n.t('perf.statusBar.idle'),
+      tooltip: this.i18n.t('perf.tooltip.idle'),
+      alignment: StatusBarAlignment.RIGHT,
+      priority: 0,
+      command: KAIRO_PERF_TOGGLE_GRAPH.id,
+    });
+  }
+
+  protected showStoppedStatusBar(): void {
+    this.statusBar.setElement('kairo.perf', {
+      text: this.i18n.t('perf.statusBar.stopped'),
+      tooltip: this.i18n.t('perf.tooltip.stopped'),
       alignment: StatusBarAlignment.RIGHT,
       priority: 0,
     });
+  }
+
+  protected refreshStatusBar(): void {
+    if (this.statusBarState === 'sampling') {
+      if (this.lastSample) {
+        this.updateStatusBar(this.lastSample);
+      } else {
+        this.showIdleStatusBar();
+      }
+    } else if (this.statusBarState === 'stopped') {
+      this.showStoppedStatusBar();
+    } else {
+      this.showIdleStatusBar();
+    }
   }
 
   /**
@@ -220,6 +256,7 @@ export class KairoPerfSampler implements CommandContribution {
     };
 
     this.samples.push(sample);
+    this.lastSample = sample;
 
     // Trim to retention window
     const cutoff = Date.now() - this.config.retentionMs;
@@ -301,7 +338,10 @@ export class KairoPerfSampler implements CommandContribution {
     if (sample.heapMB > this.config.memoryAlertThresholdMB) {
       const alert: PerfAlert = {
         type: 'memory-high',
-        message: `内存使用过高: ${sample.heapMB.toFixed(0)} MB (阈值: ${this.config.memoryAlertThresholdMB} MB)`,
+        message: this.i18n.t('perf.alert.memoryHigh', {
+          used: sample.heapMB.toFixed(0),
+          threshold: this.config.memoryAlertThresholdMB,
+        }),
         timestamp: sample.timestamp,
         value: sample.heapMB,
         threshold: this.config.memoryAlertThresholdMB,
@@ -317,7 +357,10 @@ export class KairoPerfSampler implements CommandContribution {
         // Sustained for 30 seconds
         const alert: PerfAlert = {
           type: 'cpu-sustained',
-          message: `CPU 持续高负载: ${sample.cpuPercent.toFixed(0)}% (阈值: ${this.config.cpuAlertThresholdPercent}%)`,
+          message: this.i18n.t('perf.alert.cpuSustained', {
+            usage: sample.cpuPercent.toFixed(0),
+            threshold: this.config.cpuAlertThresholdPercent,
+          }),
           timestamp: sample.timestamp,
           value: sample.cpuPercent,
           threshold: this.config.cpuAlertThresholdPercent,
@@ -334,7 +377,10 @@ export class KairoPerfSampler implements CommandContribution {
     if (sample.eventLoopLagMs > this.config.eventLoopLagThresholdMs) {
       const alert: PerfAlert = {
         type: 'event-loop-lag',
-        message: `事件循环延迟过高: ${sample.eventLoopLagMs.toFixed(0)} ms (阈值: ${this.config.eventLoopLagThresholdMs} ms)`,
+        message: this.i18n.t('perf.alert.eventLoopLag', {
+          lag: sample.eventLoopLagMs.toFixed(0),
+          threshold: this.config.eventLoopLagThresholdMs,
+        }),
         timestamp: sample.timestamp,
         value: sample.eventLoopLagMs,
         threshold: this.config.eventLoopLagThresholdMs,
@@ -348,6 +394,8 @@ export class KairoPerfSampler implements CommandContribution {
     const memText = sample.heapMB > 0
       ? `${sample.heapMB.toFixed(0)} MB`
       : 'N/A';
+    const heapText = sample.heapMB > 0 ? `${sample.heapMB.toFixed(0)} MB` : 'N/A';
+    const rssText = sample.rssMB > 0 ? `${sample.rssMB.toFixed(0)} MB` : 'N/A';
 
     let icon = '$(dashboard)';
     if (sample.heapMB > this.config.memoryAlertThresholdMB * 0.8) {
@@ -358,14 +406,14 @@ export class KairoPerfSampler implements CommandContribution {
     }
 
     this.statusBar.setElement('kairo.perf', {
-      text: `${icon} 性能: ${memText}`,
+      text: this.i18n.t('perf.statusBar.sampling', { icon, memory: memText }),
       tooltip: [
-        `堆内存: ${sample.heapMB > 0 ? sample.heapMB.toFixed(0) + ' MB' : 'N/A'}`,
-        `RSS: ${sample.rssMB > 0 ? sample.rssMB.toFixed(0) + ' MB' : 'N/A'}`,
-        `CPU: ${sample.cpuPercent.toFixed(0)}%`,
-        `事件循环延迟: ${sample.eventLoopLagMs.toFixed(0)} ms`,
-        `GC 暂停: ${sample.gcPauseMs.toFixed(0)} ms`,
-        '点击切换性能图表。',
+        this.i18n.t('perf.tooltip.heap', { value: heapText }),
+        this.i18n.t('perf.tooltip.rss', { value: rssText }),
+        this.i18n.t('perf.tooltip.cpu', { value: sample.cpuPercent.toFixed(0) }),
+        this.i18n.t('perf.tooltip.eventLoopLag', { value: sample.eventLoopLagMs.toFixed(0) }),
+        this.i18n.t('perf.tooltip.gcPause', { value: sample.gcPauseMs.toFixed(0) }),
+        this.i18n.t('perf.tooltip.clickToggle'),
       ].join('\n'),
       alignment: StatusBarAlignment.RIGHT,
       priority: 0,

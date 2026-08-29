@@ -16,6 +16,7 @@ import { Emitter, Event } from '@theia/core/lib/common/event';
 import { ILogger } from '@theia/core/lib/common/logger';
 import { MessageService } from '@theia/core/lib/common/message-service';
 import { RuntimeConnectionService } from '@kairo/runtime-extension';
+import { KairoI18nService } from '@kairo/i18n';
 import { Endpoint } from '@kairo/protocol';
 
 // ===========================================================================
@@ -73,6 +74,7 @@ export class JavaDebugCompatCheck {
   @inject(ILogger) protected readonly logger!: ILogger;
   @inject(MessageService) protected readonly messages!: MessageService;
   @inject(RuntimeConnectionService) protected readonly runtime!: RuntimeConnectionService;
+  @inject(KairoI18nService) protected readonly i18n!: KairoI18nService;
 
   protected readonly onDidCompleteCheckEmitter = new Emitter<CompatCheckReport>();
   readonly onDidCompleteCheck: Event<CompatCheckReport> = this.onDidCompleteCheckEmitter.event;
@@ -103,11 +105,11 @@ export class JavaDebugCompatCheck {
     const jdkCheck = await this.withTimeout(
       this.checkJdkVersion(config.javaHome),
       timeout,
-      'JDK 版本检查超时',
+      this.i18n.t('debug.compatCheck.timeout.jdkVersion'),
     );
     checks.push({
       id: 'jdk-version',
-      name: 'JDK 版本',
+      name: this.i18n.t('debug.compatCheck.jdkVersion.name'),
       ...jdkCheck,
     });
 
@@ -115,11 +117,11 @@ export class JavaDebugCompatCheck {
     const jdwpCheck = await this.withTimeout(
       this.checkJdwpAvailability(config.javaHome),
       timeout,
-      'JDWP 可用性检查超时',
+      this.i18n.t('debug.compatCheck.timeout.jdwpAvailability'),
     );
     checks.push({
       id: 'jdwp-availability',
-      name: 'JDWP 可用性',
+      name: this.i18n.t('debug.compatCheck.jdwpAvailability.name'),
       ...jdwpCheck,
     });
 
@@ -127,11 +129,11 @@ export class JavaDebugCompatCheck {
     const portCheck = await this.withTimeout(
       this.checkPortAvailability(config.debugPort),
       timeout,
-      '端口可用性检查超时',
+      this.i18n.t('debug.compatCheck.timeout.portAvailability'),
     );
     checks.push({
       id: 'port-availability',
-      name: 'Debug 端口可用性',
+      name: this.i18n.t('debug.compatCheck.portAvailability.name'),
       ...portCheck,
     });
 
@@ -139,11 +141,11 @@ export class JavaDebugCompatCheck {
     const adapterCheck = await this.withTimeout(
       this.checkAdapterAvailability(),
       timeout,
-      'DAP 适配器检查超时',
+      this.i18n.t('debug.compatCheck.timeout.adapterAvailability'),
     );
     checks.push({
       id: 'adapter-availability',
-      name: 'DAP 适配器',
+      name: this.i18n.t('debug.compatCheck.adapterAvailability.name'),
       ...adapterCheck,
     });
 
@@ -151,11 +153,11 @@ export class JavaDebugCompatCheck {
     const projectCheck = await this.withTimeout(
       this.checkProjectCompatibility(config.projectRoot),
       timeout,
-      '项目兼容性检查超时',
+      this.i18n.t('debug.compatCheck.timeout.projectCompatibility'),
     );
     checks.push({
       id: 'project-compatibility',
-      name: '项目兼容性',
+      name: this.i18n.t('debug.compatCheck.projectCompatibility.name'),
       ...projectCheck,
     });
 
@@ -184,47 +186,54 @@ export class JavaDebugCompatCheck {
    * Get a human-readable Chinese summary of the last check.
    */
   getSummary(): string {
-    if (!this.lastReport) return '尚未执行 Debug 兼容性检查。';
+    if (!this.lastReport) return this.i18n.t('debug.compatCheck.summary.notScanned');
 
     const r = this.lastReport;
     if (r.allPassed && !r.checks.some(c => c.severity === 'warning')) {
-      return `Debug 兼容性检查通过: ${r.checks.length} 项检查全部正常。`;
+      return this.i18n.t('debug.compatCheck.summary.allPassed', { count: r.checks.length });
     }
 
     const failed = r.checks.filter(c => c.severity === 'error');
     const warned = r.checks.filter(c => c.severity === 'warning');
+    const listJoiner = this.i18n.getCurrentLanguage() === 'zh-CN' ? '、' : ', ';
 
     const parts: string[] = [];
     if (failed.length > 0) {
-      parts.push(`${failed.length} 项检查失败: ${failed.map(c => c.name).join('、')}`);
+      parts.push(this.i18n.t('debug.compatCheck.summary.failedPart', {
+        count: failed.length,
+        names: failed.map(c => c.name).join(listJoiner),
+      }));
     }
     if (warned.length > 0) {
-      parts.push(`${warned.length} 项警告: ${warned.map(c => c.name).join('、')}`);
+      parts.push(this.i18n.t('debug.compatCheck.summary.warnedPart', {
+        count: warned.length,
+        names: warned.map(c => c.name).join(listJoiner),
+      }));
     }
     if (r.userOverrode) {
-      parts.push('用户已选择忽略警告继续调试');
+      parts.push(this.i18n.t('debug.compatCheck.summary.userOverrode'));
     }
-    return `Debug 兼容性检查: ${parts.join('; ')}。`;
+    return this.i18n.t('debug.compatCheck.summary.prefix', { parts: parts.join('; ') });
   }
 
   /**
    * Get the status bar text for the compatibility check.
    */
   getStatusBarText(): string {
-    if (!this.lastReport) return '$(debug-alt) Debug 兼容性: 未检测';
+    if (!this.lastReport) return this.i18n.t('debug.compatCheck.status.notChecked');
 
     const r = this.lastReport;
     if (r.allPassed && !r.checks.some(c => c.severity === 'warning')) {
-      return '$(check) Debug 兼容性: 正常';
+      return this.i18n.t('debug.compatCheck.status.ok');
     }
 
     const errorCount = r.checks.filter(c => c.severity === 'error').length;
     const warnCount = r.checks.filter(c => c.severity === 'warning').length;
 
     if (errorCount > 0) {
-      return `$(error) Debug 兼容性: ${errorCount} 项失败`;
+      return this.i18n.t('debug.compatCheck.status.failed', { count: errorCount });
     }
-    return `$(warning) Debug 兼容性: ${warnCount} 项警告`;
+    return this.i18n.t('debug.compatCheck.status.warning', { count: warnCount });
   }
 
   // ── Individual checks ───────────────────────────────────────────
@@ -243,7 +252,7 @@ export class JavaDebugCompatCheck {
     if (!javaHome) {
       return {
         passed: false,
-        detail: '未配置 JDK 路径。请在项目设置中配置 compilerJavaHome。',
+        detail: this.i18n.t('debug.compatCheck.jdk.missingHome'),
         severity: 'error',
         durationMs: Date.now() - start,
       };
@@ -256,7 +265,7 @@ export class JavaDebugCompatCheck {
       this.logger.info(`JDK 版本检查: ${javaHome}`);
       return {
         passed: true,
-        detail: `JDK 路径: ${javaHome}`,
+        detail: this.i18n.t('debug.compatCheck.jdk.ok', { javaHome }),
         severity: 'ok',
         durationMs: Date.now() - start,
       };
@@ -264,7 +273,7 @@ export class JavaDebugCompatCheck {
       const msg = error instanceof Error ? error.message : String(error);
       return {
         passed: false,
-        detail: `无法获取 JDK 信息: ${msg}`,
+        detail: this.i18n.t('debug.compatCheck.jdk.fetchFailed', { message: msg }),
         severity: 'warning',
         durationMs: Date.now() - start,
       };
@@ -286,7 +295,7 @@ export class JavaDebugCompatCheck {
     if (!javaHome) {
       return {
         passed: false,
-        detail: '未配置 JDK 路径，无法检查 JDWP 可用性。',
+        detail: this.i18n.t('debug.compatCheck.jdwp.missingHome'),
         severity: 'warning',
         durationMs: Date.now() - start,
       };
@@ -300,7 +309,7 @@ export class JavaDebugCompatCheck {
       this.logger.info(`JDWP 可用性检查通过: ${javaHome}`);
       return {
         passed: true,
-        detail: 'JDWP 可用（JDK 6+ 内置支持）',
+        detail: this.i18n.t('debug.compatCheck.jdwp.ok'),
         severity: 'ok',
         durationMs: Date.now() - start,
       };
@@ -308,7 +317,7 @@ export class JavaDebugCompatCheck {
       const msg = error instanceof Error ? error.message : String(error);
       return {
         passed: false,
-        detail: `JDWP 可用性检查失败: ${msg}`,
+        detail: this.i18n.t('debug.compatCheck.jdwp.checkFailed', { message: msg }),
         severity: 'warning',
         durationMs: Date.now() - start,
       };
@@ -326,7 +335,7 @@ export class JavaDebugCompatCheck {
     if (!debugPort) {
       return {
         passed: false,
-        detail: '未配置 Debug 端口。请在启动配置中设置 port 参数。',
+        detail: this.i18n.t('debug.compatCheck.port.missing'),
         severity: 'error',
         durationMs: Date.now() - start,
       };
@@ -343,7 +352,7 @@ export class JavaDebugCompatCheck {
       if (body?.available === false) {
         return {
           passed: false,
-          detail: `端口 ${debugPort} 已被占用。请更换端口或释放占用后重试。`,
+          detail: this.i18n.t('debug.compatCheck.port.occupied', { port: debugPort }),
           severity: 'error',
           durationMs: Date.now() - start,
         };
@@ -351,7 +360,7 @@ export class JavaDebugCompatCheck {
 
       return {
         passed: true,
-        detail: `端口 ${debugPort} 可用`,
+        detail: this.i18n.t('debug.compatCheck.port.ok', { port: debugPort }),
         severity: 'ok',
         durationMs: Date.now() - start,
       };
@@ -361,7 +370,7 @@ export class JavaDebugCompatCheck {
       this.logger.warn(`端口可用性检查失败 (API 不可用): ${msg}`);
       return {
         passed: true,
-        detail: `端口 ${debugPort} 检查跳过（API 不可用，假设端口空闲）`,
+        detail: this.i18n.t('debug.compatCheck.port.skipped', { port: debugPort }),
         severity: 'warning',
         durationMs: Date.now() - start,
       };
@@ -387,7 +396,10 @@ export class JavaDebugCompatCheck {
       if (body?.available) {
         return {
           passed: true,
-          detail: `DAP 适配器就绪: ${body.command ?? '已配置'}${body.version ? ` (v${body.version})` : ''}`,
+          detail: this.i18n.t('debug.compatCheck.adapter.ready', {
+            command: body.command ?? this.i18n.t('debug.compatCheck.adapter.configuredPlaceholder'),
+            version: body.version ? ` (v${body.version})` : '',
+          }),
           severity: 'ok',
           durationMs: Date.now() - start,
         };
@@ -395,7 +407,7 @@ export class JavaDebugCompatCheck {
 
       return {
         passed: false,
-        detail: 'DAP 适配器未配置。请检查 KAIRO_JAVA_DEBUG_ADAPTER_COMMAND 环境变量。',
+        detail: this.i18n.t('debug.compatCheck.adapter.notConfigured'),
         severity: 'error',
         durationMs: Date.now() - start,
       };
@@ -404,7 +416,7 @@ export class JavaDebugCompatCheck {
       this.logger.warn(`DAP 适配器检查失败 (API 不可用): ${msg}`);
       return {
         passed: true,
-        detail: 'DAP 适配器检查跳过（API 不可用，假设适配器已配置）',
+        detail: this.i18n.t('debug.compatCheck.adapter.skipped'),
         severity: 'warning',
         durationMs: Date.now() - start,
       };
@@ -425,7 +437,7 @@ export class JavaDebugCompatCheck {
     if (!projectRoot) {
       return {
         passed: true,
-        detail: '未指定项目路径，跳过项目兼容性检查。',
+        detail: this.i18n.t('debug.compatCheck.project.noRoot'),
         severity: 'warning',
         durationMs: Date.now() - start,
       };
@@ -441,7 +453,10 @@ export class JavaDebugCompatCheck {
       if (body?.mismatchCount !== undefined && body.mismatchCount > 0) {
         return {
           passed: true,
-          detail: `${body.mismatchCount} 个文件源码/类文件不匹配（共 ${body.totalScanned ?? '?'} 个文件），建议重新编译后再调试。`,
+          detail: this.i18n.t('debug.compatCheck.project.mismatch', {
+            count: body.mismatchCount,
+            total: body.totalScanned ?? '?',
+          }),
           severity: 'warning',
           durationMs: Date.now() - start,
         };
@@ -449,7 +464,7 @@ export class JavaDebugCompatCheck {
 
       return {
         passed: true,
-        detail: `项目编译状态正常（共 ${body?.totalScanned ?? '?'} 个文件）`,
+        detail: this.i18n.t('debug.compatCheck.project.ok', { total: body?.totalScanned ?? '?' }),
         severity: 'ok',
         durationMs: Date.now() - start,
       };
@@ -458,7 +473,7 @@ export class JavaDebugCompatCheck {
       this.logger.warn(`项目兼容性检查失败: ${msg}`);
       return {
         passed: true,
-        detail: '项目兼容性检查跳过（API 不可用）',
+        detail: this.i18n.t('debug.compatCheck.project.skipped'),
         severity: 'warning',
         durationMs: Date.now() - start,
       };
@@ -476,22 +491,23 @@ export class JavaDebugCompatCheck {
     const warnings = report.checks.filter(c => c.severity === 'warning');
 
     const lines: string[] = [];
-    lines.push('Debug 兼容性检查发现问题：');
+    lines.push(this.i18n.t('debug.compatCheck.dialog.title'));
     lines.push('');
 
     for (const check of errors) {
-      lines.push(`❌ ${check.name}: ${check.detail ?? '检查失败'}`);
+      lines.push(`❌ ${check.name}: ${check.detail ?? this.i18n.t('debug.compatCheck.dialog.detailError')}`);
     }
     for (const check of warnings) {
-      lines.push(`⚠️ ${check.name}: ${check.detail ?? '存在警告'}`);
+      lines.push(`⚠️ ${check.name}: ${check.detail ?? this.i18n.t('debug.compatCheck.dialog.detailWarning')}`);
     }
 
     lines.push('');
-    lines.push('是否仍然继续启动调试会话？');
+    lines.push(this.i18n.t('debug.compatCheck.dialog.question'));
 
     try {
-      const result = await this.messages.warn(lines.join('\n'), '继续调试', '取消');
-      return result === '继续调试';
+      const proceedLabel = this.i18n.t('debug.compatCheck.dialog.proceed');
+      const result = await this.messages.warn(lines.join('\n'), proceedLabel, this.i18n.t('debug.compatCheck.dialog.cancel'));
+      return result === proceedLabel;
     } catch {
       return false;
     }

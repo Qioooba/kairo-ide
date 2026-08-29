@@ -307,6 +307,27 @@ export class JavaLanguageClient implements JdtLsFrontendClient, Disposable {
     return this.lastKnownState;
   }
 
+  /**
+   * Resolve the JDT LS install info (home / JRE / launcher jar) from
+   * the backend. The Go agent's /api/v1/jdtls status refers to its own
+   * (unused) manager and carries no JRE for the Theia-hosted process,
+   * so the status bar uses this to display the real JDK version.
+   */
+  async inspect(): Promise<{ ok: true; home: string; jre: string; launcherJar: string; javaMajor?: number } | { ok: false; reason: string }> {
+    const proxy = this.proxy();
+    if (proxy) {
+      try {
+        return await proxy.$inspect();
+      } catch (err) {
+        this.logger.debug(`[JavaLanguageClient] $inspect via RPC failed: ${String(err)}`);
+      }
+    }
+    if (this.backend?.$inspect) {
+      return this.backend.$inspect();
+    }
+    return { ok: false, reason: 'backend unavailable' };
+  }
+
   async fetchState(): Promise<JdtLsState> {
     return this.withRetry(
       async () => {

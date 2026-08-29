@@ -11,13 +11,15 @@
  */
 
 import * as monaco from '@theia/monaco-editor-core';
-import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
+import { injectable, inject, postConstruct, optional } from '@theia/core/shared/inversify';
 import { ILogger } from '@theia/core/lib/common/logger';
 import { Disposable, DisposableCollection } from '@theia/core/lib/common/disposable';
 import { FileService } from '@theia/filesystem/lib/browser/file-service';
 import { WorkspaceService } from '@theia/workspace/lib/browser/workspace-service';
 import { FrontendApplicationContribution } from '@theia/core/lib/browser';
 import URI from '@theia/core/lib/common/uri';
+import { KairoI18nService } from '@kairo/i18n';
+import { setJspI18n, t } from './i18n-context';
 
 /** Maximum file size to parse (1 MB). */
 const MAX_FILE_SIZE = 1 * 1024 * 1024;
@@ -194,8 +196,8 @@ export function validateXmlContent(
       const { line } = offsetToLineCol(lineStarts, encMatch.index);
       markers.push({
         severity: monaco.MarkerSeverity.Info,
-        message: `XML 编码声明: ${encMatch[1]}`,
-        source: 'XML 验证',
+        message: t('validator.xml.encodingInfo', { encoding: encMatch[1] }),
+        source: t('validator.xml.source'),
         startLineNumber: line,
         startColumn: 1,
         endLineNumber: line,
@@ -227,8 +229,8 @@ export function validateXmlContent(
       if (tagStack.length === 0) {
         markers.push({
           severity: monaco.MarkerSeverity.Error,
-          message: `XML 格式错误: 多余的闭合标签 </${tagName}>`,
-          source: 'XML 验证',
+          message: t('validator.xml.extraCloseTag', { tag: tagName }),
+          source: t('validator.xml.source'),
           startLineNumber: line,
           startColumn: col,
           endLineNumber: line,
@@ -240,8 +242,8 @@ export function validateXmlContent(
       if (last.name !== tagName) {
         markers.push({
           severity: monaco.MarkerSeverity.Error,
-          message: `XML 标签不匹配: 期望 </${last.name}> (第 ${last.line} 行)，但找到 </${tagName}>`,
-          source: 'XML 验证',
+          message: t('validator.xml.tagMismatch', { expected: last.name, line: last.line, found: tagName }),
+          source: t('validator.xml.source'),
           startLineNumber: line,
           startColumn: col,
           endLineNumber: line,
@@ -257,8 +259,8 @@ export function validateXmlContent(
   for (const unclosed of tagStack.reverse()) {
     markers.push({
       severity: monaco.MarkerSeverity.Error,
-      message: `XML 格式错误: 未闭合的标签 <${unclosed.name}> (第 ${unclosed.line} 行)`,
-      source: 'XML 验证',
+      message: t('validator.xml.unclosedTag', { tag: unclosed.name, line: unclosed.line }),
+      source: t('validator.xml.source'),
       startLineNumber: unclosed.line,
       startColumn: unclosed.col,
       endLineNumber: unclosed.line,
@@ -288,9 +290,9 @@ export function markersForMissingRefs(
     markers.push({
       severity: monaco.MarkerSeverity.Warning,
       message: ref.kind === 'dtd'
-        ? `引用的 DTD 文件不存在: ${ref.ref}`
-        : `引用的 XSD 文件不存在: ${ref.ref}`,
-      source: ref.kind === 'dtd' ? 'DTD 验证' : 'XSD 验证',
+        ? t('validator.xml.missingDtd', { ref: ref.ref })
+        : t('validator.xml.missingXsd', { ref: ref.ref }),
+      source: ref.kind === 'dtd' ? t('validator.xml.dtdSource') : t('validator.xml.xsdSource'),
       startLineNumber: line,
       startColumn: col,
       endLineNumber: line,
@@ -323,12 +325,17 @@ export class XmlDtdValidator implements FrontendApplicationContribution, Disposa
   @inject(WorkspaceService)
   protected readonly workspaceService!: WorkspaceService;
 
+  @inject(KairoI18nService)
+  @optional()
+  protected readonly i18n?: KairoI18nService;
+
   protected subs = new DisposableCollection();
   protected attached = new Set<string>();
   protected debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   @postConstruct()
   protected init(): void {
+    setJspI18n(this.i18n);
     this.subs.push(
       monaco.editor.onDidCreateModel(model => {
         if (isXmlFile(model.uri.path)) {
@@ -405,8 +412,8 @@ export class XmlDtdValidator implements FrontendApplicationContribution, Disposa
       this.logger.warn(`XML 验证: 跳过文件 ${model.uri.path} (大小 ${(size / 1024 / 1024).toFixed(1)} MB 超过限制)`);
       monaco.editor.setModelMarkers(model, MARKER_OWNER, [{
         severity: monaco.MarkerSeverity.Warning,
-        message: `文件过大 (${(size / 1024 / 1024).toFixed(1)} MB)，跳过 XML 验证 (>1MB)`,
-        source: 'XML 验证',
+        message: t('validator.xml.tooLarge', { size: (size / 1024 / 1024).toFixed(1) }),
+        source: t('validator.xml.source'),
         startLineNumber: 1,
         startColumn: 1,
         endLineNumber: 1,
@@ -431,8 +438,8 @@ export class XmlDtdValidator implements FrontendApplicationContribution, Disposa
         this.logger.warn(`XML 验证: 解析超时 ${model.uri.path}`);
         monaco.editor.setModelMarkers(model, MARKER_OWNER, [{
           severity: monaco.MarkerSeverity.Warning,
-          message: 'XML 验证超时（超过 5 秒）',
-          source: 'XML 验证',
+          message: t('validator.xml.timeout'),
+          source: t('validator.xml.source'),
           startLineNumber: 1,
           startColumn: 1,
           endLineNumber: 1,
@@ -480,7 +487,7 @@ export class XmlDtdValidator implements FrontendApplicationContribution, Disposa
 /** Timeout error class. */
 export class TimeoutError extends Error {
   constructor() {
-    super('操作超时');
+    super(t('validator.xml.operationTimeout'));
     this.name = 'TimeoutError';
   }
 }

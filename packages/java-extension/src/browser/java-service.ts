@@ -31,6 +31,7 @@
  */
 
 import { injectable, inject, interfaces, postConstruct } from '@theia/core/shared/inversify';
+import { ILogger } from '@theia/core/lib/common/logger';
 import type {
   JdtState,
   JdtStatus,
@@ -44,11 +45,14 @@ import type { JdtLsState } from '../common/jdt-ls-state';
 export class KairoJavaService {
   @inject(RuntimeConnectionService) protected runtime!: RuntimeConnectionService;
   @inject(JavaLanguageClient) protected languageClient!: JavaLanguageClient;
+  @inject(ILogger) protected logger!: ILogger;
 
   protected state: JavaServiceState = 'uninitialized';
   protected status: JdtStatus | undefined;
   protected lastError: string | undefined;
   protected listeners = new Set<(s: JavaServiceState, st?: JdtStatus) => void>();
+  /** Set once the backend $inspect() JRE probe succeeded. */
+  protected jreFilled = false;
 
   @postConstruct()
   protected init(): void {
@@ -60,12 +64,34 @@ export class KairoJavaService {
     this.languageClient.onState(s => this.applyClientState(s));
   }
 
+  /**
+   * Fill `jre`/`javaMajor` from the backend $inspect() probe. The Go
+   * agent never carries these for the Theia-hosted LS process, so the
+   * status bar would otherwise show a bare state label forever.
+   */
+  protected async fillJreOnce(): Promise<void> {
+    if (this.jreFilled || this.status?.jre) return;
+    try {
+      const ins = await this.languageClient.inspect();
+      this.logger.info(`[KairoJavaService] $inspect -> ${JSON.stringify(ins).slice(0, 200)}`);
+      if (ins.ok && ins.jre) {
+        this.jreFilled = true;
+        const base = this.status ?? ({ state: 'running' } as JdtStatus);
+        this.status = { ...base, jre: ins.jre, javaMajor: ins.javaMajor };
+        for (const fn of this.listeners) fn(this.state, this.status);
+      }
+    } catch {
+      // cosmetic only — retry on the next ready transition
+    }
+  }
+
   protected applyClientState(s: JdtLsState): void {
     const status = { ...(this.status ?? { state: 'stopped' as JdtState }) } as JdtStatus;
     switch (s) {
       case 'ready':
         status.state = 'running';
         this.setState('ready', status);
+        void this.fillJreOnce();
         break;
       case 'starting':
       case 'initializing':
@@ -131,6 +157,20 @@ export class KairoJavaService {
       // The agent's state refers to its own (unused) manager;
       // the Theia-backend-hosted LS is the truth — overlay it.
       this.applyClientState(await this.languageClient.fetchState());
+      // The agent status carries no `jre` for the Theia-hosted process —
+      // resolve it from the backend so the status bar can show the real
+      // JDK version instead of a bare state label.
+      if (this.status && !this.status.jre) {
+        try {
+          const ins = await this.languageClient.inspect();
+          if (ins.ok) {
+            this.status = { ...this.status, jre: ins.jre, javaMajor: ins.javaMajor };
+            for (const fn of this.listeners) fn(this.state, this.status);
+          }
+        } catch {
+          // cosmetic only — state label stays
+        }
+      }
       return this.status;
     } catch (err) {
       if (err instanceof KairoError) {

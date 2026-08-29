@@ -1,5 +1,6 @@
 import { injectable, inject } from '@theia/core/shared/inversify';
 import { Emitter, Event } from '@theia/core/lib/common/event';
+import { KairoI18nService } from '@kairo/i18n';
 import { GitService, GitCommit } from './git-service';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -55,9 +56,19 @@ const SEARCH_TIMEOUT_MS = 10000;
 @injectable()
 export class GitCommitSearch {
     @inject(GitService) protected readonly gitService!: GitService;
+    @inject(KairoI18nService) protected readonly i18n!: KairoI18nService;
 
     protected readonly onDidChangeStatusEmitter = new Emitter<CommitSearchSummary>();
     readonly onDidChangeStatus: Event<CommitSearchSummary> = this.onDidChangeStatusEmitter.event;
+
+    /**
+     * 翻译辅助方法。测试可能直接 new 本服务（不经 DI），此时 i18n 为 undefined，
+     * 回退到 fallback（原中文文案），保证行为与未接入 i18n 时一致。
+     */
+    protected tr(key: string, params?: Record<string, string | number>, fallback?: string): string {
+        if (!this.i18n) return fallback ?? key;
+        return (this.i18n.t as (k: string, p?: Record<string, string | number>) => string)(key, params);
+    }
 
     protected summary: CommitSearchSummary = {
         status: 'idle',
@@ -91,13 +102,13 @@ export class GitCommitSearch {
         const signal = this.searchAbortController.signal;
 
         const queryParts: string[] = [];
-        if (criteria.message) queryParts.push(`消息: ${criteria.message}`);
-        if (criteria.author) queryParts.push(`作者: ${criteria.author}`);
-        if (criteria.shaPrefix) queryParts.push(`SHA: ${criteria.shaPrefix}`);
-        if (criteria.filePath) queryParts.push(`文件: ${criteria.filePath}`);
-        if (criteria.dateFrom) queryParts.push(`从: ${criteria.dateFrom}`);
-        if (criteria.dateTo) queryParts.push(`至: ${criteria.dateTo}`);
-        const query = queryParts.join(', ') || '全部';
+        if (criteria.message) queryParts.push(this.tr('git.commitSearch.queryMessage', { value: criteria.message }, `消息: ${criteria.message}`));
+        if (criteria.author) queryParts.push(this.tr('git.commitSearch.queryAuthor', { value: criteria.author }, `作者: ${criteria.author}`));
+        if (criteria.shaPrefix) queryParts.push(this.tr('git.commitSearch.querySha', { value: criteria.shaPrefix }, `SHA: ${criteria.shaPrefix}`));
+        if (criteria.filePath) queryParts.push(this.tr('git.commitSearch.queryFile', { value: criteria.filePath }, `文件: ${criteria.filePath}`));
+        if (criteria.dateFrom) queryParts.push(this.tr('git.commitSearch.queryDateFrom', { value: criteria.dateFrom }, `从: ${criteria.dateFrom}`));
+        if (criteria.dateTo) queryParts.push(this.tr('git.commitSearch.queryDateTo', { value: criteria.dateTo }, `至: ${criteria.dateTo}`));
+        const query = queryParts.join(', ') || this.tr('git.commitSearch.queryAll', undefined, '全部');
 
         this.summary = {
             status: 'searching',
@@ -126,7 +137,7 @@ export class GitCommitSearch {
                     results: this.summary.results,
                     query,
                     totalCount: this.summary.results.length,
-                    error: '搜索超时（10秒）',
+                    error: this.tr('git.commitSearch.timedOut', undefined, '搜索超时（10秒）'),
                 };
             } else {
                 this.summary = {
@@ -134,7 +145,7 @@ export class GitCommitSearch {
                     results: this.summary.results,
                     query,
                     totalCount: this.summary.results.length,
-                    error: `搜索失败: ${err instanceof Error ? err.message : String(err)}`,
+                    error: this.tr('git.commitSearch.failed', { msg: err instanceof Error ? err.message : String(err) }, `搜索失败: ${err instanceof Error ? err.message : String(err)}`),
                 };
             }
         }

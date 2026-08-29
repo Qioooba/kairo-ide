@@ -1,24 +1,11 @@
-import { injectable, postConstruct } from '@theia/core/shared/inversify';
+import { inject, injectable, optional, postConstruct } from '@theia/core/shared/inversify';
 import { Emitter, Event } from '@theia/core/lib/common/event';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-import { normalizeFsPath, parsePorcelainStatusZ } from './git-path-utils';
+import { WebSocketConnectionProvider } from '@theia/core/lib/browser/messaging/ws-connection-provider';
+import { WorkspaceService } from '@theia/workspace/lib/browser/workspace-service';
+import { parsePorcelainStatusZ } from './git-path-utils';
+import { GitBackendPath, GitBackendService } from '../common/git-protocol';
 
-const execFileAsync = promisify(execFile);
-
-/** Force C locale so ahead/behind and commit summaries stay machine-parseable. */
-function gitEnv(): NodeJS.ProcessEnv {
-  return {
-    ...(typeof process !== 'undefined' ? process.env : {}),
-    LANG: 'C',
-    LC_ALL: 'C',
-    LANGUAGE: 'C',
-  };
-}
-
-function gitOpts(cwd: string, extra?: { maxBuffer?: number }): { cwd: string; env: NodeJS.ProcessEnv; maxBuffer?: number } {
-  return { cwd, env: gitEnv(), ...extra };
-}
+const DEFAULT_GIT_MAX_BUFFER = 10 * 1024 * 1024;
 
 export interface GitFileStatus {
   /** Relative path from repo root */
@@ -95,11 +82,20 @@ export interface GitCommitResult {
 
 @injectable()
 export class GitService {
-  protected readonly onDidChangeStatusEmitter = new Emitter<GitStatusResult>();
-  readonly onDidChangeStatus: Event<GitStatusResult> = this.onDidChangeStatusEmitter.event;
+  @inject(WorkspaceService) @optional()
+  protected readonly workspaceService?: WorkspaceService;
+  @inject(WebSocketConnectionProvider) @optional()
+  protected readonly connectionProvider?: WebSocketConnectionProvider;
+
+  /** Single-process fallback (unit tests): bind the real backend directly. */
+  @inject(GitBackendService) @optional()
+  protected readonly directBackend?: GitBackendService;
 
   protected readonly onDidChangeEmitter = new Emitter<void>();
   readonly onDidChange: Event<void> = this.onDidChangeEmitter.event;
+
+  protected readonly onDidChangeStatusEmitter = new Emitter<GitStatusResult>();
+  readonly onDidChangeStatus: Event<GitStatusResult> = this.onDidChangeStatusEmitter.event;
 
   protected repoRoot: string | undefined;
   protected cachedStatus: GitStatusResult | undefined;
@@ -110,10 +106,53 @@ export class GitService {
   }
   protected pollingTimer: ReturnType<typeof setInterval> | undefined;
   protected refreshInFlight = false;
+  protected detectTicks = 0;
+  protected rpcProxy: GitBackendService | undefined;
+  protected rpcFailed = false;
 
   @postConstruct()
   protected init(): void {
-    this.pollingTimer = setInterval(() => { void this.refreshStatus(); }, 3000);
+    this.pollingTimer = setInterval(() => { void this.tick(); }, 3000);
+    // Detect the repo for the current workspace right away (BUG-20260826-300).
+    void this.detectRepoRoot();
+    // Re-detect when the workspace changes.
+    this.workspaceService?.onWorkspaceChanged(() => {
+      this.repoRoot = undefined;
+      this.cachedStatus = undefined;
+      void this.detectRepoRoot();
+    });
+  }
+
+  /**
+   * Poll tick: refresh cached status when a repo is known; otherwise keep
+   * probing for one (a repo may be `git init`ed while the IDE is open).
+   */
+  protected async tick(): Promise<void> {
+    if (!this.repoRoot) {
+      this.detectTicks++;
+      if (this.detectTicks % 4 === 0) {
+        await this.detectRepoRoot();
+      }
+      return;
+    }
+    await this.refreshStatus();
+  }
+
+  /** Find the git repo nearest to the first workspace root, if any. */
+  protected async detectRepoRoot(): Promise<void> {
+    try {
+      const root = (await this.workspaceService?.roots)?.[0];
+      if (!root) return;
+      const cwd = root.resource.path.toString();
+      const backend = this.proxy();
+      if (!backend) return;
+      const found = await backend.$findNearestRepoRoot(cwd, 2);
+      if (found && found !== this.repoRoot) {
+        this.setRepoRoot(found);
+      }
+    } catch {
+      // workspace not ready yet — retried by tick()
+    }
   }
 
   dispose(): void {
@@ -125,17 +164,43 @@ export class GitService {
     this.onDidChangeEmitter.dispose();
   }
 
-  async findRepoRoot(cwd: string): Promise<string | undefined> {
-    try {
-      const { stdout } = await execFileAsync('git', ['rev-parse', '--show-toplevel'], gitOpts(cwd));
-      return normalizeFsPath(stdout.trim());
-    } catch {
-      return undefined;
+  // ---------------------------------------------------------------------------
+  // Backend proxy management (mirrors SvnService pattern)
+  // ---------------------------------------------------------------------------
+
+  /** Execute `git <args>` in repoRoot via the Node backend. */
+  protected async exec(args: string[], maxBuffer: number = DEFAULT_GIT_MAX_BUFFER): Promise<string> {
+    const backend = this.proxy();
+    if (!backend || !this.repoRoot) throw new Error('git backend unavailable');
+    const result = await backend.$exec(args, this.repoRoot, maxBuffer);
+    return result.stdout;
+  }
+
+  protected proxy(): GitBackendService | undefined {
+    if (this.directBackend && typeof this.directBackend === 'object'
+      && typeof (this.directBackend as unknown as Record<string, unknown>).$exec === 'function') {
+      return this.directBackend;
     }
+    if (this.rpcFailed || !this.connectionProvider) return undefined;
+    if (!this.rpcProxy) {
+      try {
+        this.rpcProxy = this.connectionProvider.createProxy<GitBackendService>(GitBackendPath);
+      } catch {
+        this.rpcFailed = true;
+        return undefined;
+      }
+    }
+    return this.rpcProxy;
+  }
+
+  async findRepoRoot(cwd: string): Promise<string | undefined> {
+    const backend = this.proxy();
+    if (!backend) return undefined;
+    return backend.$findRepoRoot(cwd);
   }
 
   setRepoRoot(root: string): void {
-    this.repoRoot = normalizeFsPath(root);
+    this.repoRoot = root;
     this.refreshStatus();
   }
 
@@ -165,12 +230,10 @@ export class GitService {
   async getStatus(): Promise<GitStatusResult> {
     if (!this.repoRoot) return { branch: '', files: [], ahead: 0, behind: 0 };
 
-    const opts = gitOpts(this.repoRoot);
-
     const [branchResult, statusResult] = await Promise.allSettled([
-      execFileAsync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], opts),
+      this.exec(['rev-parse', '--abbrev-ref', 'HEAD']),
       // -z: NUL-terminated, unquoted paths (avoids core.quotepath octal escapes)
-      execFileAsync('git', ['status', '--porcelain', '-b', '-z'], opts),
+      this.exec(['status', '--porcelain', '-b', '-z']),
     ]);
 
     let branch = '';
@@ -179,11 +242,11 @@ export class GitService {
     let files: GitFileStatus[] = [];
 
     if (branchResult.status === 'fulfilled') {
-      branch = branchResult.value.stdout.trim();
+      branch = branchResult.value.trim();
     }
 
     if (statusResult.status === 'fulfilled') {
-      const parsed = parsePorcelainStatusZ(statusResult.value.stdout);
+      const parsed = parsePorcelainStatusZ(statusResult.value);
       if (parsed.branch) branch = parsed.branch;
       ahead = parsed.ahead;
       behind = parsed.behind;
@@ -198,10 +261,8 @@ export class GitService {
 
     const format = '%H%x00%an%x00%ae%x00%aI%x00%s';
     try {
-      const { stdout } = await execFileAsync(
-        'git',
+      const stdout = await this.exec(
         ['log', `--max-count=${maxCount}`, `--format=${format}`, '-z'],
-        gitOpts(this.repoRoot, { maxBuffer: 10 * 1024 * 1024 }),
       );
       const parts = stdout.split('\0').filter(Boolean);
       const commits: GitCommit[] = [];
@@ -225,11 +286,7 @@ export class GitService {
 
     const format = '%H%x00%an%x00%ae%x00%aI%x00%s%n%b';
     try {
-      const { stdout } = await execFileAsync(
-        'git',
-        ['log', '-1', hash, `--format=${format}`, '-z'],
-        gitOpts(this.repoRoot, { maxBuffer: 10 * 1024 * 1024 }),
-      );
+      const stdout = await this.exec(['log', '-1', hash, `--format=${format}`, '-z']);
       const parts = stdout.split('\0').filter(Boolean);
       if (parts.length >= 5) {
         return {
@@ -250,11 +307,7 @@ export class GitService {
     if (!this.repoRoot) return [];
 
     try {
-      const { stdout } = await execFileAsync(
-        'git',
-        ['blame', '--line-porcelain', '--', filePath],
-        gitOpts(this.repoRoot, { maxBuffer: 10 * 1024 * 1024 }),
-      );
+      const stdout = await this.exec(['blame', '--line-porcelain', '--', filePath]);
       const lines = stdout.split('\n');
       const result: GitBlameLine[] = [];
       let current: Partial<GitBlameLine> = {};
@@ -302,7 +355,7 @@ export class GitService {
     if (staged) args.push('--cached');
     args.push('--', file);
     try {
-      const { stdout } = await execFileAsync('git', args, gitOpts(this.repoRoot));
+      const stdout = await this.exec(args);
       return { file, diff: stdout, staged };
     } catch {
       return { file, diff: '', staged };
@@ -311,28 +364,28 @@ export class GitService {
 
   async stageFiles(files: string[]): Promise<void> {
     if (!this.repoRoot || files.length === 0) return;
-    await execFileAsync('git', ['add', '--', ...files], gitOpts(this.repoRoot));
+    await this.exec(['add', '--', ...files]);
     this.refreshStatus();
     this.onDidChangeEmitter.fire();
   }
 
   async unstageFiles(files: string[]): Promise<void> {
     if (!this.repoRoot || files.length === 0) return;
-    await execFileAsync('git', ['reset', 'HEAD', '--', ...files], gitOpts(this.repoRoot));
+    await this.exec(['reset', 'HEAD', '--', ...files]);
     this.refreshStatus();
     this.onDidChangeEmitter.fire();
   }
 
   async stageAll(): Promise<void> {
     if (!this.repoRoot) return;
-    await execFileAsync('git', ['add', '-A'], gitOpts(this.repoRoot));
+    await this.exec(['add', '-A']);
     this.refreshStatus();
     this.onDidChangeEmitter.fire();
   }
 
   async unstageAll(): Promise<void> {
     if (!this.repoRoot) return;
-    await execFileAsync('git', ['reset', 'HEAD'], gitOpts(this.repoRoot));
+    await this.exec(['reset', 'HEAD']);
     this.refreshStatus();
     this.onDidChangeEmitter.fire();
   }
@@ -346,24 +399,20 @@ export class GitService {
     if (options.amend) args.push('--amend');
     if (options.signoff) args.push('--signoff');
     if (options.noVerify) args.push('--no-verify');
-    const { stdout } = await execFileAsync('git', args, gitOpts(this.repoRoot));
+    const stdout = await this.exec(args);
     let hash = '';
     try {
-      const head = await execFileAsync('git', ['rev-parse', '--short', 'HEAD'], gitOpts(this.repoRoot));
-      hash = head.stdout.trim();
+      hash = (await this.exec(['rev-parse', '--short', 'HEAD'])).trim();
     } catch {
       // leave empty
     }
     let filesChanged = 0;
     try {
-      const stat = await execFileAsync(
-        'git', ['diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD'],
-        gitOpts(this.repoRoot),
-      );
-      filesChanged = stat.stdout.trim().split('\n').filter(Boolean).length;
+      const stat = await this.exec(['diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD']);
+      filesChanged = stat.trim().split('\n').filter(Boolean).length;
     } catch {
       // VC-P2-12: fall back to locale-dependent stdout only if diff-tree fails.
-      const changedMatch = stdout.match(/(\d+) files? changed/);
+      const changedMatch = /(\d+) files? changed/.exec(stdout);
       filesChanged = changedMatch ? parseInt(changedMatch[1], 10) : 0;
     }
     this.refreshStatus();

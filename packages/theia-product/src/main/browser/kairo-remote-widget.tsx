@@ -11,7 +11,7 @@
  */
 
 import * as React from 'react';
-import { injectable, inject } from '@theia/core/shared/inversify';
+import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import { MessageService } from '@theia/core/lib/common/message-service';
 import { KairoI18nService } from '@kairo/i18n';
@@ -52,16 +52,26 @@ export class KairoRemoteWidget extends ReactWidget {
   constructor() {
     super();
     this.id = KAIRO_REMOTE_FACTORY_ID;
-    this.title.label = this.i18n.t('widget.remote.title');
-    this.title.caption = this.i18n.t('widget.remote.caption');
     this.title.iconClass = 'codicon codicon-remote';
     this.title.closable = true;
     this.addClass('kairo-remote');
-    this.toDispose.push(this.i18n.onDidChangeLanguage(() => {
+  }
+
+  /**
+   * Title must be applied after DI property injection completes —
+   * reading this.i18n in the constructor threw
+   * "Cannot read properties of undefined (reading 't')" and the widget
+   * never mounted (BUG-20260826-109).
+   */
+  @postConstruct()
+  protected init(): void {
+    const apply = (): void => {
       this.title.label = this.i18n.t('widget.remote.title');
       this.title.caption = this.i18n.t('widget.remote.caption');
       this.update();
-    }));
+    };
+    apply();
+    this.toDispose.push(this.i18n.onDidChangeLanguage(apply));
   }
 
   render(): React.ReactNode {

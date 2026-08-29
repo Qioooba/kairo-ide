@@ -15,6 +15,7 @@ import { Emitter, Event } from '@theia/core/lib/common/event';
 import { ILogger } from '@theia/core/lib/common/logger';
 import { MessageService } from '@theia/core/lib/common/message-service';
 import { RuntimeConnectionService } from '@kairo/runtime-extension';
+import { KairoI18nService } from '@kairo/i18n';
 import type { Endpoint } from '@kairo/protocol';
 
 /** Authentication types for remote JDWP. */
@@ -58,6 +59,7 @@ export class RemoteDebugTunnel {
   @inject(ILogger) protected readonly logger!: ILogger;
   @inject(MessageService) protected readonly messages!: MessageService;
   @inject(RuntimeConnectionService) protected readonly runtime!: RuntimeConnectionService;
+  @inject(KairoI18nService) protected readonly i18n!: KairoI18nService;
 
   protected readonly onDidChangeStatusEmitter = new Emitter<TunnelStatus>();
   readonly onDidChangeStatus: Event<TunnelStatus> = this.onDidChangeStatusEmitter.event;
@@ -87,7 +89,7 @@ export class RemoteDebugTunnel {
    */
   async connect(config: RemoteDebugConfig): Promise<number> {
     if (this._status.state === 'connecting' || this._status.state === 'connected') {
-      throw new Error('隧道已连接或正在连接中，请先断开当前连接。');
+      throw new Error(this.i18n.t('java.remoteTunnel.alreadyConnected'));
     }
 
     this.activeConfig = config;
@@ -99,9 +101,9 @@ export class RemoteDebugTunnel {
         this.updateStatus({
           state: 'error',
           config,
-          error: `连接超时 (${TUNNEL_TIMEOUT_MS / 1000}秒)`,
+          error: this.i18n.t('java.remoteTunnel.statusTimeout', { seconds: TUNNEL_TIMEOUT_MS / 1000 }),
         });
-        reject(new Error(`远程 JDWP 连接超时 (${TUNNEL_TIMEOUT_MS / 1000}秒)`));
+        reject(new Error(this.i18n.t('java.remoteTunnel.connectTimeout', { seconds: TUNNEL_TIMEOUT_MS / 1000 })));
       }, TUNNEL_TIMEOUT_MS);
     });
 
@@ -162,15 +164,7 @@ export class RemoteDebugTunnel {
    * Show the experimental feature warning.
    */
   showExperimentalWarning(): void {
-    this.messages.warn(
-      '远程 JDWP 安全隧道是实验性功能。\n\n' +
-      '安全说明：\n' +
-      '• 隧道仅监听 localhost，不会暴露到网络\n' +
-      '• 支持 SSH 密钥和 Token 认证\n' +
-      '• 连接超时时间: 30 秒\n' +
-      '• 建议在生产环境中使用 SSH 隧道\n\n' +
-      '使用前请确保远程主机已配置 JDWP 调试端口。',
-    );
+    this.messages.warn(this.i18n.t('java.remoteTunnel.experimentalWarning'));
   }
 
   // ── Internal ──────────────────────────────────────────────────
@@ -204,10 +198,12 @@ export class RemoteDebugTunnel {
         return result.localPort;
       }
 
-      throw new Error(result?.error || '隧道建立失败');
+      throw new Error(result?.error || this.i18n.t('java.remoteTunnel.establishFailed'));
     } catch (error) {
       throw new Error(
-        `隧道建立失败: ${error instanceof Error ? error.message : String(error)}`,
+        this.i18n.t('java.remoteTunnel.establishFailedWithReason', {
+          message: error instanceof Error ? error.message : String(error),
+        }),
       );
     }
   }

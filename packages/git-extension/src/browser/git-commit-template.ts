@@ -1,4 +1,5 @@
 import { injectable, inject } from '@theia/core/shared/inversify';
+import { KairoI18nService } from '@kairo/i18n';
 import { GitService, GitCommit as _GitCommit } from './git-service';
 
 /** 提交类型 */
@@ -63,26 +64,59 @@ const TEMPLATE_PREFS_KEY = 'kairo-git-commit-template-prefs';
 const RECENT_COMMITS_KEY = 'kairo-git-recent-commits';
 const MAX_RECENT_COMMITS = 20;
 
+/** 模板描述的 i18n key（与 DEFAULT_TEMPLATES 顺序一一对应） */
+const TEMPLATE_DESCRIPTION_KEYS: readonly string[] = [
+    'git.template.default.description',
+    'git.template.feat.description',
+    'git.template.fix.description',
+    'git.template.refactor.description',
+    'git.template.docs.description',
+    'git.template.test.description',
+    'git.template.build.description',
+];
+
 /** 提交消息正文建议最大行长度 */
 const BODY_MAX_LINE_LENGTH = 72;
 
 @injectable()
 export class GitCommitTemplateService {
     @inject(GitService) protected readonly gitService!: GitService;
+    @inject(KairoI18nService) protected readonly i18n!: KairoI18nService;
 
     protected templates: CommitTemplate[] = [...DEFAULT_TEMPLATES];
     protected selectedTemplateIndex = 0;
     protected recentCommits: CommitSuggestion[] = [];
     protected customTemplate: string = DEFAULT_TEMPLATES[0].format;
 
+    /**
+     * 翻译辅助方法。测试可能直接 new 本服务（不经 DI），此时 i18n 为 undefined，
+     * 回退到 fallback（原中文文案），保证行为与未接入 i18n 时一致。
+     */
+    protected tr(key: string, params?: Record<string, string | number>, fallback?: string): string {
+        if (!this.i18n) return fallback ?? key;
+        return (this.i18n.t as (k: string, p?: Record<string, string | number>) => string)(key, params);
+    }
+
     /** 获取所有模板 */
     getTemplates(): CommitTemplate[] {
-        return this.templates;
+        return this.templates.map((_, i) => this.getTemplateAt(i));
     }
 
     /** 获取当前选中的模板 */
     getSelectedTemplate(): CommitTemplate {
-        return this.templates[this.selectedTemplateIndex] || this.templates[0];
+        return this.getTemplateAt(this.selectedTemplateIndex);
+    }
+
+    /** 按索引取模板，注入了 i18n 时返回翻译后的名称/描述 */
+    protected getTemplateAt(index: number): CommitTemplate {
+        const resolved = index >= 0 && index < this.templates.length ? index : 0;
+        const tpl = this.templates[resolved];
+        if (!this.i18n) return tpl;
+        return {
+            ...tpl,
+            name: resolved === 0 ? this.tr('git.template.default.name', undefined, '默认') : tpl.name,
+            description: this.tr(TEMPLATE_DESCRIPTION_KEYS[resolved], undefined, tpl.description),
+        };
     }
 
     /** 选择模板 */
@@ -268,6 +302,10 @@ export class GitCommitTemplateService {
         const stats = this.getMessageStats(message);
         return stats.bodyLines
             .filter(l => l.exceedsLimit)
-            .map(l => `第 ${l.line} 行长度为 ${l.length} 字符，超过建议的 ${BODY_MAX_LINE_LENGTH} 字符`);
+            .map(l => this.tr(
+                'git.template.lineTooLong',
+                { line: l.line, length: l.length, limit: BODY_MAX_LINE_LENGTH },
+                `第 ${l.line} 行长度为 ${l.length} 字符，超过建议的 ${BODY_MAX_LINE_LENGTH} 字符`,
+            ));
     }
 }

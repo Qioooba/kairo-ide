@@ -23,5 +23,10 @@
   },
   "devDependencies": {
     "typescript": "5.5.4"
-  }
+  },
+  "theiaExtensions": [
+    {
+      "backend": "lib/node/git-backend-module"
+    }
+  ]
 }

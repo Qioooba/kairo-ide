@@ -68,8 +68,7 @@ function createMockRuntimeConnectionService() {
     baseUrl: () => 'http://127.0.0.1:18101',
     bootstrapFromTheiaConfig: async () => true,
     invalidateEndpoints: () => {},
-    disconnectEvents: () => {},
-    openEvents: () => {},
+    reconnectEventStream: () => {},
     request: (endpoint, payload, opts) => {
       calls.push({ endpoint, payload, opts });
       const ep = String(endpoint || '');

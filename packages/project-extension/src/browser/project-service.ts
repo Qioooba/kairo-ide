@@ -32,6 +32,21 @@ export class KairoProjectService {
     return this.runtime.request('GET /api/v1/toolchains', undefined) as Promise<Toolchain[]>;
   }
 
+  /**
+   * List projects from the agent catalog. When `workspaceId` is
+   * given the catalog is scoped to that workspace; otherwise the
+   * global catalog is returned. Used by the import wizard's
+   * conflict fallback (TC-IMP-023) and the project selector.
+   */
+  async listProjects(workspaceId?: string): Promise<ProjectConfig[]> {
+    const list = await this.runtime.request(
+      'GET /api/v1/projects',
+      undefined,
+      workspaceId ? { query: { workspaceId } } : undefined,
+    );
+    return Array.isArray(list) ? list as ProjectConfig[] : [];
+  }
+
   async importProject(workspaceId: string, project: ProjectImportRequest): Promise<ProjectConfig> {
     const saved = await this.runtime.request(
       'POST /api/v1/workspaces/{workspaceId}/projects/import', project,

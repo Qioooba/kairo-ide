@@ -23,6 +23,121 @@ type CheatsheetCategoryKey =
   | 'widget.cheatsheet.category.codeFolding'
   | 'widget.cheatsheet.category.multipleCursors';
 
+type CheatsheetActionKey =
+  | 'widget.cheatsheet.action.undo'
+  | 'widget.cheatsheet.action.redo'
+  | 'widget.cheatsheet.action.cut'
+  | 'widget.cheatsheet.action.copy'
+  | 'widget.cheatsheet.action.paste'
+  | 'widget.cheatsheet.action.lineComment'
+  | 'widget.cheatsheet.action.blockComment'
+  | 'widget.cheatsheet.action.formatCode'
+  | 'widget.cheatsheet.action.optimizeImports'
+  | 'widget.cheatsheet.action.rename'
+  | 'widget.cheatsheet.action.duplicateLine'
+  | 'widget.cheatsheet.action.deleteLine'
+  | 'widget.cheatsheet.action.moveLineUp'
+  | 'widget.cheatsheet.action.moveLineDown'
+  | 'widget.cheatsheet.action.expandSelection'
+  | 'widget.cheatsheet.action.shrinkSelection'
+  | 'widget.cheatsheet.action.quickFix'
+  | 'widget.cheatsheet.action.insertLineBelow'
+  | 'widget.cheatsheet.action.insertLineAbove'
+  | 'widget.cheatsheet.action.completeStatement'
+  | 'widget.cheatsheet.action.parameterInfo'
+  | 'widget.cheatsheet.action.codeCompletion'
+  | 'widget.cheatsheet.action.smartCompletion'
+  | 'widget.cheatsheet.action.hippieCompletion'
+  | 'widget.cheatsheet.action.hippieCompletionBackward'
+  | 'widget.cheatsheet.action.quickDocumentation'
+  | 'widget.cheatsheet.action.joinLines'
+  | 'widget.cheatsheet.action.toggleCase'
+  | 'widget.cheatsheet.action.nextError'
+  | 'widget.cheatsheet.action.previousError'
+  | 'widget.cheatsheet.action.searchEverywhere'
+  | 'widget.cheatsheet.action.goToClass'
+  | 'widget.cheatsheet.action.goToFile'
+  | 'widget.cheatsheet.action.goToSymbol'
+  | 'widget.cheatsheet.action.findAction'
+  | 'widget.cheatsheet.action.goToLine'
+  | 'widget.cheatsheet.action.fileStructure'
+  | 'widget.cheatsheet.action.quickDefinition'
+  | 'widget.cheatsheet.action.goToDefinition'
+  | 'widget.cheatsheet.action.goToImplementation'
+  | 'widget.cheatsheet.action.goToTypeDefinition'
+  | 'widget.cheatsheet.action.goToSuperMethod'
+  | 'widget.cheatsheet.action.findUsages'
+  | 'widget.cheatsheet.action.callHierarchy'
+  | 'widget.cheatsheet.action.typeHierarchy'
+  | 'widget.cheatsheet.action.recentFiles'
+  | 'widget.cheatsheet.action.recentLocations'
+  | 'widget.cheatsheet.action.lastEditLocation'
+  | 'widget.cheatsheet.action.navigateBack'
+  | 'widget.cheatsheet.action.navigateForward'
+  | 'widget.cheatsheet.action.closeActiveTab'
+  | 'widget.cheatsheet.action.jumpToBracket'
+  | 'widget.cheatsheet.action.findInPath'
+  | 'widget.cheatsheet.action.replaceInPath'
+  | 'widget.cheatsheet.action.findInFile'
+  | 'widget.cheatsheet.action.replaceInFile'
+  | 'widget.cheatsheet.action.findNext'
+  | 'widget.cheatsheet.action.findPrevious'
+  | 'widget.cheatsheet.action.buildProject'
+  | 'widget.cheatsheet.action.buildAndDeploy'
+  | 'widget.cheatsheet.action.run'
+  | 'widget.cheatsheet.action.debug'
+  | 'widget.cheatsheet.action.stop'
+  | 'widget.cheatsheet.action.toggleBreakpoint'
+  | 'widget.cheatsheet.action.conditionalBreakpoint'
+  | 'widget.cheatsheet.action.stepOver'
+  | 'widget.cheatsheet.action.stepInto'
+  | 'widget.cheatsheet.action.stepOut'
+  | 'widget.cheatsheet.action.resumeProgram'
+  | 'widget.cheatsheet.action.runToCursor'
+  | 'widget.cheatsheet.action.evaluateExpression'
+  | 'widget.cheatsheet.action.rerunRestart'
+  | 'widget.cheatsheet.action.generateCode'
+  | 'widget.cheatsheet.action.overrideMethod'
+  | 'widget.cheatsheet.action.implementMethods'
+  | 'widget.cheatsheet.action.surroundWith'
+  | 'widget.cheatsheet.action.unwrap'
+  | 'widget.cheatsheet.action.manageLiveTemplates'
+  | 'widget.cheatsheet.action.refactorThis'
+  | 'widget.cheatsheet.action.extractMethod'
+  | 'widget.cheatsheet.action.extractVariable'
+  | 'widget.cheatsheet.action.extractConstant'
+  | 'widget.cheatsheet.action.extractField'
+  | 'widget.cheatsheet.action.changeSignature'
+  | 'widget.cheatsheet.action.saveAll'
+  | 'widget.cheatsheet.action.settings'
+  | 'widget.cheatsheet.action.terminal'
+  | 'widget.cheatsheet.action.toggleFullScreen'
+  | 'widget.cheatsheet.action.keyboardShortcuts'
+  | 'widget.cheatsheet.action.nextEditor'
+  | 'widget.cheatsheet.action.previousEditor'
+  | 'widget.cheatsheet.action.hideActivePanel'
+  | 'widget.cheatsheet.action.copyPath'
+  | 'widget.cheatsheet.action.pasteFromHistory'
+  | 'widget.cheatsheet.action.splitEditor'
+  | 'widget.cheatsheet.action.project'
+  | 'widget.cheatsheet.action.servers'
+  | 'widget.cheatsheet.action.deployments'
+  | 'widget.cheatsheet.action.builds'
+  | 'widget.cheatsheet.action.problems'
+  | 'widget.cheatsheet.action.todo'
+  | 'widget.cheatsheet.action.git'
+  | 'widget.cheatsheet.action.toggleBookmark'
+  | 'widget.cheatsheet.action.toggleBookmarkMnemonic'
+  | 'widget.cheatsheet.action.showBookmarks'
+  | 'widget.cheatsheet.action.collapse'
+  | 'widget.cheatsheet.action.expand'
+  | 'widget.cheatsheet.action.collapseAll'
+  | 'widget.cheatsheet.action.expandAll'
+  | 'widget.cheatsheet.action.addCursorAbove'
+  | 'widget.cheatsheet.action.addCursorBelow'
+  | 'widget.cheatsheet.action.selectNextOccurrence'
+  | 'widget.cheatsheet.action.columnSelectionMode';
+
 export namespace KairoCheatsheetCommands {
   export const TOGGLE: Command = {
     id: 'kairo.shortcuts.cheatsheet',
@@ -32,7 +147,7 @@ export namespace KairoCheatsheetCommands {
 }
 
 interface ShortcutRow {
-  action: string;
+  action: CheatsheetActionKey;
   idea: string;
   kairo: string;
 }
@@ -48,167 +163,167 @@ const IDEA_KEYBINDINGS_MAC: ShortcutCategory[] = [
     nameKey: 'widget.cheatsheet.category.editing',
     icon: 'codicon-edit',
     shortcuts: [
-      { action: 'Undo', idea: '⌘Z', kairo: '⌘Z' },
-      { action: 'Redo', idea: '⌘⇧Z', kairo: '⌘⇧Z' },
-      { action: 'Cut', idea: '⌘X', kairo: '⌘X' },
-      { action: 'Copy', idea: '⌘C', kairo: '⌘C' },
-      { action: 'Paste', idea: '⌘V', kairo: '⌘V' },
-      { action: 'Comment with Line Comment', idea: '⌘/', kairo: '⌘/' },
-      { action: 'Comment with Block Comment', idea: '⌘⌥/', kairo: '⌘⌥/' },
-      { action: 'Format Code', idea: '⌘⌥L', kairo: '⌘⌥L' },
-      { action: 'Organize Imports', idea: '⌃⌥O', kairo: '⌃⌥O' },
-      { action: 'Rename', idea: '⇧F6', kairo: '⇧F6' },
-      { action: 'Duplicate Line', idea: '⌘D', kairo: '⌘D' },
-      { action: 'Delete Line', idea: '⌘⌫', kairo: '⌘⌫' },
-      { action: 'Move Line Up', idea: '⇧⌥↑', kairo: '⇧⌥↑' },
-      { action: 'Move Line Down', idea: '⇧⌥↓', kairo: '⇧⌥↓' },
-      { action: 'Extend Selection', idea: '⌥↑', kairo: '⌥↑' },
-      { action: 'Shrink Selection', idea: '⌥↓', kairo: '⌥↓' },
-      { action: 'Quick Fix', idea: '⌥↵', kairo: '⌥↵' },
-      { action: 'Insert Line Below', idea: '⇧↵', kairo: '⇧↵' },
-      { action: 'Insert Line Above', idea: '⌘⌥↵', kairo: '⌘⌥↵' },
-      { action: 'Complete Statement', idea: '⇧⌘↵', kairo: '⇧⌘↵' },
-      { action: 'Parameter Info', idea: '⌘P', kairo: '⌘P' },
-      { action: 'Code Completion', idea: '⌃Space', kairo: '⌃Space' },
-      { action: 'Smart Completion', idea: '⌃⇧Space', kairo: '⌃⇧Space' },
-      { action: 'Hippie Completion', idea: '⌥/', kairo: '⌥/' },
-      { action: 'Hippie Completion Backward', idea: '⌥⇧/', kairo: '⌥⇧/' },
-      { action: 'Quick Documentation', idea: '⌃J', kairo: '⌃J' },
-      { action: 'Join Lines', idea: '⌃⇧J', kairo: '⌃⇧J' },
-      { action: 'Toggle Case', idea: '⌘⇧U', kairo: '⌘⇧U' },
-      { action: 'Next Error', idea: 'F2', kairo: 'F2' },
-      { action: 'Previous Error', idea: '⇧F2', kairo: '⇧F2' },
+      { action: 'widget.cheatsheet.action.undo', idea: '⌘Z', kairo: '⌘Z' },
+      { action: 'widget.cheatsheet.action.redo', idea: '⌘⇧Z', kairo: '⌘⇧Z' },
+      { action: 'widget.cheatsheet.action.cut', idea: '⌘X', kairo: '⌘X' },
+      { action: 'widget.cheatsheet.action.copy', idea: '⌘C', kairo: '⌘C' },
+      { action: 'widget.cheatsheet.action.paste', idea: '⌘V', kairo: '⌘V' },
+      { action: 'widget.cheatsheet.action.lineComment', idea: '⌘/', kairo: '⌘/' },
+      { action: 'widget.cheatsheet.action.blockComment', idea: '⌘⌥/', kairo: '⌘⌥/' },
+      { action: 'widget.cheatsheet.action.formatCode', idea: '⌘⌥L', kairo: '⌘⌥L' },
+      { action: 'widget.cheatsheet.action.optimizeImports', idea: '⌃⌥O', kairo: '⌃⌥O' },
+      { action: 'widget.cheatsheet.action.rename', idea: '⇧F6', kairo: '⇧F6' },
+      { action: 'widget.cheatsheet.action.duplicateLine', idea: '⌘D', kairo: '⌘D' },
+      { action: 'widget.cheatsheet.action.deleteLine', idea: '⌘⌫', kairo: '⌘⌫' },
+      { action: 'widget.cheatsheet.action.moveLineUp', idea: '⇧⌥↑', kairo: '⇧⌥↑' },
+      { action: 'widget.cheatsheet.action.moveLineDown', idea: '⇧⌥↓', kairo: '⇧⌥↓' },
+      { action: 'widget.cheatsheet.action.expandSelection', idea: '⌥↑', kairo: '⌥↑' },
+      { action: 'widget.cheatsheet.action.shrinkSelection', idea: '⌥↓', kairo: '⌥↓' },
+      { action: 'widget.cheatsheet.action.quickFix', idea: '⌥↵', kairo: '⌥↵' },
+      { action: 'widget.cheatsheet.action.insertLineBelow', idea: '⇧↵', kairo: '⇧↵' },
+      { action: 'widget.cheatsheet.action.insertLineAbove', idea: '⌘⌥↵', kairo: '⌘⌥↵' },
+      { action: 'widget.cheatsheet.action.completeStatement', idea: '⇧⌘↵', kairo: '⇧⌘↵' },
+      { action: 'widget.cheatsheet.action.parameterInfo', idea: '⌘P', kairo: '⌘P' },
+      { action: 'widget.cheatsheet.action.codeCompletion', idea: '⌃Space', kairo: '⌃Space' },
+      { action: 'widget.cheatsheet.action.smartCompletion', idea: '⌃⇧Space', kairo: '⌃⇧Space' },
+      { action: 'widget.cheatsheet.action.hippieCompletion', idea: '⌥/', kairo: '⌥/' },
+      { action: 'widget.cheatsheet.action.hippieCompletionBackward', idea: '⌥⇧/', kairo: '⌥⇧/' },
+      { action: 'widget.cheatsheet.action.quickDocumentation', idea: '⌃J', kairo: '⌃J' },
+      { action: 'widget.cheatsheet.action.joinLines', idea: '⌃⇧J', kairo: '⌃⇧J' },
+      { action: 'widget.cheatsheet.action.toggleCase', idea: '⌘⇧U', kairo: '⌘⇧U' },
+      { action: 'widget.cheatsheet.action.nextError', idea: 'F2', kairo: 'F2' },
+      { action: 'widget.cheatsheet.action.previousError', idea: '⇧F2', kairo: '⇧F2' },
     ],
   },
   {
     nameKey: 'widget.cheatsheet.category.navigation',
     icon: 'codicon-compass',
     shortcuts: [
-      { action: 'Search Everywhere', idea: 'Double ⇧', kairo: 'Double ⇧' },
-      { action: 'Go to Class', idea: '⌘O', kairo: '⌘O' },
-      { action: 'Go to File', idea: '⌘⇧O', kairo: '⌘⇧O' },
-      { action: 'Go to Symbol', idea: '⌘⌥O', kairo: '⌘⌥O' },
-      { action: 'Find Action', idea: '⌘⇧A', kairo: '⌘⇧A' },
-      { action: 'Go to Line', idea: '⌘L', kairo: '⌘L' },
-      { action: 'File Structure', idea: '⌘F12', kairo: '⌘F12' },
-      { action: 'Quick Definition', idea: '⌘⇧I', kairo: '⌘⇧I' },
-      { action: 'Go to Definition', idea: '⌘B', kairo: '⌘B' },
-      { action: 'Go to Implementation', idea: '⌘⌥B', kairo: '⌘⌥B' },
-      { action: 'Go to Type Definition', idea: '⌘⇧B', kairo: '⌘⇧B' },
-      { action: 'Go to Super Method', idea: '⌘U', kairo: '⌘U' },
-      { action: 'Find Usages', idea: '⌥F7', kairo: '⌥F7' },
-      { action: 'Call Hierarchy', idea: '⌃⌥H', kairo: '⌃⌥H' },
-      { action: 'Recent Files', idea: '⌘E', kairo: '⌘E' },
-      { action: 'Recent Locations', idea: '⌘⇧E', kairo: '⌘⇧E' },
-      { action: 'Navigate Back', idea: '⌘[', kairo: '⌘[' },
-      { action: 'Navigate Forward', idea: '⌘]', kairo: '⌘]' },
-      { action: 'Close Active Tab', idea: '⌘W', kairo: '⌘W' },
-      { action: 'Jump to Bracket', idea: '⌃⇧M', kairo: '⌃⇧M' },
-      { action: 'Type Hierarchy', idea: '⌃H', kairo: '⌃H' },
+      { action: 'widget.cheatsheet.action.searchEverywhere', idea: 'Double ⇧', kairo: 'Double ⇧' },
+      { action: 'widget.cheatsheet.action.goToClass', idea: '⌘O', kairo: '⌘O' },
+      { action: 'widget.cheatsheet.action.goToFile', idea: '⌘⇧O', kairo: '⌘⇧O' },
+      { action: 'widget.cheatsheet.action.goToSymbol', idea: '⌘⌥O', kairo: '⌘⌥O' },
+      { action: 'widget.cheatsheet.action.findAction', idea: '⌘⇧A', kairo: '⌘⇧A' },
+      { action: 'widget.cheatsheet.action.goToLine', idea: '⌘L', kairo: '⌘L' },
+      { action: 'widget.cheatsheet.action.fileStructure', idea: '⌘F12', kairo: '⌘F12' },
+      { action: 'widget.cheatsheet.action.quickDefinition', idea: '⌘⇧I', kairo: '⌘⇧I' },
+      { action: 'widget.cheatsheet.action.goToDefinition', idea: '⌘B', kairo: '⌘B' },
+      { action: 'widget.cheatsheet.action.goToImplementation', idea: '⌘⌥B', kairo: '⌘⌥B' },
+      { action: 'widget.cheatsheet.action.goToTypeDefinition', idea: '⌘⇧B', kairo: '⌘⇧B' },
+      { action: 'widget.cheatsheet.action.goToSuperMethod', idea: '⌘U', kairo: '⌘U' },
+      { action: 'widget.cheatsheet.action.findUsages', idea: '⌥F7', kairo: '⌥F7' },
+      { action: 'widget.cheatsheet.action.callHierarchy', idea: '⌃⌥H', kairo: '⌃⌥H' },
+      { action: 'widget.cheatsheet.action.recentFiles', idea: '⌘E', kairo: '⌘E' },
+      { action: 'widget.cheatsheet.action.recentLocations', idea: '⌘⇧E', kairo: '⌘⇧E' },
+      { action: 'widget.cheatsheet.action.navigateBack', idea: '⌘[', kairo: '⌘[' },
+      { action: 'widget.cheatsheet.action.navigateForward', idea: '⌘]', kairo: '⌘]' },
+      { action: 'widget.cheatsheet.action.closeActiveTab', idea: '⌘W', kairo: '⌘W' },
+      { action: 'widget.cheatsheet.action.jumpToBracket', idea: '⌃⇧M', kairo: '⌃⇧M' },
+      { action: 'widget.cheatsheet.action.typeHierarchy', idea: '⌃H', kairo: '⌃H' },
     ],
   },
   {
     nameKey: 'widget.cheatsheet.category.searchReplace',
     icon: 'codicon-search',
     shortcuts: [
-      { action: 'Find in Path', idea: '⌘⇧F', kairo: '⌘⇧F' },
-      { action: 'Replace in Path', idea: '⌘⇧R', kairo: '⌘⇧R' },
-      { action: 'Find in File', idea: '⌘F', kairo: '⌘F' },
-      { action: 'Replace in File', idea: '⌘R', kairo: '⌘R' },
-      { action: 'Find Next', idea: '⌘G', kairo: '⌘G' },
-      { action: 'Find Previous', idea: '⌘⇧G', kairo: '⌘⇧G' },
+      { action: 'widget.cheatsheet.action.findInPath', idea: '⌘⇧F', kairo: '⌘⇧F' },
+      { action: 'widget.cheatsheet.action.replaceInPath', idea: '⌘⇧R', kairo: '⌘⇧R' },
+      { action: 'widget.cheatsheet.action.findInFile', idea: '⌘F', kairo: '⌘F' },
+      { action: 'widget.cheatsheet.action.replaceInFile', idea: '⌘R', kairo: '⌘R' },
+      { action: 'widget.cheatsheet.action.findNext', idea: '⌘G', kairo: '⌘G' },
+      { action: 'widget.cheatsheet.action.findPrevious', idea: '⌘⇧G', kairo: '⌘⇧G' },
     ],
   },
   {
     nameKey: 'widget.cheatsheet.category.buildRunDebug',
     icon: 'codicon-play',
     shortcuts: [
-      { action: 'Build Project', idea: '⌘F9', kairo: '⌘F9' },
-      { action: 'Build & Deploy', idea: '⌘⇧F9', kairo: '⌘⇧F9' },
-      { action: 'Run', idea: '⌃⇧R', kairo: '⌃⇧R' },
-      { action: 'Debug', idea: '⌃⇧D', kairo: '⌃⇧D' },
-      { action: 'Stop', idea: '⌘F2', kairo: '⌘F2' },
-      { action: 'Toggle Breakpoint', idea: '⌘F8', kairo: '⌘F8' },
-      { action: 'Conditional Breakpoint', idea: '⌘⇧F8', kairo: '⌘⇧F8' },
-      { action: 'Step Over', idea: 'F8', kairo: 'F8' },
-      { action: 'Step Into', idea: 'F7', kairo: 'F7' },
-      { action: 'Step Out', idea: '⇧F8', kairo: '⇧F8' },
-      { action: 'Resume Program', idea: '⌘⌥R', kairo: '⌘⌥R' },
-      { action: 'Run to Cursor', idea: '⌥F9', kairo: '⌥F9' },
+      { action: 'widget.cheatsheet.action.buildProject', idea: '⌘F9', kairo: '⌘F9' },
+      { action: 'widget.cheatsheet.action.buildAndDeploy', idea: '⌘⇧F9', kairo: '⌘⇧F9' },
+      { action: 'widget.cheatsheet.action.run', idea: '⌃⇧R', kairo: '⌃⇧R' },
+      { action: 'widget.cheatsheet.action.debug', idea: '⌃⇧D', kairo: '⌃⇧D' },
+      { action: 'widget.cheatsheet.action.stop', idea: '⌘F2', kairo: '⌘F2' },
+      { action: 'widget.cheatsheet.action.toggleBreakpoint', idea: '⌘F8', kairo: '⌘F8' },
+      { action: 'widget.cheatsheet.action.conditionalBreakpoint', idea: '⌘⇧F8', kairo: '⌘⇧F8' },
+      { action: 'widget.cheatsheet.action.stepOver', idea: 'F8', kairo: 'F8' },
+      { action: 'widget.cheatsheet.action.stepInto', idea: 'F7', kairo: 'F7' },
+      { action: 'widget.cheatsheet.action.stepOut', idea: '⇧F8', kairo: '⇧F8' },
+      { action: 'widget.cheatsheet.action.resumeProgram', idea: '⌘⌥R', kairo: '⌘⌥R' },
+      { action: 'widget.cheatsheet.action.runToCursor', idea: '⌥F9', kairo: '⌥F9' },
     ],
   },
   {
     nameKey: 'widget.cheatsheet.category.refactoring',
     icon: 'codicon-wand',
     shortcuts: [
-      { action: 'Generate Code', idea: '⌘N', kairo: '⌘N' },
-      { action: 'Override Method', idea: '⌃O', kairo: '⌃O' },
-      { action: 'Implement Methods', idea: '⌃I', kairo: '⌃I' },
-      { action: 'Surround With', idea: '⌘⌥T', kairo: '⌘⌥T' },
-      { action: 'Unwrap', idea: '⌘⇧⌫', kairo: '⌘⇧⌫' },
-      { action: 'Manage Live Templates', idea: '⌘⌥J', kairo: '⌘⌥J' },
-      { action: 'Refactor This', idea: '⌃T', kairo: '⌃T' },
-      { action: 'Extract Method', idea: '⌘⌥M', kairo: '⌘⌥M' },
-      { action: 'Extract Variable', idea: '⌘⌥V', kairo: '⌘⌥V' },
-      { action: 'Extract Constant', idea: '⌘⌥C', kairo: '⌘⌥C' },
-      { action: 'Change Signature', idea: '⌘F6', kairo: '⌘F6' },
+      { action: 'widget.cheatsheet.action.generateCode', idea: '⌘N', kairo: '⌘N' },
+      { action: 'widget.cheatsheet.action.overrideMethod', idea: '⌃O', kairo: '⌃O' },
+      { action: 'widget.cheatsheet.action.implementMethods', idea: '⌃I', kairo: '⌃I' },
+      { action: 'widget.cheatsheet.action.surroundWith', idea: '⌘⌥T', kairo: '⌘⌥T' },
+      { action: 'widget.cheatsheet.action.unwrap', idea: '⌘⇧⌫', kairo: '⌘⇧⌫' },
+      { action: 'widget.cheatsheet.action.manageLiveTemplates', idea: '⌘⌥J', kairo: '⌘⌥J' },
+      { action: 'widget.cheatsheet.action.refactorThis', idea: '⌃T', kairo: '⌃T' },
+      { action: 'widget.cheatsheet.action.extractMethod', idea: '⌘⌥M', kairo: '⌘⌥M' },
+      { action: 'widget.cheatsheet.action.extractVariable', idea: '⌘⌥V', kairo: '⌘⌥V' },
+      { action: 'widget.cheatsheet.action.extractConstant', idea: '⌘⌥C', kairo: '⌘⌥C' },
+      { action: 'widget.cheatsheet.action.changeSignature', idea: '⌘F6', kairo: '⌘F6' },
     ],
   },
   {
     nameKey: 'widget.cheatsheet.category.generalIde',
     icon: 'codicon-settings-gear',
     shortcuts: [
-      { action: 'Save All', idea: '⌘S', kairo: '⌘S' },
-      { action: 'Settings', idea: '⌘,', kairo: '⌘,' },
-      { action: 'Terminal', idea: '⌥F12', kairo: '⌥F12' },
-      { action: 'Keyboard Shortcuts', idea: '⌘⇧K', kairo: '⌘⇧K' },
-      { action: 'Toggle Full Screen', idea: '⌃⌘F', kairo: '⌃⌘F' },
-      { action: 'Next Editor', idea: '⌘⇧]', kairo: '⌘⇧]' },
-      { action: 'Previous Editor', idea: '⌘⇧[', kairo: '⌘⇧[' },
-      { action: 'Hide Active Panel', idea: 'Esc', kairo: 'Esc' },
+      { action: 'widget.cheatsheet.action.saveAll', idea: '⌘S', kairo: '⌘S' },
+      { action: 'widget.cheatsheet.action.settings', idea: '⌘,', kairo: '⌘,' },
+      { action: 'widget.cheatsheet.action.terminal', idea: '⌥F12', kairo: '⌥F12' },
+      { action: 'widget.cheatsheet.action.keyboardShortcuts', idea: '⌘⇧K', kairo: '⌘⇧K' },
+      { action: 'widget.cheatsheet.action.toggleFullScreen', idea: '⌃⌘F', kairo: '⌃⌘F' },
+      { action: 'widget.cheatsheet.action.nextEditor', idea: '⌘⇧]', kairo: '⌘⇧]' },
+      { action: 'widget.cheatsheet.action.previousEditor', idea: '⌘⇧[', kairo: '⌘⇧[' },
+      { action: 'widget.cheatsheet.action.hideActivePanel', idea: 'Esc', kairo: 'Esc' },
     ],
   },
   {
     nameKey: 'widget.cheatsheet.category.toolWindows',
     icon: 'codicon-layout',
     shortcuts: [
-      { action: 'Project', idea: '⌘1', kairo: '⌘1' },
-      { action: 'Servers (Kairo)', idea: '⌘2 (Bookmarks in IDEA)', kairo: '⌘2' },
-      { action: 'Deployments (Kairo)', idea: '⌘3 (Find in IDEA)', kairo: '⌘3' },
-      { action: 'Builds (Kairo)', idea: '⌘4 (Run in IDEA)', kairo: '⌘4' },
-      { action: 'Debug', idea: '⌘5', kairo: '⌘5' },
-      { action: 'Problems', idea: '⌘6', kairo: '⌘6' },
-      { action: 'TODO (Kairo)', idea: '⌘7 (Structure in IDEA)', kairo: '⌘7' },
-      { action: 'Git', idea: '⌘9', kairo: '⌘9' },
+      { action: 'widget.cheatsheet.action.project', idea: '⌘1', kairo: '⌘1' },
+      { action: 'widget.cheatsheet.action.servers', idea: '⌘2 (Bookmarks in IDEA)', kairo: '⌘2' },
+      { action: 'widget.cheatsheet.action.deployments', idea: '⌘3 (Find in IDEA)', kairo: '⌘3' },
+      { action: 'widget.cheatsheet.action.builds', idea: '⌘4 (Run in IDEA)', kairo: '⌘4' },
+      { action: 'widget.cheatsheet.action.debug', idea: '⌘5', kairo: '⌘5' },
+      { action: 'widget.cheatsheet.action.problems', idea: '⌘6', kairo: '⌘6' },
+      { action: 'widget.cheatsheet.action.todo', idea: '⌘7 (Structure in IDEA)', kairo: '⌘7' },
+      { action: 'widget.cheatsheet.action.git', idea: '⌘9', kairo: '⌘9' },
     ],
   },
   {
     nameKey: 'widget.cheatsheet.category.bookmarks',
     icon: 'codicon-bookmark',
     shortcuts: [
-      { action: 'Toggle Bookmark', idea: 'F11', kairo: 'F11' },
-      { action: 'Toggle Bookmark (Mnemonic)', idea: '⌘F11', kairo: '⌘F11' },
-      { action: 'Show Bookmarks', idea: '⇧F11', kairo: '⇧F11' },
+      { action: 'widget.cheatsheet.action.toggleBookmark', idea: 'F11', kairo: 'F11' },
+      { action: 'widget.cheatsheet.action.toggleBookmarkMnemonic', idea: '⌘F11', kairo: '⌘F11' },
+      { action: 'widget.cheatsheet.action.showBookmarks', idea: '⇧F11', kairo: '⇧F11' },
     ],
   },
   {
     nameKey: 'widget.cheatsheet.category.codeFolding',
     icon: 'codicon-folding',
     shortcuts: [
-      { action: 'Collapse', idea: '⌘-', kairo: '⌘-' },
-      { action: 'Expand', idea: '⌘=', kairo: '⌘=' },
-      { action: 'Collapse All', idea: '⌘⇧-', kairo: '⌘⇧-' },
-      { action: 'Expand All', idea: '⌘⇧=', kairo: '⌘⇧=' },
+      { action: 'widget.cheatsheet.action.collapse', idea: '⌘-', kairo: '⌘-' },
+      { action: 'widget.cheatsheet.action.expand', idea: '⌘=', kairo: '⌘=' },
+      { action: 'widget.cheatsheet.action.collapseAll', idea: '⌘⇧-', kairo: '⌘⇧-' },
+      { action: 'widget.cheatsheet.action.expandAll', idea: '⌘⇧=', kairo: '⌘⇧=' },
     ],
   },
   {
     nameKey: 'widget.cheatsheet.category.multipleCursors',
     icon: 'codicon-multiple-windows',
     shortcuts: [
-      { action: 'Add Cursor Above', idea: '⌃G', kairo: '⌃G' },
-      { action: 'Add Cursor Below', idea: '⌃⇧G', kairo: '⌃⇧G' },
-      { action: 'Select Next Occurrence', idea: '⌥J', kairo: '⌥J' },
-      { action: 'Column Selection Mode', idea: '⌘⇧8', kairo: '⌘⇧8' },
+      { action: 'widget.cheatsheet.action.addCursorAbove', idea: '⌃G', kairo: '⌃G' },
+      { action: 'widget.cheatsheet.action.addCursorBelow', idea: '⌃⇧G', kairo: '⌃⇧G' },
+      { action: 'widget.cheatsheet.action.selectNextOccurrence', idea: '⌥J', kairo: '⌥J' },
+      { action: 'widget.cheatsheet.action.columnSelectionMode', idea: '⌘⇧8', kairo: '⌘⇧8' },
     ],
   },
 ];
@@ -218,171 +333,171 @@ const IDEA_KEYBINDINGS_WIN: ShortcutCategory[] = [
     nameKey: 'widget.cheatsheet.category.editing',
     icon: 'codicon-edit',
     shortcuts: [
-      { action: 'Undo (撤销)', idea: 'Ctrl+Z', kairo: 'Ctrl+Z' },
-      { action: 'Redo (重做)', idea: 'Ctrl+Shift+Z', kairo: 'Ctrl+Shift+Z' },
-      { action: 'Cut (剪切)', idea: 'Ctrl+X', kairo: 'Ctrl+X' },
-      { action: 'Copy (复制)', idea: 'Ctrl+C', kairo: 'Ctrl+C' },
-      { action: 'Paste (粘贴)', idea: 'Ctrl+V', kairo: 'Ctrl+V' },
-      { action: 'Line Comment (行注释)', idea: 'Ctrl+/', kairo: 'Ctrl+/' },
-      { action: 'Block Comment (块注释)', idea: 'Ctrl+Shift+/', kairo: 'Ctrl+Shift+/' },
-      { action: 'Format Code (格式化代码)', idea: 'Ctrl+Alt+L', kairo: 'Ctrl+Alt+L' },
-      { action: 'Optimize Imports (优化导入)', idea: 'Ctrl+Alt+O', kairo: 'Ctrl+Alt+O' },
-      { action: 'Rename (重命名)', idea: 'Shift+F6', kairo: 'Shift+F6' },
-      { action: 'Duplicate Line (复制行)', idea: 'Ctrl+D', kairo: 'Ctrl+D' },
-      { action: 'Delete Line (删除行)', idea: 'Ctrl+Y', kairo: 'Ctrl+Y' },
-      { action: 'Move Line Up (上移行)', idea: 'Shift+Alt+Up', kairo: 'Shift+Alt+Up' },
-      { action: 'Move Line Down (下移行)', idea: 'Shift+Alt+Down', kairo: 'Shift+Alt+Down' },
-      { action: 'Expand Selection (扩展选择)', idea: 'Ctrl+W', kairo: 'Ctrl+W' },
-      { action: 'Shrink Selection (收缩选择)', idea: 'Ctrl+Shift+W', kairo: 'Ctrl+Shift+W' },
-      { action: 'Quick Fix (快速修复)', idea: 'Alt+Enter', kairo: 'Alt+Enter' },
-      { action: 'Insert Line Below (下方插入行)', idea: 'Shift+Enter', kairo: 'Shift+Enter' },
-      { action: 'Insert Line Above (上方插入行)', idea: 'Ctrl+Alt+Enter', kairo: 'Ctrl+Alt+Enter' },
-      { action: 'Complete Statement (补全语句)', idea: 'Ctrl+Shift+Enter', kairo: 'Ctrl+Shift+Enter' },
-      { action: 'Parameter Info (参数信息)', idea: 'Ctrl+P', kairo: 'Ctrl+P' },
-      { action: 'Code Completion (代码补全)', idea: 'Ctrl+Space', kairo: 'Ctrl+Space' },
-      { action: 'Smart Completion (智能补全)', idea: 'Ctrl+Shift+Space', kairo: 'Ctrl+Shift+Space' },
-      { action: 'Hippie Completion (循环补全)', idea: 'Alt+/', kairo: 'Alt+/' },
-      { action: 'Hippie Completion Backward (反向循环)', idea: 'Alt+Shift+/', kairo: 'Alt+Shift+/' },
-      { action: 'Quick Documentation (快速文档)', idea: 'Ctrl+Q', kairo: 'Ctrl+Q' },
-      { action: 'Join Lines (合并行)', idea: 'Ctrl+Shift+J', kairo: 'Ctrl+Shift+J' },
-      { action: 'Toggle Case (切换大小写)', idea: 'Ctrl+Shift+U', kairo: 'Ctrl+Shift+U' },
-      { action: 'Next Error (下一个错误)', idea: 'F2', kairo: 'F2' },
-      { action: 'Previous Error (上一个错误)', idea: 'Shift+F2', kairo: 'Shift+F2' },
+      { action: 'widget.cheatsheet.action.undo', idea: 'Ctrl+Z', kairo: 'Ctrl+Z' },
+      { action: 'widget.cheatsheet.action.redo', idea: 'Ctrl+Shift+Z', kairo: 'Ctrl+Shift+Z' },
+      { action: 'widget.cheatsheet.action.cut', idea: 'Ctrl+X', kairo: 'Ctrl+X' },
+      { action: 'widget.cheatsheet.action.copy', idea: 'Ctrl+C', kairo: 'Ctrl+C' },
+      { action: 'widget.cheatsheet.action.paste', idea: 'Ctrl+V', kairo: 'Ctrl+V' },
+      { action: 'widget.cheatsheet.action.lineComment', idea: 'Ctrl+/', kairo: 'Ctrl+/' },
+      { action: 'widget.cheatsheet.action.blockComment', idea: 'Ctrl+Shift+/', kairo: 'Ctrl+Shift+/' },
+      { action: 'widget.cheatsheet.action.formatCode', idea: 'Ctrl+Alt+L', kairo: 'Ctrl+Alt+L' },
+      { action: 'widget.cheatsheet.action.optimizeImports', idea: 'Ctrl+Alt+O', kairo: 'Ctrl+Alt+O' },
+      { action: 'widget.cheatsheet.action.rename', idea: 'Shift+F6', kairo: 'Shift+F6' },
+      { action: 'widget.cheatsheet.action.duplicateLine', idea: 'Ctrl+D', kairo: 'Ctrl+D' },
+      { action: 'widget.cheatsheet.action.deleteLine', idea: 'Ctrl+Y', kairo: 'Ctrl+Y' },
+      { action: 'widget.cheatsheet.action.moveLineUp', idea: 'Shift+Alt+Up', kairo: 'Shift+Alt+Up' },
+      { action: 'widget.cheatsheet.action.moveLineDown', idea: 'Shift+Alt+Down', kairo: 'Shift+Alt+Down' },
+      { action: 'widget.cheatsheet.action.expandSelection', idea: 'Ctrl+W', kairo: 'Ctrl+W' },
+      { action: 'widget.cheatsheet.action.shrinkSelection', idea: 'Ctrl+Shift+W', kairo: 'Ctrl+Shift+W' },
+      { action: 'widget.cheatsheet.action.quickFix', idea: 'Alt+Enter', kairo: 'Alt+Enter' },
+      { action: 'widget.cheatsheet.action.insertLineBelow', idea: 'Shift+Enter', kairo: 'Shift+Enter' },
+      { action: 'widget.cheatsheet.action.insertLineAbove', idea: 'Ctrl+Alt+Enter', kairo: 'Ctrl+Alt+Enter' },
+      { action: 'widget.cheatsheet.action.completeStatement', idea: 'Ctrl+Shift+Enter', kairo: 'Ctrl+Shift+Enter' },
+      { action: 'widget.cheatsheet.action.parameterInfo', idea: 'Ctrl+P', kairo: 'Ctrl+P' },
+      { action: 'widget.cheatsheet.action.codeCompletion', idea: 'Ctrl+Space', kairo: 'Ctrl+Space' },
+      { action: 'widget.cheatsheet.action.smartCompletion', idea: 'Ctrl+Shift+Space', kairo: 'Ctrl+Shift+Space' },
+      { action: 'widget.cheatsheet.action.hippieCompletion', idea: 'Alt+/', kairo: 'Alt+/' },
+      { action: 'widget.cheatsheet.action.hippieCompletionBackward', idea: 'Alt+Shift+/', kairo: 'Alt+Shift+/' },
+      { action: 'widget.cheatsheet.action.quickDocumentation', idea: 'Ctrl+Q', kairo: 'Ctrl+Q' },
+      { action: 'widget.cheatsheet.action.joinLines', idea: 'Ctrl+Shift+J', kairo: 'Ctrl+Shift+J' },
+      { action: 'widget.cheatsheet.action.toggleCase', idea: 'Ctrl+Shift+U', kairo: 'Ctrl+Shift+U' },
+      { action: 'widget.cheatsheet.action.nextError', idea: 'F2', kairo: 'F2' },
+      { action: 'widget.cheatsheet.action.previousError', idea: 'Shift+F2', kairo: 'Shift+F2' },
     ],
   },
   {
     nameKey: 'widget.cheatsheet.category.navigation',
     icon: 'codicon-compass',
     shortcuts: [
-      { action: 'Search Everywhere (全局搜索)', idea: 'Double Shift', kairo: 'Double Shift' },
-      { action: 'Go to Class (查找类)', idea: 'Ctrl+N', kairo: 'Ctrl+N' },
-      { action: 'Go to File (查找文件)', idea: 'Ctrl+Shift+N', kairo: 'Ctrl+Shift+N' },
-      { action: 'Go to Symbol (查找符号)', idea: 'Ctrl+Shift+Alt+N', kairo: 'Ctrl+Shift+Alt+N' },
-      { action: 'Find Action (查找操作)', idea: 'Ctrl+Shift+A', kairo: 'Ctrl+Shift+A' },
-      { action: 'Go to Line (跳转到行)', idea: 'Ctrl+G', kairo: 'Ctrl+G' },
-      { action: 'File Structure (文件结构)', idea: 'Ctrl+F12', kairo: 'Ctrl+F12' },
-      { action: 'Quick Definition (快速定义)', idea: 'Ctrl+Shift+I', kairo: 'Ctrl+Shift+I' },
-      { action: 'Go to Definition (跳转到定义)', idea: 'Ctrl+B', kairo: 'Ctrl+B' },
-      { action: 'Go to Implementation (跳转到实现)', idea: 'Ctrl+Alt+B', kairo: 'Ctrl+Alt+B' },
-      { action: 'Go to Type Definition (跳转到类型定义)', idea: 'Ctrl+Shift+B', kairo: 'Ctrl+Shift+B' },
-      { action: 'Go to Super Method (跳转到父类方法)', idea: 'Ctrl+U', kairo: 'Ctrl+U' },
-      { action: 'Find Usages (查找用法)', idea: 'Alt+F7', kairo: 'Alt+F7' },
-      { action: 'Call Hierarchy (调用层次)', idea: 'Ctrl+Alt+H', kairo: 'Ctrl+Alt+H' },
-      { action: 'Type Hierarchy (类型层次)', idea: 'Ctrl+H', kairo: 'Ctrl+H' },
-      { action: 'Recent Files (最近文件)', idea: 'Ctrl+E', kairo: 'Ctrl+E' },
-      { action: 'Recent Locations (最近位置)', idea: 'Ctrl+Shift+E', kairo: 'Ctrl+Shift+E' },
-      { action: 'Last Edit Location (上次编辑位置)', idea: 'Ctrl+Shift+Backspace', kairo: 'Ctrl+Shift+Backspace' },
-      { action: 'Navigate Back (后退)', idea: 'Ctrl+Alt+Left', kairo: 'Ctrl+Alt+Left' },
-      { action: 'Navigate Forward (前进)', idea: 'Ctrl+Alt+Right', kairo: 'Ctrl+Alt+Right' },
-      { action: 'Close Active Tab (关闭当前标签)', idea: 'Ctrl+F4', kairo: 'Ctrl+F4' },
-      { action: 'Jump to Bracket (跳转到括号)', idea: 'Ctrl+Shift+M', kairo: 'Ctrl+Shift+M' },
+      { action: 'widget.cheatsheet.action.searchEverywhere', idea: 'Double Shift', kairo: 'Double Shift' },
+      { action: 'widget.cheatsheet.action.goToClass', idea: 'Ctrl+N', kairo: 'Ctrl+N' },
+      { action: 'widget.cheatsheet.action.goToFile', idea: 'Ctrl+Shift+N', kairo: 'Ctrl+Shift+N' },
+      { action: 'widget.cheatsheet.action.goToSymbol', idea: 'Ctrl+Shift+Alt+N', kairo: 'Ctrl+Shift+Alt+N' },
+      { action: 'widget.cheatsheet.action.findAction', idea: 'Ctrl+Shift+A', kairo: 'Ctrl+Shift+A' },
+      { action: 'widget.cheatsheet.action.goToLine', idea: 'Ctrl+G', kairo: 'Ctrl+G' },
+      { action: 'widget.cheatsheet.action.fileStructure', idea: 'Ctrl+F12', kairo: 'Ctrl+F12' },
+      { action: 'widget.cheatsheet.action.quickDefinition', idea: 'Ctrl+Shift+I', kairo: 'Ctrl+Shift+I' },
+      { action: 'widget.cheatsheet.action.goToDefinition', idea: 'Ctrl+B', kairo: 'Ctrl+B' },
+      { action: 'widget.cheatsheet.action.goToImplementation', idea: 'Ctrl+Alt+B', kairo: 'Ctrl+Alt+B' },
+      { action: 'widget.cheatsheet.action.goToTypeDefinition', idea: 'Ctrl+Shift+B', kairo: 'Ctrl+Shift+B' },
+      { action: 'widget.cheatsheet.action.goToSuperMethod', idea: 'Ctrl+U', kairo: 'Ctrl+U' },
+      { action: 'widget.cheatsheet.action.findUsages', idea: 'Alt+F7', kairo: 'Alt+F7' },
+      { action: 'widget.cheatsheet.action.callHierarchy', idea: 'Ctrl+Alt+H', kairo: 'Ctrl+Alt+H' },
+      { action: 'widget.cheatsheet.action.typeHierarchy', idea: 'Ctrl+H', kairo: 'Ctrl+H' },
+      { action: 'widget.cheatsheet.action.recentFiles', idea: 'Ctrl+E', kairo: 'Ctrl+E' },
+      { action: 'widget.cheatsheet.action.recentLocations', idea: 'Ctrl+Shift+E', kairo: 'Ctrl+Shift+E' },
+      { action: 'widget.cheatsheet.action.lastEditLocation', idea: 'Ctrl+Shift+Backspace', kairo: 'Ctrl+Shift+Backspace' },
+      { action: 'widget.cheatsheet.action.navigateBack', idea: 'Ctrl+Alt+Left', kairo: 'Ctrl+Alt+Left' },
+      { action: 'widget.cheatsheet.action.navigateForward', idea: 'Ctrl+Alt+Right', kairo: 'Ctrl+Alt+Right' },
+      { action: 'widget.cheatsheet.action.closeActiveTab', idea: 'Ctrl+F4', kairo: 'Ctrl+F4' },
+      { action: 'widget.cheatsheet.action.jumpToBracket', idea: 'Ctrl+Shift+M', kairo: 'Ctrl+Shift+M' },
     ],
   },
   {
     nameKey: 'widget.cheatsheet.category.searchReplace',
     icon: 'codicon-search',
     shortcuts: [
-      { action: 'Find in Path (全局查找)', idea: 'Ctrl+Shift+F', kairo: 'Ctrl+Shift+F' },
-      { action: 'Replace in Path (全局替换)', idea: 'Ctrl+Shift+R', kairo: 'Ctrl+Shift+R' },
-      { action: 'Find (查找)', idea: 'Ctrl+F', kairo: 'Ctrl+F' },
-      { action: 'Replace (替换)', idea: 'Ctrl+R', kairo: 'Ctrl+R' },
-      { action: 'Find Next (下一个)', idea: 'F3', kairo: 'F3' },
-      { action: 'Find Previous (上一个)', idea: 'Shift+F3', kairo: 'Shift+F3' },
+      { action: 'widget.cheatsheet.action.findInPath', idea: 'Ctrl+Shift+F', kairo: 'Ctrl+Shift+F' },
+      { action: 'widget.cheatsheet.action.replaceInPath', idea: 'Ctrl+Shift+R', kairo: 'Ctrl+Shift+R' },
+      { action: 'widget.cheatsheet.action.findInFile', idea: 'Ctrl+F', kairo: 'Ctrl+F' },
+      { action: 'widget.cheatsheet.action.replaceInFile', idea: 'Ctrl+R', kairo: 'Ctrl+R' },
+      { action: 'widget.cheatsheet.action.findNext', idea: 'F3', kairo: 'F3' },
+      { action: 'widget.cheatsheet.action.findPrevious', idea: 'Shift+F3', kairo: 'Shift+F3' },
     ],
   },
   {
     nameKey: 'widget.cheatsheet.category.buildRunDebug',
     icon: 'codicon-play',
     shortcuts: [
-      { action: 'Build Project (构建项目)', idea: 'Ctrl+F9', kairo: 'Ctrl+F9' },
-      { action: 'Build & Deploy (构建并部署)', idea: 'Ctrl+Shift+F9', kairo: 'Ctrl+Shift+F9' },
-      { action: 'Run (运行)', idea: 'Shift+F10', kairo: 'Shift+F10' },
-      { action: 'Debug (调试)', idea: 'Shift+F9', kairo: 'Shift+F9' },
-      { action: 'Stop (停止)', idea: 'Ctrl+F2', kairo: 'Ctrl+F2' },
-      { action: 'Toggle Breakpoint (切换断点)', idea: 'Ctrl+F8', kairo: 'Ctrl+F8' },
-      { action: 'View / Conditional Breakpoint (查看/条件断点)', idea: 'Ctrl+Shift+F8', kairo: 'Ctrl+Shift+F8' },
-      { action: 'Step Over (单步跳过)', idea: 'F8', kairo: 'F8' },
-      { action: 'Step Into (单步进入)', idea: 'F7', kairo: 'F7' },
-      { action: 'Step Out (单步跳出)', idea: 'Shift+F8', kairo: 'Shift+F8' },
-      { action: 'Resume Program (继续执行)', idea: 'F9', kairo: 'F9' },
-      { action: 'Run to Cursor (运行到光标)', idea: 'Alt+F9', kairo: 'Alt+F9' },
-      { action: 'Evaluate Expression (求值)', idea: 'Alt+F8', kairo: 'Alt+F8' },
-      { action: 'Rerun / Restart (重新运行)', idea: 'Ctrl+F5', kairo: 'Ctrl+F5' },
+      { action: 'widget.cheatsheet.action.buildProject', idea: 'Ctrl+F9', kairo: 'Ctrl+F9' },
+      { action: 'widget.cheatsheet.action.buildAndDeploy', idea: 'Ctrl+Shift+F9', kairo: 'Ctrl+Shift+F9' },
+      { action: 'widget.cheatsheet.action.run', idea: 'Shift+F10', kairo: 'Shift+F10' },
+      { action: 'widget.cheatsheet.action.debug', idea: 'Shift+F9', kairo: 'Shift+F9' },
+      { action: 'widget.cheatsheet.action.stop', idea: 'Ctrl+F2', kairo: 'Ctrl+F2' },
+      { action: 'widget.cheatsheet.action.toggleBreakpoint', idea: 'Ctrl+F8', kairo: 'Ctrl+F8' },
+      { action: 'widget.cheatsheet.action.conditionalBreakpoint', idea: 'Ctrl+Shift+F8', kairo: 'Ctrl+Shift+F8' },
+      { action: 'widget.cheatsheet.action.stepOver', idea: 'F8', kairo: 'F8' },
+      { action: 'widget.cheatsheet.action.stepInto', idea: 'F7', kairo: 'F7' },
+      { action: 'widget.cheatsheet.action.stepOut', idea: 'Shift+F8', kairo: 'Shift+F8' },
+      { action: 'widget.cheatsheet.action.resumeProgram', idea: 'F9', kairo: 'F9' },
+      { action: 'widget.cheatsheet.action.runToCursor', idea: 'Alt+F9', kairo: 'Alt+F9' },
+      { action: 'widget.cheatsheet.action.evaluateExpression', idea: 'Alt+F8', kairo: 'Alt+F8' },
+      { action: 'widget.cheatsheet.action.rerunRestart', idea: 'Ctrl+F5', kairo: 'Ctrl+F5' },
     ],
   },
   {
     nameKey: 'widget.cheatsheet.category.refactoring',
     icon: 'codicon-wand',
     shortcuts: [
-      { action: 'Generate Code (生成代码)', idea: 'Alt+Insert', kairo: 'Alt+Insert' },
-      { action: 'Override Method (重写方法)', idea: 'Ctrl+O', kairo: 'Ctrl+O' },
-      { action: 'Implement Methods (实现方法)', idea: 'Ctrl+I', kairo: 'Ctrl+I' },
-      { action: 'Surround With (包围)', idea: 'Ctrl+Alt+T', kairo: 'Ctrl+Alt+T' },
-      { action: 'Unwrap (拆除包围)', idea: 'Ctrl+Shift+Delete', kairo: 'Ctrl+Shift+Delete' },
-      { action: 'Manage Live Templates (管理模板)', idea: 'Ctrl+Alt+Shift+J', kairo: 'Ctrl+Alt+Shift+J' },
-      { action: 'Refactor This (重构)', idea: 'Ctrl+Shift+Alt+T', kairo: 'Ctrl+Shift+Alt+T' },
-      { action: 'Extract Method (提取方法)', idea: 'Ctrl+Alt+M', kairo: 'Ctrl+Alt+M' },
-      { action: 'Extract Variable (提取变量)', idea: 'Ctrl+Alt+V', kairo: 'Ctrl+Alt+V' },
-      { action: 'Extract Constant (提取常量)', idea: 'Ctrl+Alt+C', kairo: 'Ctrl+Alt+C' },
-      { action: 'Extract Field (提取字段)', idea: 'Ctrl+Alt+F', kairo: 'Ctrl+Alt+F' },
-      { action: 'Change Signature (修改签名)', idea: 'Ctrl+F6', kairo: 'Ctrl+F6' },
+      { action: 'widget.cheatsheet.action.generateCode', idea: 'Alt+Insert', kairo: 'Alt+Insert' },
+      { action: 'widget.cheatsheet.action.overrideMethod', idea: 'Ctrl+O', kairo: 'Ctrl+O' },
+      { action: 'widget.cheatsheet.action.implementMethods', idea: 'Ctrl+I', kairo: 'Ctrl+I' },
+      { action: 'widget.cheatsheet.action.surroundWith', idea: 'Ctrl+Alt+T', kairo: 'Ctrl+Alt+T' },
+      { action: 'widget.cheatsheet.action.unwrap', idea: 'Ctrl+Shift+Delete', kairo: 'Ctrl+Shift+Delete' },
+      { action: 'widget.cheatsheet.action.manageLiveTemplates', idea: 'Ctrl+Alt+Shift+J', kairo: 'Ctrl+Alt+Shift+J' },
+      { action: 'widget.cheatsheet.action.refactorThis', idea: 'Ctrl+Shift+Alt+T', kairo: 'Ctrl+Shift+Alt+T' },
+      { action: 'widget.cheatsheet.action.extractMethod', idea: 'Ctrl+Alt+M', kairo: 'Ctrl+Alt+M' },
+      { action: 'widget.cheatsheet.action.extractVariable', idea: 'Ctrl+Alt+V', kairo: 'Ctrl+Alt+V' },
+      { action: 'widget.cheatsheet.action.extractConstant', idea: 'Ctrl+Alt+C', kairo: 'Ctrl+Alt+C' },
+      { action: 'widget.cheatsheet.action.extractField', idea: 'Ctrl+Alt+F', kairo: 'Ctrl+Alt+F' },
+      { action: 'widget.cheatsheet.action.changeSignature', idea: 'Ctrl+F6', kairo: 'Ctrl+F6' },
     ],
   },
   {
     nameKey: 'widget.cheatsheet.category.generalIde',
     icon: 'codicon-settings-gear',
     shortcuts: [
-      { action: 'Save All (保存全部)', idea: 'Ctrl+S', kairo: 'Ctrl+S' },
-      { action: 'Settings (设置)', idea: 'Ctrl+Alt+S', kairo: 'Ctrl+Alt+S' },
-      { action: 'Terminal (终端)', idea: 'Alt+F12', kairo: 'Alt+F12' },
-      { action: 'Toggle Full Screen (全屏)', idea: 'Ctrl+Shift+F12', kairo: 'Ctrl+Shift+F12' },
-      { action: 'Copy Path (复制路径)', idea: 'Ctrl+Shift+C', kairo: 'Ctrl+Shift+C' },
-      { action: 'Paste from History (历史粘贴)', idea: 'Ctrl+Shift+V', kairo: 'Ctrl+Shift+V' },
-      { action: 'Hide Active Panel (隐藏面板)', idea: 'Shift+Esc', kairo: 'Shift+Esc' },
-      { action: 'Split Editor (分屏)', idea: 'Ctrl+Shift+\\', kairo: 'Ctrl+Shift+\\' },
+      { action: 'widget.cheatsheet.action.saveAll', idea: 'Ctrl+S', kairo: 'Ctrl+S' },
+      { action: 'widget.cheatsheet.action.settings', idea: 'Ctrl+Alt+S', kairo: 'Ctrl+Alt+S' },
+      { action: 'widget.cheatsheet.action.terminal', idea: 'Alt+F12', kairo: 'Alt+F12' },
+      { action: 'widget.cheatsheet.action.toggleFullScreen', idea: 'Ctrl+Shift+F12', kairo: 'Ctrl+Shift+F12' },
+      { action: 'widget.cheatsheet.action.copyPath', idea: 'Ctrl+Shift+C', kairo: 'Ctrl+Shift+C' },
+      { action: 'widget.cheatsheet.action.pasteFromHistory', idea: 'Ctrl+Shift+V', kairo: 'Ctrl+Shift+V' },
+      { action: 'widget.cheatsheet.action.hideActivePanel', idea: 'Shift+Esc', kairo: 'Shift+Esc' },
+      { action: 'widget.cheatsheet.action.splitEditor', idea: 'Ctrl+Shift+\\', kairo: 'Ctrl+Shift+\\' },
     ],
   },
   {
     nameKey: 'widget.cheatsheet.category.toolWindows',
     icon: 'codicon-layout',
     shortcuts: [
-      { action: 'Project (项目)', idea: 'Alt+1', kairo: 'Alt+1' },
-      { action: 'Servers (服务器, Kairo)', idea: 'Alt+2 (Bookmarks in IDEA)', kairo: 'Alt+2' },
-      { action: 'Deployments (部署, Kairo)', idea: 'Alt+3 (Find in IDEA)', kairo: 'Alt+3' },
-      { action: 'Builds (构建, Kairo)', idea: 'Alt+4 (Run in IDEA)', kairo: 'Alt+4' },
-      { action: 'Debug (调试)', idea: 'Alt+5', kairo: 'Alt+5' },
-      { action: 'Problems (问题)', idea: 'Alt+6', kairo: 'Alt+6' },
-      { action: 'TODO (Kairo)', idea: 'Alt+7 (Structure in IDEA)', kairo: 'Alt+7' },
-      { action: 'Git / VCS', idea: 'Alt+9', kairo: 'Alt+9' },
+      { action: 'widget.cheatsheet.action.project', idea: 'Alt+1', kairo: 'Alt+1' },
+      { action: 'widget.cheatsheet.action.servers', idea: 'Alt+2 (Bookmarks in IDEA)', kairo: 'Alt+2' },
+      { action: 'widget.cheatsheet.action.deployments', idea: 'Alt+3 (Find in IDEA)', kairo: 'Alt+3' },
+      { action: 'widget.cheatsheet.action.builds', idea: 'Alt+4 (Run in IDEA)', kairo: 'Alt+4' },
+      { action: 'widget.cheatsheet.action.debug', idea: 'Alt+5', kairo: 'Alt+5' },
+      { action: 'widget.cheatsheet.action.problems', idea: 'Alt+6', kairo: 'Alt+6' },
+      { action: 'widget.cheatsheet.action.todo', idea: 'Alt+7 (Structure in IDEA)', kairo: 'Alt+7' },
+      { action: 'widget.cheatsheet.action.git', idea: 'Alt+9', kairo: 'Alt+9' },
     ],
   },
   {
     nameKey: 'widget.cheatsheet.category.bookmarks',
     icon: 'codicon-bookmark',
     shortcuts: [
-      { action: 'Toggle Bookmark (切换书签)', idea: 'F11', kairo: 'F11' },
-      { action: 'Toggle Bookmark (Mnemonic)', idea: 'Ctrl+F11', kairo: 'Ctrl+F11' },
-      { action: 'Show Bookmarks (显示书签)', idea: 'Shift+F11', kairo: 'Shift+F11' },
+      { action: 'widget.cheatsheet.action.toggleBookmark', idea: 'F11', kairo: 'F11' },
+      { action: 'widget.cheatsheet.action.toggleBookmarkMnemonic', idea: 'Ctrl+F11', kairo: 'Ctrl+F11' },
+      { action: 'widget.cheatsheet.action.showBookmarks', idea: 'Shift+F11', kairo: 'Shift+F11' },
     ],
   },
   {
     nameKey: 'widget.cheatsheet.category.codeFolding',
     icon: 'codicon-folding',
     shortcuts: [
-      { action: 'Collapse (折叠)', idea: 'Ctrl+-', kairo: 'Ctrl+-' },
-      { action: 'Expand (展开)', idea: 'Ctrl+=', kairo: 'Ctrl+=' },
-      { action: 'Collapse All (全部折叠)', idea: 'Ctrl+Shift+-', kairo: 'Ctrl+Shift+-' },
-      { action: 'Expand All (全部展开)', idea: 'Ctrl+Shift+=', kairo: 'Ctrl+Shift+=' },
+      { action: 'widget.cheatsheet.action.collapse', idea: 'Ctrl+-', kairo: 'Ctrl+-' },
+      { action: 'widget.cheatsheet.action.expand', idea: 'Ctrl+=', kairo: 'Ctrl+=' },
+      { action: 'widget.cheatsheet.action.collapseAll', idea: 'Ctrl+Shift+-', kairo: 'Ctrl+Shift+-' },
+      { action: 'widget.cheatsheet.action.expandAll', idea: 'Ctrl+Shift+=', kairo: 'Ctrl+Shift+=' },
     ],
   },
   {
     nameKey: 'widget.cheatsheet.category.multipleCursors',
     icon: 'codicon-multiple-windows',
     shortcuts: [
-      { action: 'Add Cursor Above (上方添加光标)', idea: 'Ctrl+Alt+Up', kairo: 'Ctrl+Alt+Up' },
-      { action: 'Add Cursor Below (下方添加光标)', idea: 'Ctrl+Alt+Down', kairo: 'Ctrl+Alt+Down' },
-      { action: 'Select Next Occurrence (选择下一个)', idea: 'Alt+J', kairo: 'Alt+J' },
-      { action: 'Column Selection Mode (列选择)', idea: 'Alt+Shift+Insert', kairo: 'Alt+Shift+Insert' },
+      { action: 'widget.cheatsheet.action.addCursorAbove', idea: 'Ctrl+Alt+Up', kairo: 'Ctrl+Alt+Up' },
+      { action: 'widget.cheatsheet.action.addCursorBelow', idea: 'Ctrl+Alt+Down', kairo: 'Ctrl+Alt+Down' },
+      { action: 'widget.cheatsheet.action.selectNextOccurrence', idea: 'Alt+J', kairo: 'Alt+J' },
+      { action: 'widget.cheatsheet.action.columnSelectionMode', idea: 'Alt+Shift+Insert', kairo: 'Alt+Shift+Insert' },
     ],
   },
 ];
@@ -462,7 +577,10 @@ const CheatsheetContent: React.FC<{
   const [, forceUpdate] = React.useReducer((x: number) => x + 1, 0);
   const searchInputRef = React.useRef<HTMLInputElement>(null);
   const term = searchTerm.trim().toLowerCase();
-  const data = getShortcutData();
+  const data = getShortcutData().map(category => ({
+    ...category,
+    shortcuts: category.shortcuts.map(row => ({ ...row, action: t(row.action) })),
+  }));
   const isMac = isOSX;
   const comingSoonLabel = t('widget.cheatsheet.comingSoon');
 

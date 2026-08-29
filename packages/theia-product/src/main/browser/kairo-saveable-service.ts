@@ -17,13 +17,19 @@
 
 import { injectable, inject } from '@theia/core/shared/inversify';
 import { MessageService } from '@theia/core/lib/common';
-import { SaveableService } from '@theia/core/lib/browser/saveable-service';
+import { FilesystemSaveableService } from '@theia/filesystem/lib/browser/filesystem-saveable-service';
 import { Widget } from '@theia/core/lib/browser/widgets/widget';
 import { SaveOptions } from '@theia/core/lib/browser/saveable';
 import URI from '@theia/core/lib/common/uri';
 
+/**
+ * Extends FilesystemSaveableService (not the abstract base) so the
+ * stock Save As implementation (canSaveAs + saveAs via file dialog)
+ * is preserved — rebinding with the base class disabled Save As
+ * product-wide (TC-MENU-005).
+ */
 @injectable()
-export class KairoSaveableService extends SaveableService {
+export class KairoSaveableService extends FilesystemSaveableService {
   /** Pre-save callbacks invoked before each save operation. */
   static readonly onBeforeSave: Array<(widget: Widget, options?: SaveOptions) => void> = [];
 

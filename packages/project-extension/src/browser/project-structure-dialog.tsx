@@ -160,22 +160,39 @@ export class ProjectStructureDialog extends ReactDialog<void> {
             const config = configs.find(c => c.id === project.projectId);
 
             if (config) {
-                const compiler = config.java?.compiler;
-                if (compiler) {
-                    if (compiler.sourceLevel) {
-                        next.sourceLevel = compiler.sourceLevel as SourceLevel;
-                    }
-                    if (compiler.targetLevel) {
-                        next.targetLevel = compiler.targetLevel as SourceLevel;
-                    }
+                const raw: any = config as any;
+                // Support both ProjectConfig (nested encoding.default) and domain.Project (top-level Encoding string)
+                const encRaw = raw.encoding ?? raw.Encoding;
+                let enc: string | undefined;
+                if (typeof encRaw === 'string' && encRaw) enc = encRaw;
+                else if (encRaw?.default) enc = encRaw.default;
+                if (enc) next.encoding = enc as EncodingId;
+
+                // Support both shapes for compiler levels
+                const compiler = raw.java?.compiler;
+                if (compiler?.sourceLevel) {
+                    next.sourceLevel = compiler.sourceLevel as SourceLevel;
+                } else if (raw.sourceLevel) {
+                    next.sourceLevel = raw.sourceLevel as SourceLevel;
+                }
+                if (compiler?.targetLevel) {
+                    next.targetLevel = compiler.targetLevel as SourceLevel;
+                } else if (raw.targetLevel) {
+                    next.targetLevel = raw.targetLevel as SourceLevel;
+                }
+                if (compiler?.toolchainId) {
                     next.selectedJdkId = compiler.toolchainId || 'auto';
+                } else if (raw.toolchainId) {
+                    next.selectedJdkId = raw.toolchainId || 'auto';
+                } else if (raw.java?.compiler?.toolchainId) {
+                    next.selectedJdkId = raw.java.compiler.toolchainId || 'auto';
                 }
-                if (config.encoding?.default) {
-                    next.encoding = config.encoding.default;
-                }
+
+                const srcList: string[] = raw.sourceLayout?.src ?? raw.sourceRoots ?? raw.SourceRoots ?? [];
+                const testSrcList: string[] = raw.sourceLayout?.testSrc ?? raw.testSrc ?? [];
                 next.sourceDirs = [
-                    ...(config.sourceLayout?.src || []).map(p => ({ path: p, isTest: false })),
-                    ...(config.sourceLayout?.testSrc || []).map(p => ({ path: p, isTest: true })),
+                    ...srcList.map((p: string) => ({ path: p, isTest: false })),
+                    ...testSrcList.map((p: string) => ({ path: p, isTest: true })),
                 ];
             }
 
@@ -201,8 +218,22 @@ export class ProjectStructureDialog extends ReactDialog<void> {
                     const mergedSrc = [...(next.sourceDirs || this.state.sourceDirs)];
                     if (jdtResp.sourceRoots) {
                         for (const src of jdtResp.sourceRoots) {
-                            if (!existingSrc.has(src)) {
-                                mergedSrc.push({ path: src, isTest: false });
+                            let rel = src;
+                            // JDT may return absolute paths; relativize to project root for config validation
+                            if (src.startsWith(wsCtx.root)) {
+                                rel = src.slice(wsCtx.root.length).replace(/^\/+/, '');
+                                if (!rel) rel = '.';
+                            } else if (src.startsWith('/')) {
+                                // fallback: try to make relative by taking basename if under root
+                                const base = src.split('/').pop() || src;
+                                // only use basename if it looks like a source dir
+                                if (['src', 'test', 'src/main/java', 'src/test/java'].some(k => src.includes(k))) {
+                                    rel = base;
+                                }
+                            }
+                            if (!existingSrc.has(rel) && !existingSrc.has(src)) {
+                                mergedSrc.push({ path: rel, isTest: false });
+                                existingSrc.add(rel);
                                 existingSrc.add(src);
                             }
                         }
@@ -594,6 +625,23 @@ export class ProjectStructureDialog extends ReactDialog<void> {
                 deploy: { mode: 'copy', target: '' },
                 hotReload: { mode: 'staticSync' },
             };
+
+            // Backend PUT handler expects domain.Project (string encoding, top-level
+            // sourceRoots/sourceLevel) while protocol defines ProjectConfig
+            // (object encoding, nested java.compiler). Provide both so the
+            // request succeeds regardless of which shape the store validates.
+            (updated as any).encoding = this.state.encoding;
+            (updated as any).sourceRoots = srcDirs;
+            (updated as any).resourceRoots = (existing as any)?.resourceRoots ?? [];
+            (updated as any).libraryDirs = (existing as any)?.libraryDirs ?? [];
+            (updated as any).webappDir = (existing as any)?.webappDir ?? 'WebRoot';
+            (updated as any).outputDir = (existing as any)?.outputDir ?? 'build/classes';
+            (updated as any).sourceLevel = this.state.sourceLevel;
+            (updated as any).targetLevel = this.state.targetLevel;
+            (updated as any).buildTool = (existing as any)?.buildTool ?? 'ant';
+            (updated as any).contextPath = (existing as any)?.contextPath ?? '/';
+            (updated as any).rootPath = project.root;
+            (updated as any).root = project.root;
 
             const saved = await this.runtime.request(
                 'PUT /api/v1/projects/{projectId}',

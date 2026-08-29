@@ -14,6 +14,7 @@ import { FileService } from '@theia/filesystem/lib/browser/file-service';
 import { WorkspaceService } from '@theia/workspace/lib/browser/workspace-service';
 import { EditorManager } from '@theia/editor/lib/browser';
 import { JavaCompletionProvider, JavaLanguageClient, JAVA_LANGUAGE_ID, JAVA_MONARCH, registerJavaLiveTemplates, applyKairoLanguageEditorDefaults } from '@kairo/java-extension';
+import { KairoI18nService } from '@kairo/i18n';
 import { JSP_LANGUAGE_ID, JSP_MONARCH } from './jsp-monarch';
 import { registerJspNavigation } from './jsp-navigation';
 import { registerJspFindUsages } from './jsp-find-usages';
@@ -139,6 +140,9 @@ export class KairoJspLanguageContribution implements FrontendApplicationContribu
   @inject(JspDebugBreakpointMapper)
   protected readonly jspDebugMapper!: JspDebugBreakpointMapper;
 
+  @inject(KairoI18nService)
+  protected readonly i18n!: KairoI18nService;
+
   protected subs = new DisposableCollection();
 
   protected navServices(): { fileService: FileService; workspaceService: WorkspaceService } {
@@ -149,17 +153,17 @@ export class KairoJspLanguageContribution implements FrontendApplicationContribu
     applyKairoLanguageEditorDefaults();
     registerJspLanguage();
     registerXmlLanguage();
-    registerJsonLanguage();
-    registerPropertiesLanguage();
+    registerJsonLanguage(this.i18n);
+    registerPropertiesLanguage(this.i18n);
     const nav = this.navServices();
     this.subs.push(registerJspNavigation(nav));
     this.subs.push(registerJspFindUsages(nav));
-    this.subs.push(registerXmlDtdCompletion());
-    this.subs.push(registerElExpressionProviders());
+    this.subs.push(registerXmlDtdCompletion(this.i18n));
+    this.subs.push(registerElExpressionProviders(this.i18n));
     this.subs.push(registerElNavigation(nav));
-    this.subs.push(registerXmlStructureView());
+    this.subs.push(registerXmlStructureView(this.i18n));
     this.subs.push(registerJspScriptletProviders(this.javaProvider));
-    this.subs.push(registerJspScriptletJavaCompletion(this.javaProvider, this.javaClient));
+    this.subs.push(registerJspScriptletJavaCompletion(this.javaProvider, this.javaClient, this.i18n));
     this.subs.push(registerJavaLiveTemplates(JSP_LANGUAGE_ID, {
       shouldProvide: (model, position) => {
         const ctx = analyzeCursorContext(
@@ -173,8 +177,8 @@ export class KairoJspLanguageContribution implements FrontendApplicationContribu
     this.subs.push(registerJspScriptletDiagnostics(this.javaClient));
     this.subs.push(registerJspScriptletBackgrounds());
     this.subs.push(registerJspServletNavigation(nav));
-    this.subs.push(registerJspDebugCodeLens());
-    this.subs.push(registerJspBreakpointCommand(this.jspDebugMapper));
+    this.subs.push(registerJspDebugCodeLens(this.i18n));
+    this.subs.push(registerJspBreakpointCommand(this.jspDebugMapper, this.i18n));
     this.subs.push(registerJspBreakpointEditorOpener(this.editorManager, this.fileService));
     this.subs.push(registerJspTldCompletion(this.tldProvider));
     this.subs.push(monaco.languages.registerCompletionItemProvider('xml', this.webxmlCompletionProvider));

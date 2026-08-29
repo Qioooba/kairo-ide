@@ -45,7 +45,7 @@ export interface JdtLsBackendService {
   $start(opts: { rootUri: string; workspaceDataDir: string; sourceLevel?: string; home?: string; jreHome?: string }): Promise<{ ok: true } | { ok: false; reason: string }>;
   $stop(): Promise<void>;
   $state(): Promise<JdtLsState>;
-  $inspect(): Promise<{ ok: true; home: string; jre: string; launcherJar: string } | { ok: false; reason: string }>;
+  $inspect(): Promise<{ ok: true; home: string; jre: string; launcherJar: string; javaMajor?: number } | { ok: false; reason: string }>;
   $didOpen(p: { uri: string; languageId: string; version: number; text: string }): Promise<void>;
   $didChange(p: { uri: string; version: number; changes: { text: string; rangeLength?: number }[] }): Promise<void>;
   $didClose(uri: string): Promise<void>;

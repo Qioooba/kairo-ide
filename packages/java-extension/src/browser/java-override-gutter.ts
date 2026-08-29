@@ -23,6 +23,7 @@ import { EditorManager } from '@theia/editor/lib/browser/editor-manager';
 import { ILogger } from '@theia/core/lib/common/logger';
 import { MonacoEditor } from '@theia/monaco/lib/browser/monaco-editor';
 import { JavaLanguageClient } from './java-language-client';
+import { KairoI18nService } from '@kairo/i18n';
 import type { LSPLocation as _LSPLocation } from '../common/lsp-protocol';
 
 /** Gutter decoration CSS class names. */
@@ -88,6 +89,9 @@ export class JavaOverrideGutter implements FrontendApplicationContribution, Disp
 
   @inject(ILogger)
   protected readonly logger!: ILogger;
+
+  @inject(KairoI18nService)
+  protected readonly i18n!: KairoI18nService;
 
   /** Cache: file URI → gutter decorations. */
   protected cache: Map<string, FileGutterCache> = new Map();
@@ -341,8 +345,8 @@ export class JavaOverrideGutter implements FrontendApplicationContribution, Disp
         glyphMarginClassName: d.type === 'override' ? OVERRIDE_CLASS : IMPLEMENTATION_CLASS,
         glyphMarginHoverMessage: {
           value: d.type === 'override'
-            ? `**⬆ 重写方法** — 点击跳转到父类定义`
-            : `**⬇ 被子类实现** — 点击跳转到子类实现`,
+            ? this.i18n.t('java.overrideGutter.hoverOverride')
+            : this.i18n.t('java.overrideGutter.hoverImplementedBySub'),
         },
         overviewRuler: {
           color: d.type === 'override' ? '#5698cd' : '#16825d',

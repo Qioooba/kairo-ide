@@ -9,8 +9,9 @@
  * Electron desktop is not affected (guard is disabled there).
  */
 
-import { injectable } from '@theia/core/shared/inversify';
+import { injectable, inject } from '@theia/core/shared/inversify';
 import { FrontendApplicationContribution, FrontendApplication } from '@theia/core/lib/browser';
+import { KeybindingRegistry } from '@theia/core/lib/browser/keybinding';
 import { isOSX } from '@theia/core/lib/common/os';
 import { isKairoBrowser } from './kairo-platform';
 
@@ -56,13 +57,17 @@ const GUARDED_CHORDS_MAC = new Set([
   'cmd+ctrl+shift+j', 'cmd+shift+8', 'cmd+o', 'cmd+shift+o', 'cmd+alt+o',
   'cmd+shift+a', 'cmd+l', 'cmd+b', 'cmd+shift+i', 'cmd+alt+b', 'alt+f7',
   'cmd+alt+f7', 'cmd+[', 'cmd+]', 'cmd+e', 'cmd+shift+e', 'ctrl+shift+m',
-  'f4', 'ctrl+h', 'cmd+f12', 'cmd+shift+f', 'cmd+shift+r', 'cmd+f', 'cmd+r',
+  'ctrl+g', 'ctrl+shift+g', 'f4', 'ctrl+h', 'cmd+f12', 'cmd+shift+f', 'cmd+shift+r', 'cmd+f', 'cmd+r',
   'cmd+g', 'cmd+shift+g', 'cmd+f9', 'cmd+shift+f9', 'ctrl+shift+r', 'ctrl+shift+d',
   'cmd+f2', 'cmd+f8', 'cmd+shift+f8', 'f8', 'f7', 'shift+f8', 'cmd+alt+r', 'alt+f9',
   'cmd+s', 'alt+f12', 'cmd+shift+k', 'cmd+w', 'ctrl+cmd+f', 'cmd+,',
   'cmd+shift+]', 'cmd+shift+[', 'cmd+shift+w',
   'cmd+1', 'cmd+2', 'cmd+3', 'cmd+4', 'cmd+5', 'cmd+6', 'cmd+7', 'cmd+9',
-  'escape', 'f11', 'cmd+f11', 'shift+f11',
+  // NOTE: plain 'escape' must NOT be guarded — the synthetic re-dispatch
+  // carries keyCode 0 and crashes MonacoResolvedKeybinding.toKeybinding()
+  // when the Monaco find widget resolves its own Escape binding
+  // (BUG-20260826-104). Chrome does not reserve bare Escape anyway.
+  'f11', 'cmd+f11', 'shift+f11',
   'cmd+n', 'ctrl+o', 'ctrl+i', 'cmd+alt+t', 'cmd+shift+delete',
   'alt+/', 'alt+shift+/', 'cmd+alt+j', 'ctrl+t', 'cmd+alt+m', 'cmd+alt+v',
   'cmd+alt+c', 'cmd+alt+f', 'cmd+f6', 'cmd+a', 'cmd+home', 'cmd+end',
@@ -149,9 +154,55 @@ function shouldGuardChord(chord: string): boolean {
   return guarded.has(chord);
 }
 
+/** Chords Chrome reserves for navigation/chrome — must be blocked even in text fields. */
+const NAV_RESERVED = new Set([
+  'cmd+n', 'cmd+t', 'cmd+w', 'cmd+shift+t', 'cmd+shift+n', 'cmd+shift+w',
+  'cmd+tab', 'cmd+shift+tab', 'f5', 'cmd+r', 'cmd+p',
+  'ctrl+n', 'ctrl+t', 'ctrl+w', 'ctrl+shift+t', 'ctrl+shift+n', 'ctrl+shift+w',
+  'ctrl+tab', 'ctrl+shift+tab', 'ctrl+r', 'ctrl+p',
+]);
+
+/**
+ * Chords that Chrome reserves and Kairo remaps INSIDE the editor. These are
+ * still intercepted when the event target is a Monaco editor; every other
+ * editor-internal chord flows natively so Monaco/Theia each act exactly once
+ * (BUG-20260826-310: guard clones racing native delivery caused doubled or
+ * dropped delete-line/duplicate/comment/fold keystrokes).
+ */
+function chromeReservedEditorChords(): Set<string> {
+  const p = isOSX ? 'cmd' : 'ctrl';
+  return new Set([
+    ...NAV_RESERVED,
+    `${p}+g`, `${p}+d`, `${p}+s`, `${p}+f`, `${p}+o`, `${p}+l`,
+    `${p}+[`, `${p}+]`,
+    ...Array.from({ length: 9 }, (_, i) => `${p}+${i + 1}`),
+    'f11',
+  ]);
+}
+
+interface GuardCloneEvent extends KeyboardEvent {
+  __kairoGuardClone?: boolean;
+}
+
 @injectable()
 export class KairoBrowserKeyboardGuardContribution implements FrontendApplicationContribution {
+  @inject(KeybindingRegistry)
+  protected readonly keybindings!: KeybindingRegistry;
+
+  protected readonly reservedEditorChords = chromeReservedEditorChords();
+
+  protected isEditableTarget(target: EventTarget | null): boolean {
+    const el = target as HTMLElement | null;
+    if (!el?.tagName) return false;
+    return el.tagName === 'INPUT' || el.tagName === 'TEXTAREA'
+      || el.isContentEditable === true;
+  }
+
   protected readonly keydown = (event: KeyboardEvent): void => {
+    // Re-dispatched clones flow through here too — let them pass untouched.
+    if ((event as GuardCloneEvent).__kairoGuardClone) {
+      return;
+    }
     const chord = eventToChord(event);
     if (!chord || !shouldGuardChord(chord)) {
       return;
@@ -161,8 +212,56 @@ export class KairoBrowserKeyboardGuardContribution implements FrontendApplicatio
     if (target?.closest('[data-testid="search-center-modal"]')) {
       return;
     }
+    // Text fields keep native editing behavior (select-all/copy/paste…);
+    // only Chrome-reserved navigation chords are still intercepted there.
+    const editable = this.isEditableTarget(target);
+    if (editable && !NAV_RESERVED.has(chord)) {
+      return;
+    }
+    // Inside a Monaco editor only Chrome-reserved chords are intercepted —
+    // all other editor chords must keep their single, native delivery
+    // (BUG-20260826-310).
+    const inEditor = !!target?.closest?.('.monaco-editor');
+    if (inEditor && !this.reservedEditorChords.has(chord)) {
+      return;
+    }
+
+    // BUG-20260826-302: Theia's KeybindingRegistry.run() ignores events whose
+    // defaultPrevented flag is already set, so a plain preventDefault() here
+    // silently killed every guarded shortcut in the browser (⌘S, ⌘⇧O, ⌘D, …).
+    //
+    // Strategy: preventDefault() blocks Chrome's reserved behavior but leaves
+    // the event fully intact for every in-page listener (Monaco included,
+    // which ignores the flag). Only the KeybindingRegistry needs a clean
+    // event — hand it a synthetic twin marked __kairoGuardClone.
+    //
+    // BUG-20260826-401: the twin used to be dispatched on document.body,
+    // which stripped the DOM context from the event — every editor-scoped
+    // `when` clause (editorTextFocus, editorLangId == java, …) evaluated
+    // false and ALL editor keybindings silently died in the browser.
+    // Dispatch on the ORIGINAL target (always an Element for keydown) so
+    // when-clause evaluation walks the real focus chain; fall back to
+    // body only when the target is not an Element (BUG-20260826-104).
     event.preventDefault();
-    // Do not stopPropagation — Theia KeybindingRegistry must still receive the event.
+    const clone = new KeyboardEvent('keydown', {
+      key: event.key,
+      code: event.code,
+      location: event.location,
+      ctrlKey: event.ctrlKey,
+      shiftKey: event.shiftKey,
+      altKey: event.altKey,
+      metaKey: event.metaKey,
+      repeat: event.repeat,
+      isComposing: event.isComposing,
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+    });
+    (clone as GuardCloneEvent).__kairoGuardClone = true;
+    const dispatchTarget: EventTarget = event.target instanceof Element
+      ? event.target
+      : (document.body ?? document.documentElement ?? document);
+    dispatchTarget.dispatchEvent(clone);
   };
 
   onStart(_app: FrontendApplication): void {

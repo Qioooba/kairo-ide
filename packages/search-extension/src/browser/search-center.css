@@ -576,6 +576,25 @@
   background: var(--theia-scrollbarSlider-background, rgba(128, 128, 128, 0.35));
 }
 
+/* Replace-in-Path post-image preview: "match → replacement" */
+.kairo-search-replacement-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 6px;
+}
+
+.kairo-search-replacement-arrow {
+  color: var(--theia-descriptionForeground, #858585);
+}
+
+.kairo-search-replacement {
+  color: var(--theia-terminal-ansiGreen, #23d18b);
+  background: var(--theia-diffEditor-insertedTextBackground, rgba(35, 209, 139, 0.15));
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
 .kairo-search-truncated {
   padding: 8px 16px;
   font-size: 12px;

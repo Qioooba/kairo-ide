@@ -19,6 +19,7 @@ import { FileService } from '@theia/filesystem/lib/browser/file-service';
 import URI from '@theia/core/lib/common/uri';
 import { ProblemManager } from '@theia/markers/lib/browser/problem/problem-manager';
 import { Diagnostic, DiagnosticSeverity } from '@theia/core/shared/vscode-languageserver-protocol';
+import { KairoI18nService } from '@kairo/i18n';
 
 /** A single mismatch entry. */
 export interface SourceMismatchEntry {
@@ -55,6 +56,7 @@ export class JavaSourceMismatchDetector {
   @inject(FileService) protected readonly fileService!: FileService;
   @inject(ProblemManager) protected readonly problemManager!: ProblemManager;
   @inject(ILogger) protected readonly logger!: ILogger;
+  @inject(KairoI18nService) protected readonly i18n!: KairoI18nService;
 
   protected readonly onDidCompleteScanEmitter = new Emitter<SourceMismatchReport>();
   readonly onDidCompleteScan: Event<SourceMismatchReport> = this.onDidCompleteScanEmitter.event;
@@ -174,36 +176,37 @@ export class JavaSourceMismatchDetector {
    * Get a human-readable Chinese summary of the last scan.
    */
   getSummary(): string {
-    if (!this.lastReport) return '尚未执行源码/类文件不匹配扫描。';
+    if (!this.lastReport) return this.i18n.t('diagnostic.sourceMismatch.notScanned');
 
     const r = this.lastReport;
     if (r.mismatches.length === 0) {
-      return `源码/类文件不匹配扫描完成: 总计 ${r.totalScanned} 个文件，全部为最新。`;
+      return this.i18n.t('diagnostic.sourceMismatch.summaryUpToDate', { total: r.totalScanned });
     }
 
     const parts: string[] = [];
     if (r.missingClass > 0) {
-      parts.push(`${r.missingClass} 个文件缺少 .class 文件（未编译）`);
+      parts.push(this.i18n.t('diagnostic.sourceMismatch.summaryMissingClass', { count: r.missingClass }));
     }
     if (r.staleClass > 0) {
-      parts.push(`${r.staleClass} 个文件 .class 过期（源码已修改）`);
+      parts.push(this.i18n.t('diagnostic.sourceMismatch.summaryStaleClass', { count: r.staleClass }));
     }
-    return `源码/类文件不匹配: ${parts.join('，')}。建议重新编译项目后再进行调试。`;
+    const listJoiner = this.i18n.getCurrentLanguage() === 'zh-CN' ? '，' : ', ';
+    return this.i18n.t('diagnostic.sourceMismatch.summaryMismatch', { parts: parts.join(listJoiner) });
   }
 
   /**
    * Get the status bar text for the mismatch diagnostic.
    */
   getStatusBarText(): string {
-    if (!this.lastReport) return '$(sync) 源码一致性: 未检测';
+    if (!this.lastReport) return this.i18n.t('diagnostic.sourceMismatch.statusNotChecked');
 
     const r = this.lastReport;
     if (r.mismatches.length === 0) {
-      return '$(check) 源码一致性: 正常';
+      return this.i18n.t('diagnostic.sourceMismatch.statusOk');
     }
 
     const total = r.missingClass + r.staleClass;
-    return `$(warning) 源码一致性: ${total} 个不匹配`;
+    return this.i18n.t('diagnostic.sourceMismatch.statusMismatch', { count: total });
   }
 
   // ── Internal helpers ───────────────────────────────────────────
@@ -262,15 +265,18 @@ export class JavaSourceMismatchDetector {
 
   protected async updateProblemMarkers(report: SourceMismatchReport): Promise<void> {
     const uriToDiagnostics = new Map<string, Diagnostic[]>();
+    const locale = this.i18n.getCurrentLanguage() === 'zh-CN' ? 'zh-CN' : 'en-US';
 
     for (const mismatch of report.mismatches) {
       const uri = URI.fromFilePath(mismatch.sourceFile).toString();
       const existing = uriToDiagnostics.get(uri) ?? [];
 
       const message = mismatch.classMissing
-        ? `缺少 .class 文件: ${mismatch.classFile}。请先编译项目。`
-        : `.class 文件已过期 (源码修改于 ${new Date(mismatch.sourceMtime).toLocaleString('zh-CN')}，` +
-          `.class 构建于 ${new Date(mismatch.classMtime).toLocaleString('zh-CN')})。建议重新编译后再调试。`;
+        ? this.i18n.t('diagnostic.sourceMismatch.markerClassMissing', { classFile: mismatch.classFile })
+        : this.i18n.t('diagnostic.sourceMismatch.markerClassStale', {
+            sourceTime: new Date(mismatch.sourceMtime).toLocaleString(locale),
+            classTime: new Date(mismatch.classMtime).toLocaleString(locale),
+          });
 
       existing.push({
         message,
@@ -279,7 +285,7 @@ export class JavaSourceMismatchDetector {
           end: { line: 0, character: 0 },
         },
         severity: DiagnosticSeverity.Warning,
-        source: 'Kairo: 源码/类文件不匹配',
+        source: this.i18n.t('diagnostic.sourceMismatch.markerSource'),
         code: mismatch.classMissing ? 'class-missing' : 'class-stale',
       });
 

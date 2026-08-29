@@ -30,6 +30,10 @@ export namespace KairoFocusCommands {
     id: 'kairo.focus.editor',
     label: 'Kairo: Focus Editor',
   };
+  export const HIDE_ACTIVE_PANEL: Command = {
+    id: 'kairo.hideActivePanel',
+    label: 'Kairo: Hide Active Panel',
+  };
   export const FOCUS_SIDEBAR: Command = {
     id: 'kairo.focus.sidebar',
     label: 'Kairo: Focus Sidebar',
@@ -77,11 +81,18 @@ export class KairoFocusManagement implements FrontendApplicationContribution, Co
     this.createSkipToContentLink();
   }
 
+  protected readonly globalKeydownHandler = (event: KeyboardEvent): void => this.handleGlobalKeydown(event);
+
   onStart(): void {
-    // Listen for Escape to focus editor
-    document.addEventListener('keydown', this.handleGlobalKeydown.bind(this));
+    // Listen for Escape to focus editor. Must run at CAPTURE phase: widgets
+    // such as the file tree consume plain Escape at target level (cancel
+    // type-ahead) and never let it reach the bubble phase, which silently
+    // disabled the TC-CMD-003 contract. Inputs/dialogs keep native Escape
+    // handling via the target guards in handleGlobalKeydown
+    // (BUG-20260826-303 contract preserved).
+    document.addEventListener('keydown', this.globalKeydownHandler, true);
     this.toDispose.push({
-      dispose: () => document.removeEventListener('keydown', this.handleGlobalKeydown.bind(this)),
+      dispose: () => document.removeEventListener('keydown', this.globalKeydownHandler, true),
     });
   }
 
@@ -92,6 +103,10 @@ export class KairoFocusManagement implements FrontendApplicationContribution, Co
   registerCommands(registry: CommandRegistry): void {
     registry.registerCommand(KairoFocusCommands.FOCUS_EDITOR, {
       execute: () => this.focusEditor(),
+    });
+    registry.registerCommand(KairoFocusCommands.HIDE_ACTIVE_PANEL, {
+      execute: () => this.hideActivePanel(),
+      isEnabled: () => true,
     });
     registry.registerCommand(KairoFocusCommands.FOCUS_SIDEBAR, {
       execute: () => this.focusSidebar(),
@@ -117,11 +132,13 @@ export class KairoFocusManagement implements FrontendApplicationContribution, Co
     // IDEA: Escape focuses the editor / hides active tool window.
     // Do NOT bind Shift+F6 (Rename), Ctrl/Cmd+J, Ctrl/Cmd+`, or Ctrl/Cmd+0 —
     // those are VS Code leftovers that steal IDEA chords.
-    keybindings.registerKeybinding({
-      command: KairoFocusCommands.FOCUS_EDITOR.id,
-      keybinding: 'escape',
-      when: '!editorFocus',
-    });
+    //
+    // BUG-20260826-303: do NOT register Escape → FOCUS_EDITOR as a keybinding.
+    // The KeybindingRegistry listens on document CAPTURE and swallows the
+    // event (preventDefault + stopPropagation) after dispatching, which
+    // prevented dialogs from ever receiving Escape (Cancel/ESC dead). The
+    // global keydown handler below implements the same behavior with proper
+    // target checks (inputs/dialogs excluded) at bubble phase.
     keybindings.registerKeybinding({
       command: KairoFocusCommands.FOCUS_NEXT_PANEL.id,
       keybinding: 'f6',
@@ -202,6 +219,33 @@ export class KairoFocusManagement implements FrontendApplicationContribution, Co
   /*  Panel Cycling                                                       */
   /* ------------------------------------------------------------------ */
 
+  /**
+   * IDEA Shift+Escape: hide the active tool window. Hides the bottom
+   * panel when visible, otherwise collapses the focused side panel.
+   */
+  async hideActivePanel(): Promise<void> {
+    const shell = this.shell as unknown as {
+      bottomPanel?: { isHidden?: boolean; setHidden?(v: boolean): void };
+      leftPanelHandler?: { collapse?(): Promise<void> | void };
+      rightPanelHandler?: { collapse?(): Promise<void> | void };
+    };
+    if (shell.bottomPanel && !shell.bottomPanel.isHidden && typeof shell.bottomPanel.setHidden === 'function') {
+      shell.bottomPanel.setHidden(true);
+      return;
+    }
+    // Fall back to whichever side panel currently holds focus.
+    const active = this.shell.activeWidget;
+    const inLeft = active ? !!active.node.closest('#theia-left-side-panel') : false;
+    if (inLeft && shell.leftPanelHandler?.collapse) {
+      await shell.leftPanelHandler.collapse();
+      return;
+    }
+    const inRight = active ? !!active.node.closest('#theia-right-side-panel') : false;
+    if (inRight && shell.rightPanelHandler?.collapse) {
+      await shell.rightPanelHandler.collapse();
+    }
+  }
+
   focusNextPanel(): void {
     this.currentPanelIndex = (this.currentPanelIndex + 1) % PANEL_ORDER.length;
     this.focusPanelByIndex(this.currentPanelIndex);
@@ -270,20 +314,25 @@ export class KairoFocusManagement implements FrontendApplicationContribution, Co
    * Escape from any panel focuses the editor.
    */
   protected handleGlobalKeydown(event: KeyboardEvent): void {
-    // Don't intercept when typing in an input or editor
+    if (event.key !== 'Escape' || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) {
+      return;
+    }
+    // Don't intercept when typing in an input or editor, and let Theia
+    // dialogs and role=dialog overlays (Find Action, …) own their Escape.
     const target = event.target as HTMLElement;
     if (
       target.tagName === 'INPUT' ||
       target.tagName === 'TEXTAREA' ||
-      target.closest('.monaco-editor')
+      target.isContentEditable ||
+      target.closest('.monaco-editor') ||
+      target.closest('#theia-dialog-shell') ||
+      target.closest('[role="dialog"]')
     ) {
       return;
     }
-
-    if (event.key === 'Escape' && !event.ctrlKey && !event.metaKey && !event.altKey) {
-      this.focusEditor();
-      event.preventDefault();
-    }
+    this.focusEditor();
+    event.preventDefault();
+    event.stopPropagation();
   }
 
   /* ------------------------------------------------------------------ */

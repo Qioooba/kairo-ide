@@ -24,19 +24,23 @@ interface IDEAKeybinding {
 }
 
 const IDEA_MAC_KEYBINDINGS: IDEAKeybinding[] = [
+  // NOTE (BUG-20260826-310): pure Monaco action ids (commentLine, deleteLines,
+  // copyLinesDown, fold family, jumpToBracket, addSelectionToNextFindMatch,
+  // selectHighlights, blockComment) are intentionally NOT registered here.
+  // The KeybindingRegistry bridges unmatched ids through MonacoCommandService
+  // to the active Monaco editor, so keeping them caused DOUBLE execution for
+  // every guarded chord (guard clone -> registry -> delegate + original ->
+  // Monaco). These chords live exclusively in kairo-idea-mac-monaco-keymap.ts
+  // now.
   // ── Editing ─────────────────────────────────────────────────
   { command: 'undo', keybinding: 'cmd+z' },
   { command: 'redo', keybinding: 'cmd+shift+z' },
   { command: 'editor.action.clipboardCutAction', keybinding: 'cmd+x', when: 'editorTextFocus' },
   { command: 'editor.action.clipboardCopyAction', keybinding: 'cmd+c', when: 'editorTextFocus' },
   { command: 'editor.action.clipboardPasteAction', keybinding: 'cmd+v', when: 'editorTextFocus' },
-  { command: 'editor.action.commentLine', keybinding: 'cmd+/', when: 'editorTextFocus' },
-  { command: 'editor.action.blockComment', keybinding: 'cmd+alt+/', when: 'editorTextFocus' },
   { command: 'editor.action.formatDocument', keybinding: 'cmd+alt+l', when: 'editorTextFocus' },
   { command: 'kairo.organizeImports', keybinding: 'ctrl+alt+o', when: 'editorTextFocus' },
   { command: 'editor.action.rename', keybinding: 'shift+f6', when: 'editorTextFocus' },
-  { command: 'editor.action.deleteLines', keybinding: 'cmd+backspace', when: 'editorTextFocus' },
-  { command: 'editor.action.copyLinesDownAction', keybinding: 'cmd+d', when: 'editorTextFocus' },
   { command: 'editor.action.smartSelect.expand', keybinding: 'alt+up', when: 'editorTextFocus' },
   { command: 'editor.action.smartSelect.shrink', keybinding: 'alt+down', when: 'editorTextFocus' },
   { command: 'editor.action.insertLineAfter', keybinding: 'shift+enter', when: 'editorTextFocus' },
@@ -49,13 +53,7 @@ const IDEA_MAC_KEYBINDINGS: IDEAKeybinding[] = [
   { command: 'editor.action.showHover', keybinding: 'ctrl+j', when: 'editorTextFocus' },
   { command: 'editor.action.marker.next', keybinding: 'f2', when: 'editorFocus' },
   { command: 'editor.action.marker.prev', keybinding: 'shift+f2', when: 'editorFocus' },
-  { command: 'editor.fold', keybinding: 'cmd+-', when: 'editorFocus' },
-  { command: 'editor.unfold', keybinding: 'cmd+=', when: 'editorFocus' },
-  { command: 'editor.foldAll', keybinding: 'cmd+shift+-', when: 'editorFocus' },
-  { command: 'editor.unfoldAll', keybinding: 'cmd+shift+=', when: 'editorFocus' },
   { command: 'editor.action.joinLines', keybinding: 'ctrl+shift+j', when: 'editorTextFocus' },
-  { command: 'editor.action.addSelectionToNextFindMatch', keybinding: 'alt+j', when: 'editorTextFocus' },
-  { command: 'editor.action.selectHighlights', keybinding: 'cmd+ctrl+shift+j', when: 'editorTextFocus' },
   { command: 'editor.action.toggleColumnSelection', keybinding: 'cmd+shift+8', when: 'editorFocus' },
 
   // ── Navigation ──────────────────────────────────────────────
@@ -76,7 +74,6 @@ const IDEA_MAC_KEYBINDINGS: IDEAKeybinding[] = [
   { command: 'kairo.navigation.recentFiles', keybinding: 'cmd+e' },
   // Map unimplemented alias to recentFiles (TP-P2-2)
   { command: 'kairo.navigation.recentFiles', keybinding: 'cmd+shift+e' },
-  { command: 'editor.action.jumpToBracket', keybinding: 'ctrl+shift+m', when: 'editorTextFocus' },
   { command: 'editor.action.revealDefinition', keybinding: 'f4', when: 'editorTextFocus' },
   { command: 'editor.action.typeHierarchy', keybinding: 'ctrl+h', when: 'editorTextFocus' },
   { command: 'kairo.navigation.fileStructure', keybinding: 'cmd+f12', when: 'editorTextFocus' },
@@ -143,7 +140,10 @@ const IDEA_MAC_KEYBINDINGS: IDEAKeybinding[] = [
   { command: 'workbench.actions.view.problems', keybinding: 'cmd+6' },
   { command: 'kairo.view.todo', keybinding: 'cmd+7' },
   { command: 'workbench.view.scm', keybinding: 'cmd+9' },
-  { command: 'workbench.action.hideActivePanel', keybinding: 'escape' },
+  // IDEA Shift+Escape hides the active tool window. (BUG-20260826-303:
+  // previously bound to workbench.action.hideActivePanel, which does not
+  // exist in Theia 1.73 — the chord was a silent no-op.)
+  { command: 'kairo.hideActivePanel', keybinding: 'shift+escape' },
 
   // ── Bookmarks ───────────────────────────────────────────────
   { command: 'kairo.bookmark.toggle', keybinding: 'f11' },

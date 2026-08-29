@@ -213,38 +213,61 @@ export class WorkspaceContextService implements FrontendApplicationContribution 
      */
     protected async refreshProjectYaml(rootUri: URI, rootPath: string): Promise<void> {
         const candidates = ['.kairo/project.yaml', '.kairo/project.yml'];
-        for (const rel of candidates) {
-            try {
-                const fileUri = rootUri.resolve(rel);
-                const stat = await this.fileService.resolve(fileUri);
-                if (!stat || !stat.isFile) {
-                    continue;
+        // BUG-20260826-301: workspaces often act as containers holding a
+        // single project folder (e.g. workspace/legacy-sample/.kairo/
+        // project.yaml). Only looking at the workspace root left such
+        // projects unbound ("Project: (not imported)") and disabled the
+        // project encoding override — GBK files opened as mojibake.
+        const dirs = [rootUri, ...(await this.oneLevelSubDirs(rootUri))];
+        for (const dirUri of dirs) {
+            for (const rel of candidates) {
+                try {
+                    const fileUri = dirUri.resolve(rel);
+                    const stat = await this.fileService.resolve(fileUri);
+                    if (!stat || !stat.isFile) {
+                        continue;
+                    }
+                    const content = await this.fileService.readFile(stat.resource);
+                    // Read raw bytes; the file is small text, the TextDecoder
+                    // constructor takes an ArrayBufferView which is satisfied
+                    // by the Uint8Array the API hands us.
+                    const bytes = content.value instanceof Uint8Array
+                        ? content.value
+                        : new Uint8Array(content.value.buffer || content.value);
+                    // BD-P2-12: project.yaml may be GBK on Chinese legacy projects.
+                    // Prefer UTF-8 (with BOM); fall back to gbk when UTF-8 yields
+                    // replacement characters and gbk does not.
+                    const text = decodeProjectYamlBytes(bytes);
+                    const parsed = this.parseSimpleYaml(text);
+                    if (parsed) {
+                        this.projectYaml = parsed;
+                        // The project lives in the folder that owns the
+                        // .kairo/project.yaml, not the workspace root.
+                        this.projectYamlRoot = dirUri === rootUri ? rootPath : FileUri.fsPath(dirUri);
+                        this.onDidChangeProjectYamlEmitter.fire(parsed);
+                        return;
+                    }
+                } catch {
+                    // Try the next candidate.
                 }
-                const content = await this.fileService.readFile(stat.resource);
-                // Read raw bytes; the file is small text, the TextDecoder
-                // constructor takes an ArrayBufferView which is satisfied
-                // by the Uint8Array the API hands us.
-                const bytes = content.value instanceof Uint8Array
-                    ? content.value
-                    : new Uint8Array(content.value.buffer || content.value);
-                // BD-P2-12: project.yaml may be GBK on Chinese legacy projects.
-                // Prefer UTF-8 (with BOM); fall back to gbk when UTF-8 yields
-                // replacement characters and gbk does not.
-                const text = decodeProjectYamlBytes(bytes);
-                const parsed = this.parseSimpleYaml(text);
-                if (parsed) {
-                    this.projectYaml = parsed;
-                    this.projectYamlRoot = rootPath;
-                    this.onDidChangeProjectYamlEmitter.fire(parsed);
-                    return;
-                }
-            } catch {
-                // Try the next candidate.
             }
         }
         this.projectYaml = undefined;
         this.projectYamlRoot = undefined;
         this.onDidChangeProjectYamlEmitter.fire(undefined);
+    }
+
+    /** Immediate subdirectories of a folder URI (best-effort, non-hidden). */
+    protected async oneLevelSubDirs(rootUri: URI): Promise<URI[]> {
+        try {
+            const stat = await this.fileService.resolve(rootUri);
+            if (!stat || !stat.children) return [];
+            return stat.children
+                .filter(c => c.isDirectory && !c.name.startsWith('.'))
+                .map(c => c.resource);
+        } catch {
+            return [];
+        }
     }
 
     /**
@@ -319,6 +342,15 @@ export class WorkspaceContextService implements FrontendApplicationContribution 
     /** Cached parsed .kairo/project.yaml for the active workspace, if any. */
     get detectedProject(): KairoProjectYaml | undefined {
         return this.projectYaml;
+    }
+
+    /**
+     * OS path of the folder owning the detected .kairo/project.yaml —
+     * differs from the workspace root when the project lives in a
+     * subfolder (BUG-20260826-301).
+     */
+    get detectedProjectRoot(): string | undefined {
+        return this.projectYamlRoot;
     }
 
     async setWorkspace(workspaceId: string, workspaceRoot: string): Promise<void> {

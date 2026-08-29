@@ -90,3 +90,5 @@ export const KairoExtensionClient = Symbol('KairoExtensionClient');
 export interface KairoExtensionClient {
   onDidChangeExtensions(event: ExtensionChangeEvent): void;
 }
+/** JSON-RPC endpoint path shared by frontend proxy and backend handler. */
+export const KAIRO_EXTENSION_SERVICE_PATH = '/services/kairo-extensions';

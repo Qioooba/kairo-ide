@@ -202,7 +202,7 @@ describe('jsp debug breakpoint helpers (JV-P1-13)', () => {
     assert.doesNotMatch(src, /fetch\(resource/);
     assert.match(src, /export function fsPathBasename/);
     assert.match(src, /parseSmapLineMappings/);
-    assert.match(src, /未找到 JSP 行号映射/);
+    assert.match(src, /debugBreakpoint\.noMapping/);
   });
 });
 

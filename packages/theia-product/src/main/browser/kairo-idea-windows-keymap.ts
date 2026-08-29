@@ -38,18 +38,18 @@ const BROWSER_CHROME_REMAPS: Record<string, string> = {
 };
 
 const IDEA_WINDOWS_KEYBINDINGS: IDEAKeybinding[] = [
+  // NOTE (BUG-20260826-310): pure Monaco action ids are intentionally NOT
+  // registered here — see kairo-idea-mac-keymap.ts. They live exclusively in
+  // kairo-idea-monaco-keymap.ts to avoid double execution via the
+  // KeybindingRegistry -> MonacoCommandService delegate bridge.
   { command: 'undo', keybinding: 'ctrl+z' },
   { command: 'redo', keybinding: 'ctrl+shift+z' },
   { command: 'editor.action.clipboardCutAction', keybinding: 'ctrl+x', when: 'editorTextFocus' },
   { command: 'editor.action.clipboardCopyAction', keybinding: 'ctrl+c', when: 'editorTextFocus' },
   { command: 'editor.action.clipboardPasteAction', keybinding: 'ctrl+v', when: 'editorTextFocus' },
-  { command: 'editor.action.commentLine', keybinding: 'ctrl+/', when: 'editorTextFocus' },
-  { command: 'editor.action.blockComment', keybinding: 'ctrl+shift+/', when: 'editorTextFocus' },
   { command: 'editor.action.formatDocument', keybinding: 'ctrl+alt+l', when: 'editorTextFocus' },
   { command: 'kairo.organizeImports', keybinding: 'ctrl+alt+o', when: 'editorTextFocus' },
   { command: 'editor.action.rename', keybinding: 'shift+f6', when: 'editorTextFocus' },
-  { command: 'editor.action.deleteLines', keybinding: 'ctrl+y', when: 'editorTextFocus' },
-  { command: 'editor.action.copyLinesDownAction', keybinding: 'ctrl+d', when: 'editorTextFocus' },
   // Browser: Chrome steals ctrl+w; use alt+shift+w / ctrl+alt+shift+w (TP-P3-9)
   { command: 'editor.action.smartSelect.expand', keybinding: 'ctrl+w', when: 'editorTextFocus' },
   { command: 'editor.action.smartSelect.shrink', keybinding: 'ctrl+shift+w', when: 'editorTextFocus' },
@@ -63,14 +63,8 @@ const IDEA_WINDOWS_KEYBINDINGS: IDEAKeybinding[] = [
   { command: 'editor.action.showHover', keybinding: 'ctrl+q', when: 'editorTextFocus' },
   { command: 'editor.action.marker.next', keybinding: 'f2', when: 'editorFocus' },
   { command: 'editor.action.marker.prev', keybinding: 'shift+f2', when: 'editorFocus' },
-  { command: 'editor.fold', keybinding: 'ctrl+-', when: 'editorFocus' },
-  { command: 'editor.unfold', keybinding: 'ctrl+=', when: 'editorFocus' },
-  { command: 'editor.foldAll', keybinding: 'ctrl+shift+-', when: 'editorFocus' },
-  { command: 'editor.unfoldAll', keybinding: 'ctrl+shift+=', when: 'editorFocus' },
   { command: 'editor.action.joinLines', keybinding: 'ctrl+shift+j', when: 'editorTextFocus' },
-  { command: 'editor.action.addSelectionToNextFindMatch', keybinding: 'alt+j', when: 'editorTextFocus' },
   // Was ctrl+alt+shift+j — conflicted with liveTemplates.manage (TP-P2-3)
-  { command: 'editor.action.selectHighlights', keybinding: 'ctrl+alt+shift+l', when: 'editorTextFocus' },
   { command: 'editor.action.toggleColumnSelection', keybinding: 'alt+shift+insert', when: 'editorFocus' },
 
   { command: 'kairo.find.class', keybinding: 'ctrl+n' },
@@ -90,7 +84,6 @@ const IDEA_WINDOWS_KEYBINDINGS: IDEAKeybinding[] = [
   { command: 'kairo.navigation.back', keybinding: 'ctrl+alt+left' },
   { command: 'kairo.navigation.forward', keybinding: 'ctrl+alt+right' },
   { command: 'kairo.navigation.recentFiles', keybinding: 'ctrl+e' },
-  { command: 'editor.action.jumpToBracket', keybinding: 'ctrl+shift+m', when: 'editorTextFocus' },
   { command: 'editor.action.revealDefinition', keybinding: 'f4', when: 'editorTextFocus' },
   { command: 'editor.action.typeHierarchy', keybinding: 'ctrl+h', when: 'editorTextFocus' },
   { command: 'kairo.java.callHierarchy.showIncoming', keybinding: 'ctrl+alt+h', when: 'editorTextFocus && editorLangId == java' },
@@ -142,7 +135,7 @@ const IDEA_WINDOWS_KEYBINDINGS: IDEAKeybinding[] = [
   { command: 'workbench.actions.view.problems', keybinding: 'alt+6' },
   { command: 'kairo.view.todo', keybinding: 'alt+7' },
   { command: 'workbench.view.scm', keybinding: 'alt+9' },
-  { command: 'workbench.action.hideActivePanel', keybinding: 'shift+escape' },
+  { command: 'kairo.hideActivePanel', keybinding: 'shift+escape' },
 
   { command: 'kairo.bookmark.toggle', keybinding: 'f11' },
   { command: 'kairo.bookmark.toggleMnemonic', keybinding: 'ctrl+f11' },

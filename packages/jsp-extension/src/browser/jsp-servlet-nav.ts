@@ -13,33 +13,21 @@
  */
 
 import * as monaco from '@theia/monaco-editor-core';
-import URI from '@theia/core/lib/common/uri';
 import { FileService } from '@theia/filesystem/lib/browser/file-service';
 import { WorkspaceService } from '@theia/workspace/lib/browser/workspace-service';
 import { JSP_LANGUAGE_ID } from './jsp-monarch';
-import { parseWebXml, type WebXml } from './webxml-parser';
+import { type WebXml } from './webxml-parser';
 import type { JspNavServices } from './jsp-nav-services';
-
-/** Common Java source roots in legacy web projects. */
-const SRC_ROOTS = [
-  'src/main/java',
-  'src',
-  'src/java',
-  'WEB-INF/src',
-  'web/WEB-INF/src',
-];
-
-/** Common web.xml locations relative to workspace root. */
-const WEB_XML_PATHS = [
-  'WEB-INF/web.xml',
-  'web/WEB-INF/web.xml',
-  'webapp/WEB-INF/web.xml',
-  'WebContent/WEB-INF/web.xml',
-  'src/main/webapp/WEB-INF/web.xml',
-];
-
-/** Matches WEB-INF/web.xml in the URI path. */
-const WEB_XML_RE = /WEB-INF[/\\]web\.xml$/i;
+import {
+  WEB_XML_RE,
+  WEB_DOC_ROOTS,
+  getWorkspaceRootUri,
+  isInsideXmlElement,
+  isJavaClassName,
+  loadWorkspaceWebXml,
+  resolveWorkspaceJavaClass,
+} from './workspace-layout';
+import { isAbsoluteUrl } from './jsp-navigation';
 
 /** Regexes for extracting URL values from JSP/HTML attributes. */
 const FORM_ACTION_RE = /<form\b[^>]*\baction\s*=\s*["']([^"']+)["']/gi;
@@ -138,35 +126,6 @@ function findMatchingJspFile(webXml: WebXml, url: string): string | null {
   return null;
 }
 
-/**
- * Check if a string looks like a fully qualified Java class name.
- */
-function isJavaClassName(name: string): boolean {
-  return /^[a-zA-Z_][\w]*(?:\.[a-zA-Z_][\w]*)+$/.test(name);
-}
-
-/**
- * Check whether the cursor is inside a specific XML element.
- */
-function isInsideElement(
-  model: monaco.editor.ITextModel,
-  position: monaco.Position,
-  elementName: string,
-): boolean {
-  const text = model.getValue();
-  const offset = model.getOffsetAt(position);
-  const before = text.substring(0, offset);
-  const openTag = `<${elementName}>`;
-  const closeTag = `</${elementName}>`;
-  const openIdx = before.lastIndexOf(openTag);
-  if (openIdx === -1) return false;
-  const closeIdx = before.lastIndexOf(closeTag);
-  if (closeIdx > openIdx) return false;
-  const after = text.substring(offset);
-  const endCloseIdx = after.indexOf(closeTag);
-  return endCloseIdx !== -1;
-}
-
 export class JspServletNavigationProvider implements monaco.languages.DefinitionProvider {
   constructor(
     protected readonly fileService: FileService,
@@ -187,7 +146,7 @@ export class JspServletNavigationProvider implements monaco.languages.Definition
     if (!urlMatch) return [];
 
     // Skip absolute URLs (http://, https://, etc.)
-    if (/^(https?:|ftp:|mailto:|javascript:|data:)/i.test(urlMatch.url)) {
+    if (isAbsoluteUrl(urlMatch.url)) {
       return [];
     }
 
@@ -215,50 +174,18 @@ export class JspServletNavigationProvider implements monaco.languages.Definition
    * Load and parse web.xml from the workspace.
    */
   async loadWebXml(token: monaco.CancellationToken): Promise<WebXml | undefined> {
-    const roots = await this.workspaceService.roots;
-    if (roots.length === 0) return undefined;
-
-    const rootUri = URI.fromFilePath(roots[0].resource.path.toString());
-    for (const webXmlPath of WEB_XML_PATHS) {
-      if (token.isCancellationRequested) return undefined;
-      const webXmlUri = rootUri.resolve(webXmlPath);
-      try {
-        const content = await this.fileService.read(webXmlUri, { encoding: 'utf-8' });
-        const parsed = parseWebXml(content.value);
-        if (parsed) return parsed;
-      } catch {
-        // web.xml not found at this path; try next
-      }
-    }
-    return undefined;
+    const loaded = await loadWorkspaceWebXml(this.fileService, this.workspaceService, token);
+    return loaded?.webXml;
   }
 
   /**
    * Resolve a fully qualified Java class name to a file URI in the workspace.
    */
-  async resolveJavaClass(
+  resolveJavaClass(
     className: string,
     token: monaco.CancellationToken,
   ): Promise<monaco.languages.Location[]> {
-    const relativePath = className.replace(/\./g, '/') + '.java';
-    const roots = await this.workspaceService.roots;
-    if (roots.length === 0) return [];
-
-    const rootUri = URI.fromFilePath(roots[0].resource.path.toString());
-    for (const srcRoot of SRC_ROOTS) {
-      if (token.isCancellationRequested) return [];
-      const candidate = rootUri.resolve(srcRoot).resolve(relativePath);
-      try {
-        await this.fileService.resolve(candidate, { resolveMetadata: false });
-        return [{
-          uri: monaco.Uri.parse(candidate.toString()),
-          range: new monaco.Range(1, 1, 1, 1),
-        }];
-      } catch {
-        // File doesn't exist at this path; try next
-      }
-    }
-    return [];
+    return resolveWorkspaceJavaClass(this.fileService, this.workspaceService, className, token);
   }
 
   /**
@@ -273,21 +200,10 @@ export class JspServletNavigationProvider implements monaco.languages.Definition
     // Normalize the path: remove leading slash
     const relativePath = jspPath.replace(/^\/+/, '');
 
-    const roots = await this.workspaceService.roots;
-    if (roots.length === 0) return [];
+    const rootUri = await getWorkspaceRootUri(this.workspaceService);
+    if (!rootUri) return [];
 
-    const rootUri = URI.fromFilePath(roots[0].resource.path.toString());
-
-    // Common web document roots
-    const webRoots = [
-      'web',
-      'WebContent',
-      'webapp',
-      'src/main/webapp',
-      '',
-    ];
-
-    for (const webRoot of webRoots) {
+    for (const webRoot of WEB_DOC_ROOTS) {
       if (token.isCancellationRequested) return [];
       const candidate = webRoot
         ? rootUri.resolve(webRoot).resolve(relativePath)
@@ -344,22 +260,22 @@ export function registerWebXmlClassNavigation(services: JspNavServices): monaco.
       const text = word.word.trim();
 
       // ── <servlet-class> → Java class ─────────────────────
-      if (isInsideElement(model, position, 'servlet-class') && isJavaClassName(text)) {
+      if (isInsideXmlElement(model, position, 'servlet-class') && isJavaClassName(text)) {
         return provider.resolveJavaClass(text, token);
       }
 
       // ── <filter-class> → Java class ──────────────────────
-      if (isInsideElement(model, position, 'filter-class') && isJavaClassName(text)) {
+      if (isInsideXmlElement(model, position, 'filter-class') && isJavaClassName(text)) {
         return provider.resolveJavaClass(text, token);
       }
 
       // ── <jsp-file> → JSP file ────────────────────────────
-      if (isInsideElement(model, position, 'jsp-file')) {
+      if (isInsideXmlElement(model, position, 'jsp-file')) {
         return provider.resolveJspFile(text, token);
       }
 
       // ── <servlet-name> → servlet class or JSP file ───────
-      if (isInsideElement(model, position, 'servlet-name')) {
+      if (isInsideXmlElement(model, position, 'servlet-name')) {
         const webXml = await provider.loadWebXml(token);
         if (webXml) {
           const servlet = webXml.servlets[text];

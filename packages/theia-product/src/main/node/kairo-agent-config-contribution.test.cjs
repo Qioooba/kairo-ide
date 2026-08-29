@@ -13,19 +13,16 @@ const SRC = path.join(__dirname, 'kairo-agent-config-contribution.ts');
 
 // Prefer compiled helpers when available; otherwise assert source policy.
 let shouldSkipHtmlAgentConfigInjection;
-let shouldInjectAgentSecret;
 let buildAgentConfigInjectScript;
 let isSameOriginAgentSecretRequest;
 try {
   ({
     shouldSkipHtmlAgentConfigInjection,
-    shouldInjectAgentSecret,
     buildAgentConfigInjectScript,
     isSameOriginAgentSecretRequest,
   } = require('../../../lib/node/kairo-agent-config-contribution'));
 } catch {
   shouldSkipHtmlAgentConfigInjection = null;
-  shouldInjectAgentSecret = null;
   buildAgentConfigInjectScript = null;
   isSameOriginAgentSecretRequest = null;
 }
@@ -47,14 +44,6 @@ test('shouldSkipHtmlAgentConfigInjection is true when preload owns secret', () =
   assert.equal(shouldSkipHtmlAgentConfigInjection({ KAIRO_DESKTOP: '1' }), true);
   assert.equal(shouldSkipHtmlAgentConfigInjection({ KAIRO_DESKTOP: '1', KAIRO_HEADLESS: '1' }), false);
   assert.equal(shouldSkipHtmlAgentConfigInjection({}), false);
-});
-
-test('shouldInjectAgentSecret is inverse of skip (deprecated alias)', () => {
-  if (!shouldInjectAgentSecret || !shouldSkipHtmlAgentConfigInjection) {
-    return;
-  }
-  assert.equal(shouldInjectAgentSecret({ KAIRO_AGENT_SECRET_VIA_PRELOAD: '1' }), false);
-  assert.equal(shouldInjectAgentSecret({ KAIRO_DESKTOP: '1', KAIRO_HEADLESS: '1' }), true);
 });
 
 test('HTML inject script sets agentUrl only — never embeds secret', () => {

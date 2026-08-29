@@ -1,6 +1,6 @@
-import { injectable, inject } from '@theia/core/shared/inversify';
+import { injectable, inject, optional } from '@theia/core/shared/inversify';
 import { CommandContribution, CommandRegistry, MenuContribution, MenuModelRegistry } from '@theia/core/lib/common';
-import { EDITOR_CONTEXT_MENU } from '@theia/editor/lib/browser';
+import { EDITOR_CONTEXT_MENU, EditorManager } from '@theia/editor/lib/browser';
 import { JavaRunService } from './java-run-service';
 import { JAVA_RUN_COMMANDS } from './java-run-protocol';
 import { JAVA_LANGUAGE_ID } from '../common/java-common';
@@ -32,6 +32,12 @@ export namespace JavaRunCommands {
 export class JavaRunCommandContribution implements CommandContribution {
   @inject(JavaRunService)
   protected readonly runService!: JavaRunService;
+
+  // BUG-20260826-113: isJavaEditor() used to read the non-existent
+  // window.theia.editorManager global and always returned false, so the
+  // Run/Debug 'main' menu items never rendered. Use the real service.
+  @inject(EditorManager) @optional()
+  protected readonly editorManager?: EditorManager;
 
   registerCommands(registry: CommandRegistry): void {
     registry.registerCommand(JavaRunCommands.RUN_MAIN, {
@@ -78,7 +84,7 @@ export class JavaRunCommandContribution implements CommandContribution {
 
   protected isJavaEditor(): boolean {
     try {
-      const editor = (window as any).theia?.editorManager?.currentEditor;
+      const editor = this.editorManager?.currentEditor;
       if (!editor) return false;
       return editor.editor?.document?.languageId === JAVA_LANGUAGE_ID;
     } catch {

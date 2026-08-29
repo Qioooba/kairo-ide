@@ -14,7 +14,8 @@
         "preferences": {
           "files.autoSave": "off",
           "workspace.preserveWindow": true,
-          "security.workspace.trust.enabled": true
+          "security.workspace.trust.enabled": true,
+          "editor.minimap.enabled": false
         }
       }
     }

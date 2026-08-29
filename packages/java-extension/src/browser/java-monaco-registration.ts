@@ -341,9 +341,11 @@ export class JavaMonacoRegistrationContribution implements FrontendApplicationCo
       monaco.languages.registerImplementationProvider(JAVA_LANGUAGE_ID, {
         provideImplementation: async (model, position, token) => {
           if (token.isCancellationRequested) return [];
+          console.info(`[kairo-java] monaco provideImplementation uri=${model.uri.toString()} pos=${position.lineNumber - 1}:${position.column - 1}`);
           const result = await this.provider.provideImplementation(
             model.uri.toString(), position.lineNumber - 1, position.column - 1,
           );
+          console.info(`[kairo-java] monaco provideImplementation result=${result.length}`);
           return token.isCancellationRequested ? [] : result.map(adaptLocation);
         },
       }),
@@ -1507,13 +1509,36 @@ function adaptResourceOperation(
 function isEditableCodeAction(action: { command: string } | LSPCodeAction): action is LSPCodeAction & { edit: LSPWorkspaceEdit } {
   if (typeof action.command === 'string') return false;
   const candidate = action as LSPCodeAction;
-  // Reject actions that only execute a command (no edit to apply).
-  if (candidate.command) return false;
-  return !!candidate.edit && !candidate.disabled;
+  if (candidate.disabled) return false;
+  if (candidate.edit) return true;
+  // JDT LS quick fixes carry their workspace edit inside the
+  // `java.apply.workspaceEdit` command arguments instead of an `edit`
+  // field (BUG-20260826-404: these actions were dropped, so Alt+Enter /
+  // the lightbulb offered nothing). Unwrap the embedded edit.
+  if (candidate.command?.command === 'java.apply.workspaceEdit') {
+    const arg = candidate.command.arguments?.[0];
+    return !!arg && typeof arg === 'object';
+  }
+  return false;
 }
 
-function adaptCodeAction(action: LSPCodeAction & { edit: LSPWorkspaceEdit }): monaco.languages.CodeAction {
-  const edit = adaptWorkspaceEdit(action.edit);
+/** Extract the workspace edit a code action applies, unwrapping
+ *  JDT's command-embedded edits. */
+function codeActionEdit(action: LSPCodeAction): LSPWorkspaceEdit | undefined {
+  if (action.edit) return action.edit;
+  if (action.command?.command === 'java.apply.workspaceEdit') {
+    const arg = action.command.arguments?.[0];
+    if (arg && typeof arg === 'object') return arg as LSPWorkspaceEdit;
+  }
+  return undefined;
+}
+
+function adaptCodeAction(action: LSPCodeAction): monaco.languages.CodeAction {
+  const rawEdit = codeActionEdit(action);
+  if (!rawEdit) {
+    return { title: action.title, kind: action.kind };
+  }
+  const edit = adaptWorkspaceEdit(rawEdit);
   if (edit.rejectReason) {
     return { title: action.title, disabled: edit.rejectReason };
   }

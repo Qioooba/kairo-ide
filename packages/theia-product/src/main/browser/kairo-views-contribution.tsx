@@ -29,7 +29,7 @@ import {
   OpenerService,
   open,
 } from '@theia/core/lib/browser';
-import { Command, CommandRegistry, CommandService, MenuContribution, MenuModelRegistry, MenuPath, MessageService } from '@theia/core/lib/common';
+import { Command, CommandRegistry, CommandService, MenuContribution, MenuModelRegistry, MenuPath, MessageService, PreferenceService } from '@theia/core/lib/common';
 import URI from '@theia/core/lib/common/uri';
 import { KeybindingContribution, KeybindingRegistry } from '@theia/core/lib/browser/keybinding';
 import { isOSX } from '@theia/core/lib/common/os';
@@ -50,12 +50,13 @@ import { ServerViewWidget, LogViewerWidget } from '@kairo/tomcat-extension';
 import { ImportWizardWidget, ProjectSelectorWidget } from '@kairo/project-extension';
 import { MavenViewWidget } from './maven-view-widget';
 import { KairoTodoWidget } from './kairo-todo-widget';
-import { KAIRO_WELCOME_FACTORY_ID } from './kairo-welcome-widget';
+import { KAIRO_WELCOME_FACTORY_ID, markWelcomeExplicitlyRequested } from './kairo-welcome-widget';
 import {
   KAIRO_IMPORT_WIZARD_FACTORY_ID,
   KAIRO_PROJECT_SELECTOR_FACTORY_ID,
   KAIRO_RUN_CONFIGURATIONS_FACTORY_ID,
   KAIRO_KEYMAP_FACTORY_ID,
+  KAIRO_TOOLBAR_FACTORY_ID,
   KAIRO_MAVEN_FACTORY_ID as _KAIRO_MAVEN_FACTORY_ID,
   KAIRO_TODO_FACTORY_ID as _KAIRO_TODO_FACTORY_ID,
   KAIRO_TESTS_FACTORY_ID,
@@ -479,6 +480,7 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
   @inject(Container) protected readonly container!: Container;
   @inject(HotDeployService) protected hotDeploy!: HotDeployService;
   @inject(KairoI18nService) protected i18n!: KairoI18nService;
+  @inject(PreferenceService) protected preferences!: PreferenceService;
   protected javaDebug: KairoJavaDebugService | undefined;
   protected debugSessionService: KairoDebugSessionService | undefined;
   /** Captured during registerCommands so labels can be refreshed after async i18n load. */
@@ -533,12 +535,7 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
         /* ignore */
       }
       this.runtime.invalidateEndpoints();
-      this.runtime.disconnectEvents();
-      try {
-        this.runtime.openEvents();
-      } catch {
-        /* ignore */
-      }
+      this.runtime.reconnectEventStream();
       await new Promise(r => setTimeout(r, 400));
     };
     // HTTP health can succeed while EventStream is still stale (KAIRO-QA-004).
@@ -674,7 +671,11 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
     // closes itself once a project is selected.
     // P2-UX-02: on first launch (no recent projects), auto-open the
     // import wizard to guide the user through onboarding.
-    void this.maybeOpenWelcome();
+    // BUG-20260826-200: opening here (onStart) races ShellLayoutRestorer —
+    // the restorer runs AFTER contributions' onStart and REPLACES the main
+    // area with the persisted layout, discarding a freshly-added Welcome
+    // whenever that layout did not contain it. Hook the layout-initialized
+    // phase instead so the shell is final before Welcome attaches.
     this.activeProject.onDidChangeProject(p => {
       if (p) void this.closeWelcome();
     });
@@ -696,6 +697,7 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
 
     // Locale may finish loading after registerCommands; refresh once more.
     this.refreshCommandLabels();
+    this.mountTopToolbar();
     // N-052: submenu labels are registered via MenuModelRegistry with a static
     // string; they do not auto-update when the language pack loads after
     // registerMenus. Refresh them once the i18n is ready and on every
@@ -705,6 +707,26 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
       this.refreshCommandLabels();
       this.refreshMenuLabels();
     });
+  }
+
+  /**
+   * Mount the persistent top toolbar (TC-TB-001: 顶部常驻工具栏，不可关闭).
+   * The widget factory is registered by the frontend module; without an
+   * explicit attach it would never appear in the workbench.
+   */
+  protected mountTopToolbar(): void {
+    void this.widgetManager.getOrCreateWidget(KAIRO_TOOLBAR_FACTORY_ID)
+      .then(widget => {
+        try {
+          this.shell.addWidget(widget, { area: 'top' });
+        } catch {
+          // Already attached — that's fine.
+        }
+        widget.update();
+      })
+      .catch(err => {
+        console.warn('[kairo] top toolbar failed to open', err);
+      });
   }
 
   /** Update top-level Kairo submenu labels after i18n language change (N-052). */
@@ -735,9 +757,29 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
     }
   }
 
-  protected async maybeOpenWelcome(): Promise<void> {
+  protected async maybeOpenWelcome(): Promise<void> { // TEMP-DEBUG
     if (this.activeProject.project) {
       return;
+    }
+    // TC-WELC-011: honor the kairo.general.showWelcome preference —
+    // when the user disabled the Welcome tab it must not auto-open
+    // on startup (Help > Welcome still opens it explicitly).
+    try {
+      // BUG-20260826-200: onStart runs before the preference service has
+      // synced the persisted user settings, so an early get() always
+      // returned the schema default (true) and showWelcome=false was
+      // silently ignored. Wait for readiness (bounded so a broken
+      // preference backend can never stall the workbench).
+      await Promise.race([
+        this.preferences.ready,
+        new Promise<void>(resolve => setTimeout(resolve, 5000)),
+      ]);
+      const showWelcome = this.preferences.get('kairo.general.showWelcome', true) as unknown as boolean; // TEMP-DEBUG
+      if (showWelcome === false) {
+        return;
+      }
+    } catch {
+      // Preference service unavailable — default to showing Welcome.
     }
     try {
       await this.revealOrCreateMain(KAIRO_WELCOME_FACTORY_ID, () => undefined, () => { /* singleton via WidgetManager */ });
@@ -765,6 +807,15 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
   onStop(): void {
     this.eventsUnsub?.();
     this.statusUnsub?.();
+  }
+
+  /**
+   * BUG-20260826-200: runs after the workbench layout has been initialized
+   * (post-restoration), so a Welcome added here can no longer be discarded
+   * by ShellLayoutRestorer.
+   */
+  onDidInitializeLayout(): void {
+    void this.maybeOpenWelcome();
   }
 
   async registerCommands(registry: CommandRegistry): Promise<void> {
@@ -1273,8 +1324,7 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
           /* desktop preload path may 404 the JSON endpoint — ignore */
         }
         this.runtime.invalidateEndpoints();
-        this.runtime.disconnectEvents();
-        this.runtime.openEvents();
+        this.runtime.reconnectEventStream();
         const ok = await this.ensureRuntimeAgentHealthy();
         if (ok) {
           this.messages.info(this.i18n.t('runtimeAgent.reconnected'));
@@ -1305,6 +1355,8 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
       execute: async () => {
         const importW = this.shell.getWidgets('main').find(widget => widget.id === KAIRO_IMPORT_WIZARD_FACTORY_ID);
         importW?.close();
+        // BUG-20260826-200: explicit request must win over showWelcome=false
+        markWelcomeExplicitlyRequested();
         await this.revealOrCreateMain(KAIRO_WELCOME_FACTORY_ID, () => undefined, () => undefined);
       },
     });
@@ -1340,6 +1392,12 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
         return undefined;
       },
     });
+
+    // TC-MENU-038: Appearance > Toggle Maximized wrapper (see registerMenus).
+    registry.registerCommand(
+      { id: 'kairo.appearance.toggleMaximized', label: 'Toggle Maximized' },
+      { execute: () => this.commands.executeCommand('core.toggleMaximized') },
+    );
 
     // Reload Context: touch WEB-INF/web.xml to trigger Tomcat context reload
     registry.registerCommand(this.withLabel(KairoCommands.RELOAD_CONTEXT), {
@@ -1590,12 +1648,19 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
       order: 'e4',
     });
 
-    // Keep a single File entry for Import — Select Project / Run Configs
-    // already live under the Kairo top menu; duplicating them here makes
-    // File feel cluttered for daily use.
+    // Keep File menu parity with the desktop template (apps/desktop
+    // buildMenuTemplate): Import / Select Project / Run Configurations.
     menus.registerMenuAction(CommonMenus.FILE_OPEN, {
       commandId: KairoCommands.IMPORT_PROJECT.id,
       order: 'a1',
+    });
+    menus.registerMenuAction(CommonMenus.FILE_OPEN, {
+      commandId: KairoCommands.SELECT_PROJECT.id,
+      order: 'a2',
+    });
+    menus.registerMenuAction(CommonMenus.FILE_OPEN, {
+      commandId: KairoCommands.MANAGE_RUN_CONFIGURATIONS.id,
+      order: 'a3',
     });
 
     // Desktop/local IDE: Upload/Download are Theia browser leftovers and
@@ -1605,6 +1670,41 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
     menus.unregisterMenuAction('file.upload', downloadUploadMenu);
     menus.unregisterMenuAction('file.download', downloadUploadMenu);
     menus.unregisterMenuAction('file.copyDownloadLink', CommonMenus.EDIT_CLIPBOARD);
+
+    // View menu parity with the desktop template: Terminal toggle plus a
+    // group with the 10 Kairo view entries (TC-MENU-035 / TC-MENU-037).
+    menus.registerMenuAction(CommonMenus.VIEW, {
+      commandId: KairoCommands.TOGGLE_TERMINAL.id,
+      order: 'z0',
+    });
+    const kairoViewGroup: MenuPath = [...CommonMenus.VIEW, '9_kairo'];
+    const kairoViewEntries: Array<[string, string]> = [
+      [KairoCommands.REVEAL_KAIRO_SERVERS.id, '01'],
+      [KairoCommands.REVEAL_KAIRO_BUILDS.id, '02'],
+      [KairoCommands.REVEAL_KAIRO_DEPLOYMENTS.id, '03'],
+      [KairoCommands.REVEAL_KAIRO_LOGS.id, '04'],
+      [KairoCommands.REVEAL_KAIRO_MAVEN.id, '05'],
+      [KairoCommands.REVEAL_KAIRO_TODO.id, '06'],
+      [KairoCommands.REVEAL_KAIRO_TESTS.id, '07'],
+      [KairoCommands.REVEAL_KAIRO_SQL_CONSOLE.id, '08'],
+      [KairoCommands.REVEAL_KAIRO_REMOTE.id, '09'],
+      [KairoCommands.REVEAL_KAIRO_PERF.id, '10'],
+    ];
+    for (const [commandId, order] of kairoViewEntries) {
+      menus.registerMenuAction(kairoViewGroup, { commandId, order });
+    }
+
+    // Appearance submenu parity: the four toggles from the desktop
+    // template — bottom panel / status bar / menu bar / maximized
+    // (TC-MENU-038). The first three are registered by Theia core.
+    // NOTE: MenuModelRegistry keys plain registerMenuAction entries by
+    // commandId and silently ignores duplicates — core already registers
+    // core.toggleMaximized elsewhere, so a Kairo wrapper command is needed
+    // for the Appearance submenu entry to render (TC-MENU-038).
+    menus.registerMenuAction([...CommonMenus.VIEW_APPEARANCE_SUBMENU, '8_kairo_maximized'], {
+      commandId: 'kairo.appearance.toggleMaximized',
+      order: 'a0',
+    });
 
     menus.registerMenuAction(CommonMenus.HELP, {
       commandId: KairoCommands.SHOW_WELCOME.id,

@@ -234,6 +234,12 @@ export const SearchResultsPanel: React.FC<SearchResultsPanelProps> = ({
                     ? <span className="kairo-search-highlight">{preview.highlight}</span>
                     : null}
                   {preview.after}
+                  {preview.replacement !== undefined && (
+                    <span className="kairo-search-replacement-group">
+                      <span className="kairo-search-replacement-arrow" aria-hidden="true">→</span>
+                      <span className="kairo-search-replacement">{preview.replacement}</span>
+                    </span>
+                  )}
                 </span>
               </button>
             );

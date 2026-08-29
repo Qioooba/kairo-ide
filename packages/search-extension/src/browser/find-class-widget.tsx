@@ -205,8 +205,23 @@ export class FindClassWidget extends ReactWidget {
     }));
   }
 
+  /** IDEA popups close on Escape regardless of inner focus. */
+  protected readonly handleEscape = (event: KeyboardEvent): void => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      this.close();
+    }
+  };
+
+  protected override onBeforeDetach(message: Message): void {
+    window.removeEventListener('keydown', this.handleEscape, true);
+    super.onBeforeDetach(message);
+  }
+
   protected onAfterAttach(message: Message): void {
     super.onAfterAttach(message);
+    window.addEventListener('keydown', this.handleEscape, true);
     this.unsubscribe ??= this.model.subscribe(state => {
       this.state = state;
       this.update();

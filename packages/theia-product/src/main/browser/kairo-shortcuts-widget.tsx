@@ -104,7 +104,10 @@ export class KairoShortcutsWidget extends BaseWidget {
   @postConstruct()
   protected init(): void {
     this.updateTitle();
-    this.toDispose.push(this.i18n.onDidChangeLanguage(() => this.updateTitle()));
+    this.toDispose.push(this.i18n.onDidChangeLanguage(() => {
+      this.updateTitle();
+      this.update();
+    }));
     this.update();
   }
 
@@ -183,14 +186,14 @@ export class KairoShortcutsWidget extends BaseWidget {
               <table
                 className="kairo-shortcuts-table"
                 role="grid"
-                aria-label={`${category.name} 快捷键`}
+                aria-label={this.i18n.t('widget.shortcuts.tableAria', { category: category.name })}
               >
                 <thead>
                   <tr className="kairo-shortcuts-header-row">
-                    <th className="kairo-shortcuts-th kairo-shortcuts-col-command">命令</th>
-                    <th className="kairo-shortcuts-th kairo-shortcuts-col-keybinding">快捷键</th>
-                    <th className="kairo-shortcuts-th kairo-shortcuts-col-label">标签</th>
-                    <th className="kairo-shortcuts-th kairo-shortcuts-col-when">条件</th>
+                    <th className="kairo-shortcuts-th kairo-shortcuts-col-command">{this.i18n.t('widget.shortcuts.colCommand')}</th>
+                    <th className="kairo-shortcuts-th kairo-shortcuts-col-keybinding">{this.i18n.t('widget.shortcuts.colKeybinding')}</th>
+                    <th className="kairo-shortcuts-th kairo-shortcuts-col-label">{this.i18n.t('widget.shortcuts.colLabel')}</th>
+                    <th className="kairo-shortcuts-th kairo-shortcuts-col-when">{this.i18n.t('widget.shortcuts.colWhen')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -208,7 +211,7 @@ export class KairoShortcutsWidget extends BaseWidget {
                       <td className="kairo-shortcuts-td kairo-shortcuts-cell-keybinding">
                         <kbd
                           className="kairo-shortcuts-kbd"
-                          aria-label={`快捷键: ${shortcut.keybinding}`}
+                          aria-label={this.i18n.t('widget.shortcuts.kbdAria', { keybinding: shortcut.keybinding })}
                         >
                           {shortcut.keybinding}
                         </kbd>
@@ -227,7 +230,9 @@ export class KairoShortcutsWidget extends BaseWidget {
           ))}
           {categorized.length === 0 && (
             <div className="kairo-shortcuts-empty">
-              {this.searchTerm ? `未找到匹配 "${this.searchTerm}" 的快捷键` : '暂无可用的快捷键'}
+              {this.searchTerm
+                ? this.i18n.t('widget.shortcuts.emptyNoMatch', { term: this.searchTerm })
+                : this.i18n.t('widget.shortcuts.empty')}
             </div>
           )}
         </div>

@@ -14,7 +14,6 @@ import * as path from 'node:path';
 import {
   parseMajorVersion,
   probeJavaVersion,
-  detectJDK17Plus,
   detectHostJDK,
   applyHostJDKEnv,
   JDT_LS_MIN_JDK_MAJOR,
@@ -205,32 +204,41 @@ describe('applyHostJDKEnv', () => {
   });
 });
 
-// ─── detectJDK17Plus ────────────────────────────────────────────
+// ─── detectHostJDK ──────────────────────────────────────────────
 
-describe('detectJDK17Plus', () => {
-  it('returns a result (found or not)', () => {
-    const result = detectJDK17Plus();
-    assert.strictEqual(typeof result.found, 'boolean');
-  });
-
-  it('includes searchedPaths array', () => {
-    const result = detectJDK17Plus();
-    assert.ok(Array.isArray(result.searchedPaths));
-    assert.ok(result.searchedPaths!.length > 0, 'should have searched at least some paths');
-  });
-
-  it('detects JDK via KAIRO_JDK_HOME if set to a valid JDK 17+', () => {
+describe('detectHostJDK', () => {
+  /** Resolve a usable `java` executable on PATH, if any. */
+  function findJavaOnPath(): string | undefined {
     const isWin = process.platform === 'win32';
-    const javaExe = isWin ? 'java.exe' : 'java';
-    let javaPath: string | undefined;
     try {
       const { execSync } = require('child_process');
       const result = isWin
         ? execSync('where java', { encoding: 'utf-8', timeout: 5_000 }).trim().split(/\r?\n/)[0]
         : execSync('which java', { encoding: 'utf-8', timeout: 5_000 }).trim();
-      if (result) javaPath = result.trim();
-    } catch { /* no java */ }
+      return result ? result.trim() : undefined;
+    } catch {
+      return undefined; // no java on PATH
+    }
+  }
 
+  it('returns a result (found or not) with searchedPaths array', () => {
+    const result = detectHostJDK();
+    assert.strictEqual(typeof result.found, 'boolean');
+    assert.ok(Array.isArray(result.searchedPaths));
+    assert.ok(result.searchedPaths!.length > 0, 'should have searched at least some paths');
+  });
+
+  it('prefers a JDK 21+ install when available on the machine', () => {
+    const result = detectHostJDK();
+    assert.strictEqual(typeof result.found, 'boolean');
+    if (!result.found) return;
+    if ((result.major ?? 0) >= JDT_LS_MIN_JDK_MAJOR) {
+      assert.ok((result.major as number) >= JDT_LS_MIN_JDK_MAJOR);
+    }
+  });
+
+  it('detects JDK via KAIRO_JDK_HOME if set to a valid JDK 17+', () => {
+    const javaPath = findJavaOnPath();
     if (!javaPath) return; // Skip if no java available.
 
     const probe = probeJavaVersion(javaPath);
@@ -240,7 +248,7 @@ describe('detectJDK17Plus', () => {
     const prevHome = process.env.KAIRO_JDK_HOME;
     try {
       process.env.KAIRO_JDK_HOME = probe.javaHome;
-      const result = detectJDK17Plus();
+      const result = detectHostJDK();
       assert.strictEqual(result.found, true);
       assert.strictEqual(result.major, probe.major);
     } finally {
@@ -253,17 +261,7 @@ describe('detectJDK17Plus', () => {
   });
 
   it('detects JDK via JAVA_HOME if set to a valid JDK 17+', () => {
-    const isWin = process.platform === 'win32';
-    const javaExe = isWin ? 'java.exe' : 'java';
-    let javaPath: string | undefined;
-    try {
-      const { execSync } = require('child_process');
-      const result = isWin
-        ? execSync('where java', { encoding: 'utf-8', timeout: 5_000 }).trim().split(/\r?\n/)[0]
-        : execSync('which java', { encoding: 'utf-8', timeout: 5_000 }).trim();
-      if (result) javaPath = result.trim();
-    } catch { /* no java */ }
-
+    const javaPath = findJavaOnPath();
     if (!javaPath) return;
 
     const probe = probeJavaVersion(javaPath);
@@ -276,7 +274,7 @@ describe('detectJDK17Plus', () => {
     delete process.env.KAIRO_JDK_HOME;
     try {
       process.env.JAVA_HOME = probe.javaHome;
-      const result = detectJDK17Plus();
+      const result = detectHostJDK();
       assert.strictEqual(result.found, true);
     } finally {
       if (prevHome !== undefined) {
@@ -289,16 +287,6 @@ describe('detectJDK17Plus', () => {
       } else {
         delete process.env.KAIRO_JDK_HOME;
       }
-    }
-  });
-});
-describe('detectHostJDK', () => {
-  it('prefers a JDK 21+ install when available on the machine', () => {
-    const result = detectHostJDK();
-    assert.strictEqual(typeof result.found, 'boolean');
-    if (!result.found) return;
-    if ((result.major ?? 0) >= JDT_LS_MIN_JDK_MAJOR) {
-      assert.ok((result.major as number) >= JDT_LS_MIN_JDK_MAJOR);
     }
   });
 });

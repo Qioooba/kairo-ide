@@ -325,11 +325,15 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
 
   protected setJdkStatus(
     s: JavaServiceState,
-    st?: { state: string; jre?: string; pid?: number; lastError?: string; version?: string },
+    st?: { state: string; jre?: string; pid?: number; lastError?: string; version?: string; javaMajor?: number },
   ): void {
     const t = this.i18n.t.bind(this.i18n);
     const jre = st?.jre;
-    const jdkVersion = jre ? extractJdkVersion(jre) : undefined;
+    const jdkVersion = st?.javaMajor !== undefined
+      ? String(st.javaMajor)
+      : jre
+        ? extractJdkVersion(jre)
+        : undefined;
     const local = s;
     const wire = st?.state;
     const effective: string = wire ?? local;

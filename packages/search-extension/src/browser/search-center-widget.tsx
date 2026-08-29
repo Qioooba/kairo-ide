@@ -32,6 +32,8 @@ export interface SearchCenterQuery {
   /** Absolute directory or file to scope the search. */
   rootPath?: string;
   scope?: SearchScope;
+  /** Replace mode: stream the post-image so rows render a replacement preview. */
+  previewReplace?: string;
 }
 
 export interface SearchCenterProps {
@@ -56,11 +58,6 @@ export interface SearchCenterProps {
 export function parseGlobInput(value: string): string[] | undefined {
   const values = [...new Set(value.split(',').map(item => item.trim()).filter(Boolean))];
   return values.length > 0 ? values : undefined;
-}
-
-/** @deprecated Prefer parseFileMask for IDEA-style masks. */
-export function parseFileTypesInput(value: string): ReturnType<typeof parseFileMask> {
-  return parseFileMask(value);
 }
 
 interface FlatSearchItem {
@@ -129,6 +126,12 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
   const streamRevision = state.streamState?.revision ?? 0;
   const groups = React.useMemo(() => groupMatchesByFile(matches), [matches, streamRevision]);
 
+  // Reset the keyboard selection onto the first match only when a NEW result
+  // set arrives (request id or live match count changed). Recomputing on every
+  // flatItems change made ←/→ collapse/expand unusable: collapsing rewrote
+  // flatItems, snapped the selection back to a match row, and ArrowRight
+  // could then never reach the collapsed header to expand it again.
+  const navKeyRef = React.useRef('');
   const flatItems = React.useMemo((): FlatSearchItem[] => {
     let idx = 0;
     const items: FlatSearchItem[] = [];
@@ -151,6 +154,11 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
   }, [groups, collapsedFiles]);
 
   React.useEffect(() => {
+    const navKey = `${state.requestId}:${matches.length}`;
+    if (navKeyRef.current === navKey) {
+      return;
+    }
+    navKeyRef.current = navKey;
     const firstMatch = flatItems.findIndex(item => item.kind === 'match');
     setSelectedIndex(firstMatch >= 0 ? firstMatch : 0);
   }, [state.requestId, flatItems]);
@@ -238,6 +246,7 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
         include: mask.include,
         exclude: mergeGlobs(mask.exclude, excludeExtra),
         scope,
+        ...(currentMode === 'replace' && replacement.trim() ? { previewReplace: replacement.trim() } : {}),
       });
     } catch (error) {
       setSubmissionError(error instanceof Error ? error : new Error(String(error)));
@@ -254,11 +263,16 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
   };
 
   const keyDown = (event: React.KeyboardEvent): void => {
+    // Handled navigation keys must not leak to the workbench: an un-stopped
+    // ArrowLeft/ArrowDown bubbles to Theia's keybinding resolver, which
+    // moves focus into the Navigator file tree mid-interaction.
     if (event.key === 'Escape') {
       event.preventDefault();
+      event.stopPropagation();
       onClose();
     } else if (event.key === 'ArrowDown') {
       event.preventDefault();
+      event.stopPropagation();
       let next = selectedIndex + 1;
       while (next < flatItems.length && flatItems[next].kind !== 'match') {
         next++;
@@ -268,6 +282,7 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
       }
     } else if (event.key === 'ArrowUp') {
       event.preventDefault();
+      event.stopPropagation();
       let prev = selectedIndex - 1;
       while (prev >= 0 && flatItems[prev].kind !== 'match') {
         prev--;
@@ -277,6 +292,7 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
       }
     } else if (event.key === 'ArrowLeft') {
       event.preventDefault();
+      event.stopPropagation();
       const item = flatItems[selectedIndex];
       if (item?.kind === 'match' && item.match) {
         const file = item.match.file;
@@ -288,6 +304,7 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
       }
     } else if (event.key === 'ArrowRight') {
       event.preventDefault();
+      event.stopPropagation();
       const item = flatItems[selectedIndex];
       if (item?.kind === 'header' && item.file && item.collapsed) {
         toggleFileCollapse(item.file);
@@ -301,6 +318,7 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
         return;
       }
       event.preventDefault();
+      event.stopPropagation();
       const item = flatItems[selectedIndex];
       if (item?.kind === 'match' && item.match) {
         // IDEA Find: Enter opens and keeps dialog; Shift+Enter opens and closes.
@@ -336,6 +354,16 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
   const selectedMatch = getSelectedMatch();
   const fileCount = groups.length;
   const matchCount = state.totalMatches || matches.length;
+
+  // Post-image preview for Replace in Path: resolve the planned replacement
+  // for a match from the current replace plan (instant, no extra request).
+  const replacementFor = (match: SearchMatch): string | undefined => {
+    if (currentMode !== 'replace' || !replacePlan) {
+      return undefined;
+    }
+    const filePlan = replacePlan.files.find(file => file.file === match.file);
+    return filePlan?.edits.find(edit => edit.line === match.line && edit.column === match.column)?.after;
+  };
 
   const renderPreview = (): React.ReactNode => {
     if (!showPreview || !selectedMatch) {
@@ -584,6 +612,14 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
                       const results = await onApplyReplacePlan!(replacePlan);
                       setApplyResults(results);
                       setCanUndo(results.some(r => r.status === 'applied') && !results.some(r => r.status === 'failed'));
+                      // Transaction failures (preflight drift, write/rollback errors)
+                      // must be visible — a silent zero-write is indistinguishable
+                      // from success for the user.
+                      const failure = results.find(r =>
+                        r.status === 'failed' || r.status === 'rollback-failed' || r.status === 'rollback-unknown');
+                      setSubmissionError(failure
+                        ? new Error(failure.error ?? `Replace failed for ${failure.file}`)
+                        : undefined);
                     } catch (error) {
                       setSubmissionError(error instanceof Error ? error : new Error(String(error)));
                     } finally {
@@ -666,6 +702,7 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
                 }
                 const match = item.match!;
                 const preview = matchPreviewParts(match);
+                const plannedReplacement = replacementFor(match);
                 return (
                   <button
                     type="button"
@@ -698,6 +735,12 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
                         ? <span className="kairo-search-highlight">{preview.highlight}</span>
                         : null}
                       {preview.after}
+                      {(plannedReplacement ?? preview.replacement) !== undefined && (
+                        <span className="kairo-search-replacement-group">
+                          <span className="kairo-search-replacement-arrow" aria-hidden="true">→</span>
+                          <span className="kairo-search-replacement">{plannedReplacement ?? preview.replacement}</span>
+                        </span>
+                      )}
                     </span>
                   </button>
                 );
@@ -745,7 +788,7 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
         )}
 
         <div className="kairo-search-footer">
-          <span className="kairo-search-stats" data-testid="search-count">
+          <span className="kairo-search-stats" data-testid="search-count" tabIndex={-1}>
             {matchCount > 0 && (fileCount > 0
               ? t('widget.search.center.stats.matchInFiles', { count: matchCount, fileCount })
               : t('widget.search.center.stats.match', { count: matchCount }))}

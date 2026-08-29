@@ -7,6 +7,7 @@
  */
 
 import * as monaco from '@theia/monaco-editor-core';
+import type { I18nService } from '@kairo/i18n';
 import { JavaCompletionProvider, adaptCompletionItem, globalRecentCompletions } from '@kairo/java-extension';
 import type { JavaLanguageClient } from '@kairo/java-extension';
 import { JSP_LANGUAGE_ID } from './jsp-monarch';
@@ -17,6 +18,7 @@ import {
   virtualUriForBlock,
   type JspVirtualKind,
 } from './jsp-virtual-java';
+import { setJspI18n, t } from './i18n-context';
 
 export type ScriptletContext = 'scriptlet' | 'expression' | 'declaration' | 'directive' | 'none';
 
@@ -72,19 +74,19 @@ function buildContextCompletions(
 
   switch (blockKind) {
     case 'declaration':
-      push('private String', 'private String ${1:name};', '声明私有 String 字段');
-      push('public void method', 'public void ${1:methodName}() {\n    ${0}\n}', '声明公有方法');
+      push('private String', 'private String ${1:name};', t('completion.scriptlet.declarePrivateString'));
+      push('public void method', 'public void ${1:methodName}() {\n    ${0}\n}', t('completion.scriptlet.declarePublicMethod'));
       break;
     case 'expression':
-      push('request.getParameter', 'request.getParameter("${1:name}")', '获取请求参数');
-      push('session.getAttribute', 'session.getAttribute("${1:name}")', '获取会话属性');
-      push('out', 'out', 'JspWriter');
+      push('request.getParameter', 'request.getParameter("${1:name}")', t('completion.scriptlet.requestGetParameter'));
+      push('session.getAttribute', 'session.getAttribute("${1:name}")', t('completion.scriptlet.sessionGetAttribute'));
+      push('out', 'out', t('completion.scriptlet.outWriter'));
       break;
     case 'scriptlet':
-      push('out.println', 'out.println(${1:value});', '输出到页面');
-      push('request.setAttribute', 'request.setAttribute("${1:name}", ${2:value});', '设置请求属性');
-      push('if', 'if (${1:condition}) {\n    ${0}\n}', 'if 语句');
-      push('for', 'for (int ${1:i} = 0; ${1:i} < ${2:max}; ${1:i}++) {\n    ${0}\n}', 'for 循环');
+      push('out.println', 'out.println(${1:value});', t('completion.scriptlet.outPrintln'));
+      push('request.setAttribute', 'request.setAttribute("${1:name}", ${2:value});', t('completion.scriptlet.requestSetAttribute'));
+      push('if', 'if (${1:condition}) {\n    ${0}\n}', t('completion.scriptlet.ifStatement'));
+      push('for', 'for (int ${1:i} = 0; ${1:i} < ${2:max}; ${1:i}++) {\n    ${0}\n}', t('completion.scriptlet.forLoop'));
       break;
   }
   return items;
@@ -96,7 +98,9 @@ function buildContextCompletions(
 export function registerJspScriptletJavaCompletion(
   javaProvider: JavaCompletionProvider,
   javaClient?: JavaLanguageClient,
+  i18n?: I18nService,
 ): monaco.IDisposable {
+  setJspI18n(i18n);
   const parser = new JspJavaParser();
   let virtualVersion = 1;
 

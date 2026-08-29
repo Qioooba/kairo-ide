@@ -9,6 +9,8 @@ export interface MatchPreviewParts {
   before: string;
   highlight: string;
   after: string;
+  /** Post-image preview when the search carried `previewReplace`. */
+  replacement?: string;
 }
 
 /** IDEA-style group header: filename only (no directory). */
@@ -48,6 +50,7 @@ export function matchPreviewParts(match: SearchMatch): MatchPreviewParts {
     before,
     highlight: match.matchText ?? '',
     after,
+    replacement: match.replacement,
   };
 }
 

@@ -365,16 +365,6 @@ export function detectHostJDK(bundledDir?: string): JDKDetectionResult {
   return detectJDKAtLeast(MIN_JDK_MAJOR, bundledDir);
 }
 
-/** @deprecated Prefer detectHostJDK — kept for existing unit tests. */
-export function detectJDK17Plus(bundledDir?: string): JDKDetectionResult {
-  return detectJDKAtLeast(MIN_JDK_MAJOR, bundledDir);
-}
-
-/** @deprecated Prefer detectHostJDK — kept for call-site compatibility. */
-export function detectJDK21Plus(bundledDir?: string): JDKDetectionResult {
-  return detectJDKAtLeast(JDT_LS_MIN_JDK_MAJOR, bundledDir);
-}
-
 /**
  * Point the canonical host env vars at one JDK home.
  * When major >= 21, JDT LS and the IDE host share the same install.

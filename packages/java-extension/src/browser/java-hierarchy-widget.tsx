@@ -18,6 +18,13 @@ interface HierarchyTreeItem {
   detail?: string;
   uri: string;
   range: { start: { line: number; character: number }; end: { line: number; character: number } };
+  /** The name-selection range — JDT resolves hierarchy items through it
+   *  (BUG-20260826-402: reconstructing items with the full body range as
+   *  selectionRange made supertypes/subtypes/incoming/outgoing return []). */
+  selectionRange?: { start: { line: number; character: number }; end: { line: number; character: number } };
+  /** Original LSP item as returned by prepare* — echoed back verbatim on
+   *  expand so JDT's opaque `data` handle survives the round trip. */
+  raw?: LSPCallHierarchyItem | LSPTypeHierarchyItem;
   children: HierarchyTreeItem[];
   expanded: boolean;
   loaded: boolean;
@@ -308,48 +315,48 @@ export class JavaHierarchyWidget extends ReactWidget {
 
     try {
       if (this.widgetState.mode === 'call-incoming') {
-        const callItem: LSPCallHierarchyItem = {
+        const callItem = (item.raw as LSPCallHierarchyItem | undefined) ?? {
           name: item.label,
           kind: 6,
           uri: item.uri,
           range: { start: item.range.start, end: item.range.end },
-          selectionRange: { start: item.range.start, end: item.range.end },
+          selectionRange: { start: (item.selectionRange ?? item.range).start, end: (item.selectionRange ?? item.range).end },
           detail: item.detail,
         };
         const calls = await this.languageClient.incomingCalls(callItem);
         item.children = calls.map((c, i) => this.toCallHierarchyTreeItem(c.from, item.depth + 1, false, i));
         item.loaded = true;
       } else if (this.widgetState.mode === 'call-outgoing') {
-        const callItem: LSPCallHierarchyItem = {
+        const callItem = (item.raw as LSPCallHierarchyItem | undefined) ?? {
           name: item.label,
           kind: 6,
           uri: item.uri,
           range: { start: item.range.start, end: item.range.end },
-          selectionRange: { start: item.range.start, end: item.range.end },
+          selectionRange: { start: (item.selectionRange ?? item.range).start, end: (item.selectionRange ?? item.range).end },
           detail: item.detail,
         };
         const calls = await this.languageClient.outgoingCalls(callItem);
         item.children = calls.map((c, i) => this.toCallHierarchyTreeItem(c.to, item.depth + 1, false, i));
         item.loaded = true;
       } else if (this.widgetState.mode === 'type-supertypes') {
-        const typeItem: LSPTypeHierarchyItem = {
+        const typeItem = (item.raw as LSPTypeHierarchyItem | undefined) ?? {
           name: item.label,
           kind: 5,
           uri: item.uri,
           range: { start: item.range.start, end: item.range.end },
-          selectionRange: { start: item.range.start, end: item.range.end },
+          selectionRange: { start: (item.selectionRange ?? item.range).start, end: (item.selectionRange ?? item.range).end },
           detail: item.detail,
         };
         const types = await this.languageClient.supertypes(typeItem);
         item.children = types.map((t, i) => this.toTypeHierarchyTreeItem(t, item.depth + 1, false, i));
         item.loaded = true;
       } else if (this.widgetState.mode === 'type-subtypes') {
-        const typeItem: LSPTypeHierarchyItem = {
+        const typeItem = (item.raw as LSPTypeHierarchyItem | undefined) ?? {
           name: item.label,
           kind: 5,
           uri: item.uri,
           range: { start: item.range.start, end: item.range.end },
-          selectionRange: { start: item.range.start, end: item.range.end },
+          selectionRange: { start: (item.selectionRange ?? item.range).start, end: (item.selectionRange ?? item.range).end },
           detail: item.detail,
         };
         const types = await this.languageClient.subtypes(typeItem);
@@ -388,6 +395,8 @@ export class JavaHierarchyWidget extends ReactWidget {
       detail: item.detail,
       uri: item.uri,
       range: item.range,
+      selectionRange: item.selectionRange ?? item.range,
+      raw: item,
       children: [],
       expanded: false,
       loaded,
@@ -407,6 +416,8 @@ export class JavaHierarchyWidget extends ReactWidget {
       detail: item.detail,
       uri: item.uri,
       range: item.range,
+      selectionRange: item.selectionRange ?? item.range,
+      raw: item,
       children: [],
       expanded: false,
       loaded,

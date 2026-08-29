@@ -31,6 +31,7 @@ import { BreakpointManager } from '@theia/debug/lib/browser/breakpoint/breakpoin
 import { SourceBreakpoint } from '@theia/debug/lib/browser/breakpoint/breakpoint-marker';
 import { DebugSession } from '@theia/debug/lib/browser/debug-session';
 import type { DebugProtocol as _DebugProtocol } from '@vscode/debugprotocol';
+import type { KairoI18nKey, KairoI18nService } from '@kairo/i18n';
 
 // ===========================================================================
 // Debug State Machine
@@ -75,12 +76,12 @@ export const DEBUG_STATE_TRANSITIONS: Record<DebugAcceptanceState, readonly Debu
   source_mismatch: ['stopped'],
 };
 
-/** Recovery strategies for each error state. */
-export const ERROR_RECOVERY_PATHS: Record<string, string> = {
-  connection_failed: '检查 JDWP 端口是否已开启，确认 Tomcat 以 Debug 模式启动。建议：停止 Tomcat，重新以 Debug 模式启动。',
-  adapter_crashed: 'Debug Adapter 进程意外退出。检查 KAIRO_JAVA_DEBUG_ADAPTER_COMMAND 环境变量配置是否正确。建议：重新启动 IDE 或检查 Adapter 日志。',
-  port_occupied: 'JDWP 端口被占用。请检查端口占用情况，更换端口或释放占用后重试。建议：修改 launch.json 中的 port 配置。',
-  source_mismatch: '源码与 .class 文件时间戳不匹配，断点可能绑定到错误行。建议：重新编译项目后再进行调试。',
+/** Recovery strategy i18n keys for each error state (resolve via getRecoverySuggestion). */
+export const ERROR_RECOVERY_PATHS: Partial<Record<DebugAcceptanceState, KairoI18nKey>> = {
+  connection_failed: 'debug.acceptance.recovery.connectionFailed',
+  adapter_crashed: 'debug.acceptance.recovery.adapterCrashed',
+  port_occupied: 'debug.acceptance.recovery.portOccupied',
+  source_mismatch: 'debug.acceptance.recovery.sourceMismatch',
 };
 
 // ===========================================================================
@@ -531,7 +532,14 @@ export function isValidTransition(
 
 /**
  * Get the recovery suggestion for a given error state.
+ * Pass an i18n service to get a localized message; otherwise the raw
+ * translation key is returned (mirrors KairoI18nService fallback).
  */
-export function getRecoverySuggestion(state: DebugAcceptanceState): string | undefined {
-  return ERROR_RECOVERY_PATHS[state];
+export function getRecoverySuggestion(
+  state: DebugAcceptanceState,
+  i18n?: KairoI18nService,
+): string | undefined {
+  const key = ERROR_RECOVERY_PATHS[state];
+  if (!key) return undefined;
+  return i18n ? i18n.t(key) : key;
 }

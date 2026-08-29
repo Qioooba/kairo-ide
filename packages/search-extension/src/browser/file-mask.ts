@@ -51,12 +51,17 @@ export function parseFileMask(mask: string): ParsedFileMask {
       isExclude = true;
       token = token.slice(1).trim();
     }
+    // Bare words ("java", "Test") carry no dot/wildcard — see exclude handling.
+    const isBareWord = /^[A-Za-z0-9_+-]+$/.test(token);
     const normalized = normalizeMaskToken(token);
     if (!normalized) {
       continue;
     }
     if (isExclude) {
-      exclude.push(normalized);
+      // A bare exclude word ("!Test") must exclude by filename substring —
+      // the include-style expansion "*.Test" describes a pseudo-extension no
+      // real file carries, so the exclusion would never fire.
+      exclude.push(isBareWord ? `*${token}*` : normalized);
     } else {
       include.push(normalized);
     }

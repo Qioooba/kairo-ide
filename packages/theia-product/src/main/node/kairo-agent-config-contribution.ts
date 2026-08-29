@@ -45,13 +45,6 @@ export function shouldSkipHtmlAgentConfigInjection(
   return false;
 }
 
-/** @deprecated use shouldSkipHtmlAgentConfigInjection */
-export function shouldInjectAgentSecret(
-  env: NodeJS.ProcessEnv = process.env,
-): boolean {
-  return !shouldSkipHtmlAgentConfigInjection(env);
-}
-
 /**
  * Reject secret delivery when the request lacks a same-origin
  * Origin/Referer (blocks curl and cross-site fetches).
@@ -102,7 +95,11 @@ export function buildAgentConfigInjectScript(agentUrl: string): string {
 @injectable()
 export class KairoAgentConfigContribution implements BackendApplicationContribution {
   configure(app: Express): void {
-    const agentUrl = process.env.KAIRO_AGENT_URL || '';
+    // KAIRO_AGENT_URL is the canonical knob; KAIRO_RUNTIME_URL is the
+    // spelling used by scripts/dev.sh and tests/e2e/lanes/lane.sh —
+    // accepting both prevents the browser frontend from silently falling
+    // back to the default :18080 agent (BUG-20260826-105).
+    const agentUrl = process.env.KAIRO_AGENT_URL || process.env.KAIRO_RUNTIME_URL || '';
     const agentSecret = process.env.KAIRO_AGENT_SECRET || '';
     const skipHtmlInjection = shouldSkipHtmlAgentConfigInjection(process.env);
 

@@ -14,7 +14,8 @@
  *  - Debug session state changes
  */
 
-import { injectable, postConstruct } from '@theia/core/shared/inversify';
+import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
+import { KairoI18nService } from '@kairo/i18n';
 
 /** Priority levels for screen reader announcements. */
 export enum AriaPriority {
@@ -37,6 +38,8 @@ const MAX_QUEUE_SIZE = 50;
 
 @injectable()
 export class KairoScreenReaderService {
+  @inject(KairoI18nService) protected readonly i18n!: KairoI18nService;
+
   protected politeRegion: HTMLElement | null = null;
   protected assertiveRegion: HTMLElement | null = null;
   protected announcementQueue: AriaAnnouncement[] = [];
@@ -180,21 +183,21 @@ export class KairoScreenReaderService {
    * Convenience method: announce editor opened.
    */
   announceEditorOpened(fileName: string): void {
-    this.announce(`已打开文件: ${fileName}`);
+    this.announce(this.i18n.t('a11y.screenReader.fileOpened', { name: fileName }));
   }
 
   /**
    * Convenience method: announce file saved.
    */
   announceFileSaved(fileName: string): void {
-    this.announce(`文件已保存: ${fileName}`);
+    this.announce(this.i18n.t('a11y.screenReader.fileSaved', { name: fileName }));
   }
 
   /**
    * Convenience method: announce build completed.
    */
   announceBuildCompleted(status: string): void {
-    this.announce(`构建${status}`);
+    this.announce(this.i18n.t('a11y.screenReader.buildStatus', { status }));
   }
 
   /**
@@ -202,9 +205,9 @@ export class KairoScreenReaderService {
    */
   announceSearchResults(query: string, count: number): void {
     if (count === 0) {
-      this.announce(`未找到 "${query}" 的结果`);
+      this.announce(this.i18n.t('a11y.screenReader.noResults', { query }));
     } else {
-      this.announce(`找到 ${count} 个 "${query}" 的结果`);
+      this.announce(this.i18n.t('a11y.screenReader.resultsFound', { count, query }));
     }
   }
 
@@ -212,7 +215,7 @@ export class KairoScreenReaderService {
    * Convenience method: announce error.
    */
   announceError(message: string): void {
-    this.announceUrgent(`错误: ${message}`);
+    this.announceUrgent(this.i18n.t('a11y.screenReader.errorPrefix', { message }));
   }
 
   /**

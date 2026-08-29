@@ -12,8 +12,10 @@
  */
 
 import * as monaco from '@theia/monaco-editor-core';
+import type { I18nService } from '@kairo/i18n';
 import { injectable } from '@theia/core/shared/inversify';
 import { JSP_LANGUAGE_ID } from './jsp-monarch';
+import { setJspI18n, t } from './i18n-context';
 
 /** Symbol kind mapping for web.xml elements. */
 const WEBXML_SYMBOL_KINDS: Record<string, monaco.languages.SymbolKind> = {
@@ -236,7 +238,7 @@ function getJspSymbols(
 
     symbols.push(sym({
       name: `<%@ ${directiveType} %>`,
-      detail: `JSP ${directiveType} 指令`,
+      detail: t('structureView.jsp.directiveDetail', { type: directiveType }),
       kind: monaco.languages.SymbolKind.Key,
       range: {
         startLineNumber: line,
@@ -304,7 +306,7 @@ function getJspSymbols(
 
     symbols.push(sym({
       name: `<${tagName}>`,
-      detail: 'JSTL 标签',
+      detail: t('structureView.jsp.jstlTagDetail'),
       kind: monaco.languages.SymbolKind.Class,
       range: {
         startLineNumber: line,
@@ -331,7 +333,7 @@ function getJspSymbols(
 
     symbols.push(sym({
       name: `<${tagName}>`,
-      detail: '自定义标签',
+      detail: t('structureView.jsp.customTagDetail'),
       kind: monaco.languages.SymbolKind.Class,
       range: {
         startLineNumber: line,
@@ -376,7 +378,8 @@ export class XmlStructureViewProvider implements monaco.languages.DocumentSymbol
  * Also pushed into the Kairo-owned symbol registry so Quick Outline
  * (Ctrl+F12) can enumerate it — Monaco 1.108 has no public provider list.
  */
-export function registerXmlStructureView(): monaco.IDisposable {
+export function registerXmlStructureView(i18n?: I18nService): monaco.IDisposable {
+  setJspI18n(i18n);
   const provider = new XmlStructureViewProvider();
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

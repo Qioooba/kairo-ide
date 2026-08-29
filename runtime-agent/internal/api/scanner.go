@@ -60,7 +60,12 @@ func detectLayout(root string) map[string]any {
 			break
 		}
 	}
-	srcAlts := []string{"src", "src/main/java", "java"}
+	// BUG-20260826-402: prefer the Maven-style root when present. Picking
+	// plain "src" for a src/main/java layout makes the generated Eclipse
+	// project treat main/java/com/... as package main.java.com..., so the
+	// JDT LS search engine (references / implementations / workspace
+	// symbols) silently returned nothing.
+	srcAlts := []string{"src/main/java", "src", "java"}
 	for _, a := range srcAlts {
 		if _, err := os.Stat(filepath.Join(root, a)); err == nil {
 			layout["src"] = []string{a}

@@ -23,7 +23,17 @@ export const FindActionComponent: React.FC<FindActionProps> = ({ model, state, o
   const [selectedIndex, setSelectedIndex] = React.useState(0);
   const [openError, setOpenError] = React.useState<Error | undefined>();
   const containerRef = React.useRef<HTMLDivElement>(null);
+  const queryInputRef = React.useRef<HTMLInputElement>(null);
   const debounceRef = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  // IDEA's Find Action always opens with the cursor in the query field. The
+  // body overlay mounts after the shell has already restored focus to the
+  // previously active widget, so React's autoFocus alone is not enough
+  // (BUG-20260826-309).
+  React.useEffect(() => {
+    const timer = setTimeout(() => queryInputRef.current?.focus(), 0);
+    return () => clearTimeout(timer);
+  }, []);
 
   React.useEffect(() => {
     clearTimeout(debounceRef.current);
@@ -115,6 +125,7 @@ export const FindActionComponent: React.FC<FindActionProps> = ({ model, state, o
       >
         <div className="kairo-find-header">
           <input
+            ref={queryInputRef}
             autoFocus
             className="theia-input kairo-find-input"
             value={query}
@@ -194,8 +205,23 @@ export class FindActionWidget extends ReactWidget {
     }));
   }
 
+  /** IDEA popups close on Escape regardless of inner focus. */
+  protected readonly handleEscape = (event: KeyboardEvent): void => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      this.close();
+    }
+  };
+
+  protected override onBeforeDetach(message: Message): void {
+    window.removeEventListener('keydown', this.handleEscape, true);
+    super.onBeforeDetach(message);
+  }
+
   protected onAfterAttach(message: Message): void {
     super.onAfterAttach(message);
+    window.addEventListener('keydown', this.handleEscape, true);
     this.unsubscribe ??= this.model.subscribe(state => {
       this.state = state;
       this.update();
