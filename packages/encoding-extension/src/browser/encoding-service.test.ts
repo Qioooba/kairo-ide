@@ -301,6 +301,17 @@ test('writeWithEncoding / readWithEncoding use toTheiaEncodingId (BD-P0-1)', asy
   );
 });
 
+test('KairoFileService native2ascii-es .properties on save (BUG-20260828-603)', async () => {
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const src = fs.readFileSync(path.join(__dirname, 'kairo-file-service.ts'), 'utf8');
+  assert.match(src, /escapeProperties/);
+  assert.match(src, /shouldEscapeProperties/);
+  assert.match(src, /iso-8859-1/);
+  assert.match(src, /BUG-20260828-603/);
+  assert.doesNotMatch(src, /getEncodingFor\(resource\)/);
+});
+
 // =========================================================================
 // S3 EncodingIdent — Kairo ↔ Theia ↔ Go domain unification
 // =========================================================================

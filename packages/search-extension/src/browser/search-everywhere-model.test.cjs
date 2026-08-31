@@ -2,6 +2,13 @@
 const { enableJSDOM } = require('@theia/core/lib/browser/test/jsdom');
 enableJSDOM();
 if (!global.DragEvent) global.DragEvent = class DragEvent extends global.MouseEvent {};
+if (!global.ResizeObserver) {
+  global.ResizeObserver = class ResizeObserver {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+}
 const Module = require('module');
 Module._extensions['.css'] = function (module, filename) { module._compile('module.exports = {};', filename); };
 const { FrontendApplicationConfigProvider } = require('@theia/core/lib/browser/frontend-application-config-provider');

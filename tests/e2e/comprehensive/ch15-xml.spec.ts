@@ -8,8 +8,9 @@ import { test, expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
 import * as fs from 'fs';
 import * as path from 'path';
+import { laneWorkspace, repoPath } from './helpers';
 
-const LANE_WS = '/Users/qi/Documents/spaces/kairo-ide/.test-lanes/E/workspace';
+const LANE_WS = laneWorkspace('E');
 const LEGACY = path.join(LANE_WS, 'legacy-sample');
 const THEIA_URL = process.env.THEIA_URL || 'http://127.0.0.1:18441';
 
@@ -114,7 +115,7 @@ test.describe.serial('ch15 xml',()=>{
     console.log('[TC-XML-001]', res);
     expect(res.hasDecl).toBeTruthy();
     expect(res.spanCount).toBeGreaterThan(20);
-    const src = fs.readFileSync('/Users/qi/Documents/spaces/kairo-ide/packages/jsp-extension/src/browser/xml-monarch.ts','utf-8');
+    const src = fs.readFileSync(repoPath('packages','jsp-extension','src','browser','xml-monarch.ts'),'utf-8');
     expect(src).toContain('xml-decl');
     expect(src).toContain('xml-cdata');
     expect(src).toContain('comment');
@@ -151,12 +152,12 @@ test.describe.serial('ch15 xml',()=>{
       expect(labels.some(l=> /servlet|filter|context-param/.test(l.toLowerCase()))).toBeTruthy();
     } else {
       // 回退：检查源码定义 28 项
-      const src = fs.readFileSync('/Users/qi/Documents/spaces/kairo-ide/packages/jsp-extension/src/browser/xml-dtd-completion.ts','utf-8');
+      const src = fs.readFileSync(repoPath('packages','jsp-extension','src','browser','xml-dtd-completion.ts'),'utf-8');
       expect(src).toContain('web-app');
       expect(src).toContain('servlet-mapping');
     }
     // 额外检查中文 doc 存在
-    const src2 = fs.readFileSync('/Users/qi/Documents/spaces/kairo-ide/packages/jsp-extension/src/browser/xml-dtd-completion.ts','utf-8');
+    const src2 = fs.readFileSync(repoPath('packages','jsp-extension','src','browser','xml-dtd-completion.ts'),'utf-8');
     expect(src2).toContain('completion.dtd.servlet');
   });
 
@@ -182,7 +183,7 @@ test.describe.serial('ch15 xml',()=>{
       expect(labels.length).toBeGreaterThan(5);
       expect(labels.some(l=> /taglib|tag|attribute/.test(l))).toBeTruthy();
     } else {
-      const src = fs.readFileSync('/Users/qi/Documents/spaces/kairo-ide/packages/jsp-extension/src/browser/xml-dtd-completion.ts','utf-8');
+      const src = fs.readFileSync(repoPath('packages','jsp-extension','src','browser','xml-dtd-completion.ts'),'utf-8');
       expect(src).toContain('taglib');
       expect(src).toContain('tag-class');
     }
@@ -211,11 +212,11 @@ test.describe.serial('ch15 xml',()=>{
       if(vis){
         expect(lbl.some(l=> /xmlns|version|encoding/.test(l))).toBeTruthy();
       } else {
-        const src = fs.readFileSync('/Users/qi/Documents/spaces/kairo-ide/packages/jsp-extension/src/browser/xml-dtd-completion.ts','utf-8');
+        const src = fs.readFileSync(repoPath('packages','jsp-extension','src','browser','xml-dtd-completion.ts'),'utf-8');
         expect(src).toContain('xmlns');
         expect(src).toContain('schemaLocation');
       }
-    }catch(e){ console.log('[TC-XML-004] err',String(e)); await page.keyboard.press('Escape'); expect(true).toBeTruthy(); }
+    }catch(e){ console.log('[TC-XML-004] err',String(e)); await page.keyboard.press('Escape'); throw e; }
   });
 
   test('TC-XML-005 多余闭合校验 </extra> Error', async()=>{
@@ -226,7 +227,7 @@ test.describe.serial('ch15 xml',()=>{
     // 轮询 8s 直到出现
     for(let i=0;i<8 && err===0;i++){ await page.waitForTimeout(1000); err=await squigglyErrorCount(); console.log('[TC-XML-005] poll',i,err); }
     expect(err).toBeGreaterThan(0);
-    const src = fs.readFileSync('/Users/qi/Documents/spaces/kairo-ide/packages/jsp-extension/src/browser/xml-dtd-validator.ts','utf-8');
+    const src = fs.readFileSync(repoPath('packages','jsp-extension','src','browser','xml-dtd-validator.ts'),'utf-8');
     expect(src).toContain('extraCloseTag');
   });
 
@@ -237,7 +238,7 @@ test.describe.serial('ch15 xml',()=>{
     for(let i=0;i<8 && err===0;i++){ await page.waitForTimeout(1000); err=await squigglyErrorCount(); }
     console.log('[TC-XML-006] err',err);
     expect(err).toBeGreaterThan(0);
-    const src = fs.readFileSync('/Users/qi/Documents/spaces/kairo-ide/packages/jsp-extension/src/browser/xml-dtd-validator.ts','utf-8');
+    const src = fs.readFileSync(repoPath('packages','jsp-extension','src','browser','xml-dtd-validator.ts'),'utf-8');
     expect(src).toContain('tagMismatch');
   });
 
@@ -248,7 +249,7 @@ test.describe.serial('ch15 xml',()=>{
     for(let i=0;i<8 && err===0;i++){ await page.waitForTimeout(800); err=await squigglyErrorCount();}
     console.log('[TC-XML-007] err',err);
     expect(err).toBeGreaterThan(0);
-    const src = fs.readFileSync('/Users/qi/Documents/spaces/kairo-ide/packages/jsp-extension/src/browser/xml-dtd-validator.ts','utf-8');
+    const src = fs.readFileSync(repoPath('packages','jsp-extension','src','browser','xml-dtd-validator.ts'),'utf-8');
     expect(src).toContain('unclosedTag');
   });
 
@@ -267,7 +268,7 @@ test.describe.serial('ch15 xml',()=>{
     console.log('[TC-XML-008] remote warn',remoteWarn,'err',remoteErr);
     // 远程 http:/urn: 应跳过缺失告警，理想 0 警告；若有结构错误则 err 可能 0
     expect(remoteWarn).toBe(0);
-    const src = fs.readFileSync('/Users/qi/Documents/spaces/kairo-ide/packages/jsp-extension/src/browser/xml-dtd-validator.ts','utf-8');
+      const src = fs.readFileSync(repoPath('packages','jsp-extension','src','browser','xml-dtd-validator.ts'),'utf-8');
     expect(src).toContain('isRemoteRef');
     expect(src).toContain('missingDtd');
   });
@@ -282,7 +283,7 @@ test.describe.serial('ch15 xml',()=>{
     console.log('[TC-XML-009] warn',warn,'err',err,'total',total);
     // 编码声明为 UTF-16LE，非允许列表，应有 Info/Warning
     expect(total).toBeGreaterThan(0);
-    const src = fs.readFileSync('/Users/qi/Documents/spaces/kairo-ide/packages/jsp-extension/src/browser/xml-dtd-validator.ts','utf-8');
+    const src = fs.readFileSync(repoPath('packages','jsp-extension','src','browser','xml-dtd-validator.ts'),'utf-8');
     expect(src).toContain('encodingInfo');
   });
 
@@ -295,7 +296,7 @@ test.describe.serial('ch15 xml',()=>{
     console.log('[TC-XML-010] size',st.size);
     expect(st.size).toBeGreaterThan(1024*1024);
     expect(total).toBeGreaterThan(0);
-    const src = fs.readFileSync('/Users/qi/Documents/spaces/kairo-ide/packages/jsp-extension/src/browser/xml-dtd-validator.ts','utf-8');
+    const src = fs.readFileSync(repoPath('packages','jsp-extension','src','browser','xml-dtd-validator.ts'),'utf-8');
     expect(src).toContain('MAX_FILE_SIZE');
     expect(src).toContain('PARSE_TIMEOUT_MS');
     expect(src).toContain('TimeoutError');
@@ -317,7 +318,7 @@ test.describe.serial('ch15 xml',()=>{
     });
     console.log('[TC-XML-011] maskOk',maskOk);
     expect(maskOk).toBeTruthy();
-    const src = fs.readFileSync('/Users/qi/Documents/spaces/kairo-ide/packages/jsp-extension/src/browser/xml-dtd-validator.ts','utf-8');
+    const src = fs.readFileSync(repoPath('packages','jsp-extension','src','browser','xml-dtd-validator.ts'),'utf-8');
     expect(src).toContain('maskXmlCommentsAndCdata');
   });
 
@@ -337,7 +338,7 @@ test.describe.serial('ch15 xml',()=>{
     });
     console.log('[TC-XML-012] hasServlet',hasServlet);
     expect(hasServlet).toBeTruthy();
-    const src = fs.readFileSync('/Users/qi/Documents/spaces/kairo-ide/packages/jsp-extension/src/browser/xml-structure-view.ts','utf-8');
+    const src = fs.readFileSync(repoPath('packages','jsp-extension','src','browser','xml-structure-view.ts'),'utf-8');
     expect(src).toContain('servlet');
     expect(src).toContain('servlet-mapping');
   });

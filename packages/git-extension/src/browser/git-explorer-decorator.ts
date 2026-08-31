@@ -4,7 +4,7 @@ import { Tree, TreeNode, CompositeTreeNode } from '@theia/core/lib/browser/tree'
 import { Emitter, Event, MaybePromise } from '@theia/core/lib/common';
 import { WidgetDecoration } from '@theia/core/lib/browser/widget-decoration';
 import { GitService } from './git-service';
-import { toRepoRelativePath } from './git-path-utils';
+import { toRepoRelativePath } from '../common/git-path-utils';
 
 /** Extended node shape for file-system-backed tree nodes. */
 interface FileNode extends TreeNode {

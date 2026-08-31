@@ -8,8 +8,9 @@ import { test, expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
 import * as fs from 'fs';
 import * as path from 'path';
+import { laneWorkspace, repoPath } from './helpers';
 
-const LANE_WS = '/Users/qi/Documents/spaces/kairo-ide/.test-lanes/E/workspace';
+const LANE_WS = laneWorkspace('E');
 const LEGACY = path.join(LANE_WS, 'legacy-sample');
 const THEIA_URL = process.env.THEIA_URL || 'http://127.0.0.1:18441';
 
@@ -119,7 +120,7 @@ test.describe.serial('ch14 jsp',()=>{
     expect(dom.hasDirective).toBeTruthy();
     expect(dom.hasEl).toBeTruthy();
     expect(dom.distinct).toBeGreaterThan(5);
-    const src = fs.readFileSync('/Users/qi/Documents/spaces/kairo-ide/packages/jsp-extension/src/browser/jsp-monarch.ts','utf-8');
+    const src = fs.readFileSync(repoPath('packages', 'jsp-extension', 'src', 'browser', 'jsp-monarch.ts'),'utf-8');
     expect(src).toContain('jsp-directive');
     expect(src).toContain('jsp-scriptlet');
     expect(src).toContain('jsp-jstl');
@@ -138,7 +139,7 @@ test.describe.serial('ch14 jsp',()=>{
     });
     console.log('[TC-JSP-002]',res);
     expect(res.hasHref).toBeTruthy();
-    const src = fs.readFileSync('/Users/qi/Documents/spaces/kairo-ide/packages/jsp-extension/src/browser/jsp-monarch.ts','utf-8');
+    const src = fs.readFileSync(repoPath('packages','jsp-extension','src','browser','jsp-monarch.ts'),'utf-8');
     expect(src).toContain('attrValueDq');
     expect(src).toContain('metatag.el');
   });
@@ -149,7 +150,7 @@ test.describe.serial('ch14 jsp',()=>{
     const hasDecoration = await page.evaluate(()=> document.documentElement.innerHTML.includes('kairo-jsp'));
     console.log('[TC-JSP-003] hasDecoration',hasDecoration);
     // 检查源码中定义了三类背景
-    const src = fs.readFileSync('/Users/qi/Documents/spaces/kairo-ide/packages/jsp-extension/src/browser/jsp-scriptlet-background.ts','utf-8');
+    const src = fs.readFileSync(repoPath('packages','jsp-extension','src','browser','jsp-scriptlet-background.ts'),'utf-8');
     expect(src).toContain('kairo-jsp');
     expect(hasDecoration).toBeTruthy();
   });
@@ -182,7 +183,7 @@ test.describe.serial('ch14 jsp',()=>{
     if(visible){
       expect(labels.length).toBeGreaterThan(0);
     } else {
-      const src = fs.readFileSync('/Users/qi/Documents/spaces/kairo-ide/packages/jsp-extension/src/browser/jsp-scriptlet-java-completion.ts','utf-8');
+      const src = fs.readFileSync(repoPath('packages','jsp-extension','src','browser','jsp-scriptlet-java-completion.ts'),'utf-8');
       expect(src).toContain('request');
       expect(src).toContain('virtual');
     }
@@ -220,7 +221,7 @@ test.describe.serial('ch14 jsp',()=>{
       for(let i=0;i<6;i++) await page.keyboard.press('Backspace');
       await page.keyboard.press('Backspace');
     }catch(e){ console.log('[TC-JSP-005] err',String(e));}
-    const src = fs.readFileSync('/Users/qi/Documents/spaces/kairo-ide/packages/jsp-extension/src/browser/jsp-scriptlet-java-completion.ts','utf-8');
+      const src = fs.readFileSync(repoPath('packages','jsp-extension','src','browser','jsp-scriptlet-java-completion.ts'),'utf-8');
     expect(src).toContain('insideJavaBlock');
   });
 
@@ -242,7 +243,7 @@ test.describe.serial('ch14 jsp',()=>{
     if(err>0){
       expect(err).toBeGreaterThan(0);
     } else {
-      const src = fs.readFileSync('/Users/qi/Documents/spaces/kairo-ide/packages/jsp-extension/src/browser/jsp-scriptlet-diagnostics.ts','utf-8');
+      const src = fs.readFileSync(repoPath('packages','jsp-extension','src','browser','jsp-scriptlet-diagnostics.ts'),'utf-8');
       expect(src).toContain('500');
       expect(src).toContain('jsp-scriptlet-java');
     }
@@ -271,7 +272,7 @@ test.describe.serial('ch14 jsp',()=>{
       expect(labels.length).toBeGreaterThan(5);
       expect(labels.some(l=> /pageContext|sessionScope|param/.test(l))).toBeTruthy();
     } else {
-      const src = fs.readFileSync('/Users/qi/Documents/spaces/kairo-ide/packages/jsp-extension/src/browser/el-expression-provider.ts','utf-8');
+      const src = fs.readFileSync(repoPath('packages','jsp-extension','src','browser','el-expression-provider.ts'),'utf-8');
       expect(src).toContain('pageContext');
       expect(src).toContain('empty');
     }
@@ -287,7 +288,7 @@ test.describe.serial('ch14 jsp',()=>{
       return el?.textContent?.slice(0,400) ?? '';
     });
     console.log('[TC-JSP-008] hoverText',hoverText.slice(0,200));
-    const src = fs.readFileSync('/Users/qi/Documents/spaces/kairo-ide/packages/jsp-extension/src/browser/el-expression-provider.ts','utf-8');
+    const src = fs.readFileSync(repoPath('packages','jsp-extension','src','browser','el-expression-provider.ts'),'utf-8');
     expect(src).toContain('sessionScope');
     expect(src).toContain('deferred');
     await page.mouse.move(0,0);
@@ -297,7 +298,7 @@ test.describe.serial('ch14 jsp',()=>{
     await openFile('__kairo_comprehensive.jsp');
     const hasProvider = await page.evaluate(()=> true); // placeholder for provider registration
     expect(hasProvider).toBeTruthy();
-    const src = fs.readFileSync('/Users/qi/Documents/spaces/kairo-ide/packages/jsp-extension/src/browser/el-navigation.ts','utf-8');
+    const src = fs.readFileSync(repoPath('packages','jsp-extension','src','browser','el-navigation.ts'),'utf-8');
     expect(src).toContain('pageContext');
   });
 
@@ -306,7 +307,7 @@ test.describe.serial('ch14 jsp',()=>{
     expect(webXml).toContain('/hello');
     expect(webXml).toContain('HelloServlet');
     await openFile('__kairo_comprehensive.jsp');
-    const src = fs.readFileSync('/Users/qi/Documents/spaces/kairo-ide/packages/jsp-extension/src/browser/jsp-servlet-nav.ts','utf-8');
+    const src = fs.readFileSync(repoPath('packages','jsp-extension','src','browser','jsp-servlet-nav.ts'),'utf-8');
     expect(src).toContain('web.xml');
   });
 
@@ -316,7 +317,7 @@ test.describe.serial('ch14 jsp',()=>{
     const visible = await line.isVisible().catch(()=>false);
     console.log('[TC-JSP-011] visible',visible);
     expect(visible).toBeTruthy();
-    const src = fs.readFileSync('/Users/qi/Documents/spaces/kairo-ide/packages/jsp-extension/src/browser/webxml-navigation.ts','utf-8');
+    const src = fs.readFileSync(repoPath('packages','jsp-extension','src','browser','webxml-navigation.ts'),'utf-8');
     expect(src).toContain('servlet-class');
   });
 
@@ -329,7 +330,7 @@ test.describe.serial('ch14 jsp',()=>{
     console.log('[TC-JSP-012] hasJspFile',hasJspFile);
     expect(hasJspFile).toBeTruthy();
     fs.unlinkSync(p);
-    const src = fs.readFileSync('/Users/qi/Documents/spaces/kairo-ide/packages/jsp-extension/src/browser/webxml-parser.ts','utf-8');
+    const src = fs.readFileSync(repoPath('packages','jsp-extension','src','browser','webxml-parser.ts'),'utf-8');
     expect(src).toContain('jsp-file');
   });
 
@@ -346,7 +347,7 @@ test.describe.serial('ch14 jsp',()=>{
       console.log('[TC-JSP-013] peek',peek);
     }catch(e){ console.log('[TC-JSP-013] err',String(e));}
     await page.keyboard.press('Escape');
-    const src = fs.readFileSync('/Users/qi/Documents/spaces/kairo-ide/packages/jsp-extension/src/browser/jsp-find-usages.ts','utf-8');
+    const src = fs.readFileSync(repoPath('packages','jsp-extension','src','browser','jsp-find-usages.ts'),'utf-8');
     expect(src).toContain('web.xml');
   });
 
@@ -370,7 +371,7 @@ test.describe.serial('ch14 jsp',()=>{
       expect(labels.some(l=> l.includes('java.sun.com/jsp/jstl') || l.includes('example.com/mytags'))).toBeTruthy();
     } else {
       // 回退：检查源码中已定义 JSTL 与 TLD 扫描
-      const src = fs.readFileSync('/Users/qi/Documents/spaces/kairo-ide/packages/jsp-extension/src/browser/jsp-tld-completion.ts','utf-8');
+      const src = fs.readFileSync(repoPath('packages','jsp-extension','src','browser','jsp-tld-completion.ts'),'utf-8');
       expect(src).toContain('jstl');
       expect(src).toContain('getTldUris');
     }
@@ -395,7 +396,7 @@ test.describe.serial('ch14 jsp',()=>{
     if(visible && labels.length>0){
       expect(labels.some(l=> /my:(custom|message)/.test(l))).toBeTruthy();
     } else {
-      const src = fs.readFileSync('/Users/qi/Documents/spaces/kairo-ide/packages/jsp-extension/src/browser/jsp-tld-completion.ts','utf-8');
+      const src = fs.readFileSync(repoPath('packages','jsp-extension','src','browser','jsp-tld-completion.ts'),'utf-8');
       expect(src).toContain('custom');
     }
   });
@@ -419,7 +420,7 @@ test.describe.serial('ch14 jsp',()=>{
     if(visible && labels.length>0){
       expect(labels.some(l=> /attr|requiredAttr/.test(l))).toBeTruthy();
     } else {
-      const src = fs.readFileSync('/Users/qi/Documents/spaces/kairo-ide/packages/jsp-extension/src/browser/jsp-tld-completion.ts','utf-8');
+      const src = fs.readFileSync(repoPath('packages','jsp-extension','src','browser','jsp-tld-completion.ts'),'utf-8');
       expect(src).toContain('required');
     }
   });
@@ -446,7 +447,7 @@ test.describe.serial('ch14 jsp',()=>{
     for(let i=0;i<5;i++) await page.keyboard.press('Backspace');
     fs.writeFileSync(tldPath, orig, 'utf-8');
     await page.waitForTimeout(800);
-    const src = fs.readFileSync('/Users/qi/Documents/spaces/kairo-ide/packages/jsp-extension/src/browser/jsp-tld-completion.ts','utf-8');
+    const src = fs.readFileSync(repoPath('packages','jsp-extension','src','browser','jsp-tld-completion.ts'),'utf-8');
     expect(src).toContain('invalidateCache');
     expect(src).toContain('WEB-INF/lib');
   });
@@ -464,7 +465,7 @@ test.describe.serial('ch14 jsp',()=>{
       return text.includes('<%@') && text.includes('<%');
     });
     expect(hasSymbols).toBeTruthy();
-    const src = fs.readFileSync('/Users/qi/Documents/spaces/kairo-ide/packages/jsp-extension/src/browser/xml-structure-view.ts','utf-8');
+    const src = fs.readFileSync(repoPath('packages','jsp-extension','src','browser','xml-structure-view.ts'),'utf-8');
     expect(src).toContain('jsp');
   });
 
@@ -502,7 +503,7 @@ test.describe.serial('ch14 jsp',()=>{
       for(let i=0;i<6;i++) await page.keyboard.press('Backspace');
       await page.keyboard.press('Backspace');
     }catch(e){ console.log('[TC-JSP-019] err',String(e));}
-    const src = fs.readFileSync('/Users/qi/Documents/spaces/kairo-ide/packages/jsp-extension/src/browser/jsp-grammar.ts','utf-8');
+    const src = fs.readFileSync(repoPath('packages','jsp-extension','src','browser','jsp-grammar.ts'),'utf-8');
     expect(src).toContain('shouldProvide');
     expect(src).toContain('insideJavaBlock');
   });
@@ -516,19 +517,19 @@ test.describe.serial('ch14 jsp',()=>{
       signal: AbortSignal.timeout(10000),
     }).then(r=> r.text()).catch(()=> '');
     console.log('[TC-JSP-020] search len',String(res).slice(0,200));
-    const src = fs.readFileSync('/Users/qi/Documents/spaces/kairo-ide/packages/jsp-extension/src/browser/jsp-find-usages.ts','utf-8');
+    const src = fs.readFileSync(repoPath('packages','jsp-extension','src','browser','jsp-find-usages.ts'),'utf-8');
     expect(src).toContain('findUsages');
     expect(src).toContain('500');
   });
 
   test('TC-JSP-021 JSP断点实验特性 偏好kairo.jsp.debugBreakpoints CodeLens Jasper映射', async()=>{
-    const src = fs.readFileSync('/Users/qi/Documents/spaces/kairo-ide/packages/jsp-extension/src/browser/jsp-debug-breakpoint.ts','utf-8');
+    const src = fs.readFileSync(repoPath('packages','jsp-extension','src','browser','jsp-debug-breakpoint.ts'),'utf-8');
     expect(src).toContain('kairo.jsp.debugBreakpoints');
     expect(src).toContain('CodeLens');
     await openFile('__kairo_comprehensive.jsp');
     const hasLens = await page.evaluate(()=> !!document.querySelector('.codelens-decoration, .monaco-editor .codelens'));
     console.log('[TC-JSP-021] hasLens',hasLens);
-    expect(true).toBeTruthy();
+    expect(hasLens, 'JSP debug breakpoint support should expose a CodeLens').toBe(true);
   });
 
 });

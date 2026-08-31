@@ -3,8 +3,9 @@ import { test, expect } from '@playwright/test';
 import { navigateToTheia, waitForTheiaShell, dismissTrustDialog, runKairoImportWizard, setBreakpoint, openFileViaQuickOpen, waitForBuildState } from '../fixtures';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
+import { regressionWorkspace } from './paths';
 
-const TEST_WORKSPACE = '/tmp/kairo-k4-workspace/projects/workspace-shard06';
+const TEST_WORKSPACE = regressionWorkspace('shard06');
 const LEGACY_SAMPLE = path.resolve(__dirname, '..', '..', '..', 'legacy-sample');
 
 function copyDirSync(src: string, dest: string) {

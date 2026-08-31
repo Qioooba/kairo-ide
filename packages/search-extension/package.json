@@ -7,9 +7,9 @@
   "files": ["lib", "src"],
   "scripts": {
     "build": "tsc -p tsconfig.json && node -e \"require('node:fs').copyFileSync('src/browser/search-center.css','lib/browser/search-center.css')\"",
-    "clean": "rm -rf lib",
+    "clean": "node ../../scripts/clean-dir.cjs lib",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "test": "node --require source-map-support/register --test src/browser/search-service.test.cjs src/browser/search-session-model.test.cjs src/browser/search-center-widget.test.cjs src/browser/file-mask.test.cjs src/browser/search-result-utils.test.cjs src/browser/search-everywhere-model.test.cjs src/browser/search-everywhere-providers.test.cjs src/browser/search-replace-service.test.cjs src/browser/search-exports-extended.test.cjs"
+    "test": "node --require source-map-support/register --import ./test/register-hooks.mjs --test src/browser/search-service.test.cjs src/browser/search-session-model.test.cjs src/browser/search-center-widget.test.cjs src/browser/file-mask.test.cjs src/browser/search-result-utils.test.cjs src/browser/search-everywhere-model.test.cjs src/browser/search-everywhere-providers.test.cjs src/browser/search-replace-service.test.cjs src/browser/search-scope-model.test.cjs src/browser/search-exports-extended.test.cjs"
   },
   "dependencies": {
     "@kairo/protocol": "workspace:*",

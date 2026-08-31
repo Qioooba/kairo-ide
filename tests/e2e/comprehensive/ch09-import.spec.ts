@@ -9,6 +9,7 @@
 import { expect } from '@playwright/test';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'node:os';
 import {
   agentJson, cleanupTmp, importViaApi, kairoStatusEntry, makeCopy, openIdeAt,
   purgeCatalog, registerWorkspace, runCommand, startAgent, stopAgent,
@@ -139,7 +140,7 @@ test.describe('ch09 import wizard', () => {
     await registerWorkspace(dir, 'imp-006');
     // ensure at least one authorized root exists so the sandbox enforces
     await openWizard(page, dir);
-    await page.getByTestId('path-input').fill('/Users/qi/.ssh');
+    await page.getByTestId('path-input').fill(path.join(os.homedir(), '.ssh'));
     await page.getByTestId('scan-btn').click();
     const err = page.getByTestId('scan-error');
     await err.waitFor({ timeout: 20_000 });
@@ -309,7 +310,8 @@ test.describe('ch09 import wizard', () => {
     // strict order: openWorkspace before projects/import
     const iw = calls.indexOf('openWorkspace');
     const im = calls.indexOf('import');
-    expect(iw).toBeGreaterThanOrEqual(0);
+    expect(iw, 'import must authorize/open the workspace first').toBeGreaterThanOrEqual(0);
+    expect(im, 'import must call projects/import').toBeGreaterThanOrEqual(0);
     expect(im).toBeGreaterThan(iw);
 
     // setProject broadcast → status bar reflects the new active project

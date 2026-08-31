@@ -32,20 +32,11 @@ import {
 } from '../fixtures';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
+import { regressionWorkspace } from './paths';
 
 const SHARD_ID = 'shard-06b';
 const SCREENSHOT_DIR = `test-results/screenshots/${SHARD_ID}`;
-// Keep workspace under the repo tmp tree (stable on this Windows box).
-const TEST_WORKSPACE = path.resolve(
-  __dirname,
-  '..',
-  '..',
-  '..',
-  'tmp',
-  'kairo-k4-workspace',
-  'projects',
-  'workspace-shard06b',
-);
+const TEST_WORKSPACE = regressionWorkspace('shard06b');
 const LEGACY_SAMPLE = path.resolve(__dirname, '..', '..', '..', 'legacy-sample');
 const PROJECT_ID = 'project-workspace-shard06b';
 const TOMCAT_PORT = process.env.TOMCAT_PORT || '18302';
@@ -1212,16 +1203,14 @@ test.describe('SHARD-06b: Debug deep (click/hover)', () => {
     if (phaseB) {
       expect(jdk6.length, 'Phase B requires JDK6 home').toBeGreaterThan(0);
     } else {
-      test.info().annotations.push({ type: 'skipped-env', description: 'Set KAIRO_DEBUG_PHASE_B=1 for JDK6 gate' });
-      expect(true).toBe(true);
+      test.skip(true, 'Set KAIRO_DEBUG_PHASE_B=1 for JDK6 gate');
     }
   });
 
   test('DBG-DEEP-81: Phase B P0 subset re-run marker', async ({ page, request }) => {
     test.setTimeout(540_000);
     if (process.env.KAIRO_DEBUG_PHASE_B !== '1') {
-      test.info().annotations.push({ type: 'skipped-env', description: 'Phase B not enabled' });
-      expect(true).toBe(true);
+      test.skip(true, 'Phase B not enabled');
       return;
     }
     // Re-run critical P0: hit + variables + conditional true

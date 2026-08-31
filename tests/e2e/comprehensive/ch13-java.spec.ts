@@ -6,9 +6,10 @@
  */
 import { test, expect, chromium } from '@playwright/test';
 import type { Page } from '@playwright/test';
-import { openIde } from './helpers';
+import * as path from 'node:path';
+import { openIde, laneWorkspace } from './helpers';
 
-const JAVA_DIR = '/Users/qi/Documents/spaces/kairo-ide/.test-lanes/D/workspace/legacy-sample/src/main/java';
+const JAVA_DIR = path.join(laneWorkspace('D'), 'legacy-sample', 'src', 'main', 'java');
 
 /* ---------------- shared page across serial tests ---------------- */
 let page: Page;

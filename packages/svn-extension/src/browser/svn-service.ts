@@ -30,10 +30,10 @@ import {
   SvnCredential,
   SvnResolveChoice,
   SvnInfo,
-} from './svn-types';
-import { parseListXml } from './svn-parser';
+} from '../common/svn-types';
+import { parseListXml } from '../common/svn-parser';
 
-export { SvnFileStatus } from './svn-types';
+export { SvnFileStatus } from '../common/svn-types';
 export type {
   SvnStatusEntry,
   SvnInfo as SvnWorkingCopyInfo,
@@ -47,7 +47,7 @@ export type {
   SvnInstallation,
   SvnCredential as SvnCredentials,
   SvnProgressEvent,
-} from './svn-types';
+} from '../common/svn-types';
 
 export interface SvnStatusRefreshOptions {
   ignoreCache?: boolean;

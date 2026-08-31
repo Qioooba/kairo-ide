@@ -6,7 +6,7 @@ import { MessageService } from '@theia/core/lib/common/message-service';
 import { ClipboardService } from '@theia/core/lib/browser/clipboard-service';
 import { KairoI18nService } from '@kairo/i18n';
 import { SvnService } from './svn-service';
-import { RepoEntry } from './svn-types';
+import { RepoEntry } from '../common/svn-types';
 import './svn-dialogs.css';
 
 export interface SvnRepositoryDialogProps {

@@ -23,8 +23,9 @@ import {
 } from '../fixtures';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
+import { regressionWorkspace } from './paths';
 
-const TEST_WORKSPACE = '/tmp/kairo-k4-workspace/projects/workspace-shard13';
+const TEST_WORKSPACE = regressionWorkspace('shard13');
 const LEGACY_SAMPLE = path.resolve(__dirname, '..', '..', '..', 'legacy-sample');
 const PROJECT_ID = 'project-workspace-shard13';
 

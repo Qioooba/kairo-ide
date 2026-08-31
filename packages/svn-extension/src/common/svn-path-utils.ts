@@ -75,3 +75,4 @@ export function toWcRelativeFromUri(uriOrPath: string, wcRoot: string): string |
   }
   return undefined;
 }
+

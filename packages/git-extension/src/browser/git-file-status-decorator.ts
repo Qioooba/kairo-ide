@@ -5,7 +5,7 @@ import { Emitter, Event, DisposableCollection } from '@theia/core/lib/common';
 import { Title, Widget } from '@theia/core/shared/@lumino/widgets';
 import { EditorManager } from '@theia/editor/lib/browser/editor-manager';
 import { GitService } from './git-service';
-import { toRepoRelativePath } from './git-path-utils';
+import { toRepoRelativePath } from '../common/git-path-utils';
 
 const STATUS_COLORS: Record<string, string> = {
   M: 'var(--theia-editorWarning-foreground)',

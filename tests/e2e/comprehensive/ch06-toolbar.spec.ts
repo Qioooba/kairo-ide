@@ -329,7 +329,8 @@ test.describe('ch06 Toolbar', () => {
   });
 
   async function apiWsList(ws: string): Promise<Array<unknown>> {
-    const res = await fetch(`http://127.0.0.1:${process.env.AGENT_PORT}/api/v1/builds`, {
+    const agentUrl = process.env.AGENT_URL || `http://127.0.0.1:${process.env.AGENT_PORT || '18410'}`;
+    const res = await fetch(`${agentUrl}/api/v1/builds`, {
       headers: { 'X-Kairo-Workspace-Id': ws },
     });
     const j = await res.json().catch(() => null);

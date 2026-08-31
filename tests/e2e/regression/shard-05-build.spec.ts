@@ -23,11 +23,12 @@ import {
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
+import { regressionWorkspace } from './paths';
 
 const SHARD_ID = 'shard-05';
 const SCREENSHOT_DIR = `test-results/screenshots/${SHARD_ID}`;
 
-const TEST_WORKSPACE = '/tmp/kairo-k4-workspace/projects/workspace-shard05';
+const TEST_WORKSPACE = regressionWorkspace('shard05');
 const LEGACY_SAMPLE = path.resolve(__dirname, '..', '..', '..', 'legacy-sample');
 const PROJECT_ID = 'project-workspace-shard05';
 
@@ -39,6 +40,7 @@ const PROJECT_ID = 'project-workspace-shard05';
 // KAIRO-RC-WEB-2026-07-26: do not rely on a hard-coded Tomcat port.
 // The actual port is read from the running server state via getTomcatBaseUrl.
 const FALLBACK_TOMCAT_PORT = process.env.TOMCAT_PORT || '18302';
+const THEIA_URL = process.env.THEIA_URL || 'http://127.0.0.1:18301';
 // KAIRO-RC-WEB-2026-07-26-02: the imported legacy sample project
 // declares contextPath: "/" in .kairo/project.yaml, so webapp URLs
 // are served from the root context. Do not hard-code "/kairo".
@@ -658,7 +660,7 @@ public class HelloServlet extends HttpServlet {
     await test.step('2. 访问页面产生日志', async () => {
       await page.goto(`${await getTomcatBaseUrl(page, FALLBACK_TOMCAT_PORT)}${APP_CONTEXT}/hello.jsp`);
       await page.waitForTimeout(1000);
-      await page.goto(`http://127.0.0.1:18301/`);
+      await page.goto(`${THEIA_URL.replace(/\/$/, '')}/`);
       await waitForTheiaShell(page);
       await page.waitForTimeout(2000);
       await page.screenshot({ path: `${SCREENSHOT_DIR}/TEST-0509/02-logs-updated.png` });

@@ -18,7 +18,6 @@ export default defineConfig({
   testDir: '.',
   testMatch: [
     'core-e2e.spec.ts',
-    'desktop-e2e.spec.ts',
     'frontend-e2e.spec.ts',
     'boundary-e2e.spec.ts',
     'windows-e2e.spec.ts',

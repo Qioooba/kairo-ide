@@ -13,10 +13,10 @@ export type {
   SvnCredentials,
   SvnProgressEvent,
 } from './svn-service';
-export { SvnFileStatus, getStatusLabel, mapSvnItemStatus } from './svn-types';
+export { SvnFileStatus, getStatusLabel, mapSvnItemStatus } from '../common/svn-types';
 export type {
   SvnStatusEntry as SvnStatusEntryType,
-} from './svn-types';
+} from '../common/svn-types';
 export { SvnStore } from './svn-store';
 export type { SvnChangesState } from './svn-store';
 export { SvnDetector } from './svn-detector';

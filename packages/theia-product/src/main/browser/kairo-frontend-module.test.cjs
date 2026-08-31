@@ -57,6 +57,7 @@ const { PreferenceService } = require('@theia/core/lib/common/preferences');
 const { ContributionProvider, bindRootContributionProvider } = require('@theia/core/lib/common/contribution-provider');
 const { SaveErrorChecker } = require('@theia/core/lib/browser/saveable-service');
 const { WindowFocusService } = require('@theia/core/lib/browser/window/window-focus-service');
+const { OpenerService } = require('@theia/core/lib/browser');
 
 const mockLogger = {
   trace: () => {}, debug: () => {}, info: () => {}, warn: () => {}, error: () => {}, fatal: () => {},
@@ -88,6 +89,10 @@ function compose() {
       bindRootContributionProvider(bind, SaveErrorChecker);
       bindRootContributionProvider(bind, FileServiceContribution);
       if (!isBound(WindowFocusService)) bind(WindowFocusService).toConstantValue({ onFocusChanged: () => ({ dispose: () => {} }) });
+      if (!isBound(OpenerService)) bind(OpenerService).toConstantValue({
+        getOpeners: async () => [],
+        getOpener: async () => ({ open: async () => undefined }),
+      });
       bindKairoFrontend(bind, undefined, isBound, rebind);
       bindKairoProduct(bind, isBound, rebind);
     }),

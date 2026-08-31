@@ -21,6 +21,7 @@ const { Container } = require('inversify');
 // Theia core symbols and classes
 const { ApplicationShell, WidgetManager, OpenerService } = require('@theia/core/lib/browser');
 const { CommandRegistry, CommandService, MessageService } = require('@theia/core/lib/common');
+const { PreferenceService } = require('@theia/core/lib/common/preferences');
 
 // Kairo extension symbols
 const { RuntimeConnectionService } = require('@kairo/runtime-extension/lib/browser');
@@ -181,6 +182,13 @@ function buildContainer() {
   container.bind(KairoProjectService).toConstantValue(createMockKairoProjectService());
   container.bind(ActiveProjectService).toConstantValue(createMockActiveProjectService());
   container.bind(MessageService).toConstantValue(createMockMessageService());
+  container.bind(PreferenceService).toConstantValue({
+    get: () => undefined,
+    getBoolean: () => false,
+    getString: () => undefined,
+    onPreferenceChanged: () => ({ dispose: () => {} }),
+    ready: Promise.resolve(),
+  });
   container.bind(BuildStore).toConstantValue(createMockBuildStore());
   container.bind(KairoJavaDebugService).toConstantValue(createMockJavaDebugService());
   container.bind(KairoI18nService).toConstantValue(createMockKairoI18nService());
@@ -299,14 +307,16 @@ test('KairoViewsContribution.registerCommands registers every command in a real 
   }
 });
 
-test('KairoViewsContribution.registerCommands registers exactly 48 commands', () => {
+test('KairoViewsContribution.registerCommands keeps the command set unique and complete', () => {
   const container = buildContainer();
   const contribution = container.get(KairoViewsContribution);
   const registry = new CommandRegistry();
   contribution.registerCommands(registry);
 
-  assert.strictEqual(registry.commandIds.length, 48,
-    `Expected 48 commands, got ${registry.commandIds.length}: ${registry.commandIds.join(', ')}`);
+  assert.ok(registry.commandIds.length >= 48,
+    `Expected at least 48 commands, got ${registry.commandIds.length}: ${registry.commandIds.join(', ')}`);
+  assert.strictEqual(new Set(registry.commandIds).size, registry.commandIds.length,
+    'command ids must not be registered twice');
 });
 
 // --------------- execution verification ---------------

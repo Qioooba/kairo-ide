@@ -11,10 +11,21 @@ import { execFile } from 'node:child_process';
 import { promises as fsPromises } from 'node:fs';
 import * as path from 'node:path';
 import { promisify } from 'node:util';
-import { normalizeFsPath } from '../browser/git-path-utils';
+import { normalizeFsPath } from '../common/git-path-utils';
 import { GitBackendService, GitCommandResult } from '../common/git-protocol';
 
 const execFileAsync = promisify(execFile);
+
+/**
+ * Convert the browser/Theia representation of a Windows drive path into a
+ * native filesystem path.  URI.path is commonly received as `/g:/...` while
+ * Node's Windows APIs require `G:/...`; treating the former as a POSIX path
+ * makes repository discovery silently fail.
+ */
+function backendFsPath(value: string): string {
+  const normalized = normalizeFsPath(value);
+  return /^\/[a-zA-Z]:\//.test(normalized) ? normalized.substring(1) : normalized;
+}
 
 /** Force C locale so status/log output stays machine-parseable. */
 function gitEnv(): NodeJS.ProcessEnv {
@@ -29,14 +40,15 @@ function gitEnv(): NodeJS.ProcessEnv {
 @injectable()
 export class GitBackendServiceImpl implements GitBackendService {
   async $exec(args: string[], cwd: string, maxBuffer = 1024 * 1024): Promise<GitCommandResult> {
-    const { stdout } = await execFileAsync('git', args, { cwd, env: gitEnv(), maxBuffer });
+    const { stdout } = await execFileAsync('git', args, { cwd: backendFsPath(cwd), env: gitEnv(), maxBuffer });
     return { stdout };
   }
 
   async $findRepoRoot(cwd: string): Promise<string | undefined> {
+    const nativeCwd = backendFsPath(cwd);
     try {
       const { stdout } = await execFileAsync('git', ['rev-parse', '--show-toplevel'], {
-        cwd,
+        cwd: nativeCwd,
         env: gitEnv(),
       });
       return normalizeFsPath(stdout.trim());
@@ -46,8 +58,9 @@ export class GitBackendServiceImpl implements GitBackendService {
   }
 
   async $findNearestRepoRoot(cwd: string, maxDepth = 2): Promise<string | undefined> {
+    const nativeCwd = backendFsPath(cwd);
     // 1. Downward BFS: workspace folders frequently contain project repos.
-    const queue: Array<{ dir: string; depth: number }> = [{ dir: cwd, depth: 0 }];
+    const queue: Array<{ dir: string; depth: number }> = [{ dir: nativeCwd, depth: 0 }];
     while (queue.length > 0) {
       const { dir, depth } = queue.shift()!;
       if (await this.isRepoRoot(dir)) {
@@ -66,7 +79,7 @@ export class GitBackendServiceImpl implements GitBackendService {
       }
     }
     // 2. Standard upward walk from cwd.
-    return this.$findRepoRoot(cwd);
+    return this.$findRepoRoot(nativeCwd);
   }
 
   protected async isRepoRoot(dir: string): Promise<boolean> {

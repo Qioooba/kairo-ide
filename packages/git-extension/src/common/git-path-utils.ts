@@ -19,7 +19,14 @@ export function uriToFsPath(uriOrPath: string): string {
     }
     return p;
   }
-  return normalizeFsPath(uriOrPath);
+  const barePath = normalizeFsPath(uriOrPath);
+  // Theia's URI.path for a Windows file URI is a bare `/g:/...` path.  It is
+  // not a file URI anymore, but it still needs the drive marker unwrapped or
+  // it will never match a backend repo root such as `G:/...`.
+  if (/^\/[a-zA-Z]:\//.test(barePath)) {
+    return barePath.substring(1);
+  }
+  return barePath;
 }
 
 /**

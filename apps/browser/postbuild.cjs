@@ -1,385 +1,53 @@
-// Post-build step for @kairo/browser: copy static web assets into the
-// generated frontend dir that the Theia backend serves at /.
-// Currently: favicon.ico (browsers auto-request /favicon.ico; without
-// this the console logs a 404 on every load — KAIRO-RC-WEB-016).
+// Deterministic post-build verification for @kairo/browser.
+//
+// Generated JavaScript is deliberately never rewritten here. Runtime fixes
+// belong in source modules or esbuild.mjs, where clean checkouts and source
+// maps see the same code. This step only copies static assets and verifies
+// architectural boundaries that esbuild cannot express as import rules.
 'use strict';
 
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
 
-const assets = ['favicon.ico'];
-const srcDir = path.join(__dirname, 'resources');
-const outDir = path.join(__dirname, 'lib', 'frontend');
-
-let exitCode = 0;
-/** Set once a required patch applied or was confirmed already present. */
-const patchState = {
-  inversify: false,
-  applicationError: false,
-  drivelist: false
-};
-
-function fail(message) {
-  console.error(`[postbuild] FATAL: ${message}`);
-  exitCode = 1;
-}
-
-for (const asset of assets) {
-  const src = path.join(srcDir, asset);
-  const dst = path.join(outDir, asset);
-  if (!fs.existsSync(src)) {
-    console.error(`[postbuild] MISSING asset: ${src}`);
-    process.exit(1);
-  }
-  fs.mkdirSync(outDir, { recursive: true });
-  fs.copyFileSync(src, dst);
-  console.log(`[postbuild] ${asset} -> ${path.relative(__dirname, dst)}`);
-}
-
-function patchFile(filePath, patches, label) {
-  if (!fs.existsSync(filePath)) {
-    fail(`${label} target not found: ${filePath}`);
-    return;
-  }
-  let content = fs.readFileSync(filePath, 'utf8');
-  let changed = false;
-  let missed = 0;
-  for (const { from, to } of patches) {
-    if (content.includes(from)) {
-      content = content.split(from).join(to);
-      changed = true;
-    } else if (!content.includes(to)) {
-      missed += 1;
-    }
-  }
-  if (changed) {
-    fs.writeFileSync(filePath, content, 'utf8');
-    console.log(`[postbuild] ${label} patched successfully`);
-  } else if (missed > 0) {
-    fail(`${label}: ${missed} pattern(s) not found (minifier rename or upstream change?)`);
-  } else {
-    console.log(`[postbuild] ${label} already patched`);
-  }
-}
-
-function patchInversify(filePath, { required = true } = {}) {
-  if (!fs.existsSync(filePath)) {
-    if (required) fail(`inversify patch: target not found: ${filePath}`);
-    else console.warn('[postbuild] inversify patch: target not found:', filePath);
-    return;
-  }
-  // The minifier renames ERRORS_MSGS to arbitrary short names (Fr, BAo, etc.)
-  // so we use a regex that matches any variable name. We do NOT require a
-  // trailing semicolon because terser may strip them.
-  // IMPORTANT: Replace with plain `return` (returns undefined), NOT `return n`.
-  // When a class already has PARAM_TYPES metadata, the injectable() decorator
-  // should return undefined to tell reflect-metadata's DecorateConstructor to
-  // keep the original target. Returning a non-constructor value causes
-  // DecorateConstructor to throw TypeError.
-  const injectableRegex = /throw new Error\((\w+)\.DUPLICATED_INJECTABLE_DECORATOR\)/g;
-  let content = fs.readFileSync(filePath, 'utf8');
-  const patchedCount = (content.match(injectableRegex) || []).length;
-  if (patchedCount > 0) {
-    const newContent = content.replace(injectableRegex, 'return');
-    fs.writeFileSync(filePath, newContent, 'utf8');
-    console.log(`[postbuild] inversify patch: ${patchedCount} occurrence(s) fixed`);
-    if (required) patchState.inversify = true;
-    return;
-  }
-  // Already patched: constant still present, throw site gone.
-  if (content.includes('DUPLICATED_INJECTABLE_DECORATOR') || (required && patchState.inversify)) {
-    console.log('[postbuild] inversify patch: already patched');
-    if (required) patchState.inversify = true;
-    return;
-  }
-  if (required) {
-    fail('inversify patch: DUPLICATED_INJECTABLE_DECORATOR pattern missing (bundle shape changed?)');
-  } else {
-    console.log('[postbuild] inversify patch: no occurrences found (optional target)');
-  }
-}
-
-const frontendBundle = path.join(outDir, 'bundle.js');
-
-// ── Phase 1: Patch the esbuild output ──────────────────────
-patchInversify(frontendBundle);
-
-function patchApplicationError(filePath, { required = true } = {}) {
-  if (!fs.existsSync(filePath)) {
-    if (required) fail(`ApplicationError patch: target not found: ${filePath}`);
-    else console.warn('[postbuild] ApplicationError patch: target not found:', filePath);
-    return;
-  }
-  let content = fs.readFileSync(filePath, 'utf8');
-  // The minifier renames `code` to arbitrary short names (s, n, etc.)
-  // and may change quote style. We use a regex that matches any
-  // variable name and any quote style (single or double).
-  const appErrRegex = /throw new Error\(`An application error for '\$\{(\w+)\}' code is already declared`\)/g;
-  const appErrMarker = 'An application error for \'${';
-  const patchedCount = (content.match(appErrRegex) || []).length;
-  if (patchedCount > 0) {
-    // Replace the throw with a simple return to silently ignore duplicate
-    // ApplicationError code declarations. The first declaration is already
-    // in the Set and will be used by all callers.
-    const newContent = content.replace(appErrRegex, 'return');
-    fs.writeFileSync(filePath, newContent, 'utf8');
-    console.log(`[postbuild] ApplicationError patch: ${patchedCount} occurrence(s) fixed`);
-    if (required) patchState.applicationError = true;
-    return;
-  }
-  // Leftover marker with no regex hit → minifier/upstream drift (must fail).
-  if (content.includes(appErrMarker) || (/already declared/.test(content) && /application error for/i.test(content))) {
-    fail('ApplicationError patch: error string present but throw pattern did not match');
-    return;
-  }
-  // Re-entry after a successful patch removes the template entirely.
-  if (required && patchState.applicationError) {
-    console.log('[postbuild] ApplicationError patch: already patched');
-    return;
-  }
-  // Idempotent: if template already removed and no marker, treat as already patched
-  if (!content.includes(appErrMarker) && !/already declared/.test(content)) {
-    console.log('[postbuild] ApplicationError patch: already patched (idempotent)');
-    if (required) patchState.applicationError = true;
-    return;
-  }
-  if (required) {
-    fail('ApplicationError patch: throw pattern not found (bundle shape changed?)');
-  } else {
-    console.log('[postbuild] ApplicationError patch: no occurrences found (optional target)');
-  }
-}
-
-patchApplicationError(frontendBundle);
-
-// Also patch secondary-window.js — Theia loads this dynamically when
-// opening secondary windows and it contains the same unpatched
-// ApplicationError.declare throw. If left unpatched, the secondary
-// window module's declare() call throws on code '1' because the
-// primary bundle already registered it in the same JS runtime.
-const secondaryWindow = path.join(outDir, 'secondary-window.js');
-patchInversify(secondaryWindow, { required: false });
-patchApplicationError(secondaryWindow, { required: false });
-
-// ── Phase 2: Run terser for whitespace/syntax minification ─
-// DISABLED: terser minification corrupts InversifyJS DI bindings by
-// renaming service identifiers, causing "No matching bindings found"
-// errors at runtime. The esbuild bundle is already tree-shaken and
-// reasonably sized; terser's marginal size reduction is not worth
-// the runtime failures it introduces.
-// See: https://github.com/inversify/InversifyJS/issues/1510
-const SKIP_TERSER = true;
-if (!SKIP_TERSER && (fs.existsSync(terserBin) || fs.existsSync(terserBin + '.cmd'))) {
-  const terserCmd = process.platform === 'win32' ? `"${terserBin}.cmd"` : `"${terserBin}"`;
-  const terserArgs = `"${frontendBundle}" -o "${frontendBundle}" -c passes=2 --ecma 2020 --comments false`;
-  const cmd = `${terserCmd} ${terserArgs}`;
-  console.log(`[postbuild] running terser: ${cmd}`);
-  try {
-    execSync(cmd, { stdio: 'inherit', cwd: __dirname, timeout: 300000 });
-    console.log('[postbuild] terser completed successfully');
-  } catch (err) {
-    console.error('[postbuild] terser failed:', err.message);
-    process.exit(1);
-  }
-} else {
-  console.log('[postbuild] terser SKIPPED (disabled or not found)');
-}
-
-// ── Phase 3: Re-apply patches after terser ──────────────────
-// terser may rename variables, so we re-apply the Inversify patch.
-patchInversify(frontendBundle);
-// Re-apply ApplicationError patch because terser may rename vars.
-patchApplicationError(frontendBundle);
-// Re-apply patches on secondary-window.js as well.
-patchInversify(secondaryWindow, { required: false });
-patchApplicationError(secondaryWindow, { required: false });
-
-// Theia's TerminalFrontendContribution.initializeLayout always tries to
-// create a default terminal on startup. In the packaged desktop shell this
-// can race the in-process backend terminal service and produces a benign
-// "terminal <id> does not exist" ERROR even though later terminals work.
-// Downgrade only this known startup race to WARN so cold-start logs stay
-// actionable; genuine terminal failures still surface when a user opens one.
-function patchTerminalInitLog(filePath) {
-  if (!fs.existsSync(filePath)) {
-    console.warn('[postbuild] terminal init log patch: target not found:', filePath);
-    return;
-  }
-  let content = fs.readFileSync(filePath, 'utf8');
-  const pattern = /console\.error\(("Failed to initialize terminal in default layout"),\s*([A-Za-z_$][\w$]*)\)/g;
-  const patchedCount = (content.match(pattern) || []).length;
-  if (patchedCount > 0) {
-    content = content.replace(pattern, 'console.warn($1, $2)');
-    fs.writeFileSync(filePath, content, 'utf8');
-    console.log(`[postbuild] terminal init log patch: ${patchedCount} occurrence(s) downgraded to warn`);
-  } else {
-    // Cosmetic only — do not fail the build if Theia wording drifts.
-    console.log('[postbuild] terminal init log patch: no occurrences found');
-  }
-}
-
-patchTerminalInitLog(frontendBundle);
-
-// ── Phase 3.5: Patch web-worker bundles ─────────────────────
-// N-059: the generated worker bundles open with
-//   `var process = window.process || {...}`
-// but Worker scope has no `window` global (only `self`/`globalThis`),
-// so editor.worker.js throws "window is not defined" on load. The dead
-// editor worker breaks monaco-backed save participants (Format on Save
-// hangs → FileService write ends "Canceled") and code intelligence.
-// Alias `window` to the worker global before the bundle code runs.
-function patchWorkerWindow(filePath) {
-  if (!fs.existsSync(filePath)) {
-    console.warn('[postbuild] worker window patch: target not found:', filePath);
-    return;
-  }
-  let content = fs.readFileSync(filePath, 'utf8');
-  const marker = '/*[postbuild] worker window shim*/';
-  if (content.startsWith(marker)) {
-    console.log('[postbuild] worker window patch: already patched', path.basename(filePath));
-    return;
-  }
-  if (!content.startsWith('var process = window.process')) {
-    console.log('[postbuild] worker window patch: pattern not found (bundle shape changed?)', path.basename(filePath));
-    return;
-  }
-  content = marker + '\n'
-    + 'var window = self; // worker-scope alias (N-059)\n'
-    + 'var localStorage = (function () { var m = new Map(); return { getItem: function (k) { return m.has(k) ? m.get(k) : null; }, setItem: function (k, v) { m.set(k, String(v)); }, removeItem: function (k) { m.delete(k); }, clear: function () { m.clear(); }, key: function (i) { return Array.from(m.keys())[i] ?? null; }, get length() { return m.size; } }; })(); // worker has no storage (N-059)\n'
-    + content;
-  fs.writeFileSync(filePath, content, 'utf8');
-  console.log('[postbuild] worker window patched:', path.basename(filePath));
-}
-patchWorkerWindow(path.join(outDir, 'editor.worker.js'));
-patchWorkerWindow(path.join(outDir, 'plugin-worker.js'));
-
+const frontendDir = path.join(__dirname, 'lib', 'frontend');
 const backendMain = path.join(__dirname, 'lib', 'backend', 'main.js');
 
-// The esbuild bundle inlines the native module require as part of a
-// switch-case statement. The pattern is:
-//   case"drivelist":return require("drivelist/build/Release/drivelist.node")
-// We replace the require() call with a stub that returns an object
-// with a `list` method matching the drivelist API.
-// Also accept require('drivelist') / quoted path variants from esbuild.
-function patchBackendDrivelist(filePath) {
+function copyRequiredAsset(name) {
+  const source = path.join(__dirname, 'resources', name);
+  const target = path.join(frontendDir, name);
+  if (!fs.existsSync(source)) {
+    throw new Error(`[postbuild] required asset is missing: ${source}`);
+  }
+  fs.mkdirSync(frontendDir, { recursive: true });
+  fs.copyFileSync(source, target);
+  console.log(`[postbuild] ${name} -> ${path.relative(__dirname, target)}`);
+}
+
+/**
+ * The Node backend must stay on the common/node side of the dependency graph.
+ * A browser import once pulled ApplicationShell and React into this bundle and
+ * was hidden by prepending a jsdom polyfill. Reject that architecture instead.
+ */
+function verifyBackendIsDomFree(filePath) {
   if (!fs.existsSync(filePath)) {
-    fail(`drivelist patch: target not found: ${filePath}`);
-    return;
+    throw new Error(`[postbuild] backend boundary target is missing: ${filePath}`);
   }
-  let content = fs.readFileSync(filePath, 'utf8');
-  const stub = '{ list: function(cb) { cb(null, []); } }';
-  const requirePatterns = [
-    'require("drivelist/build/Release/drivelist.node")',
-    "require('drivelist/build/Release/drivelist.node')",
-    'require("drivelist")',
-    "require('drivelist')"
+
+  const content = fs.readFileSync(filePath, 'utf8');
+  // Theia embeds package metadata, so dependency-name strings such as
+  // "react-dom" are not evidence of executable browser code.
+  const forbiddenRuntimeMarkers = [
+    'ApplicationShell',
+    'document.createElement',
+    '__REACT_DEVTOOLS_GLOBAL_HOOK__',
+    '__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED',
   ];
-  let hit = false;
-  for (const oldRequire of requirePatterns) {
-    if (content.includes(oldRequire)) {
-      content = content.split(oldRequire).join(stub);
-      hit = true;
-    }
+  const found = forbiddenRuntimeMarkers.filter(marker => content.includes(marker));
+  if (found.length > 0) {
+    throw new Error(`[postbuild] backend contains browser runtime code: ${found.join(', ')}`);
   }
-  if (hit) {
-    fs.writeFileSync(filePath, content, 'utf8');
-    console.log('[postbuild] drivelist native binding patched successfully');
-    patchState.drivelist = true;
-    return;
-  }
-  if (content.includes(stub) || content.includes('list: function(cb) { cb(null, []); }') || patchState.drivelist) {
-    console.log('[postbuild] drivelist: already patched');
-    patchState.drivelist = true;
-    return;
-  }
-  if (!/\bdrivelist\b/.test(content)) {
-    console.log('[postbuild] drivelist: not referenced in backend bundle');
-    patchState.drivelist = true;
-    return;
-  }
-  // If drivelist only appears as a package.json string ("drivelist":"^12.0.2") inside
-  // the bundle's dependency table, no native require needs patching.
-  const occurrences = (content.match(/\bdrivelist\b/g) || []).length;
-  const jsonOnly = occurrences === 1 && /"drivelist"\s*:\s*"/.test(content);
-  if (jsonOnly) {
-    console.log('[postbuild] drivelist: only JSON reference found, no native require to patch');
-    patchState.drivelist = true;
-    return;
-  }
-  console.warn('[postbuild] drivelist: require pattern not found but word present (likely JSON only), treating as optional');
-  patchState.drivelist = true;
-}
-patchBackendDrivelist(backendMain);
- // ── Phase 4: Inject jsdom polyfill into backend main.js ──────────
-// P0 fix: `apps/browser lib/backend/main.js:1913` includes frontend
-// `application-shell` code that accesses document/DragEvent/window.location
-// on Node 22.23.2 with Theia 1.73.1. The previous workaround via
-// `NODE_OPTIONS --require musespark-audit/polyfill.cjs` failed because
-// `theia start` spawns a child process without inheriting env. Direct
-// file prepend is required so the polyfill runs before any frontend
-// code touches DOM globals. Covers: document, DragEvent, DataTransfer,
-// localStorage, window.history, matchMedia, getComputedStyle.
-function injectBackendPolyfill(filePath) {
-  if (!fs.existsSync(filePath)) {
-    fail(`backend polyfill: target not found: ${filePath}`);
-    return;
-  }
-  let content = fs.readFileSync(filePath, 'utf8');
-  const marker = 'P0 Browser startup polyfill';
-  if (content.includes(marker)) {
-    console.log('[postbuild] backend polyfill already injected');
-    return;
-  }
-  if (content.indexOf("if(typeof document==='undefined')") !== -1 && content.indexOf("if(typeof document==='undefined')") < 3000 && content.includes('jsdom')) {
-    console.log('[postbuild] backend polyfill already injected (heuristic)');
-    return;
-  }
-  let polyfill;
-  const candidates = [
-    path.join(__dirname, '..', '..', 'musespark-audit', 'polyfill.cjs'),
-    path.join(__dirname, 'polyfill.cjs'),
-  ];
-  let foundPath = null;
-  for (const cand of candidates) {
-    if (fs.existsSync(cand)) {
-      foundPath = cand;
-      polyfill = fs.readFileSync(cand, 'utf8');
-      console.log(`[postbuild] backend polyfill source: ${path.relative(__dirname, cand)}`);
-      break;
-    }
-  }
-  if (!foundPath) {
-    console.warn('[postbuild] backend polyfill source not found, using inline fallback');
-    polyfill = require('fs').readFileSync(path.join(__dirname, '..', '..', 'musespark-audit', 'polyfill.cjs'), 'utf8');
-  }
-  if (!polyfill.includes(marker)) {
-    polyfill = '// ' + marker + ': injected by postbuild.cjs for Node 22 + Theia 1.73.1\n' + polyfill;
-  }
-  if (!polyfill.endsWith('\n')) polyfill += '\n';
-  const newContent = polyfill + content;
-  fs.writeFileSync(filePath, newContent, 'utf8');
-  console.log('[postbuild] backend polyfill injected into ' + path.relative(__dirname, filePath) + ' (' + polyfill.length + ' bytes)');
-}
-injectBackendPolyfill(backendMain);
-
-
-// DK-P3-3: required patches must have applied (or been confirmed present).
-// Silent miss previously left a broken desktop shell; fail the build hard.
-// drivelist is now optional: upstream Theia may tree-shake it out, leaving only
-// a JSON package string ("drivelist":"^12.0.2") which should not be treated as
-// a missing require. The patch is cosmetic for that case.
-if (!patchState.inversify || !patchState.applicationError) {
-  fail(
-    `required patch incomplete: inversify=${patchState.inversify} `
-    + `applicationError=${patchState.applicationError} drivelist=${patchState.drivelist}`
-  );
-}
-if (!patchState.drivelist) {
-  console.warn('[postbuild] drivelist: optional patch not applied (no native require found)');
-  patchState.drivelist = true;
+  console.log('[postbuild] backend dependency boundary verified (DOM-free)');
 }
 
-if (exitCode !== 0) {
-  process.exit(exitCode);
-}
+copyRequiredAsset('favicon.ico');
+verifyBackendIsDomFree(backendMain);

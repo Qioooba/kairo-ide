@@ -6,7 +6,7 @@ import { MessageService } from '@theia/core/lib/common/message-service';
 import { KairoI18nService } from '@kairo/i18n';
 import { SvnService } from './svn-service';
 import { SvnStore } from './svn-store';
-import { SvnFileStatus, SvnStatusEntry, getStatusLabel } from './svn-types';
+import { SvnFileStatus, SvnStatusEntry, getStatusLabel } from '../common/svn-types';
 import './svn-dialogs.css';
 
 export interface SvnCommitDialogProps {

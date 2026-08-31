@@ -9,8 +9,8 @@
     "src"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json && cp src/browser/*.css lib/browser/ 2>/dev/null || true",
-    "clean": "rm -rf lib",
+    "build": "tsc -p tsconfig.json && node ../../scripts/copy-css.cjs src/browser lib/browser",
+    "clean": "node ../../scripts/clean-dir.cjs lib",
     "lint": "tsc -p tsconfig.json --noEmit",
     "test": "node -r ./test-setup.cjs -r ts-node/register --no-warnings src/browser/import-wizard-widget.test.ts && node -r ./test-setup.cjs --test src/browser/project-exports-extended.test.cjs src/browser/project-logic.test.cjs src/browser/project-service-extended.test.cjs src/browser/import-wizard-widget.test.cjs src/browser/project-extra.test.cjs"
   },

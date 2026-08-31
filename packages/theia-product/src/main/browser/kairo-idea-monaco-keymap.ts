@@ -12,6 +12,31 @@ export const KAIRO_TOGGLE_CASE_COMMAND = {
   label: 'Toggle Case',
 };
 
+/** Commands that must be routed through Theia's keybinding registry.  Monaco
+ * has competing built-ins for these chords (redo, bracket navigation and
+ * comment actions); registering a second editor-level handler is order
+ * dependent and produced silent no-ops in Chromium on Windows. */
+const KAIRO_DELETE_LINE_COMMAND = {
+  id: 'kairo.editor.deleteLine',
+  label: 'Delete Line',
+};
+const KAIRO_DUPLICATE_LINE_COMMAND = {
+  id: 'kairo.editor.duplicateLine',
+  label: 'Duplicate Line',
+};
+const KAIRO_SELECT_ALL_OCCURRENCES_COMMAND = {
+  id: 'kairo.editor.selectAllOccurrences',
+  label: 'Select All Occurrences',
+};
+const KAIRO_JUMP_TO_BRACKET_COMMAND = {
+  id: 'kairo.editor.jumpToBracket',
+  label: 'Jump to Matching Bracket',
+};
+const KAIRO_BLOCK_COMMENT_COMMAND = {
+  id: 'kairo.editor.blockComment',
+  label: 'Toggle Block Comment',
+};
+
 @injectable()
 export class KairoIDEAMonacoKeymapContribution implements FrontendApplicationContribution {
   @inject(EditorManager) protected readonly editorManager!: EditorManager;
@@ -21,6 +46,7 @@ export class KairoIDEAMonacoKeymapContribution implements FrontendApplicationCon
   private keymapApplied = false;
   private toggleCaseCommandRegistered = false;
   private lastToggleAt = 0;
+  private editorCommandBindingsRegistered = false;
 
   onStart(_app: FrontendApplication): void {
     if (isOSX) {
@@ -28,6 +54,7 @@ export class KairoIDEAMonacoKeymapContribution implements FrontendApplicationCon
     }
 
     this.reclaimToggleCaseChord();
+    this.registerEditorCommandBindings();
     this.applyIDEAKeybindings();
     this.editorManager.onCreated(widget => {
       const editor = widget.editor;
@@ -95,6 +122,85 @@ export class KairoIDEAMonacoKeymapContribution implements FrontendApplicationCon
     }]);
   }
 
+  /**
+   * Route conflict-prone Windows editor actions through a single dispatch
+   * path.  The previous implementation added Monaco handlers for Ctrl+Y,
+   * Ctrl+Shift+M and Ctrl+Alt+Shift+J while Chromium's native delivery and
+   * Monaco defaults competed for the same chords.  In a browser this looked
+   * like the shortcuts were accepted but did nothing.  Theia's registry owns
+   * the chord and invokes the active editor explicitly, matching the stable
+   * macOS implementation.
+   */
+  protected registerEditorCommandBindings(): void {
+    if (this.editorCommandBindingsRegistered) {
+      return;
+    }
+    this.editorCommandBindingsRegistered = true;
+    this.keybindings.unregisterKeybinding('ctrl+y');
+    this.keybindings.unregisterKeybinding('ctrl+d');
+    this.keybindings.unregisterKeybinding('ctrl+shift+m');
+    this.keybindings.unregisterKeybinding('ctrl+alt+shift+j');
+    this.keybindings.unregisterKeybinding('ctrl+shift+/');
+
+    this.commands.registerCommand(KAIRO_DELETE_LINE_COMMAND, {
+      execute: () => this.triggerInActiveEditor('editor.action.deleteLines'),
+    });
+    this.commands.registerCommand(KAIRO_DUPLICATE_LINE_COMMAND, {
+      execute: () => this.duplicateActiveLine(),
+    });
+    this.commands.registerCommand(KAIRO_SELECT_ALL_OCCURRENCES_COMMAND, {
+      execute: () => this.triggerInActiveEditor('editor.action.selectHighlights'),
+    });
+    this.commands.registerCommand(KAIRO_JUMP_TO_BRACKET_COMMAND, {
+      execute: () => this.triggerInActiveEditor('editor.action.jumpToBracket'),
+    });
+    this.commands.registerCommand(KAIRO_BLOCK_COMMENT_COMMAND, {
+      execute: () => this.triggerInActiveEditor('editor.action.blockComment'),
+    });
+
+    const when = 'editorTextFocus && !editorReadonly';
+    this.keybindings.registerKeybinding({ command: KAIRO_DELETE_LINE_COMMAND.id, keybinding: 'ctrl+y', when });
+    this.keybindings.registerKeybinding({ command: KAIRO_DUPLICATE_LINE_COMMAND.id, keybinding: 'ctrl+d', when });
+    this.keybindings.registerKeybinding({ command: KAIRO_SELECT_ALL_OCCURRENCES_COMMAND.id, keybinding: 'ctrl+alt+shift+j', when });
+    this.keybindings.registerKeybinding({ command: KAIRO_JUMP_TO_BRACKET_COMMAND.id, keybinding: 'ctrl+shift+m', when: 'editorTextFocus' });
+    this.keybindings.registerKeybinding({ command: KAIRO_BLOCK_COMMENT_COMMAND.id, keybinding: 'ctrl+shift+/', when });
+  }
+
+  protected triggerInActiveEditor(actionId: string): void {
+    const current = this.editorManager.currentEditor?.editor;
+    if (!(current instanceof MonacoEditor)) {
+      return;
+    }
+    current.getControl().trigger('idea-keymap', actionId, null);
+  }
+
+  /** Duplicate the active line without relying on Monaco's competing
+   * copy-line keybinding.  The editor action is not exposed consistently by
+   * all Monaco builds, while this edit operation is stable across browser and
+   * Electron hosts and preserves the current cursor column. */
+  protected duplicateActiveLine(): void {
+    const current = this.editorManager.currentEditor?.editor;
+    if (!(current instanceof MonacoEditor)) {
+      return;
+    }
+    const control = current.getControl();
+    const model = control.getModel();
+    const selection = control.getSelection();
+    if (!model || !selection) {
+      return;
+    }
+    const lineNumber = selection.positionLineNumber;
+    const lineContent = model.getLineContent(lineNumber);
+    const endColumn = model.getLineMaxColumn(lineNumber);
+    const cursorColumn = Math.min(selection.positionColumn, endColumn);
+    const eol = model.getEOL();
+    control.executeEdits('idea-duplicate-line', [{
+      range: { startLineNumber: lineNumber, startColumn: endColumn, endLineNumber: lineNumber, endColumn },
+      text: `${eol}${lineContent}`,
+    }]);
+    control.setPosition({ lineNumber: lineNumber + 1, column: cursorColumn });
+  }
+
   private applyIDEAKeybindings(): void {
     if (this.keymapApplied) {
       return;
@@ -154,20 +260,6 @@ export class KairoIDEAMonacoKeymapContribution implements FrontendApplicationCon
       control.trigger('idea-keymap', 'editor.action.startFindReplaceAction', null);
     }, 'editorFocus');
 
-    control.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyY, () => {
-      control.trigger('idea-keymap', 'editor.action.deleteLines', null);
-    }, 'editorTextFocus && !editorReadonly');
-
-    // Ctrl+D — Duplicate Line (IDEA Windows default)
-    control.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyD, () => {
-      control.trigger('idea-keymap', 'editor.action.copyLinesDownAction', null);
-    }, 'editorTextFocus && !editorReadonly');
-
-    // Ctrl+Shift+M — Jump to Matching Bracket (IDEA Windows default)
-    control.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyM, () => {
-      control.trigger('idea-keymap', 'editor.action.jumpToBracket', null);
-    }, 'editorTextFocus');
-
     // Ctrl+Shift+U — Toggle Case is handled at the Theia KeybindingRegistry
     // level (see reclaimToggleCaseChord): the Output panel registers
     // "CtrlCmd+Shift+U" (output:toggle) in the same registry and consumes the
@@ -194,9 +286,11 @@ export class KairoIDEAMonacoKeymapContribution implements FrontendApplicationCon
       control.trigger('idea-keymap', 'editor.action.addSelectionToNextFindMatch', null);
     }, 'editorTextFocus');
 
-    control.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyMod.Shift | monaco.KeyCode.KeyJ, () => {
-      control.trigger('idea-keymap', 'editor.action.selectHighlights', null);
-    }, 'editorTextFocus');
+    // Duplicate-line, select-all-occurrences, bracket matching and block
+    // comments are routed
+    // through registerEditorCommandBindings() above.  Keeping duplicate
+    // Monaco handlers here makes Chromium dispatch the action twice or let a
+    // built-in command win depending on event timing.
 
     control.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.End, () => {
       control.trigger('idea-keymap', 'cursorBottom', null);
@@ -236,11 +330,6 @@ export class KairoIDEAMonacoKeymapContribution implements FrontendApplicationCon
       control.trigger('idea-keymap', 'editor.unfoldAll', null);
     }, 'editorFocus');
 
-    // Ctrl+Shift+/ — Block Comment (IDEA). Same class of gap: the Theia-level
-    // binding references 'editor.action.blockComment', which is not a
-    // registered Theia command (BUG-20260826-307).
-    control.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.Slash, () => {
-      control.trigger('idea-keymap', 'editor.action.blockComment', null);
-    }, 'editorTextFocus');
+    // Ctrl+Shift+/ block comment is likewise registered at the Theia level.
   }
 }

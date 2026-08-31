@@ -5,7 +5,7 @@ import { CommandService } from '@theia/core/lib/common/command';
 import { KairoI18nService } from '@kairo/i18n';
 import { SvnStore, SvnChangesState } from './svn-store';
 import { SvnService } from './svn-service';
-import { SvnFileStatus, SvnStatusEntry } from './svn-types';
+import { SvnFileStatus, SvnStatusEntry } from '../common/svn-types';
 
 const CMD_COMMIT = 'svn.commit';
 const CMD_UPDATE = 'svn.update';

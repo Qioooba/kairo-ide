@@ -124,15 +124,15 @@ electron-packager outputs.
 | Command | What it does |
 |---------|--------------|
 | `pnpm test` | All TS unit tests in packages and apps (`node --test`) |
-| `pnpm test:agent` | Go unit tests (cross-platform wrapper; skips 53 known Windows-only file-I/O failures on Windows) |
-| `pnpm test:agent:race` | Go unit tests with `-race` |
-| `pnpm test:agent:integration` | Go integration tests (needs JDK) |
+| `pnpm test:agent` | Complete Go unit/integration package suite on every platform |
+| `pnpm test:agent:race` | Complete Go suite with the race detector |
+| `pnpm test:agent:integration` | Complete Go suite with the `integration` build tag |
 | `pnpm test:e2e:api` | Runtime Agent HTTP smoke (no browser) |
 | `pnpm test:e2e:smoke` | Playwright shell smoke (headless) |
 | `pnpm test:e2e:web` | Playwright full-chain UI E2E (headless) |
 | `pnpm test:visual:web` | Headed visual regression smoke |
 | `pnpm test:a11y:web` | axe-core accessibility scan (headed, `@axe-core/playwright`) |
-| `pnpm verify` | `pnpm install --frozen-lockfile` + build + `pnpm test` + `pnpm test:agent` + lint |
+| `pnpm verify` | Type-check + lint + all package/desktop/root unit tests + complete Go suite |
 
 ## 8. What is **not** in test
 

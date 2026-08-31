@@ -8,8 +8,9 @@ import { test, expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
 import * as fs from 'fs';
 import * as path from 'path';
+import { laneWorkspace, repoPath } from './helpers';
 
-const LANE_WS = '/Users/qi/Documents/spaces/kairo-ide/.test-lanes/E/workspace';
+const LANE_WS = laneWorkspace('E');
 const LEGACY = path.join(LANE_WS, 'legacy-sample');
 const THEIA_URL = process.env.THEIA_URL || 'http://127.0.0.1:18441';
 
@@ -141,14 +142,15 @@ test.describe.serial('ch16 json-props',()=>{
       expect(labelsPkg.length).toBeGreaterThan(5);
       expect(labelsPkg.some(l=> /name|version|scripts/.test(l))).toBeTruthy();
       // 检查 16 项中的至少 10 项在源码中定义
-      const src = fs.readFileSync('/Users/qi/Documents/spaces/kairo-ide/packages/jsp-extension/src/browser/json-language.ts','utf-8');
+      const src = fs.readFileSync(repoPath('packages','jsp-extension','src','browser','json-language.ts'),'utf-8');
       const pkgKeys = ['name','version','description','main','scripts','dependencies','devDependencies','peerDependencies','keywords','author','license','repository','type','exports','engines'];
       for(const k of pkgKeys) expect(src).toContain(`'${k}'`);
     } else {
-      // 回退：文件本身包含这些键即算通过（避免 flaky）
+      // Keep a meaningful fixture assertion when the editor does not render a
+      // widget; never turn this branch into an unconditional pass.
       const pkg = fs.readFileSync(path.join(LEGACY,'package.json'),'utf-8');
       expect(pkg).toContain('kairo-json-test');
-      expect(true).toBeTruthy();
+      expect(pkg).toMatch(/"(name|version|scripts)"/);
     }
 
     // tsconfig.json
@@ -175,9 +177,9 @@ test.describe.serial('ch16 json-props',()=>{
     try{ await waitSuggest(8000); labelsEs=await suggestionLabels(); console.log('[TC-JSON-002] eslint',labelsEs.slice(0,8)); await page.keyboard.press('Escape'); }catch{ await page.keyboard.press('Escape');}
     for(let i=0;i<3;i++) await page.keyboard.press('Backspace');
     await page.keyboard.press('Backspace');
-    // 至少一个文件触发补全即算通过；否则检查语言注册
+    // At least one of the three JSON documents must expose completion.
     if(labelsTs.length===0 && labelsEs.length===0 && labelsPkg.length===0){
-      expect(true).toBeTruthy(); // 已在上层验证 pkgKeys 源码
+      throw new Error('JSON completion did not appear in package.json, tsconfig.json, or .eslintrc.json');
     }
   });
 
@@ -206,7 +208,7 @@ test.describe.serial('ch16 json-props',()=>{
       expect(hasVal || labels.length>0).toBeTruthy();
     } else {
       // 回退：检查源码中定义了值补全
-      const src = fs.readFileSync('/Users/qi/Documents/spaces/kairo-ide/packages/jsp-extension/src/browser/json-language.ts','utf-8');
+      const src = fs.readFileSync(repoPath('packages','jsp-extension','src','browser','json-language.ts'),'utf-8');
       expect(src).toContain('buildJsonValueCompletions');
       expect(src).toContain('true');
     }
@@ -237,7 +239,7 @@ test.describe.serial('ch16 json-props',()=>{
     // 大文件应触发 Warning（>1MB），至少有 1 个 squiggly
     expect(largeWarn.count).toBeGreaterThan(0);
     // 验证源码中 MAX_JSON_SIZE 为 1MB
-    const src = fs.readFileSync('/Users/qi/Documents/spaces/kairo-ide/packages/jsp-extension/src/browser/json-language.ts','utf-8');
+    const src = fs.readFileSync(repoPath('packages','jsp-extension','src','browser','json-language.ts'),'utf-8');
     expect(src).toContain('MAX_JSON_SIZE');
     expect(src).toContain('1 * 1024 * 1024');
   });
@@ -260,7 +262,7 @@ test.describe.serial('ch16 json-props',()=>{
     console.log('[TC-PROP-001] hasComment',dom.hasComment,'spanCount',dom.spanCount);
     expect(dom.hasComment).toBeTruthy();
     expect(dom.hasJdbc).toBeTruthy();
-    const src = fs.readFileSync('/Users/qi/Documents/spaces/kairo-ide/packages/jsp-extension/src/browser/properties-monarch.ts','utf-8');
+    const src = fs.readFileSync(repoPath('packages','jsp-extension','src','browser','properties-monarch.ts'),'utf-8');
     expect(src).toContain('comment.properties');
     expect(src).toContain('delimiter.properties');
     expect(src).toContain('string.properties');
@@ -301,7 +303,7 @@ test.describe.serial('ch16 json-props',()=>{
       const noPropsOnComment = !vis2 || labels2.length===0 || !labels2.some(l=> l.includes('jdbc.') || l.includes('server.'));
       expect(noPropsOnComment).toBeTruthy();
     } else {
-      const src = fs.readFileSync('/Users/qi/Documents/spaces/kairo-ide/packages/jsp-extension/src/browser/properties-language.ts','utf-8');
+    const src = fs.readFileSync(repoPath('packages','jsp-extension','src','browser','properties-language.ts'),'utf-8');
       expect(src).toContain('jdbc.driverClassName');
       expect(src).toContain('server.port');
       expect(src).toContain('spring.datasource');
@@ -344,7 +346,7 @@ test.describe.serial('ch16 json-props',()=>{
     try{ fs.unlinkSync(tmpPath);}catch{}
     await page.waitForTimeout(500);
     // 验证源码中对 BMP 外字符代理对处理
-    const encSrc = fs.readFileSync('/Users/qi/Documents/spaces/kairo-ide/packages/jsp-extension/src/browser/properties-language.ts','utf-8');
+    const encSrc = fs.readFileSync(repoPath('packages','jsp-extension','src','browser','properties-language.ts'),'utf-8');
     expect(encSrc).toContain('properties');
   });
 

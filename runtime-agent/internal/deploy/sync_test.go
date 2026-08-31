@@ -105,6 +105,9 @@ func TestBasicDeploy_Success(t *testing.T) {
 	if result.Succeeded != 2 {
 		t.Errorf("expected 2 succeeded, got %d", result.Succeeded)
 	}
+	if len(result.Added) != 2 || len(result.Modified) != 0 {
+		t.Fatalf("new files should be reported as added, got added=%v modified=%v", result.Added, result.Modified)
+	}
 
 	data, err := os.ReadFile(filepath.Join(deployRoot, "a.txt"))
 	if err != nil {
@@ -120,6 +123,53 @@ func TestBasicDeploy_Success(t *testing.T) {
 	}
 	if string(data) != "hello-b" {
 		t.Errorf("sub/b.txt content = %q, want hello-b", string(data))
+	}
+}
+
+func TestDeployResult_ExistingTargetIsModified(t *testing.T) {
+	srcRoot, deployRoot, outsideRoot := setupTestEnv(t)
+	defer verifySentinel(t, outsideRoot)
+
+	writeTestFile(t, srcRoot, "a.txt", "updated")
+	writeTestFile(t, deployRoot, "a.txt", "original")
+
+	result, err := executePlan(t, NewDeployEngine(), domain.DeployPlan{
+		DeploymentRoot: deployRoot,
+		OwnerToken:     validOwnerToken(),
+		Mode:           domain.DeployModeMerge,
+		Entries: []domain.DeployEntry{
+			{Source: filepath.Join(srcRoot, "a.txt"), Target: "a.txt", Action: domain.DeployActionAdd},
+		},
+	}, []string{srcRoot})
+	if err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+	if len(result.Added) != 0 || len(result.Modified) != 1 || result.Modified[0] != "a.txt" {
+		t.Fatalf("existing file should be reported as modified, got added=%v modified=%v", result.Added, result.Modified)
+	}
+}
+
+func TestDeployResult_ExplicitDeleteReportsRelativeTarget(t *testing.T) {
+	_, deployRoot, outsideRoot := setupTestEnv(t)
+	defer verifySentinel(t, outsideRoot)
+
+	writeTestFile(t, deployRoot, "sub/remove.txt", "remove me")
+	result, err := executePlan(t, NewDeployEngine(), domain.DeployPlan{
+		DeploymentRoot: deployRoot,
+		OwnerToken:     validOwnerToken(),
+		Mode:           domain.DeployModeMerge,
+		Entries: []domain.DeployEntry{
+			{Target: "sub/remove.txt", Action: domain.DeployActionDelete},
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(deployRoot, "sub/remove.txt")); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("delete target still exists: %v", statErr)
+	}
+	if len(result.Deleted) != 1 || result.Deleted[0] != "sub/remove.txt" {
+		t.Fatalf("delete result should contain relative target, got %v", result.Deleted)
 	}
 }
 

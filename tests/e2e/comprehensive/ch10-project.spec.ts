@@ -534,8 +534,10 @@ test.describe('ch10 project', () => {
     await dlg.getByRole('button', { name: 'OK' }).click();
     await expect(dlg).toBeHidden({ timeout: 60_000 });
 
-    expect(calls.indexOf('put')).toBeGreaterThanOrEqual(0);
-    expect(calls.lastIndexOf('jdtls')).toBeGreaterThan(calls.indexOf('put'));   // libraries synced after PUT (last jdtls is save)
+    const putIndex = calls.indexOf('put');
+    const jdtlsIndex = calls.lastIndexOf('jdtls');
+    expect(putIndex, 'saving structure must issue a project PUT').toBeGreaterThanOrEqual(0);
+    expect(jdtlsIndex, 'saving structure must sync JDT LS after PUT').toBeGreaterThan(putIndex);
     const encVal = (putPayload?.encoding as any)?.default ?? putPayload?.encoding;
     expect(encVal).toBe('utf-8');
 

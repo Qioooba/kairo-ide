@@ -3,7 +3,7 @@
  * 18.5 docked Find 结果窗   TC-SRCH-051..052
  */
 import { test, expect } from '@playwright/test';
-import { W2, openIdeAt } from './ch18-helpers';
+import { W2, openIdeAt, SEARCH_CENTER_SHORTCUT } from './ch18-helpers';
 
 test('TC-SRCH-051 [P2] kairo.search.results.open 底部 Find 窗 + 共享 session model', async ({ page }) => {
   await openIdeAt(page, W2);
@@ -26,7 +26,7 @@ test('TC-SRCH-051 [P2] kairo.search.results.open 底部 Find 窗 + 共享 sessio
   await expect(page.locator('[data-testid="find-tool-idle"]')).toBeVisible(); // bottom rank area, idle
 
   // search from the modal — docked window mirrors results (shared model)
-  await page.keyboard.press('Meta+Shift+F');
+  await page.keyboard.press(SEARCH_CENTER_SHORTCUT);
   await page.locator('[data-testid="search-center-modal"]').waitFor({ state: 'visible', timeout: 10_000 });
   await page.locator('[data-testid="search-query"]').fill('foo');
   await page.locator('[data-testid="search-query"]').press('Enter');
@@ -57,7 +57,7 @@ test('TC-SRCH-052 [P2] 默认排除：node_modules / .git / WEB-INF/lib(*.class)
 
   // zebraunique exists in: deepsignal.txt (root), node_modules/pkg/deep.js,
   // .git/hidden.txt; Fake*.class under WEB-INF/lib is binary-skipped.
-  await page.keyboard.press('Meta+Shift+F');
+  await page.keyboard.press(SEARCH_CENTER_SHORTCUT);
   await page.locator('[data-testid="search-center-modal"]').waitFor({ state: 'visible', timeout: 10_000 });
   await page.locator('[data-testid="search-query"]').fill('zebraunique');
   await page.locator('[data-testid="search-query"]').press('Enter');

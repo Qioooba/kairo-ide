@@ -8,7 +8,7 @@ import { FileUri } from '@theia/core/lib/common/file-uri';
 import { KairoI18nService } from '@kairo/i18n';
 import { SvnService } from './svn-service';
 import { SvnStore } from './svn-store';
-import { SvnResolveChoice, SvnStatusEntry } from './svn-types';
+import { SvnResolveChoice, SvnStatusEntry } from '../common/svn-types';
 import './svn-dialogs.css';
 
 export interface SvnConflictDialogProps {

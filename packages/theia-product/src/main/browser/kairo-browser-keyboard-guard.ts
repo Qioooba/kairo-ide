@@ -162,6 +162,15 @@ const NAV_RESERVED = new Set([
   'ctrl+tab', 'ctrl+shift+tab', 'ctrl+r', 'ctrl+p',
 ]);
 
+// These actions are deliberately dispatched by the Theia registry.  Suppress
+// the original DOM event after cloning it so Monaco's built-in Ctrl+D/Redo/
+// comment/bracket handlers cannot race the product command and undo the
+// result.  Other guarded editor chords continue to receive the original event
+// for native Monaco actions.
+const REGISTRY_EDITOR_CHORDS_WIN = new Set([
+  'ctrl+d', 'ctrl+y', 'ctrl+shift+m', 'ctrl+alt+shift+j', 'ctrl+shift+/',
+]);
+
 /**
  * Chords that Chrome reserves and Kairo remaps INSIDE the editor. These are
  * still intercepted when the event target is a Monaco editor; every other
@@ -177,6 +186,11 @@ function chromeReservedEditorChords(): Set<string> {
     `${p}+[`, `${p}+]`,
     ...Array.from({ length: 9 }, (_, i) => `${p}+${i + 1}`),
     'f11',
+    // Conflict-prone Windows editor actions are owned by the Theia registry
+    // (kairo-idea-monaco-keymap.ts).  Clone these guarded events so the
+    // registry receives the editor context instead of letting Monaco's
+    // built-ins consume them first.
+    ...(isOSX ? [] : ['ctrl+y', 'ctrl+shift+m', 'ctrl+alt+shift+j', 'ctrl+shift+/']),
   ]);
 }
 
@@ -262,6 +276,9 @@ export class KairoBrowserKeyboardGuardContribution implements FrontendApplicatio
       ? event.target
       : (document.body ?? document.documentElement ?? document);
     dispatchTarget.dispatchEvent(clone);
+    if (!isOSX && inEditor && REGISTRY_EDITOR_CHORDS_WIN.has(chord)) {
+      event.stopPropagation();
+    }
   };
 
   onStart(_app: FrontendApplication): void {

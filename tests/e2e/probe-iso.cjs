@@ -1,4 +1,5 @@
 const { chromium } = require('playwright');
+const { probeUrl } = require('./probe-config.cjs');
 (async () => {
   const browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
@@ -8,7 +9,7 @@ const { chromium } = require('playwright');
     if (msg.type() === 'error') errs.push('CONSOLE-ERR: ' + msg.text().slice(0, 200));
   });
   try {
-    await page.goto('http://127.0.0.1:3070', { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await page.goto(probeUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
     await page.waitForSelector('#theia-shell, #theia-app-shell, .theia-shell', { timeout: 30000 });
     await page.waitForTimeout(5000);
     const title = await page.title();

@@ -413,3 +413,4 @@ export function parseVersionString(versionStr: string): { major: number; minor: 
   }
   return { major: 0, minor: 0, full: versionStr.trim() };
 }
+

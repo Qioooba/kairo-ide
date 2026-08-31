@@ -80,13 +80,17 @@ export class SearchScopeModel {
   }
 
   addToHistory(entry: SearchHistoryEntry): void {
+    const normalizedEntry = { ...entry, query: entry.query.trim() };
+    if (!normalizedEntry.query) {
+      return;
+    }
     this.history = [
-      entry,
+      normalizedEntry,
       ...this.history.filter(
-        existing => !(existing.query === entry.query
-          && existing.isRegex === entry.isRegex
-          && existing.caseSensitive === entry.caseSensitive
-          && existing.wholeWord === entry.wholeWord)
+        existing => !(existing.query === normalizedEntry.query
+          && existing.isRegex === normalizedEntry.isRegex
+          && existing.caseSensitive === normalizedEntry.caseSensitive
+          && existing.wholeWord === normalizedEntry.wholeWord)
       ),
     ].slice(0, MAX_HISTORY);
     this.saveToStorage();
@@ -95,9 +99,13 @@ export class SearchScopeModel {
   getPinned(): readonly SearchHistoryEntry[] { return this.pinned; }
 
   pinQuery(entry: SearchHistoryEntry): void {
+    const normalizedEntry = { ...entry, query: entry.query.trim() };
+    if (!normalizedEntry.query) {
+      return;
+    }
     if (this.pinned.length >= MAX_PINNED) return;
-    if (this.pinned.some(existing => existing.query === entry.query)) return;
-    this.pinned = [...this.pinned, entry];
+    if (this.pinned.some(existing => existing.query === normalizedEntry.query)) return;
+    this.pinned = [...this.pinned, normalizedEntry];
     this.savePinned();
   }
 
@@ -115,6 +123,11 @@ export class SearchScopeModel {
     this.saveToStorage();
   }
 
+  removeFromHistory(entry: SearchHistoryEntry): void {
+    this.history = this.history.filter(existing => !sameHistoryEntry(existing, entry));
+    this.saveToStorage();
+  }
+
   clearPinned(): void {
     this.pinned = [];
     this.savePinned();
@@ -122,13 +135,21 @@ export class SearchScopeModel {
 
   protected loadFromStorage(): void {
     try {
-      const historyRaw = localStorage.getItem(HISTORY_STORAGE_KEY);
+      const storage = globalThis.localStorage;
+      if (!storage) return;
+      const historyRaw = storage.getItem(HISTORY_STORAGE_KEY);
       if (historyRaw) {
-        this.history = JSON.parse(historyRaw);
+        const parsed = JSON.parse(historyRaw);
+        if (Array.isArray(parsed)) {
+          this.history = parsed.filter(isHistoryEntry).slice(0, MAX_HISTORY);
+        }
       }
-      const pinnedRaw = localStorage.getItem(PINNED_STORAGE_KEY);
+      const pinnedRaw = storage.getItem(PINNED_STORAGE_KEY);
       if (pinnedRaw) {
-        this.pinned = JSON.parse(pinnedRaw);
+        const parsed = JSON.parse(pinnedRaw);
+        if (Array.isArray(parsed)) {
+          this.pinned = parsed.filter(isHistoryEntry).slice(0, MAX_PINNED);
+        }
       }
     } catch {
       // Ignore corrupted storage
@@ -137,7 +158,7 @@ export class SearchScopeModel {
 
   protected saveToStorage(): void {
     try {
-      localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(this.history));
+      globalThis.localStorage?.setItem(HISTORY_STORAGE_KEY, JSON.stringify(this.history));
     } catch {
       // Ignore storage errors
     }
@@ -145,9 +166,32 @@ export class SearchScopeModel {
 
   protected savePinned(): void {
     try {
-      localStorage.setItem(PINNED_STORAGE_KEY, JSON.stringify(this.pinned));
+      globalThis.localStorage?.setItem(PINNED_STORAGE_KEY, JSON.stringify(this.pinned));
     } catch {
       // Ignore storage errors
     }
   }
+}
+
+function sameHistoryEntry(a: SearchHistoryEntry, b: SearchHistoryEntry): boolean {
+  return a.query === b.query
+    && a.isRegex === b.isRegex
+    && a.caseSensitive === b.caseSensitive
+    && a.wholeWord === b.wholeWord
+    && a.scope === b.scope;
+}
+
+function isHistoryEntry(value: unknown): value is SearchHistoryEntry {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+  const entry = value as Partial<SearchHistoryEntry>;
+  return typeof entry.query === 'string'
+    && typeof entry.isRegex === 'boolean'
+    && typeof entry.caseSensitive === 'boolean'
+    && typeof entry.wholeWord === 'boolean'
+    && typeof entry.scope === 'string'
+    && SCOPE_OPTIONS.some(option => option.value === entry.scope)
+    && typeof entry.timestamp === 'number'
+    && Number.isFinite(entry.timestamp);
 }

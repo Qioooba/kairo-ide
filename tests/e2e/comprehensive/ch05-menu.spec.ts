@@ -117,11 +117,23 @@ test.describe('5.1 File', () => {
     // browser file dialog with a tree listing workspace contents
     const dialog = page.locator('#theia-dialog-shell').first();
     await expect(dialog).toBeVisible({ timeout: 15_000 });
-    // descend into legacy-sample then double-click a file to open it
-    const folderRow = dialog.locator('.theia-TreeNode[title$="/legacy-sample"]').first();
+    // NOTE: in this dialog every row's title attribute mirrors the dialog's
+    // current target path (all rows share it on Windows builds), so rows
+    // must be matched by their label segment text, never by title.
+    const rowByLabel = (name: string) =>
+      dialog.locator('.theia-TreeNode').filter({
+        has: page.locator('.theia-TreeNodeSegmentGrow', { hasText: new RegExp(`^\\s*${name}\\s*$`) }),
+      }).first();
+    // descend into legacy-sample, then double-click a file to open it.
+    // Mouse clicks on the expansion toggle proved unreliable in headless
+    // Chromium on Windows — select the row, then expand via ArrowRight.
+    const folderRow = rowByLabel('legacy-sample');
     await folderRow.waitFor({ state: 'visible', timeout: 15_000 });
-    await folderRow.dblclick();
-    const fileRow = dialog.locator('.theia-TreeNode[title$="index.html"], .theia-TreeNode[title$="build.xml"]').first();
+    await folderRow.click();
+    await page.keyboard.press('ArrowRight');
+    const fileRow = dialog.locator('.theia-TreeNode').filter({
+      has: page.locator('.theia-TreeNodeSegmentGrow', { hasText: /^\s*(index\.html|build\.xml)\s*$/ }),
+    }).first();
     await fileRow.waitFor({ state: 'visible', timeout: 20_000 });
     await fileRow.dblclick();
     await waitForMainTab(page, /index\.html|build\.xml/, 20_000);
@@ -136,7 +148,11 @@ test.describe('5.1 File', () => {
     await clickMenuItem(page, { command: 'workspace:open' });
     const dialog = page.locator('#theia-dialog-shell').first();
     await expect(dialog).toBeVisible({ timeout: 15_000 });
-    const row = dialog.locator('.theia-TreeNode[title$="/legacy-sample"]').first();
+    // Row titles are shared across the dialog tree (see TC-MENU-002) —
+    // match the folder row by its label segment text.
+    const row = dialog.locator('.theia-TreeNode').filter({
+      has: page.locator('.theia-TreeNodeSegmentGrow', { hasText: /^\s*legacy-sample\s*$/ }),
+    }).first();
     await row.waitFor({ state: 'visible', timeout: 15_000 });
     await row.click(); // select folder
     const confirmBtn = dialog.locator('button.theia-button.main').first();

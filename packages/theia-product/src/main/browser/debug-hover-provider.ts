@@ -3,8 +3,10 @@ import { EditorManager, EditorWidget } from '@theia/editor/lib/browser';
 import { FrontendApplicationContribution } from '@theia/core/lib/browser';
 import { MonacoEditor } from '@theia/monaco/lib/browser/monaco-editor';
 import * as monaco from '@theia/monaco-editor-core';
+import { WorkspaceContextService } from '@kairo/runtime-extension';
 import { KairoDebugSessionService } from './kairo-debug-session-service';
 import { createDebugHoverWidget, type DebugHoverWidgetInstance, type HoverValueResult } from './debug-hover-widget';
+import { persistDebugWatch } from './debug-watches-idea';
 
 const IDENTIFIER_RE = /[a-zA-Z_$][a-zA-Z0-9_$.\[\]]*/;
 
@@ -23,6 +25,9 @@ export class KairoDebugHoverProvider implements FrontendApplicationContribution 
 
     @inject(KairoDebugSessionService)
     protected readonly debugSession!: KairoDebugSessionService;
+
+    @inject(WorkspaceContextService)
+    protected readonly workspaceContext!: WorkspaceContextService;
 
     protected currentWidget: DebugHoverWidgetInstance | null = null;
     protected currentWidgetEditor: monaco.editor.ICodeEditor | null = null;
@@ -180,8 +185,8 @@ export class KairoDebugHoverProvider implements FrontendApplicationContribution 
             this.currentWidget = createDebugHoverWidget(
                 editor,
                 this.debugSession,
-                (_expr: string) => {
-                    // Add to watches (not implemented yet)
+                (expr: string) => {
+                    persistDebugWatch(expr, this.workspaceContext.context?.workspaceId);
                 },
             );
             this.currentWidgetEditor = editor;

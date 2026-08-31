@@ -37,13 +37,18 @@ export class GitRepoDetector implements FrontendApplicationContribution {
     for (const root of roots) {
       if (!root.resource) continue;
       const fsPath = root.resource.path.toString();
-      const found = await this.gitService.findRepoRoot(fsPath);
+      const found = await this.gitService.findNearestRepoRoot(fsPath, 2);
       if (found) {
         if (found !== this.gitService.getRepoRoot()) {
           this.gitService.setRepoRoot(found);
         }
         return;
       }
+    }
+    // A repository can be deleted or moved while the IDE remains open. Do
+    // not leave the previous root/status visible forever in that case.
+    if (this.gitService.getRepoRoot()) {
+      this.gitService.setRepoRoot(undefined);
     }
   }
 }

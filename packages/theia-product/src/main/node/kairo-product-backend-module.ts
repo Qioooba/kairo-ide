@@ -18,10 +18,9 @@
 
 import { ContainerModule } from '@theia/core/shared/inversify';
 import { EncodingService } from '@theia/core/lib/common/encoding-service';
-// Deep import: the package index pulls in browser-only modules
-// (Lumino DOM) which would crash the Node backend. The safe
-// service itself only touches @theia/core common code.
-import { KairoSafeEncodingService } from '@kairo/encoding-extension/lib/browser/safe-encoding-service';
+// Use the common entry point so the Node backend never bundles the encoding
+// extension's browser graph (React, Monaco, ApplicationShell, and DOM code).
+import { KairoSafeEncodingService } from '@kairo/encoding-extension/lib/common';
 import { DebugAdapterContribution } from '@theia/debug/lib/common/debug-model';
 import { KairoJavaDebugAdapterContribution } from './kairo-java-debug-adapter-contribution';
 import { BackendApplicationContribution } from '@theia/core/lib/node/backend-application';

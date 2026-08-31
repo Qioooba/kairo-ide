@@ -6,10 +6,52 @@
  * Supplementary-plane characters (rune > U+FFFF) use surrogate
  * pairs: \\uD800\\uDC00.
  *
- * This module provides editor-level unescape for display. Whole-file
- * encode/decode is owned by the Go agent (PropertiesDecode /
- * PropertiesEncode in internal/encoding/encoding.go).
+ * Whole-file encode/decode is also implemented here so Theia
+ * FileService saves (Ctrl+S) emit ISO-8859-1 + \\uXXXX without
+ * waiting on the agent recode endpoint. The Go PropertiesEncode
+ * helper remains the source of truth for agent-side recode.
  */
+
+const HEX = '0123456789ABCDEF';
+
+function hex4(code: number): string {
+    return HEX[(code >> 12) & 0xF]
+        + HEX[(code >> 8) & 0xF]
+        + HEX[(code >> 4) & 0xF]
+        + HEX[code & 0xF];
+}
+
+/** True for *.properties URIs / fs paths (query/hash stripped). */
+export function isPropertiesPath(pathOrUri: string): boolean {
+    const normalized = pathOrUri.split('?')[0].split('#')[0].toLowerCase();
+    return normalized.endsWith('.properties');
+}
+
+/**
+ * Convert Unicode text to Java native2ascii form.
+ * Code points < U+0080 pass through (so existing \\uXXXX sequences
+ * are not double-escaped). BMP chars become \\uXXXX; supplementary
+ * plane chars become a UTF-16 surrogate pair, matching Java Properties.
+ */
+export function escapeProperties(text: string): string {
+    let result = '';
+    for (const char of text) {
+        const cp = char.codePointAt(0)!;
+        if (cp < 0x80) {
+            result += char;
+            continue;
+        }
+        if (cp > 0xFFFF) {
+            const r = cp - 0x10000;
+            const hi = 0xD800 + (r >> 10);
+            const lo = 0xDC00 + (r & 0x3FF);
+            result += `\\u${hex4(hi)}\\u${hex4(lo)}`;
+            continue;
+        }
+        result += `\\u${hex4(cp)}`;
+    }
+    return result;
+}
 
 /**
  * Convert Java \\uXXXX escape sequences to actual Unicode characters.

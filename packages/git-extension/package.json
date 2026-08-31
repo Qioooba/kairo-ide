@@ -7,7 +7,7 @@
   "files": ["lib", "src"],
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "clean": "rm -rf lib",
+    "clean": "node ../../scripts/clean-dir.cjs lib",
     "lint": "tsc -p tsconfig.json --noEmit",
     "test": "node --test src/browser/git-exports.test.cjs src/browser/git-logic.test.cjs src/browser/git-stash-service.test.cjs src/browser/git-cherrypick-service.test.cjs src/browser/git-stash-widget.test.cjs src/browser/git-history-widget.test.cjs src/browser/git-path-utils.test.cjs src/browser/git-diff-parse.test.cjs"
   },

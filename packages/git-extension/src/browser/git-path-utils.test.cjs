@@ -38,7 +38,7 @@ const {
   parsePorcelainStatusZ,
   parsePorcelainStatusLines,
   normalizeFsPath,
-} = require('../../lib/browser/git-path-utils');
+} = require('../../lib/common/git-path-utils');
 
 describe('git-path-utils — uriToFsPath / Windows file://', () => {
   it('strips file:// without leaving /G: on Windows-style URIs', () => {
@@ -57,6 +57,10 @@ describe('git-path-utils — uriToFsPath / Windows file://', () => {
   it('passes through bare paths with forward slashes', () => {
     assert.strictEqual(uriToFsPath('G:\\foo\\bar'), 'G:/foo/bar');
     assert.strictEqual(uriToFsPath('/home/user/repo'), '/home/user/repo');
+  });
+
+  it('unwraps Theia URI.path drive form', () => {
+    assert.strictEqual(uriToFsPath('/g:/spaces/kairo-ide/src/App.java'), 'g:/spaces/kairo-ide/src/App.java');
   });
 
   it('normalizeFsPath strips trailing slashes', () => {

@@ -10,9 +10,10 @@
 import { test, expect, Page } from '@playwright/test';
 import * as fs from 'fs';
 import * as path from 'path';
+import { laneWorkspace } from './helpers';
 
-// Lane B fixed paths (helpers.ts defaults to A, so override)
-const LANE_WS = process.env.LANE_WS || '/Users/qi/Documents/spaces/kairo-ide/.test-lanes/B/workspace';
+// Lane B is used by the encoding campaign; LANE_WS can override it for CI.
+const LANE_WS = laneWorkspace('B');
 const LEGACY = path.join(LANE_WS, 'legacy-sample');
 const THEIA_URL = process.env.THEIA_URL || 'http://127.0.0.1:18411';
 const AGENT = `http://127.0.0.1:${process.env.AGENT_PORT || '18410'}`;

@@ -13,7 +13,7 @@
 #      contract end-to-end:
 #         GET  /api/v1/health         200
 #         GET  /api/v1/endpoints      200
-#         WS   auth roundtrip         (Sec-WebSocket-Protocol: kairo-secret-v1, <secret>)
+#         WS   auth roundtrip         (Sec-WebSocket-Protocol selects <secret>)
 #         POST /api/v1/runtime/restart 200 (process replaced)
 #
 # The script is INTENTIONALLY tolerant: if a step cannot run on the
@@ -147,49 +147,9 @@ if ($SkipBuild) {
   Skip "test.agent" "-SkipBuild was set"
 } else {
   Step "test.agent" {
-    Push-Location (Join-Path $RepoRoot "runtime-agent")
-    try {
-      # 53 file-I/O tests across internal/atomicfile,
-      # internal/bootstrap, internal/catalinabase,
-      # internal/encoding, internal/pathpolicy,
-      # internal/planning, internal/repository call os.Sync
-      # on a freshly-created TEMP subdir. On Windows this
-      # frequently returns "Access is denied" because Windows
-      # holds the directory open for a brief moment after the
-      # test deletes its files; the failure is environmental,
-      # not a real bug. Skip them on Windows only; they still
-      # run on Linux / macOS CI.
-      #
-      # The skip list mirrors scripts/test-agent.js exactly;
-      # see CR-003 in
-      # docs/progress/WINDOWS_WAVE2_CONTRACT_REQUESTS.md for
-      # the upstream fix ask.
-      $skipPattern = 'TestAtomicWriteJSON$|TestAtomicWriteJSON_CreatesParentDirs$|TestLoadProjectConfig_Success$|TestSaveProjectConfig$|' +
-                     'TestProjectConfig_YAMLFormat$|TestProjectCatalog_PutAndGet$|TestProjectCatalog_Delete$|TestProjectCatalog_DuplicateRoot$|' +
-                     'TestFileBuildHistoryRepo_SaveAndGet$|TestFileProjectRepo_SaveAndGet$|TestFileProjectRepo_SaveWithSubdirectory$|' +
-                     'TestFileProjectRepo_List$|TestFileProjectRepo_Delete$|TestFileProjectRepo_FindByRoot$|TestFileProjectRepo_ReturnsCopy$|' +
-                     'TestFileProjectRepo_YAMLWrittenNotJSON$|TestFileProjectRepo_NotFound$|TestFileProjectRepo_InvalidID$|TestFileProjectRepo_ListReturnsAggregateError$|' +
-                     'TestFileServerHistoryRepo_SaveAndGet$|TestFileServerHistoryRepo_Update$|TestFileServerHistoryRepo_AgentCrashLeavesRunningRecord$|' +
-                     'TestFileServerHistoryRepo_ConcurrentSaveGetList$|TestFileServerHistoryRepo_VersionedJSONFormat$|TestFileServerHistoryRepo_DesiredVsObservedState$|' +
-                     'TestFileToolchainRepo_SaveAndGet$|TestFileWorkspaceRepo_SaveAndGet$|TestFileWorkspaceRepo_Delete$|' +
-                     'TestWriteAtomic$|TestWriteFile_CreatesFile$|TestWriteFile_CreatesParentDirs$|TestWriteFile_ReplacesExisting$|' +
-                     'TestWriteFile_PreservesPermissions$|TestWriteFile_NoTempLeak$|TestWriteFile_ConcurrentWrites$|TestWriteAndReadOwner$|TestVerifyOwner$|' +
-                     'TestPrepare$|TestSafeRemove$|' +
-                     'TestPrepareCatalinaBase_CopiesMinimalConf$|TestPrepareCatalinaBase_DoesNotOverwriteExisting$|TestTomcat6Provider_Prepare_CreatesLayoutAndConfig$|' +
-                     'TestEncoding_Recode_GBK_to_UTF8$|TestEncoding_Recode_UTF8_to_GBK_Roundtrip$|TestEncoding_Recode_AddsBOMForUtf8BOM$|' +
-                     'TestPreflight_AbsoluteTarget$|' +
-                     'TestGenerator_DefaultProject_FromLegacySample$|TestGenerator_YAMLOverride$|TestGenerator_CacheHitOnSecondCall$|' +
-                     'TestGenerator_CacheInvalidatedOnConfigChange$|TestGenerator_StatusReportsExistence$|TestGenerator_Invalidate$|TestGenerator_AllWorkspaces$'
-      $extraArgs = @('-count=1','-timeout','180s')
-      if ($IsWindows) {
-        $extraArgs += @('-skip', $skipPattern)
-        Write-Host "  (Windows: skipping 53 file-I/O tests that hit the TEMP dir Access is denied bug — see CR-003)" -ForegroundColor Yellow
-      }
-      & go test @extraArgs ./... 2>&1 | Tee-Object -FilePath $logFile | Out-Null
-      if ($LASTEXITCODE -ne 0) { throw "go test failed" }
-    } finally {
-      Pop-Location
-    }
+    & node (Join-Path $RepoRoot "scripts/test-agent.js") 2>&1 |
+      Tee-Object -FilePath $logFile | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "go test failed" }
   }
 }
 
@@ -416,8 +376,10 @@ if ($SkipAgent -or -not $script:agentProc) {
   Step "ws.auth" {
     # WebSocket auth roundtrip: the client offers
     # `Sec-WebSocket-Protocol: kairo-secret-v1, <secret>`. The server
-    # is expected to negotiate the `kairo-secret-v1` subprotocol
-    # back, which proves it accepted the secret.
+    # validates the adjacent secret token and echoes that token as the
+    # selected protocol. RFC 6455 requires the selected value to be one of
+    # the offered protocols; selecting the secret both proves authentication
+    # and lets browser WebSocket clients complete the handshake.
     $ws = [System.Net.WebSockets.ClientWebSocket]::new()
     $ws.Options.AddSubProtocol("kairo-secret-v1")
     $ws.Options.AddSubProtocol($Secret)
@@ -431,8 +393,8 @@ if ($SkipAgent -or -not $script:agentProc) {
       if ($ws.State -ne [System.Net.WebSockets.WebSocketState]::Open) {
         throw "WS not open after ConnectAsync: state=$($ws.State)"
       }
-      if ($ws.SubProtocol -ne "kairo-secret-v1") {
-        throw "expected negotiated subprotocol 'kairo-secret-v1', got '$($ws.SubProtocol)'"
+      if ($ws.SubProtocol -ne $Secret) {
+        throw "expected negotiated secret subprotocol, got '$($ws.SubProtocol)'"
       }
       Write-Host "  WS subprotocol negotiated: $($ws.SubProtocol)" -ForegroundColor DarkGray
     } finally {

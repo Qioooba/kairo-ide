@@ -3,7 +3,7 @@ import { EditorManager } from '@theia/editor/lib/browser';
 import { MonacoEditor } from '@theia/monaco/lib/browser/monaco-editor';
 import { MessageService } from '@theia/core/lib/common/message-service';
 import { SvnService } from './svn-service';
-import { SvnBlameLine } from './svn-types';
+import { SvnBlameLine } from '../common/svn-types';
 
 interface AnnotatedFile {
   entries: SvnBlameLine[];

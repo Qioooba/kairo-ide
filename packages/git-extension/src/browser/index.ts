@@ -37,7 +37,7 @@ export {
   parsePorcelainStatusZ,
   parsePorcelainStatusLines,
   normalizeFsPath,
-} from './git-path-utils';
+} from '../common/git-path-utils';
 export { GitStore } from './git-store';
 export type { GitChangesState } from './git-store';
 export { GitChangesWidget } from './git-changes-widget';

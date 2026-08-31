@@ -158,6 +158,16 @@ test('debug watch widget is defined', () => {
   assert.match(watch, /class KairoDebugWatchWidget extends ReactWidget/);
 });
 
+test('debug hover Add to Watches persists into the IDEA watch panel', () => {
+  const hover = read('packages/theia-product/src/main/browser/debug-hover-provider.ts');
+  const watches = read('packages/theia-product/src/main/browser/debug-watches-idea.tsx');
+  assert.match(hover, /persistDebugWatch/);
+  assert.doesNotMatch(hover, /not implemented yet/);
+  assert.match(watches, /export function persistDebugWatch/);
+  assert.match(watches, /KAIRO_DEBUG_WATCH_ADDED/);
+  assert.match(watches, /addEventListener\(KAIRO_DEBUG_WATCH_ADDED/);
+});
+
 test('debug session service provides centralized session state', () => {
   const service = read('packages/theia-product/src/main/browser/kairo-debug-session-service.ts');
   assert.match(service, /KairoDebugSessionService/);
@@ -408,9 +418,9 @@ test('status bar avoids bare spaces and empty workspaceId (TP-P2-19)', () => {
 });
 
 test('debug hover/variables use theme CSS variables without Darcula hex (TP-P2-18)', () => {
-  const hover = read('packages/theia-product/src/main/browser/debug-hover-widget.tsx');
+  const hoverCss = read('packages/ui-kit/src/browser/kairo-theme.css');
   const vars = read('packages/theia-product/src/main/browser/debug-variables-idea.tsx');
-  assert.match(hover, /--theia-widget-shadow|--theia-editor-inactiveSelectionBackground/);
+  assert.match(hoverCss, /--theia-widget-shadow|--theia-editor-inactiveSelectionBackground/);
   assert.doesNotMatch(vars, /#6a8759|#6897bb|#a9b7c6|#c0c0c0|#b5b6e3/);
 });
 

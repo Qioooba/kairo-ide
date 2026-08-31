@@ -181,7 +181,7 @@ describe('SVN backend integration (live CLI)', { skip: !svnBin }, () => {
 
   it('parses changelist entries that live outside <target>', async () => {
     // Use parser directly against real CLI XML fixture shape
-    const { parseStatusXml } = require(path.join(__dirname, '..', '..', 'lib', 'browser', 'svn-parser.js'));
+    const { parseStatusXml } = require(path.join(__dirname, '..', '..', 'lib', 'common', 'svn-parser.js'));
     const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <status>
 <target path="${wc.replace(/\\/g, '\\\\')}"></target>

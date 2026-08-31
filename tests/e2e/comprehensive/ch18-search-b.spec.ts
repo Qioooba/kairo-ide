@@ -5,8 +5,16 @@
  */
 import { test, expect, Page } from '@playwright/test';
 import * as path from 'path';
+import { fileURLToPath } from 'node:url';
 import { api, openIde, attachDiagnostics, unexpectedConsoleErrors } from './helpers';
-import { W2, openIdeAt } from './ch18-helpers';
+import {
+  W2,
+  openIdeAt,
+  FIND_ACTION_SHORTCUT,
+  FIND_CLASS_SHORTCUT,
+  FIND_FILE_SHORTCUT,
+  FIND_SYMBOL_SHORTCUT,
+} from './ch18-helpers';
 
 const everywhere = (page: Page) => page.locator('[data-testid="search-everywhere"]');
 
@@ -133,9 +141,7 @@ test('TC-SRCH-041 [P1] Find File 浏览器键位 + 索引结果 + 空查询 rece
   await openIdeAt(page, W2);
   await page.waitForTimeout(1500); // let keybindings finish attaching
 
-  // B.3 remap covers Windows browsers (Ctrl+Shift+N → Alt+Shift+F); this
-  // macOS browser build uses the B.2 mac chord ⇧⌘O through the same guard.
-  await openFindModal(page, 'Meta+Shift+O', 'find-file');
+  await openFindModal(page, FIND_FILE_SHORTCUT, 'find-file');
   await page.locator('[data-testid="find-file-query"]').fill('Util');
   await expect(page.locator('[data-testid="find-file-result"]').first())
     .toContainText('Util.java', { timeout: 20_000 });
@@ -149,7 +155,7 @@ test('TC-SRCH-041 [P1] Find File 浏览器键位 + 索引结果 + 空查询 rece
   await expect(page.getByRole('tab', { name: /Util\.java/ })).toBeVisible({ timeout: 20_000 });
 
   // empty query → recent files (remembered on open)
-  await openFindModal(page, 'Meta+Shift+O', 'find-file');
+  await openFindModal(page, FIND_FILE_SHORTCUT, 'find-file');
   await page.waitForTimeout(600);
   const recent = await page.locator('[data-testid="find-file-result"]').count();
   expect(recent).toBeGreaterThanOrEqual(1);
@@ -161,7 +167,7 @@ test('TC-SRCH-041 [P1] Find File 浏览器键位 + 索引结果 + 空查询 rece
 test('TC-SRCH-042 [P1] Find Class 两段式命中 Greeter（包名剥离启发式）', async ({ page }) => {
   await openIdeAt(page, W2);
   await page.waitForTimeout(1500); // let keybindings finish attaching
-  await openFindModal(page, 'Meta+O', 'find-class');
+  await openFindModal(page, FIND_CLASS_SHORTCUT, 'find-class');
   await page.locator('[data-testid="find-class-query"]').fill('Greeter');
   await expect(page.locator('[data-testid="find-class-result"]').first())
     .toContainText('Greeter', { timeout: 20_000 });
@@ -185,7 +191,7 @@ test('TC-SRCH-043 [P2] Find Symbol kinds 过滤（JDT ready→符号；否则优
   } catch { /* keep false */ }
   console.log('CH18-043 jdtReady:', jdtReady);
 
-  await openFindModal(page, 'Meta+Alt+O', 'find-symbol');
+  await openFindModal(page, FIND_SYMBOL_SHORTCUT, 'find-symbol');
   await page.locator('[data-testid="find-symbol-query"]').fill('doGet');
   await page.waitForTimeout(3000);
 
@@ -209,7 +215,7 @@ test('TC-SRCH-044 [P2] Find Action 有 label 的命令 + 格式化快捷键 deta
   const diag = attachDiagnostics(page);
   await openIde(page);
   await page.waitForTimeout(1500); // let keybindings finish attaching;
-  await openFindModal(page, 'Meta+Shift+A', 'find-action');
+  await openFindModal(page, FIND_ACTION_SHORTCUT, 'find-action');
   const actionInput = page.locator('[data-testid="find-action-query"]');
   await actionInput.fill('Save');
   await expect(actionInput).toHaveValue('Save', { timeout: 5_000 });
@@ -256,7 +262,15 @@ test('TC-SRCH-045 [P2] 路径安全：scheme / 绝对路径 / ..逃逸（含 dec
   }
 
   const ok = String(mod.resolveWorkspaceMatchUri(root, 'src/Util.java'));
-  expect(ok).toContain('/tmp/kairo-w2search/ws/src/Util.java');
+  // Theia URI serialization percent-encodes the Windows drive colon
+  // (`file:///g%3A/...`).  Compare decoded filesystem paths instead of raw
+  // URI text so the assertion is valid on Windows and POSIX hosts alike.
+  const normalizeFsPath = (value: string): string =>
+    process.platform === 'win32' ? value.toLowerCase() : value;
+  expect(normalizeFsPath(path.resolve(fileURLToPath(ok))))
+    .toBe(normalizeFsPath(path.resolve(W2, 'src', 'Util.java')));
   const nested = String(mod.resolveWorkspaceMatchUri(root, 'src/main/java/com/example/Greeter.java'));
-  expect(nested).toContain('/ws/src/main/java/com/example/Greeter.java');
+  expect(normalizeFsPath(path.resolve(fileURLToPath(nested)))).toBe(
+    normalizeFsPath(path.resolve(W2, 'src', 'main', 'java', 'com', 'example', 'Greeter.java')),
+  );
 });

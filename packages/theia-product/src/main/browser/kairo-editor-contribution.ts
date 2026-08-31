@@ -6,7 +6,7 @@
  *   B3.4: Read-only file handling
  */
 
-import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
+import { injectable, inject, optional, postConstruct } from '@theia/core/shared/inversify';
 import {
   DisposableCollection,
   Disposable,
@@ -28,6 +28,7 @@ import { StatusBar, StatusBarAlignment } from '@theia/core/lib/browser';
 import { MonacoEditor } from '@theia/monaco/lib/browser/monaco-editor';
 import { FileService } from '@theia/filesystem/lib/browser/file-service';
 import { AbstractDialog, DialogProps } from '@theia/core/lib/browser/dialogs';
+import { SecondaryWindowHandler } from '@theia/core/lib/browser/secondary-window-handler';
 import { Message } from '@theia/core/shared/@lumino/messaging';
 import * as monaco from '@theia/monaco-editor-core';
 import { JavaOrganizeImports } from '@kairo/java-extension';
@@ -132,6 +133,9 @@ export class KairoEditorContribution implements FrontendApplicationContribution,
   @inject(MessageService) protected readonly messages!: MessageService;
   @inject(PreferenceService) protected readonly preferences!: PreferenceService;
   @inject(ApplicationShell) protected readonly shell!: ApplicationShell;
+  // Theia's browser application binds this service; keep the contribution
+  // constructible in headless/unit-test containers that omit secondary windows.
+  @inject(SecondaryWindowHandler) @optional() protected readonly secondaryWindows?: SecondaryWindowHandler;
   @inject(JavaOrganizeImports) protected readonly organizeImports!: JavaOrganizeImports;
   @inject(StatusBar) protected readonly statusBar!: StatusBar;
   @inject(KairoI18nService) protected readonly i18n!: KairoI18nService;
@@ -189,6 +193,22 @@ export class KairoEditorContribution implements FrontendApplicationContribution,
   /* ------------------------------------------------------------------ */
 
   registerCommands(registry: CommandRegistry): void {
+    registry.registerCommand(
+      { id: 'kairo.editor.moveIntoNewWindow', label: 'Move Editor into New Window' },
+      {
+        execute: () => {
+          const widget = this.editorManager.currentEditor;
+          if (!widget || !widget.isExtractable || !this.secondaryWindows) {
+            this.messages.warn('No extractable editor is active.');
+            return;
+          }
+          this.secondaryWindows.moveWidgetToSecondaryWindow(widget);
+        },
+        isEnabled: () => !!this.secondaryWindows && !!this.editorManager.currentEditor?.isExtractable,
+        isVisible: () => !!this.secondaryWindows && !!this.editorManager.currentEditor?.isExtractable,
+      },
+    );
+
     registry.registerCommand(
       { id: 'kairo.organizeImports', label: 'Kairo: Organize Imports' },
       {

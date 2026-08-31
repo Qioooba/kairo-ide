@@ -889,6 +889,16 @@ const enMessages = {
             title: 'Whole word',
           },
         },
+        history: {
+          title: 'Search history',
+          recent: 'Recent searches',
+          pinned: 'Pinned searches',
+          empty: 'No saved searches',
+          clear: 'Clear history',
+          pin: 'Pin query',
+          unpin: 'Unpin query',
+          remove: 'Remove from history',
+        },
         mode: {
           replace: 'Replace',
           search: 'Search',

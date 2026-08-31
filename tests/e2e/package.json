@@ -14,6 +14,7 @@
     "test:frontend": "npx playwright test --config playwright.config.ts frontend-e2e.spec.ts",
     "test:boundary": "npx playwright test --config playwright.config.ts boundary-e2e.spec.ts",
     "test:windows": "npx playwright test --config playwright.config.ts windows-e2e.spec.ts",
+    "test:desktop": "npx playwright test --config desktop/playwright.config.ts",
     "test:all": "npx playwright test --config playwright.config.ts",
     "test:report": "node test-report.cjs"
   },

@@ -85,7 +85,9 @@ test.describe('SHARD-01: IDE启动 + Shell布局 + 状态栏', () => {
       const welcomeContent = page.locator('.theia-welcome, .welcome-page, [class*="welcome"]');
       const hasWelcome = await welcomeContent.count() > 0;
       await page.screenshot({ path: `${SCREENSHOT_DIR}/TEST-0102/03-welcome-content.png` });
-      expect(hasWelcome || true).toBeTruthy(); // Welcome page is optional
+      if (!hasWelcome) {
+        test.info().annotations.push({ type: 'optional-ui', description: 'Welcome page is not shown for an already-initialized workspace' });
+      }
     });
   });
 

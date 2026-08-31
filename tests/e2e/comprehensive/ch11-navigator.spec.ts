@@ -3,12 +3,12 @@
  * TC-NAV-001..007 from docs/COMPREHENSIVE_TEST_DOCUMENT.md.
  */
 import { test, expect } from '@playwright/test';
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { openIde, attachDiagnostics } from './helpers';
+import { openIde, attachDiagnostics, laneWorkspace } from './helpers';
 
-const WS_ROOT = '/Users/qi/Documents/spaces/kairo-ide/.test-lanes/C/workspace';
+const WS_ROOT = laneWorkspace('C');
 const PROJ = path.join(WS_ROOT, 'legacy-sample');
 
 /** Locate an explorer tree node by its visible label segment. */
@@ -49,7 +49,13 @@ test.describe('Chapter 11 — Navigator', () => {
     await openIde(page);
     await expandNode(page, 'legacy-sample');
     // Key directories and files must be present
-    for (const label of ['src', 'WebRoot', 'lib', 'dist', 'build', '.kairo', '.settings',
+    // `dist` is a generated build artifact and is intentionally excluded from
+    // the checked-in legacy fixture (`legacy-sample/.gitignore`).  The
+    // Explorer must render the source/configuration tree that is actually
+    // present in a clean workspace; generated output is covered by the build
+    // and deployment suites instead of making this navigation test depend on
+    // a previous build having polluted the fixture.
+    for (const label of ['src', 'WebRoot', 'lib', 'build', '.kairo', '.settings',
       'build.xml', 'README.md', 'package.json', 'index.html']) {
       await expect(treeNode(page, label)).toBeVisible({ timeout: 10_000 });
     }
@@ -146,7 +152,11 @@ test.describe('Chapter 11 — Navigator', () => {
     await page.waitForTimeout(800);
 
     // Open a deep file through quick file search instead of the explorer.
-    await page.keyboard.press('Meta+Shift+O'); // kairo.find.file (mac keymap)
+    // The browser runner executes on the host OS.  Sending the macOS Meta
+    // chord on Windows is a no-op (the old test then reported a misleading
+    // auto-reveal failure), so exercise the platform's real keybinding.
+    const findFileShortcut = process.platform === 'darwin' ? 'Meta+Shift+O' : 'Control+Shift+N';
+    await page.keyboard.press(findFileShortcut);
     const quickInput = page.locator('.kairo-find-input').first();
     try {
       await quickInput.waitFor({ state: 'visible', timeout: 6_000 });
@@ -155,7 +165,7 @@ test.describe('Chapter 11 — Navigator', () => {
       await page.keyboard.press('F1');
       const pal = page.locator('.quick-input-widget input.input').first();
       await pal.waitFor({ state: 'visible', timeout: 10_000 });
-      await pal.fill('Toggle Kairo Find File');
+      await pal.fill('Kairo Find File');
       await page.waitForTimeout(800);
       await page.keyboard.press('Enter');
       await quickInput.waitFor({ state: 'visible', timeout: 10_000 });
@@ -178,7 +188,16 @@ test.describe('Chapter 11 — Navigator', () => {
 
   test('TC-NAV-005: VCS decorations after git init/commit/modify', async ({ page }) => {
     // Prepare a fresh git repo INSIDE legacy-sample (workspace is not itself a repo).
-    execSync('rm -rf .git && git init -q && git config user.email t@t.io && git config user.name t && git add -A && git commit -qm init && echo "// nav005 change" >> README.md && echo untracked > nav005-untracked.txt', { cwd: PROJ, stdio: 'ignore' });
+    const readmePath = path.join(PROJ, 'README.md');
+    const originalReadme = fs.readFileSync(readmePath);
+    fs.rmSync(path.join(PROJ, '.git'), { recursive: true, force: true });
+    execFileSync('git', ['init', '-q'], { cwd: PROJ, stdio: 'ignore' });
+    execFileSync('git', ['config', 'user.email', 't@t.io'], { cwd: PROJ, stdio: 'ignore' });
+    execFileSync('git', ['config', 'user.name', 't'], { cwd: PROJ, stdio: 'ignore' });
+    execFileSync('git', ['add', '-A'], { cwd: PROJ, stdio: 'ignore' });
+    execFileSync('git', ['commit', '-qm', 'init'], { cwd: PROJ, stdio: 'ignore' });
+    fs.appendFileSync(readmePath, '// nav005 change\n');
+    fs.writeFileSync(path.join(PROJ, 'nav005-untracked.txt'), 'untracked\n');
 
     try {
       await openIde(page);
@@ -206,7 +225,9 @@ test.describe('Chapter 11 — Navigator', () => {
       const color = await modTail.evaluate((el: HTMLElement) => getComputedStyle(el).color);
       console.log(`[TC-NAV-005] modified decoration computed color=${color}`);
     } finally {
-      execSync('rm -rf .git nav005-untracked.txt && git checkout 2>/dev/null; true', { cwd: PROJ, stdio: 'ignore' });
+      fs.rmSync(path.join(PROJ, '.git'), { recursive: true, force: true });
+      fs.rmSync(path.join(PROJ, 'nav005-untracked.txt'), { force: true });
+      fs.writeFileSync(readmePath, originalReadme);
     }
   });
 

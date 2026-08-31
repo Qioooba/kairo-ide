@@ -167,6 +167,7 @@ test.describe('SHARD-EF 构建/部署/服务器', () => {
     // At least check that log-empty or log lines appear
     const hasEmpty = await page.locator('[data-testid="log-empty"]').count();
     const hasContent = await page.locator('[data-testid="log-viewer"] .log-line, [data-testid="log-viewer"] pre').count();
-    expect(exists > 0 || hasEmpty > 0 || hasContent >= 0).toBe(true);
+    expect(exists, 'Tomcat Logs view must be registered').toBeGreaterThan(0);
+    expect(hasEmpty + hasContent, 'Tomcat Logs view must render empty state or log lines').toBeGreaterThan(0);
   });
 });

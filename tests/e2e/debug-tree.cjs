@@ -17,7 +17,10 @@ const path = require('path');
     if (!r.ok()) logs.push(`[response] ${r.status()} ${r.url()}`);
   });
 
-  const url = 'http://127.0.0.1:18301/?kairoAgent=http://127.0.0.1:18300#/tmp/kairo-e2e-workspaces/legacy-sample';
+  const theiaUrl = process.env.THEIA_URL || 'http://127.0.0.1:18301';
+  const agentUrl = process.env.AGENT_URL || 'http://127.0.0.1:18300';
+  const workspace = process.env.THEIA_WORKSPACE || path.resolve(__dirname, '..', '..', '.test-lanes', 'A', 'workspace');
+  const url = `${theiaUrl}/?kairoAgent=${encodeURIComponent(agentUrl)}#${encodeURI(workspace)}`;
   await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
   await page.waitForSelector('#theia-app-shell, #theia-shell, .theia-shell', { state: 'attached', timeout: 30_000 });
   await page.waitForTimeout(30_000);
@@ -425,7 +428,7 @@ const path = require('path');
   console.log('Attempting workspaceService.open via container...');
   let openResult = { skipped: true };
   try {
-    openResult = await page.evaluate(async () => {
+    openResult = await page.evaluate(async (workspacePath) => {
       const container = window.theia.container;
       // Try to find WorkspaceService by searching all bound singletons
       let ws = undefined;
@@ -450,11 +453,11 @@ const path = require('path');
       search(container);
       if (!ws) return { error: 'WorkspaceService not found in container' };
       const URI = window.theia.URI || window.theia.core.URI;
-      const uri = new URI('/tmp/kairo-e2e-workspaces/legacy-sample');
+      const uri = new URI(workspacePath);
       await ws.open(uri);
       await new Promise(r => setTimeout(r, 3000));
       return { workspace: ws.workspace, roots: await ws.roots, recent: ws.recentWorkspaces };
-    });
+    }, workspace);
     console.log('Open result:', JSON.stringify(openResult, null, 2));
   } catch (e) {
     console.log('workspaceService.open failed:', e.message);

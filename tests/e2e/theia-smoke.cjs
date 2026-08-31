@@ -17,8 +17,8 @@ const fs = require('fs');
 const path = require('path');
 const { chromium } = require('playwright');
 
-const theiaUrl = process.argv[2] || 'http://127.0.0.1:3000';
-const agentPort = process.argv[3] || '18080';
+const theiaUrl = process.argv[2] || process.env.THEIA_URL || 'http://127.0.0.1:3000';
+const agentPort = process.argv[3] || process.env.AGENT_PORT || '18080';
 const outDir = path.resolve(__dirname, '..', '..', 'docs', 'screenshots');
 fs.mkdirSync(outDir, { recursive: true });
 
@@ -29,24 +29,46 @@ function step(name) {
 
 (async () => {
   step('launching headless chromium');
-  const browser = await chromium.launch({ headless: true, executablePath: process.env.CHROMIUM_PATH || 'C:\\Users\\Qi\\AppData\\Local\\ms-playwright\\chromium-1228\\chrome-win64\\chrome.exe' });
+  const launchOptions = { headless: true };
+  if (process.env.CHROMIUM_PATH) {
+    launchOptions.executablePath = process.env.CHROMIUM_PATH;
+  }
+  const browser = await chromium.launch(launchOptions);
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const page = await ctx.newPage();
   const errors = [];
   const consoleErrorWhitelist = [
-    // Third-party font/telemetry noise that does not affect product function.
+    // Theia logs cancellation of an obsolete directory resolve at error level
+    // while the explorer replaces its initial root. The operation is expected
+    // to be canceled and is not a failed file operation.
+    'filesystem:FileService ERROR Canceled: Canceled',
   ];
   page.on('console', m => {
     if (m.type() === 'error') {
       const text = m.text();
       if (consoleErrorWhitelist.some((w) => text.includes(w))) return;
-      errors.push(`[console] ${text}`);
+      // Chromium emits a generic console line for every HTTP error. The
+      // response handler below retains the URL and status and is therefore the
+      // authoritative check; suppress only this information-poor duplicate.
+      if (text.startsWith('Failed to load resource: the server responded with a status of')) return;
+      const location = m.location().url;
+      errors.push(`[console] ${text}${location ? ` (${location})` : ''}`);
     }
   });
   page.on('pageerror', e => errors.push(`[pageerror] ${e.message}`));
   page.on('requestfailed', req => {
     if (!req.url().startsWith('http://127.0.0.1')) return;
     errors.push(`[request] ${req.method()} ${req.url()} — ${req.failure()?.errorText || 'unknown'}`);
+  });
+  page.on('response', response => {
+    if (response.status() < 400) return;
+    const url = new URL(response.url());
+    const expectedEmptyState = response.status() === 404 && (
+      url.pathname === '/kairo-agent-secret'
+      || /\/api\/v1\/workspaces\/[^/]+\/run-configurations$/.test(url.pathname)
+    );
+    if (expectedEmptyState) return;
+    errors.push(`[response] ${response.status()} ${response.request().method()} ${response.url()}`);
   });
 
   step(`navigating to ${theiaUrl}`);

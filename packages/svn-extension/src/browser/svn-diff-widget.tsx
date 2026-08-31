@@ -20,7 +20,7 @@ import { QuickInputService } from '@theia/core/lib/browser/quick-input/quick-inp
 import { FileService } from '@theia/filesystem/lib/browser/file-service';
 import { WorkspaceService } from '@theia/workspace/lib/browser';
 import { SvnService } from './svn-service';
-import { SvnLogEntry } from './svn-types';
+import { SvnLogEntry } from '../common/svn-types';
 
 export type SvnDiffMode = 'local-base' | 'local-head' | 'local-rev' | 'rev-rev';
 

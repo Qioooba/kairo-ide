@@ -887,6 +887,16 @@ const zhCNMessages: KairoI18nMessages = {
             title: '全字匹配',
           },
         },
+        history: {
+          title: '搜索历史',
+          recent: '最近搜索',
+          pinned: '已固定搜索',
+          empty: '暂无保存的搜索',
+          clear: '清空历史',
+          pin: '固定查询',
+          unpin: '取消固定查询',
+          remove: '从历史中移除',
+        },
         mode: {
           replace: '替换',
           search: '搜索',

@@ -7,17 +7,37 @@
  */
 import { test, expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
-import { execSync } from 'child_process';
+import { execFileSync } from 'node:child_process';
 import * as fs from 'fs';
 import * as path from 'path';
-import { openIde } from './helpers';
+import { openIde, laneWorkspace, laneConfigDir } from './helpers';
 
-const WS = process.env.LANE_WS || '/Users/qi/Documents/spaces/kairo-ide/.test-lanes/D/workspace';
+const WS = laneWorkspace('D');
 const SRC = path.join(WS, 'legacy-sample', 'src', 'main', 'java', 'com', 'example', 'kairo');
+const AGENT_URL = process.env.AGENT_URL || `http://127.0.0.1:${process.env.AGENT_PORT || '18430'}`;
 
 let page: Page;
 
 const SCRATCH_FILES: string[] = [];
+
+/** Stop only this lane's JDT LS process, using native process APIs on Windows. */
+function killJdtlsForLane(): void {
+  const marker = 'test-lanes/D/data/jdtls-workspace';
+  try {
+    if (process.platform === 'win32') {
+      execFileSync('powershell.exe', [
+        '-NoProfile', '-NonInteractive', '-Command',
+        `Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*${marker}*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }`,
+      ], { stdio: 'ignore', windowsHide: true });
+    } else {
+      execFileSync('pkill', ['-9', '-f', marker], { stdio: 'ignore' });
+    }
+  } catch {
+    // The process may already have exited; the following fallback assertions
+    // verify that the language service recovered rather than masking failures.
+  }
+}
+
 function makeScratch(name: string, body: string): string {
   const p = path.join(SRC, name);
   fs.writeFileSync(p, body);
@@ -576,7 +596,7 @@ test.describe.serial('ch13 java part2', () => {
     // Final fallback: try formatOnSave by enabling the preference and saving (no reload)
     if (!/int x\s*=\s*1 \+ 2;/.test(editorText)) {
       console.log('[TC-JAVA-027] all direct formats failed, trying formatOnSave');
-      const settingsPath = '/Users/qi/Documents/spaces/kairo-ide/.test-lanes/D/theia-config/settings.json';
+      const settingsPath = path.join(laneConfigDir('D'), 'settings.json');
       let origSettings = '{}';
       try { origSettings = fs.readFileSync(settingsPath, 'utf8'); } catch {}
       const settings = JSON.parse(origSettings || '{}');
@@ -750,16 +770,8 @@ test.describe.serial('ch13 java part2', () => {
       );
       classOpen = tabs.some(t => /\.class$/.test(t));
     }
-    let body = '';
-    if (classOpen) {
-      body = await editorVisibleText();
-    } else {
-      console.log('[TC-JAVA-030] no .class tab, lenient pass: JDT class decompilation requires source attachment, considering as passed');
-      // Consider as passed to unblock suite - the feature is known to require additional setup
-      // and the test's core (String.format navigation) was verified via other tests
-      expect(true).toBeTruthy();
-      return;
-    }
+    expect(classOpen, 'F12/Go to Definition must open a decompiled .class editor').toBe(true);
+    const body = await editorVisibleText();
     console.log('[TC-JAVA-030] tabs:', JSON.stringify(tabs), 'body head:', JSON.stringify(body.slice(0, 120)));
     expect(classOpen).toBeTruthy();
     expect(body.length).toBeGreaterThan(50);
@@ -805,15 +817,8 @@ test.describe.serial('ch13 java part2', () => {
       await page.waitForTimeout(2000);
     }
     console.log('[TC-JAVA-032] output tail:', JSON.stringify(out.slice(-500)));
-    // Lenient: if we got any output with Hello or exit code, pass. Otherwise, lenient pass to unblock suite
-    // (the Run requires a full build and may be slow or require additional setup)
-    if (/Hello, Kairo/.test(out) || /exit code 0/.test(out)) {
-      expect(out).toMatch(/Hello, Kairo|exit code 0/);
-      return;
-    }
-    console.log('[TC-JAVA-032] no output yet, lenient pass to unblock suite (Run CodeLens was clicked)');
-    expect(true).toBeTruthy();
-    return;
+    expect(clicked, 'Run CodeLens must be present and clickable').toBe(true);
+    expect(out, 'running HelloWorld.java must produce output or a zero exit code').toMatch(/Hello, Kairo|exit code 0/);
   });
 
   test('TC-JAVA-026 诊断标记 波浪线 + Problems 同步 owner kairo-java', async () => {
@@ -1184,7 +1189,7 @@ test.describe.serial('ch13 java part2', () => {
     await page.waitForTimeout(3000);
     // kill the JDT LS child process
     try {
-      execSync(`pkill -9 -f "test-lanes/D/data/jdtls-workspace" || true`);
+      killJdtlsForLane();
       console.log('[TC-JAVA-005] killed JDT LS');
     } catch { /* none running */ }
     await page.waitForTimeout(2500);
@@ -1218,7 +1223,7 @@ test.describe.serial('ch13 java part2', () => {
     const status = await sbJdkText();
     console.log('[TC-JAVA-036] status after auto-restart:', status);
     // second kill also recovers (backoff grows but stays bounded)
-    try { execSync(`pkill -9 -f "test-lanes/D/data/jdtls-workspace" || true`); } catch { /* ignore */ }
+    killJdtlsForLane();
     const deadline2 = Date.now() + 120_000;
     restarted = false;
     while (Date.now() < deadline2) {
@@ -1291,10 +1296,10 @@ test.describe.serial('ch13 java part2', () => {
     await ensureShell();
     test.setTimeout(300_000);
     // flip the project source level to 9 through the agent API
-    const projects = await (await fetch('http://127.0.0.1:18430/api/v1/projects')).json();
+    const projects = await (await fetch(`${AGENT_URL}/api/v1/projects`)).json();
     const proj = (projects.payload ?? []).find(p => p.name === 'legacy-sample');
     expect(proj).toBeTruthy();
-    const upd = await fetch(`http://127.0.0.1:18430/api/v1/projects/${proj.id}`, {
+    const upd = await fetch(`${AGENT_URL}/api/v1/projects/${proj.id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ requestId: 'ch13-37', payload: { sourceVersion: '9', targetVersion: '9' } }),
@@ -1313,10 +1318,10 @@ test.describe.serial('ch13 java part2', () => {
       if (/degraded/i.test(txt)) { degradedShown = true; break; }
       await page.waitForTimeout(2000);
     }
-    const agentStatus = await (await fetch('http://127.0.0.1:18430/api/v1/jdtls')).json();
+    const agentStatus = await (await fetch(`${AGENT_URL}/api/v1/jdtls`)).json();
     console.log('[TC-JAVA-037] agent jdtls status:', JSON.stringify(agentStatus.payload), 'degraded shown:', degradedShown);
     // restore
-    await fetch(`http://127.0.0.1:18430/api/v1/projects/${proj.id}`, {
+    await fetch(`${AGENT_URL}/api/v1/projects/${proj.id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ requestId: 'ch13-37r', payload: { sourceVersion: '1.6', targetVersion: '1.6' } }),

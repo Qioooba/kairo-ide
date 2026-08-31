@@ -132,7 +132,15 @@ export const SearchResultsPanel: React.FC<SearchResultsPanelProps> = ({
   i18n,
 }) => {
   const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
-  const groups = React.useMemo(() => groupMatchesByFile(state.matches), [state.matches]);
+  // Streaming searches append to one stable matches buffer for throughput.
+  // The revision is the cache-invalidation signal; relying on array identity
+  // leaves the docked view stuck at its initial empty grouping while totals
+  // continue updating.
+  const streamRevision = state.streamState?.revision ?? 0;
+  const groups = React.useMemo(
+    () => groupMatchesByFile(state.matches),
+    [state.matches, streamRevision],
+  );
   const flatItems = React.useMemo((): FlatItem[] => {
     let idx = 0;
     const items: FlatItem[] = [];

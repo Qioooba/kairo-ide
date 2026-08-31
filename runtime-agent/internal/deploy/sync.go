@@ -72,6 +72,14 @@ func (e *safeDeployEngine) Execute(ctx context.Context, plan domain.DeployPlan, 
 			}
 		}
 
+		// Capture existence before the write. Checking after copy would always
+		// report a modification because the newly-created target already exists.
+		targetExisted := false
+		if entry.Entry.Action != domain.DeployActionDelete {
+			_, statErr := os.Lstat(entry.ResolvedTarget)
+			targetExisted = statErr == nil
+		}
+
 		if err := e.executeEntry(ctx, vp, entry); err != nil {
 			result.Failed++
 			result.Partial = true
@@ -84,12 +92,9 @@ func (e *safeDeployEngine) Execute(ctx context.Context, plan domain.DeployPlan, 
 
 		// Record add/modify
 		if entry.Entry.Action == domain.DeployActionDelete {
-			e.recordDeleteResult(result, "", result.RootCanon)
+			e.recordDeleteResult(result, entry.ResolvedTarget, result.RootCanon)
 		} else {
-			// Check if target existed before copy
-			_, statErr := os.Lstat(entry.ResolvedTarget)
-			isAdd := statErr != nil
-			e.recordEntryResult(result, entry, isAdd)
+			e.recordEntryResult(result, entry, !targetExisted)
 		}
 		result.Succeeded++
 	}

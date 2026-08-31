@@ -103,8 +103,8 @@ test.describe('SHARD-HI 搜索/视图/重连', () => {
     const hasSearchModal = await page.locator('[data-testid="search-center-modal"], [data-testid="search-everywhere"]').count();
     const hasPalette = await page.locator('.quick-input-widget:visible').count();
     saveJson('H01', 'result.json', { hasSearchModal, hasPalette, found, note: found ? 'ok' : 'search command not in palette (query "搜索" yields no row; try "Everywhere")' });
-    // Soft check: palette open/close is the real UX; search entry missing is a finding, not a hard fail
-    expect(hasPalette >= 0).toBe(true);
+    expect(found, 'Search Everywhere must be discoverable from the command palette').toBe(true);
+    expect(hasSearchModal + hasPalette, 'search command must open a search surface or leave the palette visible').toBeGreaterThan(0);
     await page.keyboard.press('Escape');
   });
 

@@ -7,7 +7,7 @@ import { MessageService } from '@theia/core/lib/common/message-service';
 import { QuickInputService } from '@theia/core/lib/browser/quick-input/quick-input-service';
 import { WorkspaceService } from '@theia/workspace/lib/browser';
 import { SvnService } from './svn-service';
-import { SvnLogEntry } from './svn-types';
+import { SvnLogEntry } from '../common/svn-types';
 
 interface SvnHistoryProps {
   svnService: SvnService;

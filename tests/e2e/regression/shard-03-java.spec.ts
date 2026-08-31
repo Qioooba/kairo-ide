@@ -16,6 +16,7 @@ import {
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
+import { regressionWorkspace } from './paths';
 
 const SHARD_ID = 'shard-03';
 const SCREENSHOT_DIR = `test-results/screenshots/${SHARD_ID}`;
@@ -23,7 +24,7 @@ const SCREENSHOT_DIR = `test-results/screenshots/${SHARD_ID}`;
 // KAIRO-RC-WEB-2026-07-25-05: the test workspace must live inside the
 // Theia-registered workspace root (e.g. /tmp/kairo-k4-workspace) so
 // the runtime agent's `resolveProjectImportRoot` accepts the path.
-const TEST_WORKSPACE = '/tmp/kairo-k4-workspace/projects/workspace-shard03';
+const TEST_WORKSPACE = regressionWorkspace('shard03');
 const LEGACY_SAMPLE = path.resolve(__dirname, '..', '..', '..', 'legacy-sample');
 
 const PROJECT_ID = 'project-workspace-shard03';

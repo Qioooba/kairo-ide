@@ -1,8 +1,8 @@
 # Kairo IDE 全模块浏览器版测试 · 主进度文档
 
 > **测试依据**: [docs/COMPREHENSIVE_TEST_DOCUMENT.md](../../COMPREHENSIVE_TEST_DOCUMENT.md)（v0.1.0，738 用例）
-> **形态**: 仅 BROWSER（macOS 环境，DESKTOP 列一律 N/A；第 2 章整章跳过）
-> **构建**:增量构建（2026-08-28 02:00 `@kairo/jsp-extension` + `apps/browser` 修复 BUG-600/601；2026-08-27 18:26 `@kairo/encoding-extension` + `apps/browser` 修复 BUG-800），Go agent 保持 2026-08-26 编译。
+> **形态**: Windows 主机优先覆盖 Browser + Desktop；Browser 章节按平台选择 Cmd/Ctrl，Desktop 使用真实 Electron。安装器/Tomcat/JDT 等需外部环境的章节仍按条件标记 N/A/延后。
+> **构建**: 2026-08-30 已完成 `build:packages`、`build:browser`、`build:desktop` 全量刷新（browser/node 0 error，DOM-free backend boundary 通过，Go agent 重建）。
 > **开始时间**: 2026-08-26 03:40 (本地)
 > **状态图例**: ✅通过 ❌失败 ⛔阻断 ⏭️跳过 🔄进行中 ⬜未开始 N/A=仅桌面用例
 
@@ -52,21 +52,27 @@
 - BUG-20260828-600 (P2) JSON/XML/WebXml 补全占位 range 导致建议被过滤 — `json-language.ts:103,119` / `xml-dtd-completion.ts:25` / `webxml-completion.ts:32,51` 硬编码 `range:{1,1,1,1}`，Monaco 过滤非光标 range 的建议；改为 `model.getWordUntilPosition` 的 `word` range 注入
 - BUG-20260828-601 (P1) XML 属性补全分支永不可达 — `xml-dtd-completion.ts:134` 的 `isInsideOpenTag` 元素分支恒先命中，属性分支重叠；改为先判 `afterLt` 含空格则属性，否则元素
 - BUG-20260828-602 (P0-阻塞构建) `search-extension` 合并冲突残留 `<<<<<<<` 导致 `apps/browser` 生产构建失败 — `find-action-model.ts:88` / `find-action-widget.tsx:26` / `kairo-product-frontend-module.ts:807` 清理冲突标记
-- BUG-20260828-603 (观察) Properties 保存未做 `\uXXXX` 转义 — `testKey=你好` 落盘为 UTF-8 裸字节 `���` 而非 `\u4f60\u597d`，未静默写 `?` 但不符合 `ISO-8859-1+\uXXXX` 规格（已记录未修复）
+- BUG-20260828-603 (P1) Properties 保存未做 `\uXXXX` 转义 — `KairoFileService` 对 `.properties` 在 write/update 路径做 native2ascii（ISO-8859-1 + `\uXXXX`，补充平面输出代理对）；显式 “Save with Encoding” UTF-8 仍写原生 UTF-8。已修
 
 **W2-B 修复（详见 ch17.md，2026-08-27，通道 B 1.3m 回归）**:
 - BUG-800 (P2) Tab 编码后缀未渲染 — `encoding-tab-decorator.ts:50` 仅 `Navigatable.is` 强校验且仅 `onCreated/onDidChangeEncoding`，已加 `duck-typing` 回退与 `onCurrentEditorChanged` + 可选 `ActiveProjectService.onDidChangeProject` 监听，`pnpm --filter @kairo/encoding-extension build && cd apps/browser && pnpm build` 后重启 lane B 回归 16/16
 - BUG-801 (观察 P3) ASCII 回退 `utf-8 0.9` 误判 — `memEncoder.Detect` 硬编码 `UTF8` 未取项目 `encoding`，`__kairo_ascii.txt` 的 API 误报 `utf-8 0.9` 而状态栏正确 `gbk *`（前端文件夹覆盖）；不阻断
 - BUG-802 (观察 P3) `directoryEncodingOverrides` 未持久化 — `ProjectToConfig` 丢失该字段，`src/:utf-8` 内存注入重启丢失；测试经 per-file `Reopen` 演示最深优先
 
+**Windows 阶段修复（2026-08-29，详见 ch03.md）**:
+- BUG-20260829-900 (P0-阻塞构建) `packages/git-extension/src/browser/git-service.ts:427` — 合并提交引入的 `run()` 引用未定义符号 `execFileAsync`/`gitOpts`，`pnpm -r build` 全链失败（browser 版无法构建）。修复：改为经 `this.exec()` 走 Node 后端 RPC（浏览器包禁用 child_process 是既定架构），保留"裁剪 stdout + 失败抛 stderr 详情"契约
+- ENV-20260829-901 (P0-环境) lane.sh 生成的 agent.yaml 用 MSYS 路径 `/g/...`，Go agent 解析为 `G:\g\...` → dataDir 落在通道外、reset 失效 — `write_config` 经 `cygpath -m` 转换
+- ENV-20260829-902 (P1-环境) lane.sh 停止逻辑在 Git Bash 失效（MSYS pid ≠ Windows pid，kill/lsof/pkill 不可用）→ netstat 反查真 pid + `taskkill //F //T` 树杀 + pid 文件写 Windows pid
+- TEST-20260829-903 (P2-基建) smoke WELC 前提改纯净空工作区（legacy-sample `.kairo` 自动绑定抑制 Welcome 属正确行为）；ch05 Open 对话框树行 title 共享 → 按标签段匹配 + ArrowRight 展开；FileService `Canceled` 加入良性 allowlist
+
 ## 三、章节进度总览
 
 | 章节 | 内容 | 用例数(B列) | 通过 | 失败 | 阻断 | 跳过/N-A | 状态 | 详情 |
 |------|------|------------|------|------|------|----------|------|------|
 | 第2章 | 安装卸载 | — | — | — | — | 全部N/A | ⏭️ | 仅Windows桌面 |
-| 第3章 | 启动退出(B列) | 12 | 3 | 0 | 0 | 9待测 | 🔄 | smoke已过3条(LAUNCH-061/062/064部分) |
-| 第4章 | 窗口布局主题 | 9 | 0 | 0 | 0 | 9 | ⬜ | |
-| 第5章 | 菜单栏 | 33 | 57 | 0 | 0 | 9 | ✅ | W1A完成：57✅/9⏭️/0❌（66条含子菜单） |
+| 第3章 | 启动退出(B列) | 12 | 14 | 0 | 0 | 3延后 | ✅ | Win完成：smoke3条+ch03 spec 10/10（002/013/014/021/022/023/041/042/063/064/065）；056/057/066 延后至 Tomcat/桌面阶段；桌面列(003-012等)待桌面阶段 |
+| 第4章 | 窗口布局主题 | 9 | 9 | 0 | 0 | 0 | ✅ | Windows Chromium 通道C串行 9/9（4.8m）；含主题、DockPanel/状态栏持久化布局归一化、分栏与二级窗口 |
+| 第5章 | 菜单栏 | 33 | 57 | 0 | 0 | 9 | ✅ | W1A完成：57✅/9⏭️/0❌（66条含子菜单）；**Windows 2026-08-29 全量复验 38 tests passed/9 skipped/0 failed（13.5m，通道A）** |
 | 第6章 | 工具栏 | 11 | 11 | 0 | 0 | 0 | ✅ | W1A完成：修复P0工具栏不挂载 |
 | 第7章 | 状态栏 | 11 | 11 | 0 | 0 | 0 | ✅ | W1A完成 |
 | 第8章 | 欢迎页 | 11 | 11 | 0 | 0 | 0 | ✅ | W1-B 完成：9✅/0❌ (3.8m)，BUG-200 修复后双向验证通过 |
@@ -79,7 +85,7 @@
 | 第15章 | XML/DTD | 12 | 12 | 0 | 0 | 0 | ✅ | W2 完成：12✅/0❌ (3.6m)，BUG-600/601 修复后 |
 | 第16章 | JSON/Properties | 8 | 8 | 0 | 0 | 0 | ✅ | W2 完成：8✅/0❌ (50.9s)，BUG-600 修复后，603 观察 |
 | 第17章 | 编码GBK专项 | 16 | 16 | 0 | 0 | 0 | ✅ | B 通道 16✅ (1.3m)，修复 BUG-800 并回归，801/802 观察 |
-| 第18章 | 搜索全家桶 | 24 | 24 | 0 | 0 | 0 | ✅ | W2E完成23✅+011部分(P3缺history下拉UI)；修BUG-500~506 |
+| 第18章 | 搜索全家桶 | 27 | 27 | 0 | 0 | 0 | ✅ | Windows Chromium 串行完成 17+8+2；Search Center 历史/固定菜单、流式 docked Find、Replace 事务均已实测；修 BUG-500~506 与历史 UI 缺口 |
 | 第19章 | 构建系统 | 19 | 0 | 0 | 0 | 19 | ⬜ | Wave3 |
 | 第20章 | Maven视图 | 8 | 0 | 0 | 0 | 8 | ⬜ | Wave3 |
 | 第21章 | Tomcat/部署/热更 | 30 | 0 | 0 | 0 | 30 | ⬜ | Wave3 |
@@ -120,5 +126,6 @@
 5. 更新本表与章节文档。
 
 ---
-*最后更新: 2026-08-27 18:27 Wave2-B ch17 完成（通道 B 16✅/0❌ 1.3m，缺陷 1 项已修复并回归 2 项观察）*
+*最后更新: 2026-08-30 Windows 阶段：Browser/desktop 构建与 Electron 4/4 通过；ch04 9/9、ch11 7/7、ch12 17/17、ch18 27/27；全仓 unit/typecheck/lint/Go 回归通过。*
+*历史: 2026-08-27 18:27 Wave2-B ch17 完成（通道 B 16✅/0❌ 1.3m，缺陷 1 项已修复并回归 2 项观察）*
 *历史: 2026-08-28 02:00 Wave2 ch14/15/16 完成（通道 E 21+12+8=41 用例，缺陷 3 项已修复+1 观察，合并冲突 1 项阻塞构建已清理）*

@@ -11,7 +11,7 @@ import { KairoI18nService } from '@kairo/i18n';
 import { KairoSearchSessionModel, type SearchSessionState } from './search-session-model';
 import { SearchReplaceService, type ReplaceApplyResult, type ReplacePlan } from './search-replace-service';
 import { resolveWorkspaceMatchUri } from './search-path';
-import { SearchScopeModel, type SearchScope, SCOPE_OPTIONS } from './search-scope-model';
+import { SearchScopeModel, type SearchHistoryEntry, type SearchScope, SCOPE_OPTIONS } from './search-scope-model';
 import { parseFileMask, mergeGlobs } from './file-mask';
 import { groupMatchesByFile, sameLineContext, multiLineContext, getSearchFileName, getSearchFileDir, getSearchFileIcon, matchPreviewParts } from './search-result-utils';
 import { SearchResultsWidget } from './search-results-widget';
@@ -106,8 +106,42 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
   const [showPreview, setShowPreview] = React.useState(true);
   const [currentMode, setCurrentMode] = React.useState<'search' | 'replace'>(mode);
   const [showAdvanced, setShowAdvanced] = React.useState(false);
+  const [historyOpen, setHistoryOpen] = React.useState(false);
+  const [historyRevision, setHistoryRevision] = React.useState(0);
   const containerRef = React.useRef<HTMLDivElement>(null);
   const inputRef = React.useRef<HTMLInputElement>(null);
+
+  // Read the model on every render. History is mutated after a search has
+  // completed (outside the session-state update), so memoizing only on the
+  // model object would show a stale empty menu until a full widget refresh.
+  const history = scopeModel?.getRecentQueries(10) ?? [];
+  const pinned = scopeModel?.getPinned() ?? [];
+
+  const loadHistoryEntry = (entry: SearchHistoryEntry): void => {
+    setQuery(entry.query);
+    setRegex(entry.isRegex);
+    setCaseSensitive(entry.caseSensitive);
+    setWholeWord(entry.wholeWord);
+    setScope(entry.scope);
+    scopeModel?.setScope(entry.scope);
+    setHistoryOpen(false);
+    inputRef.current?.focus();
+    inputRef.current?.select();
+  };
+
+  const togglePinned = (entry: SearchHistoryEntry): void => {
+    if (scopeModel?.isPinned(entry.query)) {
+      scopeModel.unpinQuery(entry.query);
+    } else {
+      scopeModel?.pinQuery(entry);
+    }
+    setHistoryRevision(value => value + 1);
+  };
+
+  const removeHistory = (entry: SearchHistoryEntry): void => {
+    scopeModel?.removeFromHistory(entry);
+    setHistoryRevision(value => value + 1);
+  };
 
   React.useEffect(() => {
     setCurrentMode(mode);
@@ -545,6 +579,108 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
                 >
                   W
                 </button>
+                <button
+                  type="button"
+                  className={`kairo-search-filter-btn kairo-search-history-btn${historyOpen ? ' is-active' : ''}`}
+                  onClick={() => setHistoryOpen(value => !value)}
+                  title={t('widget.search.center.history.title')}
+                  aria-label={t('widget.search.center.history.title')}
+                  aria-expanded={historyOpen}
+                  data-testid="search-history-toggle"
+                >
+                  <span className="codicon codicon-history" aria-hidden="true" />
+                </button>
+                {historyOpen && (
+                  <div
+                    className="kairo-search-history-menu"
+                    role="menu"
+                    data-testid="search-history-menu"
+                    data-history-revision={historyRevision}
+                    onClick={event => event.stopPropagation()}
+                  >
+                    {pinned.length > 0 && (
+                      <div className="kairo-search-history-section">
+                        <div className="kairo-search-history-heading">{t('widget.search.center.history.pinned')}</div>
+                        {pinned.map(entry => (
+                          <div className="kairo-search-history-entry" key={`pinned-${entry.query}-${entry.timestamp}`}>
+                            <button
+                              type="button"
+                              className="kairo-search-history-query"
+                              role="menuitem"
+                              onClick={() => loadHistoryEntry(entry)}
+                              title={entry.query}
+                            >
+                              <span className="codicon codicon-pinned" aria-hidden="true" />
+                              <span>{entry.query}</span>
+                            </button>
+                            <button
+                              type="button"
+                              className="kairo-search-history-action"
+                              onClick={() => togglePinned(entry)}
+                              aria-label={t('widget.search.center.history.unpin')}
+                              title={t('widget.search.center.history.unpin')}
+                            >
+                              <span className="codicon codicon-pin" aria-hidden="true" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <div className="kairo-search-history-section">
+                      <div className="kairo-search-history-heading">
+                        <span>{t('widget.search.center.history.recent')}</span>
+                        {history.length > 0 && (
+                          <button
+                            type="button"
+                            className="kairo-search-history-clear"
+                            onClick={() => { scopeModel?.clearHistory(); setHistoryRevision(value => value + 1); }}
+                          >
+                            {t('widget.search.center.history.clear')}
+                          </button>
+                        )}
+                      </div>
+                      {history.map(entry => (
+                        <div className="kairo-search-history-entry" key={`recent-${entry.query}-${entry.timestamp}`}>
+                          <button
+                            type="button"
+                            className="kairo-search-history-query"
+                            role="menuitem"
+                            onClick={() => loadHistoryEntry(entry)}
+                            title={entry.query}
+                          >
+                            <span className="codicon codicon-history" aria-hidden="true" />
+                            <span>{entry.query}</span>
+                          </button>
+                          <button
+                            type="button"
+                            className="kairo-search-history-action"
+                            onClick={() => togglePinned(entry)}
+                            aria-label={scopeModel?.isPinned(entry.query)
+                              ? t('widget.search.center.history.unpin')
+                              : t('widget.search.center.history.pin')}
+                            title={scopeModel?.isPinned(entry.query)
+                              ? t('widget.search.center.history.unpin')
+                              : t('widget.search.center.history.pin')}
+                          >
+                            <span className={`codicon ${scopeModel?.isPinned(entry.query) ? 'codicon-pinned' : 'codicon-pin'}`} aria-hidden="true" />
+                          </button>
+                          <button
+                            type="button"
+                            className="kairo-search-history-action"
+                            onClick={() => removeHistory(entry)}
+                            aria-label={t('widget.search.center.history.remove')}
+                            title={t('widget.search.center.history.remove')}
+                          >
+                            <span className="codicon codicon-close" aria-hidden="true" />
+                          </button>
+                        </div>
+                      ))}
+                      {history.length === 0 && pinned.length === 0 && (
+                        <div className="kairo-search-history-empty">{t('widget.search.center.history.empty')}</div>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
             {currentMode === 'replace' && (

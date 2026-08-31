@@ -1,9 +1,10 @@
 const { chromium } = require('playwright');
+const { probeUrl, screenshotPath } = require('./probe-config.cjs');
 (async () => {
   const browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   try {
-    await page.goto('http://127.0.0.1:3070', { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await page.goto(probeUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
     await page.waitForTimeout(10000);
     // dismiss trust dialog (same as fixtures.ts)
     const dialogShell = page.locator('.workspace-trust-dialog, .theia-trust-dialog, #theia-dialog-shell.workspace-trust-dialog');
@@ -30,7 +31,7 @@ const { chromium } = require('playwright');
       };
     });
     console.log('COUNTS=' + JSON.stringify(counts, null, 2));
-    await page.screenshot({ path: '/tmp/theia-final.png', fullPage: true });
+    await page.screenshot({ path: screenshotPath('theia-final.png'), fullPage: true });
   } catch (e) {
     console.log('FATAL=' + e.message);
   }

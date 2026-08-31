@@ -7,7 +7,7 @@
   "files": ["lib", "src"],
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "clean": "rm -rf lib",
+    "clean": "node ../../scripts/clean-dir.cjs lib",
     "lint": "tsc -p tsconfig.json --noEmit",
     "test": "node --test src/browser/server-service.test.cjs src/browser/log-buffer.test.cjs src/browser/log-viewer-contract.test.cjs src/browser/server-store-context.test.cjs src/browser/server-view-widget.test.cjs src/browser/log-viewer-widget.test.cjs"
   },

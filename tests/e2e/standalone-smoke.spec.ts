@@ -191,11 +191,7 @@ test.describe('Standalone-02: Widget Rendering', () => {
           break;
         }
       }
-      if (foundStatusBar) {
-        expect(true).toBeTruthy();
-      } else {
-        console.log('  Status bar not found — may not be rendered yet');
-      }
+      expect(foundStatusBar, 'The workbench must render a status bar').toBe(true);
     });
 
     await test.step('5. Take a screenshot of the widget layout', async () => {

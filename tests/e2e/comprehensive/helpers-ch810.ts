@@ -3,14 +3,14 @@
  * Kept separate from ./helpers so parallel lane agents are unaffected.
  */
 import { expect, Page, test as base } from '@playwright/test';
-import { execSync, spawn } from 'child_process';
+import { execFileSync, spawn } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import { AGENT, api } from './helpers';
 
 export const REPO = path.resolve(__dirname, '..', '..', '..');
 export const LANES = path.join(REPO, '.test-lanes', 'B');
-export const TMP_ROOT = '/tmp/kairo-w1b';
+export const TMP_ROOT = process.env.KAIRO_TEST_TMP || path.join(LANES, 'tmp', 'kairo-w1b');
 export const LEGACY_SAMPLE = path.join(REPO, 'legacy-sample');
 
 /**
@@ -86,6 +86,8 @@ export async function waitWelcome(page: Page, timeout = 45_000): Promise<void> {
 }
 
 const AGENT_PORT_NUM = Number(new URL(AGENT).port);
+const THEIA = process.env.THEIA_URL || 'http://127.0.0.1:18411';
+const AGENT_BIN = path.join(REPO, 'runtime-agent', 'bin', `kairo-runtime${process.platform === 'win32' ? '.exe' : ''}`);
 
 async function waitForPort(up: boolean, timeoutMs = 60_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
@@ -103,21 +105,35 @@ async function waitForPort(up: boolean, timeoutMs = 60_000): Promise<void> {
 
 /** Stop ONLY this lane's runtime agent (Theia stays up). */
 export async function stopAgent(): Promise<void> {
-  execSync(`kill $(cat ${LANES}/agent.pid) 2>/dev/null || true`, { stdio: 'ignore' });
-  await new Promise(r => setTimeout(r, 700));
-  execSync(`kill -9 $(cat ${LANES}/agent.pid) 2>/dev/null || true; rm -f ${LANES}/agent.pid`, { stdio: 'ignore' });
-  execSync(`lsof -tnP -iTCP:${AGENT_PORT_NUM} -sTCP:LISTEN 2>/dev/null | xargs kill -9 2>/dev/null || true`, { stdio: 'ignore' });
+  const pidFile = path.join(LANES, 'agent.pid');
+  if (fs.existsSync(pidFile)) {
+    const pid = Number(fs.readFileSync(pidFile, 'utf8').trim());
+    if (Number.isInteger(pid) && pid > 0) {
+      try {
+        if (process.platform === 'win32') {
+          execFileSync('taskkill', ['/F', '/T', '/PID', String(pid)], { stdio: 'ignore', windowsHide: true });
+        } else {
+          process.kill(pid, 'SIGTERM');
+          await new Promise(r => setTimeout(r, 700));
+          try { process.kill(pid, 'SIGKILL'); } catch { /* already stopped */ }
+        }
+      } catch { /* process may have exited between the health check and kill */ }
+    }
+    try { fs.unlinkSync(pidFile); } catch { /* already gone */ }
+  }
   await waitForPort(false, 20_000);
 }
 
 /** Start this lane's runtime agent back up. */
 export async function startAgent(): Promise<void> {
-  const out = fs.openSync(`${LANES}/logs/agent.log`, 'a');
-  const child = spawn(`${REPO}/runtime-agent/bin/kairo-runtime`, ['--config', `${LANES}/agent.yaml`], {
+  fs.mkdirSync(path.join(LANES, 'logs'), { recursive: true });
+  const out = fs.openSync(path.join(LANES, 'logs', 'agent.log'), 'a');
+  const child = spawn(AGENT_BIN, ['--config', path.join(LANES, 'agent.yaml')], {
     detached: true,
     stdio: ['ignore', out, out],
+    windowsHide: true,
   });
-  fs.writeFileSync(`${LANES}/agent.pid`, String(child.pid));
+  fs.writeFileSync(path.join(LANES, 'agent.pid'), String(child.pid));
   child.unref();
   await waitForPort(true, 60_000);
   // give the stores a moment
@@ -132,16 +148,23 @@ export async function startAgent(): Promise<void> {
  * cases nondeterministic.
  */
 export async function restartLane(): Promise<void> {
-  execSync('( sleep 1; ./tests/e2e/lanes/lane.sh stop B; ) < /dev/null >/dev/null 2>&1 || true', { cwd: REPO });
+  const bash = process.platform === 'win32' ? 'bash.exe' : 'bash';
+  try { execFileSync(bash, ['tests/e2e/lanes/lane.sh', 'stop', 'B'], { cwd: REPO, stdio: 'ignore' }); } catch { /* lane may already be down */ }
   await new Promise(r => setTimeout(r, 1500));
-  execSync('( sleep 1; ./tests/e2e/lanes/lane.sh start B; ) < /dev/null > /tmp/laneB-restart.log 2>&1 &', { cwd: REPO });
+  const restartLog = path.join(REPO, 'test-results', 'laneB-restart.log');
+  fs.mkdirSync(path.dirname(restartLog), { recursive: true });
+  const log = fs.openSync(restartLog, 'a');
+  const child = spawn(bash, ['tests/e2e/lanes/lane.sh', 'start', 'B'], {
+    cwd: REPO, detached: true, stdio: ['ignore', log, log], windowsHide: true,
+  });
+  child.unref();
   const deadline = Date.now() + 150_000;
   while (Date.now() < deadline) {
     let theiaUp = false;
     let agentUp = false;
     try {
       agentUp = (await fetch(`${AGENT}/api/v1/health`, { signal: AbortSignal.timeout(1200) })).ok;
-      theiaUp = (await fetch('http://127.0.0.1:18411', { signal: AbortSignal.timeout(1200) })).ok;
+      theiaUp = (await fetch(THEIA, { signal: AbortSignal.timeout(1200) })).ok;
     } catch { /* not yet */ }
     if (theiaUp && agentUp) {
       await new Promise(r => setTimeout(r, 2000));

@@ -1,4 +1,6 @@
 import { test, chromium } from '@playwright/test';
+import * as path from 'node:path';
+import * as fs from 'node:fs';
 
 test('capture frontend init errors', async () => {
   const browser = await chromium.launch({ headless: true, args: ['--headless=new'] });
@@ -11,7 +13,9 @@ test('capture frontend init errors', async () => {
     if (!r.ok()) logs.push(`[response] ${r.status()} ${r.url()}`);
   });
 
-  const url = 'http://127.0.0.1:18301/?kairoAgent=http://127.0.0.1:18300';
+  const theiaUrl = process.env.THEIA_URL || `http://127.0.0.1:${process.env.THEIA_PORT || '18301'}`;
+  const agentUrl = process.env.AGENT_URL || `http://127.0.0.1:${process.env.AGENT_PORT || '18300'}`;
+  const url = `${theiaUrl}/?kairoAgent=${encodeURIComponent(agentUrl)}`;
   await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
   await page.waitForTimeout(8_000);
 
@@ -24,6 +28,8 @@ test('capture frontend init errors', async () => {
   console.log(html.slice(0, 2000));
   console.log('--- hasShell ---', hasShell);
 
-  await page.screenshot({ path: '/Users/qi/Documents/spaces/kairo-ide/test-results/debug-init.png', fullPage: true });
+  const screenshotPath = path.resolve(__dirname, 'test-results', 'debug-init.png');
+  fs.mkdirSync(path.dirname(screenshotPath), { recursive: true });
+  await page.screenshot({ path: screenshotPath, fullPage: true });
   await browser.close();
 });

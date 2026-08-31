@@ -4,8 +4,8 @@ import { promisify } from 'node:util';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
-import { SvnInstallation } from './svn-types';
-import { parseVersionString } from './svn-parser';
+import { SvnInstallation } from '../common/svn-types';
+import { parseVersionString } from '../common/svn-parser';
 
 const execFileAsync = promisify(execFile);
 

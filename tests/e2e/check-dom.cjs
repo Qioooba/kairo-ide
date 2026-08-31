@@ -1,9 +1,10 @@
 const { chromium } = require('@playwright/test');
+const { probeUrl } = require('./probe-config.cjs');
 
 (async () => {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
-  await page.goto('http://127.0.0.1:3002', { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await page.goto(probeUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
   await page.waitForTimeout(3000);
   
   // Check what elements exist

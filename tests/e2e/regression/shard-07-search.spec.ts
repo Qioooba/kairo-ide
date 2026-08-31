@@ -15,11 +15,12 @@ import {
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
+import { regressionWorkspace } from './paths';
 
 const SHARD_ID = 'shard-07';
 const SCREENSHOT_DIR = `test-results/screenshots/${SHARD_ID}`;
 
-const TEST_WORKSPACE = '/tmp/kairo-k4-workspace/projects/workspace-shard07';
+const TEST_WORKSPACE = regressionWorkspace('shard07');
 const LEGACY_SAMPLE = path.resolve(__dirname, '..', '..', '..', 'legacy-sample');
 const PROJECT_ID = 'project-workspace-shard07';
 

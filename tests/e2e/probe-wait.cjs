@@ -1,9 +1,10 @@
 const { chromium } = require('playwright');
+const { probeUrl, screenshotPath } = require('./probe-config.cjs');
 (async () => {
   const browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   try {
-    await page.goto('http://127.0.0.1:3070', { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await page.goto(probeUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
     await page.waitForTimeout(8000);
     // dismiss trust dialog
     const yesBtn = page.locator('button.theia-button.main', { hasText: /yes,?\s*i\s*trust/i }).first();
@@ -23,7 +24,7 @@ const { chromium } = require('playwright');
         break;
       }
     }
-    await page.screenshot({ path: '/tmp/theia-fully-loaded.png', fullPage: true });
+    await page.screenshot({ path: screenshotPath('theia-fully-loaded.png'), fullPage: true });
   } catch (e) {
     console.log('FATAL=' + e.message);
   }

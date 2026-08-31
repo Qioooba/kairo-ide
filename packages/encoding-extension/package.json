@@ -10,9 +10,9 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "clean": "rm -rf lib",
+    "clean": "node ../../scripts/clean-dir.cjs lib",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "test": "node --require ts-node/register --require source-map-support/register --test src/browser/encoding-service.test.ts src/browser/encoding-reopen.test.ts && pnpm build && node --import ./test/register-hooks.mjs --test src/browser/encoding-uri-coercion.test.cjs"
+    "test": "node --require ts-node/register --require source-map-support/register --test src/browser/encoding-service.test.ts src/browser/encoding-reopen.test.ts src/browser/properties-escape.test.ts && pnpm build && node --import ./test/register-hooks.mjs --test src/browser/encoding-uri-coercion.test.cjs"
   },
   "dependencies": {
     "@kairo/i18n": "workspace:*",

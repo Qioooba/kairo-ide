@@ -8,7 +8,7 @@ import {
 } from '@theia/core/lib/browser';
 import type { editor as MonacoEditorTypes } from '@theia/monaco-editor-core';
 import { GitService } from './git-service';
-import { toRepoRelativePath } from './git-path-utils';
+import { toRepoRelativePath } from '../common/git-path-utils';
 
 type MonacoControlLike = MonacoEditorTypes.IStandaloneCodeEditor;
 type GutterDecoration = MonacoEditorTypes.IModelDeltaDecoration;

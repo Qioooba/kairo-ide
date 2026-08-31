@@ -47,15 +47,26 @@ export async function openIde(page: Page): Promise<void> {
   // test permanently re-binds every fresh page to a subfolder workspace
   // (different agent workspaceId ⇒ empty project lists downstream).
   await page.goto(`/#${encodeURI(LANE_WS)}`, { waitUntil: 'domcontentloaded' });
-  // Trust dialog (workspace.trust.enabled true in browser app config)
+  // The trust dialog is rendered after the shell has mounted.  Clicking
+  // before that point races the asynchronous workspace-trust contribution;
+  // the old best-effort click could silently leave every following test in
+  // Restricted Mode, where command/keybinding contributions are disabled.
+  await page.waitForSelector('#theia-app-shell', { timeout: 120_000 });
   const trustButton = page.getByRole('button', { name: /Yes, I trust|是，我信任|trust the authors$/i }).first();
   try {
-    await trustButton.click({ timeout: 15_000 });
-    // Theia reloads/re-renders after trusting; wait for shell again below
+    await trustButton.click({ timeout: 20_000 });
+    // Theia reloads/re-renders after trusting; wait for shell again below.
+    await page.waitForSelector('#theia-app-shell', { timeout: 120_000 });
   } catch {
-    /* no dialog — fine */
+    /* already trusted, or the trust contribution is disabled */
   }
-  await page.waitForSelector('#theia-app-shell', { timeout: 120_000 });
+  // A missed trust click is not a harmless setup variation for this suite:
+  // it makes F1/commands and extension-backed tests report misleading
+  // failures.  Fail at the boundary with a useful diagnostic instead.
+  const restrictedMode = page.getByText('Restricted Mode', { exact: true }).first();
+  if (await restrictedMode.isVisible().catch(() => false)) {
+    throw new Error('Workspace remained in Restricted Mode; trust dialog was not accepted');
+  }
 }
 
 /** Open a widget via F1 command palette. Returns after palette closes. */
@@ -100,10 +111,35 @@ export function attachDiagnostics(page: Page): {
 
 import * as path from 'path';
 
+/** Repository root and deterministic lane paths, independent of host OS. */
+export const REPO_ROOT = path.resolve(__dirname, '..', '..', '..');
+
+/** Resolve the active lane from explicit env first, then its conventional port. */
+export function activeLane(): string {
+  if (process.env.LANE) return process.env.LANE;
+  const port = Number.parseInt(process.env.AGENT_PORT || '', 10);
+  if (Number.isInteger(port) && port >= 18400 && port <= 18440 && port % 10 === 0) {
+    return String.fromCharCode('A'.charCodeAt(0) + (port - 18400) / 10);
+  }
+  return 'A';
+}
+
 /** Absolute path of the lane's served workspace folder. */
-export const LANE_WS =
-  process.env.LANE_WS ||
-  path.resolve(__dirname, '..', '..', '..', '.test-lanes', 'A', 'workspace');
+export const LANE_WS = process.env.LANE_WS || path.join(REPO_ROOT, '.test-lanes', activeLane(), 'workspace');
+
+export function laneWorkspace(lane: string): string {
+  // An explicit LANE_WS intentionally overrides all test lanes for a custom
+  // fixture run; otherwise each chapter gets its documented isolated lane.
+  return process.env.LANE_WS || path.join(REPO_ROOT, '.test-lanes', lane, 'workspace');
+}
+
+export function laneConfigDir(lane: string): string {
+  return path.join(REPO_ROOT, '.test-lanes', lane, 'theia-config');
+}
+
+export function repoPath(...segments: string[]): string {
+  return path.join(REPO_ROOT, ...segments);
+}
 
 /**
  * Startup console noise that is pre-existing/benign in this build
@@ -122,6 +158,10 @@ export const CONSOLE_ALLOWLIST: RegExp[] = [
   // BUG-20260826-108 (P3, cosmetic): some Kairo list widgets render arrays
   // without React keys in rare paths — React logs this as console.error.
   /Each child in a list should have a unique .key. prop/i,
+  // Benign: dismissing the Open/Save dialog cancels its in-flight directory
+  // watch/read; FileService logs the abort as a console error (observed on
+  // Windows TC-MENU-002 when a dblclick opens the file and closes the dialog).
+  /filesystem:FileService ERROR Canceled/i,
 ];
 
 export function unexpectedConsoleErrors(errors: string[]): string[] {

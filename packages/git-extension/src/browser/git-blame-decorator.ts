@@ -5,7 +5,7 @@ import { EditorManager } from '@theia/editor/lib/browser/editor-manager';
 import { EditorWidget } from '@theia/editor/lib/browser/editor-widget';
 import { TextEditor as _TextEditor } from '@theia/editor/lib/browser/editor';
 import { GitService } from './git-service';
-import { toRepoRelativePath } from './git-path-utils';
+import { toRepoRelativePath } from '../common/git-path-utils';
 import { Range } from '@theia/core/shared/vscode-languageserver-protocol';
 
 interface BlameLineData {

@@ -5,8 +5,8 @@ import { Emitter, Event, DisposableCollection } from '@theia/core/lib/common';
 import { Title, Widget } from '@theia/core/shared/@lumino/widgets';
 import { EditorManager } from '@theia/editor/lib/browser/editor-manager';
 import { SvnService } from './svn-service';
-import { SvnFileStatus } from './svn-types';
-import { toWcRelativeFromUri } from './svn-path-utils';
+import { SvnFileStatus } from '../common/svn-types';
+import { toWcRelativeFromUri } from '../common/svn-path-utils';
 
 const STATUS_COLORS: Record<SvnFileStatus, string> = {
   [SvnFileStatus.Normal]: '',

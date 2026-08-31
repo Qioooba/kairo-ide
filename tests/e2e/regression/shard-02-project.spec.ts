@@ -19,6 +19,7 @@ import {
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
+import { regressionWorkspace } from './paths';
 
 const SHARD_ID = 'shard-02';
 const SCREENSHOT_DIR = `test-results/screenshots/${SHARD_ID}`;
@@ -33,7 +34,7 @@ const SCREENSHOT_DIR = `test-results/screenshots/${SHARD_ID}`;
 // the path. We drop the project under
 // `/tmp/kairo-k4-workspace/projects/workspace-shard02` so the agent,
 // the Theia file explorer, and the OS path are all consistent.
-const TEST_WORKSPACE = '/tmp/kairo-k4-workspace/projects/workspace-shard02';
+const TEST_WORKSPACE = regressionWorkspace('shard02');
 const LEGACY_SAMPLE = path.resolve(__dirname, '..', '..', '..', 'legacy-sample');
 
 // KAIRO-RC-WEB-040: the runtime agent persists imported projects in

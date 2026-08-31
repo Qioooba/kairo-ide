@@ -255,7 +255,9 @@ describe('路径兼容性测试 (Path Compatibility)', { timeout: 30000 }, () =>
 
     test('长路径：中文深层嵌套（150+ 字符）', async () => {
       const segments = [];
-      for (let i = 0; i < 8; i++) {
+      // Keep the fixture independent of the host's temporary-directory prefix.
+      // Eight segments were only 129 characters on this Windows runner.
+      for (let i = 0; i < 10; i++) {
         segments.push(`第${i + 1}层目录名称比较长`);
       }
       const deepPath = segments.join(path.sep);

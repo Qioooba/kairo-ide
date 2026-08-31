@@ -90,6 +90,9 @@ dist/
 
 # Runtime / state
 .runtime/
+.runtime-*/
+.test-lanes/
+.playwright-cli/
 *.pid
 *.sock
 .runtime-tmp/
@@ -97,6 +100,7 @@ dist/
 # Test fixtures
 tests/e2e/screenshots/*.actual.png
 tests/e2e/screenshots/*.diff.png
+**/test-results/
 test-results/
 playwright-report/
 playwright/.cache/
@@ -142,10 +146,14 @@ apps/*/src/**/*.d.ts
 apps/*/src/**/*.js
 apps/*/src/**/*.js.map
 
-# Theia-generated esbuild config (re-emitted on every `theia build`)
+# Theia-generated build files (`gen-esbuild.*` and `src-gen` are re-emitted).
 apps/*/esbuild.mjs
 apps/*/gen-esbuild.*.mjs
 apps/*/src-gen/
+# Theia deliberately preserves this customization entry point. Kairo's browser
+# build changes security and dependency-boundary options here, so it must be
+# reproducible in a clean checkout rather than living as ignored machine state.
+!apps/browser/esbuild.mjs
 packages/theia-product/esbuild.mjs
 packages/theia-product/gen-esbuild.*.mjs
 packages/theia-product/src-gen/

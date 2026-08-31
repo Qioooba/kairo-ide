@@ -10,7 +10,7 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "clean": "rm -rf lib",
+    "clean": "node ../../scripts/clean-dir.cjs lib",
     "lint": "tsc -p tsconfig.json --noEmit",
     "test": "node --test src/browser/test-exports.test.cjs src/browser/test-runner.test.cjs src/browser/test-discovery.test.cjs src/browser/test-store.test.cjs src/browser/test-extra.test.cjs"
   },

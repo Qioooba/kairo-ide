@@ -30,15 +30,15 @@ import {
   SvnDiffResult,
   SvnCredential,
   SvnResolveChoice,
-} from '../browser/svn-types';
+} from '../common/svn-types';
 import {
   parseVersionString,
   parseStatusXml,
   parseInfoXml,
   parseLogXml,
   parseBlameXml,
-} from '../browser/svn-parser';
-import { toWcRelativePath } from '../browser/svn-path-utils';
+} from '../common/svn-parser';
+import { toWcRelativePath } from '../common/svn-path-utils';
 
 const execFileAsync = promisify(execFile);
 

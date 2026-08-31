@@ -4,8 +4,8 @@ import { Tree, TreeNode, CompositeTreeNode } from '@theia/core/lib/browser/tree'
 import { Emitter, Event, MaybePromise } from '@theia/core/lib/common';
 import { WidgetDecoration } from '@theia/core/lib/browser/widget-decoration';
 import { SvnService } from './svn-service';
-import { SvnFileStatus } from './svn-types';
-import { toWcRelativeFromUri } from './svn-path-utils';
+import { SvnFileStatus } from '../common/svn-types';
+import { toWcRelativeFromUri } from '../common/svn-path-utils';
 
 interface FileNode extends TreeNode {
   uri?: string | { path?: { toString(): string }; toString(): string };

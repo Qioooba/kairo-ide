@@ -258,6 +258,103 @@
   border-color: var(--theia-button-background, #0e639c);
 }
 
+.kairo-search-history-btn {
+  position: relative;
+}
+
+.kairo-search-history-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 20;
+  width: min(360px, 70vw);
+  max-height: 320px;
+  overflow: auto;
+  padding: 6px;
+  background: var(--theia-dropdown-background, #252526);
+  border: 1px solid var(--theia-dropdown-border, #454545);
+  border-radius: 5px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.kairo-search-history-section + .kairo-search-history-section {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--theia-panel-border, #454545);
+}
+
+.kairo-search-history-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 7px;
+  color: var(--theia-descriptionForeground, #858585);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.kairo-search-history-entry {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.kairo-search-history-query {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 1;
+  min-width: 0;
+  padding: 5px 7px;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+  color: var(--theia-foreground, #cccccc);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.kairo-search-history-query:hover,
+.kairo-search-history-action:hover,
+.kairo-search-history-clear:hover {
+  background: var(--theia-list-hoverBackground, rgba(128, 128, 128, 0.16));
+}
+
+.kairo-search-history-query span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.kairo-search-history-action,
+.kairo-search-history-clear {
+  flex: 0 0 auto;
+  border: 0;
+  background: transparent;
+  color: var(--theia-descriptionForeground, #858585);
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.kairo-search-history-action {
+  width: 25px;
+  height: 25px;
+}
+
+.kairo-search-history-clear {
+  padding: 2px 4px;
+  font-size: 10px;
+}
+
+.kairo-search-history-empty {
+  padding: 8px;
+  color: var(--theia-descriptionForeground, #858585);
+  font-size: 12px;
+}
+
 .kairo-search-options-row {
   display: flex;
   align-items: center;

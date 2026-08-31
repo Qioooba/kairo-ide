@@ -9,8 +9,8 @@
     "src"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json && cp src/browser/*.css lib/browser/ 2>/dev/null || true",
-    "clean": "rm -rf lib",
+    "build": "tsc -p tsconfig.json && node ../../scripts/copy-css.cjs src/browser lib/browser",
+    "clean": "node ../../scripts/clean-dir.cjs lib",
     "lint": "tsc -p tsconfig.json --noEmit",
     "test": "node --test src/browser/maven-view-widget.test.cjs src/browser/build-view-widget.test.cjs && node --import ./test/register-hooks.mjs --test src/browser/build-store-map.test.cjs src/browser/build-exports-extended.test.cjs src/browser/build-store-logic.test.cjs src/browser/build-store-context.test.cjs src/browser/build-store-map-extended.test.cjs"
   },

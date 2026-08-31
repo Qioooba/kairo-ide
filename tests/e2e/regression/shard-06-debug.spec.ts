@@ -22,11 +22,12 @@ import {
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
+import { regressionWorkspace } from './paths';
 
 const SHARD_ID = 'shard-06';
 const SCREENSHOT_DIR = `test-results/screenshots/${SHARD_ID}`;
 
-const TEST_WORKSPACE = '/tmp/kairo-k4-workspace/projects/workspace-shard06';
+const TEST_WORKSPACE = regressionWorkspace('shard06');
 const LEGACY_SAMPLE = path.resolve(__dirname, '..', '..', '..', 'legacy-sample');
 const PROJECT_ID = 'project-workspace-shard06';
 const TOMCAT_PORT = process.env.TOMCAT_PORT || '18302';
@@ -572,7 +573,7 @@ test.describe('SHARD-06: 调试功能', () => {
       // 没有 glyph 时也允许通过(某些 Theia 版本用 .margin-view-overlays 内的小圆点)
       if (!hasGlyph) {
         const overlay = page.locator('.monaco-editor .margin-view-overlays .breakpoint, .monaco-editor .margin-view-overlays [class*="breakpoint"]').first();
-        expect((await overlay.count()) > 0 || true).toBe(true);
+        expect(await overlay.count(), 'a breakpoint glyph or overlay must be rendered').toBeGreaterThan(0);
       }
       await page.screenshot({ path: `${SCREENSHOT_DIR}/TEST-0601/01-breakpoint-set.png` });
     });

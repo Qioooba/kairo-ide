@@ -13,7 +13,12 @@
 set -euo pipefail
 
 REPO="${KAIRO_REPO:-$(cd "$(dirname "$0")/../../.." && pwd)}"
-AGENT_BIN="$REPO/runtime-agent/bin/kairo-runtime"
+# Windows (Git Bash/MSYS) needs the .exe suffix; keep plain name elsewhere.
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*) EXE_SUFFIX=".exe" ;;
+  *) EXE_SUFFIX="" ;;
+esac
+AGENT_BIN="$REPO/runtime-agent/bin/kairo-runtime$EXE_SUFFIX"
 LANES_DIR="$REPO/.test-lanes"
 
 lane_ports() {
@@ -37,11 +42,21 @@ lane_env() {
 ensure_agent_bin() {
   if [[ "${FORCE_REBUILD:-0}" == "1" || ! -x "$AGENT_BIN" ]]; then
     echo "[lane] building runtime-agent..."
-    (cd "$REPO/runtime-agent" && GOTOOLCHAIN=local go build -o bin/kairo-runtime ./cmd/kairo-runtime)
+    (cd "$REPO/runtime-agent" && GOTOOLCHAIN=local go build -o "bin/kairo-runtime$EXE_SUFFIX" ./cmd/kairo-runtime)
   fi
 }
 
 write_config() {
+  # The Go agent runs as a native Windows binary: MSYS-style paths
+  # (/g/spaces/...) would be read as drive-root-relative (G:\g\spaces\...),
+  # silently relocating dataDir OUTSIDE the lane (state resets then miss).
+  # cygpath -m converts to the unambiguous G:/spaces/... form.
+  to_native_path() {
+    if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else echo "$1"; fi
+  }
+  local data_dir bundled_dir
+  data_dir=$(to_native_path "$LANE_DIR/data")
+  bundled_dir=$(to_native_path "$REPO/bundled")
   cat > "$LANE_DIR/agent.yaml" <<EOF
 version: 0.1.0
 
@@ -51,8 +66,8 @@ port: $AGENT_PORT
 tlsCert: ""
 tlsKey: ""
 
-dataDir: $LANE_DIR/data
-bundledDir: $REPO/bundled
+dataDir: $data_dir
+bundledDir: $bundled_dir
 
 logLevel: info
 
@@ -73,6 +88,36 @@ jdwpDefaultPort: $JDWP_PORT
 EOF
 }
 
+resolve_winpid() {
+  # Only meaningful on Windows (Git Bash): bash $! for native executables is
+  # an MSYS pid that plain kill cannot signal. Overwrite the pid file with the
+  # real Windows pid resolved from the listening port (netstat -ano).
+  local port="$1" pidfile="$2"
+  [[ "$(uname -s)" =~ ^(MINGW|MSYS|CYGWIN) ]] || return 0
+  local wpid=""
+  for i in $(seq 1 40); do
+    wpid=$(netstat -ano 2>/dev/null | awk -v p=":$port\$" '$2 ~ p && $4 == "LISTENING" {print $5}' | head -1)
+    [[ -n "$wpid" ]] && break
+    sleep 0.5
+  done
+  if [[ -n "$wpid" ]]; then
+    echo "$wpid" > "$pidfile"
+  fi
+}
+
+kill_tree() {
+  # Kill a process and its children. On Windows, bash `kill` cannot signal
+  # native executables (MSYS pid space differs) — use taskkill /T /F.
+  local pid="$1"
+  if [[ "$(uname -s)" =~ ^(MINGW|MSYS|CYGWIN) ]] && command -v taskkill >/dev/null 2>&1; then
+    taskkill //F //T //PID "$pid" >/dev/null 2>&1 || true
+  else
+    kill "$pid" >/dev/null 2>&1 || true
+    sleep 0.5
+    kill -9 "$pid" >/dev/null 2>&1 || true
+  fi
+}
+
 start() {
   local lane="$1"
   lane_env "$lane"
@@ -89,6 +134,7 @@ start() {
     fi
     nohup "$AGENT_BIN" --config "$LANE_DIR/agent.yaml" > "$LANE_DIR/logs/agent.log" 2>&1 < /dev/null &
     echo $! > "$LANE_DIR/agent.pid"
+    resolve_winpid "$AGENT_PORT" "$LANE_DIR/agent.pid"
     for i in $(seq 1 60); do
       curl -fsS "http://127.0.0.1:$AGENT_PORT/api/v1/health" >/dev/null 2>&1 && break
       sleep 0.25
@@ -105,6 +151,7 @@ start() {
       KAIRO_RUNTIME_URL="http://127.0.0.1:$AGENT_PORT" THEIA_CONFIG_DIR="$LANE_DIR/theia-config" \
       nohup node lib/backend/main.js "$LANE_DIR/workspace" --hostname=127.0.0.1 --port="$THEIA_PORT" < /dev/null \
       > "$LANE_DIR/logs/theia.log" 2>&1 & echo $! > "$LANE_DIR/theia.pid")
+    resolve_winpid "$THEIA_PORT" "$LANE_DIR/theia.pid"
     for i in $(seq 1 120); do
       curl -fsS -o /dev/null "http://127.0.0.1:$THEIA_PORT" 2>/dev/null && break
       sleep 0.5
@@ -128,18 +175,30 @@ stop() {
   for name in theia agent; do
     if [[ -f "$LANE_DIR/$name.pid" ]]; then
       local pid; pid=$(cat "$LANE_DIR/$name.pid")
-      kill "$pid" >/dev/null 2>&1 || true
-      sleep 0.5
-      kill -9 "$pid" >/dev/null 2>&1 || true
+      kill_tree "$pid"
       rm -f "$LANE_DIR/$name.pid"
     fi
   done
   # kill any process still bound to lane ports
   for port in $AGENT_PORT $THEIA_PORT; do
-    local pids; pids=$(lsof -tnP -iTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)
-    [[ -n "${pids// /}" ]] && kill -9 $pids 2>/dev/null || true
+    local pids
+    if command -v lsof >/dev/null 2>&1; then
+      pids=$(lsof -tnP -iTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)
+    else
+      # Windows netstat: TCP  <local>  <remote>  LISTENING  <pid>
+      # Do not use `sort -u` here: on Windows Git Bash it can resolve to the
+      # native sort.exe, which treats -u as an input filename and emits a
+      # misleading "system cannot find the file" message.  awk provides the
+      # required de-duplication without depending on a platform-specific sort.
+      pids=$(netstat -ano 2>/dev/null | awk -v p=":$port\$" '$2 ~ p && $4 == "LISTENING" && !seen[$5]++ {print $5}')
+    fi
+    for p in $pids; do
+      kill_tree "$p"
+    done
   done
-  pkill -9 -f "kairo-runtime --config $LANE_DIR/agent.yaml" 2>/dev/null || true
+  if command -v pkill >/dev/null 2>&1; then
+    pkill -9 -f "kairo-runtime --config $LANE_DIR/agent.yaml" 2>/dev/null || true
+  fi
   echo "[lane $lane] stopped"
 }
 

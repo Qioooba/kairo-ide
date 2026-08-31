@@ -38,10 +38,41 @@ interface IDEAWatchesPanelProps {
 }
 
 const WATCH_STORAGE_PREFIX = 'kairo-debug-watches';
+export const KAIRO_DEBUG_WATCH_ADDED = 'kairo-debug-watch-added';
 
 function watchStorageKey(workspaceKey?: string): string {
     const dim = (workspaceKey || 'default').replace(/[^\w.-]+/g, '_');
     return `${WATCH_STORAGE_PREFIX}:${dim}`;
+}
+
+/** Persist a watch from hover / other surfaces and notify the IDEA watches panel. */
+export function persistDebugWatch(expression: string, workspaceKey?: string): void {
+    const expr = expression.trim();
+    if (!expr || typeof localStorage === 'undefined') {
+        return;
+    }
+    const key = watchStorageKey(workspaceKey);
+    let exprs: string[] = [];
+    try {
+        const saved = localStorage.getItem(key);
+        if (saved) {
+            exprs = JSON.parse(saved);
+        }
+    } catch {
+        exprs = [];
+    }
+    if (!Array.isArray(exprs)) {
+        exprs = [];
+    }
+    if (!exprs.includes(expr)) {
+        exprs.push(expr);
+        try {
+            localStorage.setItem(key, JSON.stringify(exprs));
+        } catch {
+            // quota / private mode — still notify in-memory listeners
+        }
+    }
+    window.dispatchEvent(new CustomEvent(KAIRO_DEBUG_WATCH_ADDED, { detail: { expression: expr, workspaceKey } }));
 }
 
 function mapVariablesToChildren(vars: Array<{ name: string; value: string; type?: string; variablesReference?: number }>): WatchChild[] {
@@ -371,6 +402,17 @@ export const IDEAWatchesPanel: React.FC<IDEAWatchesPanelProps> = ({ sessionServi
     React.useEffect(() => {
         loadWatches();
     }, [loadWatches]);
+
+    React.useEffect(() => {
+        const onAdded = (event: Event) => {
+            const detail = (event as CustomEvent<{ expression?: string; workspaceKey?: string }>).detail;
+            if (!detail?.expression) return;
+            if (detail.workspaceKey && workspaceKey && detail.workspaceKey !== workspaceKey) return;
+            addWatch(detail.expression);
+        };
+        window.addEventListener(KAIRO_DEBUG_WATCH_ADDED, onAdded);
+        return () => window.removeEventListener(KAIRO_DEBUG_WATCH_ADDED, onAdded);
+    }, [addWatch, workspaceKey]);
 
     React.useEffect(() => {
         void evaluateAll();

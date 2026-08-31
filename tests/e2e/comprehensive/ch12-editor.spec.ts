@@ -12,13 +12,28 @@
 import { test, expect } from '@playwright/test';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { openIde } from './helpers';
+import { openIde, laneWorkspace, laneConfigDir } from './helpers';
 
-const WS_ROOT = '/Users/qi/Documents/spaces/kairo-ide/.test-lanes/C/workspace';
+const WS_ROOT = laneWorkspace('C');
 const PROJ = path.join(WS_ROOT, 'legacy-sample');
 const ED = path.join(PROJ, '_kairo-ed');
-const USER_SETTINGS = '/Users/qi/Documents/spaces/kairo-ide/.test-lanes/C/theia-config/settings.json';
+const USER_SETTINGS = path.join(laneConfigDir('C'), 'settings.json');
 const HISTORY_DIR = path.join(WS_ROOT, '.kairo', 'local-history');
+
+// The chapter is executed against both Chromium/Windows and macOS browser
+// builds.  Keep the platform-dependent modifier in one place so the tests
+// exercise the same keymap users actually receive instead of silently sending
+// Meta chords to a Windows page.
+const PRIMARY_MOD = process.platform === 'darwin' ? 'Meta' : 'Control';
+const primary = (chord: string): string => `${PRIMARY_MOD}+${chord}`;
+const CLOSE_ACTIVE_EDITOR = process.platform === 'darwin' ? 'Meta+w' : 'Control+F4';
+const ADD_CURSOR_BELOW = process.platform === 'darwin' ? 'Control+Shift+g' : 'Control+Alt+ArrowDown';
+const SELECT_ALL_OCCURRENCES = process.platform === 'darwin'
+  ? 'Meta+Control+Shift+j'
+  : 'Control+Alt+Shift+j';
+const DELETE_LINE = process.platform === 'darwin' ? 'Meta+Backspace' : 'Control+y';
+const XML_BLOCK_COMMENT = process.platform === 'darwin' ? 'Meta+Alt+/' : 'Control+Shift+/';
+const NEXT_FIND_MATCH = process.platform === 'darwin' ? primary('g') : 'F3';
 
 function treeNode(page: any, label: string) {
   return page.locator('.theia-TreeNode').filter({
@@ -105,7 +120,7 @@ function write(name: string, content: string): string {
 async function saveViaKeyboard(page: any): Promise<void> {
   const dirty = page.locator('.lm-TabBar-tab.theia-mod-dirty');
   for (let attempt = 0; attempt < 5; attempt++) {
-    await page.keyboard.press('Meta+s');
+    await page.keyboard.press(primary('s'));
     try {
       await expect(dirty).toHaveCount(0, { timeout: 3_000 });
       await page.waitForTimeout(400);
@@ -139,12 +154,14 @@ async function retryKeys(page: any, times: number, fn: () => Promise<void>, chec
 test.describe('Chapter 12 — Editor core', () => {
 
   let savedSettings = '';
+  let settingsExisted = false;
 
   test.beforeAll(() => {
     fs.mkdirSync(ED, { recursive: true });
     // Deterministic autosave environment: off by default for every test in
     // this chapter (ED-015 manages its own transitions).
-    savedSettings = fs.readFileSync(USER_SETTINGS, 'utf8');
+    settingsExisted = fs.existsSync(USER_SETTINGS);
+    savedSettings = settingsExisted ? fs.readFileSync(USER_SETTINGS, 'utf8') : '{}';
     const base = JSON.parse(savedSettings);
     delete base['files.autoSave'];
     delete base['editor.autoSave'];
@@ -153,7 +170,11 @@ test.describe('Chapter 12 — Editor core', () => {
 
   test.afterAll(() => {
     if (savedSettings) {
-      fs.writeFileSync(USER_SETTINGS, savedSettings);
+      if (settingsExisted) {
+        fs.writeFileSync(USER_SETTINGS, savedSettings);
+      } else {
+        fs.rmSync(USER_SETTINGS, { force: true });
+      }
     }
   });
 
@@ -168,7 +189,7 @@ test.describe('Chapter 12 — Editor core', () => {
     await expect(labels.filter({ hasText: 'ed01-a.txt' }).first()).toBeVisible();
     await expect(labels.filter({ hasText: 'ed01-b.txt' }).first()).toBeVisible();
     // active tab is ed01-b; Cmd+W closes it
-    await page.keyboard.press('Meta+w');
+    await page.keyboard.press(CLOSE_ACTIVE_EDITOR);
     await expect(labels.filter({ hasText: 'ed01-b.txt' })).toHaveCount(0, { timeout: 10_000 });
     await expect(labels.filter({ hasText: 'ed01-a.txt' }).first()).toBeVisible();
   });
@@ -179,7 +200,7 @@ test.describe('Chapter 12 — Editor core', () => {
     await closeAllEditors(page);
     await openEdFile(page, 'ed02-save.txt');
     // modify
-    await page.keyboard.press('Meta+a'); // select all (editor.action.selectAll)
+    await page.keyboard.press(primary('a')); // select all (editor.action.selectAll)
     await page.keyboard.type('edited by TC-ED-002\n');
     const tab = page.locator('.lm-TabBar-tab', { hasText: 'ed02-save.txt' }).first();
     await expect(tab).toHaveClass(/theia-mod-dirty/, { timeout: 10_000 });
@@ -201,7 +222,7 @@ test.describe('Chapter 12 — Editor core', () => {
     await closeAllEditors(page);
     await openEdFile(page, 'ed03-undo.txt');
     // go to end
-    await page.keyboard.press('Meta+ArrowDown');
+    await page.keyboard.press(primary('ArrowDown'));
     // 20 discrete edits — each Enter starts a new undo unit
     for (let i = 1; i <= 20; i++) {
       await page.keyboard.type(`line${String(i).padStart(2, '0')}`);
@@ -212,7 +233,7 @@ test.describe('Chapter 12 — Editor core', () => {
       await page.waitForTimeout(450); // defeat typing coalescing
     }
     for (let i = 0; i < 20; i++) {
-      await page.keyboard.press('Meta+z');
+      await page.keyboard.press(primary('z'));
     }
     const afterUndo = await editorText(page);
     console.log(`[TC-ED-003] after 20x undo: ${JSON.stringify(afterUndo.slice(0, 40))}`);
@@ -220,7 +241,7 @@ test.describe('Chapter 12 — Editor core', () => {
     expect(afterUndo).not.toContain('line05');
     expect(afterUndo).toContain('start');
     for (let i = 0; i < 20; i++) {
-      await page.keyboard.press('Meta+Shift+z');
+      await page.keyboard.press(primary('Shift+z'));
     }
     const afterRedo = await editorText(page);
     expect(afterRedo).toContain('line20');
@@ -233,9 +254,9 @@ test.describe('Chapter 12 — Editor core', () => {
     await closeAllEditors(page);
     await openEdFile(page, 'ed04-cursor.txt');
     // cursor at line1 col1; Ctrl+Shift+G adds a cursor below (IDEA mac)
-    await page.keyboard.press('Meta+ArrowUp');
+    await page.keyboard.press(primary('ArrowUp'));
     await page.keyboard.press('Home');
-    await page.keyboard.press('Control+Shift+g');
+    await page.keyboard.press(ADD_CURSOR_BELOW);
     await page.waitForTimeout(300);
     await page.keyboard.type('X-');
     let txt = norm(await editorText(page));
@@ -247,7 +268,7 @@ test.describe('Chapter 12 — Editor core', () => {
     await openEdFile(page, 'ed04-occ.txt');
     // select first "foo" deterministically
     await ensureEditorFocus(page);
-    await page.keyboard.press('Meta+ArrowUp');
+    await page.keyboard.press(primary('ArrowUp'));
     await page.keyboard.press('Home');
     await page.keyboard.press('Shift+ArrowRight');
     await page.keyboard.press('Shift+ArrowRight');
@@ -264,11 +285,11 @@ test.describe('Chapter 12 — Editor core', () => {
     write('ed04-all.txt', 'dup one dup two dup\n');
     await openEdFile(page, 'ed04-all.txt');
     await ensureEditorFocus(page);
-    await page.keyboard.press('Meta+ArrowUp');
+    await page.keyboard.press(primary('ArrowUp'));
     await page.keyboard.press('Home');
     for (let i = 0; i < 3; i++) await page.keyboard.press('Shift+ArrowRight');
     await page.waitForTimeout(200);
-    await page.keyboard.press('Meta+Control+Shift+j');
+    await page.keyboard.press(SELECT_ALL_OCCURRENCES);
     await page.waitForTimeout(300);
     await page.keyboard.type('Q');
     txt = norm(await editorText(page));
@@ -286,10 +307,10 @@ test.describe('Chapter 12 — Editor core', () => {
     // Delete line l2 (retry: rare chord-delivery races swallow a stroke)
     let txt = '';
     for (let i = 0; i < 3; i++) {
-      await page.keyboard.press('Meta+ArrowUp');
+      await page.keyboard.press(primary('Home'));
       await page.keyboard.press('ArrowDown'); // cursor on l2
       await page.keyboard.press('Home');
-      await page.keyboard.press('Meta+Backspace'); // delete line
+      await page.keyboard.press(DELETE_LINE); // delete line
       await page.waitForTimeout(400);
       txt = norm(await editorText(page));
       if (txt.includes('l1') && txt.includes('l3') && !txt.includes('l2')) break;
@@ -299,12 +320,12 @@ test.describe('Chapter 12 — Editor core', () => {
     expect(txt).not.toContain('l2');
     // duplicate line: cursor onto l3 -> Cmd+D duplicates it below
     for (let i = 0; i < 3; i++) {
-      await page.keyboard.press('Meta+ArrowUp');
+      await page.keyboard.press(primary('Home'));
       await page.keyboard.press('ArrowDown'); // first remaining data line (l3)
       await page.keyboard.press('Home');
       const before = norm(await editorText(page));
       const countBefore = (before.match(/l3/g) || []).length;
-      await page.keyboard.press('Meta+d');
+      await page.keyboard.press(primary('d'));
       await page.waitForTimeout(400);
       const after = norm(await editorText(page));
       const countAfter = (after.match(/l3/g) || []).length;
@@ -314,7 +335,7 @@ test.describe('Chapter 12 — Editor core', () => {
     expect((txt.match(/l3/g) || []).length).toBeGreaterThanOrEqual(2);
     // move line down with Shift+Alt+Down: order must flip when possible
     for (let i = 0; i < 3; i++) {
-      await page.keyboard.press('Meta+ArrowUp');
+      await page.keyboard.press(primary('Home'));
       await page.keyboard.press('ArrowDown'); // first l3
       await page.keyboard.press('Home');
       const before = norm(await editorText(page));
@@ -337,11 +358,11 @@ test.describe('Chapter 12 — Editor core', () => {
     // prefix keeps Home anchored even if focus clicks land elsewhere.
     let converted = false;
     for (let attempt = 0; attempt < 4 && !converted; attempt++) {
-      await page.keyboard.press('Meta+ArrowUp');
+      await page.keyboard.press(primary('ArrowUp'));
       for (let i = 0; i < 4; i++) { await page.keyboard.press('ArrowRight'); }
       for (let i = 0; i < 5; i++) { await page.keyboard.press('Shift+ArrowRight'); }
       await page.waitForTimeout(200);
-      await page.keyboard.press('Meta+Shift+U');
+      await page.keyboard.press(primary('Shift+u'));
       await page.waitForTimeout(500);
       const txt = norm(await editorText(page));
       console.log(`[TC-ED-006] attempt ${attempt}: ${JSON.stringify(txt)}`);
@@ -359,9 +380,9 @@ test.describe('Chapter 12 — Editor core', () => {
     await openEdFile(page, 'ed07-comment.java');
     let txt = '';
     for (let i = 0; i < 3; i++) {
-      await page.keyboard.press('Meta+ArrowUp');
+      await page.keyboard.press(primary('ArrowUp'));
       await page.keyboard.press('Home');
-      await page.keyboard.press('Meta+/');
+      await page.keyboard.press(primary('/'));
       await page.waitForTimeout(400);
       txt = norm(await editorText(page));
       if (txt.includes('//')) break;
@@ -371,9 +392,9 @@ test.describe('Chapter 12 — Editor core', () => {
     // jsp uses HTML-style block comment
     await openEdFile(page, 'ed07-page.jsp');
     for (let i = 0; i < 3; i++) {
-      await page.keyboard.press('Meta+a'); // jsp config defines only blockComment → needs selection
+      await page.keyboard.press(primary('a')); // jsp config defines only blockComment → needs selection
       await page.waitForTimeout(150);
-      await page.keyboard.press('Meta+/');
+      await page.keyboard.press(primary('/'));
       await page.waitForTimeout(400);
       txt = norm(await editorText(page));
       if (txt.includes('<!--')) break;
@@ -384,9 +405,9 @@ test.describe('Chapter 12 — Editor core', () => {
     await openEdFile(page, 'ed07-conf.xml');
     await ensureEditorFocus(page);
     for (let i = 0; i < 3; i++) {
-      await page.keyboard.press('Meta+a');
+      await page.keyboard.press(primary('a'));
       await page.waitForTimeout(150);
-      await page.keyboard.press('Meta+Alt+/');
+      await page.keyboard.press(XML_BLOCK_COMMENT);
       await page.waitForTimeout(500);
       txt = norm(await editorText(page));
       if (txt.includes('<!--')) break;
@@ -400,7 +421,7 @@ test.describe('Chapter 12 — Editor core', () => {
     await openIde(page);
     await closeAllEditors(page);
     await openEdFile(page, 'ed08-find.txt');
-    await page.keyboard.press('Meta+f');
+    await page.keyboard.press(primary('f'));
     const findWidget = page.locator('.find-widget').first();
     await expect(findWidget).toBeVisible({ timeout: 10_000 });
     await page.keyboard.type('cat');
@@ -410,7 +431,7 @@ test.describe('Chapter 12 — Editor core', () => {
     console.log(`[TC-ED-008] match count: "${count1}"`);
     expect(count1).toMatch(/3/);
     // Cmd+G advances to next match (mac keymap); F3 forward, Shift+F3 backward
-    await page.keyboard.press('Meta+g');
+    await page.keyboard.press(NEXT_FIND_MATCH);
     await page.waitForTimeout(400);
     const count2 = await matchesCount();
     console.log(`[TC-ED-008] after Cmd+G: "${count2}"`);
@@ -430,7 +451,7 @@ test.describe('Chapter 12 — Editor core', () => {
     const regexToggle = findWidget.locator('.codicon-regex').first();
     expect(await regexToggle.count()).toBeGreaterThan(0);
     // replace opens with Cmd+R
-    await page.keyboard.press('Meta+r');
+    await page.keyboard.press(primary('r'));
     await page.waitForTimeout(500);
     const replaceRow = findWidget.locator('.replace-part').first();
     if (!(await replaceRow.isVisible().catch(() => false))) {
@@ -470,7 +491,7 @@ test.describe('Chapter 12 — Editor core', () => {
       .evaluate((el: HTMLElement) => el.childElementCount);
     const beforeFold = await lineCount();
     // fold all: place cursor in editor then Cmd+Shift+-
-    await page.keyboard.press('Meta+Shift+-');
+    await page.keyboard.press(primary('Shift+-'));
     let afterFoldAll = beforeFold;
     await expect.poll(async () => {
       afterFoldAll = await lineCount();
@@ -478,32 +499,32 @@ test.describe('Chapter 12 — Editor core', () => {
     }, { timeout: 10_000, intervals: [300, 500] }).toBeLessThan(beforeFold);
     console.log(`[TC-ED-009] rendered view-lines before=${beforeFold} foldAll=${afterFoldAll}`);
     // unfold all restores
-    await page.keyboard.press('Meta+Shift+=');
+    await page.keyboard.press(primary('Shift+='));
     await page.waitForTimeout(700);
     const afterUnfoldAll = await lineCount();
     expect(afterUnfoldAll).toBe(beforeFold);
     // fold single region: cursor onto line 4 (inside while-block), then Cmd+-
-    await page.keyboard.press('Meta+ArrowUp');
+    await page.keyboard.press(primary('ArrowUp'));
     for (let i = 0; i < 3; i++) { await page.keyboard.press('ArrowDown'); }
-    await page.keyboard.press('Meta+-');
+    await page.keyboard.press(primary('-'));
     await page.waitForTimeout(600);
     const afterSingleFold = await lineCount();
     console.log(`[TC-ED-009] single fold=${afterSingleFold}`);
     expect(afterSingleFold).toBeLessThan(beforeFold);
-    await page.keyboard.press('Meta+=');
+    await page.keyboard.press(primary('='));
     await page.waitForTimeout(400);
     // #region marker folding (java language configuration folding.markers)
     await openEdFile(page, 'ed09-region.java');
     await ensureEditorFocus(page);
     const beforeRegion = await lineCount();
-    await page.keyboard.press('Meta+ArrowUp');
+    await page.keyboard.press(primary('ArrowUp'));
     for (let i = 0; i < 3; i++) { await page.keyboard.press('ArrowDown'); } // inside region body
-    await page.keyboard.press('Meta+-');
+    await page.keyboard.press(primary('-'));
     await page.waitForTimeout(600);
     const afterRegionFold = await lineCount();
     console.log(`[TC-ED-009] region fold before=${beforeRegion} after=${afterRegionFold}`);
     expect(afterRegionFold).toBeLessThan(beforeRegion);
-    await page.keyboard.press('Meta+=');
+    await page.keyboard.press(primary('='));
   });
 
   test('TC-ED-010: bracket matching jumps to matching brace (Ctrl+Shift+M)', async ({ page }) => {
@@ -511,7 +532,7 @@ test.describe('Chapter 12 — Editor core', () => {
     await openIde(page);
     await closeAllEditors(page);
     await openEdFile(page, 'ed10-bracket.txt');
-    await page.keyboard.press('Meta+ArrowUp');
+    await page.keyboard.press(primary('ArrowUp'));
     await page.keyboard.press('Home');
     for (let i = 0; i < 7; i++) await page.keyboard.press('ArrowRight'); // just before '{'
     await page.keyboard.press('Control+Shift+m');
@@ -531,7 +552,7 @@ test.describe('Chapter 12 — Editor core', () => {
     await openEdFile(page, 'ed11-pairs.java');
     // Dismiss any suggestion popup after each keystroke so the raw pair
     // characters are what lands in the buffer.
-    await page.keyboard.press('Meta+ArrowDown');
+    await page.keyboard.press(primary('ArrowDown'));
     // Each pair opener goes on its own fresh line so the auto-inserted closer
     // is directly observable as an empty pair. Retries absorb a startup race
     // where the first keystrokes after editor creation are dropped by the
@@ -566,7 +587,7 @@ test.describe('Chapter 12 — Editor core', () => {
     await ensureEditorFocus(page);
     let elClosed = false;
     for (let attempt = 0; attempt < 4 && !elClosed; attempt++) {
-      await page.keyboard.press('Meta+a');
+      await page.keyboard.press(primary('a'));
       await page.keyboard.press('Escape');
       await page.keyboard.type('${center');
       await page.waitForTimeout(500);
@@ -662,7 +683,7 @@ test.describe('Chapter 12 — Editor core', () => {
       const p = write('ed15-autosave.txt', 'v1\n');
       await openIde(page);
       await openEdFile(page, 'ed15-autosave.txt');
-      await page.keyboard.press('Meta+ArrowDown');
+      await page.keyboard.press(primary('ArrowDown'));
       await page.keyboard.press('Enter');
       await page.keyboard.type('dirty-but-unsaved');
       // blur editor and wait beyond any delay — nothing must hit disk
@@ -685,7 +706,7 @@ test.describe('Chapter 12 — Editor core', () => {
       expect(synced['files.autoSave']).toBe('afterDelay');
 
       await openEdFile(page, 'ed15-autosave.txt');
-      await page.keyboard.press('Meta+ArrowDown');
+      await page.keyboard.press(primary('ArrowDown'));
       await page.keyboard.press('End');
       await page.keyboard.type('-v2');
       let savedToDisk = false;
@@ -719,8 +740,6 @@ test.describe('Chapter 12 — Editor core', () => {
       const content = fs.readFileSync(p, 'utf8');
       console.log(`[TC-ED-016] content after format-on-save:\n${content}`);
       // formatting must have expanded the collapsed braces / spacing
-      const changed = content !== fs.readFileSync(path.join(ED, 'ed16-format.java'), 'utf8') || true;
-      void changed;
       const formatted =
         /\{\s*\n\s*void messy/.test(content) ||
         content.includes('int x = 1') ||
@@ -736,7 +755,7 @@ test.describe('Chapter 12 — Editor core', () => {
     await openIde(page);
     await closeAllEditors(page);
     await openEdFile(page, 'ed17-blur.txt');
-    await page.keyboard.press('Meta+ArrowDown');
+    await page.keyboard.press(primary('ArrowDown'));
     await page.keyboard.press('Enter');
     await page.keyboard.type('unsaved-on-blur');
     // simulate window deactivation

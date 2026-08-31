@@ -220,10 +220,12 @@ test('encoding tab decorator decorates every open editor tab (BD-P2-13)', () => 
   assert.match(src, /Navigatable\.is/);
   assert.match(src, /getResourceUri/);
   assert.doesNotMatch(src, /title\.owner !== editor/);
-  assert.doesNotMatch(src, /currentEditor/);
+  // Switching tabs changes the active project/encoding context, so the
+  // decorator must invalidate decorations without filtering other tabs out.
+  assert.match(src, /onCurrentEditorChanged/);
 });
 
-const { KairoSafeEncodingService, UnrepresentableEncodingError } = require('../../lib/browser/safe-encoding-service');
+const { KairoSafeEncodingService, UnrepresentableEncodingError } = require('../../lib/common/safe-encoding-service');
 
 test('KairoSafeEncodingService refuses unrepresentable chars instead of corrupting bytes (KAIRO-RC-WEB-229)', () => {
   const svc = new KairoSafeEncodingService();
@@ -303,7 +305,7 @@ test('KairoEncodingRegistry applies folder overrides to descendants (KAIRO-RC-WE
 });
 
 test('encodeStream tolerates undefined (empty New File via FileService.doCreate, flow-02)', async () => {
-  const { KairoSafeEncodingService } = require('../../lib/browser/safe-encoding-service');
+  const { KairoSafeEncodingService } = require('../../lib/common/safe-encoding-service');
   const svc = new KairoSafeEncodingService();
   // Stock Theia accepts undefined for empty creates; the validating
   // override must not crash on it either (used to throw

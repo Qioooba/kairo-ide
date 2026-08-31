@@ -1,9 +1,13 @@
 const { chromium } = require('@playwright/test');
+const fs = require('fs');
+const path = require('path');
 
 (async () => {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
-  await page.goto('http://127.0.0.1:3002?kairoAgent=http://127.0.0.1:18081', { 
+  const theiaUrl = process.env.THEIA_URL || 'http://127.0.0.1:3002';
+  const agentUrl = process.env.AGENT_URL || 'http://127.0.0.1:18081';
+  await page.goto(`${theiaUrl}/?kairoAgent=${encodeURIComponent(agentUrl)}`, {
     waitUntil: 'domcontentloaded', 
     timeout: 30000 
   });
@@ -13,7 +17,9 @@ const { chromium } = require('@playwright/test');
   await page.waitForTimeout(5000);
   
   // Take screenshot
-  await page.screenshot({ path: '/Users/qi/Documents/spaces/kairo-ide/tests/e2e/test-results/current-state.png' });
+  const artifactDir = process.env.KAIRO_TEST_ARTIFACT_DIR || path.resolve(__dirname, 'test-results');
+  fs.mkdirSync(artifactDir, { recursive: true });
+  await page.screenshot({ path: path.join(artifactDir, 'current-state.png') });
   
   // Get detailed shell structure
   const shellStructure = await page.evaluate(() => {

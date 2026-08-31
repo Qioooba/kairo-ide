@@ -2,7 +2,7 @@ import { inject, injectable, optional, postConstruct } from '@theia/core/shared/
 import { Emitter, Event } from '@theia/core/lib/common/event';
 import { WebSocketConnectionProvider } from '@theia/core/lib/browser/messaging/ws-connection-provider';
 import { WorkspaceService } from '@theia/workspace/lib/browser/workspace-service';
-import { parsePorcelainStatusZ } from './git-path-utils';
+import { normalizeFsPath, parsePorcelainStatusZ } from '../common/git-path-utils';
 import { GitBackendPath, GitBackendService } from '../common/git-protocol';
 
 const DEFAULT_GIT_MAX_BUFFER = 10 * 1024 * 1024;
@@ -147,7 +147,7 @@ export class GitService {
       const backend = this.proxy();
       if (!backend) return;
       const found = await backend.$findNearestRepoRoot(cwd, 2);
-      if (found && found !== this.repoRoot) {
+      if (found !== this.repoRoot) {
         this.setRepoRoot(found);
       }
     } catch {
@@ -199,9 +199,32 @@ export class GitService {
     return backend.$findRepoRoot(cwd);
   }
 
-  setRepoRoot(root: string): void {
-    this.repoRoot = root;
-    this.refreshStatus();
+  /**
+   * Resolve the repository nearest to a workspace folder.  A workspace root
+   * is often a container (for example a checkout with several project
+   * folders), so the detector must use the backend's bounded downward search
+   * before falling back to the normal parent walk.
+   */
+  async findNearestRepoRoot(cwd: string, maxDepth = 2): Promise<string | undefined> {
+    const backend = this.proxy();
+    if (!backend) return undefined;
+    return backend.$findNearestRepoRoot(cwd, maxDepth);
+  }
+
+  setRepoRoot(root: string | undefined): void {
+    const normalized = root ? normalizeFsPath(root) : undefined;
+    if (normalized === this.repoRoot) return;
+
+    this.repoRoot = normalized;
+    this.cachedStatus = undefined;
+    // Clear old decorations/status-bar state immediately when switching
+    // projects or when a repository is removed, then publish the new status
+    // once the backend refresh completes.
+    this.onDidChangeStatusEmitter.fire({ branch: '', files: [], ahead: 0, behind: 0 });
+    this.onDidChangeEmitter.fire();
+    if (normalized) {
+      void this.refreshStatus();
+    }
   }
 
   getRepoRoot(): string | undefined {
@@ -420,11 +443,11 @@ export class GitService {
     return { hash, message, filesChanged };
   }
 
-  /** Run a git command and return combined, trimmed output. */
+  /** Run a git command and return trimmed stdout via the Node backend. */
   protected async run(args: string[]): Promise<string> {
     if (!this.repoRoot) throw new Error('No git repository');
     try {
-      const { stdout } = await execFileAsync('git', args, gitOpts(this.repoRoot));
+      const stdout = await this.exec(args);
       this.refreshStatus();
       this.onDidChangeEmitter.fire();
       return stdout.trim();

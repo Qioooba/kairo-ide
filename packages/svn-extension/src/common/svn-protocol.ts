@@ -17,7 +17,7 @@ import type {
   SvnDiffResult,
   SvnCredential,
   SvnResolveChoice,
-} from '../browser/svn-types';
+} from './svn-types';
 
 export const SvnBackendPath = '/services/svn-backend';
 

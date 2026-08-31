@@ -1,6 +1,6 @@
-import { injectable, inject as _inject } from '@theia/core/shared/inversify';
+import { injectable } from '@theia/core/shared/inversify';
 import { AbstractViewContribution } from '@theia/core/lib/browser/shell/view-contribution';
-import { Command, CommandRegistry } from '@theia/core/lib/common';
+import { Command } from '@theia/core/lib/common';
 import { MenuModelRegistry } from '@theia/core/lib/common/menu';
 import { GitHistoryWidget } from './git-history-widget';
 
@@ -21,13 +21,6 @@ export class GitHistoryContribution extends AbstractViewContribution<GitHistoryW
       },
       toggleCommandId: GIT_HISTORY_TOGGLE_COMMAND.id,
     });
-  }
-
-  override registerCommands(commands: CommandRegistry): void {
-    commands.registerCommand(GIT_HISTORY_TOGGLE_COMMAND, {
-      execute: () => this.openView({ activate: true }),
-    });
-    super.registerCommands(commands);
   }
 
   override registerMenus(menus: MenuModelRegistry): void {

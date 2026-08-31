@@ -1,18 +1,22 @@
 /**
  * Chapter 18 — Search功能全家桶 (Browser column).
  * 18.1 Search Center  TC-SRCH-001..012
- * 18.2 Replace in Path TC-SRCH-021..025 (fixtures under /tmp/kairo-w2search — shared lane workspace untouched)
+ * 18.2 Replace in Path TC-SRCH-021..025 (fixtures under the isolated W2 lane workspace)
  *
- * Platform note: this campaign runs Chrome on macOS. The Kairo keymap binds
- * macOS chords (B.2): Cmd+Shift+F / Cmd+Shift+R for Find/Replace in Path,
- * Cmd+Shift+O / Cmd+O / Cmd+Alt+O / Cmd+Shift+A for Find File/Class/Symbol/Action.
+ * Key chords are selected from the host platform so the same scenarios cover
+ * macOS Cmd and Windows/Linux Ctrl browser builds.
  */
 import { test, expect, Page } from '@playwright/test';
 import * as fs from 'fs';
 import * as path from 'path';
 import { openIde, attachDiagnostics, unexpectedConsoleErrors, openFileViaQuickOpen } from './helpers';
-
-const W2 = '/tmp/kairo-w2search/ws';
+import {
+  W2,
+  ensureSearchFixture,
+  IS_MAC,
+  SEARCH_CENTER_SHORTCUT,
+  REPLACE_SHORTCUT,
+} from './ch18-helpers';
 
 const ALPHA_ORIG = 'alpha line with foo token\nfoo appears twice: foo foo\nno target on this line\n';
 const BETA_ORIG = 'beta starts with foo\nplain middle line\nending foo\n';
@@ -25,6 +29,7 @@ function resetReplaceFixtures(): void {
 
 /** openIde pinned to an arbitrary workspace root (URL fragment binding). */
 async function openIdeAt(page: Page, root: string): Promise<void> {
+  ensureSearchFixture();
   await page.goto(`/#${encodeURI(root)}`, { waitUntil: 'domcontentloaded' });
   const trust = page.getByRole('button', { name: /Yes, I trust|是，我信任|trust the authors$/i }).first();
   try { await trust.click({ timeout: 15_000 }); } catch { /* none */ }
@@ -34,7 +39,7 @@ async function openIdeAt(page: Page, root: string): Promise<void> {
 const modal = (page: Page) => page.locator('[data-testid="search-center-modal"]');
 const queryInput = (page: Page) => page.locator('[data-testid="search-query"]');
 
-async function openSearchCenter(page: Page, key = 'Meta+Shift+F'): Promise<void> {
+async function openSearchCenter(page: Page, key = SEARCH_CENTER_SHORTCUT): Promise<void> {
   await page.keyboard.press(key);
   await modal(page).waitFor({ state: 'visible', timeout: 10_000 });
 }
@@ -151,13 +156,13 @@ test('TC-SRCH-001 [P0] Ctrl+Shift+F 打开 body overlay（SIW 键已注销）', 
   const diag = attachDiagnostics(page);
   await openIde(page);
 
-  // Windows-chord Ctrl+Shift+F is not bound in this macOS browser build…
-  await page.keyboard.press('Control+Shift+F');
+  // The opposite platform chord must not open the modal.
+  await page.keyboard.press(IS_MAC ? 'Control+Shift+F' : 'Meta+Shift+F');
   await page.waitForTimeout(600);
   expect(await modal(page).count()).toBe(0);
 
-  // …the platform chord (macOS Cmd+Shift=F; Win/Linux: Ctrl+Shift+F) opens the overlay.
-  await page.keyboard.press('Meta+Shift+F');
+  // The platform chord opens the overlay.
+  await page.keyboard.press(SEARCH_CENTER_SHORTCUT);
   await expect(modal(page)).toBeVisible({ timeout: 10_000 });
 
   // backdrop hosted as a body-level overlay, outside the workbench shell DOM
@@ -198,7 +203,7 @@ test('TC-SRCH-002 [P1] Monaco 聚焦时 capture 拦截仍打开；modal 内按�
   await page.waitForTimeout(300);
   expect(await page.evaluate(() => !!document.activeElement?.closest('.monaco-editor'))).toBe(true);
 
-  await page.keyboard.press('Meta+Shift+F');
+  await page.keyboard.press(SEARCH_CENTER_SHORTCUT);
   await expect(modal(page)).toBeVisible({ timeout: 10_000 });
 
   // keys typed inside the modal must pass through untouched (no re-interception)
@@ -536,6 +541,20 @@ test('TC-SRCH-011 [P3] history 上限 50 去重（pinned 模型上限 10）', as
   await search(page, 'zebra'); // duplicate — dedupe keeps one entry
   expect(await awaitSettled(page)).toBe('results');
 
+  // The model is user-visible: recent entries can be loaded and pinned from
+  // the history menu, not just inspected through localStorage.
+  await page.locator('[data-testid="search-history-toggle"]').click();
+  const historyMenu = page.locator('[data-testid="search-history-menu"]');
+  await expect(historyMenu).toBeVisible();
+  const zebraEntry = historyMenu.locator('.kairo-search-history-entry').filter({ hasText: 'zebra' }).first();
+  await expect(zebraEntry).toBeVisible();
+  await zebraEntry.locator('.kairo-search-history-action').first().click();
+  const pinned = await page.evaluate(() => JSON.parse(localStorage.getItem('kairo-search-pinned') ?? '[]'));
+  expect(pinned.some((entry: { query: string }) => entry.query === 'zebra')).toBe(true);
+  await zebraEntry.locator('.kairo-search-history-query').click();
+  await expect(queryInput(page)).toHaveValue('zebra');
+  await page.locator('[data-testid="search-history-toggle"]').click();
+
   let history = await page.evaluate(() => JSON.parse(localStorage.getItem('kairo-search-history') ?? '[]'));
   expect(history.length).toBe(2);
   expect(history[0].query).toBe('zebra');
@@ -558,7 +577,8 @@ test('TC-SRCH-011 [P3] history 上限 50 去重（pinned 模型上限 10）', as
   history = await page.evaluate(() => JSON.parse(localStorage.getItem('kairo-search-history') ?? '[]'));
   expect(history.length).toBeLessThanOrEqual(50);
   expect(history[0].query).toBe('brand-new-query');
-  // NOTE: pinned 上限 10 由 SearchScopeModel.pinQuery 实现（无 UI 入口），模型级单测覆盖。
+  // UI pin/unpin and clear actions are exercised above; model still enforces
+  // the hard caps (history 50, pinned 10).
 });
 
 test('TC-SRCH-012 [P1] 取消语义：CancelledError 不当错误展示 + stale 保护', async ({ page }) => {
@@ -597,7 +617,7 @@ test('TC-SRCH-012 [P1] 取消语义：CancelledError 不当错误展示 + stale 
 // ------------------------------------------------------------------
 
 async function openReplaceMode(page: Page): Promise<void> {
-  await page.keyboard.press('Meta+Shift+R');
+  await page.keyboard.press(REPLACE_SHORTCUT);
   await modal(page).waitFor({ state: 'visible', timeout: 10_000 });
   const replaceText = page.locator('[data-testid="replace-text"]');
   if (!(await replaceText.isVisible())) {

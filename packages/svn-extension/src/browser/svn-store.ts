@@ -1,7 +1,7 @@
 import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
 import { Emitter, Event } from '@theia/core/lib/common/event';
 import { SvnService, SvnStatusEntry, SvnCommitInfo, SvnFileStatus } from './svn-service';
-import { SvnWorkingCopyInfo, SvnResolveChoice } from './svn-types';
+import { SvnWorkingCopyInfo, SvnResolveChoice } from '../common/svn-types';
 
 export interface SvnChangesState {
   available: boolean;

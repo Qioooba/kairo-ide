@@ -8,7 +8,7 @@ import { MessageService } from '@theia/core/lib/common/message-service';
 import { EditorManager } from '@theia/editor/lib/browser';
 import { KairoI18nService } from '@kairo/i18n';
 import { GitService } from './git-service';
-import { toRepoRelativePath } from './git-path-utils';
+import { toRepoRelativePath } from '../common/git-path-utils';
 
 export const GIT_SYNC_COMMANDS = {
   PULL: 'kairo.git.pull',
