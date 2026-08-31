@@ -27,7 +27,7 @@
     "@theia/plugin-ext": "1.73.1",
     "@theia/plugin-ext-vscode": "1.73.1",
     "@theia/workspace": "1.73.1",
-    "adm-zip": "^0.5.16",
+    "adm-zip": "^0.6.0",
     "semver": "^7.7.1"
   },
   "devDependencies": {
