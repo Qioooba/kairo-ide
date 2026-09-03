@@ -50,7 +50,7 @@
   },
   "devDependencies": {
     "@theia/cli": "1.73.1",
-    "cross-env": "^7.0.3",
+    "cross-env": "^10.1.0",
     "esbuild": "0.28.2",
     "jsdom": "^30.0.1",
     "typescript": "5.5.4"
