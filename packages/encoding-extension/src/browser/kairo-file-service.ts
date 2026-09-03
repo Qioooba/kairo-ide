@@ -45,11 +45,15 @@ function offsetAt(text: string, line: number, character: number): number {
 
 /** Apply LSP content changes against a snapshot, then return the full text. */
 export function applyContentChanges(text: string, changes: readonly TextDocumentContentChangeEvent[]): string {
-  const full = [...changes].reverse().find(change => !change.range);
-  if (full && changes.every(change => !change.range)) {
+  const isFull = (change: TextDocumentContentChangeEvent): change is { text: string } =>
+    !('range' in change);
+  const full = [...changes].reverse().find(isFull);
+  if (full && changes.every(isFull)) {
     return full.text;
   }
-  const ranged = changes.filter((change): change is TextDocumentContentChangeEvent & { range: NonNullable<TextDocumentContentChangeEvent['range']> } => !!change.range);
+  const ranged = changes.filter((change): change is TextDocumentContentChangeEvent & {
+    range: { start: { line: number; character: number }; end: { line: number; character: number } };
+  } => 'range' in change);
   const ordered = [...ranged].sort((a, b) => {
     if (a.range.start.line !== b.range.start.line) {
       return b.range.start.line - a.range.start.line;

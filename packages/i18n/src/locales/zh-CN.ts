@@ -171,6 +171,7 @@ const zhCNMessages: KairoI18nMessages = {
     openApplication: 'Kairo: 打开应用程序',
     revealServers: 'Kairo: 显示服务器',
     revealBuilds: 'Kairo: 显示构建',
+    revealCustomBuild: 'Kairo: 显示自定义构建',
     revealDeployments: 'Kairo: 显示部署',
     revealLogs: 'Kairo: 显示 Tomcat 日志',
     revealMaven: 'Kairo: 显示 Maven',

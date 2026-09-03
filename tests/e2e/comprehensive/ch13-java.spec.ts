@@ -111,7 +111,7 @@ async function focusEditorAndClickLine(lineSubstring: string, col?: number): Pro
   // Robust: locate view-line via evaluate innerText search, not locator hasText which fragments on token spans
   for (let attempt = 0; attempt < 5; attempt++) {
     await page.keyboard.press('Escape');
-    await page.keyboard.press('Meta+ArrowUp');
+    await page.keyboard.press('ControlOrMeta+ArrowUp');
     await page.waitForTimeout(500);
     const found = await page.evaluate((needle) => {
       const editors = Array.from(document.querySelectorAll('.monaco-editor')) as HTMLElement[];
@@ -143,7 +143,7 @@ async function focusEditorAndClickLine(lineSubstring: string, col?: number): Pro
     return txt.includes(needle);
   }, lineSubstring);
   if (fallback) {
-    await page.keyboard.press('Meta+ArrowUp');
+    await page.keyboard.press('ControlOrMeta+ArrowUp');
     await page.waitForTimeout(300);
     return;
   }
@@ -210,9 +210,9 @@ async function editorValue(): Promise<string> {
 
 /** Undo all test edits in the active editor and save (keeps the LS buffer clean). */
 async function revertEdits(): Promise<void> {
-  for (let i = 0; i < 20; i++) await page.keyboard.press('Meta+Z');
+  for (let i = 0; i < 20; i++) await page.keyboard.press('ControlOrMeta+Z');
   await page.waitForTimeout(400);
-  await page.keyboard.press('Meta+S');
+  await page.keyboard.press('ControlOrMeta+S');
   await page.waitForTimeout(900);
   // Hard reset via file reload if still dirty (hippie may insert multiple tokens)
   const dirty = await page.evaluate(() => document.querySelector('.monaco-editor .dirty') !== null || document.body.innerText.includes('•'));
@@ -252,14 +252,19 @@ test.describe.serial('ch13 java part1', () => {
     // "Publish Diagnostics") — the status bar must surface it.
     // NOTE: deliberately NOT using Java: Rebuild Index here — buildWorkspace(true)
     // wipes the JDT search index and references stay empty for minutes after.
+    const readIndexStatus = () => page.evaluate(() => {
+      const els = Array.from(document.querySelectorAll('#theia-statusBar .element'));
+      return els.map(e => {
+        const text = e.textContent?.trim() ?? '';
+        const title = e.getAttribute('title') ?? e.getAttribute('aria-label') ?? '';
+        return { text, title };
+      }).filter(e => /index|索引|jdt/i.test(`${e.text} ${e.title}`));
+    });
+    let progressEntry = await readIndexStatus();
     await openFile('Caller.java');
-    let progressEntry: string[] = [];
     const deadline = Date.now() + 90_000;
     while (Date.now() < deadline) {
-      progressEntry = await page.evaluate(() => {
-        const els = Array.from(document.querySelectorAll('#theia-statusBar .element'));
-        return els.map(e => e.textContent?.trim() ?? '').filter(t => /index|索引/i.test(t));
-      });
+      progressEntry = await readIndexStatus();
       if (progressEntry.length > 0) break;
       // nudge the LS with an edit so it re-validates
       await page.keyboard.press('End');
@@ -298,7 +303,7 @@ test.describe.serial('ch13 java part1', () => {
     await page.waitForTimeout(1200);
     // Monaco themes color tokens via mtkN classes (stylesheet), not inline styles.
     const wordClass = await page.evaluate(() => {
-      const map: Record<string, Set<string>> = {};
+      const map: Record<string, string[]> = Object.create(null);
       for (const span of Array.from(document.querySelectorAll('.monaco-editor .view-line span'))) {
         if (!span.getClientRects().length) continue;
         const text = (span.textContent ?? '').trim();
@@ -307,12 +312,11 @@ test.describe.serial('ch13 java part1', () => {
         for (const word of text.split(/(\s+)/)) {
           const w = word.trim();
           if (!w) continue;
-          (map[w] ??= new Set()).add(cls);
+          const set = map[w] ?? (map[w] = []);
+          if (!set.includes(cls)) set.push(cls);
         }
       }
-      const out: Record<string, string[]> = {};
-      for (const [k, v] of Object.entries(map)) out[k] = Array.from(v);
-      return out;
+      return map;
     });
     console.log('[TC-JAVA-002] sample word classes:', JSON.stringify(Object.fromEntries(Object.entries(wordClass).slice(0, 40))));
     const cls = (w: string): string | undefined => wordClass[w]?.[0];
@@ -364,10 +368,10 @@ test.describe.serial('ch13 java part1', () => {
     // Robust placement: click editor, go to line with "String aa" via keyboard search
     await page.locator('.monaco-editor:visible .view-lines').first().click().catch(() => {});
     await page.waitForTimeout(400);
-    await page.keyboard.press('Meta+ArrowUp');
+    await page.keyboard.press('ControlOrMeta+ArrowUp');
     await page.waitForTimeout(300);
     // Navigate to the line containing String aa (it's near end of file)
-    await page.keyboard.press('Meta+End');
+    await page.keyboard.press('ControlOrMeta+End');
     await page.waitForTimeout(300);
     await page.keyboard.press('ArrowUp');
     await page.waitForTimeout(200);
@@ -398,7 +402,7 @@ test.describe.serial('ch13 java part1', () => {
     await page.waitForTimeout(600);
     await page.locator('.monaco-editor:visible .view-lines').first().click().catch(() => {});
     await page.waitForTimeout(300);
-    await page.keyboard.press('Meta+End');
+    await page.keyboard.press('ControlOrMeta+End');
     await page.waitForTimeout(200);
     // Caller.java: return line is 2 lines before main, so go up 3 lines from file end
     await page.keyboard.press('ArrowUp');
@@ -429,7 +433,7 @@ test.describe.serial('ch13 java part1', () => {
     // Robust caret placement: go to end of file and add new line (avoid fragile line click)
     await page.locator('.monaco-editor:visible .view-lines').first().click().catch(() => {});
     await page.waitForTimeout(300);
-    await page.keyboard.press('Meta+End');
+    await page.keyboard.press('ControlOrMeta+End');
     await page.waitForTimeout(200);
     await page.keyboard.press('End');
     await page.keyboard.press('Enter');
@@ -479,7 +483,7 @@ test.describe.serial('ch13 java part1', () => {
     const wbox = await wordSpan.boundingBox();
     await page.mouse.dblclick(wbox!.x + wbox!.width / 2, wbox!.y + wbox!.height / 2);
     await page.waitForTimeout(400);
-    await page.keyboard.press('Meta+B');
+    await page.keyboard.press('ControlOrMeta+B');
     await page.waitForTimeout(2500);
     await expect(page.locator('#theia-main-content-panel .lm-TabBar-tabLabel', { hasText: 'FormalGreeter.java' }).first())
       .toBeVisible({ timeout: 15_000 });
@@ -503,7 +507,7 @@ test.describe.serial('ch13 java part1', () => {
     const wbox = await methodSpan.boundingBox();
     await page.mouse.click(wbox!.x + wbox!.width / 2, wbox!.y + wbox!.height / 2);
     await page.waitForTimeout(400);
-    // Meta+Alt+B is bound but 'editor.action.goToImplementation' is a Monaco
+    // ControlOrMeta+Alt+B is bound but 'editor.action.goToImplementation' is a Monaco
     // command — exercise the same action via the editor context menu
     // (Go To > Implementation(s)).
     const runImpl = async (): Promise<void> => {

@@ -32,6 +32,7 @@ import { SecondaryWindowHandler } from '@theia/core/lib/browser/secondary-window
 import { Message } from '@theia/core/shared/@lumino/messaging';
 import * as monaco from '@theia/monaco-editor-core';
 import { JavaOrganizeImports } from '@kairo/java-extension';
+import { collectLspTextEditsForUri } from '@kairo/java-extension/lib/common/lsp-protocol';
 import type { LSPWorkspaceEdit, LSPTextEdit } from '@kairo/java-extension/lib/common/lsp-protocol';
 import { KairoI18nService } from '@kairo/i18n';
 
@@ -297,28 +298,11 @@ export class KairoEditorContribution implements FrontendApplicationContribution,
     const model = control.getModel();
     if (!model) return;
 
-    const operations: monaco.editor.IIdentifiedSingleEditOperation[] = [];
-    const textEdits = edit.changes?.[fileUri];
-    if (textEdits) {
-      for (const te of textEdits) {
-        operations.push({
-          range: lspToMonacoRange(te),
-          text: te.newText,
-        });
-      }
-    }
-    if (edit.documentChanges) {
-      for (const change of edit.documentChanges) {
-        if ('kind' in change) continue; // Skip resource operations
-        if (change.textDocument.uri !== fileUri) continue;
-        for (const te of change.edits) {
-          operations.push({
-            range: lspToMonacoRange(te),
-            text: te.newText,
-          });
-        }
-      }
-    }
+    const textEdits = collectLspTextEditsForUri(edit, fileUri);
+    const operations: monaco.editor.IIdentifiedSingleEditOperation[] = textEdits.map(te => ({
+      range: lspToMonacoRange(te),
+      text: te.newText,
+    }));
 
     if (operations.length > 0) {
       // Sort edits in reverse order so earlier edits don't

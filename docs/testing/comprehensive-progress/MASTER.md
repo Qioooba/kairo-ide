@@ -29,7 +29,7 @@
 | BUG-20260826-001 | P0(阻塞启动) | java-debug-acceptance.ts | i18n key 类型宽泛导致全包编译失败 | `ERROR_RECOVERY_PATHS` 改为 `Partial<Record<State, KairoI18nKey>>` |
 | BUG-20260826-002 | P0(阻塞启动) | plugin-extension frontend-module.ts | 浏览器模块从 `../node/` 导入常量，把 adm-zip 等 Node 库打进前端 bundle → `process is not defined` → **IDE 白屏无法启动** | `KAIRO_EXTENSION_SERVICE_PATH` 移入 common 协议文件，双端引用 |
 
-**W1-A 修复（详见 ch05/06/07.md）**: BUG-100 工具栏不挂载(P0)、BUG-101 File菜单缺项、BUG-102 View菜单缺11项、BUG-103 Save As 全局禁用、BUG-104 键盘保护 pageerror、BUG-105 **lane 隔离失效：后端只读 KAIRO_AGENT_URL**(P0)、BUG-106 Maven标题raw key、BUG-107 Remote视图构造崩溃、BUG-109 右键Run组永不渲染、BUG-110 Ctrl+R替换键、BUG-111 Large指示不出现；未修:BUG-108(React key P3)、BUG-112(GoTo子菜单缺Java项→ch13跟进)
+**W1-A 修复（详见 ch05/06/07.md）**: BUG-100 工具栏不挂载(P0)、BUG-101 File菜单缺项、BUG-102 View菜单缺11项、BUG-103 Save As 全局禁用、BUG-104 键盘保护 pageerror、BUG-105 **lane 隔离失效：后端只读 KAIRO_AGENT_URL**(P0)、BUG-106 Maven标题raw key、BUG-107 Remote视图构造崩溃、BUG-109 右键Run组永不渲染、BUG-110 Ctrl+R替换键、BUG-111 Large指示不出现；未修:BUG-108(React key P3)；BUG-112 Go To 子菜单已改为 `kairo.java.*` Theia 命令（ch13 复验）
 
 **W1-C 修复（详见 ch11/12/37.md，2026-08-26）**:
 - BUG-20260826-300 Git集成从未接入浏览器构建(P1) — git协议+后端服务+前端代理

@@ -75,23 +75,27 @@ export namespace JavaNavigationCommands {
   };
 
   export const GO_TO_DECLARATION: Command = {
-    id: 'editor.action.revealDefinition',
+    id: 'kairo.java.goToDeclaration',
     label: 'Declaration',
+    category: 'Java',
   };
 
   export const GO_TO_IMPLEMENTATION: Command = {
-    id: 'editor.action.goToImplementation',
+    id: 'kairo.java.goToImplementation',
     label: 'Implementation(s)',
+    category: 'Java',
   };
 
   export const PEEK_DEFINITION: Command = {
-    id: 'editor.action.peekDefinition',
+    id: 'kairo.java.peekDefinition',
     label: 'Quick Definition',
+    category: 'Java',
   };
 
   export const QUICK_IMPLEMENTATION: Command = {
-    id: 'editor.action.peekImplementation',
+    id: 'kairo.java.peekImplementation',
     label: 'Quick Implementation',
+    category: 'Java',
   };
 
   export const SHOW_CALL_HIERARCHY: Command = {
@@ -157,6 +161,10 @@ export class JavaNavigationContribution implements CommandContribution, MenuCont
     [JavaNavigationCommands.FIND_USAGES.id]: 'widget.java.command.findUsages',
     [JavaNavigationCommands.SHOW_USAGES.id]: 'widget.java.command.showUsages',
     [JavaNavigationCommands.FILE_STRUCTURE.id]: 'widget.java.command.fileStructure',
+    [JavaNavigationCommands.GO_TO_DECLARATION.id]: 'widget.java.command.declaration',
+    [JavaNavigationCommands.GO_TO_IMPLEMENTATION.id]: 'widget.java.command.implementation',
+    [JavaNavigationCommands.PEEK_DEFINITION.id]: 'widget.java.command.quickDefinition',
+    [JavaNavigationCommands.QUICK_IMPLEMENTATION.id]: 'widget.java.command.quickImplementation',
   };
 
   protected withLabel(cmd: Command): Command {
@@ -215,6 +223,34 @@ export class JavaNavigationContribution implements CommandContribution, MenuCont
 
     registry.registerCommand(this.withLabel(JavaNavigationCommands.FILE_STRUCTURE), {
       execute: () => this.executeFileStructure(),
+      isVisible: () => this.isJavaEditorActive(),
+      isEnabled: () => this.isJavaEditorActive(),
+    });
+
+    // BUG-20260826-112: Monaco action ids (`editor.action.revealDefinition`
+    // etc.) are not Theia commands, so MenuModelRegistry dropped every Go To
+    // child that pointed at them. Wrap them as kairo.java.* commands so the
+    // submenu actually renders in the browser build.
+    registry.registerCommand(this.withLabel(JavaNavigationCommands.GO_TO_DECLARATION), {
+      execute: () => this.triggerMonacoAction('editor.action.revealDefinition'),
+      isVisible: () => this.isJavaEditorActive(),
+      isEnabled: () => this.isJavaEditorActive(),
+    });
+
+    registry.registerCommand(this.withLabel(JavaNavigationCommands.GO_TO_IMPLEMENTATION), {
+      execute: () => this.triggerMonacoAction('editor.action.goToImplementation'),
+      isVisible: () => this.isJavaEditorActive(),
+      isEnabled: () => this.isJavaEditorActive(),
+    });
+
+    registry.registerCommand(this.withLabel(JavaNavigationCommands.PEEK_DEFINITION), {
+      execute: () => this.triggerMonacoAction('editor.action.peekDefinition'),
+      isVisible: () => this.isJavaEditorActive(),
+      isEnabled: () => this.isJavaEditorActive(),
+    });
+
+    registry.registerCommand(this.withLabel(JavaNavigationCommands.QUICK_IMPLEMENTATION), {
+      execute: () => this.triggerMonacoAction('editor.action.peekImplementation'),
       isVisible: () => this.isJavaEditorActive(),
       isEnabled: () => this.isJavaEditorActive(),
     });
@@ -641,9 +677,13 @@ export class JavaNavigationContribution implements CommandContribution, MenuCont
   }
 
   protected executeFileStructure(): void {
+    this.triggerMonacoAction('editor.action.gotoSymbol');
+  }
+
+  protected triggerMonacoAction(actionId: string): void {
     const editor = this.getCurrentMonacoEditor();
     if (!editor) return;
-    editor.trigger('kairo-java', 'editor.action.gotoSymbol', null);
+    editor.trigger('kairo-java', actionId, null);
   }
 
   protected getCurrentMonacoEditor(): monaco.editor.IStandaloneCodeEditor | undefined {

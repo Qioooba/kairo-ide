@@ -1676,6 +1676,46 @@ func TestBuildEnhancedBreakpointSetCommand_WithThreadFilter(t *testing.T) {
 	}
 }
 
+func TestBuildEnhancedBreakpointSetCommand_ConditionIsNotJDWPModifier(t *testing.T) {
+	eb := &EnhancedBreakpoint{
+		Breakpoint: Breakpoint{
+			SuspendPolicy: suspendAll,
+			Condition:     "x > 5",
+		},
+	}
+	data := BuildEnhancedBreakpointSetCommand(0x100, 0x200, 42, eb)
+	r := NewJDWPDataReader(data)
+	_, _ = r.ReadByte()
+	_, _ = r.ReadByte()
+	modCount, _ := r.ReadInt()
+	if modCount != 1 {
+		t.Errorf("condition must not add a JDWP modifier, got %d", modCount)
+	}
+}
+
+func TestBreakpointManager_RecordHitAndShouldStop_Condition(t *testing.T) {
+	bm := NewBreakpointManager()
+	id := bm.AddBreakpoint(&Breakpoint{
+		Kind:      BreakpointLine,
+		ClassName: "Demo",
+		LineNumber: 10,
+		Enabled:   true,
+		Condition: "x > 5",
+		RequestID: 77,
+	})
+	_ = id
+	if bm.RecordHitAndShouldStop(77, map[string]interface{}{"x": 3}, nil, 0, "", 0) {
+		t.Fatal("false condition should not stop")
+	}
+	if !bm.RecordHitAndShouldStop(77, map[string]interface{}{"x": 9}, nil, 0, "", 0) {
+		t.Fatal("true condition should stop")
+	}
+	bp, _ := bm.FindByRequestID(77)
+	if bp.HitCount != 2 {
+		t.Errorf("HitCount = %d, want 2", bp.HitCount)
+	}
+}
+
 func TestComplexConditionToString(t *testing.T) {
 	cc := ParseComplexCondition("x > 5 && y < 10")
 	s := complexConditionToString(cc)

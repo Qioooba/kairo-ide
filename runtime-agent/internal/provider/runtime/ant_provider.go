@@ -121,6 +121,22 @@ func (p *AntProvider) Validate(ctx context.Context, plan domain.BuildPlan) error
 	if _, err := os.Stat(buildFilePath); os.IsNotExist(err) {
 		return fmt.Errorf("build file %s not found", buildFilePath)
 	}
+	data, err := os.ReadFile(buildFilePath)
+	if err != nil {
+		return fmt.Errorf("read build file: %w", err)
+	}
+	var doc AntBuildXML
+	if err := xml.Unmarshal(data, &doc); err != nil {
+		return fmt.Errorf("parse build.xml: %w", err)
+	}
+	for _, target := range plan.Targets {
+		if target == "" {
+			continue
+		}
+		if doc.GetTarget(target) == nil {
+			return fmt.Errorf("target %q not found in build.xml", target)
+		}
+	}
 	return nil
 }
 

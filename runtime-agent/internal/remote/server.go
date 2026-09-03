@@ -27,12 +27,15 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"sync"
 	"time"
 
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/log"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/security"
+	"github.com/gorilla/websocket"
 )
 
 // TLSVersion is the minimum TLS version enforced by the remote server.
@@ -45,6 +48,12 @@ var CipherSuites = []uint16{
 	tls.TLS_AES_256_GCM_SHA384,
 	tls.TLS_AES_128_GCM_SHA256,
 	tls.TLS_CHACHA20_POLY1305_SHA256,
+}
+
+var remoteWSUpgrader = websocket.Upgrader{
+	CheckOrigin:     security.IsSafeWebSocketOrigin,
+	ReadBufferSize:  1024,
+	WriteBufferSize: 1024,
 }
 
 // SessionTokenLength is the byte length of a session token (32 bytes → 64 hex chars).
@@ -85,6 +94,12 @@ type RemoteConfig struct {
 	// MaxConcurrentSessions limits the number of active sessions.
 	// Zero means unlimited.
 	MaxConcurrentSessions int
+
+	// LocalAgentURL is the loopback URL of the local runtime-agent
+	// (e.g. http://127.0.0.1:18080). Authenticated remote API calls
+	// are reverse-proxied here. Empty means proxy is configured later
+	// and requests return 503 until it is set.
+	LocalAgentURL string
 }
 
 // RemoteServer is the TLS-enabled remote agent server.
@@ -405,22 +420,127 @@ func (rs *RemoteServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleWebSocket handles WebSocket upgrade for event streaming.
+// handleWebSocket upgrades the client to a multiplexed event stream.
+// Auth is already enforced by authMiddleware (Bearer, subprotocol, or token query).
 func (rs *RemoteServer) handleWebSocket(w http.ResponseWriter, r *http.Request) {
-	// WebSocket upgrade is handled by the auth middleware
-	// The actual upgrade logic reuses the existing event stream handler
-	rs.writeError(w, http.StatusNotImplemented, "WebSocket upgrade not yet implemented")
+	session, _ := r.Context().Value(ctxKeySession).(*sessionInfo)
+
+	conn, err := remoteWSUpgrader.Upgrade(w, r, nil)
+	if err != nil {
+		rs.logger.Warn("remote websocket upgrade failed", log.Fields{
+			"error": err.Error(),
+			"path":  r.URL.Path,
+		})
+		return
+	}
+	defer conn.Close()
+
+	username := ""
+	reconnect := ""
+	if session != nil {
+		username = session.Username
+		reconnect = session.ReconnectToken
+	}
+
+	conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+	if err := conn.WriteJSON(map[string]any{
+		"type":           "connected",
+		"username":       username,
+		"reconnectToken": reconnect,
+		"timestamp":      time.Now().UTC().Format(time.RFC3339),
+	}); err != nil {
+		return
+	}
+
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+				if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+
+	conn.SetReadLimit(1024 * 1024)
+	conn.SetReadDeadline(time.Now().Add(5 * time.Minute))
+	conn.SetPongHandler(func(string) error {
+		conn.SetReadDeadline(time.Now().Add(5 * time.Minute))
+		return nil
+	})
+
+	for {
+		if _, _, err := conn.ReadMessage(); err != nil {
+			return
+		}
+		conn.SetReadDeadline(time.Now().Add(5 * time.Minute))
+	}
 }
 
-// handleProxiedAPI proxies API requests to the local agent.
+// handleProxiedAPI reverse-proxies authenticated /api/v1/* calls to the local agent.
 func (rs *RemoteServer) handleProxiedAPI(w http.ResponseWriter, r *http.Request) {
-	session := r.Context().Value(ctxKeySession).(*sessionInfo)
+	session, _ := r.Context().Value(ctxKeySession).(*sessionInfo)
+	username := ""
+	if session != nil {
+		username = session.Username
+	}
 	rs.logger.Debug("remote API request", log.Fields{
 		"method":   r.Method,
 		"path":     r.URL.Path,
-		"username": session.Username,
+		"username": username,
 	})
-	rs.writeError(w, http.StatusNotImplemented, "API proxying not yet implemented")
+
+	target, err := rs.localAgentTarget()
+	if err != nil {
+		rs.writeError(w, http.StatusServiceUnavailable, err.Error())
+		return
+	}
+
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	originalDirector := proxy.Director
+	proxy.Director = func(req *http.Request) {
+		originalDirector(req)
+		req.Host = target.Host
+		req.URL.Host = target.Host
+		req.URL.Scheme = target.Scheme
+		if username != "" {
+			req.Header.Set("X-Kairo-Remote-User", username)
+		}
+		if r.Host != "" {
+			req.Header.Set("X-Forwarded-Host", r.Host)
+		}
+		req.Header.Del("Accept-Encoding")
+	}
+	proxy.ErrorHandler = func(rw http.ResponseWriter, req *http.Request, proxyErr error) {
+		rs.logger.Warn("remote API proxy failed", log.Fields{
+			"error": proxyErr.Error(),
+			"path":  req.URL.Path,
+		})
+		rs.writeError(rw, http.StatusBadGateway, "local agent unreachable: "+proxyErr.Error())
+	}
+	proxy.ServeHTTP(w, r)
+}
+
+func (rs *RemoteServer) localAgentTarget() (*url.URL, error) {
+	raw := rs.cfg.LocalAgentURL
+	if raw == "" {
+		return nil, fmt.Errorf("local agent URL not configured")
+	}
+	target, err := url.Parse(raw)
+	if err != nil || target.Scheme == "" || target.Host == "" {
+		return nil, fmt.Errorf("invalid local agent URL")
+	}
+	return target, nil
 }
 
 // writeJSON writes a JSON response.

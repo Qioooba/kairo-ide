@@ -44,7 +44,7 @@ import {
   KairoProjectService,
   ActiveProjectService,
 } from '@kairo/project-extension';
-import { BuildViewWidget } from '@kairo/build-extension';
+import { BuildViewWidget, CustomBuildRunnerWidget } from '@kairo/build-extension';
 import { BuildStore, mapBuildResult } from '@kairo/build-extension';
 import { ServerViewWidget, LogViewerWidget } from '@kairo/tomcat-extension';
 import { ImportWizardWidget, ProjectSelectorWidget } from '@kairo/project-extension';
@@ -105,6 +105,7 @@ export namespace KairoCommands {
   export const OPEN_APPLICATION: Command = { id: 'kairo.app.open', label: 'Kairo: Open Application' };
   export const REVEAL_KAIRO_SERVERS: Command = { id: 'kairo.view.servers', label: 'Kairo: Show Servers' };
   export const REVEAL_KAIRO_BUILDS: Command = { id: 'kairo.view.builds', label: 'Kairo: Show Builds' };
+  export const REVEAL_KAIRO_CUSTOM_BUILD: Command = { id: 'kairo.view.customBuild', label: 'Kairo: Show Custom Build' };
   export const REVEAL_KAIRO_DEPLOYMENTS: Command = { id: 'kairo.view.deployments', label: 'Kairo: Show Deployments' };
   export const REVEAL_KAIRO_LOGS: Command = { id: 'kairo.view.logs', label: 'Kairo: Show Tomcat Logs' };
   export const REVEAL_KAIRO_MAVEN: Command = { id: 'kairo.view.maven', label: 'Kairo: Show Maven' };
@@ -570,6 +571,7 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
     [KairoCommands.OPEN_APPLICATION.id]: 'command.openApplication',
     [KairoCommands.REVEAL_KAIRO_SERVERS.id]: 'command.revealServers',
     [KairoCommands.REVEAL_KAIRO_BUILDS.id]: 'command.revealBuilds',
+    [KairoCommands.REVEAL_KAIRO_CUSTOM_BUILD.id]: 'command.revealCustomBuild',
     [KairoCommands.REVEAL_KAIRO_DEPLOYMENTS.id]: 'command.revealDeployments',
     [KairoCommands.REVEAL_KAIRO_LOGS.id]: 'command.revealLogs',
     [KairoCommands.REVEAL_KAIRO_MAVEN.id]: 'command.revealMaven',
@@ -627,6 +629,7 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
 
   protected serversView: ServerViewWidget | undefined;
   protected buildsView: BuildViewWidget | undefined;
+  protected customBuildView: CustomBuildRunnerWidget | undefined;
   protected deploymentsView: KairoDeploymentsWidget | undefined;
   protected logsView: LogViewerWidget | undefined;
   protected mavenView: MavenViewWidget | undefined;
@@ -1173,6 +1176,15 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
     registry.registerCommand(this.withLabel(KairoCommands.REVEAL_KAIRO_BUILDS), {
       execute: () => { void this.revealOrCreate(BuildViewWidget.ID, () => this.buildsView, w => { this.buildsView = w; }); },
     });
+    registry.registerCommand(this.withLabel(KairoCommands.REVEAL_KAIRO_CUSTOM_BUILD), {
+      execute: async () => {
+        await this.revealOrCreate(CustomBuildRunnerWidget.ID, () => this.customBuildView, w => { this.customBuildView = w; });
+        const project = this.activeProject.project;
+        if (project?.root && this.customBuildView) {
+          this.customBuildView.setCommand('', project.root);
+        }
+      },
+    });
     registry.registerCommand(this.withLabel(KairoCommands.REVEAL_KAIRO_DEPLOYMENTS), {
       execute: () => { void this.revealOrCreate(KairoDeploymentsWidget.ID, () => this.deploymentsView, w => { this.deploymentsView = w; }); },
     });
@@ -1534,6 +1546,11 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
       commandId: KairoCommands.REVEAL_KAIRO_BUILDS.id,
       icon: 'codicon codicon-gear',
       order: 'c2',
+    });
+    menus.registerMenuAction([...KAIRO_MENU, 'c_view'], {
+      commandId: KairoCommands.REVEAL_KAIRO_CUSTOM_BUILD.id,
+      icon: 'codicon codicon-terminal',
+      order: 'c2a',
     });
     menus.registerMenuAction([...KAIRO_MENU, 'c_view'], {
       commandId: KairoCommands.REVEAL_KAIRO_DEPLOYMENTS.id,

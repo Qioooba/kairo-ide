@@ -34,6 +34,9 @@ test('registerCommands: registers Find Usages and Show Usages', () => {
 
   assert.ok(registered.has('kairo.java.findUsages'));
   assert.ok(registered.has('kairo.java.showUsages'));
+  assert.ok(registered.has('kairo.java.goToDeclaration'));
+  assert.ok(registered.has('kairo.java.goToImplementation'));
+  assert.ok(registered.has('kairo.java.peekDefinition'));
   assert.equal(typeof registered.get('kairo.java.findUsages').handler.execute, 'function');
   assert.equal(typeof registered.get('kairo.java.showUsages').handler.execute, 'function');
 });
@@ -69,8 +72,15 @@ test('registerMenus: Show Usages appears before Find Usages in Go To submenu', (
 
   const show = actions.find(a => a.action.commandId === 'kairo.java.showUsages');
   const find = actions.find(a => a.action.commandId === 'kairo.java.findUsages');
+  const declaration = actions.find(a => a.action.commandId === 'kairo.java.goToDeclaration');
+  const implementation = actions.find(a => a.action.commandId === 'kairo.java.goToImplementation');
+  const peek = actions.find(a => a.action.commandId === 'kairo.java.peekDefinition');
   assert.ok(show);
   assert.ok(find);
+  assert.ok(declaration, 'BUG-20260826-112: Declaration must be a Theia command, not editor.action.revealDefinition');
+  assert.ok(implementation);
+  assert.ok(peek);
+  assert.equal(declaration.action.commandId.startsWith('editor.action.'), false);
   assert.ok(String(show.action.order) < String(find.action.order));
 });
 

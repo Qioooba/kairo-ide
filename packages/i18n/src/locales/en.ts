@@ -174,6 +174,7 @@ const enMessages = {
     openApplication: 'Kairo: Open Application',
     revealServers: 'Kairo: Show Servers',
     revealBuilds: 'Kairo: Show Builds',
+    revealCustomBuild: 'Kairo: Show Custom Build',
     revealDeployments: 'Kairo: Show Deployments',
     revealLogs: 'Kairo: Show Tomcat Logs',
     revealMaven: 'Kairo: Show Maven',

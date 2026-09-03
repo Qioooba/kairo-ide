@@ -287,6 +287,27 @@ func TestAntProvider_Validate_Success(t *testing.T) {
 	}
 }
 
+func TestAntProvider_Validate_UnknownTarget(t *testing.T) {
+	dir := t.TempDir()
+	buildPath := filepath.Join(dir, "build.xml")
+	if err := os.WriteFile(buildPath, []byte(`<project name="test"><target name="compile"/></project>`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	p := NewAntProvider(AntProviderConfig{}, nil)
+	err := p.Validate(context.Background(), domain.BuildPlan{
+		ProjectRoot: dir,
+		BuildFile:   "build.xml",
+		Targets:     []string{"war-does-not-exist"},
+	})
+	if err == nil {
+		t.Fatal("expected error for unknown ant target")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("expected not-found error, got %v", err)
+	}
+}
+
 func TestAntProvider_BuildArgs(t *testing.T) {
 	p := NewAntProvider(AntProviderConfig{}, nil)
 

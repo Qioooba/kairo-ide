@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/log"
+	"github.com/gorilla/websocket"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -495,8 +496,8 @@ func TestRemoteServer_HandleWebSocket(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodGet, "/api/v1/remote/ws", nil)
 	rec := &responseRecorder{header: make(http.Header)}
 	rs.handleWebSocket(rec, req)
-	if rec.status != http.StatusNotImplemented {
-		t.Errorf("status = %d, want %d", rec.status, http.StatusNotImplemented)
+	if rec.status != http.StatusBadRequest && rec.status != 0 {
+		t.Errorf("status = %d, want 400 (failed upgrade) or 0", rec.status)
 	}
 }
 
@@ -516,8 +517,8 @@ func TestRemoteServer_HandleProxiedAPI(t *testing.T) {
 	req = req.WithContext(ctx)
 	rec := &responseRecorder{header: make(http.Header)}
 	rs.handleProxiedAPI(rec, req)
-	if rec.status != http.StatusNotImplemented {
-		t.Errorf("status = %d, want %d", rec.status, http.StatusNotImplemented)
+	if rec.status != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want %d", rec.status, http.StatusServiceUnavailable)
 	}
 }
 
@@ -2265,5 +2266,85 @@ func TestSessionManager_ValidateSession_NotFound_Extended(t *testing.T) {
 	sm := NewSessionManager(100, 1*time.Hour)
 	if sm.ValidateSession("nonexistent") {
 		t.Fatal("ValidateSession should return false for nonexistent session")
+	}
+}
+
+func TestRemoteServer_HandleWebSocket_Upgrade(t *testing.T) {
+	rs, _ := NewRemoteServer(RemoteConfig{
+		BindAddr: ":0",
+		Logger:   log.New("test"),
+	})
+	rs.sessions["tok"] = &sessionInfo{
+		Token:          "tok",
+		Username:       "alice",
+		ReconnectToken: "re-1",
+		CreatedAt:      time.Now(),
+		ExpiresAt:      time.Now().Add(time.Hour),
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/remote/ws", rs.handleWebSocket)
+	ts := httptest.NewServer(rs.authMiddleware(mux))
+	defer ts.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/api/v1/remote/ws"
+	hdr := http.Header{}
+	hdr.Set("Authorization", "Bearer tok")
+	hdr.Set("Origin", "http://127.0.0.1")
+	conn, resp, err := websocket.DefaultDialer.Dial(wsURL, hdr)
+	if err != nil {
+		t.Fatalf("dial: %v (status=%v)", err, resp)
+	}
+	defer conn.Close()
+
+	var hello map[string]any
+	if err := conn.ReadJSON(&hello); err != nil {
+		t.Fatalf("read hello: %v", err)
+	}
+	if hello["type"] != "connected" {
+		t.Errorf("type = %v, want connected", hello["type"])
+	}
+	if hello["username"] != "alice" {
+		t.Errorf("username = %v, want alice", hello["username"])
+	}
+	if hello["reconnectToken"] != "re-1" {
+		t.Errorf("reconnectToken = %v, want re-1", hello["reconnectToken"])
+	}
+}
+
+func TestRemoteServer_HandleProxiedAPI_Forwards(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/workspaces" {
+			t.Errorf("upstream path = %s", r.URL.Path)
+		}
+		if r.Header.Get("X-Kairo-Remote-User") != "testuser" {
+			t.Errorf("missing remote user header, got %q", r.Header.Get("X-Kairo-Remote-User"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer upstream.Close()
+
+	rs, _ := NewRemoteServer(RemoteConfig{
+		BindAddr:      ":0",
+		Logger:        log.New("test"),
+		LocalAgentURL: upstream.URL,
+	})
+	session := &sessionInfo{
+		Token:     "test-token",
+		Username:  "testuser",
+		CreatedAt: time.Now(),
+		ExpiresAt: time.Now().Add(time.Hour),
+	}
+	req, _ := http.NewRequest(http.MethodGet, "/api/v1/workspaces", nil)
+	req = req.WithContext(context.WithValue(req.Context(), ctxKeySession, session))
+	rec := httptest.NewRecorder()
+	rs.handleProxiedAPI(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"ok":true`) {
+		t.Errorf("body = %s", rec.Body.String())
 	}
 }

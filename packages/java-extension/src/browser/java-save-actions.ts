@@ -22,7 +22,7 @@ import * as monaco from '@theia/monaco-editor-core';
 import { JavaCompletionProvider } from './java-completion-provider';
 import { JavaOrganizeImports } from './java-organize-imports';
 import { JavaDocumentSyncContribution } from './java-document-sync';
-import { LSPTextEdit } from '../common/lsp-protocol';
+import { collectLspTextEditsForUri, lspUrisReferToSameDocument, LSPTextEdit } from '../common/lsp-protocol';
 
 const JAVA_EXTENSIONS = ['.java'];
 
@@ -108,18 +108,7 @@ export class JavaSaveActionsService implements FrontendApplicationContribution {
       if (organizeImportsOnSave) {
         const result = await this.imports.organizeImports(uri);
         if (result.success && result.edit) {
-          const operations: LSPTextEdit[] = [];
-          const textEdits = result.edit.changes?.[uri];
-          if (textEdits) {
-            operations.push(...textEdits);
-          }
-          if (result.edit.documentChanges) {
-            for (const change of result.edit.documentChanges) {
-              if ('kind' in change) continue;
-              if (change.textDocument.uri !== uri) continue;
-              operations.push(...change.edits);
-            }
-          }
+          const operations = collectLspTextEditsForUri(result.edit, uri);
           if (operations.length > 0) {
             this.applyEdits(control, operations);
           }
@@ -155,7 +144,7 @@ export class JavaSaveActionsService implements FrontendApplicationContribution {
   protected findEditorForUri(uri: string): MonacoEditor | undefined {
     for (const widget of this.editorManager.all) {
       const editor = widget.editor;
-      if (editor instanceof MonacoEditor && editor.uri.toString() === uri) {
+      if (editor instanceof MonacoEditor && lspUrisReferToSameDocument(editor.uri.toString(), uri)) {
         return editor;
       }
     }

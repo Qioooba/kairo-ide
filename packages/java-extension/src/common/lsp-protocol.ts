@@ -180,6 +180,57 @@ export interface LSPWorkspaceEdit {
   documentChanges?: (LSPTextDocumentEdit | LSPResourceOperation)[];
 }
 
+/**
+ * Normalize an LSP document URI so JDT (`file:///g:/...`) and Monaco
+ * (`file:///g%3A/...`, mixed drive-letter case) compare as the same file.
+ */
+export function normalizeLspDocumentUri(uri: string): string {
+  if (!uri) {
+    return '';
+  }
+  let value = uri.replace(/\\/g, '/').trim();
+  try {
+    value = decodeURIComponent(value);
+  } catch {
+    // Keep the original string when percent-encoding is malformed.
+  }
+  value = value.replace(/^file:\/\/([^/])/i, 'file:///$1');
+  if (/^file:\/\//i.test(value)) {
+    value = value.toLowerCase();
+  }
+  return value;
+}
+
+export function lspUrisReferToSameDocument(a: string, b: string): boolean {
+  return a === b || normalizeLspDocumentUri(a) === normalizeLspDocumentUri(b);
+}
+
+/** Collect text edits that target `fileUri`, regardless of URI encoding. */
+export function collectLspTextEditsForUri(edit: LSPWorkspaceEdit, fileUri: string): LSPTextEdit[] {
+  const operations: LSPTextEdit[] = [];
+  if (edit.changes) {
+    for (const [changeUri, textEdits] of Object.entries(edit.changes)) {
+      if (lspUrisReferToSameDocument(changeUri, fileUri) && textEdits?.length) {
+        operations.push(...textEdits);
+      }
+    }
+  }
+  if (edit.documentChanges) {
+    for (const change of edit.documentChanges) {
+      if ('kind' in change) {
+        continue;
+      }
+      if (!lspUrisReferToSameDocument(change.textDocument.uri, fileUri)) {
+        continue;
+      }
+      if (change.edits?.length) {
+        operations.push(...change.edits);
+      }
+    }
+  }
+  return operations;
+}
+
 export interface LSPCommand {
   title: string;
   command: string;

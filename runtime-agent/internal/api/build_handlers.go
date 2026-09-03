@@ -68,7 +68,11 @@ func (s *Server) handleCustomBuild(w http.ResponseWriter, r *http.Request) {
 
 	// Detached from the HTTP request lifetime — defer-cancel would SIGKILL the
 	// child as soon as writeOK returns (BD-P0-5). Cancel() still kills via process group.
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	timeout := 30 * time.Minute
+	if cfg.TimeoutMs > 0 {
+		timeout = time.Duration(cfg.TimeoutMs) * time.Millisecond
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	_ = cancel // timer retained until timeout; Cancel() does not need this handle
 
 	if s.Services.CustomBuild == nil {

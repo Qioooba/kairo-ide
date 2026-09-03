@@ -104,7 +104,10 @@ win:
   extraResources:
     - from: ../../runtime-agent/bin/kairo-runtime.exe
       to: bin/kairo-runtime.exe
-  sign: scripts/sign-win.cjs
+  # NOTE: `win.sign` was removed in electron-builder 26.x (schema no longer
+  # accepts it). For signed releases, set CSC_LINK / CSC_KEY_PASSWORD and
+  # use electron-builder's built-in signing (or downgrade to 25.x with
+  # `sign: scripts/sign-win.cjs`). Unsigned intranet builds skip signing.
   requestedExecutionLevel: asInvoker
 
 nsis:

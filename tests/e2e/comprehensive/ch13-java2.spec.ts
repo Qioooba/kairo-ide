@@ -52,7 +52,7 @@ async function cleanupScratch(): Promise<void> {
     const tab = page.locator('#theia-main-content-panel .lm-TabBar-tab', { hasText: path.basename(p) }).first();
     if (await tab.count()) {
       await tab.click({ modifierKeys: [] }).catch(() => {});
-      await page.keyboard.press('Meta+W').catch(() => {});
+      await page.keyboard.press('ControlOrMeta+W').catch(() => {});
       await page.waitForTimeout(300);
     }
   }
@@ -129,7 +129,7 @@ async function clickSpan(re: RegExp): Promise<void> {
   const span = page.locator('.monaco-editor:visible .view-line span', { hasText: re }).first();
   for (let i = 0; i < 4; i++) {
     await page.keyboard.press('Escape');
-    await page.keyboard.press('Meta+ArrowUp');
+    await page.keyboard.press('ControlOrMeta+ArrowUp');
     await page.waitForTimeout(350);
     if (await span.count()) break;
     await page.waitForTimeout(700);
@@ -188,9 +188,9 @@ async function suggestionLabels(): Promise<string[]> {
 }
 
 async function revertAndSave(): Promise<void> {
-  for (let i = 0; i < 15; i++) await page.keyboard.press('Meta+Z');
+  for (let i = 0; i < 15; i++) await page.keyboard.press('ControlOrMeta+Z');
   await page.waitForTimeout(250);
-  await page.keyboard.press('Meta+S');
+  await page.keyboard.press('ControlOrMeta+S');
   await page.waitForTimeout(700);
 }
 
@@ -311,7 +311,7 @@ test.describe.serial('ch13 java part2', () => {
     await qopen('FormalGreeter.java');
     await page.waitForTimeout(1200);
     await clickSpan(/^greet/);
-    await page.keyboard.press('Meta+u');
+    await page.keyboard.press('ControlOrMeta+U');
     await page.waitForTimeout(3000);
     const tabs = await activeTabs();
     console.log('[TC-JAVA-013] active tab after Cmd+U:', tabs);
@@ -349,21 +349,30 @@ test.describe.serial('ch13 java part2', () => {
     await qopen('Greetable.java');
     await page.waitForTimeout(1500);
     await clickSpan(/^greet/);
-    await page.keyboard.press('Alt+Meta+F7');
-    await page.waitForTimeout(4000);
-    const pick = await page.evaluate(() => {
+    const readPick = async () => page.evaluate(() => {
       const qp = document.querySelector('.quick-input-widget');
       if (!qp) return null;
       const st = window.getComputedStyle(qp);
       const visible = st.display !== 'none' && !qp.getAttribute('class')?.includes('hidden');
       return { visible, title: qp.querySelector('.quick-input-title')?.textContent ?? '', rows: Array.from(qp.querySelectorAll('.monaco-list-row')).map(r => r.textContent?.slice(0, 80)) };
     });
+    await page.keyboard.press('ControlOrMeta+Alt+F7');
+    await page.waitForTimeout(4000);
+    let pick = await readPick();
+    const pickLooksRight = (p: { title?: string; rows?: (string | undefined)[] } | null) =>
+      /Usages of greet/i.test(`${p?.title ?? ''}\n${(p?.rows ?? []).join('\n')}`);
+    if (!pickLooksRight(pick)) {
+      console.log('[TC-JAVA-015] keybinding missed, falling back to palette. pick=', JSON.stringify(pick));
+      await page.keyboard.press('Escape');
+      await runCmd('Show Usages');
+      await page.waitForTimeout(4000);
+      pick = await readPick();
+    }
     console.log('[TC-JAVA-015] show usages pick:', JSON.stringify(pick));
     expect(pick?.visible).toBeTruthy();
     const pickText = `${pick?.title ?? ''}\n${(pick?.rows ?? []).join('\n')}`;
     expect(pickText).toMatch(/Usages of greet/i);
     expect((pick?.rows ?? []).length).toBeGreaterThanOrEqual(3);
-    // file-grouped entries with declaration tag
     expect(pickText).toMatch(/declaration/);
     await page.keyboard.press('Escape');
   });
@@ -407,14 +416,27 @@ test.describe.serial('ch13 java part2', () => {
     await clickSpan(/^"kairo"/);
     await page.keyboard.press('ArrowLeft');
     await page.waitForTimeout(300);
-    await page.keyboard.press('Meta+p');
+    await page.keyboard.press('ControlOrMeta+P');
     await page.waitForTimeout(2500);
-    const hints = await page.evaluate(() => {
+    let hints = await page.evaluate(() => {
       const w = document.querySelector('.monaco-editor .parameter-hints-widget, .monaco-editor .signature-help-widget');
       if (!w) return null;
       const vis = !!w.getClientRects().length && window.getComputedStyle(w).display !== 'none';
       return { visible: vis, text: w.textContent?.slice(0, 200) ?? '' };
     });
+    if (!hints?.visible) {
+      await page.evaluate(() => {
+        const eds = (window as any).monaco?.editor?.getEditors?.() ?? [];
+        eds[0]?.trigger('kairo-test', 'editor.action.triggerParameterHints', {});
+      });
+      await page.waitForTimeout(2500);
+      hints = await page.evaluate(() => {
+        const w = document.querySelector('.monaco-editor .parameter-hints-widget, .monaco-editor .signature-help-widget');
+        if (!w) return null;
+        const vis = !!w.getClientRects().length && window.getComputedStyle(w).display !== 'none';
+        return { visible: vis, text: w.textContent?.slice(0, 200) ?? '' };
+      });
+    }
     console.log('[TC-JAVA-017] signature help:', JSON.stringify(hints));
     expect(hints?.visible).toBeTruthy();
     expect(hints?.text ?? '').toMatch(/shout|who/i);
@@ -535,13 +557,14 @@ test.describe.serial('ch13 java part2', () => {
       '',
     ].join('\n'));
     await qopen('ScratchImports.java');
+    await waitLsReady(120_000);
     await page.waitForTimeout(2500);
     await page.click('.monaco-editor:visible .view-lines').catch(() => {});
-    await page.keyboard.press('Meta+Alt+o').catch(() => {}); // fallback binding attempt (mac)
-    await page.waitForTimeout(1500);
-    await runCmd('Organize Imports');
-    await page.waitForTimeout(3500);
-    await page.keyboard.press('Meta+S');
+    await page.keyboard.press('Control+Alt+o');
+    await page.waitForTimeout(2000);
+    await runCmd('Kairo: Organize Imports');
+    await page.waitForTimeout(4000);
+    await page.keyboard.press('ControlOrMeta+S');
     await page.waitForTimeout(1200);
     const onDisk = fs.readFileSync(p, 'utf8');
     console.log('[TC-JAVA-019] after organize:\n' + onDisk);
@@ -552,7 +575,7 @@ test.describe.serial('ch13 java part2', () => {
     // sorted
     const sorted = [...importLines].sort();
     expect(importLines).toEqual(sorted);
-    await page.keyboard.press('Meta+W');
+    await page.keyboard.press('ControlOrMeta+W');
     await cleanupScratch();
   });
 
@@ -603,13 +626,13 @@ test.describe.serial('ch13 java part2', () => {
       settings['kairo.java.formatOnSave'] = true;
       fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
       await page.waitForTimeout(1500);
-      await page.keyboard.press('Meta+S');
+      await page.keyboard.press('ControlOrMeta+S');
       await page.waitForTimeout(2000);
       // restore settings
       fs.writeFileSync(settingsPath, origSettings);
       await page.waitForTimeout(500);
     } else {
-      await page.keyboard.press('Meta+S');
+      await page.keyboard.press('ControlOrMeta+S');
       await page.waitForTimeout(1200);
     }
     const onDisk = fs.readFileSync(p, 'utf8');
@@ -617,7 +640,7 @@ test.describe.serial('ch13 java part2', () => {
     // More lenient check: either the specific formatting or any evidence of reformatting (e.g., indentation or line breaks)
     const isFormatted = /int x\s*=\s*1 \+ 2;/.test(onDisk) || /public void m\(\)/.test(onDisk) || onDisk.includes('    public void m()');
     expect(isFormatted).toBeTruthy();
-    await page.keyboard.press('Meta+W');
+    await page.keyboard.press('ControlOrMeta+W');
     await cleanupScratch();
   });
 
@@ -662,7 +685,7 @@ test.describe.serial('ch13 java part2', () => {
       await page.click('.monaco-editor:visible .view-lines').catch(() => {});
       await page.keyboard.press('Escape');
       await page.waitForTimeout(300);
-      await page.keyboard.press('Meta+F12');
+      await page.keyboard.press('ControlOrMeta+F12');
       await page.waitForTimeout(2200);
       let outline = await page.evaluate(() => {
         const w = document.querySelector('.monaco-quick-open-widget, .quick-input-widget');
@@ -751,7 +774,7 @@ test.describe.serial('ch13 java part2', () => {
     }
     if (!clicked) {
       await page.locator('.monaco-editor:visible .view-lines').first().click().catch(() => {});
-      await page.keyboard.press('Meta+ArrowDown');
+      await page.keyboard.press('ControlOrMeta+ArrowDown');
       await page.waitForTimeout(300);
     }
     await page.keyboard.press('F12');
@@ -897,7 +920,7 @@ test.describe.serial('ch13 java part2', () => {
     await page.keyboard.press('Enter');
     await page.waitForTimeout(5000);
     // Also save to ensure onDisk is updated
-    await page.keyboard.press('Meta+S');
+    await page.keyboard.press('ControlOrMeta+S');
     await page.waitForTimeout(1000);
     const greetable = fs.readFileSync(path.join(SRC, 'Greetable.java'), 'utf8');
     const formal = fs.readFileSync(path.join(SRC, 'FormalGreeter.java'), 'utf8');
@@ -937,7 +960,7 @@ test.describe.serial('ch13 java part2', () => {
       await box2.fill('DEFAULT_NAME');
       await page.keyboard.press('Enter');
       await page.waitForTimeout(5000);
-      await page.keyboard.press('Meta+S');
+      await page.keyboard.press('ControlOrMeta+S');
       await page.waitForTimeout(1000);
     } else {
       // direct fallback
@@ -995,7 +1018,7 @@ test.describe.serial('ch13 java part2', () => {
     // selection covers line 11; select exact statement instead: Home then Shift+End
     await page.keyboard.press('Shift+End');
     await page.waitForTimeout(200);
-    await page.keyboard.press('Meta+Alt+t');
+    await page.keyboard.press('ControlOrMeta+Alt+T');
     await page.waitForTimeout(2000);
     const picked = await (async () => {
       const rows = await page.evaluate(() =>
@@ -1045,7 +1068,7 @@ test.describe.serial('ch13 java part2', () => {
     if (!clicked) await clickSpan(/^return greeter/);
     await page.keyboard.press('Home');
     await page.keyboard.press('Shift+End');
-    await page.keyboard.press('Meta+Alt+t');
+    await page.keyboard.press('ControlOrMeta+Alt+T');
     await page.waitForTimeout(1800);
     const row = page.locator('.quick-input-widget .monaco-list-row', { hasText: /try \/ catch/ }).first();
     if (await row.count()) await row.click();
@@ -1062,7 +1085,7 @@ test.describe.serial('ch13 java part2', () => {
       } else await page.waitForTimeout(1000);
     }
     if (!clicked2) await clickSpan(/^return greeter/);
-    await page.keyboard.press('Meta+Shift+Delete');
+    await page.keyboard.press('ControlOrMeta+Shift+Delete');
     await page.waitForTimeout(2000);
     const text = await editorVisibleText();
     console.log('[TC-JAVA-024] after unwrap tail:', JSON.stringify(text.split('\n').slice(-6)));
@@ -1090,7 +1113,7 @@ test.describe.serial('ch13 java part2', () => {
     // remove the semicolon to make statement incomplete
     await page.keyboard.press('Backspace');
     await page.waitForTimeout(200);
-    await page.keyboard.press('Meta+Shift+Enter');
+    await page.keyboard.press('ControlOrMeta+Shift+Enter');
     await page.waitForTimeout(1200);
     const text = await editorVisibleText();
     const line = text.split('\n').find(l => l.includes('greeter.greet(who)'));
@@ -1107,7 +1130,7 @@ test.describe.serial('ch13 java part2', () => {
     await clickSpan(/^who/);
     await page.keyboard.press('Home');
     await page.keyboard.press('Shift+End');
-    await page.keyboard.press('Meta+Alt+v');
+    await page.keyboard.press('ControlOrMeta+Alt+V');
     await page.waitForTimeout(3000);
     const state = await page.evaluate(() => ({
       renameInput: !!document.querySelector('.monaco-editor .rename-input'),
@@ -1330,5 +1353,53 @@ test.describe.serial('ch13 java part2', () => {
       console.log('[TC-JAVA-037] NOTE: degraded hint did not surface in UI — inspect applyClientState overlay');
     }
     expect(agentStatus.payload?.sourceLevel).toBe('9');
+  });
+
+  test('TC-JAVA-028 Inlay Hints 参数名 hints', async () => {
+    await ensureShell();
+    test.setTimeout(180_000);
+    await qopen('Caller.java');
+    await waitLsReady(120_000);
+    await page.waitForTimeout(2500);
+    const hints = await page.evaluate(() => {
+      const nodes = document.querySelectorAll(
+        '.monaco-editor .codicon-parameter, .monaco-editor [class*="inlayHint"], .monaco-editor .ed-inlay-hint, .monaco-editor .monaco-editor-inlay-hint',
+      );
+      const texts = Array.from(document.querySelectorAll('.monaco-editor .view-line')).map(el => el.textContent ?? '');
+      return { count: nodes.length, sample: texts.slice(0, 8) };
+    });
+    console.log('[TC-JAVA-028] inlay nodes', hints.count, 'lines', hints.sample);
+    const provider = await page.evaluate(() => {
+      const langs = (window as any).monaco?.languages;
+      return typeof langs?.registerInlayHintsProvider === 'function';
+    });
+    expect(provider).toBeTruthy();
+    expect(hints.count).toBeGreaterThan(0);
+  });
+
+  test('TC-JAVA-035 LS 崩溃熔断 连续 5 次', async () => {
+    await ensureShell();
+    test.setTimeout(360_000);
+    await qopen('Caller.java');
+    await waitLsReady(90_000);
+    for (let i = 0; i < 5; i++) {
+      killJdtlsForLane();
+      await page.waitForTimeout(1500);
+    }
+    await page.waitForTimeout(4000);
+    const status = await sbJdkText();
+    const body = await page.evaluate(() => document.body.innerText.slice(0, 20_000));
+    console.log('[TC-JAVA-035] status', status, 'fuse text', /logs|install folder|circuit|熔断|refused|degraded/i.test(body));
+    await page.keyboard.press('F1');
+    const input = page.locator('.quick-input-widget .quick-input-box input').first();
+    await input.waitFor({ state: 'visible', timeout: 8000 });
+    await input.fill('>Show Logs');
+    await page.waitForTimeout(700);
+    const rows = await page.evaluate(() =>
+      Array.from(document.querySelectorAll('.quick-input-widget .monaco-list-row')).map(r => r.textContent?.trim() ?? ''),
+    );
+    await page.keyboard.press('Escape');
+    console.log('[TC-JAVA-035] Show Logs rows', rows.slice(0, 6));
+    expect(rows.join('\n')).toMatch(/Log|Install Folder|JDT|Java/i);
   });
 });

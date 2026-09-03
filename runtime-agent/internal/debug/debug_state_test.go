@@ -234,6 +234,29 @@ func TestDebugStateMachine_HandleEvent_BreakpointHit(t *testing.T) {
 	}
 }
 
+func TestDebugStateMachine_HandleEvent_ConditionalBreakpointSkip(t *testing.T) {
+	dsm := NewDebugStateMachine()
+	bm := NewBreakpointManager()
+	bm.AddBreakpoint(&Breakpoint{
+		Kind:       BreakpointLine,
+		ClassName:  "Demo",
+		LineNumber: 42,
+		Enabled:    true,
+		Condition:  "x > 10",
+		RequestID:  9,
+	})
+	dsm.SetBreakpointManager(bm)
+	dsm.SetVariableProvider(func(DebugEvent) map[string]interface{} {
+		return map[string]interface{}{"x": 1}
+	})
+	dsm.Connect("session-1", 5005, "127.0.0.1", "attach")
+	dsm.HandleEvent(DebugEvent{Type: EventVMStart})
+	dsm.HandleEvent(DebugEvent{Type: EventBreakpointHit, RequestID: 9, ThreadID: 100, LineNumber: 42})
+	if dsm.State() != StateRunning {
+		t.Errorf("false condition should keep running, got %s", dsm.State())
+	}
+}
+
 func TestDebugStateMachine_HandleEvent_StepComplete(t *testing.T) {
 	dsm := NewDebugStateMachine()
 	dsm.Connect("session-1", 5005, "127.0.0.1", "attach")

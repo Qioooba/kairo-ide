@@ -18,6 +18,9 @@ type CustomBuildConfig struct {
 	Command     string            `json:"command"`
 	WorkingDir  string            `json:"workingDir"`
 	Env         map[string]string `json:"env"`
+	// TimeoutMs overrides the default 30-minute custom-build deadline.
+	// Zero keeps the default. Used by tests and callers that need a shorter cap.
+	TimeoutMs int64 `json:"timeoutMs,omitempty"`
 }
 
 // BuildEvent represents a streaming event during build execution.

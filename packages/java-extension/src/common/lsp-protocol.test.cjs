@@ -98,6 +98,41 @@ test('LSPMessageParser: reset() discards partial state', () => {
   assert.equal(parser.pendingBytes(), 0);
 });
 
+test('normalizeLspDocumentUri: matches encoded Windows drive letters', () => {
+  const { normalizeLspDocumentUri, lspUrisReferToSameDocument, collectLspTextEditsForUri } = require('../../lib/common/lsp-protocol');
+  const monacoUri = 'file:///g%3A/spaces/kairo-ide/Caller.java';
+  const jdtUri = 'file:///g:/spaces/kairo-ide/Caller.java';
+  const jdtUpper = 'file:///G:/spaces/kairo-ide/Caller.java';
+  const twoSlash = 'file://G:/spaces/kairo-ide/Caller.java';
+  assert.equal(normalizeLspDocumentUri(monacoUri), normalizeLspDocumentUri(jdtUri));
+  assert.equal(lspUrisReferToSameDocument(monacoUri, jdtUri), true);
+  assert.equal(lspUrisReferToSameDocument(monacoUri, jdtUpper), true);
+  assert.equal(lspUrisReferToSameDocument(monacoUri, twoSlash), true);
+  assert.equal(lspUrisReferToSameDocument(jdtUri, 'file:///g:/spaces/other/Caller.java'), false);
+
+  const edit = {
+    changes: {
+      [jdtUri]: [{ range: { start: { line: 0, character: 0 }, end: { line: 1, character: 0 } }, newText: 'import java.util.List;\n' }],
+    },
+  };
+  const collected = collectLspTextEditsForUri(edit, monacoUri);
+  assert.equal(collected.length, 1);
+  assert.equal(collected[0].newText, 'import java.util.List;\n');
+
+  const documentEdit = {
+    documentChanges: [
+      {
+        textDocument: { uri: jdtUpper, version: 3 },
+        edits: [{ range: { start: { line: 2, character: 0 }, end: { line: 3, character: 0 } }, newText: '' }],
+      },
+      { kind: 'create', uri: 'file:///g:/spaces/kairo-ide/New.java' },
+    ],
+  };
+  const fromDocument = collectLspTextEditsForUri(documentEdit, monacoUri);
+  assert.equal(fromDocument.length, 1);
+  assert.equal(fromDocument[0].newText, '');
+});
+
 test('LSP message framing: handles byte-by-byte push', () => {
   const original = { id: 7, method: 'ping' };
   const framed = encodeLspMessage(original);

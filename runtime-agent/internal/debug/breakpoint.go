@@ -146,6 +146,50 @@ func (bm *BreakpointManager) GetBreakpoint(id int32) (*Breakpoint, bool) {
 	return bp, ok
 }
 
+// FindByRequestID looks up a breakpoint by JDWP event request ID, then by local ID.
+func (bm *BreakpointManager) FindByRequestID(requestID int32) (*Breakpoint, bool) {
+	bm.mu.RLock()
+	defer bm.mu.RUnlock()
+	for _, bp := range bm.breakpoints {
+		if bp.RequestID == requestID {
+			return bp, true
+		}
+	}
+	bp, ok := bm.breakpoints[requestID]
+	return bp, ok
+}
+
+// RecordHitAndShouldStop increments hit count and returns whether the session
+// should actually suspend. Conditions are evaluated here because HotSpot does
+// not implement the JDWP Conditional modifier.
+func (bm *BreakpointManager) RecordHitAndShouldStop(requestID int32, vars map[string]interface{}, thisObj interface{}, threadID int64, threadName string, stackDepth int32) bool {
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
+
+	var bp *Breakpoint
+	for _, candidate := range bm.breakpoints {
+		if candidate.RequestID == requestID {
+			bp = candidate
+			break
+		}
+	}
+	if bp == nil {
+		bp = bm.breakpoints[requestID]
+	}
+	if bp == nil {
+		return true
+	}
+
+	bp.HitCount++
+	if !bp.Enabled {
+		return false
+	}
+	if bp.Condition != "" && !EvaluateBreakpointCondition(bp.Condition, vars) {
+		return false
+	}
+	return EvaluateHitCount(bp)
+}
+
 // ListBreakpoints returns all breakpoints.
 func (bm *BreakpointManager) ListBreakpoints() []*Breakpoint {
 	bm.mu.RLock()
@@ -1440,9 +1484,8 @@ func BuildEnhancedBreakpointSetCommand(classID, methodID int64, lineNumber int32
 	if eb.InstanceFilter != nil && eb.InstanceFilter.ObjectID != 0 {
 		modifierCount++
 	}
-	if eb.Condition != "" || eb.ComplexCondition != nil {
-		modifierCount++
-	}
+	// Conditions are evaluated on hit (RecordHitAndShouldStop). HotSpot does
+	// not implement JDWP Conditional (modKind 2); do not emit a fake modifier.
 
 	w.WriteInt(modifierCount)
 
@@ -1463,17 +1506,6 @@ func BuildEnhancedBreakpointSetCommand(classID, methodID int64, lineNumber int32
 	if eb.InstanceFilter != nil && eb.InstanceFilter.ObjectID != 0 {
 		w.WriteByte(5) // ModKind.InstanceOnly = 5
 		w.WriteObjectID(eb.InstanceFilter.ObjectID)
-	}
-
-	// Conditional modifier (if specified)
-	if eb.Condition != "" || eb.ComplexCondition != nil {
-		condStr := eb.Condition
-		if eb.ComplexCondition != nil {
-			condStr = complexConditionToString(eb.ComplexCondition)
-		}
-		w.WriteByte(4) // ModKind.Conditional = 4
-		w.WriteInt(int32(len(condStr)))
-		w.WriteLong(int64(len(condStr))) // placeholder for exprID
 	}
 
 	return w.Bytes()

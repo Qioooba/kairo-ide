@@ -70,11 +70,13 @@ type DebugSession struct {
 
 // DebugStateMachine manages the state of a debug session.
 type DebugStateMachine struct {
-	mu        sync.RWMutex
-	session   *DebugSession
-	listeners []func(DebugEvent)
-	eventLog  []DebugEvent
-	errorLog  []string
+	mu          sync.RWMutex
+	session     *DebugSession
+	listeners   []func(DebugEvent)
+	eventLog    []DebugEvent
+	errorLog    []string
+	breakpoints *BreakpointManager
+	varProvider func(DebugEvent) map[string]interface{}
 }
 
 // NewDebugStateMachine creates a new debug state machine.
@@ -173,6 +175,19 @@ func (dsm *DebugStateMachine) Terminate() error {
 func (dsm *DebugStateMachine) HandleEvent(event DebugEvent) {
 	dsm.mu.Lock()
 
+	if event.Type == EventBreakpointHit && dsm.breakpoints != nil {
+		vars := map[string]interface{}{}
+		if dsm.varProvider != nil {
+			if provided := dsm.varProvider(event); provided != nil {
+				vars = provided
+			}
+		}
+		if !dsm.breakpoints.RecordHitAndShouldStop(event.RequestID, vars, nil, event.ThreadID, "", 0) {
+			dsm.mu.Unlock()
+			return
+		}
+	}
+
 	// Update state based on event type
 	switch event.Type {
 	case EventVMStart:
@@ -206,6 +221,22 @@ func (dsm *DebugStateMachine) AddListener(fn func(DebugEvent)) {
 	defer dsm.mu.Unlock()
 
 	dsm.listeners = append(dsm.listeners, fn)
+}
+
+// SetBreakpointManager attaches the breakpoint table used to evaluate
+// conditions / hit-count filters when a JDWP breakpoint event arrives.
+// HotSpot does not implement JDWP Conditional modifiers; filtering happens here.
+func (dsm *DebugStateMachine) SetBreakpointManager(bm *BreakpointManager) {
+	dsm.mu.Lock()
+	defer dsm.mu.Unlock()
+	dsm.breakpoints = bm
+}
+
+// SetVariableProvider supplies locals/fields for condition evaluation on hit.
+func (dsm *DebugStateMachine) SetVariableProvider(fn func(DebugEvent) map[string]interface{}) {
+	dsm.mu.Lock()
+	defer dsm.mu.Unlock()
+	dsm.varProvider = fn
 }
 
 // AddError records an error that occurred during debugging.

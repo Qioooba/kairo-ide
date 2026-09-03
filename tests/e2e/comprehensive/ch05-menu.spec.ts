@@ -1202,17 +1202,15 @@ test.describe('5.8 Context menus', () => {
     await openJavaEditor(page);
     await openEditorContextMenu(page);
     const items = (await dumpVisibleMenuItems(page)).join('\n');
-    // navigation group renders (File Structure / Call Hierarchy / Type
-    // Hierarchy from the same contribution) and the Go To entry exists
     expect(items).toContain('File Structure...');
     expect(items).toMatch(/(^|\n)[^|]*\bGo To\b/);
-    // BUG-20260826-112: the Go To submenu's seven java children
-    // (Declaration/Implementation(s)/Type Declaration/Super Method/
-    // Show Usages/Find Usages…/Quick Definition) do NOT render in the
-    // browser build — recorded as a defect in ch05.md.
-    const goToList = ['Declaration', 'Implementation(s)', 'Type Declaration', 'Super Method', 'Show Usages', 'Find Usages...', 'Quick Definition'];
-    const missing = goToList.filter((x) => !items.includes(x));
-    console.log('[ch05][BUG-20260826-112] missing Go To children:', JSON.stringify(missing));
+    const goTo = page.locator('.lm-Menu:not(.lm-mod-hidden) .lm-Menu-item', { hasText: /^Go To$/ }).first();
+    await goTo.hover();
+    await page.waitForTimeout(500);
+    const submenu = (await dumpVisibleMenuItems(page)).join('\n');
+    for (const expected of ['Declaration', 'Implementation(s)', 'Type Declaration', 'Super Method', 'Show Usages', 'Find Usages...', 'Quick Definition']) {
+      expect(submenu, expected).toContain(expected);
+    }
     await escapeOverlays(page);
     await expectNoFatal(diag);
   });

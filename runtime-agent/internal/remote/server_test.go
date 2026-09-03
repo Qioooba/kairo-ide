@@ -623,7 +623,7 @@ func TestShutdown_WithServer(t *testing.T) {
 	}
 }
 
-// TestHandleWebSocket tests the WebSocket handler (not implemented).
+// TestHandleWebSocket tests the WebSocket handler without an upgrade request.
 func TestHandleWebSocket(t *testing.T) {
 	rs, _ := NewRemoteServer(RemoteConfig{
 		BindAddr: ":0",
@@ -632,27 +632,26 @@ func TestHandleWebSocket(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodGet, "/api/v1/remote/ws", nil)
 	rec := &responseRecorder{header: make(http.Header)}
 	rs.handleWebSocket(rec, req)
-	if rec.status != http.StatusNotImplemented {
-		t.Errorf("status = %d, want %d", rec.status, http.StatusNotImplemented)
+	if rec.status != http.StatusBadRequest && rec.status != 0 {
+		t.Errorf("status = %d, want 400 (failed upgrade) or 0", rec.status)
 	}
 }
 
-// TestHandleProxiedAPI tests the proxied API handler (not implemented).
+// TestHandleProxiedAPI tests the proxied API handler without a local agent URL.
 func TestHandleProxiedAPI(t *testing.T) {
 	rs, _ := NewRemoteServer(RemoteConfig{
 		BindAddr: ":0",
 		Logger:   log.New("test"),
 	})
 	req, _ := http.NewRequest(http.MethodGet, "/api/v1/workspaces", nil)
-	// Add session info to context
 	session := &sessionInfo{Username: "testuser", Role: "user"}
 	ctx := context.WithValue(req.Context(), ctxKeySession, session)
 	req = req.WithContext(ctx)
 
 	rec := &responseRecorder{header: make(http.Header)}
 	rs.handleProxiedAPI(rec, req)
-	if rec.status != http.StatusNotImplemented {
-		t.Errorf("status = %d, want %d", rec.status, http.StatusNotImplemented)
+	if rec.status != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want %d", rec.status, http.StatusServiceUnavailable)
 	}
 }
 

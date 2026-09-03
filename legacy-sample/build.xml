@@ -57,6 +57,12 @@
     <delete dir="${build.dir}"/>
   </target>
 
+  <target name="war" depends="package"
+          description="Package the webapp as a WAR.">
+    <mkdir dir="dist"/>
+    <jar destfile="dist/legacy-sample.war" basedir="dist/webapp"/>
+  </target>
+
   <target name="package" depends="compile"
           description="Build a deployable webapp directory under dist/.">
     <mkdir dir="dist"/>

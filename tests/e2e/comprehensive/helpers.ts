@@ -9,6 +9,13 @@ import { expect, Page } from '@playwright/test';
 export const AGENT = `http://127.0.0.1:${process.env.AGENT_PORT || '18080'}`;
 export const THEIA_URL = process.env.THEIA_URL || 'http://127.0.0.1:3000';
 
+/** Primary chord modifier: Cmd on macOS, Ctrl on Windows/Linux. */
+export const IS_MAC = process.platform === 'darwin';
+export const PRIMARY_MOD = IS_MAC ? 'Meta' : 'Control';
+export function primary(...keys: string[]): string {
+  return [PRIMARY_MOD, ...keys].join('+');
+}
+
 export interface AgentResp {
   status: number;
   json: any | null;
