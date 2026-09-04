@@ -40,10 +40,14 @@ files:
   - "!lib/**/*.map"
   # Exclude test files from the production package.
   - "!lib/**/*.test.js"
-  # Natives are mirrored to app.asar.unpacked by scripts/after-pack.cjs;
-  # keeping the originals inside the asar duplicated ~7 MB.
-  - "!lib/backend/native/**"
-  - "!lib/prebuilds/**"
+  # Native binaries (.node/.dll/.exe) must be reachable on a real
+  # filesystem path: Node cannot dlopen them from inside app.asar.
+  # They are unpacked via asarUnpack below (narrow lib/ patterns, so the
+  # pnpm workspace-link "must be under apps/desktop" error is avoided)
+  # and additionally mirrored by scripts/after-pack.cjs as a fallback.
+  # Never ship file-lock bypass copies into the package.
+  - "!**/*.locked-*"
+  - "!**/*.zombie"
   # Node_modules are controlled by the dependencies field in package.json.
   # Only @kairo/protocol is listed as a runtime dependency; all other packages
   # are in devDependencies so electron-builder won't include them.
@@ -51,9 +55,16 @@ files:
   - "!node_modules/**/*.map"
   - "!node_modules/**/tsconfig.tsbuildinfo"
 asar: true
-# asarUnpack is intentionally NOT used here: with pnpm workspace-linked
-# deps (@kairo/protocol), electron-builder's unpack filter throws
-# "must be under apps/desktop". Natives are mirrored by scripts/after-pack.cjs.
+# Unpack native binaries so require("./native/watcher.node") from
+# app.asar/lib/backend/main.js transparently resolves to
+# app.asar.unpacked (Electron patches fs for unpacked entries).
+# Patterns are deliberately narrow (lib/ only): a broad "**/*.node"
+# would match pnpm workspace links outside apps/desktop and make
+# electron-builder throw "must be under apps/desktop".
+# scripts/after-pack.cjs additionally mirrors the same dirs as fallback.
+asarUnpack:
+  - "lib/backend/native/**/*"
+  - "lib/prebuilds/**/*"
 
 # Shared bundled runtime artifacts (all platforms).
 extraResources:

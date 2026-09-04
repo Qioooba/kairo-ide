@@ -60,6 +60,12 @@ function copyRecursive(src, dst) {
   let count = 0;
   const entries = fs.readdirSync(src, { withFileTypes: true });
   for (const entry of entries) {
+    // Never propagate file-lock bypass copies (e.g. conpty.node.locked-*):
+    // they are stale duplicates of the real binary held by a live process.
+    if (entry.name.includes('.locked-') || entry.name.endsWith('.zombie')) {
+      log(`SKIP lock-bypass artifact: ${entry.name}`);
+      continue;
+    }
     const s = path.join(src, entry.name);
     const d = path.join(dst, entry.name);
     if (entry.isDirectory()) {

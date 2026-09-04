@@ -3,11 +3,13 @@
 /**
  * afterPack — mirror native binaries into resources/app.asar.unpacked.
  *
- * Why not asarUnpack in package.json?
- * electron-builder's asarUnpack path filter throws when workspace-linked
- * deps (e.g. @kairo/protocol) resolve outside apps/desktop/. Copying
- * natives here keeps .node/.dll/.exe on a real filesystem path that
- * Electron resolves preferentially over the asar copy.
+ * This is a fallback for electron-builder's asarUnpack (see
+ * electron-builder.yml): asarUnpack already unpacks
+ * lib/backend/native + lib/prebuilds with proper asar-header flags so
+ * require() from inside app.asar resolves to app.asar.unpacked.
+ * This manual mirror keeps .node/.dll/.exe on a real filesystem path
+ * even if a future config change drops asarUnpack. Skip file-lock
+ * bypass copies (*.locked-*, *.zombie) — they are stale duplicates.
  */
 
 const fs = require('fs');
@@ -18,6 +20,9 @@ function copyRecursive(src, dst) {
   fs.mkdirSync(dst, { recursive: true });
   let n = 0;
   for (const ent of fs.readdirSync(src, { withFileTypes: true })) {
+    if (ent.name.includes('.locked-') || ent.name.endsWith('.zombie')) {
+      continue;
+    }
     const s = path.join(src, ent.name);
     const d = path.join(dst, ent.name);
     if (ent.isDirectory()) {
