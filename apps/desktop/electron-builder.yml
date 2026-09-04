@@ -35,6 +35,11 @@ files:
   - lib/agent-state.js
   - lib/frontend/**/*
   - lib/backend/**/*
+  # node-pty prebuilds (conpty.node): loadNativeModule() probes
+  # ../prebuilds + ./prebuilds relative to lib/backend/main.js, so they
+  # must be addressable inside the asar (unpacked, see below). They were
+  # previously only mirrored by after-pack and invisible to require().
+  - lib/prebuilds/**/*
   - package.json
   # Exclude source maps — production builds don't need them (~133 MB saved).
   - "!lib/**/*.map"
@@ -64,6 +69,10 @@ asar: true
 # scripts/after-pack.cjs additionally mirrors the same dirs as fallback.
 asarUnpack:
   - "lib/backend/native/**/*"
+  # windows-trash.exe is execFile'd from join(__dirname,"windows-trash.exe");
+  # Windows cannot CreateProcess inside app.asar, so it must be unpacked
+  # (Electron redirects child_process asar paths to app.asar.unpacked).
+  - "lib/backend/windows-trash.exe"
   - "lib/prebuilds/**/*"
 
 # Shared bundled runtime artifacts (all platforms).

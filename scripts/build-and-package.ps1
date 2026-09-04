@@ -825,6 +825,8 @@ if (-not $SkipSmoke -and (Test-Path (Join-Path $liveUnpackedDir "Kairo.exe"))) {
         -OkMsg "asar.unpacked native (watcher.node) 已展开" -FailMsg "asar.unpacked/native 缺失 — afterPack 未生效"
     Invoke-SmokeCheck -Critical -Path (Join-Path $liveUnpackedDir "resources/app.asar.unpacked/lib/prebuilds/win32-x64/conpty.node") `
         -OkMsg "asar.unpacked prebuilds (conpty.node) 已展开" -FailMsg "asar.unpacked/prebuilds 缺失 — 终端不可用"
+    Invoke-SmokeCheck -Critical -Path (Join-Path $liveUnpackedDir "resources/app.asar.unpacked/lib/backend/windows-trash.exe") `
+        -OkMsg "asar.unpacked windows-trash.exe 已展开" -FailMsg "windows-trash 未展开 — 回收站删除不可用"
     Invoke-SmokeCheck -Path (Join-Path $liveUnpackedDir "start-browser-mode.cmd") `
         -OkMsg "start-browser-mode.cmd 已复制" -FailMsg "start-browser-mode.cmd 未复制"
 
