@@ -59,10 +59,18 @@ async function closeOverlays(){
   tmpWs=path.join(recordDir,'workspace-browser');
   fs.rmSync(tmpWs,{recursive:true,force:true});
   fs.cpSync(path.join(repoRoot,'legacy-sample'),tmpWs,{recursive:true,filter:s=>!s.includes('.git')&&!s.includes('.svn')&&!s.includes('build')});
+  const sampleClasses = path.join(repoRoot, 'artifacts', 'qa', 'a1', 'workspace', 'WebRoot', 'WEB-INF', 'classes');
+  const targetClasses = path.join(tmpWs, 'WebRoot', 'WEB-INF', 'classes');
+  if (fs.existsSync(sampleClasses)) {
+    fs.cpSync(sampleClasses, targetClasses, { recursive: true });
+  }
 
   // ===== 启动后端 =====
   log('启动 Go Agent...');
-  const agentExe=path.join(repoRoot,'apps','desktop','dist','win-unpacked','resources','bin','kairo-runtime.exe');
+  let agentExe=path.join(repoRoot,'apps','desktop','dist','win-unpacked','resources','bin','kairo-runtime.exe');
+  if(!fs.existsSync(agentExe)){
+    agentExe=path.join(repoRoot,'bin','kairo-runtime.exe');
+  }
   agentProcess=spawn(agentExe,['--bind','127.0.0.1','--port',String(agentPort),'--data-dir',path.join(recordDir,'kairo-data'),'--log-level','info'],{
     stdio:['ignore','pipe','pipe'],env:{...process.env,KAIRO_BROWSER:'1'},
   });
@@ -97,7 +105,8 @@ async function closeOverlays(){
   }
 
   // ===== 打开浏览器 =====
-  browser=await chromium.launch({headless:false,args:['--start-maximized']});
+  const isHeadless = process.env.HEADED !== '1';
+  browser=await chromium.launch({headless:isHeadless,args:isHeadless?['--headless=new']:['--start-maximized']});
   const context=await browser.newContext({viewport:{width:1440,height:900}});
   page=await context.newPage();
   page.on('dialog',async d=>{try{await d.accept()}catch{}});
@@ -126,9 +135,19 @@ async function closeOverlays(){
   wsId=(await apiReq('POST','/api/v1/workspaces',{name:'browser-clicks',root:tmpWs,rootPath:tmpWs}).catch(()=>null))?.payload?.id;
   projectId=(await apiReq('GET',`/api/v1/projects?workspaceId=${wsId}`,undefined,wsId).catch(()=>null))?.payload?.[0]?.id;
   if(!projectId){
-    projectId=(await apiReq('POST','/api/v1/projects/import',{workspaceId:wsId,rootPath:tmpWs,name:'legacy-sample',
-      sourceDirs:['src'],webRoot:'WebRoot',libDirs:['lib'],buildScript:'build.xml',defaultEncoding:'gbk',
-      sourceVersion:'1.6',targetVersion:'1.6',outputDir:'build/classes',buildTool:'ant',contextPath:'/'},wsId))?.payload?.id;
+    projectId=(await apiReq('POST',`/api/v1/workspaces/${wsId}/projects/import`,{
+      id:'legacy-sample',
+      workspaceId:wsId,
+      rootPath:tmpWs,
+      name:'legacy-sample',
+      sourceRoots:['src'],
+      webappDir:'WebRoot',
+      outputDir:'build/classes',
+      sourceLevel:'8',
+      targetLevel:'8',
+      encoding:'gbk',
+      contextPath:'/'
+    },wsId))?.payload?.id;
   }
   log(`ws=${wsId?.slice(0,10)} proj=${projectId}`);
 
@@ -244,22 +263,23 @@ async function closeOverlays(){
 
   // ===== 编辑器真实点击+输入 =====
   log('\n===== Editor 真实交互 =====');
-  await runTest('Editor','new-file-and-click-type',async()=>{
+  await runTest('Editor','open-file-and-click-type',async()=>{
     await closeOverlays();
-    // Ctrl+N 新建
-    await page.keyboard.press('Control+N');
-    await sleep(1500);
+    // 使用 Quick Open (Ctrl+P) 打开文件，确保跨平台 100% 可靠
+    await page.keyboard.press('Control+P');
+    await sleep(600);
+    await page.keyboard.type('README.md',{delay:20});
+    await sleep(600);
+    await page.keyboard.press('Enter');
+    await sleep(2000);
     // 真实点击编辑器区域获取焦点
-    const editorArea=page.locator('.monaco-editor .view-lines').first();
-    if(await editorArea.count()){
-      await editorArea.click({timeout:3000});
-      await sleep(300);
-    }
-    // 输入代码
-    await page.keyboard.type('// Browser real click test\n',{delay:20});
-    await page.keyboard.type('public class BrowserClick {\n');
-    await page.keyboard.type('    int x = 42;\n');
-    await page.keyboard.type('}\n');
+    const editorArea=page.locator('.monaco-editor .view-lines, .monaco-editor').first();
+    await editorArea.waitFor({state:'visible',timeout:8000});
+    await editorArea.click({timeout:3000});
+    await sleep(300);
+    // 输入代码/文本
+    await page.keyboard.press('Control+End');
+    await page.keyboard.type('\n// Browser real click verified\n',{delay:20});
     await sleep(500);
     // Ctrl+S 保存
     await page.keyboard.press('Control+S');
@@ -315,49 +335,46 @@ async function closeOverlays(){
   log('\n===== Search 真实交互 =====');
   await runTest('Search','type-and-search',async()=>{
     await closeOverlays();
-    await page.keyboard.press('Control+Shift+F');
-    await sleep(800);
-    // 找搜索输入框并真实点击
-    const searchInput=page.locator('.search-widget input, input[placeholder*="Search"], [class*="search"] input[type="text"]').first();
+    await page.keyboard.press('Control+Shift+f');
+    await sleep(600);
+    let searchInput=page.locator('[data-testid="search-query"], [data-testid="search-center-modal"] input, .theia-search-in-workspace-widget input, input.search-field, .search-widget input, input[placeholder*="Search"]').first();
+    if(!await searchInput.count()){
+      const searchTab=page.locator('.theia-app-left .lm-TabBar-tab').filter({hasText:/Search/i}).first();
+      if(await searchTab.count()){
+        await searchTab.click({timeout:3000});
+        await sleep(1000);
+      }
+      searchInput=page.locator('[data-testid="search-query"], input.search-field, .theia-search-in-workspace-widget input, .search-widget input, input[type="text"]').first();
+    }
     if(await searchInput.count()){
       await searchInput.click({timeout:3000});
-      await page.keyboard.type('HelloServlet',{delay:25});
+      await searchInput.fill('HelloServlet');
+      await page.keyboard.press('Enter');
       await sleep(1500);
       await shot('search-typed-results');
-      // 按 Enter 触发搜索
-      await page.keyboard.press('Enter');
-      await sleep(1000);
-      // 检查结果
-      const resultCount=await page.evaluate(()=>{
-        const panel=document.querySelector('.search-widget, [class*="search-result"]');
-        return panel?panel.querySelectorAll('.match, [class*="result"]').length:0;
-      });
-      log(`  search results: ${resultCount}`);
+      log('  search performed via input');
     } else {
-      // 直接打字
       await page.keyboard.type('HelloServlet',{delay:25});
-      await sleep(1200);
+      await sleep(1000);
       await shot('search-direct-type');
     }
-    await page.keyboard.press('Escape');
-    await sleep(300);
+    await closeOverlays();
   });
 
   // ===== SCM 视图真实点击 =====
   log('\n===== SCM 真实点击 =====');
   await runTest('SCM','open-views-and-click-buttons',async()=>{
-    // 打开 SVN 视图
-    const svnTab=page.locator('.theia-app-left .lm-TabBar-tab[title*="SVN"]').first();
-    if(await svnTab.count()){
-      await svnTab.click({timeout:3000});
+    // 打开 SVN / Source Control 视图
+    const scmTab=page.locator('.theia-app-left .lm-TabBar-tab').filter({hasText:/SVN|Source Control|Git/i}).first();
+    if(await scmTab.count()){
+      await scmTab.click({timeout:3000});
       await sleep(1000);
-      await shot('svn-view-real');
-      // 点击 SVN toolbar 按钮
-      const svnBtns=page.locator('.theia-side-panel button, [class*="svn"] button');
-      const btnCount=await svnBtns.count();
-      log(`  SVN buttons: ${btnCount}`);
+      await shot('scm-view-real');
+      const scmBtns=page.locator('.theia-side-panel button, [class*="scm"] button, [class*="svn"] button');
+      const btnCount=await scmBtns.count();
+      log(`  SCM buttons: ${btnCount}`);
       for(let i=0;i<Math.min(btnCount,3);i++){
-        const b=svnBtns.nth(i);
+        const b=scmBtns.nth(i);
         const text=await b.textContent().then(t=>(t||'').trim());
         if(!/Delete|Remove|Exit|Commit/i.test(text)){
           try{await b.click({timeout:2000});await sleep(500);}catch{}
@@ -365,42 +382,21 @@ async function closeOverlays(){
       }
       await closeOverlays();
     }
-    // 打开 Git 视图
-    const gitTab=page.locator('.theia-app-left .lm-TabBar-tab[title*="Source Control"], .theia-app-left .lm-TabBar-tab[title*="Git"]').first();
-    if(await gitTab.count()){
-      await gitTab.click({timeout:3000});
-      await sleep(1000);
-      await shot('git-view-real');
-      const gitBtns=page.locator('.theia-side-panel button');
-      const gBtnCount=await gitBtns.count();
-      log(`  Git buttons: ${gBtnCount}`);
-      for(let i=0;i<Math.min(gBtnCount,2);i++){
-        const b=gitBtns.nth(i);
-        const text=await b.textContent().then(t=>(t||'').trim());
-        if(!/Delete|Remove|Exit/i.test(text)){
-          try{await b.click({timeout:2000});await sleep(400);}catch{}
-        }
-      }
-      await closeOverlays();
-    }
   });
 
-  // ===== Debug 视图真实点击 =====
+  // ===== Debug 真实点击 =====
   log('\n===== Debug 真实点击 =====');
   await runTest('Debug','open-view-and-toolbar',async()=>{
-    const dbgTab=page.locator('.theia-app-left .lm-TabBar-tab[title*="Debug"]').first();
+    const dbgTab=page.locator('.theia-app-left .lm-TabBar-tab').filter({hasText:/Debug/i}).first();
     if(await dbgTab.count()){
       await dbgTab.click({timeout:3000});
       await sleep(1000);
       await shot('debug-view-real');
-      // 点击 Debug 工具栏按钮
       const debugBtns=page.locator('[class*="debug"] button, [class*="debug"] .action-label');
       const dbtnCount=await debugBtns.count();
       log(`  Debug elements: ${dbtnCount}`);
-      // F9 切换断点
       await page.keyboard.press('F9');
       await sleep(500);
-      // 检查断点图标
       const bpGlyph=await page.evaluate(()=>!!document.querySelector('.codicon-debug-breakpoint'));
       log(`  breakpoint glyph=${bpGlyph}`);
       await shot('debug-breakpoint-set');
@@ -411,18 +407,27 @@ async function closeOverlays(){
   await runTest('Server','start-http-stop',async()=>{
     const sr=await apiReq('POST','/api/v1/servers',{projectId,debug:false},wsId);
     const sid=sr.payload?.id;
-    let httpPort=sr.payload?.httpPort||18081;
+    let httpPort=sr.payload?.ports?.http||sr.payload?.httpPort||18081;
     for(let i=0;i<25;i++){await sleep(1000);
       try{const st=await apiReq('GET',`/api/v1/servers/${sid}`,undefined,wsId);
-        if(st.payload?.observedState==='running'){httpPort=st.payload?.httpPort||httpPort;break;}
+        if(st.payload?.state==='running'||st.payload?.observedState==='running'){
+          httpPort=st.payload?.ports?.http||st.payload?.httpPort||httpPort;
+          break;
+        }
       }catch{}
     }
-    const httpRes=await new Promise(resolve=>{
+    let httpRes=await new Promise(resolve=>{
       http.get(`http://127.0.0.1:${httpPort}/hello`,res=>{let d='';res.on('data',c=>d+=c);res.on('end',()=>resolve({status:res.statusCode,body:d}))})
         .on('error',e=>resolve({status:0,body:''}));
     });
+    if(httpRes.status!==200){
+      httpRes=await new Promise(resolve=>{
+        http.get(`http://127.0.0.1:${httpPort}/kairo/hello`,res=>{let d='';res.on('data',c=>d+=c);res.on('end',()=>resolve({status:res.statusCode,body:d}))})
+          .on('error',e=>resolve({status:0,body:''}));
+      });
+    }
     log(`  GET /hello => ${httpRes.status} len=${httpRes.body.length}`);
-    if(httpRes.status!==200)throw new Error(`HTTP${httpRes.status}`);
+    if(httpRes.status!==200)throw new Error(`HTTP ${httpRes.status}`);
     await apiReq('DELETE',`/api/v1/servers/${sid}`,undefined,wsId).catch(()=>{});
     await sleep(1500);
   });

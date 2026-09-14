@@ -666,12 +666,9 @@ func (s *Server) handleBuilds(w http.ResponseWriter, r *http.Request) {
 			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: readErr.Error()})
 			return
 		}
-		if status, cached, ok := s.lookupIdempotent(env.RequestID); ok {
-			replayIdempotent(w, status, cached)
-			return
-		}
+		rawPayload := extractPayload(body)
 		var req BuildRequest
-		if err := decodeStrictBuildRequest(extractPayload(body), &req); err != nil {
+		if err := decodeStrictBuildRequest(rawPayload, &req); err != nil {
 			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: err.Error()})
 			return
 		}
@@ -679,6 +676,31 @@ func (s *Server) handleBuilds(w http.ResponseWriter, r *http.Request) {
 			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: "projectId required"})
 			return
 		}
+
+		opKey := OperationKey{Scope: req.ProjectID, Kind: OpBuild, RequestID: env.RequestID}
+		claim, rec := s.OperationRegistry().ClaimOrWait(r.Context(), opKey, rawPayload)
+		if claim == ClaimResultCancelled {
+			return
+		}
+		if claim == ClaimResultConflict {
+			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{
+				Code:    protocol.ErrConflict,
+				Message: fmt.Sprintf("operation conflict: requestID %q already submitted with different payload", env.RequestID),
+			})
+			return
+		}
+		if claim == ClaimResultReplay && rec != nil {
+			if rec.State == OpStateCompleted {
+				replayIdempotent(w, rec.StatusCode, rec.Response)
+				return
+			}
+			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{
+				Code:    protocol.ErrCompileFailed,
+				Message: rec.ErrorMsg,
+			})
+			return
+		}
+
 		// Validate that the projectId actually exists. Without this
 		// guard the build engine happily accepted any string and
 		// returned a queued-then-success build with 0 files compiled
@@ -691,11 +713,13 @@ func (s *Server) handleBuilds(w http.ResponseWriter, r *http.Request) {
 		// engine compiled 0 files into agent-data with defaults
 		// (the "sham build").
 		if s.Services.ProjectStore == nil {
+			s.OperationRegistry().Finish(opKey, http.StatusInternalServerError, nil, errors.New("ProjectStore not configured"))
 			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInternal, Message: "ProjectStore not configured"})
 			return
 		}
 		p, err := s.Services.ProjectStore.Get(req.ProjectID)
 		if err != nil {
+			s.OperationRegistry().Finish(opKey, http.StatusNotFound, nil, err)
 			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{
 				Code:    protocol.ErrNotFound,
 				Message: fmt.Sprintf("project not found: %s", req.ProjectID),
@@ -703,6 +727,7 @@ func (s *Server) handleBuilds(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := hydrateBuildRequest(&req, p); err != nil {
+			s.OperationRegistry().Finish(opKey, http.StatusBadRequest, nil, err)
 			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: err.Error()})
 			return
 		}
@@ -719,15 +744,17 @@ func (s *Server) handleBuilds(w http.ResponseWriter, r *http.Request) {
 			req.TraceID = requestID
 		}
 		if s.Services.BuildEngine == nil {
+			s.OperationRegistry().Finish(opKey, http.StatusInternalServerError, nil, errors.New("BuildEngine not configured"))
 			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInternal, Message: "BuildEngine not configured"})
 			return
 		}
 		res, err := s.Services.BuildEngine.Start(req)
 		if err != nil {
+			s.OperationRegistry().Finish(opKey, http.StatusInternalServerError, nil, err)
 			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrCompileFailed, Message: err.Error()})
 			return
 		}
-		writeIdempotentOK(s, w, env, res)
+		writeIdempotentOK(s, w, env, opKey, res)
 	default:
 		writeError(w, "", "", protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: "GET or POST only"})
 	}
@@ -799,13 +826,33 @@ func (s *Server) handleDeployments(w http.ResponseWriter, r *http.Request) {
 			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInternal, Message: "Deployer not configured"})
 			return
 		}
-		if status, cached, ok := s.lookupIdempotent(env.RequestID); ok {
-			replayIdempotent(w, status, cached)
+		rawPayload := extractPayload(body)
+		var req DeployRequest
+		if err := json.Unmarshal(rawPayload, &req); err != nil {
+			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: err.Error()})
 			return
 		}
-		var req DeployRequest
-		if err := json.Unmarshal(extractPayload(body), &req); err != nil {
-			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: err.Error()})
+		opKey := OperationKey{Scope: req.ProjectID, Kind: OpDeploy, RequestID: env.RequestID}
+		claim, rec := s.OperationRegistry().ClaimOrWait(r.Context(), opKey, rawPayload)
+		if claim == ClaimResultCancelled {
+			return
+		}
+		if claim == ClaimResultConflict {
+			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{
+				Code:    protocol.ErrConflict,
+				Message: fmt.Sprintf("operation conflict: requestID %q already submitted with different payload", env.RequestID),
+			})
+			return
+		}
+		if claim == ClaimResultReplay && rec != nil {
+			if rec.State == OpStateCompleted {
+				replayIdempotent(w, rec.StatusCode, rec.Response)
+				return
+			}
+			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{
+				Code:    protocol.ErrDeployFailed,
+				Message: rec.ErrorMsg,
+			})
 			return
 		}
 		// KAIRO-RC-WEB-239: the frontend sends {projectId, buildId,
@@ -815,6 +862,7 @@ func (s *Server) handleDeployments(w http.ResponseWriter, r *http.Request) {
 		if req.Source == "" && req.ProjectID != "" && s.Services.ProjectStore != nil {
 			p, err := s.Services.ProjectStore.Get(req.ProjectID)
 			if err != nil {
+				s.OperationRegistry().Finish(opKey, http.StatusNotFound, nil, err)
 				writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrNotFound, Message: "project not found: " + req.ProjectID})
 				return
 			}
@@ -824,6 +872,7 @@ func (s *Server) handleDeployments(w http.ResponseWriter, r *http.Request) {
 				if resolver, ok := s.Services.ServerRunner.(interface{ DeploymentTarget(string) (string, error) }); ok {
 					req.Target, err = resolver.DeploymentTarget(req.ProjectID)
 					if err != nil {
+						s.OperationRegistry().Finish(opKey, http.StatusConflict, nil, err)
 						writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrConflict, Message: err.Error()})
 						return
 					}
@@ -839,10 +888,11 @@ func (s *Server) handleDeployments(w http.ResponseWriter, r *http.Request) {
 		}
 		res, err := s.Services.Deployer.Publish(req)
 		if err != nil {
+			s.OperationRegistry().Finish(opKey, http.StatusInternalServerError, nil, err)
 			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrDeployFailed, Message: err.Error()})
 			return
 		}
-		writeIdempotentOK(s, w, env, res)
+		writeIdempotentOK(s, w, env, opKey, res)
 	default:
 		writeError(w, "", "", protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: "GET or POST only"})
 	}
@@ -1020,18 +1070,42 @@ func (s *Server) handleServers(w http.ResponseWriter, r *http.Request) {
 		}
 		writeOK(w, env, s.Services.ServerRunner.List())
 	case http.MethodPost:
-		env, body, _ := readEnvelopeAndBody(r)
+		env, body, readErr := readEnvelopeAndBody(r)
+		if readErr != nil {
+			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: readErr.Error()})
+			return
+		}
 		if s.Services.ServerRunner == nil {
 			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInternal, Message: "ServerRunner not configured"})
 			return
 		}
-		if status, cached, ok := s.lookupIdempotent(env.RequestID); ok {
-			replayIdempotent(w, status, cached)
+		rawPayload := extractPayload(body)
+		var req StartServerRequest
+		if err := json.Unmarshal(rawPayload, &req); err != nil {
+			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: err.Error()})
 			return
 		}
-		var req StartServerRequest
-		if err := json.Unmarshal(extractPayload(body), &req); err != nil {
-			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: err.Error()})
+		opKey := OperationKey{Scope: req.ProjectID, Kind: OpServerStart, RequestID: env.RequestID}
+		claim, rec := s.OperationRegistry().ClaimOrWait(r.Context(), opKey, rawPayload)
+		if claim == ClaimResultCancelled {
+			return
+		}
+		if claim == ClaimResultConflict {
+			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{
+				Code:    protocol.ErrConflict,
+				Message: fmt.Sprintf("operation conflict: requestID %q already submitted with different payload", env.RequestID),
+			})
+			return
+		}
+		if claim == ClaimResultReplay && rec != nil {
+			if rec.State == OpStateCompleted {
+				replayIdempotent(w, rec.StatusCode, rec.Response)
+				return
+			}
+			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{
+				Code:    protocol.ErrProcessSpawnFailed,
+				Message: rec.ErrorMsg,
+			})
 			return
 		}
 		// KAIRO-RC-WEB-240: the frontend sends only {projectId, debug};
@@ -1041,6 +1115,7 @@ func (s *Server) handleServers(w http.ResponseWriter, r *http.Request) {
 		if req.WebappDir == "" && req.ProjectID != "" && s.Services.ProjectStore != nil {
 			p, err := s.Services.ProjectStore.Get(req.ProjectID)
 			if err != nil {
+				s.OperationRegistry().Finish(opKey, http.StatusNotFound, nil, err)
 				writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrNotFound, Message: "project not found: " + req.ProjectID})
 				return
 			}
@@ -1051,10 +1126,11 @@ func (s *Server) handleServers(w http.ResponseWriter, r *http.Request) {
 		}
 		srv, err := s.Services.ServerRunner.Start(req)
 		if err != nil {
+			s.OperationRegistry().Finish(opKey, http.StatusInternalServerError, nil, err)
 			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrProcessSpawnFailed, Message: err.Error()})
 			return
 		}
-		writeIdempotentOK(s, w, env, srv)
+		writeIdempotentOK(s, w, env, opKey, srv)
 	default:
 		writeError(w, "", "", protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: "GET or POST only"})
 	}
@@ -1528,6 +1604,18 @@ func (s *Server) handleRuntimeRestart(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	// Atomic check: if a restart is already underway, acknowledge idempotently without spawning duplicate process (F18 / T33)
+	if !s.isRestarting.CompareAndSwap(false, true) {
+		writeOK(w, protocol.RequestEnvelope{}, map[string]string{
+			"status": "restarting",
+			"note":   "restart already in progress",
+		})
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		return
+	}
+
 	// No body to parse — the contract says "no body". Tolerate
 	// an empty envelope anyway in case the client sends one.
 	writeOK(w, protocol.RequestEnvelope{}, map[string]string{"status": "restarting"})
@@ -2037,3 +2125,45 @@ func (s *Server) handleJDTProject(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 }
+
+// handleOperationsSub handles GET /api/v1/operations/{requestId} (F20 / T25).
+func (s *Server) handleOperationsSub(w http.ResponseWriter, r *http.Request) {
+	rest := strings.TrimPrefix(r.URL.Path, "/api/v1/operations/")
+	if rest == "" || r.Method != http.MethodGet {
+		writeError(w, "", "", protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: "GET /api/v1/operations/{requestId} only"})
+		return
+	}
+	env, _, _ := readEnvelopeAndBody(r)
+	rec, ok := s.OperationRegistry().GetStatusByRequestID(rest)
+	if !ok {
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{
+			Code:    protocol.ErrNotFound,
+			Message: fmt.Sprintf("operation not found: %s", rest),
+		})
+		return
+	}
+	type OperationStatusDTO struct {
+		RequestID   string `json:"requestId"`
+		Scope       string `json:"scope,omitempty"`
+		Kind        string `json:"kind,omitempty"`
+		State       string `json:"state"`
+		StatusCode  int    `json:"statusCode,omitempty"`
+		Error       string `json:"error,omitempty"`
+		CreatedAt   string `json:"createdAt"`
+		CompletedAt string `json:"completedAt,omitempty"`
+	}
+	dto := OperationStatusDTO{
+		RequestID:  rec.Key.RequestID,
+		Scope:      rec.Key.Scope,
+		Kind:       string(rec.Key.Kind),
+		State:      string(rec.State),
+		StatusCode: rec.StatusCode,
+		Error:      rec.ErrorMsg,
+		CreatedAt:  rec.CreatedAt.Format(time.RFC3339Nano),
+	}
+	if !rec.CompletedAt.IsZero() {
+		dto.CompletedAt = rec.CompletedAt.Format(time.RFC3339Nano)
+	}
+	writeOK(w, env, dto)
+}
+

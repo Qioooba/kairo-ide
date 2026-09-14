@@ -1,0 +1,14 @@
+{
+  "component": "lithe-debug-contract-fixtures",
+  "upstreamRepository": "1lck/Lithe-IDEA",
+  "upstreamCommit": "9446a8fd0a318da883a2ce4757d3a429bbdfba03",
+  "license": "Apache-2.0",
+  "files": [
+    "shared/fixtures/debug/breakpoint-relocation-v1.json",
+    "shared/fixtures/debug/disconnect-policy-v1.json",
+    "shared/fixtures/debug/variable-paging-v1.json",
+    "shared/fixtures/debug/stepping-filters-v1.json",
+    "shared/fixtures/debug/exception-info-v1.json"
+  ],
+  "modifications": "none for original fixtures; Kairo adapters tracked separately"
+}

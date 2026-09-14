@@ -4,8 +4,10 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -37,12 +39,13 @@ type Request struct {
 }
 
 type Result struct {
-	Success       bool         `json:"success"`
-	Diagnostics   []Diagnostic `json:"diagnostics"`
-	Output        string       `json:"output"`
-	FilesCompiled int          `json:"filesCompiled"`
-	ElapsedMs     int64        `json:"elapsedMs"`
-	ExitCode      int          `json:"exitCode"`
+	Success       bool                   `json:"success"`
+	Diagnostics   []Diagnostic           `json:"diagnostics"`
+	Output        string                 `json:"output"`
+	FilesCompiled int                    `json:"filesCompiled"`
+	ElapsedMs     int64                  `json:"elapsedMs"`
+	ExitCode      int                    `json:"exitCode"`
+	Manifest      *BuildArtifactManifest `json:"manifest,omitempty"`
 }
 
 type Diagnostic struct {
@@ -180,16 +183,72 @@ func parseLevel(level string) int {
 	return 0
 }
 
-// normalizeLevel raises a -source/-target level to the JDK's minimum.
-// Levels equal to or above the minimum, and unparsable values, pass through.
+// normalizeLevel formats a -source/-target level.
+// PR01 (F01): It does NOT silently elevate requested versions to compiler minimums.
 func normalizeLevel(level string, min int) string {
-	if min <= 0 || level == "" {
-		return level
+	return strings.TrimSpace(level)
+}
+
+// maxMajorForTarget returns the maximum JVM class major version corresponding
+// to a given source or target level string (e.g. "1.6" -> 50, "8" -> 52, "21" -> 65).
+// Returns 0 when the level is unknown.
+func maxMajorForTarget(level string) int {
+	v := parseLevel(level)
+	if v <= 0 {
+		return 0
 	}
-	if v := parseLevel(level); v > 0 && v < min {
-		return strconv.Itoa(min)
+	if v >= 1 && v <= 4 {
+		return 44 + v // 1.1 -> 45, 1.2 -> 46, 1.3 -> 47, 1.4 -> 48
 	}
-	return level
+	if v >= 5 {
+		return 44 + v // 5 (1.5) -> 49, 6 (1.6) -> 50, 7 (1.7) -> 51, 8 (1.8) -> 52, 9 -> 53, 11 -> 55, 17 -> 61, 21 -> 65
+	}
+	return 0
+}
+
+// validateClassMajorVersions scans outputDir for .class files and checks that their
+// JVM major version does not exceed maxMajor (PR01 / F01 / T03).
+func validateClassMajorVersions(outputDir string, maxMajor int, targetLevel string) ([]Diagnostic, error) {
+	if outputDir == "" || maxMajor <= 0 {
+		return nil, nil
+	}
+	var diags []Diagnostic
+	err := filepath.Walk(outputDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		if info.IsDir() || !strings.HasSuffix(strings.ToLower(info.Name()), ".class") {
+			return nil
+		}
+		f, err := os.Open(path)
+		if err != nil {
+			return nil
+		}
+		defer f.Close()
+
+		var header [8]byte
+		if _, err := io.ReadFull(f, header[:]); err != nil {
+			return nil
+		}
+		// Check magic 0xCAFEBABE
+		if header[0] != 0xCA || header[1] != 0xFE || header[2] != 0xBA || header[3] != 0xBE {
+			return nil
+		}
+		major := binary.BigEndian.Uint16(header[6:8])
+		if int(major) > maxMajor {
+			diags = append(diags, Diagnostic{
+				File:     path,
+				Severity: "error",
+				Code:     "class_major_version_exceeded",
+				Message: fmt.Sprintf(
+					"generated class %s has major version %d, exceeding maximum allowed %d for target %s",
+					filepath.Base(path), major, maxMajor, targetLevel,
+				),
+			})
+		}
+		return nil
+	})
+	return diags, err
 }
 
 func (c *Compiler) Compile(ctx context.Context, req Request) (*Result, error) {
@@ -206,17 +265,48 @@ func (c *Compiler) Compile(ctx context.Context, req Request) (*Result, error) {
 		req.Timeout = 5 * time.Minute
 	}
 
+	// PR01 (F01 / T01): Toolchain compatibility gate.
+	// Never silently elevate user-requested levels to match compiler.
+	// If requested source or target level is below this compiler's supported minimum,
+	// reject with structured toolchain_incompatible diagnostic.
+	if c.minSourceLevel > 0 {
+		reqSrc := parseLevel(req.SourceLevel)
+		reqTgt := parseLevel(req.TargetLevel)
+		if (reqSrc > 0 && reqSrc < c.minSourceLevel) || (reqTgt > 0 && reqTgt < c.minSourceLevel) {
+			incompatLevel := req.SourceLevel
+			if reqTgt > 0 && reqTgt < c.minSourceLevel {
+				incompatLevel = req.TargetLevel
+			}
+			diagMsg := fmt.Sprintf(
+				"compiler toolchain %s does not support requested level %s (minimum supported level is %d)",
+				c.javaHome, incompatLevel, c.minSourceLevel,
+			)
+			return &Result{
+				Success:  false,
+				ExitCode: 2,
+				Output:   diagMsg,
+				Diagnostics: []Diagnostic{
+					{
+						Severity: "error",
+						Code:     "toolchain_incompatible",
+						Message:  diagMsg,
+					},
+				},
+			}, nil
+		}
+	}
+
 	args := []string{}
 	if req.Args != nil {
 		args = append(args, req.Args...)
 	} else {
-		// KAIRO-S27/JDK21: newer javac drops support for legacy source levels
-		// (JDK 20+ removed source/target 6). Clamp to the JDK's minimum so
-		// legacy projects still compile on JDK 17/21 toolchains.
-		args = append(args,
-			"-source", normalizeLevel(req.SourceLevel, c.minSourceLevel),
-			"-target", normalizeLevel(req.TargetLevel, c.minSourceLevel),
-		)
+		// PR01: pass requested source and target levels without silently elevating them.
+		if req.SourceLevel != "" {
+			args = append(args, "-source", normalizeLevel(req.SourceLevel, c.minSourceLevel))
+		}
+		if req.TargetLevel != "" {
+			args = append(args, "-target", normalizeLevel(req.TargetLevel, c.minSourceLevel))
+		}
 		if req.Encoding != "" {
 			args = append(args, "-encoding", req.Encoding)
 		}
@@ -327,12 +417,34 @@ func (c *Compiler) Compile(ctx context.Context, req Request) (*Result, error) {
 		res.Diagnostics = []Diagnostic{}
 	}
 	res.Success = res.ExitCode == 0
+	if res.Success {
+		// PR01 (F01 / T03): Validate output class file bytecode major version.
+		// Applies to both default args and custom args branches.
+		targetToCheck := req.TargetLevel
+		if targetToCheck == "" {
+			targetToCheck = req.SourceLevel
+		}
+		if maxMajor := maxMajorForTarget(targetToCheck); maxMajor > 0 && req.OutputDir != "" {
+			majorDiags, _ := validateClassMajorVersions(req.OutputDir, maxMajor, targetToCheck)
+			if len(majorDiags) > 0 {
+				res.Success = false
+				res.ExitCode = 1
+				res.Diagnostics = append(res.Diagnostics, majorDiags...)
+				res.Output += fmt.Sprintf("\nDeployment gate rejected: %d class(es) exceeded target %s major version (max %d)", len(majorDiags), targetToCheck, maxMajor)
+			}
+		}
+	}
 	// KAIRO-RC-WEB-238 follow-up: modern javac prints no
 	// "Note: N files" line, so countCompiled always returned 0
 	// even for successful builds. A zero exit means every source
 	// passed to javac compiled — report that honestly.
 	if res.Success {
 		res.FilesCompiled = len(req.Sources)
+		if req.OutputDir != "" {
+			if manifest, err := GenerateManifest(req.OutputDir, req.ProjectRoot, req.Toolchain, nil); err == nil {
+				res.Manifest = manifest
+			}
+		}
 	} else {
 		res.FilesCompiled = countCompiled(res.Output)
 	}

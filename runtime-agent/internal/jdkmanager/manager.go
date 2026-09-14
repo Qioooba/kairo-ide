@@ -149,31 +149,35 @@ func loadPersistedJDKHomes() []string {
 	if cfg := strings.TrimSpace(os.Getenv("KAIRO_JDK_CONFIG")); cfg != "" {
 		candidates = append(candidates, cfg)
 	}
-	if dataDir := strings.TrimSpace(os.Getenv("KAIRO_DATA_DIR")); dataDir != "" {
+	dataDir := strings.TrimSpace(os.Getenv("KAIRO_DATA_DIR"))
+	if dataDir != "" {
 		candidates = append(candidates,
 			filepath.Join(dataDir, "host-jdk.json"),
 			filepath.Join(filepath.Dir(dataDir), "host-jdk.json"),
 		)
 	}
-	// Best-effort Electron userData defaults when env is missing.
-	if runtime.GOOS == "windows" {
-		if appData := os.Getenv("APPDATA"); appData != "" {
-			for _, name := range []string{"Kairo", "kairo-ide", "@kairo/desktop"} {
-				candidates = append(candidates, filepath.Join(appData, name, "host-jdk.json"))
+	// Only probe Electron userData defaults when no explicit data dir/config
+	// is provided (avoids tests accidentally picking up a developer install).
+	if dataDir == "" && strings.TrimSpace(os.Getenv("KAIRO_JDK_CONFIG")) == "" {
+		if runtime.GOOS == "windows" {
+			if appData := os.Getenv("APPDATA"); appData != "" {
+				for _, name := range []string{"Kairo", "kairo-ide", "@kairo/desktop"} {
+					candidates = append(candidates, filepath.Join(appData, name, "host-jdk.json"))
+				}
 			}
-		}
-	} else if runtime.GOOS == "darwin" {
-		home, _ := os.UserHomeDir()
-		if home != "" {
-			for _, name := range []string{"Kairo", "kairo-ide"} {
-				candidates = append(candidates, filepath.Join(home, "Library", "Application Support", name, "host-jdk.json"))
+		} else if runtime.GOOS == "darwin" {
+			home, _ := os.UserHomeDir()
+			if home != "" {
+				for _, name := range []string{"Kairo", "kairo-ide"} {
+					candidates = append(candidates, filepath.Join(home, "Library", "Application Support", name, "host-jdk.json"))
+				}
 			}
-		}
-	} else {
-		home, _ := os.UserHomeDir()
-		if home != "" {
-			for _, name := range []string{"Kairo", "kairo-ide"} {
-				candidates = append(candidates, filepath.Join(home, ".config", name, "host-jdk.json"))
+		} else {
+			home, _ := os.UserHomeDir()
+			if home != "" {
+				for _, name := range []string{"Kairo", "kairo-ide"} {
+					candidates = append(candidates, filepath.Join(home, ".config", name, "host-jdk.json"))
+				}
 			}
 		}
 	}

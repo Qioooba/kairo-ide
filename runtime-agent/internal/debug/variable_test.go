@@ -34,13 +34,13 @@ func buildTaggedVariableReply(entries []struct {
 		case jdwpTagLong:
 			w.WriteLong(e.raw.(int64))
 		case jdwpTagShort:
-			w.WriteInt(e.raw.(int32))
+			w.WriteShort(int16(e.raw.(int32)))
 		case jdwpTagFloat:
 			w.WriteFloat(e.raw.(float32))
 		case jdwpTagDouble:
 			w.WriteDouble(e.raw.(float64))
 		case jdwpTagChar:
-			w.WriteInt(e.raw.(int32))
+			w.WriteChar(uint16(e.raw.(int32)))
 		case jdwpTagObject:
 			w.WriteObjectID(e.raw.(int64))
 		case jdwpTagString:
@@ -751,15 +751,22 @@ func TestJdwpErrorMessage(t *testing.T) {
 		code int16
 		want string
 	}{
-		{10, "VM_DEAD"},
-		{11, "THREAD_NOT_SUSPENDED"},
-		{20, "INVALID_CLASS"},
-		{33, "INVALID_OBJECT"},
-		{35, "INVALID_THREAD"},
+		{0, "NONE"},
+		{10, "INVALID_THREAD"},
+		{11, "INVALID_THREAD_GROUP"},
+		{13, "THREAD_NOT_SUSPENDED"},
+		{20, "INVALID_OBJECT"},
+		{21, "INVALID_CLASS"},
+		{30, "INVALID_FRAMEID"},
+		{31, "NO_MORE_FRAMES"},
+		{34, "TYPE_MISMATCH"},
+		{35, "INVALID_SLOT"},
 		{99, "NOT_IMPLEMENTED"},
-		{100, "ABSENT_INFORMATION"},
-		{110, "NATIVE_METHOD"},
-		{112, "NO_MORE_FRAMES"},
+		{100, "NULL_POINTER"},
+		{101, "ABSENT_INFORMATION"},
+		{110, "OUT_OF_MEMORY"},
+		{112, "VM_DEAD"},
+		{512, "NATIVE_METHOD"},
 		{999, "UNKNOWN_ERROR_999"},
 	}
 
@@ -780,12 +787,12 @@ func TestParseVariableFromUntagged_AllTypes(t *testing.T) {
 		data []byte
 	}{
 		{"byte", jdwpTagByte, []byte{0x7F}},
-		{"char", jdwpTagChar, []byte{0, 0, 0, 0x41}},
+		{"char", jdwpTagChar, []byte{0, 0x41}},
 		{"double", jdwpTagDouble, []byte{0x3F, 0xF0, 0, 0, 0, 0, 0, 0}},
 		{"float", jdwpTagFloat, []byte{0x3F, 0x80, 0, 0}},
 		{"int", jdwpTagInt, []byte{0, 0, 0, 42}},
 		{"long", jdwpTagLong, []byte{0, 0, 0, 0, 0, 0, 0, 100}},
-		{"short", jdwpTagShort, []byte{0, 0, 0, 10}},
+		{"short", jdwpTagShort, []byte{0, 10}},
 		{"boolean_true", jdwpTagBoolean, []byte{1}},
 		{"boolean_false", jdwpTagBoolean, []byte{0}},
 		{"string", jdwpTagString, makeObjIDBytes(42)},

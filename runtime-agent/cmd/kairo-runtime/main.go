@@ -5,7 +5,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	stdlog "log"
@@ -15,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"time"
 
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/api"
@@ -24,53 +24,6 @@ import (
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/log"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/tomcat6"
 )
-
-// agentState is written to <dataDir>/agent-state.json on startup so
-// other processes (Desktop, Browser launcher) can discover the running
-// agent and reuse it instead of starting a duplicate.
-type agentState struct {
-	Port        int    `json:"port"`
-	PID         int    `json:"pid"`
-	BindAddress string `json:"bindAddress"`
-	StartedAt   string `json:"startedAt"`
-}
-
-func writeAgentState(dataDir string, st agentState) {
-	statePath := filepath.Join(dataDir, "agent-state.json")
-	data, err := json.MarshalIndent(st, "", "  ")
-	if err != nil {
-		stdlog.Printf("WARN: failed to marshal agent state: %v", err)
-		return
-	}
-	// Owner-only (0600). Remove any prior file first so OpenFile's
-	// mode is applied — mode is ignored when truncating an existing
-	// file that may still be world-readable from older releases.
-	_ = os.Remove(statePath)
-	f, err := os.OpenFile(statePath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
-		stdlog.Printf("WARN: failed to write agent state file %s: %v", statePath, err)
-		return
-	}
-	_, writeErr := f.Write(data)
-	closeErr := f.Close()
-	if writeErr != nil {
-		stdlog.Printf("WARN: failed to write agent state file %s: %v", statePath, writeErr)
-		_ = os.Remove(statePath)
-		return
-	}
-	if closeErr != nil {
-		stdlog.Printf("WARN: failed to close agent state file %s: %v", statePath, closeErr)
-		return
-	}
-	stdlog.Printf("agent state written to %s (port=%d, pid=%d)", statePath, st.Port, st.PID)
-}
-
-func removeAgentState(dataDir string) {
-	statePath := filepath.Join(dataDir, "agent-state.json")
-	if err := os.Remove(statePath); err != nil && !errors.Is(err, os.ErrNotExist) {
-		stdlog.Printf("WARN: failed to remove agent state file %s: %v", statePath, err)
-	}
-}
 
 const (
 	agentVersion           = "0.1.0"
@@ -203,24 +156,67 @@ func main() {
 		stdlog.Fatalf("remote mode is not available in this release. Please bind to 127.0.0.1 only")
 	}
 
+	// Generation tracking (F18 / T31, T33)
+	generation := 1
+	if gStr := os.Getenv("KAIRO_GENERATION"); gStr != "" {
+		if parsed, perr := strconv.Atoi(gStr); perr == nil && parsed > 0 {
+			generation = parsed
+		}
+	}
+	instanceID := fmt.Sprintf("inst_%d_%d", os.Getpid(), time.Now().UnixNano())
+
+	// Write initial starting state atomically so launcher/supervisor can track readiness
+	_ = api.WriteAgentStateAtomic(cfg.DataDir, api.AgentState{
+		InstanceID:  instanceID,
+		Generation:  generation,
+		PID:         os.Getpid(),
+		Port:        cfg.Port,
+		BindAddress: cfg.BindAddress,
+		StartedAt:   time.Now().UTC().Format(time.RFC3339),
+		Status:      "starting",
+	})
+	defer api.RemoveAgentState(cfg.DataDir, os.Getpid(), generation)
+
 	// Write agent state after bind so port 0 resolves to the real
 	// OS-assigned port (DK-P1-2). Desktop polls this file for discovery.
 	addr := fmt.Sprintf("%s:%d", cfg.BindAddress, cfg.Port)
-	ln, err := srv.Listen(addr)
+
+	// In restart or fixed-port mode, retry with bounded timeout to allow predecessor
+	// process time to cleanly release the port (F18 / T31).
+	handoffTimeout := restartShutdownTimeout
+	if cfg.Port == 0 {
+		handoffTimeout = 0
+	}
+
+	ln, err := srv.ListenWithHandoff(addr, handoffTimeout)
 	if err != nil {
+		_ = api.WriteAgentStateAtomic(cfg.DataDir, api.AgentState{
+			InstanceID:  instanceID,
+			Generation:  generation,
+			PID:         os.Getpid(),
+			Port:        cfg.Port,
+			BindAddress: cfg.BindAddress,
+			StartedAt:   time.Now().UTC().Format(time.RFC3339),
+			Status:      "failed",
+			Error:       err.Error(),
+		})
 		shutCtx, cancel := context.WithTimeout(context.Background(), restartShutdownTimeout)
 		defer cancel()
 		_ = container.Shutdown(shutCtx)
 		stdlog.Fatalf("listen: %v", err)
 	}
 	boundPort := srv.BoundPort()
-	writeAgentState(cfg.DataDir, agentState{
-		Port:        boundPort,
+	if err := api.WriteAgentStateAtomic(cfg.DataDir, api.AgentState{
+		InstanceID:  instanceID,
+		Generation:  generation,
 		PID:         os.Getpid(),
+		Port:        boundPort,
 		BindAddress: cfg.BindAddress,
 		StartedAt:   time.Now().UTC().Format(time.RFC3339),
-	})
-	defer removeAgentState(cfg.DataDir)
+		Status:      "ready",
+	}); err != nil {
+		stdlog.Printf("WARN: failed to write agent state file: %v", err)
+	}
 
 	// Wire restart after bind so --port 0 is replaced with the concrete
 	// OS-assigned port (otherwise /api/v1/runtime/restart would rebind
@@ -229,6 +225,9 @@ func main() {
 		Args:            withPinnedPort(originalArgs, boundPort),
 		ShutdownTimeout: restartShutdownTimeout,
 		OnShutdown:      container.Shutdown,
+		DataDir:         cfg.DataDir,
+		InstanceID:      instanceID,
+		Generation:      generation,
 	})
 
 	if err := srv.Serve(ln, cfg.TLSCert, cfg.TLSKey); err != nil {

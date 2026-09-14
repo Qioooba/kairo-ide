@@ -108,13 +108,14 @@ type Match struct {
 
 // Result is the result of a search.
 type Result struct {
-	Matches      []Match       `json:"matches"`
-	TotalMatches int           `json:"totalMatches"`
-	Truncated    bool          `json:"truncated"`
-	ElapsedMs    int64         `json:"elapsedMs"`
-	ErroredFiles []ErroredFile `json:"erroredFiles"`
-	allDecoders  map[string]func() ([]byte, error)
-	mu           sync.Mutex
+	Matches       []Match       `json:"matches"`
+	TotalMatches  int           `json:"totalMatches"`
+	FilesSearched int           `json:"filesSearched,omitempty"`
+	Truncated     bool          `json:"truncated"`
+	ElapsedMs     int64         `json:"elapsedMs"`
+	ErroredFiles  []ErroredFile `json:"erroredFiles"`
+	allDecoders   map[string]func() ([]byte, error)
+	mu            sync.Mutex
 }
 
 // ErroredFile records a file we could not read.
@@ -182,17 +183,37 @@ func Search(root string, opts Options) (*Result, error) {
 	return res, nil
 }
 
+// StreamStats captures aggregated execution metadata for a streaming search (F13 / T29).
+type StreamStats struct {
+	TotalMatches  int   `json:"totalMatches"`
+	FilesSearched int   `json:"filesSearched"`
+	SkippedFiles  int   `json:"skippedFiles"`
+	Truncated     bool  `json:"truncated"`
+	Cancelled     bool  `json:"cancelled"`
+	DurationMs    int64 `json:"durationMs"`
+}
+
 // SearchStreaming walks root and calls callback for each batch of matches.
-// Each batch contains up to batchSize results. callback receives the batch,
-// the batch index (0-based), and the cumulative total matches so far.
-// Returns an error if the callback fails or the context is cancelled.
+// Backward-compatible wrapper around SearchStreamingWithStats.
 func SearchStreaming(ctx context.Context, root string, opts Options, callback func(batch []Match, batchIndex int, total int) error) error {
+	_, err := SearchStreamingWithStats(ctx, root, opts, callback)
+	return err
+}
+
+// SearchStreamingWithStats walks root and streams batches of matches to callback,
+// returning aggregated metadata (files searched, skipped, truncated, cancelled, duration).
+// It owns the execution context, guarantees all worker goroutines are terminated (joined)
+// before returning, and propagates cancellation bidirectionally (F13 / T28 ~ T30).
+func SearchStreamingWithStats(ctx context.Context, root string, opts Options, callback func(batch []Match, batchIndex int, total int) error) (StreamStats, error) {
+	start := time.Now()
+	var stats StreamStats
+
 	const batchSize = 50
 	if root == "" {
-		return errors.New("root is empty")
+		return stats, errors.New("root is empty")
 	}
 	if opts.Query == "" {
-		return nil
+		return stats, nil
 	}
 	if opts.MaxResults == 0 {
 		opts.MaxResults = 100_000
@@ -200,65 +221,142 @@ func SearchStreaming(ctx context.Context, root string, opts Options, callback fu
 	if opts.MaxFileBytes == 0 {
 		opts.MaxFileBytes = defaultMaxFileBytes
 	}
-	if opts.Cancel == nil {
-		opts.Cancel = ctx
-	}
 	if opts.ProjectEncoding == "" {
 		opts.ProjectEncoding = encoding.UTF8
 	}
 
-	matcher, err := buildMatcher(opts)
-	if err != nil {
-		return err
+	// 1. Converge all cancellation sources into a single owned context (F13 / T28)
+	baseCtx := ctx
+	if baseCtx == nil {
+		baseCtx = context.Background()
+	}
+	searchCtx, searchCancel := context.WithCancel(baseCtx)
+	defer searchCancel()
+
+	// If a separate opts.Cancel was provided, link it
+	if opts.Cancel != nil && opts.Cancel != ctx {
+		cancelWatcherDone := make(chan struct{})
+		defer close(cancelWatcherDone)
+		go func() {
+			select {
+			case <-opts.Cancel.Done():
+				searchCancel()
+			case <-searchCtx.Done():
+			case <-cancelWatcherDone:
+			}
+		}()
 	}
 
-	inc := compileGlobs(opts.Include)
-	exc := compileGlobs(opts.Exclude)
+	searchOpts := opts
+	searchOpts.Cancel = searchCtx
+
+	matcher, err := buildMatcher(searchOpts)
+	if err != nil {
+		return stats, err
+	}
+
+	inc := compileGlobs(searchOpts.Include)
+	exc := compileGlobs(searchOpts.Exclude)
 
 	matchCh := make(chan Match, 256)
 	walkErrCh := make(chan error, 1)
 
+	collector := &streamCollector{
+		ch:  matchCh,
+		ctx: searchCtx,
+	}
+
+	// 2. Launch producer in a goroutine tracked by sync.WaitGroup for deterministic join
+	var producerWg sync.WaitGroup
+	producerWg.Add(1)
 	go func() {
+		defer producerWg.Done()
 		defer close(matchCh)
-		walkErrCh <- walkAndCollect(root, matcher, inc, exc, opts, &streamCollector{ch: matchCh, ctx: opts.Cancel})
+		walkErrCh <- walkAndCollect(root, matcher, inc, exc, searchOpts, collector)
 	}()
 
 	batch := make([]Match, 0, batchSize)
 	batchIndex := 0
 	total := 0
+	var consumerErr error
 
+	// 3. Consumer loop
+consumeLoop:
 	for {
 		select {
-		case <-ctx.Done():
-			return ctx.Err()
+		case <-searchCtx.Done():
+			consumerErr = searchCtx.Err()
+			break consumeLoop
 		case match, ok := <-matchCh:
 			if !ok {
-				if len(batch) > 0 {
-					if err := callback(batch, batchIndex, total); err != nil {
-						return err
-					}
-				}
-				select {
-				case walkErr := <-walkErrCh:
-					if walkErr != nil && !errors.Is(walkErr, context.Canceled) && !errors.Is(walkErr, context.DeadlineExceeded) {
-						return walkErr
-					}
-					return nil
-				default:
-					return nil
-				}
+				break consumeLoop
 			}
 			batch = append(batch, match)
 			total++
 			if len(batch) >= batchSize {
 				if err := callback(batch, batchIndex, total); err != nil {
-					return err
+					consumerErr = err
+					searchCancel() // CANCEL PRODUCER IMMEDIATELY! (F13 / T28)
+					break consumeLoop
 				}
 				batch = make([]Match, 0, batchSize)
 				batchIndex++
 			}
 		}
 	}
+
+	// 4. Teardown: cancel producer if consumer aborted or errored, and drain channel to prevent producer deadlock
+	searchCancel()
+
+	// Drain any in-flight matches so producer workers never block on send
+	go func() {
+		for range matchCh {
+		}
+	}()
+
+	// 5. Join all producer goroutines before returning (F13 / T28)
+	producerWg.Wait()
+
+	// 6. Final batch delivery (only if no consumer error occurred and context was not cancelled)
+	if consumerErr == nil && len(batch) > 0 {
+		if err := callback(batch, batchIndex, total); err != nil {
+			consumerErr = err
+		}
+	}
+
+	// 7. Collect producer error
+	var walkErr error
+	select {
+	case walkErr = <-walkErrCh:
+	default:
+	}
+
+	// 8. Populate stats metadata (F13 / T29)
+	stats.TotalMatches = total
+	stats.FilesSearched = int(collector.filesCount.Load())
+	stats.SkippedFiles = int(collector.skippedCount.Load())
+	stats.DurationMs = time.Since(start).Milliseconds()
+
+	if total >= searchOpts.MaxResults {
+		stats.Truncated = true
+	}
+	if errors.Is(baseCtx.Err(), context.Canceled) || (opts.Cancel != nil && errors.Is(opts.Cancel.Err(), context.Canceled)) || errors.Is(consumerErr, context.Canceled) || (walkErr != nil && errors.Is(walkErr, context.Canceled)) {
+		stats.Cancelled = true
+	}
+
+	if consumerErr != nil && !errors.Is(consumerErr, context.Canceled) {
+		return stats, consumerErr
+	}
+	if baseCtx.Err() != nil {
+		return stats, baseCtx.Err()
+	}
+	if opts.Cancel != nil && opts.Cancel.Err() != nil {
+		return stats, opts.Cancel.Err()
+	}
+	if walkErr != nil && !errors.Is(walkErr, context.Canceled) && !errors.Is(walkErr, context.DeadlineExceeded) {
+		return stats, walkErr
+	}
+	return stats, nil
 }
 
 // ListFiles walks root and returns relative file paths (for Find File / Search Everywhere).
@@ -334,8 +432,10 @@ func ListFiles(root string, opts ListOptions) ([]FileEntry, error) {
 
 // streamCollector implements a match collector that sends to a channel.
 type streamCollector struct {
-	ch  chan<- Match
-	ctx context.Context
+	ch           chan<- Match
+	ctx          context.Context
+	skippedCount atomic.Int64
+	filesCount   atomic.Int64
 }
 
 func (sc *streamCollector) addMatch(m Match) {
@@ -343,6 +443,14 @@ func (sc *streamCollector) addMatch(m Match) {
 	case sc.ch <- m:
 	case <-sc.ctx.Done():
 	}
+}
+
+func (sc *streamCollector) recordError(path string, err error) {
+	sc.skippedCount.Add(1)
+}
+
+func (sc *streamCollector) recordFileSearched() {
+	sc.filesCount.Add(1)
 }
 
 // matchSink is the interface that both Result and streamCollector implement.
@@ -490,6 +598,12 @@ func (r *Result) recordError(path string, err error) {
 	r.mu.Unlock()
 }
 
+func (r *Result) recordFileSearched() {
+	r.mu.Lock()
+	r.FilesSearched++
+	r.mu.Unlock()
+}
+
 func isExcludedDir(rel string) bool {
 	base := filepath.Base(rel)
 	return excludedDirSet[base]
@@ -576,9 +690,14 @@ func searchFileToSink(
 	}
 	f, err := os.Open(absPath)
 	if err != nil {
+		reportFileError(sink, rel, fmt.Errorf("open file: %w", err))
 		return nil
 	}
 	defer f.Close()
+
+	if reporter, ok := sink.(interface{ recordFileSearched() }); ok {
+		reporter.recordFileSearched()
+	}
 
 	// Skip oversized files instead of buffering them in memory.
 	if opts.MaxFileBytes > 0 {

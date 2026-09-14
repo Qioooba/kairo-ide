@@ -14,6 +14,7 @@
 
 import { spawnSync, ChildProcess } from 'child_process';
 import * as fs from 'node:fs';
+import type { AgentState } from '@kairo/protocol';
 import {
   ProcessManager,
   ShutdownOptions,
@@ -84,6 +85,32 @@ export function readProcessCommandLine(pid: number): string | undefined {
   }
 }
 
+/** Read AgentState from agent-state.json when present and well-formed (DK-P1-2 / F18). */
+export function readAgentState(
+  statePath: string,
+  readFileSync: (path: string, encoding: BufferEncoding) => string = (p, enc) =>
+    fs.readFileSync(p, enc),
+  existsSync: (path: string) => boolean = (p) => fs.existsSync(p),
+): AgentState | undefined {
+  try {
+    if (!existsSync(statePath)) return undefined;
+    const raw = JSON.parse(readFileSync(statePath, 'utf8')) as Partial<AgentState>;
+    if (
+      typeof raw.pid === 'number' && Number.isInteger(raw.pid) && raw.pid > 0 &&
+      typeof raw.port === 'number' && Number.isInteger(raw.port) && raw.port > 0 && raw.port <= 65535 &&
+      typeof raw.instanceId === 'string' && raw.instanceId.trim().length > 0 &&
+      typeof raw.bindAddress === 'string' && raw.bindAddress.trim().length > 0 &&
+      typeof raw.status === 'string' && raw.status.trim().length > 0 &&
+      typeof raw.startedAt === 'string' && raw.startedAt.trim().length > 0
+    ) {
+      return raw as AgentState;
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Read pid from agent-state.json when present and well-formed. */
 export function readAgentStatePid(
   statePath: string,
@@ -91,16 +118,7 @@ export function readAgentStatePid(
     fs.readFileSync(p, enc),
   existsSync: (path: string) => boolean = (p) => fs.existsSync(p),
 ): number | undefined {
-  try {
-    if (!existsSync(statePath)) return undefined;
-    const raw = JSON.parse(readFileSync(statePath, 'utf8')) as { pid?: unknown };
-    if (typeof raw.pid === 'number' && Number.isInteger(raw.pid) && raw.pid > 0) {
-      return raw.pid;
-    }
-    return undefined;
-  } catch {
-    return undefined;
-  }
+  return readAgentState(statePath, readFileSync, existsSync)?.pid;
 }
 
 /**

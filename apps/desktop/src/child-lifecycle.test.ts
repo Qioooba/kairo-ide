@@ -53,9 +53,47 @@ describe('ChildLifecycle helpers', () => {
   it('readAgentStatePid parses agent-state.json', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kairo-agent-state-'));
     const statePath = path.join(dir, 'agent-state.json');
-    fs.writeFileSync(statePath, JSON.stringify({ port: 1, pid: 99991 }), 'utf8');
+    fs.writeFileSync(
+      statePath,
+      JSON.stringify({
+        port: 1,
+        pid: 99991,
+        instanceId: 'inst-1',
+        bindAddress: '127.0.0.1',
+        status: 'ready',
+        startedAt: '2026-09-14T00:00:00Z',
+      }),
+      'utf8',
+    );
     try {
       assert.strictEqual(readAgentStatePid(statePath), 99991);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('readAgentState rejects incomplete or truncated agent-state.json', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kairo-agent-state-'));
+    const statePath = path.join(dir, 'agent-state.json');
+    try {
+      // Missing mandatory fields like instanceId, bindAddress, status, startedAt
+      fs.writeFileSync(statePath, JSON.stringify({ port: 1, pid: 99991 }), 'utf8');
+      assert.strictEqual(readAgentStatePid(statePath), undefined);
+
+      // Invalid port
+      fs.writeFileSync(
+        statePath,
+        JSON.stringify({
+          port: 70000,
+          pid: 99991,
+          instanceId: 'inst-1',
+          bindAddress: '127.0.0.1',
+          status: 'ready',
+          startedAt: '2026-09-14T00:00:00Z',
+        }),
+        'utf8',
+      );
+      assert.strictEqual(readAgentStatePid(statePath), undefined);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }

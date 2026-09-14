@@ -197,7 +197,7 @@ func (s *Server) handleSearchStream(w http.ResponseWriter, r *http.Request) {
 		Cancel:          ctx,
 	}
 
-	err = search.SearchStreaming(ctx, root, opts, func(batch []search.Match, batchIndex int, total int) error {
+	stats, err := search.SearchStreamingWithStats(ctx, root, opts, func(batch []search.Match, batchIndex int, total int) error {
 		ev := protocol.SearchStreamEvent{
 			Kind:       "searchStream",
 			TaskID:     taskID,
@@ -238,21 +238,35 @@ func (s *Server) handleSearchStream(w http.ResponseWriter, r *http.Request) {
 
 	// Send final event.
 	if err != nil {
-		sendSearchError(conn, err.Error())
+		sendSearchError(conn, err.Error(), stats)
 		return
 	}
 	finalEv := protocol.SearchStreamEvent{
-		Kind:   "searchStream",
-		TaskID: taskID,
-		Done:   true,
+		Kind:          "searchStream",
+		TaskID:        taskID,
+		Done:          true,
+		Total:         stats.TotalMatches,
+		Skipped:       stats.SkippedFiles,
+		Truncated:     stats.Truncated,
+		Cancelled:     stats.Cancelled,
+		DurationMs:    stats.DurationMs,
+		FilesSearched: stats.FilesSearched,
 	}
 	_ = conn.WriteJSON(finalEv)
 }
 
-func sendSearchError(conn *websocket.Conn, errMsg string) {
-	_ = conn.WriteJSON(protocol.SearchStreamEvent{
+func sendSearchError(conn *websocket.Conn, errMsg string, stats ...search.StreamStats) {
+	ev := protocol.SearchStreamEvent{
 		Kind:  "searchStream",
 		Done:  true,
 		Error: errMsg,
-	})
+	}
+	if len(stats) > 0 {
+		ev.Skipped = stats[0].SkippedFiles
+		ev.Truncated = stats[0].Truncated
+		ev.Cancelled = stats[0].Cancelled
+		ev.DurationMs = stats[0].DurationMs
+		ev.FilesSearched = stats[0].FilesSearched
+	}
+	_ = conn.WriteJSON(ev)
 }

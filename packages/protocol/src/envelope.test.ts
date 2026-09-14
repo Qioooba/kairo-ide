@@ -100,7 +100,7 @@ test('KairoErrorCode is the documented set (lock the wire)', () => {
   const expected: KairoErrorCode[] = [
     'unauthenticated', 'forbidden', 'not_found', 'conflict', 'rate_limited',
     'invalid_request', 'path_forbidden', 'toolchain_missing', 'runtime_missing',
-    'unsupported_jdk_target',
+    'unsupported_jdk_target', 'target_ambiguous', 'target_not_found', 'stale_target',
     'internal', 'io_error', 'process_spawn_failed', 'compile_failed',
     'deploy_failed', 'debug_attach_failed', 'cancelled', 'timeout', 'plugin_crashed', 'unsupported',
   ];
@@ -108,5 +108,5 @@ test('KairoErrorCode is the documented set (lock the wire)', () => {
   // compiles; the assertion is that the runtime representation
   // matches the documented list.
   const observed: readonly string[] = expected as readonly string[];
-  assert.strictEqual(observed.length, 20);
+  assert.strictEqual(observed.length, 23);
 });

@@ -994,8 +994,8 @@ func TestNormalizeLevel(t *testing.T) {
 		min   int
 		want  string
 	}{
-		{"1.6", 7, "7"},   // legacy source raised to JDK 21 minimum
-		{"1.6", 8, "8"},   // raised further when JDK min is 8
+		{"1.6", 7, "1.6"}, // PR01 (F01): legacy source preserved, NOT silently raised
+		{"1.6", 8, "1.6"}, // PR01 (F01): legacy source preserved, NOT silently raised
 		{"1.6", 0, "1.6"}, // unknown minimum → pass through
 		{"8", 7, "8"},     // already supported → unchanged
 		{"7", 7, "7"},     // exactly the minimum → unchanged
@@ -1011,9 +1011,6 @@ func TestNormalizeLevel(t *testing.T) {
 }
 
 func TestProbeMinSourceLevel(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("POSIX shell fixture; Windows probing is covered by real JDK E2E")
-	}
 
 	t.Run("english-jdk21", func(t *testing.T) {
 		javac := writeFakeJavac(t, "Usage: javac <options> <source files>\nSupported releases: 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21\n")
@@ -1073,6 +1070,18 @@ func writeFakeJavac(t *testing.T, helpText string) string {
 	if err := os.MkdirAll(binDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	if runtime.GOOS == "windows" {
+		helpFile := filepath.Join(binDir, "help.txt")
+		if err := os.WriteFile(helpFile, []byte(helpText), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		javac := filepath.Join(binDir, "javac.cmd")
+		script := "@echo off\r\ntype \"%~dp0help.txt\"\r\n"
+		if err := os.WriteFile(javac, []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		return javac
+	}
 	javac := filepath.Join(binDir, "javac")
 	script := "#!/bin/sh\nprintf '%s' " + strconv.Quote(helpText) + "\n"
 	if err := os.WriteFile(javac, []byte(script), 0o755); err != nil {
@@ -1087,5 +1096,94 @@ func writeFile(t *testing.T, dir, name, content string) {
 	path := filepath.Join(dir, name)
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// PR01 (F01 / T01): normalizeLevel must not silently elevate source/target levels
+func TestCompiler_NormalizeLevel_NoSilentLifting(t *testing.T) {
+	// If project requests 1.6 but compiler min is 8, normalizeLevel must NOT lift to "8".
+	got := normalizeLevel("1.6", 8)
+	if got == "8" {
+		t.Fatalf("normalizeLevel('1.6', 8) silently elevated version to '8', want '1.6'")
+	}
+	if got != "1.6" {
+		t.Errorf("normalizeLevel('1.6', 8) = %q, want '1.6'", got)
+	}
+}
+
+// PR01 (F01 / T01): When compiler toolchain does not support requested level, reject with toolchain_incompatible
+func TestCompiler_IncompatibleToolchain_Rejects(t *testing.T) {
+	c := &Compiler{
+		javaHome:       t.TempDir(),
+		minSourceLevel: 8, // Compiler only supports Java 8+
+	}
+	src := filepath.Join(t.TempDir(), "Test.java")
+	if err := os.WriteFile(src, []byte("public class Test {}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := c.Compile(context.Background(), Request{
+		ProjectRoot: filepath.Dir(src),
+		SourceLevel: "1.6",
+		TargetLevel: "1.6",
+		Sources:     []string{src},
+	})
+	if err != nil {
+		t.Fatalf("Compile unexpected error: %v", err)
+	}
+	if res.Success {
+		t.Fatalf("Compile succeeded for incompatible toolchain; expected failure")
+	}
+	if res.ExitCode == 0 {
+		t.Errorf("expected non-zero exit code, got %d", res.ExitCode)
+	}
+
+	foundIncompatible := false
+	for _, d := range res.Diagnostics {
+		if d.Code == "toolchain_incompatible" {
+			foundIncompatible = true
+			break
+		}
+	}
+	if !foundIncompatible {
+		t.Errorf("expected diagnostic with code 'toolchain_incompatible', got: %#v", res.Diagnostics)
+	}
+}
+
+// PR01 (F01 / T03): Generated class files must not exceed the target level's maximum major version
+func TestCompiler_ValidateClassMajorVersion(t *testing.T) {
+	outDir := t.TempDir()
+	classFile := filepath.Join(outDir, "Sample.class")
+
+	// Synthesize a valid class header with major version 52 (Java 8)
+	// Magic: 0xCAFEBABE, Minor: 0, Major: 52
+	header := []byte{
+		0xCA, 0xFE, 0xBA, 0xBE, // Magic
+		0x00, 0x00,             // Minor 0
+		0x00, 0x34,             // Major 52 (0x34 = 52)
+	}
+	if err := os.WriteFile(classFile, header, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// For target 1.6, max major is 50. Major 52 must be rejected.
+	diags, err := validateClassMajorVersions(outDir, 50, "1.6")
+	if err != nil {
+		t.Fatalf("validateClassMajorVersions error: %v", err)
+	}
+	if len(diags) == 0 {
+		t.Fatalf("expected major version violation diagnostic, got none")
+	}
+	if diags[0].Code != "class_major_version_exceeded" {
+		t.Errorf("expected code 'class_major_version_exceeded', got %q", diags[0].Code)
+	}
+
+	// For target 1.8, max major is 52. Major 52 must pass.
+	diags8, err := validateClassMajorVersions(outDir, 52, "1.8")
+	if err != nil {
+		t.Fatalf("validateClassMajorVersions error: %v", err)
+	}
+	if len(diags8) != 0 {
+		t.Errorf("expected no violation for target 1.8, got %#v", diags8)
 	}
 }

@@ -1,7 +1,7 @@
 package com.example.kairo;
 
 /**
- * Caller of FormalGreeter — used for Go To, usages, hippie, signature help, and surround.
+ * Caller of FormalGreeter -- used for Go To, usages, hippie, signature help, and surround.
  */
 public class Caller {
     public static void main(String[] args) {

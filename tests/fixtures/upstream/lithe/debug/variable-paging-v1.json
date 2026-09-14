@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "description": "Golden test fixture for variable paging and normalization (Lithe L11)",
+  "cases": [
+    {
+      "id": "paging-100k-array",
+      "description": "100k array partitioned into 100-element pages",
+      "input": {
+        "variablesReference": 5001,
+        "totalCount": 100000,
+        "pageSize": 100
+      },
+      "expected": {
+        "pageCount": 1000,
+        "firstPage": {
+          "variablesReference": 5001,
+          "start": 0,
+          "count": 100,
+          "totalCount": 100000,
+          "label": "[0..99]"
+        },
+        "lastPage": {
+          "variablesReference": 5001,
+          "start": 99900,
+          "count": 100,
+          "totalCount": 100000,
+          "label": "[99900..99999]"
+        }
+      }
+    },
+    {
+      "id": "paging-empty-or-negative",
+      "description": "Zero or negative counts normalize cleanly without throwing",
+      "input": {
+        "variablesReference": 5002,
+        "totalCount": 0,
+        "pageSize": 100
+      },
+      "expected": {
+        "pageCount": 0,
+        "pages": []
+      }
+    }
+  ]
+}

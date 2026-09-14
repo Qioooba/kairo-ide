@@ -70,6 +70,9 @@ function resolveExecutable() {
     // Fallback: apps/desktop/dist/win-unpacked (older layout).
     packaged = path.join(repoRoot, 'apps', 'desktop', 'dist', 'win-unpacked', 'Kairo IDE.exe');
   }
+  if (!fs.existsSync(packaged)) {
+    packaged = path.join(repoRoot, 'apps', 'desktop', 'dist', 'win-unpacked', 'Kairo.exe');
+  }
   if (fs.existsSync(packaged)) {
     return { executablePath: packaged, args: [], mode: 'packaged' };
   }
@@ -545,6 +548,7 @@ if (wantList) {
     // set KAIRO_DEV so the automation can actually exercise the
     // UI. The flag does NOT change any business logic.
     KAIRO_DEV: '1',
+    KAIRO_OPEN_FOLDER: process.env.KAIRO_OPEN_FOLDER || repoRoot,
     // KAIRO_NO_KAIRO_FRONTEND=1 makes product-frontend.ts load an
     // empty ContainerModule, skipping every Kairo contribution
     // binding (KairoStatusBarContribution, KairoLargeFileContribution,

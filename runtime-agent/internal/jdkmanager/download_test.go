@@ -29,6 +29,8 @@ func envCleanup(t *testing.T) {
 	os.Unsetenv("KAIRO_JDK_SHA256")
 	emptyDir := t.TempDir()
 	t.Setenv("PATH", emptyDir)
+	t.Setenv("KAIRO_DATA_DIR", emptyDir)
+	t.Setenv("KAIRO_JDK_CONFIG", filepath.Join(emptyDir, "missing.json"))
 	commonJDKPaths = func() []string { return nil }
 	t.Cleanup(func() {
 		os.Setenv("PATH", origPath)
@@ -333,6 +335,7 @@ func TestEnsureJDK17_MacLayout(t *testing.T) {
 }
 
 func TestEnsureJDK17_AlreadyAvailable(t *testing.T) {
+	envCleanup(t)
 	tmpDir := t.TempDir()
 	jdk17Dir := filepath.Join(tmpDir, "jdk17", "bin")
 	if err := os.MkdirAll(jdk17Dir, 0755); err != nil {

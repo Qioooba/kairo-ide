@@ -18,6 +18,8 @@ import {
   virtualUriForBlock,
   type JspVirtualKind,
 } from './jsp-virtual-java';
+import { JspPageModelBuilder, type PageVirtualJavaResult } from './jsp-page-model';
+import { defaultVirtualDocumentManager } from './virtual-document-manager';
 
 /** Minimal LSP diagnostic shape we need for mapping. */
 interface LSPDiagnostic {
@@ -71,11 +73,11 @@ export function mapDiagnosticToJsp(
   return {
     severity: severityToMarkerSeverity(javaDiagnostic.severity),
     message: javaDiagnostic.message,
-    source: javaDiagnostic.source,
-    code: javaDiagnostic.code === undefined ? undefined : String(javaDiagnostic.code),
-    startLineNumber: Math.max(1, start.line + 1),
-    startColumn: Math.max(1, start.character + 1),
-    endLineNumber: Math.max(1, end.line + 1),
+    source: javaDiagnostic.source ?? 'jsp-java',
+    code: javaDiagnostic.code !== undefined ? String(javaDiagnostic.code) : undefined,
+    startLineNumber: start.line + 1,
+    startColumn: start.character + 1,
+    endLineNumber: end.line + 1,
     endColumn: Math.max(1, end.character + 1),
   };
 }
@@ -100,6 +102,10 @@ interface ModelState {
   activeVirtualUris: Set<string>;
   /** Disposable for the model's content change listener. */
   contentChangeDisposable: monaco.IDisposable;
+  /** Page-level virtual Java compilation result (F16 / T40 ~ T42) */
+  pageResult?: PageVirtualJavaResult;
+  /** Monotonic sequence counter to discard stale async diagnostics runs */
+  sequence: number;
 }
 
 /**
@@ -111,17 +117,37 @@ interface ModelState {
 export function registerJspScriptletDiagnostics(
   client: JavaLanguageClient,
 ): monaco.IDisposable {
+  defaultVirtualDocumentManager.setClient(client);
   const parser = new JspJavaParser();
   const modelStates = new Map<string, ModelState>();
 
   /**
    * Run diagnostics for a single JSP model.
    */
-  function runDiagnostics(state: ModelState): void {
+  async function runDiagnostics(state: ModelState, seq: number): Promise<void> {
     const content = state.model.getValue();
     const blocks = parser.findJavaBlocks(content);
 
+    // 1. Whole-page model synchronization (F16 / T40 ~ T42)
+    const pageBuilder = new JspPageModelBuilder();
+    let pageResult: PageVirtualJavaResult | undefined;
+    try {
+      pageResult = await pageBuilder.buildPageVirtualJava(state.jspUri, content);
+    } catch {
+      // ignore
+    }
+
+    if (state.sequence !== seq || state.model.isDisposed()) {
+      return;
+    }
+
     const newVirtualUris = new Set<string>();
+
+    if (pageResult) {
+      state.pageResult = pageResult;
+      newVirtualUris.add(pageResult.virtualUri);
+      defaultVirtualDocumentManager.syncDocument(pageResult.virtualUri, pageResult.virtualJava, 'java', state.jspUri);
+    }
 
     for (let i = 0; i < blocks.length; i++) {
       const block = blocks[i];
@@ -136,26 +162,14 @@ export function registerJspScriptletDiagnostics(
         : block.kind === 'expression' ? 'expression'
           : 'scriptlet';
       const virtualJava = buildVirtualJavaFile(blockContent, kind);
-      try {
-        client.didOpen({
-          uri: virtualUri,
-          languageId: 'java',
-          version: state.model.getVersionId(),
-          text: virtualJava,
-        });
-      } catch {
-        // JDT LS may not be ready; skip silently.
-      }
+      // Synchronize via VirtualDocumentManager (F17 / T38)
+      defaultVirtualDocumentManager.syncDocument(virtualUri, virtualJava, 'java', state.jspUri);
     }
 
-    // Close virtual URIs that are no longer active.
+    // Close virtual URIs that are no longer active in this JSP file.
     for (const oldUri of state.activeVirtualUris) {
       if (!newVirtualUris.has(oldUri)) {
-        try {
-          client.didClose(oldUri);
-        } catch {
-          // Ignore close errors.
-        }
+        defaultVirtualDocumentManager.closeDocument(oldUri);
       }
     }
     state.activeVirtualUris = newVirtualUris;
@@ -168,9 +182,11 @@ export function registerJspScriptletDiagnostics(
     if (state.changeTimer) {
       clearTimeout(state.changeTimer);
     }
+    state.sequence++;
+    const seq = state.sequence;
     state.changeTimer = setTimeout(() => {
       state.changeTimer = undefined;
-      runDiagnostics(state);
+      runDiagnostics(state, seq);
     }, DIAGNOSTICS_DEBOUNCE_MS);
   }
 
@@ -196,6 +212,7 @@ export function registerJspScriptletDiagnostics(
       changeTimer: undefined,
       activeVirtualUris: new Set(),
       contentChangeDisposable,
+      sequence: 0,
     };
     modelStates.set(uri, state);
 
@@ -213,14 +230,8 @@ export function registerJspScriptletDiagnostics(
       clearTimeout(state.changeTimer);
     }
     state.contentChangeDisposable.dispose();
-    // Close all virtual URIs for this model.
-    for (const virtualUri of state.activeVirtualUris) {
-      try {
-        client.didClose(virtualUri);
-      } catch {
-        // Ignore.
-      }
-    }
+    // Close all virtual URIs for this model via VirtualDocumentManager (F17 / T38)
+    defaultVirtualDocumentManager.closeAllForJsp(uri);
     modelStates.delete(uri);
     monaco.editor.setModelMarkers(model, 'jsp-scriptlet-java', []);
   }
@@ -268,8 +279,41 @@ export function registerJspScriptletDiagnostics(
 
     const model = state.model;
     const content = model.getValue();
-    const blocks = parser.findJavaBlocks(content);
 
+    // Whole-page diagnostic mapping via SourceMap (T42)
+    if (parsed.isPage && state.pageResult) {
+      const markers: monaco.editor.IMarkerData[] = [];
+      for (const diag of params.diagnostics) {
+        const mappedStart = state.pageResult.sourceMap.mapVirtualPositionToJsp(
+          diag.range.start.line,
+          diag.range.start.character,
+        );
+        if (mappedStart && mappedStart.inUserCode) {
+          const mappedEnd = state.pageResult.sourceMap.mapVirtualPositionToJsp(
+            diag.range.end.line,
+            diag.range.end.character,
+          );
+          markers.push({
+            severity: severityToMarkerSeverity(diag.severity),
+            message: diag.message,
+            source: diag.source ?? 'jsp-java',
+            code: diag.code !== undefined ? String(diag.code) : undefined,
+            startLineNumber: mappedStart.line + 1,
+            startColumn: mappedStart.character + 1,
+            endLineNumber: (mappedEnd?.line ?? mappedStart.line) + 1,
+            endColumn: (mappedEnd?.character ?? mappedStart.character + 1) + 1,
+          });
+        }
+      }
+      monaco.editor.setModelMarkers(model, 'jsp-scriptlet-java', markers);
+      return;
+    }
+
+    if (parsed.blockIndex === undefined) {
+      return;
+    }
+
+    const blocks = parser.findJavaBlocks(content);
     if (parsed.blockIndex >= blocks.length) {
       return;
     }

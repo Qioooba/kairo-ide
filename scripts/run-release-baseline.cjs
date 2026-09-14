@@ -283,6 +283,9 @@ async function main() {
   // ================================================================
   console.log('[baseline] === CI Gates ===');
 
+  report.gates.push(gate('architecture-boundaries', 30, process.execPath, ['scripts/check-architecture-boundaries.cjs']));
+  console.log(`  architecture-boundaries: ${report.gates[report.gates.length - 1].ok ? 'PASS' : 'FAIL'}`);
+
   report.gates.push(gate('supply-chain-tests', 30, process.execPath, ['--test', 'scripts/supply-chain.test.cjs']));
   console.log(`  supply-chain-tests: ${report.gates[report.gates.length - 1].ok ? 'PASS' : 'FAIL'}`);
 

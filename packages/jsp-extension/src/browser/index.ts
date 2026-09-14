@@ -25,3 +25,6 @@ export * from './json-monarch';
 export * from './json-language';
 export * from './properties-monarch';
 export * from './properties-language';
+export * from './virtual-document-manager';
+export * from './jsp-sourcemap';
+export * from './jsp-page-model';

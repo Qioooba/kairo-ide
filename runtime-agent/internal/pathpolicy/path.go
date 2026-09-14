@@ -3,9 +3,11 @@ package pathpolicy
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 )
 
@@ -195,14 +197,81 @@ func isLexicallyUnder(child, parent string) bool {
 	if rel == "." {
 		return true
 	}
-	if rel == ".." {
-		return false
-	}
 	sep := string(os.PathSeparator)
-	if strings.HasPrefix(rel, ".."+sep) {
+	if rel == ".." || strings.HasPrefix(rel, ".."+sep) {
 		return false
 	}
-	return !strings.HasPrefix(rel, "..")
+	return true
+}
+
+// IsLexicallyUnder reports whether child is equal to parent or a sub-path under parent.
+func IsLexicallyUnder(child, parent string) bool {
+	return isLexicallyUnder(child, parent)
+}
+
+// ResolveURIOrPath converts a file URI (file://...) or a raw file path
+// into a normalized native filesystem path, handling percent-encoding,
+// Windows drive letters, UNC hosts, and rejecting non-file schemes and traversal.
+// PR02 (F02 / T05, T07, T08).
+func ResolveURIOrPath(input string) (string, error) {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return "", ErrEmptyPath
+	}
+	if strings.ContainsRune(input, 0) {
+		return "", ErrNULCharacter
+	}
+
+	var nativePath string
+	if strings.HasPrefix(input, "file://") || strings.HasPrefix(input, "file:") {
+		u, err := url.Parse(input)
+		if err != nil {
+			return "", fmt.Errorf("invalid file URI: %w", err)
+		}
+		if u.Scheme != "file" {
+			return "", fmt.Errorf("unsupported URI scheme: %q", u.Scheme)
+		}
+
+		rawPath := u.Path
+		pathPart, err := url.PathUnescape(rawPath)
+		if err != nil {
+			pathPart = rawPath
+		}
+
+		// Handle UNC path: file://hostname/share/path
+		if u.Host != "" && u.Host != "localhost" {
+			nativePath = `\\` + u.Host + filepath.FromSlash(pathPart)
+		} else {
+			// On Windows: /C:/path -> C:/path
+			if runtime.GOOS == "windows" {
+				if len(pathPart) >= 3 && pathPart[0] == '/' && isDriveLetter(pathPart[1]) && pathPart[2] == ':' {
+					pathPart = pathPart[1:]
+				}
+			}
+			nativePath = filepath.Clean(filepath.FromSlash(pathPart))
+		}
+	} else if strings.Contains(input, "://") {
+		// Check if it's a Windows drive path with double slash, e.g. C://path
+		if len(input) >= 3 && isDriveLetter(input[0]) && strings.HasPrefix(input[1:], "://") {
+			nativePath = filepath.Clean(string(input[0]) + ":/" + strings.TrimLeft(input[3:], "/"))
+		} else {
+			// Non-file scheme, e.g. http://, git://
+			return "", fmt.Errorf("unsupported URI scheme: %s", input)
+		}
+	} else {
+		// Plain filesystem path
+		nativePath = filepath.Clean(input)
+	}
+
+	abs, err := filepath.Abs(nativePath)
+	if err != nil {
+		return "", fmt.Errorf("resolve absolute path: %w", err)
+	}
+	return filepath.Clean(abs), nil
+}
+
+func isDriveLetter(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z')
 }
 
 func ValidateDeployTarget(target string) error {

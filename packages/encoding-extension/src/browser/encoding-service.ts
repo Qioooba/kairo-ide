@@ -279,6 +279,13 @@ export class KairoEncodingServiceImpl {
   }
 
   /**
+   * Alias for {@link getEncodingFor}.
+   */
+  getEncoding(uri: URI): string {
+    return this.getEncodingFor(uri);
+  }
+
+  /**
    * Drop the cached encoding for one URI (BD-P1-7). The next
    * {@link getEncodingFor} re-reads the registry. Fires
    * {@link onDidChangeEncoding} when an entry was removed so tab /

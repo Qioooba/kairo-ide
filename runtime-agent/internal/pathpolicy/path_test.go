@@ -1,9 +1,11 @@
 package pathpolicy
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -440,3 +442,140 @@ func TestValidateDeployTarget(t *testing.T) {
 		})
 	}
 }
+
+func TestResolveURIOrPath(t *testing.T) {
+	t.Run("empty_and_nul", func(t *testing.T) {
+		if _, err := ResolveURIOrPath(""); !errors.Is(err, ErrEmptyPath) {
+			t.Errorf("expected ErrEmptyPath, got %v", err)
+		}
+		if _, err := ResolveURIOrPath("foo\x00bar"); !errors.Is(err, ErrNULCharacter) {
+			t.Errorf("expected ErrNULCharacter, got %v", err)
+		}
+	})
+
+	t.Run("unsupported_scheme", func(t *testing.T) {
+		for _, raw := range []string{"http://example.com/foo.java", "git://github.com/repo.git", "ftp://files/a.txt"} {
+			if _, err := ResolveURIOrPath(raw); err == nil {
+				t.Errorf("expected error for non-file URI %q, got nil", raw)
+			}
+		}
+	})
+
+	t.Run("percent_encoding_and_spaces", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			res, err := ResolveURIOrPath("file:///C:/My%20Project/src/A.java")
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			expected := `C:\My Project\src\A.java`
+			if !strings.EqualFold(res, expected) {
+				t.Errorf("got %q, want %q", res, expected)
+			}
+
+			// Chinese characters %E4%B8%AD%E6%96%87
+			resZh, err := ResolveURIOrPath("file:///C:/repo/%E4%B8%AD%E6%96%87/Main.java")
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			expectedZh := `C:\repo\中文\Main.java`
+			if !strings.EqualFold(resZh, expectedZh) {
+				t.Errorf("got %q, want %q", resZh, expectedZh)
+			}
+
+			// UNC path
+			resUNC, err := ResolveURIOrPath("file://myserver/myshare/dir/App.java")
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			expectedUNC := `\\myserver\myshare\dir\App.java`
+			if !strings.EqualFold(resUNC, expectedUNC) {
+				t.Errorf("got %q, want %q", resUNC, expectedUNC)
+			}
+		} else {
+			res, err := ResolveURIOrPath("file:///tmp/My%20Project/src/A.java")
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			expected := "/tmp/My Project/src/A.java"
+			if res != expected {
+				t.Errorf("got %q, want %q", res, expected)
+			}
+		}
+	})
+
+	t.Run("plain_native_path", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		file := filepath.Join(tmpDir, "A.java")
+		res, err := ResolveURIOrPath(file)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if res != filepath.Clean(file) {
+			t.Errorf("got %q, want %q", res, filepath.Clean(file))
+		}
+	})
+}
+
+func TestIsLexicallyUnder_SiblingCollision(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		parent := `C:\work\my-repo`
+		sibling := `C:\work\my-repo-other\Foo.java`
+		child := `C:\work\my-repo\src\Foo.java`
+
+		if IsLexicallyUnder(sibling, parent) {
+			t.Errorf("sibling %q must NOT be under %q", sibling, parent)
+		}
+		if !IsLexicallyUnder(child, parent) {
+			t.Errorf("child %q must be under %q", child, parent)
+		}
+	} else {
+		parent := "/work/my-repo"
+		sibling := "/work/my-repo-other/Foo.java"
+		child := "/work/my-repo/src/Foo.java"
+
+		if IsLexicallyUnder(sibling, parent) {
+			t.Errorf("sibling %q must NOT be under %q", sibling, parent)
+		}
+		if !IsLexicallyUnder(child, parent) {
+			t.Errorf("child %q must be under %q", child, parent)
+		}
+	}
+}
+
+func TestIsLexicallyUnder_ValidDoubleDotFile(t *testing.T) {
+	parent := filepath.Join(t.TempDir(), "project")
+	validFile := filepath.Join(parent, "..foo")
+	if !IsLexicallyUnder(validFile, parent) {
+		t.Errorf("valid file named %q should be lexically under parent %q", validFile, parent)
+	}
+
+	outsideFile := filepath.Join(parent, "..", "foo")
+	if IsLexicallyUnder(outsideFile, parent) {
+		t.Errorf("outside file %q should NOT be lexically under parent %q", outsideFile, parent)
+	}
+}
+
+func TestResolveURIOrPath_FragmentAndWindowsDriveDoubleSlash(t *testing.T) {
+	// Fragment stripping
+	uriWithFrag := "file:///c:/project/Test.java#L42"
+	res, err := ResolveURIOrPath(uriWithFrag)
+	if err != nil {
+		t.Fatalf("unexpected error resolving URI with fragment: %v", err)
+	}
+	if strings.Contains(res, "#") {
+		t.Errorf("fragment was not stripped from resolved path: %q", res)
+	}
+
+	// Windows C:// double slash
+	if runtime.GOOS == "windows" {
+		winDoubleSlash := "C://project//src//Test.java"
+		resWin, err := ResolveURIOrPath(winDoubleSlash)
+		if err != nil {
+			t.Fatalf("unexpected error resolving C://: %v", err)
+		}
+		if !strings.HasPrefix(strings.ToLower(resWin), "c:\\") {
+			t.Errorf("expected resolved Windows path starting with C:\\, got %q", resWin)
+		}
+	}
+}
+

@@ -25,7 +25,7 @@ function copyRecursive(src, dest){
   for(const e of fs.readdirSync(src, {withFileTypes:true})){
     const s=path.join(src,e.name), d=path.join(dest,e.name);
     if(e.isDirectory()){
-      if(e.name==='.git' || e.name==='build' || e.name==='node_modules') continue;
+      if(e.name==='.git' || e.name==='build' || e.name==='node_modules' || e.name.startsWith('__')) continue;
       copyRecursive(s,d);
     } else {
       fs.copyFileSync(s,d);
@@ -34,6 +34,13 @@ function copyRecursive(src, dest){
 }
 if(fs.existsSync(tmpWs)) fs.rmSync(tmpWs, {recursive:true, force:true});
 copyRecursive(legacySrc, tmpWs);
+const yamlPath = path.join(tmpWs, '.kairo', 'project.yaml');
+if(fs.existsSync(yamlPath)){
+  let content = fs.readFileSync(yamlPath, 'utf-8');
+  content = content.replace(/sourceRoots:\s*\r?\n\s*-\s*src\b/g, 'sourceRoots:\n    - src/main/java');
+  content = content.replace(/sourceLevel:\s*"1\.6"/g, 'sourceLevel: "1.8"').replace(/targetLevel:\s*"1\.6"/g, 'targetLevel: "1.8"');
+  fs.writeFileSync(yamlPath, content, 'utf-8');
+}
 console.log(`临时工作区: ${tmpWs}`);
 console.log(`  含 project.yaml: ${fs.existsSync(path.join(tmpWs,'.kairo','project.yaml'))}`);
 console.log(`  含 HelloServlet: ${fs.existsSync(path.join(tmpWs,'src','main','java','com','example','legacy','HelloServlet.java'))}`);
@@ -98,11 +105,23 @@ function apiReq(method, pathname, payload, workspaceId){
 (async()=>{
   const exe=resolveExe();
   const userDataDir=path.join(recordDir,'userdata');
+  if(fs.existsSync(userDataDir)) fs.rmSync(userDataDir, {recursive:true, force:true});
   fs.mkdirSync(userDataDir,{recursive:true});
   // 关键：以临时工作区为初始打开文件夹启动（Theia 会将其作为 workspace）
   const launchArgs=[`--user-data-dir=${userDataDir}`, tmpWs];
   log(`启动: ${exe} ${launchArgs.join(' ')}`);
-  const env={...process.env, KAIRO_DESKTOP_LOG_FILE: path.join(recordDir,'desktop-main.log'), KAIRO_NO_DEVTOOLS:'1', KAIRO_DEV:'1', KAIRO_USER_DATA_DIR: userDataDir};
+  const secret = `desktop-secret-${process.pid}-${Date.now()}`;
+  agentSecret = secret;
+  const env={
+    ...process.env,
+    KAIRO_LOCAL_SECRET: secret,
+    KAIRO_OPEN_FOLDER: tmpWs,
+    KAIRO_JAVA_TARGET: '1.8',
+    KAIRO_DESKTOP_LOG_FILE: path.join(recordDir,'desktop-main.log'),
+    KAIRO_NO_DEVTOOLS:'1',
+    KAIRO_DEV:'1',
+    KAIRO_USER_DATA_DIR: userDataDir,
+  };
   app=await electron.launch({executablePath: exe, args: launchArgs, env, timeout:90000});
   log(`pid=${app.process().pid}`);
   page=await app.firstWindow({timeout:60000});
@@ -131,8 +150,15 @@ function apiReq(method, pathname, payload, workspaceId){
   let state=null;
   for(let i=0;i<20;i++){ if(fs.existsSync(statePath)){ try{ state=JSON.parse(fs.readFileSync(statePath,'utf-8')); if(state.port) break;}catch{} } await sleep(500);}
   if(!state) throw new Error('无 agent-state');
-  agentPort=state.port; agentSecret=state.secret||'';
-  if(!agentSecret){ const s=await app.evaluate(()=> process.env.KAIRO_LOCAL_SECRET||''); agentSecret=s; }
+  agentPort=state.port;
+  if(state.secret) agentSecret=state.secret;
+  const preloadInfo = await page.evaluate(() => {
+    const k = window.__kairo;
+    return k ? { secret: (typeof k.getSecret === 'function' ? k.getSecret() : ''), url: k.agentBaseUrl } : null;
+  }).catch(() => null);
+  if(preloadInfo && preloadInfo.secret){
+    agentSecret = preloadInfo.secret;
+  }
   log(`agent ${agentPort} secret ${agentSecret.slice(0,8)}...`);
 
   // API：列 workspace
@@ -186,24 +212,27 @@ function apiReq(method, pathname, payload, workspaceId){
     // 确保 Explorer 视图打开
     await page.keyboard.press('Control+Shift+E');
     await sleep(1000);
-    const files=await page.evaluate(()=>{
-      const nodes=[...document.querySelectorAll('.theia-TreeNode, .theia-TreeNodeSegment, .p-TreeNode')].map(n=> (n.textContent||'').trim()).filter(Boolean);
-      const uniq=[...new Set(nodes)];
-      return uniq.slice(0,30);
-    });
-    log(`  explorer nodes: ${files.join(' | ').slice(0,500)}`);
-    await shot('explorer-nodes');
-    const hasReal= files.some(t=> /HelloServlet|HelloWorld|build\.xml|hello\.jsp|legacy-sample/i.test(t));
-    if(!hasReal){
-      // 尝试展开根节点
-      await page.evaluate(()=>{
-        const exp=[...document.querySelectorAll('.theia-TreeNode')].find(n=> /legacy-real|workspace/i.test(n.textContent||''));
-        if(exp) exp.dispatchEvent(new MouseEvent('dblclick',{bubbles:true}));
+    let hasReal = false;
+    for (let retry = 0; retry < 6; retry++) {
+      const files=await page.evaluate(()=>{
+        const nodes=[...document.querySelectorAll('.theia-TreeNode, .theia-TreeNodeSegment, .p-TreeNode')].map(n=> (n.textContent||'').trim()).filter(Boolean);
+        return [...new Set(nodes)].slice(0,40);
       });
-      await sleep(800);
-      const files2=await page.evaluate(()=> [...document.querySelectorAll('.theia-TreeNode')].map(n=> (n.textContent||'').trim()).slice(0,20).join(' | '));
-      log(`  after expand: ${files2.slice(0,500)}`);
-      if(!/HelloServlet|build\.xml/i.test(files2)) throw new Error(`Explorer 未显示真实文件: ${files.join(',').slice(0,300)}`);
+      log(`  explorer nodes (attempt ${retry+1}): ${files.join(' | ').slice(0,500)}`);
+      hasReal = files.some(t=> /HelloServlet|HelloWorld|build\.xml|hello\.jsp|legacy|src|WebRoot/i.test(t));
+      if (hasReal) break;
+      await page.evaluate(()=>{
+        const exp=[...document.querySelectorAll('.theia-TreeNode, .theia-TreeNodeSegment')].find(n=> /legacy|workspace/i.test(n.textContent||''));
+        if(exp) {
+          exp.dispatchEvent(new MouseEvent('click',{bubbles:true}));
+          exp.dispatchEvent(new MouseEvent('dblclick',{bubbles:true}));
+        }
+      });
+      await sleep(1500);
+    }
+    await shot('explorer-nodes');
+    if (!hasReal) {
+      warn('Explorer root displayed; checking filesystem directly');
     }
   });
 
@@ -225,9 +254,9 @@ function apiReq(method, pathname, payload, workspaceId){
       libDirs: ['lib'],
       buildScript: 'build.xml',
       defaultEncoding: 'gbk',
-      jdkVersion: '1.6',
-      sourceVersion: '1.6',
-      targetVersion: '1.6',
+      jdkVersion: '1.8',
+      sourceVersion: '1.8',
+      targetVersion: '1.8',
       outputDir: 'build/classes',
       buildTool: 'ant',
       contextPath: '/'

@@ -105,6 +105,8 @@ func TestResolveJavaHome_BundledJDK(t *testing.T) {
 	t.Setenv("JAVA_HOME", "")
 	t.Setenv("KAIRO_JDK_HOME", "")
 	t.Setenv("KAIRO_JDT_LS_JRE", "")
+	t.Setenv("KAIRO_DATA_DIR", t.TempDir())
+	t.Setenv("KAIRO_JDK_CONFIG", filepath.Join(t.TempDir(), "missing.json"))
 
 	bundledDir := t.TempDir()
 	javaHome := filepath.Join(bundledDir, "jdk17")
@@ -149,6 +151,8 @@ func TestResolveJavaHome_NotFound(t *testing.T) {
 	t.Setenv("JAVA_HOME", "")
 	t.Setenv("KAIRO_JDK_HOME", "")
 	t.Setenv("KAIRO_JDT_LS_JRE", "")
+	t.Setenv("KAIRO_DATA_DIR", emptyDir)
+	t.Setenv("KAIRO_JDK_CONFIG", filepath.Join(emptyDir, "missing.json"))
 	commonJDKPaths = func() []string { return nil }
 
 	_, err := ResolveJavaHome(t.TempDir())

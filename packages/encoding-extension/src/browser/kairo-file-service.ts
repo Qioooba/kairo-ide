@@ -22,9 +22,17 @@ import type { TextDocumentContentChangeEvent } from '@theia/core/shared/vscode-l
 import { escapeProperties, isPropertiesPath } from './properties-escape';
 import { toKairoEncodingId, toTheiaEncodingId } from './encoding-utils';
 
+export class UnrepresentableEncodingError extends Error {
+  constructor(public readonly encoding: string, detail?: string) {
+    super(`Character cannot be represented in ${encoding}${detail ? `: ${detail}` : ''}`);
+    this.name = 'UnrepresentableEncodingError';
+    Object.setPrototypeOf(this, new.target.prototype);
+  }
+}
+
 export function isEncodingRefusal(err: unknown): boolean {
   const e = err as { name?: string; message?: string } | undefined;
-  return !!e && (e.name === 'UnrepresentableEncodingError' || /not representable/.test(e.message || ''));
+  return !!e && (e.name === 'UnrepresentableEncodingError' || /not representable|cannot be represented/i.test(e.message || ''));
 }
 
 function offsetAt(text: string, line: number, character: number): number {
@@ -117,6 +125,19 @@ export class KairoFileService extends FileService {
           encoding: toTheiaEncodingId('iso-8859-1'),
           overwriteEncoding: true,
         };
+      } else {
+        const text = asString(value);
+        if (typeof value !== 'string') {
+          payload = text;
+        }
+        const targetEncoding = writeOptions?.encoding || this.encodingSvc.getEncoding(resource);
+        const kairoId = toKairoEncodingId(targetEncoding);
+        if (kairoId !== 'utf-8' && kairoId !== 'utf-8-bom') {
+          const validation = await this.encodingSvc.validateEncoding(text, kairoId);
+          if (!validation.valid) {
+            throw new UnrepresentableEncodingError(kairoId, validation.error);
+          }
+        }
       }
       const stat = await super.write(resource, payload, writeOptions);
       this.encodingSvc.invalidateEncodingCache(resource);
@@ -140,6 +161,16 @@ export class KairoFileService extends FileService {
         });
         this.encodingSvc.invalidateEncodingCache(resource);
         return stat;
+      }
+      const targetEncoding = options?.encoding || this.encodingSvc.getEncoding(resource);
+      const kairoId = toKairoEncodingId(targetEncoding);
+      if (kairoId !== 'utf-8' && kairoId !== 'utf-8-bom') {
+        const current = await super.read(resource, { encoding: toTheiaEncodingId(kairoId) });
+        const next = applyContentChanges(current.value, changes);
+        const validation = await this.encodingSvc.validateEncoding(next, kairoId);
+        if (!validation.valid) {
+          throw new UnrepresentableEncodingError(kairoId, validation.error);
+        }
       }
       const stat = await super.update(resource, changes, options);
       this.encodingSvc.invalidateEncodingCache(resource);

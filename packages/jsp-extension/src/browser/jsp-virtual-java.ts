@@ -20,11 +20,19 @@ export function virtualUriForBlock(jspUri: string, blockIndex: number): string {
   return `${JSP_VIRTUAL_URI_PREFIX}//${jspUri}#block${blockIndex}`;
 }
 
-export function parseVirtualUri(virtualUri: string): { jspUri: string; blockIndex: number } | null {
+export function virtualUriForPage(jspUri: string): string {
+  return `${JSP_VIRTUAL_URI_PREFIX}//${jspUri}#page`;
+}
+
+export function parseVirtualUri(virtualUri: string): { jspUri: string; blockIndex?: number; isPage?: boolean } | null {
   if (!virtualUri.startsWith(JSP_VIRTUAL_URI_PREFIX + '//')) {
     return null;
   }
   const rest = virtualUri.slice(JSP_VIRTUAL_URI_PREFIX.length + 2);
+  if (rest.endsWith('#page')) {
+    const jspUri = rest.slice(0, -('#page'.length));
+    return { jspUri, isPage: true };
+  }
   const hashIdx = rest.lastIndexOf('#block');
   if (hashIdx < 0) {
     return null;

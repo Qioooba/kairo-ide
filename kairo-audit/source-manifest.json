@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "auditDate": "2026-09-12",
+  "fixedSnapshots": {
+    "kairo": {
+      "repository": "Qioooba/kairo-ide",
+      "commit": "6f6792213a540fad678cde5ea1790c92b83d3bcd",
+      "commitTimeUtc": "2026-09-12T15:25:17Z",
+      "message": "chore: add Apache-2.0 LICENSE for open source"
+    },
+    "lithe": {
+      "repository": "1lck/Lithe-IDEA",
+      "commit": "9446a8fd0a318da883a2ce4757d3a429bbdfba03",
+      "commitTimeUtc": "2026-09-11T16:53:39Z",
+      "message": "Merge Homebrew cask v0.4.7 changes"
+    }
+  },
+  "verifiedEvidence": {
+    "goIsolatedTests": "evidence/go-isolated-tests.txt",
+    "nodeModelTests": "evidence/node-model-tests.txt",
+    "javacTargetExperiment": "evidence/javac-target-experiment.txt"
+  }
+}

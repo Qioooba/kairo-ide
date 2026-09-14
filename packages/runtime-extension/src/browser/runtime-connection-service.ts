@@ -37,6 +37,7 @@ import {
   unwrapResponse,
 } from './runtime-errors';
 import { KairoErrorListener } from './runtime';
+import { AgentEndpointValidator } from './runtime-security';
 
 /** Window extensions injected by the Kairo preload script. */
 interface KairoWindow {
@@ -165,17 +166,21 @@ export class RuntimeConnectionService {
     }
     const kairo = (window as unknown as KairoWindow).__kairo;
     if (kairo && typeof kairo.agentBaseUrl === 'string' && kairo.agentBaseUrl) {
-      const secret = typeof kairo.getSecret === 'function' ? kairo.getSecret() : '';
-      this.initialize(kairo.agentBaseUrl, secret);
-      return true;
+      if (AgentEndpointValidator.isAllowedAgentUrl(kairo.agentBaseUrl).allowed) {
+        const secret = typeof kairo.getSecret === 'function' ? kairo.getSecret() : '';
+        this.initialize(kairo.agentBaseUrl, secret);
+        return true;
+      }
     }
     const kairoCfg = (window as unknown as KairoWindow).kairoConfig;
     if (kairoCfg && kairoCfg.agentUrl) {
-      // Secret is never on kairoConfig; use __kairo.getSecret() only.
-      const getSecret = (window as unknown as KairoWindow).__kairo?.getSecret;
-      const secret = typeof getSecret === 'function' ? getSecret() : '';
-      this.initialize(kairoCfg.agentUrl, secret);
-      return true;
+      if (AgentEndpointValidator.isAllowedAgentUrl(kairoCfg.agentUrl).allowed) {
+        // Secret is never on kairoConfig; use __kairo.getSecret() only.
+        const getSecret = (window as unknown as KairoWindow).__kairo?.getSecret;
+        const secret = typeof getSecret === 'function' ? getSecret() : '';
+        this.initialize(kairoCfg.agentUrl, secret);
+        return true;
+      }
     }
     // KAIRO-RC-WEB-015: allow ?kairoAgent= override; otherwise leave
     // baseUrl empty until bootstrapFromTheiaConfig / DEFAULT fallback.
@@ -183,8 +188,9 @@ export class RuntimeConnectionService {
       ? new URLSearchParams(window.location.search).get('kairoAgent')
       : null;
     const injected = (globalThis as unknown as { __KAIRO_DEFAULT_RUNTIME_URL__?: string }).__KAIRO_DEFAULT_RUNTIME_URL__;
-    if (fromQuery || injected) {
-      this.config = { baseUrl: fromQuery ?? injected ?? '' };
+    const candidate = fromQuery ?? injected ?? '';
+    if (candidate && AgentEndpointValidator.isAllowedAgentUrl(candidate).allowed) {
+      this.config = { baseUrl: candidate };
       return !!this.config.baseUrl;
     }
     return false;
@@ -209,7 +215,7 @@ export class RuntimeConnectionService {
         return false;
       }
       const body = await res.json() as { agentUrl?: string };
-      if (body?.agentUrl) {
+      if (body?.agentUrl && AgentEndpointValidator.isAllowedAgentUrl(body.agentUrl).allowed) {
         const secret = await this.resolveAgentSecret();
         this.initialize(body.agentUrl, secret);
         this.invalidateEndpoints();
@@ -232,6 +238,9 @@ export class RuntimeConnectionService {
    * missing, fetch it from the Theia backend same-origin endpoint.
    */
   protected async ensureAgentSecretFromBackend(): Promise<void> {
+    if (!this.config.baseUrl || !AgentEndpointValidator.isAllowedAgentUrl(this.config.baseUrl).allowed) {
+      return;
+    }
     const secret = await this.resolveAgentSecret();
     if (!secret || !this.config.baseUrl) {
       return;
@@ -312,6 +321,17 @@ export class RuntimeConnectionService {
 
   /** Initialize the runtime with the agent URL and secret. */
   initialize(agentUrl: string, agentSecret: string): void {
+    const isAllowed = AgentEndpointValidator.isAllowedAgentUrl(agentUrl).allowed;
+    if (!isAllowed) {
+      this.listener?.onError?.(
+        new KairoError({
+          code: 'forbidden',
+          message: `Rejected disallowed agent URL: ${agentUrl}`,
+        }),
+        { endpoint: 'GET /api/v1/health' as Endpoint, attempt: 0 },
+      );
+      return;
+    }
     const prevUrl = this.config.baseUrl;
     const prevSecret = this.agentSecret() ?? '';
     this.config = {
@@ -347,6 +367,9 @@ export class RuntimeConnectionService {
   }
 
   configure(cfg: KairoRuntimeConfig): void {
+    if (cfg.baseUrl && !AgentEndpointValidator.isAllowedAgentUrl(cfg.baseUrl).allowed) {
+      return;
+    }
     this.config = { ...this.config, ...cfg };
   }
 
@@ -369,6 +392,9 @@ export class RuntimeConnectionService {
 
   /** Set the agent shared secret (sent as `X-Kairo-Secret`). */
   setAgentSecret(secret: string | undefined): void {
+    if (this.config.baseUrl && !AgentEndpointValidator.isAllowedAgentUrl(this.config.baseUrl).allowed) {
+      return;
+    }
     this.config.agentSecret = secret;
   }
 
@@ -506,7 +532,9 @@ export class RuntimeConnectionService {
     const url = this.url('GET /api/v1/diagnostics/port', { query: { port: String(port) } });
     const headers: Record<string, string> = { Accept: 'application/json' };
     const secret = this.agentSecret();
-    if (secret) headers['X-Kairo-Secret'] = secret;
+    if (secret && AgentEndpointValidator.isAllowedAgentUrl(url).allowed) {
+      headers['X-Kairo-Secret'] = secret;
+    }
     const res = await fetch(url, { method: 'GET', headers, credentials: 'omit' });
     const body = await res.json().catch(() => undefined);
     const out = unwrapResponse(res, body);
@@ -552,8 +580,8 @@ export class RuntimeConnectionService {
       headers['X-Kairo-CSRF'] = this.config.csrfToken;
     }
     const secret = this.agentSecret();
-    if (secret) {
-      // The contract (搂1.1) says the secret rides in
+    if (secret && AgentEndpointValidator.isAllowedAgentUrl(url).allowed) {
+      // The contract (§1.1) says the secret rides in
       // `X-Kairo-Secret`, never in `Authorization: Bearer`.
       headers['X-Kairo-Secret'] = secret;
     }
@@ -916,11 +944,12 @@ export class EventStream {
     this.setStatus('connecting');
     let ws: WebSocket;
     try {
-      // Per docs/hotfix-windows-test-readiness.md 搂1.2, the
+      // Per docs/hotfix-windows-test-readiness.md §1.2, the
       // secret rides in a Sec-WebSocket-Protocol token. The
       // server selects this subprotocol on upgrade and rejects
       // anonymous connections.
-      const protocols = this.agentSecret
+      const isAllowed = AgentEndpointValidator.isAllowedAgentUrl(this.url).allowed;
+      const protocols = (this.agentSecret && isAllowed)
         ? [KAIRO_WS_SUBPROTOCOL, this.agentSecret]
         : [];
       // Sequence replay: on reconnect, send `?since=<seq>` so the

@@ -38,6 +38,9 @@ const (
 	ErrToolchainMissing     KairoErrorCode = "toolchain_missing"
 	ErrRuntimeMissing       KairoErrorCode = "runtime_missing"
 	ErrUnsupportedJDKTarget KairoErrorCode = "unsupported_jdk_target"
+	ErrTargetAmbiguous      KairoErrorCode = "target_ambiguous"
+	ErrTargetNotFound       KairoErrorCode = "target_not_found"
+	ErrStaleTarget          KairoErrorCode = "stale_target"
 
 	// 5xx-style
 	ErrInternal           KairoErrorCode = "internal"
@@ -52,12 +55,40 @@ const (
 	ErrUnsupported        KairoErrorCode = "unsupported"
 )
 
+// DebugTargetBinding represents an immutable debug target binding
+// contract (PR03 / F03). It disambiguates servers, sessions and instances.
+type DebugTargetBinding struct {
+	ProjectID              string `json:"projectId"`
+	ServerID               string `json:"serverId,omitempty"`
+	RunConfigurationID     string `json:"runConfigurationId,omitempty"`
+	RuntimeInstanceID      string `json:"runtimeInstanceId,omitempty"`
+	DeploymentGeneration   int    `json:"deploymentGeneration,omitempty"`
+	DebugSessionID         string `json:"debugSessionId,omitempty"`
+	DebugSessionGeneration int    `json:"debugSessionGeneration,omitempty"`
+	RequestKind            string `json:"requestKind,omitempty"`
+	OwnsDebuggee           bool   `json:"ownsDebuggee,omitempty"`
+	ClassLoaderID          string `json:"classLoaderId,omitempty"`
+}
+
 // KairoError is the wire format for an error response.
 type KairoError struct {
 	Code      KairoErrorCode `json:"code"`
 	Message   string         `json:"message"`
 	Details   any            `json:"details,omitempty"`
 	Retryable bool           `json:"retryable,omitempty"`
+}
+
+// AgentState represents the state of the Kairo Runtime Agent process (DK-P1-2 / F18).
+// Persisted atomically in <dataDir>/agent-state.json for process discovery and handover.
+type AgentState struct {
+	InstanceID  string `json:"instanceId"`
+	Generation  int    `json:"generation"`
+	PID         int    `json:"pid"`
+	Port        int    `json:"port"`
+	BindAddress string `json:"bindAddress"`
+	StartedAt   string `json:"startedAt"`
+	Status      string `json:"status"` // starting | ready | handing_over | shutting_down | stopped | failed
+	Error       string `json:"error,omitempty"`
 }
 
 // RequestEnvelope is the universal request envelope. The
@@ -460,8 +491,13 @@ type SearchStreamEvent struct {
 		ContextAfter  string `json:"contextAfter"`
 		Replacement   string `json:"replacement,omitempty"`
 	} `json:"batch"`
-	BatchIndex int    `json:"batchIndex"`
-	Total      int    `json:"total"`
-	Done       bool   `json:"done"`
-	Error      string `json:"error,omitempty"`
+	BatchIndex    int    `json:"batchIndex"`
+	Total         int    `json:"total"`
+	Done          bool   `json:"done"`
+	Error         string `json:"error,omitempty"`
+	Skipped       int    `json:"skipped,omitempty"`
+	Truncated     bool   `json:"truncated,omitempty"`
+	Cancelled     bool   `json:"cancelled,omitempty"`
+	DurationMs    int64  `json:"durationMs,omitempty"`
+	FilesSearched int    `json:"filesSearched,omitempty"`
 }

@@ -80,6 +80,8 @@ func TestWaitForPort_ContextCancelDuringWait(t *testing.T) {
 
 func TestFindCatalinaHome_ReadDirError(t *testing.T) {
 	t.Setenv("KAIRO_TOMCAT6_HOME", "")
+	t.Setenv("KAIRO_DATA_DIR", t.TempDir())
+	t.Setenv("KAIRO_TOMCAT_CONFIG", filepath.Join(t.TempDir(), "missing-host-tomcat.json"))
 	bundledDir := t.TempDir()
 	// Create tomcat6 dir but make it unreadable
 	tomcatDir := filepath.Join(bundledDir, "tomcat6")
@@ -95,6 +97,8 @@ func TestFindCatalinaHome_ReadDirError(t *testing.T) {
 
 func TestFindCatalinaHome_NoBootstrapJarInAnySubdir(t *testing.T) {
 	t.Setenv("KAIRO_TOMCAT6_HOME", "")
+	t.Setenv("KAIRO_DATA_DIR", t.TempDir())
+	t.Setenv("KAIRO_TOMCAT_CONFIG", filepath.Join(t.TempDir(), "missing-host-tomcat.json"))
 	bundledDir := t.TempDir()
 	tomcatDir := filepath.Join(bundledDir, "tomcat6")
 	os.MkdirAll(filepath.Join(tomcatDir, "some-dir-without-jar"), 0755)
@@ -592,6 +596,8 @@ func TestFindCatalinaHome_EnvVarSetButNoBootstrap(t *testing.T) {
 
 func TestFindCatalinaHome_FileNotDir(t *testing.T) {
 	t.Setenv("KAIRO_TOMCAT6_HOME", "")
+	t.Setenv("KAIRO_DATA_DIR", t.TempDir())
+	t.Setenv("KAIRO_TOMCAT_CONFIG", filepath.Join(t.TempDir(), "missing-host-tomcat.json"))
 	bundledDir := t.TempDir()
 	tomcatDir := filepath.Join(bundledDir, "tomcat6")
 	os.MkdirAll(tomcatDir, 0755)

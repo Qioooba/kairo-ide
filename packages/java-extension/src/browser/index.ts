@@ -56,6 +56,7 @@ export { JavaSafeDelete } from './java-safe-delete';
 export type { SafeDeletePreview, SafeDeleteResult } from './java-safe-delete';
 export { JavaRefactoring } from './java-refactoring';
 export type { RefactoringResult } from './java-refactoring';
+export { ProjectModelManager, type ProjectModelOptions, type RevisionChangeListener } from './project-model';
 export { KairoJavaDebugContribution, KairoJavaDebugBreakpointCommandContribution, KairoJavaDebugCommands } from './kairo-java-debug-breakpoint-contribution';
 
 // ── Save Actions ────────────────────────────────────────────────
@@ -99,6 +100,38 @@ export type { SourceMismatchEntry, SourceMismatchReport } from './java-debug-sou
 // ── Debug compatibility check (P1-DBG-00) ───────────────────────
 export { JavaDebugCompatCheck } from './java-debug-compat-check';
 export type { CompatCheckItem, CompatCheckReport, CompatCheckConfig } from './java-debug-compat-check';
+
+// ── Debug End-to-End Capabilities (PR14 / T47~T50) ───────────────
+export {
+  BreakpointMigrationCoordinator,
+  JavaDebugCapabilitiesPipeline,
+  VariablePagingManager,
+  DebugStopGenerationManager,
+  DebugDisconnectPolicy,
+  SteppingFilterManager,
+  ExceptionBreakpointManager,
+  DEFAULT_VARIABLE_PAGE_SIZE,
+  MAX_VARIABLE_PAGE_SIZE,
+} from './java-debug-capabilities';
+export type {
+  ManagedBreakpoint,
+  DapSourceBreakpointPayload,
+  AdapterCapabilities,
+  VmEvaluationContext,
+} from './java-debug-capabilities';
+
+// ── Startup & Performance Observability (PR15) ────────────────────
+export {
+  StartupStageTracker,
+  WorkspaceFileManifestCache,
+  ResourceBudgetManager,
+  DEFAULT_WORKSPACE_EXCLUDES,
+  DEFAULT_4GB_BUDGET,
+} from './startup-performance-tracker';
+export type {
+  StartupStageListener,
+} from './startup-performance-tracker';
+
 
 // ── Override/Implementation Gutter (§7.3 P2-JAVA) ───────────────
 export { JavaOverrideGutter } from './java-override-gutter';

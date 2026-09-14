@@ -408,35 +408,36 @@ func TestResolve(t *testing.T) {
 func TestCanonicalEncodingName(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
-		input string
-		want  ID
+		input  string
+		want   ID
+		wantOk bool
 	}{
-		{"utf-8", UTF8},
-		{"UTF8", UTF8},
-		{"gbk", GBK},
-		{"gb2312", GBK},
-		{"cp936", GBK},
-		{"ms936", GBK},
-		{"gb18030", GB18030},
-		{"iso-8859-1", ISO88591},
-		{"iso8859-1", ISO88591},
-		{"latin1", ISO88591},
-		{"latin-1", ISO88591},
-		{"us-ascii", USASCII},
-		{"ascii", USASCII},
-		{"utf-16", UTF16LE},
-		{"utf-16le", UTF16LE},
-		{"utf16le", UTF16LE},
-		{"utf-16be", UTF16BE},
-		{"utf16be", UTF16BE},
-		{"unknown-encoding", UTF8}, // default fallback
-		{"", UTF8},                  // empty falls back to UTF8
+		{"utf-8", UTF8, true},
+		{"UTF8", UTF8, true},
+		{"gbk", GBK, true},
+		{"gb2312", GBK, true},
+		{"cp936", GBK, true},
+		{"ms936", GBK, true},
+		{"gb18030", GB18030, true},
+		{"iso-8859-1", ISO88591, true},
+		{"iso8859-1", ISO88591, true},
+		{"latin1", ISO88591, true},
+		{"latin-1", ISO88591, true},
+		{"us-ascii", USASCII, true},
+		{"ascii", USASCII, true},
+		{"utf-16", UTF16LE, true},
+		{"utf-16le", UTF16LE, true},
+		{"utf16le", UTF16LE, true},
+		{"utf-16be", UTF16BE, true},
+		{"utf16be", UTF16BE, true},
+		{"unknown-encoding", "", false}, // unknown encodings must NOT fall back to UTF-8 (F15)
+		{"", "", false},                  // empty returns false (F15)
 	}
 	for _, c := range cases {
 		t.Run(c.input, func(t *testing.T) {
-			got := canonicalEncodingName(c.input)
-			if got != c.want {
-				t.Errorf("canonicalEncodingName(%q) = %q, want %q", c.input, got, c.want)
+			got, ok := canonicalEncodingName(c.input)
+			if ok != c.wantOk || got != c.want {
+				t.Errorf("canonicalEncodingName(%q) = (%q, %v), want (%q, %v)", c.input, got, ok, c.want, c.wantOk)
 			}
 		})
 	}
@@ -810,3 +811,100 @@ func TestDetect_XML_EncodingMissingQuote(t *testing.T) {
 		t.Errorf("should detect some encoding")
 	}
 }
+
+// TestDetect_UTF16LE_CRLF_T35 tests UTF-16LE with CRLF line endings (T35).
+func TestDetect_UTF16LE_CRLF_T35(t *testing.T) {
+	t.Parallel()
+	sample := []byte{0xFF, 0xFE, 'A', 0x00, '\r', 0x00, '\n', 0x00, 'B', 0x00}
+	got, _, hasBom, eol := Detect(sample, UTF8, Aliases{})
+	if got != UTF16LE {
+		t.Fatalf("got encoding %q, want %q", got, UTF16LE)
+	}
+	if !hasBom {
+		t.Errorf("expected hasBom=true")
+	}
+	if eol != "crlf" {
+		t.Errorf("got eol=%q, want crlf (F14: raw UTF-16 bytes misclassified CRLF as %q)", eol, eol)
+	}
+}
+
+// TestDetect_UTF16BE_CRLF_T35 tests UTF-16BE with CRLF line endings (T35).
+func TestDetect_UTF16BE_CRLF_T35(t *testing.T) {
+	t.Parallel()
+	sample := []byte{0xFE, 0xFF, 0x00, 'A', 0x00, '\r', 0x00, '\n', 0x00, 'B'}
+	got, _, hasBom, eol := Detect(sample, UTF8, Aliases{})
+	if got != UTF16BE {
+		t.Fatalf("got encoding %q, want %q", got, UTF16BE)
+	}
+	if !hasBom {
+		t.Errorf("expected hasBom=true")
+	}
+	if eol != "crlf" {
+		t.Errorf("got eol=%q, want crlf (F14: raw UTF-16 bytes misclassified CRLF as %q)", eol, eol)
+	}
+}
+
+// TestDetect_MixedEOL_T35 tests files with mixed line endings (T35).
+func TestDetect_MixedEOL_T35(t *testing.T) {
+	t.Parallel()
+	sample := []byte("first\r\nsecond\nthird\r\n")
+	_, _, _, eol := Detect(sample, UTF8, Aliases{})
+	if eol != "mixed" {
+		t.Errorf("got eol=%q, want mixed", eol)
+	}
+}
+
+// TestDetect_JavaCommentCharset_NotDetected_T36 tests that Java comments with charset=utf-8
+// are not misclassified as HTML/JSP charset declarations (T36).
+func TestDetect_JavaCommentCharset_NotDetected_T36(t *testing.T) {
+	t.Parallel()
+	// GBK file containing a comment mentioning charset=utf-8, followed by GBK Chinese text
+	sample := []byte("// String s = \"charset=utf-8\";\r\npublic class Foo { String cn = \"\xC4\xE3\xBA\xC3\"; }")
+	got, conf, _, _ := Detect(sample, GBK, Aliases{})
+	if got == UTF8 {
+		t.Errorf("got %q (conf=%f), want GBK/GB18030 (Java comment should not trigger HTML charset detection)", got, conf)
+	}
+}
+
+// TestDetect_HTML_UnknownCharset_NotUTF8_T36 tests that unknown HTML charset declarations
+// do not silently fall back to UTF-8 (T36).
+func TestDetect_HTML_UnknownCharset_NotUTF8_T36(t *testing.T) {
+	t.Parallel()
+	// HTML with unknown charset and GBK Chinese text
+	html := []byte("<html><head><meta charset=\"unsupported_charset_xyz\"></head><body>\xC4\xE3\xBA\xC3</body></html>")
+	got, conf, _, _ := Detect(html, GBK, Aliases{})
+	if got == UTF8 {
+		t.Errorf("got %q (conf=%f), want GBK/GB18030 (unknown charset must not fallback to UTF-8)", got, conf)
+	}
+}
+
+// TestDetect_JSP_PageEncodingPrecedence_T36 tests that JSP pageEncoding takes precedence
+// over contentType charset (T36).
+func TestDetect_JSP_PageEncodingPrecedence_T36(t *testing.T) {
+	t.Parallel()
+	jsp := []byte("<%@ page language=\"java\" contentType=\"text/html; charset=ISO-8859-1\" pageEncoding=\"GBK\"%>\r\n<html><body>\xC4\xE3\xBA\xC3</body></html>")
+	got, _, _, _ := Detect(jsp, UTF8, Aliases{})
+	if got != GBK {
+		t.Errorf("got %q, want gbk (pageEncoding must take precedence over contentType)", got)
+	}
+}
+
+// TestCanDecodeAs_StrictASCII_T36 tests that canDecodeAs rejects non-ASCII for USASCII (T36).
+func TestCanDecodeAs_StrictASCII_T36(t *testing.T) {
+	t.Parallel()
+	chineseUTF8 := []byte("你好")
+	if canDecodeAs(chineseUTF8, USASCII) {
+		t.Errorf("canDecodeAs(Chinese, USASCII) should be false")
+	}
+}
+
+// TestEncode_StrictASCII_T36 tests that Encode rejects non-ASCII for USASCII (T36).
+func TestEncode_StrictASCII_T36(t *testing.T) {
+	t.Parallel()
+	chinese := []byte("你好")
+	_, err := Encode(chinese, USASCII, Aliases{})
+	if err == nil {
+		t.Errorf("Encode(Chinese, USASCII) should fail for non-ASCII bytes")
+	}
+}
+

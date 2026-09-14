@@ -195,6 +195,9 @@ function validateStartup(): string[] {
 // ─── Secret Generation ────────────────────────────────────────
 
 function generateSecret(): string {
+  if (process.env.KAIRO_LOCAL_SECRET && process.env.KAIRO_LOCAL_SECRET.trim().length > 0) {
+    return process.env.KAIRO_LOCAL_SECRET.trim();
+  }
   return randomBytes(32).toString('hex');
 }
 
@@ -1160,7 +1163,7 @@ function buildMenuTemplate(): MenuItemConstructorOptions[] {
         { label: 'Toggle Developer Tools', ...action('kairo.devtools.toggle') },
         { label: 'Debug Diagnostics', ...action('kairo:open-debug-diagnostics') },
         { type: 'separator' },
-        { label: 'About', ...action('core.about') },
+        { label: 'About Kairo IDE', ...action('core.about') },
       ],
     },
   ];
@@ -1378,17 +1381,17 @@ async function createWindow(): Promise<void> {
   await mainWindow.loadURL(`http://127.0.0.1:${theiaPort}`);
   flog(`[startup] loadURL=${Date.now() - tLoad}ms`);
 
-  // Defer native menu until after first paint so it does not contend
-  // with Theia frontend bootstrap (OPT-001).
-  mainWindow.webContents.once('did-finish-load', () => {
+  const applyMenu = () => {
     try {
       const menu = Menu.buildFromTemplate(buildMenuTemplate());
       Menu.setApplicationMenu(menu);
-      flog('[kairo] native application menu set (deferred)');
+      flog('[kairo] native application menu set');
     } catch (err: any) {
       flog(`[kairo] menu set failed: ${err?.message || err}`);
     }
-  });
+  };
+  applyMenu();
+  mainWindow.webContents.once('did-finish-load', applyMenu);
 
   // Handle the close event to force-close the window even when the
   // renderer's beforeunload handler (Theia's DefaultWindowService)

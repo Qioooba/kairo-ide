@@ -528,17 +528,24 @@ func (hsm *HotSwapManager) trimHistory() {
 //
 // RefTypeTag / ClassVersion on ClassRedefinition are metadata for callers;
 // they are NOT encoded in the wire payload.
-func BuildRedefineClassesCommand(classes []ClassRedefinition) []byte {
+func BuildRedefineClassesCommandWithSizes(classes []ClassRedefinition, refTypeIDSize int) []byte {
+	if refTypeIDSize != 4 && refTypeIDSize != 8 {
+		refTypeIDSize = 8
+	}
 	w := NewJDWPDataWriter()
 	w.WriteInt(int32(len(classes)))
 
 	for _, c := range classes {
-		w.WriteObjectID(c.RefTypeID)
+		w.WriteID(c.RefTypeID, refTypeIDSize)
 		w.WriteInt(int32(len(c.ClassBytes)))
 		w.data = append(w.data, c.ClassBytes...)
 	}
 
 	return w.Bytes()
+}
+
+func BuildRedefineClassesCommand(classes []ClassRedefinition) []byte {
+	return BuildRedefineClassesCommandWithSizes(classes, 8)
 }
 
 // ClassRedefinition represents a single class to redefine via JDWP.

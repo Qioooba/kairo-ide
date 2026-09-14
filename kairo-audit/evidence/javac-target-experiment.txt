@@ -1,0 +1,12 @@
+Running verify_javac_target.py experiment...
+Detected: javac 21.0.12
+Step 1: Attempting compilation with -source 1.6 -target 1.6 (unchanged)...
+Exit code: 2
+Output: error: Source option 6 is no longer supported. Use 8 or later.
+error: Target option 6 is no longer supported. Use 8 or later.
+Target 1.6 explicitly rejected by modern compiler as expected.
+Step 2: Attempting compilation after modeled normalizeLevel(1.6 -> 8)...
+Exit code: 0
+Observed class header: magic=0xcafebabe, minor=0, major=52
+Java 6 deployment major-version gate (<=50): REJECT
+VERIFICATION SUCCEEDED: Gate successfully blocked incompatible class.

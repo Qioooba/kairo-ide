@@ -354,11 +354,11 @@ describe('jsp navigation webapp paths (JV-P2-7)', () => {
   });
 });
 
-describe('jsp scriptlet virtual URI lifecycle (JV-P2-1)', () => {
-  test('completion closes ephemeral virtual docs after use', () => {
+describe('jsp scriptlet virtual URI lifecycle (JV-P2-1 / F17)', () => {
+  test('completion manages ephemeral virtual docs via VirtualDocumentManager leases', () => {
     const src = fs.readFileSync(path.join(__dirname, 'jsp-scriptlet-java-completion.ts'), 'utf8');
-    assert.match(src, /openedVirtual/);
-    assert.match(src, /didClose\(virtualUri\)/);
+    assert.match(src, /acquireLease/);
+    assert.match(src, /lease\.dispose\(\)/);
     assert.match(src, /finally/);
   });
 });

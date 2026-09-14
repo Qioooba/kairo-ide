@@ -10,6 +10,7 @@ import (
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/api/protocol"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/debug"
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/domain"
+	"github.com/Qioooba/kairo-ide/runtime-agent/internal/pathpolicy"
 )
 
 // handleCompileIncremental handles POST /api/v1/jvm/compile-incremental.
@@ -40,6 +41,20 @@ func (s *Server) handleCompileIncremental(w http.ResponseWriter, r *http.Request
 		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: "projectId required"})
 		return
 	}
+
+	var normalizedFiles []string
+	for _, f := range req.Files {
+		resolved, err := pathpolicy.ResolveURIOrPath(f)
+		if err != nil {
+			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{
+				Code:    protocol.ErrInvalidRequest,
+				Message: fmt.Sprintf("invalid file path or URI %q: %v", f, err),
+			})
+			return
+		}
+		normalizedFiles = append(normalizedFiles, resolved)
+	}
+	req.Files = normalizedFiles
 
 	if s.Services.ProjectStore == nil {
 		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInternal, Message: "ProjectStore not configured"})
@@ -110,16 +125,31 @@ func (s *Server) handleJvmCompile(w http.ResponseWriter, r *http.Request) {
 
 	var req struct {
 		File      string `json:"file"`
+		SourceURI string `json:"sourceUri"`
 		ProjectID string `json:"projectId"`
 	}
 	if err := json.Unmarshal(extractPayload(body), &req); err != nil {
 		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: err.Error()})
 		return
 	}
-	if req.File == "" {
-		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: "file required"})
+	rawFile := req.File
+	if rawFile == "" {
+		rawFile = req.SourceURI
+	}
+	if rawFile == "" {
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: "file or sourceUri required"})
 		return
 	}
+
+	nativeFile, err := pathpolicy.ResolveURIOrPath(rawFile)
+	if err != nil {
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{
+			Code:    protocol.ErrInvalidRequest,
+			Message: fmt.Sprintf("invalid file path or URI: %v", err),
+		})
+		return
+	}
+	req.File = nativeFile
 
 	if s.Services.ProjectStore == nil {
 		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInternal, Message: "ProjectStore not configured"})
@@ -127,7 +157,6 @@ func (s *Server) handleJvmCompile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var p domain.Project
-	var err error
 	if req.ProjectID != "" {
 		p, err = s.Services.ProjectStore.Get(req.ProjectID)
 		if err != nil {
@@ -208,12 +237,10 @@ func (s *Server) handleJvmCompile(w http.ResponseWriter, r *http.Request) {
 
 // handleJvmRedefine handles POST /api/v1/jvm/redefine (BD-P1-4).
 // Attempts live JDWP VirtualMachine.RedefineClasses when an exclusive
-// JDWP port is available (request jdwpPort/jdwpHost, else first running
-// server with a debug port). There is no in-agent DAP session registry
-// to share redefine with an already-attached debugger — when DAP owns
-// the port, callers must use the frontend DebugSession.sendCustomRequest
-// path (JavaHotSwapService) instead of a second JDWP attach. This handler
-// never reports success on attach failure: it returns ErrUnsupported/501.
+// handleJvmRedefine handles POST /api/v1/jvm/redefine (BD-P1-4 / PR03 F03).
+// It redefines classes on the VM via JDWP using an explicit, unambiguous
+// target binding (projectId, serverId, runtimeInstanceId, sessionGeneration).
+// Blind fallback to the first running server is strictly prohibited.
 func (s *Server) handleJvmRedefine(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, "", "", protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: "POST only"})
@@ -227,15 +254,34 @@ func (s *Server) handleJvmRedefine(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		SourcePath string `json:"sourcePath"`
-		ClassPath  string `json:"classPath"`
-		ClassName  string `json:"className"`
-		JdwpHost   string `json:"jdwpHost"`
-		JdwpPort   int    `json:"jdwpPort"`
+		SourcePath string                       `json:"sourcePath"`
+		SourceURI  string                       `json:"sourceUri"`
+		ClassPath  string                       `json:"classPath"`
+		ClassName     string                       `json:"className"`
+		ExpectedHash  string                       `json:"expectedHash"`
+		ClassLoaderID string                       `json:"classLoaderId"`
+		JdwpHost      string                       `json:"jdwpHost"`
+		JdwpPort   int                          `json:"jdwpPort"`
+		ProjectID  string                       `json:"projectId"`
+		ServerID   string                       `json:"serverId"`
+		Target     *protocol.DebugTargetBinding `json:"target"`
 	}
 	if err := json.Unmarshal(extractPayload(body), &req); err != nil {
 		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: err.Error()})
 		return
+	}
+	if req.SourcePath == "" && req.SourceURI != "" {
+		req.SourcePath = req.SourceURI
+	}
+	if req.SourcePath != "" {
+		if native, err := pathpolicy.ResolveURIOrPath(req.SourcePath); err == nil {
+			req.SourcePath = native
+		}
+	}
+	if req.ClassPath != "" {
+		if native, err := pathpolicy.ResolveURIOrPath(req.ClassPath); err == nil {
+			req.ClassPath = native
+		}
 	}
 	if req.SourcePath == "" && req.ClassName == "" {
 		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInvalidRequest, Message: "sourcePath or className required"})
@@ -246,30 +292,50 @@ func (s *Server) handleJvmRedefine(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	host := req.JdwpHost
-	port := req.JdwpPort
-	if port <= 0 {
-		host, port = s.resolveJDWPEndpoint()
+	host := strings.TrimSpace(req.JdwpHost)
+	if host == "" {
+		host = "127.0.0.1"
 	}
-	if port <= 0 {
+	// Restrict JDWP host to loopback only to prevent SSRF
+	if host != "127.0.0.1" && host != "localhost" && host != "::1" && host != "[::1]" {
 		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{
-			Code:    protocol.ErrUnsupported,
-			Message: "no JDWP debug port available for class redefine; start the server in debug mode or pass jdwpPort",
-			Details: map[string]string{
-				"sourcePath": req.SourcePath,
-				"classPath":  req.ClassPath,
-				"hint":       "HotSwap requires an exclusive JDWP listener; if a debugger is already attached, use the debugger HotSwap instead",
-			},
+			Code:    protocol.ErrInvalidRequest,
+			Message: fmt.Sprintf("invalid jdwpHost %q: only loopback connections are permitted", host),
 		})
 		return
 	}
 
+	// Mandatory target endpoint authorization
+	resolvedPort, targetErr := s.resolveTargetEndpoint(req.Target, req.ProjectID, req.ServerID, req.SourcePath)
+	if targetErr != nil {
+		writeError(w, env.RequestID, env.CorrelationID, *targetErr)
+		return
+	}
+
+	port := req.JdwpPort
+	if port <= 0 {
+		port = resolvedPort
+	} else if port != resolvedPort {
+		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{
+			Code:    protocol.ErrInvalidRequest,
+			Message: fmt.Sprintf("jdwpPort %d does not match authorized target port %d", port, resolvedPort),
+		})
+		return
+	}
+
+	classLoaderID := req.ClassLoaderID
+	if classLoaderID == "" && req.Target != nil {
+		classLoaderID = req.Target.ClassLoaderID
+	}
+
 	result, err := debug.RedefineClassLive(debug.LiveRedefineRequest{
-		Host:       host,
-		Port:       port,
-		ClassPath:  req.ClassPath,
-		SourcePath: req.SourcePath,
-		ClassName:  req.ClassName,
+		Host:          host,
+		Port:          port,
+		ClassPath:     req.ClassPath,
+		SourcePath:    req.SourcePath,
+		ClassName:     req.ClassName,
+		ExpectedHash:  req.ExpectedHash,
+		ClassLoaderID: classLoaderID,
 	}, nil)
 	if err != nil {
 		msg := err.Error()
@@ -278,7 +344,8 @@ func (s *Server) handleJvmRedefine(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(lower, "dial") || strings.Contains(lower, "handshake") {
 			code = protocol.ErrUnsupported
 			msg = "cannot attach JDWP for redefine (port busy or no listener): " + err.Error()
-		} else if strings.Contains(lower, "not loaded") || strings.Contains(lower, "invalid class") {
+		} else if strings.Contains(lower, "not loaded") || strings.Contains(lower, "invalid class") ||
+			strings.Contains(lower, "ambiguous_class_loader") || strings.Contains(lower, "class_loader_") {
 			code = protocol.ErrInvalidRequest
 		}
 		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{
@@ -303,21 +370,113 @@ func (s *Server) handleJvmRedefine(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// resolveJDWPEndpoint picks a debug port from running servers.
-func (s *Server) resolveJDWPEndpoint() (host string, port int) {
+// resolveTargetEndpoint resolves the unique, authorized debug port for a target (PR03 / F03 / T09-T11).
+// It rejects missing, ambiguous, or stale targets and NEVER falls back blindly to the first running server.
+func (s *Server) resolveTargetEndpoint(target *protocol.DebugTargetBinding, projectID, serverID, sourcePath string) (int, *protocol.KairoError) {
+	if target != nil {
+		if projectID == "" {
+			projectID = target.ProjectID
+		}
+		if serverID == "" {
+			serverID = target.ServerID
+		}
+	}
+	if projectID == "" && sourcePath != "" && s.Services != nil && s.Services.ProjectStore != nil {
+		if p, err := findProjectContainingFile(s.Services.ProjectStore, sourcePath); err == nil && string(p.ID) != "" {
+			projectID = string(p.ID)
+		}
+	}
+
+	if projectID == "" && serverID == "" {
+		return 0, &protocol.KairoError{
+			Code:    protocol.ErrTargetNotFound,
+			Message: "explicit target binding (projectId or serverId) is required for class redefine; blind fallback to first running server is prohibited",
+		}
+	}
+
 	if s.Services == nil || s.Services.ServerRunner == nil {
-		return "", 0
-	}
-	for _, srv := range s.Services.ServerRunner.List() {
-		if srv == nil || srv.Ports == nil || srv.Ports.Debug <= 0 {
-			continue
-		}
-		state := strings.ToLower(srv.State)
-		if state == "running" || state == "starting" || state == "debugging" {
-			return "127.0.0.1", srv.Ports.Debug
+		return 0, &protocol.KairoError{
+			Code:    protocol.ErrUnsupported,
+			Message: "no JDWP debug port available for class redefine; start the server in debug mode",
 		}
 	}
-	return "", 0
+
+	allServers := s.Services.ServerRunner.List()
+
+	if serverID != "" {
+		for _, srv := range allServers {
+			if srv != nil && srv.ID == serverID {
+				state := strings.ToLower(srv.State)
+				if (state != "running" && state != "starting" && state != "debugging") || srv.Ports == nil || srv.Ports.Debug <= 0 {
+					return 0, &protocol.KairoError{
+						Code:    protocol.ErrUnsupported,
+						Message: fmt.Sprintf("target server %s is not running in debug mode", serverID),
+					}
+				}
+				if target != nil {
+					if target.RuntimeInstanceID != "" && srv.RuntimeInstanceID != "" && target.RuntimeInstanceID != srv.RuntimeInstanceID {
+						return 0, &protocol.KairoError{
+							Code:    protocol.ErrStaleTarget,
+							Message: fmt.Sprintf("stale target: runtime instance mismatch (%s != %s)", target.RuntimeInstanceID, srv.RuntimeInstanceID),
+						}
+					}
+					if target.DeploymentGeneration > 0 && srv.Generation > 0 && target.DeploymentGeneration != srv.Generation {
+						return 0, &protocol.KairoError{
+							Code:    protocol.ErrStaleTarget,
+							Message: fmt.Sprintf("stale target: server generation mismatch (%d != %d)", target.DeploymentGeneration, srv.Generation),
+						}
+					}
+				}
+				return srv.Ports.Debug, nil
+			}
+		}
+		return 0, &protocol.KairoError{
+			Code:    protocol.ErrTargetNotFound,
+			Message: fmt.Sprintf("target server %s not found", serverID),
+		}
+	}
+
+	// serverID is empty, filter by projectID
+	var candidates []*ServerResponse
+	for _, srv := range allServers {
+		if srv != nil && srv.ProjectID == projectID {
+			state := strings.ToLower(srv.State)
+			if (state == "running" || state == "starting" || state == "debugging") && srv.Ports != nil && srv.Ports.Debug > 0 {
+				candidates = append(candidates, srv)
+			}
+		}
+	}
+
+	if len(candidates) == 0 {
+		return 0, &protocol.KairoError{
+			Code:    protocol.ErrTargetNotFound,
+			Message: fmt.Sprintf("no running debug server found for project: %s", projectID),
+		}
+	}
+	if len(candidates) > 1 {
+		return 0, &protocol.KairoError{
+			Code:    protocol.ErrTargetAmbiguous,
+			Message: fmt.Sprintf("multiple running debug servers found for project %s; explicit serverId target binding required", projectID),
+		}
+	}
+
+	matched := candidates[0]
+	if target != nil {
+		if target.RuntimeInstanceID != "" && matched.RuntimeInstanceID != "" && target.RuntimeInstanceID != matched.RuntimeInstanceID {
+			return 0, &protocol.KairoError{
+				Code:    protocol.ErrStaleTarget,
+				Message: fmt.Sprintf("stale target: runtime instance mismatch (%s != %s)", target.RuntimeInstanceID, matched.RuntimeInstanceID),
+			}
+		}
+		if target.DeploymentGeneration > 0 && matched.Generation > 0 && target.DeploymentGeneration != matched.Generation {
+			return 0, &protocol.KairoError{
+				Code:    protocol.ErrStaleTarget,
+				Message: fmt.Sprintf("stale target: server generation mismatch (%d != %d)", target.DeploymentGeneration, matched.Generation),
+			}
+		}
+	}
+
+	return matched.Ports.Debug, nil
 }
 
 // handleJDTLSDistribution handles GET /api/v1/jdtls/distribution.
@@ -347,11 +506,11 @@ func (s *Server) handleJDTLSDistribution(w http.ResponseWriter, r *http.Request)
 // findProjectContainingFile picks the project whose root is the
 // longest path prefix of file (most specific match).
 func findProjectContainingFile(store ProjectStore, file string) (domain.Project, error) {
-	abs, err := filepath.Abs(file)
+	nativePath, err := pathpolicy.ResolveURIOrPath(file)
 	if err != nil {
 		return domain.Project{}, fmt.Errorf("resolve file path: %w", err)
 	}
-	abs = filepath.Clean(abs)
+	abs := filepath.Clean(nativePath)
 
 	var best domain.Project
 	bestLen := -1
@@ -363,13 +522,12 @@ func findProjectContainingFile(store ProjectStore, file string) (domain.Project,
 		if root == "" {
 			continue
 		}
-		rootAbs, err := filepath.Abs(root)
+		rootNative, err := pathpolicy.ResolveURIOrPath(root)
 		if err != nil {
 			continue
 		}
-		rootAbs = filepath.Clean(rootAbs)
-		rel, err := filepath.Rel(rootAbs, abs)
-		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		rootAbs := filepath.Clean(rootNative)
+		if !pathpolicy.IsLexicallyUnder(abs, rootAbs) {
 			continue
 		}
 		if len(rootAbs) > bestLen {

@@ -50,8 +50,10 @@ type serverMeta struct {
 	ContextPath  string         `json:"contextPath"`
 	WebappDir    string         `json:"webappDir"`
 	CatalinaBase string         `json:"catalinaBase"`
-	LastError    string         `json:"lastError,omitempty"`
-	WasRunning   bool           `json:"wasRunning,omitempty"`
+	LastError         string         `json:"lastError,omitempty"`
+	WasRunning        bool           `json:"wasRunning,omitempty"`
+	RuntimeInstanceID string         `json:"runtimeInstanceId,omitempty"`
+	Generation        int            `json:"generation,omitempty"`
 }
 
 // toResponse maps the persisted serverMeta to the safe API
@@ -61,14 +63,16 @@ func (m *serverMeta) toResponse() *api.ServerResponse {
 		return nil
 	}
 	resp := &api.ServerResponse{
-		ID:          m.ID,
-		ProjectID:   m.ProjectID,
-		Type:        m.Type,
-		State:       m.State,
-		PID:         m.PID,
-		StartedAt:   m.StartedAt,
-		ContextPath: m.ContextPath,
-		LastError:   m.LastError,
+		ID:                m.ID,
+		ProjectID:         m.ProjectID,
+		Type:              m.Type,
+		State:             m.State,
+		PID:               m.PID,
+		StartedAt:         m.StartedAt,
+		ContextPath:       m.ContextPath,
+		LastError:         m.LastError,
+		RuntimeInstanceID: m.RuntimeInstanceID,
+		Generation:        m.Generation,
 	}
 	if m.Ports != nil {
 		resp.Ports = &api.ServerPorts{
@@ -222,9 +226,11 @@ func (r *realServerRunner) Start(req api.StartServerRequest) (*api.ServerRespons
 		Ports:        &ports,
 		StartedAt:    inst.StartedAt(),
 		JavaHome:     req.JavaHome,
-		ContextPath:  req.ContextPath,
-		WebappDir:    req.WebappDir,
-		CatalinaBase: base,
+		ContextPath:       req.ContextPath,
+		WebappDir:         req.WebappDir,
+		CatalinaBase:      base,
+		Generation:        1,
+		RuntimeInstanceID: fmt.Sprintf("%s_gen1_%d", id, inst.StartedAt().UnixNano()),
 	}
 	r.mu.Lock()
 	r.instances[id] = inst
@@ -389,6 +395,8 @@ func (r *realServerRunner) Restart(id string) (*api.ServerResponse, error) {
 	m.State = newInst.State()
 	m.StartedAt = newInst.StartedAt()
 	m.LastError = ""
+	m.Generation++
+	m.RuntimeInstanceID = fmt.Sprintf("%s_gen%d_%d", id, m.Generation, newInst.StartedAt().UnixNano())
 	r.instances[id] = newInst
 	r.save()
 	resp := m.toResponse()

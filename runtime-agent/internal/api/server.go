@@ -18,6 +18,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/api/protocol"
@@ -69,83 +70,33 @@ type Server struct {
 	// restartConfig, if set, lets /api/v1/runtime/restart
 	// spawn a fresh process. See SetRestartConfig.
 	restartConfig RestartConfig
+	isRestarting  atomic.Bool
 
 	// recentProjects tracks recently opened projects for the
 	// welcome page. In-memory only; survives agent restarts
 	// via the project catalog.
 	recentProjects []recentProjectEntry
 
-	// idempotencyCache dedupes POST build/deploy/start by
-	// client requestId (BD-P1-2). Entries expire after a short TTL.
-	idempotencyMu    sync.Mutex
-	idempotencyCache map[string]idempotencyEntry
+	// operations manages atomic execution deduplication, payload fingerprinting,
+	// and concurrency coalescing for state-mutating requests (F20 / T25, T26).
+	operationsMu sync.Mutex
+	operations   *OperationRegistry
 
 	// injected services
 	Services *Services
 }
 
-type idempotencyEntry struct {
-	status  int
-	body    []byte
-	expires time.Time
+// OperationRegistry returns the server's OperationRegistry, initializing it lazily if needed.
+func (s *Server) OperationRegistry() *OperationRegistry {
+	s.operationsMu.Lock()
+	defer s.operationsMu.Unlock()
+	if s.operations == nil {
+		s.operations = NewOperationRegistry(10*time.Minute, 512)
+	}
+	return s.operations
 }
 
-const idempotencyTTL = 5 * time.Minute
-const idempotencyMaxEntries = 256
-
-func (s *Server) lookupIdempotent(requestID string) (status int, body []byte, ok bool) {
-	if requestID == "" {
-		return 0, nil, false
-	}
-	s.idempotencyMu.Lock()
-	defer s.idempotencyMu.Unlock()
-	if s.idempotencyCache == nil {
-		return 0, nil, false
-	}
-	ent, found := s.idempotencyCache[requestID]
-	if !found {
-		return 0, nil, false
-	}
-	if time.Now().After(ent.expires) {
-		delete(s.idempotencyCache, requestID)
-		return 0, nil, false
-	}
-	return ent.status, ent.body, true
-}
-
-func (s *Server) storeIdempotent(requestID string, status int, body []byte) {
-	if requestID == "" {
-		return
-	}
-	s.idempotencyMu.Lock()
-	defer s.idempotencyMu.Unlock()
-	if s.idempotencyCache == nil {
-		s.idempotencyCache = make(map[string]idempotencyEntry)
-	}
-	now := time.Now()
-	if len(s.idempotencyCache) >= idempotencyMaxEntries {
-		for k, v := range s.idempotencyCache {
-			if now.After(v.expires) {
-				delete(s.idempotencyCache, k)
-			}
-		}
-		for len(s.idempotencyCache) >= idempotencyMaxEntries {
-			for k := range s.idempotencyCache {
-				delete(s.idempotencyCache, k)
-				break
-			}
-		}
-	}
-	copied := make([]byte, len(body))
-	copy(copied, body)
-	s.idempotencyCache[requestID] = idempotencyEntry{
-		status:  status,
-		body:    copied,
-		expires: now.Add(idempotencyTTL),
-	}
-}
-
-func writeIdempotentOK[P any](s *Server, w http.ResponseWriter, env protocol.RequestEnvelope, payload P) {
+func writeIdempotentOK[P any](s *Server, w http.ResponseWriter, env protocol.RequestEnvelope, opKey OperationKey, payload P) {
 	resp := protocol.ResponseEnvelope{
 		RequestID:     env.RequestID,
 		CorrelationID: env.CorrelationID,
@@ -157,7 +108,7 @@ func writeIdempotentOK[P any](s *Server, w http.ResponseWriter, env protocol.Req
 		writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{Code: protocol.ErrInternal, Message: err.Error()})
 		return
 	}
-	s.storeIdempotent(env.RequestID, http.StatusOK, body)
+	s.OperationRegistry().Finish(opKey, http.StatusOK, body, nil)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(body)
@@ -197,6 +148,12 @@ type RestartConfig struct {
 	// OnShutdown hook without actually replacing the test
 	// process. Production code MUST leave this false.
 	NoExec bool
+	// DataDir is where agent-state.json is stored.
+	DataDir string
+	// InstanceID is the unique ID of the current agent instance.
+	InstanceID string
+	// Generation is the generation number of the current agent instance.
+	Generation int
 }
 
 // Services is the bag of dependencies the handlers use. Set
@@ -255,14 +212,15 @@ type Services struct {
 // NewServer creates a Server.
 func NewServer(services *Services, l *log.Logger, a *audit.Log, version string, secret string) *Server {
 	s := &Server{
-		logger:   l,
-		audit:    a,
-		router:   http.NewServeMux(),
-		started:  time.Now(),
-		version:  version,
-		secret:   secret,
-		Services: services,
+		logger:      l,
+		audit:       a,
+		router:      http.NewServeMux(),
+		started:     time.Now(),
+		version:     version,
+		secret:      secret,
+		Services:    services,
 		rateLimiter: NewRateLimiter(0), // default 100 req/min
+		operations:  NewOperationRegistry(10*time.Minute, 512),
 	}
 	s.routes()
 	return s
@@ -318,10 +276,10 @@ func (s *Server) BoundPort() int {
 	return s.port
 }
 
-// Listen binds addr (host:port; port 0 = ephemeral) without serving.
-// Callers that need the real port before Serve (agent-state.json) use this.
-func (s *Server) Listen(addr string) (net.Listener, error) {
-	ln, err := net.Listen("tcp", addr)
+// ListenWithHandoff binds addr (host:port; port 0 = ephemeral), retrying if the address
+// is in use up to handoffTimeout (F18 / T31). Callers that need the real port before Serve use this.
+func (s *Server) ListenWithHandoff(addr string, handoffTimeout time.Duration) (net.Listener, error) {
+	ln, err := ListenWithHandoff(context.Background(), addr, handoffTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -346,8 +304,15 @@ func (s *Server) Listen(addr string) (net.Listener, error) {
 		IdleTimeout:       2 * time.Minute,
 	}
 	s.mu.Unlock()
-	s.logger.Info("http listen", log.Fields{"addr": ln.Addr().String()})
+	if s.logger != nil {
+		s.logger.Info("http listen", log.Fields{"addr": ln.Addr().String()})
+	}
 	return ln, nil
+}
+
+// Listen binds addr (host:port; port 0 = ephemeral) without handoff retry.
+func (s *Server) Listen(addr string) (net.Listener, error) {
+	return s.ListenWithHandoff(addr, 0)
 }
 
 // Serve serves HTTP (or HTTPS) on an already-bound listener from Listen.
@@ -568,6 +533,8 @@ func (s *Server) routes() {
 	// Servers
 	s.router.HandleFunc("/api/v1/servers", s.handleServers)
 	s.router.HandleFunc("/api/v1/servers/", s.handleServerSub)
+	// Operations (JobManager and idempotency query)
+	s.router.HandleFunc("/api/v1/operations/", s.handleOperationsSub)
 	// Search
 	s.router.HandleFunc("/api/v1/search", s.handleSearch)
 	s.router.HandleFunc("/api/v1/search/files", s.handleSearchFiles)
@@ -631,6 +598,14 @@ func (s *Server) doRestart() {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
+	// Update state to handing_over if DataDir is set (F18 / T31)
+	if rc.DataDir != "" {
+		if curState, err := ReadAgentState(rc.DataDir); err == nil {
+			curState.Status = "handing_over"
+			_ = WriteAgentStateAtomic(rc.DataDir, curState)
+		}
+	}
+
 	// 1. Spawn the fresh process FIRST (P0-13): if we instead
 	//    shutdown the HTTP server first, ListenAndServe returns
 	//    immediately, main() exits, and the goroutine running
@@ -651,6 +626,13 @@ func (s *Server) doRestart() {
 		if env == nil {
 			env = os.Environ()
 		}
+		// Pass generation and parent PID to child environment (F18 / T31)
+		nextGen := rc.Generation + 1
+		env = append(env,
+			fmt.Sprintf("KAIRO_GENERATION=%d", nextGen),
+			fmt.Sprintf("KAIRO_PARENT_PID=%d", os.Getpid()),
+		)
+
 		cmd := exec.Command(exe, rc.Args...)
 		cmd.Env = env
 		// P0-13: on Windows, attaching the new agent to the
@@ -662,7 +644,20 @@ func (s *Server) doRestart() {
 		cmd.Stderr = nil
 		if err := cmd.Start(); err != nil {
 			fmt.Fprintf(os.Stderr, "[restart] spawn FAILED: %v\n", err)
-			os.Exit(1)
+			if s.logger != nil {
+				s.logger.Error("restart: spawn failed", log.Fields{"err": err.Error()})
+			}
+			if rc.DataDir != "" {
+				if curState, rerr := ReadAgentState(rc.DataDir); rerr == nil {
+					curState.Status = "failed"
+					curState.Error = fmt.Sprintf("spawn replacement failed: %v", err)
+					_ = WriteAgentStateAtomic(rc.DataDir, curState)
+				}
+			}
+			s.isRestarting.Store(false)
+			if !rc.NoExec {
+				os.Exit(1)
+			}
 			return
 		}
 		fmt.Fprintf(os.Stderr, "[restart] spawn OK pid=%d\n", cmd.Process.Pid)
@@ -743,6 +738,12 @@ func writeError(w http.ResponseWriter, requestID, correlationID string, e protoc
 	if e.Code == protocol.ErrUnsupported {
 		status = http.StatusNotImplemented
 	}
+	if e.Code == protocol.ErrTargetNotFound {
+		status = http.StatusNotFound
+	}
+	if e.Code == protocol.ErrTargetAmbiguous || e.Code == protocol.ErrStaleTarget {
+		status = http.StatusConflict
+	}
 	writeJSON(w, status, resp)
 }
 
@@ -751,7 +752,8 @@ func isClientError(c protocol.KairoErrorCode) bool {
 	case protocol.ErrUnauthenticated, protocol.ErrForbidden, protocol.ErrPathForbidden,
 		protocol.ErrNotFound, protocol.ErrConflict, protocol.ErrRateLimited,
 		protocol.ErrInvalidRequest, protocol.ErrToolchainMissing, protocol.ErrRuntimeMissing,
-		protocol.ErrUnsupported, protocol.ErrUnsupportedJDKTarget:
+		protocol.ErrUnsupported, protocol.ErrUnsupportedJDKTarget,
+		protocol.ErrTargetAmbiguous, protocol.ErrTargetNotFound, protocol.ErrStaleTarget:
 		return true
 	}
 	return false

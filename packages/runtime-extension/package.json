@@ -12,7 +12,7 @@
     "build": "tsc -p tsconfig.json",
     "clean": "node ../../scripts/clean-dir.cjs lib",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "test": "node --require ./test-setup.cjs --test src/browser/runtime.test.cjs src/browser/runtime-exports-extended.test.cjs src/browser/workspace-context-service.test.cjs src/browser/runtime-errors-extended.test.cjs src/browser/runtime-connection-service.test.cjs",
+    "test": "node --require ./test-setup.cjs --test src/browser/runtime.test.cjs src/browser/runtime-exports-extended.test.cjs src/browser/workspace-context-service.test.cjs src/browser/runtime-errors-extended.test.cjs src/browser/runtime-connection-service.test.cjs src/browser/runtime-security.test.cjs",
     "test:dynamic": "node --require ./test-setup.cjs --test src/browser/runtime-dynamic-routes.test.cjs",
     "test:mocha": "mocha",
     "test:all": "pnpm run test:mocha && pnpm run test && pnpm run test:dynamic"

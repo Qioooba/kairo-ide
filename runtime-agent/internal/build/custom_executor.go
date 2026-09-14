@@ -40,12 +40,19 @@ type BuildEvent struct {
 // BuildEventHandler is called for each build event.
 type BuildEventHandler func(event BuildEvent)
 
-// CustomBuildExecutor manages custom build command execution.
+// CustomBuildExecutor manages custom build command execution and lifecycle (F19 / T27).
 type CustomBuildExecutor struct {
 	mu      sync.Mutex
-	running map[string]*exec.Cmd
+	running map[string]*customBuildJob
 	results map[string]customBuildResult
 	handler BuildEventHandler
+}
+
+type customBuildJob struct {
+	cmd       *exec.Cmd
+	cancel    context.CancelFunc
+	done      chan struct{}
+	startTime time.Time
 }
 
 type customBuildResult struct {
@@ -56,7 +63,7 @@ type customBuildResult struct {
 // NewCustomBuildExecutor creates a new executor.
 func NewCustomBuildExecutor(handler BuildEventHandler) *CustomBuildExecutor {
 	return &CustomBuildExecutor{
-		running: make(map[string]*exec.Cmd),
+		running: make(map[string]*customBuildJob),
 		results: make(map[string]customBuildResult),
 		handler: handler,
 	}
@@ -64,9 +71,17 @@ func NewCustomBuildExecutor(handler BuildEventHandler) *CustomBuildExecutor {
 
 // Start begins executing a custom build command.
 func (e *CustomBuildExecutor) Start(ctx context.Context, cfg CustomBuildConfig) error {
+	return e.StartWithCancel(ctx, nil, cfg)
+}
+
+// StartWithCancel begins executing a custom build with context ownership and cancel func (F19 / T27).
+func (e *CustomBuildExecutor) StartWithCancel(ctx context.Context, cancel context.CancelFunc, cfg CustomBuildConfig) error {
 	e.mu.Lock()
 	if _, exists := e.running[cfg.BuildID]; exists {
 		e.mu.Unlock()
+		if cancel != nil {
+			cancel() // Immediate release of timer! (F19 / T27)
+		}
 		return fmt.Errorf("build %s is already running", cfg.BuildID)
 	}
 	delete(e.results, cfg.BuildID)
@@ -76,6 +91,9 @@ func (e *CustomBuildExecutor) Start(ctx context.Context, cfg CustomBuildConfig) 
 	// Parse command: split on spaces respecting quotes
 	cmdParts := shellSplit(cfg.Command)
 	if len(cmdParts) == 0 {
+		if cancel != nil {
+			cancel() // Immediate release of timer! (F19 / T27)
+		}
 		return fmt.Errorf("empty command")
 	}
 	exe := cmdParts[0]
@@ -102,14 +120,23 @@ func (e *CustomBuildExecutor) Start(ctx context.Context, cfg CustomBuildConfig) 
 	// Create pipes for stdout/stderr
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		if cancel != nil {
+			cancel() // Immediate release of timer! (F19 / T27)
+		}
 		return fmt.Errorf("stdout pipe: %w", err)
 	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
+		if cancel != nil {
+			cancel() // Immediate release of timer! (F19 / T27)
+		}
 		return fmt.Errorf("stderr pipe: %w", err)
 	}
 
 	if err := cmd.Start(); err != nil {
+		if cancel != nil {
+			cancel() // Immediate release of timer on start failure! (F19 / T27)
+		}
 		if handler != nil {
 			handler(BuildEvent{
 				Type:    "error",
@@ -122,17 +149,27 @@ func (e *CustomBuildExecutor) Start(ctx context.Context, cfg CustomBuildConfig) 
 		return fmt.Errorf("start command: %w", err)
 	}
 
+	job := &customBuildJob{
+		cmd:       cmd,
+		cancel:    cancel,
+		done:      make(chan struct{}),
+		startTime: time.Now(),
+	}
+
 	e.mu.Lock()
 	// Re-check in case of concurrent Start with same ID after unlock.
 	if _, exists := e.running[cfg.BuildID]; exists {
 		e.mu.Unlock()
+		if cancel != nil {
+			cancel()
+		}
 		_ = killProcessGroup(cmd)
 		return fmt.Errorf("build %s is already running", cfg.BuildID)
 	}
-	e.running[cfg.BuildID] = cmd
+	e.running[cfg.BuildID] = job
 	e.mu.Unlock()
 
-	startTime := time.Now()
+	startTime := job.startTime
 	if handler != nil {
 		handler(BuildEvent{
 			Type:    "start",
@@ -155,6 +192,12 @@ func (e *CustomBuildExecutor) Start(ctx context.Context, cfg CustomBuildConfig) 
 	}()
 
 	go func() {
+		defer func() {
+			if cancel != nil {
+				cancel() // Release timer immediately upon process completion! (F19 / T27)
+			}
+			close(job.done)
+		}()
 		err := cmd.Wait()
 		pipeWG.Wait()
 		e.mu.Lock()
@@ -168,11 +211,15 @@ func (e *CustomBuildExecutor) Start(ctx context.Context, cfg CustomBuildConfig) 
 				exitCode = -1
 			}
 		}
-		e.results[cfg.BuildID] = customBuildResult{status: "finished", exitCode: exitCode}
+		prevResult, wasCancelled := e.results[cfg.BuildID]
+		isCancelled := wasCancelled && prevResult.status == "cancelled"
+		if !isCancelled {
+			e.results[cfg.BuildID] = customBuildResult{status: "finished", exitCode: exitCode}
+		}
 		finishHandler := e.handler
 		e.mu.Unlock()
 
-		if finishHandler != nil {
+		if finishHandler != nil && !isCancelled {
 			finishHandler(BuildEvent{
 				Type:       "finish",
 				BuildID:    cfg.BuildID,
@@ -189,12 +236,13 @@ func (e *CustomBuildExecutor) Start(ctx context.Context, cfg CustomBuildConfig) 
 // Cancel stops a running build.
 func (e *CustomBuildExecutor) Cancel(buildID string) error {
 	e.mu.Lock()
-	cmd, ok := e.running[buildID]
-	e.mu.Unlock()
-
+	job, ok := e.running[buildID]
 	if !ok {
+		e.mu.Unlock()
 		return fmt.Errorf("build %s not running", buildID)
 	}
+	e.results[buildID] = customBuildResult{status: "cancelled", exitCode: -1}
+	e.mu.Unlock()
 
 	if e.handler != nil {
 		e.handler(BuildEvent{
@@ -204,11 +252,38 @@ func (e *CustomBuildExecutor) Cancel(buildID string) error {
 		})
 	}
 
+	if job.cancel != nil {
+		job.cancel() // Immediate cancel release! (F19 / T27)
+	}
+
+	err := killProcessGroup(job.cmd)
+	select {
+	case <-job.done:
+	case <-time.After(2 * time.Second):
+	}
+	return err
+}
+
+// Close terminates all active builds and releases all context resources.
+func (e *CustomBuildExecutor) Close() error {
 	e.mu.Lock()
-	e.results[buildID] = customBuildResult{status: "cancelled", exitCode: -1}
+	jobs := make([]*customBuildJob, 0, len(e.running))
+	for _, job := range e.running {
+		jobs = append(jobs, job)
+	}
 	e.mu.Unlock()
 
-	return killProcessGroup(cmd)
+	for _, job := range jobs {
+		if job.cancel != nil {
+			job.cancel()
+		}
+		_ = killProcessGroup(job.cmd)
+		select {
+		case <-job.done:
+		case <-time.After(1 * time.Second):
+		}
+	}
+	return nil
 }
 
 // IsRunning checks if a build is currently running.

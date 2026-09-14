@@ -18,6 +18,8 @@ import {
   virtualUriForBlock,
   type JspVirtualKind,
 } from './jsp-virtual-java';
+import { JspPageModelBuilder, convertAdditionalTextEditsToJsp } from './jsp-page-model';
+import { defaultVirtualDocumentManager } from './virtual-document-manager';
 import { setJspI18n, t } from './i18n-context';
 
 export type ScriptletContext = 'scriptlet' | 'expression' | 'declaration' | 'directive' | 'none';
@@ -101,8 +103,10 @@ export function registerJspScriptletJavaCompletion(
   i18n?: I18nService,
 ): monaco.IDisposable {
   setJspI18n(i18n);
+  if (javaClient) {
+    defaultVirtualDocumentManager.setClient(javaClient);
+  }
   const parser = new JspJavaParser();
-  let virtualVersion = 1;
 
   return monaco.languages.registerCompletionItemProvider(
     JSP_LANGUAGE_ID,
@@ -145,40 +149,67 @@ export function registerJspScriptletJavaCompletion(
           const blockContent = content.slice(ctx.block.start, ctx.block.end);
           const offsetInBlock = Math.max(0, ctx.offset - ctx.block.start);
           const virtualKind = toVirtualKind(ctx.blockKind);
-          const virtualText = buildVirtualJavaFile(blockContent, virtualKind);
-          const virtualUri = virtualUriForBlock(model.uri.toString(), blockIndex >= 0 ? blockIndex : 0);
-          const virtualPos = mapOffsetToVirtualPosition(blockContent, offsetInBlock, virtualKind);
 
-          let openedVirtual = false;
-          if (javaClient) {
-            try {
-              javaClient.didOpen({
-                uri: virtualUri,
-                languageId: 'java',
-                version: virtualVersion++,
-                text: virtualText,
-              });
-              openedVirtual = true;
-            } catch {
-              // ignore — completion may still work via fallback
-            }
+          // Build whole-page virtual Java (F16 / T40 ~ T43)
+          let virtualUri: string;
+          let virtualText: string;
+          let virtualLine: number;
+          let virtualChar: number;
+
+          const pageBuilder = new JspPageModelBuilder();
+          const pageResult = await pageBuilder.buildPageVirtualJava(model.uri.toString(), content);
+          const mappedVirtual = pageResult.sourceMap.mapJspPositionToVirtual(
+            model.uri.toString(),
+            position.lineNumber - 1,
+            position.column - 1,
+          );
+
+          if (mappedVirtual) {
+            virtualUri = pageResult.virtualUri;
+            virtualText = pageResult.virtualJava;
+            virtualLine = mappedVirtual.line;
+            virtualChar = mappedVirtual.character;
+          } else {
+            // Fallback to single block model if position didn't map
+            const blockIndex = blocks.findIndex(
+              b => b.start === ctx.block!.start && b.end === ctx.block!.end && b.kind === ctx.block!.kind,
+            );
+            virtualText = buildVirtualJavaFile(blockContent, virtualKind);
+            virtualUri = virtualUriForBlock(model.uri.toString(), blockIndex >= 0 ? blockIndex : 0);
+            const pos = mapOffsetToVirtualPosition(blockContent, offsetInBlock, virtualKind);
+            virtualLine = pos.line;
+            virtualChar = pos.character;
           }
+
+          // Acquire unified lease from VirtualDocumentManager (F17 / T38)
+          const lease = await defaultVirtualDocumentManager.acquireLease(
+            virtualUri,
+            virtualText,
+            'java',
+            model.uri.toString(),
+          );
 
           try {
             javaProvider.cacheSource(virtualUri, virtualText);
 
             const response = await javaProvider.provideCompletions({
               uri: virtualUri,
-              line: virtualPos.line,
-              character: virtualPos.character,
+              line: virtualLine,
+              character: virtualChar,
               triggerKind: (context.triggerKind + 1) as 1 | 2 | 3,
               triggerCharacter: context.triggerCharacter,
             });
 
-            if (!token.isCancellationRequested && response.items.length > 0) {
+            // T39: Discard stale response if lease is no longer current (e.g. document closed while in-flight)
+            if (!token.isCancellationRequested && lease.isCurrent() && response.items.length > 0) {
               const javaItems = response.items.map(item => {
                 const rank = globalRecentCompletions.rank(item.label);
-                // Strip virtual-file textEdit ranges — apply as simple insert at cursor word.
+                // T43: Convert additionalTextEdits for imports into safe JSP page import directives
+                const jspEdits = convertAdditionalTextEditsToJsp(content, item.additionalTextEdits).map(e => ({
+                  range: new monaco.Range(e.range.startLineNumber, e.range.startColumn, e.range.endLineNumber, e.range.endColumn),
+                  text: e.newText,
+                }));
+
                 const adapted = adaptCompletionItem(
                   {
                     ...item,
@@ -187,25 +218,21 @@ export function registerJspScriptletJavaCompletion(
                     textEdit: undefined,
                     insertRange: undefined,
                     replaceRange: undefined,
-                    // Keep additionalTextEdits only if they target the same virtual doc — drop them for JSP.
                     additionalTextEdits: undefined,
                   },
                   range,
                 );
                 adapted.sortText = '0' + (adapted.sortText ?? adapted.label.toString());
+                if (jspEdits.length > 0) {
+                  adapted.additionalTextEdits = jspEdits;
+                }
                 return adapted;
               });
               suggestions.unshift(...javaItems);
             }
           } finally {
-            // Ephemeral completion docs must be closed (diagnostics re-opens its own).
-            if (openedVirtual && javaClient) {
-              try {
-                javaClient.didClose(virtualUri);
-              } catch {
-                // ignore
-              }
-            }
+            // Disposing the lease decrements activeLeases but does NOT close the shared document.
+            lease.dispose();
           }
         } catch {
           // snippets only

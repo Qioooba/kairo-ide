@@ -29,3 +29,15 @@ export type {
   KairoRequestInit,
   RuntimeEndpoints,
 } from './runtime-connection-service';
+
+export {
+  DEFAULT_ALLOWED_HOSTS,
+  AgentEndpointValidator,
+  WorkspaceTrustManager,
+  WorkspaceUntrustedError,
+  DiagnosticLogRedactor,
+} from './runtime-security';
+export type {
+  WorkspaceTrustListener,
+} from './runtime-security';
+

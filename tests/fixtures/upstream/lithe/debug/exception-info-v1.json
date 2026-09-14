@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "description": "Golden test fixture for DAP exception breakpoints and exception-info (Lithe Section 12.3)",
+  "cases": [
+    {
+      "id": "break-on-uncaught-exception",
+      "description": "Uncaught NullPointerException pauses VM when uncaught filter is enabled",
+      "exception": {
+        "exceptionId": "java.lang.NullPointerException",
+        "description": "null pointer dereference at line 42",
+        "breakMode": "unhandled",
+        "isCaught": false
+      },
+      "activeFilter": "uncaught",
+      "expectedBreak": true
+    },
+    {
+      "id": "ignore-caught-exception-when-only-uncaught-enabled",
+      "description": "Caught IOException does NOT pause VM when only uncaught filter is active",
+      "exception": {
+        "exceptionId": "java.io.IOException",
+        "description": "file not found",
+        "breakMode": "userUnhandled",
+        "isCaught": true
+      },
+      "activeFilter": "uncaught",
+      "expectedBreak": false
+    },
+    {
+      "id": "break-on-caught-exception-when-caught-enabled",
+      "description": "Caught SQLException pauses VM when caught filter is active",
+      "exception": {
+        "exceptionId": "java.sql.SQLException",
+        "description": "connection timeout",
+        "breakMode": "always",
+        "isCaught": true
+      },
+      "activeFilter": "caught",
+      "expectedBreak": true
+    }
+  ]
+}

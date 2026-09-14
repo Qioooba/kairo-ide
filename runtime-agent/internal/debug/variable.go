@@ -227,11 +227,11 @@ func parseVariableFromTag(r *JDWPDataReader, tag byte) (*Variable, error) {
 		}
 		v.Value = fmt.Sprintf("%d", int8(b))
 	case jdwpTagChar:
-		val, err := r.ReadInt()
+		val, err := r.ReadChar()
 		if err != nil {
 			return nil, err
 		}
-		v.Value = fmt.Sprintf("'%c' (0x%04x)", rune(uint16(val)), uint16(val))
+		v.Value = fmt.Sprintf("'%c' (0x%04x)", rune(val), val)
 	case jdwpTagDouble:
 		val, err := r.ReadDouble()
 		if err != nil {
@@ -257,11 +257,11 @@ func parseVariableFromTag(r *JDWPDataReader, tag byte) (*Variable, error) {
 		}
 		v.Value = formatLong(val)
 	case jdwpTagShort:
-		val, err := r.ReadInt()
+		val, err := r.ReadShort()
 		if err != nil {
 			return nil, err
 		}
-		v.Value = fmt.Sprintf("%d", int16(val))
+		v.Value = fmt.Sprintf("%d", val)
 	case jdwpTagBoolean:
 		b, err := r.ReadByte()
 		if err != nil {

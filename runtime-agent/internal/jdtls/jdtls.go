@@ -434,16 +434,10 @@ func (m *Manager) logf(msg string, fields map[string]any) {
 	m.logger.Info(msg, log.Fields(fields))
 }
 
-// Start launches the JDT LS as a child process. Returns the
-// metadata that the UI / API needs to render the status, and
-// only after the process is up.
+// Start launches the JDT LS as a child process.
 //
-// The function does NOT call the LSP `initialize` request
-// itself. That handshake is the caller's job (it requires
-// per-workspace root URIs and capabilities that the Manager
-// should not assume). The Manager exposes `Initialize` for
-// the LSP frame; `MarkInitialized` for the manager-level
-// bookkeeping.
+// Deprecated: As of Phase 4, the Theia backend owns the JDT LS process lifecycle.
+// The Go Agent only provides the launch descriptor. Do not invoke Start in production code.
 func (m *Manager) Start(ctx context.Context) (*Status, error) {
 	// Accept restart from stopped (0), stopping (3) after a
 	// concurrent Stop, and crashed (4). Refuse from starting
@@ -635,10 +629,10 @@ func (m *Manager) maybeAutoRestart() {
 	}()
 }
 
-// Stop terminates the JDT LS process. On Windows the process
-// group is killed via taskkill /T so the JVM (and any worker
-// threads it spawned) goes down together. On Unix we signal
-// the negative PID to take the process group.
+// Stop terminates the JDT LS process.
+//
+// Deprecated: As of Phase 4, the Theia backend owns the JDT LS process lifecycle.
+// The Go Agent only provides the launch descriptor. Do not invoke Stop in production code.
 func (m *Manager) Stop(ctx context.Context) error {
 	// Acceptable source states: running (2) and crashed (4).
 	if s := m.state.Load(); s != 2 && s != 4 {

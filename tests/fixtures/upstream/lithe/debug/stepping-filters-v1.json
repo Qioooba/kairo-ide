@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "description": "Golden test fixture for DAP stepping filters / step-in exclusion (Lithe Section 12.3)",
+  "cases": [
+    {
+      "id": "skip-jdk-internal-classes",
+      "description": "Classes in java.* and sun.* must be skipped during Step Into",
+      "targetClass": "java.util.ArrayList",
+      "expectedSkip": true
+    },
+    {
+      "id": "skip-tomcat-internal-classes",
+      "description": "Classes in org.apache.catalina.* must be skipped during Step Into",
+      "targetClass": "org.apache.catalina.core.StandardContext",
+      "expectedSkip": true
+    },
+    {
+      "id": "step-into-user-business-classes",
+      "description": "User business classes must NOT be skipped during Step Into",
+      "targetClass": "com.example.service.OrderService",
+      "expectedSkip": false
+    }
+  ]
+}

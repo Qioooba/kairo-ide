@@ -1,0 +1,78 @@
+{
+  "version": 1,
+  "description": "Golden test fixture for breakpoint relocation across document line edits (Lithe L09)",
+  "cases": [
+    {
+      "id": "single-breakpoint-insert-lines-above",
+      "description": "Inserting 5 lines above breakpoint at line 25 shifts it to line 30 while keeping condition and metadata intact",
+      "initial": {
+        "uri": "file:///workspace/src/com/example/HelloServlet.java",
+        "breakpoints": [
+          {
+            "id": "bp-1",
+            "line": 25,
+            "column": 1,
+            "enabled": true,
+            "condition": "req.getParameter(\"action\") != null",
+            "hitCondition": ">= 5",
+            "logMessage": "action={action}"
+          }
+        ]
+      },
+      "edit": {
+        "startLine": 10,
+        "linesDelta": 5,
+        "deletedCount": 0,
+        "transactionId": "tx-upstream-001"
+      },
+      "expected": {
+        "applied": true,
+        "breakpoints": [
+          {
+            "id": "bp-1",
+            "line": 30,
+            "column": 1,
+            "enabled": true,
+            "condition": "req.getParameter(\"action\") != null",
+            "hitCondition": ">= 5",
+            "logMessage": "action={action}"
+          }
+        ]
+      }
+    },
+    {
+      "id": "single-breakpoint-delete-lines-above",
+      "description": "Deleting 3 lines above breakpoint at line 20 shifts it to line 17",
+      "initial": {
+        "uri": "file:///workspace/src/com/example/HelloServlet.java",
+        "breakpoints": [
+          {
+            "id": "bp-2",
+            "line": 20,
+            "column": 1,
+            "enabled": true,
+            "condition": "count > 0"
+          }
+        ]
+      },
+      "edit": {
+        "startLine": 5,
+        "linesDelta": -3,
+        "deletedCount": 3,
+        "transactionId": "tx-upstream-002"
+      },
+      "expected": {
+        "applied": true,
+        "breakpoints": [
+          {
+            "id": "bp-2",
+            "line": 17,
+            "column": 1,
+            "enabled": true,
+            "condition": "count > 0"
+          }
+        ]
+      }
+    }
+  ]
+}

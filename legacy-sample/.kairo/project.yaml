@@ -1,8 +1,8 @@
 schemaVersion: 1
-name: legacy-sample
+name: legacy-sample-repo
 root: .
 sourceRoots:
-    - src
+    - src/main/java
 resourceRoots:
     - src/main/resources
 libraryDirs:
@@ -12,8 +12,8 @@ outputDir: build/classes
 buildFile: build.xml
 buildTargets:
     - compile
-sourceLevel: "1.6"
-targetLevel: "1.6"
+sourceLevel: "1.8"
+targetLevel: "1.8"
 encoding: gbk
 buildTool: ant
 contextPath: /

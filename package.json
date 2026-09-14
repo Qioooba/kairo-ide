@@ -29,6 +29,7 @@
     "test:e2e:desktop": "pnpm --filter @kairo/e2e test:desktop",
     "test:visual:web": "pnpm --filter @kairo/e2e test:visual",
     "test:a11y:web": "pnpm --filter @kairo/e2e test:a11y",
+    "check:architecture": "node scripts/check-architecture-boundaries.cjs",
     "verify": "pnpm build && pnpm typecheck && pnpm lint && pnpm test",
     "test:tmp-setup": "node -e \"require('./tests/setup-tmp.cjs'); console.log('KAIRO_TMP =', process.env.KAIRO_TMP); console.log('os.tmpdir() =', require('os').tmpdir());\"",
     "clean:c-drive": "pwsh -ExecutionPolicy Bypass -File scripts/clean-c-drive.ps1",

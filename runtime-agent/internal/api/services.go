@@ -183,16 +183,18 @@ type StartServerRequest struct {
 
 // ServerResponse is the safe API response shape for server info.
 type ServerResponse struct {
-	ID          string       `json:"id"`
-	ProjectID   string       `json:"projectId"`
-	Type        string       `json:"type"`
-	State       string       `json:"state"`
-	PID         int          `json:"pid"`
-	Ports       *ServerPorts `json:"ports,omitempty"`
-	StartedAt   time.Time    `json:"startedAt"`
-	ContextPath string       `json:"contextPath"`
-	LastError   string       `json:"lastError,omitempty"`
-	URL         string       `json:"url,omitempty"`
+	ID                string       `json:"id"`
+	ProjectID         string       `json:"projectId"`
+	Type              string       `json:"type"`
+	State             string       `json:"state"`
+	PID               int          `json:"pid"`
+	Ports             *ServerPorts `json:"ports,omitempty"`
+	StartedAt         time.Time    `json:"startedAt"`
+	ContextPath       string       `json:"contextPath"`
+	LastError         string       `json:"lastError,omitempty"`
+	URL               string       `json:"url,omitempty"`
+	RuntimeInstanceID string       `json:"runtimeInstanceId,omitempty"`
+	Generation        int          `json:"generation,omitempty"`
 }
 
 // ServerPorts exposes only user-facing ports.

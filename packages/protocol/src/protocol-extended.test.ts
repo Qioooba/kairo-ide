@@ -93,11 +93,11 @@ test('err() with retryable false', () => {
   assert.strictEqual(e.error.retryable, false);
 });
 
-test('err() with all 20 error codes', () => {
+test('err() with all 23 error codes', () => {
   const codes: KairoErrorCode[] = [
     'unauthenticated', 'forbidden', 'not_found', 'conflict', 'rate_limited',
     'invalid_request', 'path_forbidden', 'toolchain_missing', 'runtime_missing',
-    'unsupported_jdk_target',
+    'unsupported_jdk_target', 'target_ambiguous', 'target_not_found', 'stale_target',
     'internal', 'io_error', 'process_spawn_failed', 'compile_failed',
     'deploy_failed', 'debug_attach_failed', 'cancelled', 'timeout', 'plugin_crashed', 'unsupported',
   ];

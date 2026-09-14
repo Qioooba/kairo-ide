@@ -313,3 +313,76 @@ test('encodeStream tolerates undefined (empty New File via FileService.doCreate,
   const out = await svc.encodeStream(undefined, { encoding: 'gbk' });
   assert.ok(out !== undefined);
 });
+
+test('KairoFileService.isEncodingRefusal and UnrepresentableEncodingError (T34)', () => {
+  const { UnrepresentableEncodingError, isEncodingRefusal } = require('../../lib/browser/kairo-file-service');
+  const err = new UnrepresentableEncodingError('gbk', 'emoji U+1F525 not supported');
+  assert.equal(isEncodingRefusal(err), true);
+  assert.ok(err.message.includes('gbk'));
+  assert.ok(err.message.includes('U+1F525'));
+  assert.equal(isEncodingRefusal(new Error('character not representable in gbk')), true);
+  assert.equal(isEncodingRefusal(new Error('file not found')), false);
+});
+
+test('KairoFileService.write rejects unrepresentable GBK characters before disk write (T34)', async () => {
+  const { KairoFileService, UnrepresentableEncodingError } = require('../../lib/browser/kairo-file-service');
+  const URI = require('@theia/core/lib/common/uri').default;
+
+  let errorReported = '';
+  const mockMessages = {
+    error(msg) {
+      errorReported = msg;
+    },
+  };
+
+  const mockEncodingSvc = {
+    getEncoding(_uri) {
+      return 'gbk';
+    },
+    async validateEncoding(text, encoding) {
+      if (text.includes('🔥') && encoding === 'gbk') {
+        return { valid: false, error: 'emoji rune U+1F525 outside GBK repertoire' };
+      }
+      return { valid: true };
+    },
+    invalidateEncodingCache(_uri) {},
+  };
+
+  let superWriteCalled = false;
+  class MockParentFileService {
+    async write(resource, value, options) {
+      superWriteCalled = true;
+      return { encoding: 'gbk' };
+    }
+  }
+
+  const fileService = Object.create(KairoFileService.prototype);
+  fileService.kairoMessages = mockMessages;
+  fileService.encodingSvc = mockEncodingSvc;
+  fileService.shouldEscapeProperties = () => false;
+
+  const origProto = Object.getPrototypeOf(KairoFileService.prototype);
+  Object.setPrototypeOf(KairoFileService.prototype, MockParentFileService.prototype);
+
+  try {
+    const uri = new URI('file:///srv/legacy/app/src/Hello.java');
+    await assert.rejects(
+      async () => {
+        await fileService.write(uri, '你好 🔥 世界', { encoding: 'gbk' });
+      },
+      (err) => {
+        return err instanceof UnrepresentableEncodingError && err.encoding === 'gbk';
+      }
+    );
+
+    assert.equal(superWriteCalled, false, 'super.write must NOT be called when validation fails');
+    assert.ok(errorReported.includes('gbk'), 'error notification must mention gbk');
+    assert.ok(errorReported.includes('U+1F525'), 'error notification must mention U+1F525');
+
+    // Valid text succeeds and passes through to super.write
+    await fileService.write(uri, '你好世界', { encoding: 'gbk' });
+    assert.equal(superWriteCalled, true, 'valid text must proceed to super.write');
+  } finally {
+    Object.setPrototypeOf(KairoFileService.prototype, origProto);
+  }
+});

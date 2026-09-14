@@ -206,11 +206,11 @@ test('ResponseEnvelope payload can be any type', () => {
 
 // ---- Error code contract ----
 
-test('All 20 KairoErrorCodes are non-empty strings', () => {
+test('All 23 KairoErrorCodes are non-empty strings', () => {
   const codes: KairoErrorCode[] = [
     'unauthenticated', 'forbidden', 'not_found', 'conflict', 'rate_limited',
     'invalid_request', 'path_forbidden', 'toolchain_missing', 'runtime_missing',
-    'unsupported_jdk_target',
+    'unsupported_jdk_target', 'target_ambiguous', 'target_not_found', 'stale_target',
     'internal', 'io_error', 'process_spawn_failed', 'compile_failed',
     'deploy_failed', 'debug_attach_failed', 'cancelled', 'timeout', 'plugin_crashed', 'unsupported',
   ];
@@ -218,14 +218,14 @@ test('All 20 KairoErrorCodes are non-empty strings', () => {
     assert.ok(code.length > 0);
     assert.strictEqual(typeof code, 'string');
   }
-  assert.strictEqual(codes.length, 20);
+  assert.strictEqual(codes.length, 23);
 });
 
 test('KairoErrorCode is unique (no duplicates)', () => {
   const codes: KairoErrorCode[] = [
     'unauthenticated', 'forbidden', 'not_found', 'conflict', 'rate_limited',
     'invalid_request', 'path_forbidden', 'toolchain_missing', 'runtime_missing',
-    'unsupported_jdk_target',
+    'unsupported_jdk_target', 'target_ambiguous', 'target_not_found', 'stale_target',
     'internal', 'io_error', 'process_spawn_failed', 'compile_failed',
     'deploy_failed', 'debug_attach_failed', 'cancelled', 'timeout', 'plugin_crashed', 'unsupported',
   ];

@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "description": "Golden test fixture for DAP disconnect policy across launch/attach modes (Lithe L10)",
+  "cases": [
+    {
+      "id": "disconnect-owned-launch",
+      "description": "Owned launch process must terminate debuggee upon disconnect",
+      "input": {
+        "requestKind": "launch",
+        "ownsDebuggee": true,
+        "adapterSupportsTerminateDebuggee": true,
+        "restart": false
+      },
+      "expected": {
+        "terminateDebuggee": true,
+        "restart": false
+      }
+    },
+    {
+      "id": "disconnect-attached-external",
+      "description": "Attached external process (e.g. Tomcat) must NEVER be terminated upon disconnect",
+      "input": {
+        "requestKind": "attach",
+        "ownsDebuggee": false,
+        "adapterSupportsTerminateDebuggee": true,
+        "restart": false
+      },
+      "expected": {
+        "terminateDebuggee": false,
+        "restart": false
+      }
+    },
+    {
+      "id": "disconnect-unstarted-session",
+      "description": "Unstarted or unowned session must not kill target debuggee",
+      "input": {
+        "requestKind": "launch",
+        "ownsDebuggee": false,
+        "adapterSupportsTerminateDebuggee": true,
+        "restart": false
+      },
+      "expected": {
+        "terminateDebuggee": false,
+        "restart": false
+      }
+    }
+  ]
+}

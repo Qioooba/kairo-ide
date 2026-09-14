@@ -17,6 +17,7 @@ import (
 // JDWP packet constants.
 const (
 	jdwpPacketHeaderSize = 11
+	maxJDWPPacketLength  = 32 * 1024 * 1024 // 32MB upper bound to prevent OOM (F11 / T22)
 
 	// JDWP command set identifiers.
 	cmdSetVirtualMachine = 1
@@ -118,16 +119,24 @@ func ReadJDWPPacket(r io.Reader) (*JDWPPacket, error) {
 	if _, err := io.ReadFull(r, header); err != nil {
 		return nil, fmt.Errorf("read JDWP header: %w", err)
 	}
+	rawLen := binary.BigEndian.Uint32(header[0:4])
+	if rawLen < jdwpPacketHeaderSize {
+		return nil, fmt.Errorf("invalid JDWP packet length %d: minimum header size is %d", rawLen, jdwpPacketHeaderSize)
+	}
+	if rawLen > maxJDWPPacketLength {
+		return nil, fmt.Errorf("invalid JDWP packet length %d: exceeds maximum allowed size %d", rawLen, maxJDWPPacketLength)
+	}
+
 	pkt := &JDWPPacket{
-		Length: int32(binary.BigEndian.Uint32(header[0:4])),
+		Length: int32(rawLen),
 		ID:     int32(binary.BigEndian.Uint32(header[4:8])),
 		Flags:  header[8],
 	}
 
+	dataLen := rawLen - jdwpPacketHeaderSize
 	if pkt.Flags == 0x80 {
-		// Reply packet: error code is in the first 2 bytes of data.
+		// Reply packet: error code is in the first 2 bytes of command field in header.
 		pkt.ErrCode = int16(binary.BigEndian.Uint16(header[9:11]))
-		dataLen := pkt.Length - jdwpPacketHeaderSize
 		if dataLen > 0 {
 			pkt.Data = make([]byte, dataLen)
 			if _, err := io.ReadFull(r, pkt.Data); err != nil {
@@ -141,7 +150,6 @@ func ReadJDWPPacket(r io.Reader) (*JDWPPacket, error) {
 		// Command packet.
 		pkt.CmdSet = header[9]
 		pkt.Cmd = header[10]
-		dataLen := pkt.Length - jdwpPacketHeaderSize
 		if dataLen > 0 {
 			pkt.Data = make([]byte, dataLen)
 			if _, err := io.ReadFull(r, pkt.Data); err != nil {
@@ -202,6 +210,39 @@ func (r *JDWPDataReader) ReadLong() (int64, error) {
 	return v, nil
 }
 
+// ReadChar reads a 2-byte unsigned character (UTF-16 code point, F08 / T20).
+func (r *JDWPDataReader) ReadChar() (uint16, error) {
+	if r.pos+2 > len(r.data) {
+		return 0, fmt.Errorf("JDWP read char: unexpected end of data")
+	}
+	v := binary.BigEndian.Uint16(r.data[r.pos : r.pos+2])
+	r.pos += 2
+	return v, nil
+}
+
+// ReadShort reads a 2-byte signed short integer (F08 / T20).
+func (r *JDWPDataReader) ReadShort() (int16, error) {
+	if r.pos+2 > len(r.data) {
+		return 0, fmt.Errorf("JDWP read short: unexpected end of data")
+	}
+	v := int16(binary.BigEndian.Uint16(r.data[r.pos : r.pos+2]))
+	r.pos += 2
+	return v, nil
+}
+
+// ReadID reads an ID with the specified size (typically 4 or 8 bytes, F10 / T23).
+func (r *JDWPDataReader) ReadID(size int) (int64, error) {
+	switch size {
+	case 4:
+		v, err := r.ReadInt()
+		return int64(v), err
+	case 8:
+		return r.ReadLong()
+	default:
+		return 0, fmt.Errorf("invalid JDWP ID size %d: must be 4 or 8", size)
+	}
+}
+
 // ReadObjectID reads an 8-byte object ID.
 func (r *JDWPDataReader) ReadObjectID() (int64, error) {
 	return r.ReadLong()
@@ -221,8 +262,8 @@ func (r *JDWPDataReader) ReadString() (string, error) {
 	if length < 0 {
 		return "", fmt.Errorf("JDWP read string: negative length %d", length)
 	}
-	if r.pos+int(length) > len(r.data) {
-		return "", fmt.Errorf("JDWP read string: unexpected end of data")
+	if int(length) > r.Remaining() {
+		return "", fmt.Errorf("JDWP read string: length %d exceeds remaining data %d", length, r.Remaining())
 	}
 	s := string(r.data[r.pos : r.pos+int(length)])
 	r.pos += int(length)
@@ -236,8 +277,7 @@ func (r *JDWPDataReader) ReadUntaggedValue(tag byte) (interface{}, error) {
 		b, err := r.ReadByte()
 		return int8(b), err
 	case jdwpTagChar:
-		v, err := r.ReadInt()
-		return uint16(v), err
+		return r.ReadChar()
 	case jdwpTagDouble:
 		return r.ReadDouble()
 	case jdwpTagFloat:
@@ -247,8 +287,7 @@ func (r *JDWPDataReader) ReadUntaggedValue(tag byte) (interface{}, error) {
 	case jdwpTagLong:
 		return r.ReadLong()
 	case jdwpTagShort:
-		v, err := r.ReadInt()
-		return int16(v), err
+		return r.ReadShort()
 	case jdwpTagBoolean:
 		return r.ReadBool()
 	case jdwpTagString, jdwpTagArray, jdwpTagObject, jdwpTagThread,
@@ -291,7 +330,10 @@ func (r *JDWPDataReader) ReadTaggedValue() (byte, interface{}, error) {
 
 // SkipBytes skips n bytes.
 func (r *JDWPDataReader) SkipBytes(n int) error {
-	if r.pos+n > len(r.data) {
+	if n < 0 {
+		return fmt.Errorf("JDWP skip: negative byte count %d", n)
+	}
+	if r.pos+n > len(r.data) || r.pos+n < r.pos {
 		return fmt.Errorf("JDWP skip: unexpected end of data")
 	}
 	r.pos += n
@@ -336,6 +378,29 @@ func (w *JDWPDataWriter) WriteLong(v int64) {
 	w.data = append(w.data, buf...)
 }
 
+// WriteChar writes a 2-byte unsigned character (UTF-16 code point, F08 / T20).
+func (w *JDWPDataWriter) WriteChar(v uint16) {
+	buf := make([]byte, 2)
+	binary.BigEndian.PutUint16(buf, v)
+	w.data = append(w.data, buf...)
+}
+
+// WriteShort writes a 2-byte signed short integer (F08 / T20).
+func (w *JDWPDataWriter) WriteShort(v int16) {
+	buf := make([]byte, 2)
+	binary.BigEndian.PutUint16(buf, uint16(v))
+	w.data = append(w.data, buf...)
+}
+
+// WriteID writes an ID with the specified size (typically 4 or 8 bytes, F10 / T23).
+func (w *JDWPDataWriter) WriteID(id int64, size int) {
+	if size == 4 {
+		w.WriteInt(int32(id))
+	} else {
+		w.WriteLong(id)
+	}
+}
+
 // WriteObjectID writes an 8-byte object ID.
 func (w *JDWPDataWriter) WriteObjectID(id int64) {
 	w.WriteLong(id)
@@ -347,33 +412,112 @@ func (w *JDWPDataWriter) WriteString(s string) {
 	w.data = append(w.data, []byte(s)...)
 }
 
-// WriteTaggedValue writes a tag byte followed by the value.
+// WriteTaggedValue writes a tag byte followed by the value (F08 / T20).
 func (w *JDWPDataWriter) WriteTaggedValue(tag byte, value interface{}) {
+	if w == nil {
+		return
+	}
 	w.WriteByte(tag)
+	if value == nil {
+		switch tag {
+		case jdwpTagByte, jdwpTagBoolean:
+			w.WriteByte(0)
+		case jdwpTagChar, jdwpTagShort:
+			w.WriteShort(0)
+		case jdwpTagFloat:
+			w.WriteFloat(0)
+		case jdwpTagDouble:
+			w.WriteDouble(0)
+		case jdwpTagInt:
+			w.WriteInt(0)
+		case jdwpTagLong, jdwpTagString, jdwpTagArray, jdwpTagObject, jdwpTagThread,
+			jdwpTagThreadGroup, jdwpTagClassLoader, jdwpTagClassObject:
+			w.WriteLong(0)
+		default:
+			w.WriteInt(0)
+		}
+		return
+	}
 	switch tag {
 	case jdwpTagByte:
-		w.WriteByte(byte(value.(int8)))
+		switch b := value.(type) {
+		case int8:
+			w.WriteByte(byte(b))
+		case byte:
+			w.WriteByte(b)
+		case int:
+			w.WriteByte(byte(b))
+		default:
+			w.WriteByte(0)
+		}
 	case jdwpTagChar:
-		w.WriteInt(int32(value.(uint16)))
+		switch c := value.(type) {
+		case uint16:
+			w.WriteChar(c)
+		case rune: // rune is alias for int32
+			w.WriteChar(uint16(c))
+		case int:
+			w.WriteChar(uint16(c))
+		default:
+			w.WriteChar(0)
+		}
 	case jdwpTagDouble:
-		w.WriteDouble(value.(float64))
+		if d, ok := value.(float64); ok {
+			w.WriteDouble(d)
+		} else {
+			w.WriteDouble(0)
+		}
 	case jdwpTagFloat:
-		w.WriteFloat(value.(float32))
+		if f, ok := value.(float32); ok {
+			w.WriteFloat(f)
+		} else {
+			w.WriteFloat(0)
+		}
 	case jdwpTagInt:
-		w.WriteInt(value.(int32))
+		switch i := value.(type) {
+		case int32:
+			w.WriteInt(i)
+		case int:
+			w.WriteInt(int32(i))
+		default:
+			w.WriteInt(0)
+		}
 	case jdwpTagLong:
-		w.WriteLong(value.(int64))
+		switch l := value.(type) {
+		case int64:
+			w.WriteLong(l)
+		case int:
+			w.WriteLong(int64(l))
+		default:
+			w.WriteLong(0)
+		}
 	case jdwpTagShort:
-		w.WriteInt(int32(value.(int16)))
+		switch s := value.(type) {
+		case int16:
+			w.WriteShort(s)
+		case int:
+			w.WriteShort(int16(s))
+		case int32:
+			w.WriteShort(int16(s))
+		default:
+			w.WriteShort(0)
+		}
 	case jdwpTagBoolean:
-		if value.(bool) {
+		if b, ok := value.(bool); ok && b {
 			w.WriteByte(1)
 		} else {
 			w.WriteByte(0)
 		}
 	case jdwpTagString, jdwpTagArray, jdwpTagObject, jdwpTagThread,
 		jdwpTagThreadGroup, jdwpTagClassLoader, jdwpTagClassObject:
-		w.WriteObjectID(value.(int64))
+		switch id := value.(type) {
+		case int64:
+			w.WriteObjectID(id)
+		case int:
+			w.WriteObjectID(int64(id))
+		default:
+			w.WriteObjectID(0)
+		}
 	}
 }
 
@@ -412,61 +556,120 @@ func float32ToBits(v float32) uint32 {
 	return math.Float32bits(v)
 }
 
-// jdwpErrorMessage returns a human-readable error message for a JDWP error code.
+// jdwpErrorMessage returns the official specification name for a JDWP error code (F12 / T24).
+// Reference: https://docs.oracle.com/javase/6/docs/technotes/guides/jpda/jdwp/jdwp-protocol.html#JDWP_Error
 func jdwpErrorMessage(code int16) string {
 	switch code {
+	case 0:
+		return "NONE"
 	case 10:
-		return "VM_DEAD"
-	case 11:
-		return "THREAD_NOT_SUSPENDED"
-	case 20:
-		return "INVALID_CLASS"
-	case 21:
-		return "INVALID_CLASS_FORMAT"
-	case 22:
-		return "INVALID_CLASS_LOADER"
-	case 23:
-		return "INVALID_FIELDID"
-	case 24:
-		return "INVALID_FRAMEID"
-	case 25:
-		return "INVALID_INTERFACE"
-	case 30:
-		return "INVALID_LENGTH"
-	case 31:
-		return "INVALID_LOCATION"
-	case 32:
-		return "INVALID_METHODID"
-	case 33:
-		return "INVALID_OBJECT"
-	case 34:
-		return "INVALID_STRING"
-	case 35:
 		return "INVALID_THREAD"
-	case 36:
+	case 11:
 		return "INVALID_THREAD_GROUP"
-	case 40:
-		return "INVALID_SLOT"
-	case 41:
-		return "INVALID_TAG"
-	case 42:
-		return "INVALID_ARRAY"
-	case 50:
+	case 12:
+		return "INVALID_PRIORITY"
+	case 13:
+		return "THREAD_NOT_SUSPENDED"
+	case 14:
+		return "THREAD_SUSPENDED"
+	case 15:
+		return "THREAD_NOT_ALIVE"
+	case 20:
+		return "INVALID_OBJECT"
+	case 21:
+		return "INVALID_CLASS"
+	case 22:
+		return "CLASS_NOT_PREPARED"
+	case 23:
+		return "INVALID_METHODID"
+	case 24:
+		return "INVALID_LOCATION"
+	case 25:
+		return "INVALID_FIELDID"
+	case 30:
+		return "INVALID_FRAMEID"
+	case 31:
+		return "NO_MORE_FRAMES"
+	case 32:
+		return "OPAQUE_FRAME"
+	case 33:
+		return "NOT_CURRENT_FRAME"
+	case 34:
 		return "TYPE_MISMATCH"
+	case 35:
+		return "INVALID_SLOT"
+	case 40:
+		return "DUPLICATE"
+	case 41:
+		return "NOT_FOUND"
+	case 50:
+		return "INVALID_MONITOR"
+	case 51:
+		return "NOT_MONITOR_OWNER"
+	case 52:
+		return "INTERRUPT"
 	case 60:
-		return "INVALID_EVENT_TYPE"
+		return "INVALID_CLASS_FORMAT"
+	case 61:
+		return "CIRCULAR_CLASS_DEFINITION"
+	case 62:
+		return "FAILS_VERIFICATION"
+	case 63:
+		return "ADD_METHOD_NOT_IMPLEMENTED"
+	case 64:
+		return "SCHEMA_CHANGE_NOT_IMPLEMENTED"
+	case 65:
+		return "INVALID_TYPESTATE"
+	case 66:
+		return "HIERARCHY_CHANGE_NOT_IMPLEMENTED"
+	case 67:
+		return "DELETE_METHOD_NOT_IMPLEMENTED"
+	case 68:
+		return "CLASS_MODIFIERS_CHANGE_NOT_IMPLEMENTED"
+	case 69:
+		return "METHOD_MODIFIERS_CHANGE_NOT_IMPLEMENTED"
 	case 99:
 		return "NOT_IMPLEMENTED"
 	case 100:
-		return "ABSENT_INFORMATION"
+		return "NULL_POINTER"
 	case 101:
-		return "INVALID_TYPESTATE"
+		return "ABSENT_INFORMATION"
+	case 102:
+		return "INVALID_EVENT_TYPE"
+	case 103:
+		return "ILLEGAL_ARGUMENT"
 	case 110:
-		return "NATIVE_METHOD"
+		return "OUT_OF_MEMORY"
 	case 111:
-		return "OPAQUE_FRAME"
+		return "ACCESS_DENIED"
 	case 112:
-		return "NO_MORE_FRAMES"
+		return "VM_DEAD"
+	case 113:
+		return "INTERNAL"
+	case 115:
+		return "UNATTACHED_THREAD"
+	case 500:
+		return "INVALID_TAG"
+	case 502:
+		return "ALREADY_INVOKING"
+	case 503:
+		return "INVALID_INDEX"
+	case 504:
+		return "INVALID_LENGTH"
+	case 506:
+		return "INVALID_STRING"
+	case 507:
+		return "INVALID_CLASS_LOADER"
+	case 508:
+		return "INVALID_ARRAY"
+	case 510:
+		return "TRANSPORT_LOAD"
+	case 511:
+		return "TRANSPORT_INIT"
+	case 512:
+		return "NATIVE_METHOD"
+	case 513:
+		return "INVALID_COUNT"
 	default:
 		return fmt.Sprintf("UNKNOWN_ERROR_%d", code)
 	}

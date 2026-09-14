@@ -1,0 +1,24 @@
+=== RUN   TestCheckToolchainCompatibility_Valid
+--- PASS: TestCheckToolchainCompatibility_Valid (0.00s)
+=== RUN   TestCheckToolchainCompatibility_Incompatible
+--- PASS: TestCheckToolchainCompatibility_Incompatible (0.00s)
+=== RUN   TestReadClassMajorVersion_Valid
+--- PASS: TestReadClassMajorVersion_Valid (0.00s)
+=== RUN   TestReadClassMajorVersion_Truncated
+--- PASS: TestReadClassMajorVersion_Truncated (0.00s)
+=== RUN   TestReadClassMajorVersion_InvalidMagic
+--- PASS: TestReadClassMajorVersion_InvalidMagic (0.00s)
+=== RUN   TestValidateClassMajorForJava6
+--- PASS: TestValidateClassMajorForJava6 (0.00s)
+=== RUN   TestReadJDWPHandshake_Success
+--- PASS: TestReadJDWPHandshake_Success (0.00s)
+=== RUN   TestReadJDWPHandshake_Fragmented
+--- PASS: TestReadJDWPHandshake_Fragmented (0.00s)
+=== RUN   TestReadJDWPHandshake_Invalid
+--- PASS: TestReadJDWPHandshake_Invalid (0.00s)
+=== RUN   TestEncodeDecodeCharAndShort
+--- PASS: TestEncodeDecodeCharAndShort (0.00s)
+=== RUN   TestRunSearchWithJoin_Cancellation
+--- PASS: TestRunSearchWithJoin_Cancellation (0.00s)
+PASS
+ok  	github.com/Qioooba/kairo-ide/kairo-audit/regression	0.278s

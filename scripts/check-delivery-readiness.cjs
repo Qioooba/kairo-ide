@@ -106,6 +106,7 @@ console.log('');
 console.log(`${BOLD}${CYAN}[1/9]${RESET} ${BOLD}Critical Scripts${RESET}`);
 
 const criticalScripts = [
+  'scripts/check-architecture-boundaries.cjs',
   'scripts/generate-sbom.cjs',
   'scripts/sign-release.cjs',
   'scripts/verify-reproducible.cjs',
@@ -269,6 +270,18 @@ check('docs', 'docs/security.md exists', () => fileExists('docs/security.md'));
 check('docs', 'docs/product-requirements.md exists', () => fileExists('docs/product-requirements.md'));
 check('docs', 'Code review report exists', () => fileExists('docs/progress/releases/code-review-20260723.md'));
 check('docs', 'Delivery checklist exists', () => fileExists('docs/progress/releases/delivery-checklist-20260723.md'));
+check('docs', 'Release compatibility specification exists', () => fileExists('docs/RELEASE_COMPATIBILITY_SPECIFICATION_2026-09-13.md'));
+check('docs', 'Refactoring audit and plan document exists', () => fileExists('docs/Kairo_vs_Lithe_Source_Audit_and_Refactoring_Plan_2026-09-12.md'));
+check('docs', 'Refactoring progress document exists', () => fileExists('docs/progress/REFACTORING_PROGRESS_2026-09-12.md'));
+
+// Acceptance tests & Audit reproducibility
+check('acceptance', 'Multi-target HotSwap acceptance test exists', () => fileExists('tests/acceptance/multi-target-hotswap.test.cjs'));
+check('acceptance', 'Fault injection acceptance test exists', () => fileExists('tests/acceptance/fault-injection.test.cjs'));
+check('acceptance', 'Upstream Lithe fixtures manifest exists', () => fileExists('tests/fixtures/upstream/lithe/debug/source-manifest.json'));
+check('acceptance', 'Upstream fixtures test exists', () => fileExists('tests/fixtures/upstream/lithe/debug/upstream-fixtures.test.cjs'));
+check('audit', 'Audit reproduction package README exists', () => fileExists('kairo-audit/README.md'));
+check('audit', 'Audit implementation backlog exists', () => fileExists('kairo-audit/implementation-backlog.json'));
+check('audit', 'Audit regression guards exist', () => fileExists('kairo-audit/regression/guards.go'));
 
 // ================================================================
 // SECTION 9: CI / Baseline

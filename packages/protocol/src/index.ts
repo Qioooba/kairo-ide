@@ -62,6 +62,9 @@ export type KairoErrorCode =
   | 'toolchain_missing'
   | 'runtime_missing'
   | 'unsupported_jdk_target'
+  | 'target_ambiguous'
+  | 'target_not_found'
+  | 'stale_target'
   // 5xx-style
   | 'internal'
   | 'io_error'
@@ -74,6 +77,154 @@ export type KairoErrorCode =
   | 'plugin_crashed'
   | 'unsupported';
 
+/**
+ * Immutable debug target binding contract (PR03 / F03).
+ * Disambiguates server, project, session and runtime instances.
+ */
+export interface DebugTargetBinding {
+  projectId: string;
+  serverId?: string;
+  runConfigurationId?: string;
+  runtimeInstanceId?: string;
+  deploymentGeneration?: number;
+  debugSessionId?: string;
+  debugSessionGeneration?: number;
+  requestKind?: 'launch' | 'attach';
+  ownsDebuggee?: boolean;
+  classLoaderId?: string;
+}
+
+/**
+ * Breakpoint migration descriptor (PR14 / T47).
+ * Describes a line coordinate edit event for source breakpoints.
+ */
+export interface BreakpointMigrationDelta {
+  uri: string;
+  startLine: number;
+  linesDelta: number; // positive = inserted lines, negative = deleted lines
+  deletedCount?: number;
+  transactionId?: string;
+}
+
+/**
+ * Variable page descriptor for large array/collection virtualization (PR14 / T49).
+ */
+export interface VariablePageDescriptor {
+  variablesReference: number;
+  start: number;
+  count: number;
+  totalCount: number;
+  label: string;
+}
+
+/**
+ * Stop generation context (PR14 / T49).
+ * Prevents stale responses from previous pauses corrupting current debug view.
+ */
+export interface StopGenerationContext {
+  sessionId: string;
+  stopGeneration: number;
+  stoppedReason?: string;
+  timestamp: number;
+}
+
+/**
+ * Disconnect policy options (PR14 / T50).
+ * Prevents killing external Tomcat/WAS processes on attach debug disconnect.
+ */
+export interface DisconnectPolicyOptions {
+  requestKind: 'launch' | 'attach' | string;
+  ownsDebuggee?: boolean;
+  adapterSupportsTerminateDebuggee?: boolean;
+  restart?: boolean;
+}
+
+/**
+ * Phased startup stage identifiers (PR15).
+ * P0: processStart, firstVisible
+ * P1: editorReady
+ * P2: projectModelReady
+ * P3: javaReady
+ * P4: debugReady, serverReady
+ */
+export type StartupStage =
+  | 'processStart'
+  | 'firstVisible'
+  | 'editorReady'
+  | 'projectModelReady'
+  | 'javaReady'
+  | 'debugReady'
+  | 'serverReady';
+
+export interface StartupMilestone {
+  stage: StartupStage;
+  timestamp: number;
+  durationMs?: number;
+  metadata?: Record<string, unknown>;
+}
+
+export interface StartupReport {
+  milestones: StartupMilestone[];
+  totalDurationMs: number;
+  failedStages?: Partial<Record<StartupStage, string>>;
+}
+
+/**
+ * 4GB environment resource budgeting options (PR15).
+ */
+export interface ResourceBudgetConfig {
+  maxMemoryMb: number;
+  maxFileCacheEntries: number;
+  maxConcurrentHeavyTasks: number;
+  maxLogRingLines: number;
+}
+
+/**
+ * Lightweight file manifest entry (PR15).
+ */
+export interface FileManifestEntry {
+  relativePath: string;
+  size: number;
+  mtime: number;
+  isDirectory: boolean;
+  hash?: string;
+}
+
+/**
+ * Cached workspace file manifest snapshot (PR15).
+ */
+export interface WorkspaceFileManifest {
+  rootUri: string;
+  revision: number;
+  files: FileManifestEntry[];
+  timestamp: number;
+}
+
+/**
+ * Workspace trust status (PR16 / T52).
+ */
+export type WorkspaceTrustState = 'trusted' | 'untrusted' | 'unknown';
+
+/**
+ * Operations requiring explicit workspace trust (PR16 / T52).
+ */
+export type TrustedOperation =
+  | 'build_script'
+  | 'server_autostart'
+  | 'custom_toolchain'
+  | 'remote_attach'
+  | 'database_write';
+
+/**
+ * Security policy configuration (PR16 / T51).
+ */
+export interface SecurityPolicyConfig {
+  allowedAgentHosts: string[];
+  requireSecretAuth: boolean;
+  enforceWorkspaceTrust: boolean;
+}
+
+
 export interface KairoError {
   code: KairoErrorCode;
   /** Human-readable, never machine-parsed. */
@@ -82,6 +233,21 @@ export interface KairoError {
   details?: unknown;
   /** When true, the client may retry the same call after backoff. */
   retryable?: boolean;
+}
+
+/**
+ * AgentState represents the state of the Kairo Runtime Agent process (DK-P1-2 / F18).
+ * Persisted atomically in <dataDir>/agent-state.json for process discovery and handover.
+ */
+export interface AgentState {
+  instanceId: string;
+  generation: number;
+  pid: number;
+  port: number;
+  bindAddress: string;
+  startedAt: string;
+  status: 'starting' | 'ready' | 'handing_over' | 'shutting_down' | 'stopped' | 'failed';
+  error?: string;
 }
 
 /* ------------------------------------------------------------------ */
@@ -99,7 +265,7 @@ export type EncodingId =
   | 'us-ascii'
   | (string & {}); // user-registered alias
 
-export type Eol = 'lf' | 'crlf' | 'cr';
+export type Eol = 'lf' | 'crlf' | 'cr' | 'mixed';
 
 export interface DocumentEncoding {
   current: EncodingId;
@@ -470,6 +636,11 @@ export interface SearchStreamEvent {
   total: number;
   done: boolean;
   error?: string;
+  skipped?: number;
+  truncated?: boolean;
+  cancelled?: boolean;
+  durationMs?: number;
+  filesSearched?: number;
 }
 
 export interface EncodingDetectRequest {
@@ -803,7 +974,17 @@ export interface EndpointMap {
   // JVM incremental compilation and hot reload
   'POST /api/v1/jvm/compile-incremental': { request: { files?: string[]; projectId?: string }; response: { state: string; filesCompiled?: number; error?: string } };
   'POST /api/v1/jvm/compile': { request: { file: string; projectId?: string }; response: { success: boolean; classPath?: string; error?: string } };
-  'POST /api/v1/jvm/redefine': { request: { sourcePath: string; classPath?: string }; response: { success: boolean; error?: string } };
+  'POST /api/v1/jvm/redefine': {
+    request: {
+      sourcePath: string;
+      classPath?: string;
+      sourceUri?: string;
+      projectId?: string;
+      serverId?: string;
+      target?: DebugTargetBinding;
+    };
+    response: { success: boolean; error?: string };
+  };
   // Java detect / run (main + JUnit)
   'POST /api/v1/java/detect': {
     request: { filePath: string };
@@ -1074,6 +1255,54 @@ export type WsEvent =
       data?: { status: string };
       message?: string;
     };
+
+/* ------------------------------------------------------------------ */
+/*  Project Model (PR13 - T44, T45, T46)                              */
+/* ------------------------------------------------------------------ */
+
+export type ClasspathEntryKind = 'bootstrap' | 'compile' | 'test' | 'runtime';
+export type ClasspathEntrySource = 'manual' | 'web-inf-lib' | 'container' | 'build-file' | 'project-dep';
+
+export interface OrderedClasspathEntry {
+  path: string;
+  kind: ClasspathEntryKind;
+  source: ClasspathEntrySource;
+  resolved: boolean;
+  classes?: string[];
+}
+
+export interface ClasspathConflictDiagnostic {
+  className: string;
+  winningPath: string;
+  shadowedPath: string;
+  message: string;
+}
+
+export interface ProjectModelDiagnostic {
+  type: 'classpath_conflict' | 'unresolved_path' | 'incompatible_target' | 'configuration_error';
+  severity: 'error' | 'warning' | 'info';
+  message: string;
+  path?: string;
+  details?: Record<string, unknown>;
+}
+
+export interface ProjectModelSnapshot {
+  projectId: string;
+  rootPath: string;
+  revision: number;
+  sourceRoots: string[];
+  resourceRoots: string[];
+  webRoots: string[];
+  outputDir: string;
+  encoding: string;
+  sourceLevel: string;
+  targetLevel: string;
+  compiler: { toolchainId: string; version: string; executablePath?: string };
+  runtimeJvm: { id: string; home: string; version: string };
+  classpath: OrderedClasspathEntry[];
+  diagnostics: ProjectModelDiagnostic[];
+  updatedAt: string;
+}
 
 /* ------------------------------------------------------------------ */
 /*  Helpers (re-exported from index)                                   */

@@ -232,12 +232,27 @@ export class JavaDocumentSync {
   }
 
   dispose(): void {
-    for (const doc of this.docs.values()) {
+    for (const [uri, doc] of this.docs) {
       if (doc.timer) {
         clearTimeout(doc.timer);
       }
+      if (doc.openSent && this.effectiveState() === 'ready') {
+        try {
+          this.client.didClose(uri);
+        } catch (err) {
+          this.logger.warn(`[JavaDocumentSync] didClose failed on dispose for ${uri}: ${String(err)}`);
+        }
+      }
     }
     this.docs.clear();
+  }
+
+  /**
+   * Reset all tracked documents on workspace switch (T46).
+   * Ensures documents from the old workspace do not leak to the new workspace.
+   */
+  resetWorkspace(): void {
+    this.dispose();
   }
 
   private flushOpen(uri: string): void {
