@@ -121,7 +121,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - uses: pnpm/action-setup@v6.0.10
+      - uses: pnpm/action-setup@v6.1.0
         with:
           version: 9.15.9
 
@@ -189,7 +189,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - uses: pnpm/action-setup@v6.0.10
+      - uses: pnpm/action-setup@v6.1.0
         with:
           version: 9.15.9
 
@@ -242,7 +242,7 @@ jobs:
         working-directory: runtime-agent
         run: go build -trimpath -o ../dist/kairo-runtime ./cmd/kairo-runtime
 
-      - uses: pnpm/action-setup@v6.0.10
+      - uses: pnpm/action-setup@v6.1.0
         with:
           version: 9.15.9
 
@@ -312,7 +312,7 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
 
-      - uses: actions/setup-java@v5.7.0
+      - uses: actions/setup-java@v6.0.1
         with:
           distribution: 'temurin'
           java-version: '17'
@@ -420,12 +420,12 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - uses: actions/setup-java@v5.7.0
+      - uses: actions/setup-java@v6.0.1
         with:
           distribution: 'temurin'
           java-version: '17'
 
-      - uses: pnpm/action-setup@v6.0.10
+      - uses: pnpm/action-setup@v6.1.0
         with:
           version: 9.15.9
 
@@ -514,7 +514,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - uses: pnpm/action-setup@v6.0.10
+      - uses: pnpm/action-setup@v6.1.0
         with:
           version: 9.15.9
 
@@ -581,7 +581,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - uses: pnpm/action-setup@v6.0.10
+      - uses: pnpm/action-setup@v6.1.0
         with:
           version: 9.15.9
 
@@ -651,7 +651,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - uses: pnpm/action-setup@v6.0.10
+      - uses: pnpm/action-setup@v6.1.0
         if: matrix.component == 'frontend' || matrix.component == 'perf'
         with:
           version: 9.15.9
@@ -689,7 +689,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - uses: pnpm/action-setup@v6.0.10
+      - uses: pnpm/action-setup@v6.1.0
         with:
           version: 9.15.9
 
@@ -752,7 +752,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - uses: pnpm/action-setup@v6.0.10
+      - uses: pnpm/action-setup@v6.1.0
         with:
           version: 9.15.9
 
@@ -770,15 +770,15 @@ jobs:
         run: node scripts/ci/security-audit.cjs
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v4.37.8
+        uses: github/codeql-action/init@v4.38.0
         with:
           languages: go,javascript-typescript
 
       - name: Autobuild CodeQL
-        uses: github/codeql-action/autobuild@v4.37.8
+        uses: github/codeql-action/autobuild@v4.38.0
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v4.37.8
+        uses: github/codeql-action/analyze@v4.38.0
         with:
           category: "/language:go,javascript-typescript"
 
@@ -813,7 +813,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - uses: pnpm/action-setup@v6.0.10
+      - uses: pnpm/action-setup@v6.1.0
         with:
           version: 9.15.9
 
@@ -888,7 +888,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - uses: pnpm/action-setup@v6.0.10
+      - uses: pnpm/action-setup@v6.1.0
         with:
           version: 9.15.9
 
@@ -975,7 +975,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - uses: pnpm/action-setup@v6.0.10
+      - uses: pnpm/action-setup@v6.1.0
         with:
           version: 9.15.9
 
