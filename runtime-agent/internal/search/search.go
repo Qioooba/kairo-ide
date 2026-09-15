@@ -624,7 +624,7 @@ func isLikelyBinary(path string) bool {
 		".mp3", ".mp4", ".mov", ".avi", ".mkv", ".wav", ".ogg",
 		".woff", ".woff2", ".ttf", ".eot", ".otf",
 		".db", ".sqlite", ".sqlite3",
-		".log", ".map", ".bak", ".swp", ".swo":
+		".map", ".bak", ".swp", ".swo":
 		return true
 	}
 	return false

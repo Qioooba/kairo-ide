@@ -154,5 +154,34 @@ describe('VirtualDocumentManager (F17 / T38, T39)', () => {
     assert.equal(manager.isDocumentOpen(vUri1), false);
     assert.equal(manager.isDocumentOpen(vUri2), true, 'test.jsp2 was erroneously closed when closing test.jsp!');
   });
+
+  test('P0-4: generation monotonic increase prevents ABA lease resurrection on close then reopen', async () => {
+    const client = createMockClient();
+    const manager = new VirtualDocumentManager(client);
+
+    const vUri = 'jsp-scriptlet://test.jsp#block0';
+    const jspUri = 'file:///workspace/test.jsp';
+
+    // 1. First open: lease 1 acquired
+    const lease1 = await manager.acquireLease(vUri, 'class X { int a; }', 'java', jspUri);
+    assert.equal(lease1.isCurrent(), true);
+
+    // 2. User closes document (generation bumped, document deleted from map)
+    await manager.closeDocument(vUri);
+    assert.equal(lease1.isCurrent(), false);
+
+    // 3. Document reopened with same URI
+    const lease2 = await manager.acquireLease(vUri, 'class X { int b; }', 'java', jspUri);
+    assert.equal(lease2.isCurrent(), true);
+
+    // 4. CRITICAL ABA CHECK: lease1 must NOT resurrect because of monotonic generation!
+    assert.equal(lease1.isCurrent(), false, 'Old lease was resurrected after close and reopen (ABA bug)!');
+
+    // Generations must be strictly increasing
+    assert.ok(lease2.generation > lease1.generation, `lease2 generation (${lease2.generation}) must be > lease1 (${lease1.generation})`);
+
+    lease1.dispose();
+    lease2.dispose();
+  });
 });
 

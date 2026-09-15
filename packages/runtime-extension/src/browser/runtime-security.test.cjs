@@ -163,6 +163,23 @@ describe('Runtime Security - PR16 (F24 / T51 ~ T53)', () => {
         mgr.assertOperationAllowed(uri, 'server_autostart');
       }, WorkspaceUntrustedError);
     });
+
+    test('P0-6: normalizeUri decodes percent-encoded spaces and preserves Unix case sensitivity', () => {
+      const mgr = new WorkspaceTrustManager();
+
+      // Windows path with percent-encoding and mixed case
+      const winUriWithEncodedSpace = 'file:///C:/My%20Projects/App';
+      mgr.grantTrust(winUriWithEncodedSpace);
+      // Looking up with unencoded space and different drive case should match
+      assert.strictEqual(mgr.isWorkspaceTrusted('file:///c:/My Projects/App'), true);
+
+      // Linux case-sensitive path
+      const linuxUri1 = 'file:///home/user/MyProject';
+      const linuxUri2 = 'file:///home/user/myproject';
+      mgr.grantTrust(linuxUri1);
+      assert.strictEqual(mgr.isWorkspaceTrusted(linuxUri1), true);
+      assert.strictEqual(mgr.isWorkspaceTrusted(linuxUri2), false, 'Linux paths must preserve case sensitivity');
+    });
   });
 
   // =========================================================================

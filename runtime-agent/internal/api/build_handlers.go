@@ -34,7 +34,14 @@ func (s *Server) handleCustomBuild(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	opKey := OperationKey{Scope: cfg.ProjectRoot, Kind: OpCustomBuild, RequestID: env.RequestID}
+	normalizedRoot := cfg.ProjectRoot
+	if normalizedRoot != "" {
+		if abs, err := filepath.Abs(filepath.Clean(normalizedRoot)); err == nil {
+			normalizedRoot = abs
+		}
+	}
+
+	opKey := OperationKey{Scope: normalizedRoot, Kind: OpCustomBuild, RequestID: env.RequestID}
 	claim, rec := s.OperationRegistry().ClaimOrWait(r.Context(), opKey, rawPayload)
 	if claim == ClaimResultCancelled {
 		return

@@ -482,14 +482,13 @@ func TestResolveURIOrPath(t *testing.T) {
 				t.Errorf("got %q, want %q", resZh, expectedZh)
 			}
 
-			// UNC path
-			resUNC, err := ResolveURIOrPath("file://myserver/myshare/dir/App.java")
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
+			// UNC path: remote host must be rejected to prevent SMB SSRF (P0-2)
+			_, errUNC := ResolveURIOrPath("file://myserver/myshare/dir/App.java")
+			if errUNC == nil {
+				t.Fatalf("expected error for remote UNC path, got nil")
 			}
-			expectedUNC := `\\myserver\myshare\dir\App.java`
-			if !strings.EqualFold(resUNC, expectedUNC) {
-				t.Errorf("got %q, want %q", resUNC, expectedUNC)
+			if !strings.Contains(errUNC.Error(), "remote host in file URI not allowed") {
+				t.Errorf("expected 'remote host in file URI not allowed' error, got %v", errUNC)
 			}
 		} else {
 			res, err := ResolveURIOrPath("file:///tmp/My%20Project/src/A.java")
@@ -575,6 +574,38 @@ func TestResolveURIOrPath_FragmentAndWindowsDriveDoubleSlash(t *testing.T) {
 		}
 		if !strings.HasPrefix(strings.ToLower(resWin), "c:\\") {
 			t.Errorf("expected resolved Windows path starting with C:\\, got %q", resWin)
+		}
+	}
+}
+
+func TestResolveURIOrPath_RejectsRemoteHost(t *testing.T) {
+	maliciousURIs := []string{
+		"file://evil-host.com/share/payload.war",
+		"file://192.168.1.100/share/test",
+		"file://attacker/c$/windows/system32",
+	}
+
+	for _, uri := range maliciousURIs {
+		_, err := ResolveURIOrPath(uri)
+		if err == nil {
+			t.Errorf("expected error for remote file URI %q, got nil", uri)
+		} else if !strings.Contains(err.Error(), "remote host in file URI not allowed") {
+			t.Errorf("expected 'remote host in file URI not allowed' error, got %v", err)
+		}
+	}
+
+	// Localhost and empty host must still be accepted
+	validURIs := []string{
+		"file:///project/src/Main.java",
+		"file://localhost/project/src/Main.java",
+	}
+	for _, uri := range validURIs {
+		res, err := ResolveURIOrPath(uri)
+		if err != nil {
+			t.Errorf("expected localhost/empty-host URI %q to succeed, got %v", uri, err)
+		}
+		if res == "" {
+			t.Errorf("expected non-empty resolved path for %q", uri)
 		}
 	}
 }

@@ -88,7 +88,7 @@ export class JspSourceMap {
       const lineOffset = jspLine - span.sourceStartLine;
       const targetVirtualLine = span.virtualStartLine + lineOffset;
 
-      let targetVirtualCol = jspChar;
+      let targetVirtualCol: number;
       const prefix = span.prefixLength ?? 0;
 
       if (lineOffset === 0) {
@@ -96,11 +96,18 @@ export class JspSourceMap {
         const relativeCol = jspChar - span.sourceStartCol;
         targetVirtualCol = span.virtualStartCol + prefix + relativeCol;
       } else {
-        // Subsequent lines: keep column
-        targetVirtualCol = jspChar;
+        // Subsequent lines: indented by virtualStartCol in generated Java class/method
+        targetVirtualCol = span.virtualStartCol + jspChar;
       }
 
-      const approxVirtualOffset = span.virtualStartOffset + prefix + Math.max(0, jspChar - span.sourceStartCol);
+      let approxVirtualOffset: number;
+      if (lineOffset === 0) {
+        approxVirtualOffset = span.virtualStartOffset + prefix + Math.max(0, jspChar - span.sourceStartCol);
+      } else {
+        const totalLines = Math.max(1, span.sourceEndLine - span.sourceStartLine);
+        const lineBase = span.virtualStartOffset + Math.round(((span.virtualEndOffset - span.virtualStartOffset) * lineOffset) / totalLines);
+        approxVirtualOffset = Math.min(span.virtualEndOffset, lineBase + targetVirtualCol);
+      }
 
       return {
         line: targetVirtualLine,
@@ -145,10 +152,18 @@ export class JspSourceMap {
         const relativeVirtualCol = Math.max(0, virtualChar - span.virtualStartCol - prefix);
         targetSourceCol = span.sourceStartCol + relativeVirtualCol;
       } else {
-        targetSourceCol = virtualChar;
+        // Subsequent lines: subtract virtualStartCol indentation
+        targetSourceCol = Math.max(0, virtualChar - span.virtualStartCol);
       }
 
-      const approxSourceOffset = span.sourceStartOffset + Math.max(0, targetSourceCol - span.sourceStartCol);
+      let approxSourceOffset: number;
+      if (lineOffset === 0) {
+        approxSourceOffset = span.sourceStartOffset + Math.max(0, targetSourceCol - span.sourceStartCol);
+      } else {
+        const totalLines = Math.max(1, span.virtualEndLine - span.virtualStartLine);
+        const lineBase = span.sourceStartOffset + Math.round(((span.sourceEndOffset - span.sourceStartOffset) * lineOffset) / totalLines);
+        approxSourceOffset = Math.min(span.sourceEndOffset, lineBase + targetSourceCol);
+      }
 
       return {
         sourceUri: span.sourceUri,

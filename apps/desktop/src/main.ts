@@ -195,8 +195,14 @@ function validateStartup(): string[] {
 // ─── Secret Generation ────────────────────────────────────────
 
 function generateSecret(): string {
-  if (process.env.KAIRO_LOCAL_SECRET && process.env.KAIRO_LOCAL_SECRET.trim().length > 0) {
-    return process.env.KAIRO_LOCAL_SECRET.trim();
+  const customSecret = process.env.KAIRO_LOCAL_SECRET?.trim();
+  if (customSecret) {
+    if (customSecret.length >= 32) {
+      return customSecret;
+    }
+    console.warn(
+      `[Kairo Security] Provided KAIRO_LOCAL_SECRET is too weak (${customSecret.length} chars, required >= 32 chars). Falling back to secure CSPRNG random secret.`
+    );
   }
   return randomBytes(32).toString('hex');
 }

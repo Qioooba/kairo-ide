@@ -115,7 +115,11 @@ describe('PR13: ProjectModel 单一真相源 (T44 ~ T46)', () => {
       projectId: 'old-project',
       rootPath: '/workspace-old',
       sourceRoots: ['src'],
+      outputDir: 'build/classes',
     });
+    manager.updateToolchain('1.8', '1.8', { toolchainId: 'eclipse-jdt', version: '1.8' });
+    assert.equal(manager.getSnapshot().targetLevel, '1.8');
+    assert.equal(manager.getSnapshot().outputDir, 'build/classes');
 
     // Switch workspace resets document sync and project model
     docSync.resetWorkspace();
@@ -124,6 +128,9 @@ describe('PR13: ProjectModel 单一真相源 (T44 ~ T46)', () => {
     assert.equal(docSync.size, 0);
     assert.equal(newSnapshot.projectId, 'new-project');
     assert.equal(newSnapshot.rootPath, '/workspace-new');
+    assert.equal(newSnapshot.outputDir, '');
+    assert.equal(newSnapshot.targetLevel, '1.6');
+    assert.equal(newSnapshot.compiler.toolchainId, 'javac');
     assert.equal(manager.getWorkspaceGeneration(), 2);
     assert.equal(manager.getRevision(), 1);
 

@@ -73,7 +73,6 @@ type OperationRecord struct {
 type OperationRegistry struct {
 	mu         sync.Mutex
 	records    map[string]*OperationRecord
-	byKindReq  map[string]*OperationRecord
 	ttl        time.Duration
 	maxEntries int
 }
@@ -88,14 +87,16 @@ func NewOperationRegistry(ttl time.Duration, maxEntries int) *OperationRegistry 
 	}
 	return &OperationRegistry{
 		records:    make(map[string]*OperationRecord),
-		byKindReq:  make(map[string]*OperationRecord),
 		ttl:        ttl,
 		maxEntries: maxEntries,
 	}
 }
 
-// HashPayload calculates the SHA-256 fingerprint for a request payload.
+// HashPayload produces a canonical SHA-256 fingerprint of a request payload.
 func HashPayload(payload []byte) string {
+	if len(payload) == 0 {
+		return ""
+	}
 	h := sha256.Sum256(payload)
 	return hex.EncodeToString(h[:])
 }
@@ -109,20 +110,17 @@ func (r *OperationRegistry) ClaimOrWait(ctx context.Context, key OperationKey, p
 		// Non-idempotent request without requestId; execute directly.
 		return ClaimResultExecute, nil
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
 
 	payloadHash := HashPayload(payload)
 	keyStr := key.String()
-	kindReqKey := fmt.Sprintf("%s:%s", key.Kind, key.RequestID)
 
 	r.mu.Lock()
 	r.evictExpiredLocked()
 
-	// Check by Kind:RequestID to eliminate cross-Kind collisions while detecting same-Kind payload conflicts
-	rec, exists := r.byKindReq[kindReqKey]
-	if !exists {
-		rec, exists = r.records[keyStr]
-	}
-
+	rec, exists := r.records[keyStr]
 	if !exists {
 		// First caller wins execution right
 		rec = &OperationRecord{
@@ -133,7 +131,6 @@ func (r *OperationRegistry) ClaimOrWait(ctx context.Context, key OperationKey, p
 			done:        make(chan struct{}),
 		}
 		r.records[keyStr] = rec
-		r.byKindReq[kindReqKey] = rec
 		r.mu.Unlock()
 		return ClaimResultExecute, rec
 	}
@@ -157,10 +154,7 @@ func (r *OperationRegistry) ClaimOrWait(ctx context.Context, key OperationKey, p
 	select {
 	case <-doneChan:
 		r.mu.Lock()
-		latestRec := r.byKindReq[kindReqKey]
-		if latestRec == nil {
-			latestRec = r.records[keyStr]
-		}
+		latestRec := r.records[keyStr]
 		r.mu.Unlock()
 		if latestRec != nil {
 			return ClaimResultReplay, latestRec
@@ -181,12 +175,8 @@ func (r *OperationRegistry) Finish(key OperationKey, statusCode int, response []
 	defer r.mu.Unlock()
 
 	keyStr := key.String()
-	kindReqKey := fmt.Sprintf("%s:%s", key.Kind, key.RequestID)
 
-	rec, exists := r.records[keyStr]
-	if !exists {
-		rec = r.byKindReq[kindReqKey]
-	}
+	rec := r.records[keyStr]
 	if rec == nil {
 		rec = &OperationRecord{
 			Key:       key,
@@ -194,7 +184,6 @@ func (r *OperationRegistry) Finish(key OperationKey, statusCode int, response []
 			done:      make(chan struct{}),
 		}
 		r.records[keyStr] = rec
-		r.byKindReq[kindReqKey] = rec
 	}
 
 	rec.StatusCode = statusCode
@@ -267,9 +256,6 @@ func (r *OperationRegistry) GetStatus(key OperationKey) (*OperationRecord, bool)
 	defer r.mu.Unlock()
 	rec, ok := r.records[key.String()]
 	if !ok {
-		rec, ok = r.byKindReq[fmt.Sprintf("%s:%s", key.Kind, key.RequestID)]
-	}
-	if !ok {
 		return nil, false
 	}
 	cp := *rec
@@ -301,29 +287,21 @@ func (r *OperationRegistry) evictExpiredLocked() {
 	for k, v := range r.records {
 		if v.State != OpStateExecuting && now.Sub(v.CompletedAt) > r.ttl {
 			delete(r.records, k)
-			if v.Key.RequestID != "" {
-				delete(r.byKindReq, fmt.Sprintf("%s:%s", v.Key.Kind, v.Key.RequestID))
-			}
 		}
 	}
 	if len(r.records) >= r.maxEntries {
 		var oldestKey string
-		var oldestKindReq string
 		var oldestTime time.Time
 		for k, v := range r.records {
 			if v.State != OpStateExecuting {
 				if oldestTime.IsZero() || v.CompletedAt.Before(oldestTime) {
 					oldestTime = v.CompletedAt
 					oldestKey = k
-					oldestKindReq = fmt.Sprintf("%s:%s", v.Key.Kind, v.Key.RequestID)
 				}
 			}
 		}
 		if oldestKey != "" {
 			delete(r.records, oldestKey)
-			if oldestKindReq != "" {
-				delete(r.byKindReq, oldestKindReq)
-			}
 		}
 	}
 }

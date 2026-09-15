@@ -169,8 +169,22 @@ export class WorkspaceTrustManager {
   /**
    * Check if a sensitive operation is permitted without throwing.
    */
-  canExecute(workspaceUri: string, _operation: TrustedOperation): boolean {
-    return this.isWorkspaceTrusted(workspaceUri);
+  canExecute(workspaceUri: string, operation: TrustedOperation): boolean {
+    const isTrusted = this.isWorkspaceTrusted(workspaceUri);
+    if (isTrusted) {
+      return true;
+    }
+    // Strict operation-level gating: untrusted workspaces NEVER allow execution of dangerous operations
+    switch (operation) {
+      case 'build_script':
+      case 'server_autostart':
+      case 'custom_toolchain':
+      case 'remote_attach':
+      case 'database_write':
+        return false;
+      default:
+        return false;
+    }
   }
 
   clear(): void {
@@ -178,7 +192,18 @@ export class WorkspaceTrustManager {
   }
 
   protected normalizeUri(uri: string): string {
-    return uri.replace(/\/$/, '').toLowerCase();
+    let decoded = uri;
+    try {
+      decoded = decodeURI(uri);
+    } catch {
+      // ignore
+    }
+    const clean = decoded.replace(/\/+$/, '');
+    // Normalize Windows drive letter paths, but preserve casing for Linux/Unix paths
+    if (/^(file:\/\/\/)?[a-zA-Z]:[\\/]/i.test(clean)) {
+      return clean.toLowerCase();
+    }
+    return clean;
   }
 
   protected fireChange(uri: string, state: WorkspaceTrustState): void {

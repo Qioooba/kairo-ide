@@ -53,6 +53,7 @@ type JDWPClient interface {
 type JDWPConn struct {
 	conn    net.Conn
 	mu      sync.Mutex
+	idMu    sync.RWMutex
 	nextID  atomic.Int32
 	idSizes JDWPIDSizes
 }
@@ -136,8 +137,16 @@ func (c *JDWPConn) IDSizes() (JDWPIDSizes, error) {
 		ReferenceTypeIDSize: refTypeIDSize,
 		FrameIDSize:         frameIDSize,
 	}
+	c.idMu.Lock()
 	c.idSizes = sizes
+	c.idMu.Unlock()
 	return sizes, nil
+}
+
+func (c *JDWPConn) getIDSizes() JDWPIDSizes {
+	c.idMu.RLock()
+	defer c.idMu.RUnlock()
+	return c.idSizes
 }
 
 // ClassesBySignature issues VirtualMachine.ClassesBySignature (1,2).
@@ -148,7 +157,8 @@ func (c *JDWPConn) ClassesBySignature(signature string) ([]ClassRef, error) {
 	if err != nil {
 		return nil, err
 	}
-	refSize := int(c.idSizes.ReferenceTypeIDSize)
+	idSizes := c.getIDSizes()
+	refSize := int(idSizes.ReferenceTypeIDSize)
 	if refSize != 4 && refSize != 8 {
 		refSize = 8
 	}
@@ -181,7 +191,8 @@ func (c *JDWPConn) RedefineClasses(classes []ClassRedefinition) error {
 	if len(classes) == 0 {
 		return fmt.Errorf("no classes to redefine")
 	}
-	refSize := int(c.idSizes.ReferenceTypeIDSize)
+	idSizes := c.getIDSizes()
+	refSize := int(idSizes.ReferenceTypeIDSize)
 	if refSize != 4 && refSize != 8 {
 		refSize = 8
 	}
@@ -192,11 +203,12 @@ func (c *JDWPConn) RedefineClasses(classes []ClassRedefinition) error {
 
 // GetClassLoader issues ReferenceType.ClassLoader (2,2) to query the class loader object ID (PR05 / F06).
 func (c *JDWPConn) GetClassLoader(typeID int64) (int64, error) {
-	refSize := int(c.idSizes.ReferenceTypeIDSize)
+	idSizes := c.getIDSizes()
+	refSize := int(idSizes.ReferenceTypeIDSize)
 	if refSize != 4 && refSize != 8 {
 		refSize = 8
 	}
-	objSize := int(c.idSizes.ObjectIDSize)
+	objSize := int(idSizes.ObjectIDSize)
 	if objSize != 4 && objSize != 8 {
 		objSize = 8
 	}

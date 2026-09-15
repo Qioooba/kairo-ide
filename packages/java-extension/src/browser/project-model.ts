@@ -259,6 +259,12 @@ export class ProjectModelManager {
     this.sourceRoots = [];
     this.resourceRoots = [];
     this.webRoots = [];
+    this.outputDir = '';
+    this.encoding = 'UTF-8';
+    this.sourceLevel = '1.6';
+    this.targetLevel = '1.6';
+    this.compiler = { toolchainId: 'javac', version: '1.6' };
+    this.runtimeJvm = { id: 'jvm-1.6', home: '', version: '1.6' };
     this.classpath = [];
     this.diagnostics = [];
 

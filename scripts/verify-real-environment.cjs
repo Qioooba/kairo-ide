@@ -105,6 +105,7 @@ log(`    Exit Code: ${res2.status}`);
 const compSuccess = res2.status === 0;
 log(`    Result: ${compSuccess ? 'PASS (Successfully compiled with target 8)' : 'FAIL'}`);
 
+let gateBlocks = false;
 // Inspect generated .class header
 const classFile = path.join(tmpDir, 'TargetProbe.class');
 if (fs.existsSync(classFile)) {
@@ -116,7 +117,7 @@ if (fs.existsSync(classFile)) {
   log(`    Magic: 0x${magic}`);
   log(`    Minor version: ${minor}`);
   log(`    Major version: ${major} (Java 8 = 52, Java 6 = 50)`);
-  const gateBlocks = major > 50;
+  gateBlocks = major > 50;
   log(`    Java 6 Gate (<= 50): ${gateBlocks ? 'PASS (Properly identifies and blocks major 52 for Java 6 target)' : 'FAIL'}`);
 }
 fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -172,18 +173,25 @@ log(`  Live Tomcat 6 + Webapp + JDWP: ${liveTomcatPass ? 'PASS (100% Verified)' 
 // -------------------------------------------------------------
 // Step 5: Summary & Integrity Verdict
 // -------------------------------------------------------------
+const winHostPass = process.platform === 'win32';
+const jdkDetectPass = activeJavaHome !== null;
+const stdoutStr = goTestRes.stdout || '';
+const http200Pass = liveTomcatPass && (stdoutStr.includes('HTTP 200') || stdoutStr.includes('hello?name=Kairo'));
+const jdwpPass = liveTomcatPass && (stdoutStr.includes('JDWP') || stdoutStr.includes('handshake'));
+const shutdownPass = liveTomcatPass && (stdoutStr.includes('shutdown') || stdoutStr.includes('PASS'));
+
 log('\n[5/5] Real Environment Verification Summary:');
 log('----------------------------------------------------------------');
-log(`  1. Windows 11 Host Execution:               PASS`);
-log(`  2. Adoptium JDK 21 / 17 Detection:          PASS`);
-log(`  3. Real javac 21.0.12 Target 1.6 Rejection: PASS`);
-log(`  4. Bytecode Major 52 vs Java 6 Gate:        PASS`);
-log(`  5. Live Tomcat 6.0.53 Startup & Binding:    PASS`);
-log(`  6. Legacy Servlet HTTP 200 (GBK Charset):   PASS`);
-log(`  7. Live JDWP Protocol Handshake:            PASS`);
-log(`  8. Clean Process Shutdown & Port Release:   PASS`);
+log(`  1. Windows Host Execution:                  ${winHostPass ? 'PASS' : 'FAIL'}`);
+log(`  2. Adoptium JDK 21 / 17 Detection:          ${jdkDetectPass ? 'PASS' : 'FAIL'}`);
+log(`  3. Real javac Target 1.6 Rejection:         ${rejSuccess ? 'PASS' : 'FAIL'}`);
+log(`  4. Bytecode Major 52 vs Java 6 Gate:        ${gateBlocks ? 'PASS' : 'FAIL'}`);
+log(`  5. Live Tomcat 6.0.53 Startup & Binding:    ${liveTomcatPass ? 'PASS' : 'FAIL'}`);
+log(`  6. Legacy Servlet HTTP 200 (GBK Charset):   ${http200Pass ? 'PASS' : 'FAIL'}`);
+log(`  7. Live JDWP Protocol Handshake:            ${jdwpPass ? 'PASS' : 'FAIL'}`);
+log(`  8. Clean Process Shutdown & Port Release:   ${shutdownPass ? 'PASS' : 'FAIL'}`);
 log('----------------------------------------------------------------');
-const allPass = rejSuccess && compSuccess && liveTomcatPass;
+const allPass = winHostPass && jdkDetectPass && rejSuccess && compSuccess && gateBlocks && liveTomcatPass;
 log(`VERDICT: ${allPass ? 'ALL REAL ENVIRONMENT TESTS PASSED' : 'SOME TESTS FAILED'}`);
 log(`Evidence persisted to: ${logFile}\n`);
 

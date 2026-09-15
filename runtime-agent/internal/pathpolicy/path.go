@@ -238,18 +238,18 @@ func ResolveURIOrPath(input string) (string, error) {
 			pathPart = rawPath
 		}
 
-		// Handle UNC path: file://hostname/share/path
+		// Disallow remote host / UNC paths to prevent SMB SSRF and NTLM leaks (P0-2)
 		if u.Host != "" && u.Host != "localhost" {
-			nativePath = `\\` + u.Host + filepath.FromSlash(pathPart)
-		} else {
-			// On Windows: /C:/path -> C:/path
-			if runtime.GOOS == "windows" {
-				if len(pathPart) >= 3 && pathPart[0] == '/' && isDriveLetter(pathPart[1]) && pathPart[2] == ':' {
-					pathPart = pathPart[1:]
-				}
-			}
-			nativePath = filepath.Clean(filepath.FromSlash(pathPart))
+			return "", fmt.Errorf("remote host in file URI not allowed: %q", u.Host)
 		}
+
+		// On Windows: /C:/path -> C:/path
+		if runtime.GOOS == "windows" {
+			if len(pathPart) >= 3 && pathPart[0] == '/' && isDriveLetter(pathPart[1]) && pathPart[2] == ':' {
+				pathPart = pathPart[1:]
+			}
+		}
+		nativePath = filepath.Clean(filepath.FromSlash(pathPart))
 	} else if strings.Contains(input, "://") {
 		// Check if it's a Windows drive path with double slash, e.g. C://path
 		if len(input) >= 3 && isDriveLetter(input[0]) && strings.HasPrefix(input[1:], "://") {

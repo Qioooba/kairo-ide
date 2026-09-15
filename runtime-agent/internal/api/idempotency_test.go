@@ -249,8 +249,8 @@ func TestIdempotency_PayloadConflict_T26(t *testing.T) {
 
 	const reqID = "req-conflict-check"
 
-	// Request 1: build proj-alpha
-	b1 := makeTestEnvelope(reqID, "corr-1", map[string]any{"projectId": "proj-alpha"})
+	// Request 1: build proj-alpha with clean=false
+	b1 := makeTestEnvelope(reqID, "corr-1", map[string]any{"projectId": "proj-alpha", "clean": false})
 	r1 := httptest.NewRequest(http.MethodPost, "/api/v1/builds", bytes.NewReader(b1))
 	w1 := httptest.NewRecorder()
 	srv.handleBuilds(w1, r1)
@@ -262,8 +262,8 @@ func TestIdempotency_PayloadConflict_T26(t *testing.T) {
 		t.Fatalf("expected 1 call after request 1, got %d", calls)
 	}
 
-	// Request 2: same requestId, but different payload (proj-beta)
-	b2 := makeTestEnvelope(reqID, "corr-1", map[string]any{"projectId": "proj-beta"})
+	// Request 2: same requestId and scope, but different payload (clean=true)
+	b2 := makeTestEnvelope(reqID, "corr-1", map[string]any{"projectId": "proj-alpha", "clean": true})
 	r2 := httptest.NewRequest(http.MethodPost, "/api/v1/builds", bytes.NewReader(b2))
 	w2 := httptest.NewRecorder()
 	srv.handleBuilds(w2, r2)

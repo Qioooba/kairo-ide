@@ -45,6 +45,7 @@ interface DocumentEntry {
 export class VirtualDocumentManager {
   private docs = new Map<string, DocumentEntry>();
   private client: ILanguageClientBridge | undefined;
+  private monotonicGeneration = 1;
 
   constructor(client?: ILanguageClientBridge) {
     this.client = client;
@@ -123,7 +124,7 @@ export class VirtualDocumentManager {
         jspUri,
         languageId,
         version: 1,
-        generation: 1,
+        generation: this.monotonicGeneration++,
         text,
         isOpen: false,
         activeLeases: 0,
@@ -151,6 +152,7 @@ export class VirtualDocumentManager {
       }
     } else if (entry.text !== text) {
       entry.version++;
+      entry.generation = this.monotonicGeneration++;
       entry.text = text;
       if (this.client) {
         try {
@@ -185,7 +187,7 @@ export class VirtualDocumentManager {
     const entry = this.docs.get(uri);
     if (!entry) return;
 
-    entry.generation++;
+    entry.generation = this.monotonicGeneration++;
     const wasOpen = entry.isOpen;
     entry.isOpen = false;
     entry.activeLeases = 0;

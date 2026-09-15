@@ -217,35 +217,34 @@ func validateClassMajorVersions(outputDir string, maxMajor int, targetLevel stri
 		if err != nil {
 			return nil
 		}
-		if info.IsDir() || !strings.HasSuffix(strings.ToLower(info.Name()), ".class") {
-			return nil
-		}
-		f, err := os.Open(path)
-		if err != nil {
-			return nil
-		}
-		defer f.Close()
+		func() {
+			f, err := os.Open(path)
+			if err != nil {
+				return
+			}
+			defer f.Close()
 
-		var header [8]byte
-		if _, err := io.ReadFull(f, header[:]); err != nil {
-			return nil
-		}
-		// Check magic 0xCAFEBABE
-		if header[0] != 0xCA || header[1] != 0xFE || header[2] != 0xBA || header[3] != 0xBE {
-			return nil
-		}
-		major := binary.BigEndian.Uint16(header[6:8])
-		if int(major) > maxMajor {
-			diags = append(diags, Diagnostic{
-				File:     path,
-				Severity: "error",
-				Code:     "class_major_version_exceeded",
-				Message: fmt.Sprintf(
-					"generated class %s has major version %d, exceeding maximum allowed %d for target %s",
-					filepath.Base(path), major, maxMajor, targetLevel,
-				),
-			})
-		}
+			var header [8]byte
+			if _, err := io.ReadFull(f, header[:]); err != nil {
+				return
+			}
+			// Check magic 0xCAFEBABE
+			if header[0] != 0xCA || header[1] != 0xFE || header[2] != 0xBA || header[3] != 0xBE {
+				return
+			}
+			major := binary.BigEndian.Uint16(header[6:8])
+			if int(major) > maxMajor {
+				diags = append(diags, Diagnostic{
+					File:     path,
+					Severity: "error",
+					Code:     "class_major_version_exceeded",
+					Message: fmt.Sprintf(
+						"generated class %s has major version %d, exceeding maximum allowed %d for target %s",
+						filepath.Base(path), major, maxMajor, targetLevel,
+					),
+				})
+			}
+		}()
 		return nil
 	})
 	return diags, err

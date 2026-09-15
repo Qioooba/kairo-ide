@@ -206,4 +206,51 @@ describe('PR12: JSP 整页模型与 SourceMap (F16 / T40 ~ T43)', () => {
     assert.equal(dedupeEdits.length, 1);
     assert.equal(dedupeEdits[0].newText, '<%@ page import="java.util.List" %>\n');
   });
+
+  test('P0-5: multi-line sourcemap correctly accounts for 8-space method indent on lineOffset > 0 and round-trips with Unicode', async () => {
+    const jsp = [
+      '<html>',
+      '<%',
+      '    String greeting = "你好，世界";',
+      '    int count = greeting.length();',
+      '%>',
+      '</html>',
+    ].join('\n');
+
+    const uri = 'file:///test/multiline.jsp';
+    const result = await builder.buildPageVirtualJava(uri, jsp);
+    const sm = result.sourceMap;
+
+    // Line 2 in JSP is: "    String greeting = "你好，世界";" (lineOffset = 1 in the scriptlet)
+    // In JSP, 'int count' is on line 3, character 4 (4 spaces indent)
+    const jspLine = 3;
+    const jspChar = 4;
+
+    const vPos = sm.mapJspPositionToVirtual(uri, jspLine, jspChar);
+    assert.ok(vPos !== null, 'mapped virtual position must not be null');
+
+    // In virtual Java, the scriptlet body has 8 spaces indent
+    // So targetVirtualCol must be 8 + 4 = 12, NOT 4!
+    assert.equal(vPos.character, 12, 'targetVirtualCol must include the 8-space method indentation');
+
+    // Round-trip back to JSP
+    const backJsp = sm.mapVirtualPositionToJsp(vPos.line, vPos.character);
+    assert.ok(backJsp !== null, 'reverse mapped JSP position must not be null');
+    assert.equal(backJsp.line, jspLine);
+    assert.equal(backJsp.character, jspChar);
+
+    // Test cursor inside Chinese text on line 2
+    // Line 2: "    String greeting = "你好，世界";"
+    // '你' is character 23
+    const chineseJspLine = 2;
+    const chineseJspChar = 23;
+    const vPosZh = sm.mapJspPositionToVirtual(uri, chineseJspLine, chineseJspChar);
+    assert.ok(vPosZh !== null);
+    assert.equal(vPosZh.character, 8 + chineseJspChar, 'Chinese character column must also have 8-space indent');
+
+    const backZh = sm.mapVirtualPositionToJsp(vPosZh.line, vPosZh.character);
+    assert.ok(backZh !== null);
+    assert.equal(backZh.line, chineseJspLine);
+    assert.equal(backZh.character, chineseJspChar);
+  });
 });
