@@ -27,6 +27,6 @@
     "@theia/monaco": "1.73.1"
   },
   "devDependencies": {
-    "typescript": "5.5.4"
+    "typescript": "7.0.2"
   }
 }
