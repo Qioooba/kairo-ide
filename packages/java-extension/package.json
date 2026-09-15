@@ -19,10 +19,10 @@
     "@kairo/project-extension": "workspace:*",
     "@kairo/protocol": "workspace:*",
     "@kairo/runtime-extension": "workspace:*",
-    "@theia/debug": "1.73.1",
+    "@theia/debug": "1.75.0",
     "@theia/monaco-editor-core": "1.108.201",
     "vscode-jsonrpc": "9.0.1",
-    "@theia/filesystem": "1.73.1"
+    "@theia/filesystem": "1.75.0"
   },
   "peerDependencies": {
     "@theia/core": "1.73.1"

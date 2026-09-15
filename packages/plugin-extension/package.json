@@ -23,10 +23,10 @@
   "dependencies": {
     "@kairo/i18n": "workspace:*",
     "@kairo/protocol": "workspace:*",
-    "@theia/core": "1.73.1",
-    "@theia/plugin-ext": "1.73.1",
-    "@theia/plugin-ext-vscode": "1.73.1",
-    "@theia/workspace": "1.73.1",
+    "@theia/core": "1.75.0",
+    "@theia/plugin-ext": "1.75.0",
+    "@theia/plugin-ext-vscode": "1.75.0",
+    "@theia/workspace": "1.75.0",
     "adm-zip": "^0.5.16",
     "semver": "^7.7.1"
   },
