@@ -61,14 +61,15 @@ export function registerJspLanguage(): void {
   if (!monaco.languages.getLanguages().some(l => l.id === JSP_LANGUAGE_ID)) {
     monaco.languages.register({
       id: JSP_LANGUAGE_ID,
-      extensions: ['.jsp', '.jspx', '.tag', '.tagx'],
+      extensions: ['.jsp', '.jspf', '.jspx', '.tag', '.tagx'],
       aliases: ['JSP', 'jsp'],
     });
   }
   monaco.languages.setMonarchTokensProvider(JSP_LANGUAGE_ID, JSP_MONARCH as monaco.languages.IMonarchLanguage);
   monaco.languages.setLanguageConfiguration(JSP_LANGUAGE_ID, {
-    comments: { blockComment: ['<!--', '-->'] },
+    comments: { blockComment: ['<%--', '--%>'] },
     brackets: [
+      ['<%--', '--%>'],
       ['<!--', '-->'],
       ['<%', '%>'],
       ['<%!', '%>'],
@@ -82,6 +83,7 @@ export function registerJspLanguage(): void {
       ['(', ')'],
     ],
     autoClosingPairs: [
+      { open: '<%--', close: '--%>' },
       { open: '<!--', close: '-->' },
       { open: '"', close: '"' },
       { open: "'", close: "'" },

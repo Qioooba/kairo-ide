@@ -1,9 +1,9 @@
 import * as React from 'react';
-import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
+import { injectable, inject, optional, postConstruct } from '@theia/core/shared/inversify';
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import { CommandService } from '@theia/core/lib/common';
 import { PreferenceService } from '@theia/core/lib/common/preferences';
-import { RuntimeConnectionService } from '@kairo/runtime-extension';
+import { RuntimeConnectionService, WorkspaceContextService } from '@kairo/runtime-extension';
 import { KairoI18nService } from '@kairo/i18n';
 import { ServerStore, ServerInstance, ConnectionState, HotReloadStatus } from './server-store';
 
@@ -119,9 +119,10 @@ interface ServerViewProps {
     runtime: RuntimeConnectionService;
     i18n: KairoI18nService;
     preferences: PreferenceService;
+    workspaceContext?: WorkspaceContextService;
 }
 
-const ServerViewComponent: React.FC<ServerViewProps> = ({ store, commandService, runtime, i18n, preferences }) => {
+const ServerViewComponent: React.FC<ServerViewProps> = ({ store, commandService, runtime, i18n, preferences, workspaceContext }) => {
     const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
     const [, forceUpdate] = React.useReducer(x => x + 1, 0);
     const [servers, setServers] = React.useState<ServerInstance[]>(store.getServers());
@@ -133,6 +134,31 @@ const ServerViewComponent: React.FC<ServerViewProps> = ({ store, commandService,
     const [publishState, setPublishState] = React.useState<'idle' | 'publishing' | 'success' | 'error'>('idle');
     const [publishMessage, setPublishMessage] = React.useState(t('widget.servers.hotReload.autoSyncActive'));
     const [hotReloadStatus, setHotReloadStatus] = React.useState<HotReloadStatus>(store.getHotReloadStatus());
+    const [projectCount, setProjectCount] = React.useState<number | undefined>(undefined);
+    const [detectedYaml, setDetectedYaml] = React.useState(() => workspaceContext?.detectedProject);
+
+    React.useEffect(() => {
+        if (!workspaceContext) return;
+        const sub = workspaceContext.onDidChangeProjectYaml(y => setDetectedYaml(y));
+        return () => sub.dispose();
+    }, [workspaceContext]);
+
+    React.useEffect(() => {
+        let cancelled = false;
+        const wsId = runtime.workspace();
+        runtime.request('GET /api/v1/projects', undefined, wsId ? { query: { workspaceId: wsId } } : undefined)
+            .then(res => {
+                if (!cancelled && Array.isArray(res)) {
+                    setProjectCount(res.length);
+                }
+            })
+            .catch(() => {
+                if (!cancelled) setProjectCount(undefined);
+            });
+        return () => { cancelled = true; };
+    }, [runtime, detectedYaml]);
+
+    const hasProject = Boolean(detectedYaml?.name) || (typeof projectCount === 'number' && projectCount > 0);
 
     React.useEffect(() => {
         const disposable = i18n.onDidChangeLanguage(() => forceUpdate());
@@ -174,8 +200,20 @@ const ServerViewComponent: React.FC<ServerViewProps> = ({ store, commandService,
     const isDisconnected = connectionState === 'disconnected';
     const isEmpty = servers.length === 0 && connectionState !== 'loading';
 
-    const handleStart = () => commandService.executeCommand('kairo.server.start');
-    const handleDebug = () => commandService.executeCommand('kairo.server.debug');
+    const handleStart = () => {
+        if (!hasProject && projectCount === 0) {
+            void commandService.executeCommand('kairo.project.import');
+            return;
+        }
+        void commandService.executeCommand('kairo.server.start');
+    };
+    const handleDebug = () => {
+        if (!hasProject && projectCount === 0) {
+            void commandService.executeCommand('kairo.project.import');
+            return;
+        }
+        void commandService.executeCommand('kairo.server.debug');
+    };
     const handleStop = () => commandService.executeCommand('kairo.server.stop');
     const handleRestart = () => commandService.executeCommand('kairo.server.restart');
     const handleOpenApp = () => commandService.executeCommand('kairo.app.open');
@@ -390,11 +428,24 @@ const ServerViewComponent: React.FC<ServerViewProps> = ({ store, commandService,
             <div className="kairo-widget-section" data-testid="server-list-section">
                 <div className="kairo-section-title">{t('widget.servers.allServers')}</div>
                 {isEmpty ? (
-                    <div className="kairo-empty-state" data-testid="server-empty">
-                        <span className="kairo-empty-state-glyph codicon codicon-server" aria-hidden="true" />
-                        <h3 className="kairo-empty-state-title">{t('widget.servers.emptyListTitle')}</h3>
-                        <p className="kairo-empty-state-reason">{t('widget.servers.emptyListReason', { action: t('common.start') })}</p>
-                    </div>
+                    !hasProject && projectCount === 0 ? (
+                        <div className="kairo-empty-state" data-testid="server-no-project">
+                            <span className="kairo-empty-state-glyph codicon codicon-folder" aria-hidden="true" />
+                            <h3 className="kairo-empty-state-title">{t('widget.servers.noProjectTitle')}</h3>
+                            <p className="kairo-empty-state-reason">{t('widget.servers.noProjectReason')}</p>
+                            <div className="kairo-empty-state-action">
+                                <button className="theia-button main" onClick={() => void commandService.executeCommand('kairo.project.import')}>
+                                    {t('widget.servers.importProjectAction')}
+                                </button>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="kairo-empty-state" data-testid="server-empty">
+                            <span className="kairo-empty-state-glyph codicon codicon-server" aria-hidden="true" />
+                            <h3 className="kairo-empty-state-title">{t('widget.servers.emptyListTitle')}</h3>
+                            <p className="kairo-empty-state-reason">{t('widget.servers.emptyListReason', { action: t('common.start') })}</p>
+                        </div>
+                    )
                 ) : (
                     <ul className="kairo-server-list" data-testid="server-list">
                         {servers.map(s => (
@@ -430,6 +481,7 @@ export class ServerViewWidget extends ReactWidget {
     @inject(RuntimeConnectionService) protected readonly runtime!: RuntimeConnectionService;
     @inject(KairoI18nService) protected readonly i18n!: KairoI18nService;
     @inject(PreferenceService) protected readonly preferences!: PreferenceService;
+    @inject(WorkspaceContextService) @optional() protected readonly workspaceContext?: WorkspaceContextService;
 
     constructor() {
         super();
@@ -457,6 +509,7 @@ export class ServerViewWidget extends ReactWidget {
             runtime: this.runtime,
             i18n: this.i18n,
             preferences: this.preferences,
+            workspaceContext: this.workspaceContext,
         });
     }
 }

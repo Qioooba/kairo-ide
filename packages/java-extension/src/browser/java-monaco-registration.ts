@@ -44,6 +44,13 @@ import { JavaDocumentSyncContribution } from './java-document-sync';
 import { JavaRefactoring } from './java-refactoring';
 import { JavaRunService } from './java-run-service';
 import { JAVA_RUN_COMMANDS } from './java-run-protocol';
+import {
+  JDT_SHOW_IMPLEMENTATIONS_COMMAND,
+  JDT_SHOW_REFERENCES_COMMAND,
+  KAIRO_SHOW_USAGES_AT_LENS_COMMAND,
+  localizeCodeLensTitle,
+  parseLensCommandTarget,
+} from './java-codelens';
 import type {
   LSPDocumentSymbol,
   LSPDocumentSymbolResult,
@@ -220,15 +227,36 @@ export class JavaMonacoRegistrationContribution implements FrontendApplicationCo
         this.provider.cacheSource(model.uri.toString(), model.getValue());
       }));
     };
+    const attachLanguageListener = (model: monaco.editor.ITextModel): void => {
+      this.subs.push(model.onDidChangeLanguage(e => {
+        if (e.newLanguage === JAVA_LANGUAGE_ID) {
+          cacheModel(model);
+          attachContentListener(model);
+        } else {
+          const uri = model.uri.toString();
+          this.provider.clearSource(uri);
+          const sub = this.modelContentSubs.get(uri);
+          if (sub) {
+            sub.dispose();
+            this.modelContentSubs.delete(uri);
+          }
+        }
+      }));
+    };
+
     for (const model of monaco.editor.getModels()) {
       if (model.getLanguageId() === JAVA_LANGUAGE_ID) {
         cacheModel(model);
         attachContentListener(model);
       }
+      attachLanguageListener(model);
     }
     this.subs.push(monaco.editor.onDidCreateModel(model => {
-      cacheModel(model);
-      attachContentListener(model);
+      if (model.getLanguageId() === JAVA_LANGUAGE_ID) {
+        cacheModel(model);
+        attachContentListener(model);
+      }
+      attachLanguageListener(model);
     }));
     this.subs.push(
       monaco.editor.onWillDisposeModel(model => {
@@ -241,6 +269,71 @@ export class JavaMonacoRegistrationContribution implements FrontendApplicationCo
         }
       }),
     );
+
+    // LSP Semantic Tokens (PR5 / High-fidelity JDT LS semantic overlay)
+    const semanticTokenTypes = [
+      'comment', 'keyword', 'string', 'number', 'regexp', 'operator',
+      'namespace', 'type', 'struct', 'class', 'interface', 'enum',
+      'typeParameter', 'function', 'method', 'decorator', 'macro',
+      'variable', 'parameter', 'property', 'label', 'enumMember', 'event',
+    ];
+    const semanticTokenModifiers = [
+      'declaration', 'definition', 'readonly', 'static', 'deprecated',
+      'abstract', 'async', 'modification', 'documentation', 'defaultLibrary',
+    ];
+    const legend: monaco.languages.SemanticTokensLegend = {
+      tokenTypes: semanticTokenTypes,
+      tokenModifiers: semanticTokenModifiers,
+    };
+
+    if (typeof monaco.languages.registerDocumentSemanticTokensProvider === 'function') {
+      this.subs.push(
+        monaco.languages.registerDocumentSemanticTokensProvider(JAVA_LANGUAGE_ID, {
+          getLegend: () => legend,
+          provideDocumentSemanticTokens: async (model, _lastResultId, _token) => {
+            try {
+              const res = await this.client.semanticTokensFull(model.uri.toString());
+              if (!res || !res.data) {
+                return null;
+              }
+              return {
+                resultId: res.resultId,
+                data: new Uint32Array(res.data),
+              };
+            } catch {
+              return null;
+            }
+          },
+          releaseDocumentSemanticTokens: () => {},
+        }),
+      );
+    }
+
+    if (typeof monaco.languages.registerDocumentRangeSemanticTokensProvider === 'function') {
+      this.subs.push(
+        monaco.languages.registerDocumentRangeSemanticTokensProvider(JAVA_LANGUAGE_ID, {
+          getLegend: () => legend,
+          provideDocumentRangeSemanticTokens: async (model, range, _token) => {
+            try {
+              const lspRange: LSPRange = {
+                start: { line: range.startLineNumber - 1, character: range.startColumn - 1 },
+                end: { line: range.endLineNumber - 1, character: range.endColumn - 1 },
+              };
+              const res = await this.client.semanticTokensRange(model.uri.toString(), lspRange);
+              if (!res || !res.data) {
+                return null;
+              }
+              return {
+                resultId: res.resultId,
+                data: new Uint32Array(res.data),
+              };
+            } catch {
+              return null;
+            }
+          },
+        }),
+      );
+    }
 
     this.subs.push(registerJavaLiveTemplates(JAVA_LANGUAGE_ID, {
       getExtraTemplates: () => this.userTemplates?.list() ?? [],
@@ -479,6 +572,36 @@ export class JavaMonacoRegistrationContribution implements FrontendApplicationCo
             }
           }
           return { lenses: allLenses, dispose: () => undefined };
+        },
+        resolveCodeLens: async (model, codeLens, token) => {
+          if (token.isCancellationRequested) return codeLens;
+          const stashed = (codeLens as KairoCodeLensWithLspData)._kairoLspLens;
+          // Run/Debug lenses and already-resolved JDT lenses need no backend call.
+          if (!stashed || codeLens.command?.title) return codeLens;
+          try {
+            const lspLens: LSPCodeLens = {
+              range: {
+                start: {
+                  line: codeLens.range.startLineNumber - 1,
+                  character: codeLens.range.startColumn - 1,
+                },
+                end: {
+                  line: codeLens.range.endLineNumber - 1,
+                  character: codeLens.range.endColumn - 1,
+                },
+              },
+              data: stashed.data,
+            };
+            const resolved = await this.provider.provideCodeLensResolve(lspLens);
+            if (token.isCancellationRequested) return codeLens;
+            if (!resolved?.command) {
+              return withFallbackUsagesLens(model, codeLens);
+            }
+            return adaptCodeLens(resolved);
+          } catch (e) {
+            console.warn('[kairo-java] JDT LS codeLens/resolve failed', e);
+            return withFallbackUsagesLens(model, codeLens);
+          }
         },
       }),
       monaco.languages.registerDocumentFormattingEditProvider(JAVA_LANGUAGE_ID, {
@@ -1063,7 +1186,101 @@ export class JavaMonacoRegistrationContribution implements FrontendApplicationCo
       monaco.editor.registerCommand(JAVA_RUN_COMMANDS.DEBUG_TEST, (_accessor: any, arg?: any) => {
         self.executeRun(arg, true);
       }),
+      // IDEA-style reference lenses: JDT resolves to these command ids with
+      // arguments [uri, position, locations]. Route them to Kairo's
+      // Show Usages popup / Implementation navigation so a click actually
+      // shows "who calls this method".
+      monaco.editor.registerCommand(JDT_SHOW_REFERENCES_COMMAND, (_accessor: any, ...args: any[]) => {
+        void self.executeLensShowReferences(args);
+      }),
+      monaco.editor.registerCommand(JDT_SHOW_IMPLEMENTATIONS_COMMAND, (_accessor: any, ...args: any[]) => {
+        void self.executeLensShowImplementations(args);
+      }),
+      monaco.editor.registerCommand(KAIRO_SHOW_USAGES_AT_LENS_COMMAND, (_accessor: any, arg?: any) => {
+        void self.executeLensFallback(arg);
+      }),
     );
+  }
+
+  /**
+   * Click on "N 个引用": move the caret onto the symbol and open the
+   * existing Show Usages popup (filter + live preview + Find Usages panel
+   * button). Reuses `kairo.java.showUsages` so there is exactly one popup
+   * implementation to maintain.
+   */
+  protected async executeLensShowReferences(args: unknown[]): Promise<void> {
+    const target = parseLensCommandTarget(args);
+    if (target) {
+      this.revealLensTarget(target.uri, target.line, target.character);
+    }
+    if (this.commandService) {
+      try {
+        await this.commandService.executeCommand('kairo.java.showUsages');
+        return;
+      } catch (e) {
+        console.warn('[kairo-java] lens showUsages failed', e);
+      }
+    }
+    this.messages?.info('将光标放在方法名上，然后按 Ctrl+Alt+F7 查看调用。');
+  }
+
+  protected async executeLensShowImplementations(args: unknown[]): Promise<void> {
+    const target = parseLensCommandTarget(args);
+    if (target) {
+      this.revealLensTarget(target.uri, target.line, target.character);
+    }
+    if (this.commandService) {
+      try {
+        await this.commandService.executeCommand('kairo.java.goToImplementation');
+        return;
+      } catch (e) {
+        console.warn('[kairo-java] lens showImplementations failed', e);
+      }
+    }
+    // Direct Monaco fallback when the Theia command is unavailable.
+    const editor = target ? this.findEditorForUri(target.uri) : monaco.editor.getEditors()[0];
+    try {
+      editor?.trigger('kairo-codelens', 'editor.action.goToImplementation', null);
+    } catch {
+      // ignore
+    }
+  }
+
+  protected async executeLensFallback(arg: { uri?: string; line?: number; character?: number } | undefined): Promise<void> {
+    if (arg?.uri && typeof arg.line === 'number') {
+      this.revealLensTarget(arg.uri, arg.line, arg.character ?? 0);
+    }
+    if (this.commandService) {
+      try {
+        await this.commandService.executeCommand('kairo.java.showUsages');
+        return;
+      } catch (e) {
+        console.warn('[kairo-java] lens fallback showUsages failed', e);
+      }
+    }
+  }
+
+  protected findEditorForUri(uri: string): monaco.editor.IStandaloneCodeEditor | undefined {
+    try {
+      return monaco.editor.getEditors().find(e => e.getModel()?.uri.toString() === uri) as
+        | monaco.editor.IStandaloneCodeEditor
+        | undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** Put the caret on the lens symbol so Show Usages resolves the right symbol. */
+  protected revealLensTarget(uri: string, line: number, character: number): void {
+    const editor = this.findEditorForUri(uri) ?? monaco.editor.getEditors()[0];
+    if (!editor) return;
+    try {
+      editor.setPosition({ lineNumber: line + 1, column: character + 1 });
+      editor.revealPositionInCenterIfOutsideViewport(editor.getPosition()!);
+      editor.focus();
+    } catch {
+      // ignore
+    }
   }
 
   protected async executeRun(arg: { uri?: string; line?: number; method?: any; debug?: boolean } | undefined, debug: boolean): Promise<void> {
@@ -1651,14 +1868,46 @@ function toMonacoCompletionItemKind(kind: number | undefined): monaco.languages.
   }
 }
 
+/** Monaco lenses carry no LSP `data`; stash it for `codeLens/resolve`. */
+interface KairoCodeLensWithLspData extends monaco.languages.CodeLens {
+  _kairoLspLens?: { data: unknown };
+}
+
 function adaptCodeLens(lens: LSPCodeLens): monaco.languages.CodeLens {
-  return {
+  const adapted: KairoCodeLensWithLspData = {
     range: adaptRange(lens.range),
     command: lens.command ? {
       id: lens.command.command,
-      title: lens.command.title,
+      title: localizeCodeLensTitle(lens.command.title),
       arguments: lens.command.arguments,
     } : undefined,
+  };
+  if (lens.data !== undefined) {
+    adapted._kairoLspLens = { data: lens.data };
+  }
+  return adapted;
+}
+
+/**
+ * When `codeLens/resolve` fails (JDT busy/indexing), still show a clickable
+ * lens at the same range so the user can reach Show Usages in one click
+ * instead of seeing nothing.
+ */
+function withFallbackUsagesLens(
+  model: monaco.editor.ITextModel,
+  codeLens: monaco.languages.CodeLens,
+): monaco.languages.CodeLens {
+  return {
+    range: codeLens.range,
+    command: {
+      id: KAIRO_SHOW_USAGES_AT_LENS_COMMAND,
+      title: '查看引用',
+      arguments: [{
+        uri: model.uri.toString(),
+        line: codeLens.range.startLineNumber - 1,
+        character: codeLens.range.startColumn - 1,
+      }],
+    },
   };
 }
 

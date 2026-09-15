@@ -167,6 +167,59 @@ describe('ActiveProjectService — Basic', () => {
     const result = await svc.requireProject();
     assert.strictEqual(result.projectId, 'p1');
   });
+
+  it('tryAutoDetectAndBind detects Java Web project and auto-imports it', async () => {
+    svc.storageService.setData = () => Promise.resolve();
+    let importCalled = false;
+    svc.runtime = {
+      request: async (endpoint, body) => {
+        if (endpoint === 'POST /api/v1/projects/detect') {
+          return {
+            sourceDirs: ['src'],
+            webRoot: 'WebRoot',
+            libDirs: ['lib'],
+            buildScript: 'build.xml',
+            defaultEncoding: 'gbk',
+            jdkVersion: '1.6',
+            confidence: 0.85,
+          };
+        }
+        if (endpoint === 'POST /api/v1/projects/import') {
+          importCalled = true;
+          return {
+            id: 'my-web-app',
+            name: 'my-web-app',
+            rootPath: body.rootPath,
+          };
+        }
+        return {};
+      },
+    };
+    const ctx = { workspaceId: 'ws-100', workspaceRoot: '/workspace/my-web-app' };
+    const success = await svc.tryAutoDetectAndBind(ctx, 0);
+    assert.strictEqual(success, true);
+    assert.strictEqual(importCalled, true);
+    assert.strictEqual(svc.project.projectId, 'my-web-app');
+    assert.strictEqual(svc.project.name, 'my-web-app');
+  });
+
+  it('tryAutoDetectAndBind returns false when confidence is low or not a java project', async () => {
+    svc.runtime = {
+      request: async (endpoint) => {
+        if (endpoint === 'POST /api/v1/projects/detect') {
+          return {
+            sourceDirs: [],
+            webRoot: '',
+            confidence: 0.1,
+          };
+        }
+        return {};
+      },
+    };
+    const ctx = { workspaceId: 'ws-100', workspaceRoot: '/workspace/empty-dir' };
+    const success = await svc.tryAutoDetectAndBind(ctx, 0);
+    assert.strictEqual(success, false);
+  });
 });
 
 // ============================================================================

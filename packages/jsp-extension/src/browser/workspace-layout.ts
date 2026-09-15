@@ -49,7 +49,17 @@ export const WEB_XML_RE = /WEB-INF[/\\]web\.xml$/i;
 export const WEB_DOC_ROOTS = ['web', 'WebContent', 'webapp', 'src/main/webapp', ''];
 
 /** Default cap for directory walks (guards against huge workspaces). */
-const DEFAULT_MAX_FILES = 500;
+export const DEFAULT_MAX_FILES = 10_000;
+
+/**
+ * All workspace roots as URIs.
+ */
+export async function getAllWorkspaceRootUris(
+  workspaceService: WorkspaceService,
+): Promise<URI[]> {
+  const roots = await workspaceService.roots;
+  return roots.map(r => URI.fromFilePath(r.resource.path.toString()));
+}
 
 /**
  * The first workspace root as a URI, or undefined when no
@@ -194,7 +204,9 @@ async function walkDir(
       if (token?.isCancellationRequested || results.length >= maxFiles) return;
       const basename = child.resource.path.base;
       if (child.isDirectory) {
-        if (basename.startsWith('.') || basename === 'node_modules' || basename === 'lib' || basename === 'dist') {
+        if (basename.startsWith('.') || basename === 'node_modules' || basename === 'lib' || basename === 'dist' ||
+            basename === 'build' || basename === 'target' || basename === 'classes' || basename === 'work' ||
+            basename === 'temp' || basename === 'logs' || basename === '.metadata' || basename === '.settings') {
           continue;
         }
         await walkDir(fileService, child.resource, matchFile, results, token, maxFiles);

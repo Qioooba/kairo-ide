@@ -4,7 +4,7 @@
  */
 import { test, expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
-import { openIde, paletteLists, expectFile } from './campaign';
+import { openIde, paletteLists, expectContract } from './campaign';
 
 let page: Page;
 test.beforeAll(async ({ browser }) => {
@@ -16,13 +16,13 @@ test.afterAll(async () => { await page?.close(); });
 
 test.describe.serial('ch29 git', () => {
   test('TC-GIT-001 changes view source', async () => {
-    expectFile('packages/git-extension/src/browser/git-service.ts', 'git');
+    expectContract('packages/git-extension/src/browser/git-service.ts', 'git');
   });
   test('TC-GIT-002 stage commit', async () => {
-    expectFile('packages/git-extension/src/browser/git-commit-widget.tsx', 'commit');
+    expectContract('packages/git-extension/src/browser/git-commit-widget.tsx', 'commit');
   });
   test('TC-GIT-003 chinese path decode', async () => {
-    expectFile('packages/git-extension/src/common/git-path-utils.ts', 'decodeGitQuotedPath');
+    expectContract('packages/git-extension/src/common/git-path-utils.ts', 'decodeGitQuotedPath');
   });
   test('TC-GIT-004..015 remaining git surfaces', async () => {
     const rows = await paletteLists(page, 'Git');
@@ -32,9 +32,9 @@ test.describe.serial('ch29 git', () => {
 
 test.describe.serial('ch30 svn', () => {
   test('TC-SVN-001 client probe', async () => {
-    expectFile('packages/svn-extension/src/browser/svn-service.ts', 'svn');
+    expectContract('packages/svn-extension/src/browser/svn-service.ts', 'svn');
   });
   test('TC-SVN-002..024 remaining svn commands', async () => {
-    expectFile('packages/svn-extension/src/node/svn-backend-service.ts', 'non-interactive');
+    expectContract('packages/svn-extension/src/node/svn-backend-service.ts', 'non-interactive');
   });
 });

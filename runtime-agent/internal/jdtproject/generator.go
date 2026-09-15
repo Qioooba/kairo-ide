@@ -64,6 +64,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Qioooba/kairo-ide/runtime-agent/internal/antpath"
@@ -152,6 +153,17 @@ type Status struct {
 	GeneratedAt string `json:"generatedAt,omitempty"`
 }
 
+type inputFingerprint struct {
+	payloadHash [32]byte
+	configMtime time.Time
+	buildMtime  time.Time
+}
+
+type cachedGen struct {
+	fp     inputFingerprint
+	result GenerateResult
+}
+
 // Generator renders the JDT project model for a workspace.
 // One Generator per runtime agent.
 type Generator struct {
@@ -165,6 +177,9 @@ type Generator struct {
 	BundledDir string
 	// Logger is optional; the generator never panics.
 	Logger func(string, map[string]any)
+
+	mu         sync.Mutex
+	inputCache map[string]cachedGen
 }
 
 // NewGenerator creates a Generator.
@@ -173,6 +188,7 @@ func NewGenerator(dataDir, bundledDir string) *Generator {
 		DataDir:    dataDir,
 		BundledDir: bundledDir,
 		Logger:     func(string, map[string]any) {},
+		inputCache: make(map[string]cachedGen),
 	}
 }
 
@@ -229,6 +245,49 @@ func (g *Generator) Generate(payload []byte) (GenerateResult, error) {
 	if st, err := os.Stat(rootAbs); err != nil || !st.IsDir() {
 		return GenerateResult{}, fmt.Errorf("rootPath not a directory: %s", rootAbs)
 	}
+
+	// Early input dependency snapshot check (PERF-02 / F09)
+	targetDir := g.projectModelDir(req.WorkspaceID)
+	if req.IntoProjectRoot {
+		targetDir = rootAbs
+	}
+	cpFile := filepath.Join(targetDir, ".classpath")
+	projFile := filepath.Join(targetDir, ".project")
+
+	var configMtime time.Time
+	cfgPath := filepath.Join(rootAbs, ".legacyflow", "project.yaml")
+	if st, err := os.Stat(cfgPath); err == nil {
+		configMtime = st.ModTime()
+	}
+	var buildMtime time.Time
+	bName := req.BuildFile
+	if bName == "" {
+		bName = "build.xml"
+	}
+	if st, err := os.Stat(filepath.Join(rootAbs, bName)); err == nil {
+		buildMtime = st.ModTime()
+	}
+
+	fp := inputFingerprint{
+		payloadHash: sha256.Sum256(payload),
+		configMtime: configMtime,
+		buildMtime:  buildMtime,
+	}
+
+	g.mu.Lock()
+	cached, hasCache := g.inputCache[targetDir]
+	g.mu.Unlock()
+
+	if hasCache && cached.fp == fp {
+		if _, err1 := os.Stat(cpFile); err1 == nil {
+			if _, err2 := os.Stat(projFile); err2 == nil {
+				res := cached.result
+				res.FromCache = true
+				return res, nil
+			}
+		}
+	}
+
 	// Read the project's config.
 	proj, err := readProjectConfig(rootAbs)
 	if err != nil {
@@ -422,7 +481,7 @@ func (g *Generator) Generate(payload []byte) (GenerateResult, error) {
 	kairoPath := filepath.Join(dir, "KairoJavaConfig.ini")
 	cacheKey := sha256.Sum256(append(append(classpathBytes, projectBytes...), []byte(kairoConfig)...))
 	if !cacheChanged(dir, cacheKey[:]) {
-		return GenerateResult{
+		res := GenerateResult{
 			WorkspaceID:      req.WorkspaceID,
 			ProjectID:        proj.ProjectID,
 			ProjectModel:     projPath,
@@ -437,7 +496,11 @@ func (g *Generator) Generate(payload []byte) (GenerateResult, error) {
 			FromCache:        true,
 			ClasspathSource:  classpathSource,
 			UnresolvedPaths:  unresolvedPaths,
-		}, nil
+		}
+		g.mu.Lock()
+		g.inputCache[dir] = cachedGen{fp: fp, result: res}
+		g.mu.Unlock()
+		return res, nil
 	}
 	if err := atomicfile.WriteFile(cpPath, classpathBytes, 0o644); err != nil {
 		return GenerateResult{}, err
@@ -466,7 +529,7 @@ func (g *Generator) Generate(payload []byte) (GenerateResult, error) {
 		[]byte(renderJDTCorePrefs(proj)), 0o644); err != nil {
 		return GenerateResult{}, err
 	}
-	return GenerateResult{
+	res := GenerateResult{
 		WorkspaceID:      req.WorkspaceID,
 		ProjectID:        proj.ProjectID,
 		ProjectModel:     projPath,
@@ -481,7 +544,11 @@ func (g *Generator) Generate(payload []byte) (GenerateResult, error) {
 		FromCache:        false,
 		ClasspathSource:  classpathSource,
 		UnresolvedPaths:  unresolvedPaths,
-	}, nil
+	}
+	g.mu.Lock()
+	g.inputCache[dir] = cachedGen{fp: fp, result: res}
+	g.mu.Unlock()
+	return res, nil
 }
 
 // Status returns whether a JDT project model is on disk for

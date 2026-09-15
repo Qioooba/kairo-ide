@@ -1,0 +1,27 @@
+{
+  "name": "@kairo/highlighting-extension",
+  "version": "0.1.0",
+  "description": "Kairo IDE highlighting and performance governance extension. Provides deterministic JSP region scanning, incremental Worker tokenization, Monaco tokenization adapter, and diagnostics.",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "files": [
+    "lib",
+    "src"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "clean": "node ../../scripts/clean-dir.cjs lib tsconfig.tsbuildinfo",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test src/common/*.test.cjs src/browser/*.test.cjs src/worker/*.test.cjs"
+  },
+  "dependencies": {
+    "@kairo/protocol": "workspace:*",
+    "@theia/core": "1.73.1",
+    "@theia/editor": "1.73.1",
+    "@theia/monaco": "1.73.1",
+    "@theia/monaco-editor-core": "1.108.201"
+  },
+  "devDependencies": {
+    "typescript": "5.5.4"
+  }
+}

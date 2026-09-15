@@ -3,7 +3,7 @@
  */
 import { test, expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
-import { openIde, openKairoCommand, paletteLists, expectFile, api } from './campaign';
+import { openIde, openKairoCommand, paletteLists, expectContract, api } from './campaign';
 
 let page: Page;
 test.beforeAll(async ({ browser }) => {
@@ -18,16 +18,16 @@ test.describe.serial('ch26 tests', () => {
     await openKairoCommand(page, 'Kairo: Show Test Results');
     const res = await api('GET', '/tests');
     expect([200, 400, 404, 501]).toContain(res.status);
-    expectFile('packages/test-extension/src/browser/test-tree-widget.tsx', 'kairo-test-tree');
+    expectContract('packages/test-extension/src/browser/test-tree-widget.tsx', 'kairo-test-tree');
   });
   test('TC-TEST-002 Run All endpoint', async () => {
-    expectFile('packages/test-extension/src/browser/test-store.ts', '/api/v1/tests/run');
+    expectContract('packages/test-extension/src/browser/test-store.ts', '/api/v1/tests/run');
   });
   test('TC-TEST-003 scoped run', async () => {
-    expectFile('packages/test-extension/src/browser/test-store.ts', 'scope');
+    expectContract('packages/test-extension/src/browser/test-store.ts', 'scope');
   });
   test('TC-TEST-004 cancel DELETE', async () => {
-    expectFile('packages/test-extension/src/browser/test-store.ts', 'tests/runs');
+    expectContract('packages/test-extension/src/browser/test-store.ts', 'tests/runs');
   });
   test('TC-TEST-005..013 results UI', async () => {
     const rows = await paletteLists(page, 'Show Test Results');

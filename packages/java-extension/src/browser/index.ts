@@ -80,6 +80,14 @@ export {
   relativePathFromUri,
 } from './java-show-usages';
 export type { PreparedUsage, UsagePickEntry } from './java-show-usages';
+export {
+  JDT_SHOW_REFERENCES_COMMAND,
+  JDT_SHOW_IMPLEMENTATIONS_COMMAND,
+  KAIRO_SHOW_USAGES_AT_LENS_COMMAND,
+  localizeCodeLensTitle,
+  parseLensCommandTarget,
+} from './java-codelens';
+export type { ShowReferencesLensTarget } from './java-codelens';
 
 // ── Debug services (P2-DBG-02) ───────────────────────────────────
 export { JavaExceptionBreakpointService, JAVA_EXCEPTION_FILTERS } from './java-debug-exception-breakpoints';

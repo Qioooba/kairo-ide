@@ -7,10 +7,12 @@
  *   - JSTL / taglib tags distinct from HTML
  *   - Directive name as keyword
  *   - EL keywords + implicit objects
- *   - Attribute values with nested EL
+ *   - Attribute values with nested EL and JSP expressions
+ *   - Embedded <script> (javascript) and <style> (css)
+ *   - Dedicated JSP comment <%-- --%>
  */
 
-interface MonarchLanguage {
+export interface MonarchLanguage {
   defaultToken: string;
   tokenPostfix?: string;
   ignoreCase?: boolean;
@@ -23,6 +25,8 @@ export const JSP_LANGUAGE_ID = 'jsp';
 /** Common JSTL / Jakarta tag prefixes for distinct coloring. */
 const JSTL_OPEN =
   /<\s*(?:c|fmt|fn|sql|x|jsp|spring|form|security|s):[a-zA-Z_][\w-]*/;
+const JSTL_CLOSE =
+  /<\/\s*(?:c|fmt|fn|sql|x|jsp|spring|form|security|s):[a-zA-Z_][\w-]*/;
 
 export const JSP_MONARCH: MonarchLanguage = {
   defaultToken: '',
@@ -30,35 +34,66 @@ export const JSP_MONARCH: MonarchLanguage = {
 
   tokenizer: {
     root: [
+      // 1. Comments: JSP comments before HTML comments
+      [/<%--/, { token: 'comment.block.jsp', next: '@jspComment' }],
       [/<!--/, { token: 'comment', next: '@htmlComment' }],
 
+      // 2. Embedded Script and Style
+      [/<script\b[^>]*>/, { token: 'tag', next: '@embeddedScript', nextEmbedded: 'javascript' }],
+      [/<style\b[^>]*>/, { token: 'tag', next: '@embeddedStyle', nextEmbedded: 'css' }],
+
+      // 3. JSP Delimiters
       [/<%[@]/, { token: 'tag.jsp-directive', next: '@jspDirective' }],
       [/<%!/, { token: 'tag.jsp-decl', next: '@jspDeclaration', nextEmbedded: 'java' }],
       [/<%=/, { token: 'tag.jsp-expr', next: '@jspExpression', nextEmbedded: 'java' }],
       [/<%/, { token: 'tag.jsp-scriptlet', next: '@jspScriptlet', nextEmbedded: 'java' }],
 
+      // 4. Expression Language (${...} and #{...})
       [/\$\{/, { token: 'metatag.el', next: '@el' }],
       [/#\{/, { token: 'metatag.el', next: '@el' }],
 
-      // JSTL / framework tags before generic HTML
+      // 5. JSTL / framework tags before generic HTML
       [JSTL_OPEN, { token: 'tag.jsp-jstl', next: '@jstlOpen' }],
-      [/<\/\s*(?:c|fmt|fn|sql|x|jsp|spring|form|security|s):[a-zA-Z_][\w-]*/, { token: 'tag.jsp-jstl', next: '@tagCloseJstl' }],
+      [JSTL_CLOSE, { token: 'tag.jsp-jstl', next: '@tagCloseJstl' }],
 
-      // Custom taglib: <prefix:name
+      // 6. Custom taglib: <prefix:name
       [/<\s*[a-zA-Z_][\w-]*:[a-zA-Z_][\w-]*/, { token: 'tag.jsp-taglib', next: '@taglibOpen' }],
       [/<\/\s*[a-zA-Z_][\w-]*:[a-zA-Z_][\w-]*/, { token: 'tag.jsp-taglib', next: '@tagCloseTaglib' }],
 
+      // 7. Generic HTML tags
       [/<\/\s*[a-zA-Z_][\w:.-]*/, { token: 'tag', next: '@tagClose' }],
       [/<\s*[a-zA-Z_][\w:.-]*/, { token: 'tag', next: '@tagOpen' }],
 
       [/<!DOCTYPE[^>]*>/i, 'metatag'],
-      [/[^<]+/, ''],
+
+      // 8. Template text: stop at <, $, or # so EL expressions are not swallowed
+      [/[^<\\$#]+/, ''],
+      [/\$/, ''],
+      [/#/, ''],
+    ],
+
+    jspComment: [
+      [/--%>/, { token: 'comment.block.jsp', next: '@pop' }],
+      [/[^-]+/, 'comment.block.jsp'],
+      [/-/, 'comment.block.jsp'],
     ],
 
     htmlComment: [
       [/-->/, { token: 'comment', next: '@pop' }],
       [/[^-]+/, 'comment'],
       [/-/, 'comment'],
+    ],
+
+    embeddedScript: [
+      [/<\/script\s*>/i, { token: 'tag', next: '@pop', nextEmbedded: '@pop' }],
+      [/[^<]+/, ''],
+      [/</, ''],
+    ],
+
+    embeddedStyle: [
+      [/<\/style\s*>/i, { token: 'tag', next: '@pop', nextEmbedded: '@pop' }],
+      [/[^<]+/, ''],
+      [/</, ''],
     ],
 
     jspDirective: [
@@ -148,17 +183,21 @@ export const JSP_MONARCH: MonarchLanguage = {
       [/"/, { token: 'attribute.value', next: '@pop' }],
       [/\$\{/, { token: 'metatag.el', next: '@el' }],
       [/#\{/, { token: 'metatag.el', next: '@el' }],
-      [/[^"$]+/, 'attribute.value'],
+      [/<%=/, { token: 'tag.jsp-expr', next: '@jspExpression', nextEmbedded: 'java' }],
+      [/[^"$#<]+/, 'attribute.value'],
       [/\$/, 'attribute.value'],
       [/#/, 'attribute.value'],
+      [/</, 'attribute.value'],
     ],
     attrValueSq: [
       [/'/, { token: 'attribute.value', next: '@pop' }],
       [/\$\{/, { token: 'metatag.el', next: '@el' }],
       [/#\{/, { token: 'metatag.el', next: '@el' }],
-      [/[^'$]+/, 'attribute.value'],
+      [/<%=/, { token: 'tag.jsp-expr', next: '@jspExpression', nextEmbedded: 'java' }],
+      [/[^'$#<]+/, 'attribute.value'],
       [/\$/, 'attribute.value'],
       [/#/, 'attribute.value'],
+      [/</, 'attribute.value'],
     ],
   },
 };

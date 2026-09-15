@@ -1,0 +1,551 @@
+{
+  "generatedAt": "2026-09-14T15:00:45.423Z",
+  "auditBaseline": "6ea00095d1d2a93c3f79ce2a15803b2f893d92ef",
+  "note": "Seed inventory from static scan. Runtime-discovered nested dialogs, context submenus and error popups must be appended during real runs; surfaces absent here are NOT exempt from testing (REPORT §7.1).",
+  "counts": {
+    "surfaces": 34,
+    "covered": 0,
+    "uncovered": 34
+  },
+  "dialogs": [
+    {
+      "className": "ProjectStructureDialog",
+      "file": "packages/project-extension/src/browser/project-structure-dialog.tsx"
+    }
+  ],
+  "surfaces": [
+    {
+      "surfaceId": "kairo-server-view",
+      "constName": "KAIRO_SERVERS_FACTORY_ID",
+      "sourceFiles": [
+        "packages/theia-product/src/main/browser/*server-view*.tsx"
+      ],
+      "entryAction": "(see kairo-views-contribution)",
+      "parentSurface": "main-area",
+      "supportedStates": [],
+      "caseIds": [],
+      "screenshots": [],
+      "reviewer": "",
+      "status": "uncovered"
+    },
+    {
+      "surfaceId": "kairo-build-view",
+      "constName": "KAIRO_BUILDS_FACTORY_ID",
+      "sourceFiles": [
+        "packages/theia-product/src/main/browser/*build-view*.tsx"
+      ],
+      "entryAction": "(see kairo-views-contribution)",
+      "parentSurface": "main-area",
+      "supportedStates": [],
+      "caseIds": [],
+      "screenshots": [],
+      "reviewer": "",
+      "status": "uncovered"
+    },
+    {
+      "surfaceId": "kairo-deployments",
+      "constName": "KAIRO_DEPLOYMENTS_FACTORY_ID",
+      "sourceFiles": [
+        "packages/theia-product/src/main/browser/*deployments*.tsx"
+      ],
+      "entryAction": "(see kairo-views-contribution)",
+      "parentSurface": "main-area",
+      "supportedStates": [],
+      "caseIds": [],
+      "screenshots": [],
+      "reviewer": "",
+      "status": "uncovered"
+    },
+    {
+      "surfaceId": "kairo-log-viewer",
+      "constName": "KAIRO_LOGS_FACTORY_ID",
+      "sourceFiles": [
+        "packages/theia-product/src/main/browser/*log-viewer*.tsx"
+      ],
+      "entryAction": "(see kairo-views-contribution)",
+      "parentSurface": "main-area",
+      "supportedStates": [],
+      "caseIds": [],
+      "screenshots": [],
+      "reviewer": "",
+      "status": "uncovered"
+    },
+    {
+      "surfaceId": "kairo-import-wizard",
+      "constName": "KAIRO_IMPORT_WIZARD_FACTORY_ID",
+      "sourceFiles": [
+        "packages/theia-product/src/main/browser/*import-wizard*.tsx"
+      ],
+      "entryAction": "(see kairo-views-contribution)",
+      "parentSurface": "main-area",
+      "supportedStates": [],
+      "caseIds": [],
+      "screenshots": [],
+      "reviewer": "",
+      "status": "uncovered"
+    },
+    {
+      "surfaceId": "kairo-project-selector",
+      "constName": "KAIRO_PROJECT_SELECTOR_FACTORY_ID",
+      "sourceFiles": [
+        "packages/theia-product/src/main/browser/*project-selector*.tsx"
+      ],
+      "entryAction": "(see kairo-views-contribution)",
+      "parentSurface": "main-area",
+      "supportedStates": [
+        "loading",
+        "error"
+      ],
+      "caseIds": [],
+      "screenshots": [],
+      "reviewer": "",
+      "status": "uncovered"
+    },
+    {
+      "surfaceId": "kairo-run-configurations",
+      "constName": "KAIRO_RUN_CONFIGURATIONS_FACTORY_ID",
+      "sourceFiles": [
+        "packages/theia-product/src/main/browser/*run-configurations*.tsx"
+      ],
+      "entryAction": "Kairo: Manage Run Configurations",
+      "parentSurface": "main-area",
+      "supportedStates": [
+        "loading",
+        "empty",
+        "error",
+        "busy"
+      ],
+      "caseIds": [],
+      "screenshots": [],
+      "reviewer": "",
+      "status": "uncovered"
+    },
+    {
+      "surfaceId": "kairo-problems",
+      "constName": "KAIRO_PROBLEMS_FACTORY_ID",
+      "sourceFiles": [
+        "packages/theia-product/src/main/browser/*problems*.tsx"
+      ],
+      "entryAction": "(see kairo-views-contribution)",
+      "parentSurface": "main-area",
+      "supportedStates": [],
+      "caseIds": [],
+      "screenshots": [],
+      "reviewer": "",
+      "status": "uncovered"
+    },
+    {
+      "surfaceId": "kairo-toolbar",
+      "constName": "KAIRO_TOOLBAR_FACTORY_ID",
+      "sourceFiles": [
+        "packages/theia-product/src/main/browser/*toolbar*.tsx"
+      ],
+      "entryAction": "(always visible)",
+      "parentSurface": "shell",
+      "supportedStates": [
+        "loading",
+        "error",
+        "busy"
+      ],
+      "caseIds": [],
+      "screenshots": [],
+      "reviewer": "",
+      "status": "uncovered"
+    },
+    {
+      "surfaceId": "kairo-keymap",
+      "constName": "KAIRO_KEYMAP_FACTORY_ID",
+      "sourceFiles": [
+        "packages/theia-product/src/main/browser/*keymap*.tsx"
+      ],
+      "entryAction": "(see kairo-views-contribution)",
+      "parentSurface": "main-area",
+      "supportedStates": [],
+      "caseIds": [],
+      "screenshots": [],
+      "reviewer": "",
+      "status": "uncovered"
+    },
+    {
+      "surfaceId": "kairo-local-history",
+      "constName": "KAIRO_LOCAL_HISTORY_FACTORY_ID",
+      "sourceFiles": [
+        "packages/theia-product/src/main/browser/*local-history*.tsx"
+      ],
+      "entryAction": "(see kairo-views-contribution)",
+      "parentSurface": "main-area",
+      "supportedStates": [],
+      "caseIds": [],
+      "screenshots": [],
+      "reviewer": "",
+      "status": "uncovered"
+    },
+    {
+      "surfaceId": "kairo-test-tree",
+      "constName": "KAIRO_TESTS_FACTORY_ID",
+      "sourceFiles": [
+        "packages/theia-product/src/main/browser/*test-tree*.tsx"
+      ],
+      "entryAction": "(see kairo-views-contribution)",
+      "parentSurface": "main-area",
+      "supportedStates": [],
+      "caseIds": [],
+      "screenshots": [],
+      "reviewer": "",
+      "status": "uncovered"
+    },
+    {
+      "surfaceId": "kairo-maven-view",
+      "constName": "KAIRO_MAVEN_FACTORY_ID",
+      "sourceFiles": [
+        "packages/theia-product/src/main/browser/*maven-view*.tsx"
+      ],
+      "entryAction": "(see kairo-views-contribution)",
+      "parentSurface": "main-area",
+      "supportedStates": [],
+      "caseIds": [],
+      "screenshots": [],
+      "reviewer": "",
+      "status": "uncovered"
+    },
+    {
+      "surfaceId": "kairo-todo-view",
+      "constName": "KAIRO_TODO_FACTORY_ID",
+      "sourceFiles": [
+        "packages/theia-product/src/main/browser/*todo-view*.tsx"
+      ],
+      "entryAction": "(see kairo-views-contribution)",
+      "parentSurface": "main-area",
+      "supportedStates": [
+        "empty"
+      ],
+      "caseIds": [],
+      "screenshots": [],
+      "reviewer": "",
+      "status": "uncovered"
+    },
+    {
+      "surfaceId": "kairo-perf-dashboard",
+      "constName": "KAIRO_PERF_FACTORY_ID",
+      "sourceFiles": [
+        "packages/theia-product/src/main/browser/*perf-dashboard*.tsx"
+      ],
+      "entryAction": "(see kairo-views-contribution)",
+      "parentSurface": "main-area",
+      "supportedStates": [],
+      "caseIds": [],
+      "screenshots": [],
+      "reviewer": "",
+      "status": "uncovered"
+    },
+    {
+      "surfaceId": "kairo-sql-console",
+      "constName": "KAIRO_SQL_CONSOLE_FACTORY_ID",
+      "sourceFiles": [
+        "packages/theia-product/src/main/browser/*sql-console*.tsx"
+      ],
+      "entryAction": "Kairo: Show SQL Console",
+      "parentSurface": "main-area",
+      "supportedStates": [
+        "empty",
+        "error",
+        "busy",
+        "disconnected"
+      ],
+      "caseIds": [],
+      "screenshots": [],
+      "reviewer": "",
+      "status": "uncovered"
+    },
+    {
+      "surfaceId": "kairo-remote",
+      "constName": "KAIRO_REMOTE_FACTORY_ID",
+      "sourceFiles": [
+        "packages/theia-product/src/main/browser/*remote*.tsx"
+      ],
+      "entryAction": "Kairo: Show Remote Development",
+      "parentSurface": "main-area",
+      "supportedStates": [
+        "disconnected"
+      ],
+      "caseIds": [],
+      "screenshots": [],
+      "reviewer": "",
+      "status": "uncovered"
+    },
+    {
+      "surfaceId": "kairo-shortcuts",
+      "constName": "KAIRO_SHORTCUTS_FACTORY_ID",
+      "sourceFiles": [
+        "packages/theia-product/src/main/browser/*shortcuts*.tsx"
+      ],
+      "entryAction": "(see kairo-views-contribution)",
+      "parentSurface": "main-area",
+      "supportedStates": [],
+      "caseIds": [],
+      "screenshots": [],
+      "reviewer": "",
+      "status": "uncovered"
+    },
+    {
+      "surfaceId": "kairo-debug-variables",
+      "constName": "KAIRO_DEBUG_VARIABLES_FACTORY_ID",
+      "sourceFiles": [
+        "packages/theia-product/src/main/browser/*debug-variables*.tsx"
+      ],
+      "entryAction": "(see kairo-views-contribution)",
+      "parentSurface": "main-area",
+      "supportedStates": [
+        "empty",
+        "disconnected"
+      ],
+      "caseIds": [],
+      "screenshots": [],
+      "reviewer": "",
+      "status": "uncovered"
+    },
+    {
+      "surfaceId": "kairo-debug-callstack",
+      "constName": "KAIRO_DEBUG_CALLSTACK_FACTORY_ID",
+      "sourceFiles": [
+        "packages/theia-product/src/main/browser/*debug-callstack*.tsx"
+      ],
+      "entryAction": "(see kairo-views-contribution)",
+      "parentSurface": "main-area",
+      "supportedStates": [
+        "empty",
+        "disconnected"
+      ],
+      "caseIds": [],
+      "screenshots": [],
+      "reviewer": "",
+      "status": "uncovered"
+    },
+    {
+      "surfaceId": "kairo-debug-breakpoints",
+      "constName": "KAIRO_DEBUG_BREAKPOINTS_FACTORY_ID",
+      "sourceFiles": [
+        "packages/theia-product/src/main/browser/*debug-breakpoints*.tsx"
+      ],
+      "entryAction": "(see kairo-views-contribution)",
+      "parentSurface": "main-area",
+      "supportedStates": [
+        "empty",
+        "disconnected"
+      ],
+      "caseIds": [],
+      "screenshots": [],
+      "reviewer": "",
+      "status": "uncovered"
+    },
+    {
+      "surfaceId": "kairo-debug-toolbar",
+      "constName": "KAIRO_DEBUG_TOOLBAR_FACTORY_ID",
+      "sourceFiles": [
+        "packages/theia-product/src/main/browser/*debug-toolbar*.tsx"
+      ],
+      "entryAction": "(see kairo-views-contribution)",
+      "parentSurface": "main-area",
+      "supportedStates": [
+        "loading",
+        "empty",
+        "error",
+        "busy",
+        "disconnected"
+      ],
+      "caseIds": [],
+      "screenshots": [],
+      "reviewer": "",
+      "status": "uncovered"
+    },
+    {
+      "surfaceId": "kairo-debug-console",
+      "constName": "KAIRO_DEBUG_CONSOLE_FACTORY_ID",
+      "sourceFiles": [
+        "packages/theia-product/src/main/browser/*debug-console*.tsx"
+      ],
+      "entryAction": "(see kairo-views-contribution)",
+      "parentSurface": "main-area",
+      "supportedStates": [
+        "empty",
+        "disconnected"
+      ],
+      "caseIds": [],
+      "screenshots": [],
+      "reviewer": "",
+      "status": "uncovered"
+    },
+    {
+      "surfaceId": "kairo-debug-watch",
+      "constName": "KAIRO_DEBUG_WATCH_FACTORY_ID",
+      "sourceFiles": [
+        "packages/theia-product/src/main/browser/*debug-watch*.tsx"
+      ],
+      "entryAction": "(see kairo-views-contribution)",
+      "parentSurface": "main-area",
+      "supportedStates": [
+        "empty",
+        "disconnected"
+      ],
+      "caseIds": [],
+      "screenshots": [],
+      "reviewer": "",
+      "status": "uncovered"
+    },
+    {
+      "surfaceId": "kairo-debug-condition-editor",
+      "constName": "KAIRO_DEBUG_CONDITION_EDITOR_FACTORY_ID",
+      "sourceFiles": [
+        "packages/theia-product/src/main/browser/*debug-condition-editor*.tsx"
+      ],
+      "entryAction": "(see kairo-views-contribution)",
+      "parentSurface": "main-area",
+      "supportedStates": [
+        "empty",
+        "disconnected"
+      ],
+      "caseIds": [],
+      "screenshots": [],
+      "reviewer": "",
+      "status": "uncovered"
+    },
+    {
+      "surfaceId": "kairo-hotswap-widget",
+      "constName": "KAIRO_JAVA_HOTSWAP_FACTORY_ID",
+      "sourceFiles": [
+        "packages/theia-product/src/main/browser/*hotswap-widget*.tsx"
+      ],
+      "entryAction": "(see kairo-views-contribution)",
+      "parentSurface": "main-area",
+      "supportedStates": [],
+      "caseIds": [],
+      "screenshots": [],
+      "reviewer": "",
+      "status": "uncovered"
+    },
+    {
+      "surfaceId": "kairo-debug-diagnostics",
+      "constName": "KAIRO_DEBUG_DIAGNOSTICS_FACTORY_ID",
+      "sourceFiles": [
+        "packages/theia-product/src/main/browser/*debug-diagnostics*.tsx"
+      ],
+      "entryAction": "(see kairo-views-contribution)",
+      "parentSurface": "main-area",
+      "supportedStates": [
+        "empty",
+        "disconnected"
+      ],
+      "caseIds": [],
+      "screenshots": [],
+      "reviewer": "",
+      "status": "uncovered"
+    },
+    {
+      "surfaceId": "kairo-debug-tool-window",
+      "constName": "KAIRO_DEBUG_TOOL_WINDOW_FACTORY_ID",
+      "sourceFiles": [
+        "packages/theia-product/src/main/browser/*debug-tool-window*.tsx"
+      ],
+      "entryAction": "Debug Tool Window",
+      "parentSurface": "main-area",
+      "supportedStates": [
+        "empty",
+        "disconnected"
+      ],
+      "caseIds": [],
+      "screenshots": [],
+      "reviewer": "",
+      "status": "uncovered"
+    },
+    {
+      "surfaceId": "kairo-debug-hover-provider",
+      "constName": "KAIRO_DEBUG_HOVER_PROVIDER_FACTORY_ID",
+      "sourceFiles": [
+        "packages/theia-product/src/main/browser/*debug-hover-provider*.tsx"
+      ],
+      "entryAction": "(see kairo-views-contribution)",
+      "parentSurface": "main-area",
+      "supportedStates": [
+        "empty",
+        "disconnected"
+      ],
+      "caseIds": [],
+      "screenshots": [],
+      "reviewer": "",
+      "status": "uncovered"
+    },
+    {
+      "surfaceId": "kairo-debug-inline-values",
+      "constName": "KAIRO_DEBUG_INLINE_VALUES_FACTORY_ID",
+      "sourceFiles": [
+        "packages/theia-product/src/main/browser/*debug-inline-values*.tsx"
+      ],
+      "entryAction": "(see kairo-views-contribution)",
+      "parentSurface": "main-area",
+      "supportedStates": [
+        "empty",
+        "disconnected"
+      ],
+      "caseIds": [],
+      "screenshots": [],
+      "reviewer": "",
+      "status": "uncovered"
+    },
+    {
+      "surfaceId": "kairo-bookmarks",
+      "constName": "KAIRO_BOOKMARKS_FACTORY_ID",
+      "sourceFiles": [
+        "packages/theia-product/src/main/browser/*bookmarks*.tsx"
+      ],
+      "entryAction": "(see kairo-views-contribution)",
+      "parentSurface": "main-area",
+      "supportedStates": [],
+      "caseIds": [],
+      "screenshots": [],
+      "reviewer": "",
+      "status": "uncovered"
+    },
+    {
+      "surfaceId": "kairo-shortcut-cheatsheet",
+      "constName": "KAIRO_SHORTCUT_CHEATSHEET_FACTORY_ID",
+      "sourceFiles": [
+        "packages/theia-product/src/main/browser/*shortcut-cheatsheet*.tsx"
+      ],
+      "entryAction": "(see kairo-views-contribution)",
+      "parentSurface": "main-area",
+      "supportedStates": [],
+      "caseIds": [],
+      "screenshots": [],
+      "reviewer": "",
+      "status": "uncovered"
+    },
+    {
+      "surfaceId": "kairo-extensions",
+      "constName": "KAIRO_EXTENSIONS_FACTORY_ID",
+      "sourceFiles": [
+        "packages/theia-product/src/main/browser/*extensions*.tsx"
+      ],
+      "entryAction": "(see kairo-views-contribution)",
+      "parentSurface": "main-area",
+      "supportedStates": [],
+      "caseIds": [],
+      "screenshots": [],
+      "reviewer": "",
+      "status": "uncovered"
+    },
+    {
+      "surfaceId": "kairo-outline",
+      "constName": "KAIRO_OUTLINE_FACTORY_ID",
+      "sourceFiles": [
+        "packages/theia-product/src/main/browser/*outline*.tsx"
+      ],
+      "entryAction": "(see kairo-views-contribution)",
+      "parentSurface": "main-area",
+      "supportedStates": [],
+      "caseIds": [],
+      "screenshots": [],
+      "reviewer": "",
+      "status": "uncovered"
+    }
+  ]
+}

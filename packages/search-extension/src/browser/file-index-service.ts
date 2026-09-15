@@ -21,7 +21,9 @@ export class FileIndexService {
   @inject(RuntimeConnectionService) protected readonly runtime!: RuntimeConnectionService;
 
   protected cache: { key: string; files: FileListEntry[]; at: number } | undefined;
-  protected static readonly TTL_MS = 15_000;
+  protected inFlight = new Map<string, Promise<FileListEntry[]>>();
+  public static readonly TTL_MS = 60_000;
+  protected static readonly MAX_STALE_MS = 300_000;
 
   async listFiles(opts: FileIndexOptions): Promise<FileListEntry[]> {
     const key = JSON.stringify({
@@ -31,10 +33,34 @@ export class FileIndexService {
       exclude: opts.exclude ?? [],
       maxFiles: opts.maxFiles ?? 50_000,
     });
-    if (this.cache && this.cache.key === key && Date.now() - this.cache.at < FileIndexService.TTL_MS) {
-      return this.cache.files;
+
+    const now = Date.now();
+    if (this.cache && this.cache.key === key) {
+      const age = now - this.cache.at;
+      if (age < FileIndexService.TTL_MS) {
+        return this.cache.files;
+      }
+      if (age < FileIndexService.MAX_STALE_MS) {
+        // Stale-while-revalidate: return immediately and refresh in background
+        this.revalidateInBackground(key, opts);
+        return this.cache.files;
+      }
     }
 
+    if (this.inFlight.has(key)) {
+      return this.inFlight.get(key)!;
+    }
+
+    const fetchPromise = this.fetchFiles(key, opts);
+    this.inFlight.set(key, fetchPromise);
+    try {
+      return await fetchPromise;
+    } finally {
+      this.inFlight.delete(key);
+    }
+  }
+
+  protected async fetchFiles(key: string, opts: FileIndexOptions): Promise<FileListEntry[]> {
     const response = await this.runtime.request('POST /api/v1/search/files', {
       workspaceId: opts.workspaceId,
       rootPath: opts.rootPath,
@@ -48,7 +74,15 @@ export class FileIndexService {
     return files;
   }
 
+  protected revalidateInBackground(key: string, opts: FileIndexOptions): void {
+    if (this.inFlight.has(key)) return;
+    const fetchPromise = this.fetchFiles(key, { ...opts, signal: undefined })
+      .finally(() => this.inFlight.delete(key));
+    this.inFlight.set(key, fetchPromise);
+  }
+
   invalidate(): void {
     this.cache = undefined;
+    this.inFlight.clear();
   }
 }

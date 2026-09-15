@@ -1,4 +1,4 @@
-import { inject, injectable } from '@theia/core/shared/inversify';
+import { inject, injectable, postConstruct } from '@theia/core/shared/inversify';
 import { Emitter, Event } from '@theia/core/lib/common/event';
 import { CommandService } from '@theia/core/lib/common/command';
 import { RuntimeConnectionService } from '@kairo/runtime-extension';
@@ -64,6 +64,24 @@ export function createTomcatRunConfiguration(id = 'tomcat-local', projectId = 'p
   };
 }
 
+export function createDefaultTomcatRunConfiguration(projectId = 'project', projectName = 'Project'): TomcatRunConfiguration {
+  return {
+    id: `tomcat-${projectId}`,
+    name: `Tomcat 6: ${projectName}`,
+    type: 'tomcat6',
+    projectId,
+    mode: 'run',
+    suspend: false,
+    jdkRef: 'jdk6-local',
+    build: { type: 'ant', target: 'war', clean: false },
+    server: { id: 'tomcat6-local', httpPort: 18080, debugPort: 8000, contextPath: '/' },
+    deploy: { mode: 'exploded', artifact: 'dist' },
+    env: {},
+    vmOptions: [],
+    beforeLaunchTasks: ['build', 'deploy'],
+  };
+}
+
 export function copiedConfiguration(source: TomcatRunConfiguration, document: RunConfigurationDocument): TomcatRunConfiguration {
   const ids = new Set(document.configurations.map(item => item.id));
   const names = new Set(document.configurations.map(item => item.name.toLocaleLowerCase('en-US')));
@@ -107,8 +125,38 @@ export class KairoRunConfigurationService {
 
   get current(): Readonly<RunConfigurationViewState> { return this.state; }
 
+  @postConstruct()
+  protected init(): void {
+    if (this.activeProject?.onDidChangeProject) {
+      this.activeProject.onDidChangeProject(project => {
+        if (project && this.state.document.configurations.length === 0) {
+          void this.ensureDefaultConfiguration(project).catch(() => undefined);
+        }
+      });
+    }
+  }
+
+  async ensureDefaultConfiguration(project: { projectId: string; name: string }): Promise<RunConfigurationDocument> {
+    if (this.state.document.configurations.length > 0) {
+      return this.state.document;
+    }
+    const defaultConfig = createDefaultTomcatRunConfiguration(project.projectId, project.name);
+    try {
+      return await this.create(defaultConfig);
+    } catch {
+      // Backend may be unavailable or in mock test environment; seed state locally
+      const document: RunConfigurationDocument = {
+        version: RUN_CONFIGURATION_SCHEMA_VERSION,
+        configurations: [defaultConfig],
+        selectedConfigurationId: defaultConfig.id,
+      };
+      this.setState({ document });
+      return document;
+    }
+  }
+
   async load(): Promise<RunConfigurationDocument> {
-    return this.run('load', async workspaceId => {
+    const doc = await this.run('load', async workspaceId => {
       try {
         return await this.runtime.request('GET /api/v1/workspaces/{workspaceId}/run-configurations', undefined, {
           pathParams: { workspaceId }, timeoutMs: 15_000,
@@ -118,6 +166,10 @@ export class KairoRunConfigurationService {
         throw error;
       }
     });
+    if (doc.configurations.length === 0 && this.activeProject?.project) {
+      return this.ensureDefaultConfiguration(this.activeProject.project);
+    }
+    return doc;
   }
 
   async create(configuration: TomcatRunConfiguration): Promise<RunConfigurationDocument> {
@@ -326,8 +378,12 @@ export class KairoRunConfigurationService {
       const document = await action(workspaceId);
       const result = validateRunConfigurationDocument(document);
       if (!result.valid) throw new Error(`Runtime returned an invalid run configuration document: ${result.issues.map(i => `${i.path} ${i.message}`).join('; ')}`);
-      this.setState({ document: result.value });
-      return result.value;
+      const validDoc = result.value;
+      if (!validDoc.selectedConfigurationId && validDoc.configurations.length > 0) {
+        validDoc.selectedConfigurationId = validDoc.configurations[0].id;
+      }
+      this.setState({ document: validDoc });
+      return validDoc;
     } catch (error) {
       this.setState({ error: errorMessage(error) });
       throw error;

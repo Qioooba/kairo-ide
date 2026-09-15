@@ -210,4 +210,12 @@ test('ConnectionState: loading', () => {
   assert.strictEqual(state, 'loading');
 });
 
+test('ServerViewWidget empty state keys: noProjectTitle and noProjectReason exist in i18n', () => {
+  const i18n = require('@kairo/i18n/lib/locales/zh-CN').default;
+  assert.strictEqual(i18n.widget.servers.noProjectTitle, '未关联项目');
+  assert.ok(i18n.widget.servers.noProjectReason.includes('未关联 Java Web 项目'));
+  assert.strictEqual(i18n.widget.servers.importProjectAction, '导入项目');
+  assert.strictEqual(i18n.widget.servers.emptyListTitle, '暂无运行中的服务器');
+});
+
 test('teardown', () => { disableJSDOM(); });

@@ -10,6 +10,11 @@
 .kairo-project-structure-dialog .dialogContent {
   padding: 0;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
 }
 
 /* Custom Cancel/Apply/OK live in .kairo-ps-dialog-footer; hide Theia's empty control strip. */
@@ -17,12 +22,25 @@
   display: none;
 }
 
+/* UI-01: column root — body (nav + content) on top, footer as its sibling.
+ * The footer is flex-none so it can never become a sideways third column. */
+.kairo-ps-layout {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  block-size: min(520px, 70vh); /* initial size only; a resizable geometry controller takes over */
+  container-type: inline-size;
+}
+
 .kairo-ps-body {
   display: flex;
-  height: min(520px, 70vh);
-  max-height: min(520px, 70vh);
+  flex: 1 1 auto;
+  min-width: 0;
   min-height: 0;
-  font-size: 13px;
+  height: auto;
+  max-height: none;
   overflow: hidden;
 }
 
@@ -39,16 +57,31 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  width: 100%;
   padding: 8px 14px;
   cursor: pointer;
   color: var(--theia-sideBar-foreground);
-  user-select: none;
+  background: transparent;
+  border: none;
   border-left: 3px solid transparent;
   font-size: 13px;
+  font-family: inherit;
+  text-align: left;
+  user-select: none;
 }
 
 .kairo-ps-tab:hover {
   background: var(--theia-list-hoverBackground);
+}
+
+.kairo-ps-tab:focus-visible {
+  outline: 1px solid var(--theia-focusBorder);
+  outline-offset: -1px;
+}
+
+.kairo-ps-tab:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .kairo-ps-tab.active {
@@ -65,9 +98,11 @@
 }
 
 .kairo-ps-content {
-  flex: 1;
-  overflow-y: auto;
-  padding: 16px 20px;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px 16px;
 }
 
 .kairo-ps-loading {
@@ -95,23 +130,34 @@
 }
 
 .kairo-ps-field {
-  display: flex;
-  align-items: center;
+  display: grid;
+  grid-template-columns: minmax(112px, 144px) minmax(0, 1fr);
+  gap: 8px 12px;
+  align-items: start;
   margin-bottom: 10px;
 }
 
 .kairo-ps-field-label {
-  width: 160px;
-  flex-shrink: 0;
-  text-align: right;
-  padding-right: 12px;
+  width: auto;
+  padding-right: 0;
+  padding-top: 5px;
   color: var(--theia-foreground);
+  cursor: pointer;
 }
 
 .kairo-ps-field .theia-input,
 .kairo-ps-field .theia-select {
-  flex: 1;
-  max-width: 320px;
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+/* UI-17: container-based narrow layout — reacts to the dialog's own width,
+ * not the window viewport, so a narrow docked dialog reflows correctly. */
+@container (max-width: 560px) {
+  .kairo-ps-field { grid-template-columns: minmax(0, 1fr); }
+  .kairo-ps-field-label { text-align: left; padding-top: 0; }
 }
 
 .kairo-ps-field input[readonly] {
@@ -123,7 +169,7 @@
 .kairo-ps-hint {
   font-size: 12px;
   color: var(--theia-descriptionForeground);
-  margin: -4px 0 12px 160px;
+  margin: -4px 0 12px 0;
 }
 
 .kairo-ps-hint.kairo-ps-hint-flush {
@@ -204,12 +250,14 @@
 }
 
 .kairo-ps-badge.ant {
-  background: #b8742e;
+  /* UI-16: white on #8a5a1f = 5.89:1 (was #b8742e at 3.77:1). */
+  background: #8a5a1f;
   color: #fff;
 }
 
 .kairo-ps-badge.autodetect {
-  background: #2e7db8;
+  /* UI-16: white on #1f6fb5 = 5.25:1 (was #2e7db8 at 4.43:1). */
+  background: #1f6fb5;
   color: #fff;
 }
 
@@ -236,6 +284,28 @@
   background: var(--theia-input-background);
 }
 
+/* UI-09: the card is a <label>; keep legend unstyled-but-visible and let
+ * the native radio own focus/keyboard. */
+.kairo-ps-radio-group {
+  border: none;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+
+.kairo-ps-radio-legend {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.kairo-ps-jdk-item:focus-within {
+  border-color: var(--theia-focusBorder);
+}
+
 .kairo-ps-jdk-item:hover {
   border-color: var(--theia-focusBorder);
 }
@@ -254,15 +324,19 @@
 
 .kairo-ps-jdk-info {
   flex: 1;
+  display: block;
   overflow: hidden;
+  min-width: 0;
 }
 
 .kairo-ps-jdk-name {
+  display: block;
   font-weight: 600;
   font-size: 13px;
 }
 
 .kairo-ps-jdk-path {
+  display: block;
   font-family: var(--theia-monospace-font-family, monospace);
   font-size: 11px;
   opacity: 0.75;
@@ -272,6 +346,7 @@
 }
 
 .kairo-ps-jdk-version {
+  display: block;
   font-size: 12px;
   opacity: 0.85;
   flex-shrink: 0;
@@ -286,10 +361,11 @@
 }
 
 .kairo-ps-dialog-footer {
+  flex: 0 0 auto;
   display: flex;
   justify-content: flex-end;
   align-items: center;
-  flex-shrink: 0;
+  flex-wrap: wrap;
   gap: 8px;
   padding: 10px 16px;
   border-top: 1px solid var(--theia-editorIndentGuide-background);

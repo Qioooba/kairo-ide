@@ -1022,7 +1022,23 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
             this.messages.error(this.i18n.t('runtimeAgent.unreachable', { url }));
             return undefined;
           }
-          const p = await this.activeProject.requireProject();
+          let p;
+          try {
+            p = await this.activeProject.requireProject();
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            if (/no project/i.test(msg)) {
+              const action = await this.messages.info(
+                this.i18n.t('views.noProjectSelected'),
+                this.i18n.t('widget.servers.importProjectAction'),
+              );
+              if (action) {
+                await this.commands.executeCommand(KairoCommands.IMPORT_PROJECT.id);
+              }
+              return undefined;
+            }
+            throw e;
+          }
           const srv = await this.serverSvc.start(p.projectId, false);
           this.messages.info(this.i18n.t('views.serverState', { id: srv.id, state: srv.state }));
         } catch (err) {
@@ -1036,7 +1052,23 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
       execute: async () => {
         let serverId: string | undefined;
         try {
-          const p = await this.activeProject.requireProject();
+          let p;
+          try {
+            p = await this.activeProject.requireProject();
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            if (/no project/i.test(msg)) {
+              const action = await this.messages.info(
+                this.i18n.t('views.noProjectSelected'),
+                this.i18n.t('widget.servers.importProjectAction'),
+              );
+              if (action) {
+                await this.commands.executeCommand(KairoCommands.IMPORT_PROJECT.id);
+              }
+              return undefined;
+            }
+            throw e;
+          }
           const javaDebug = await this.getJavaDebug();
           const capability = await javaDebug.probeAvailability();
           if (capability.state !== 'available') {

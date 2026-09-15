@@ -34,6 +34,7 @@ import {
   LSPTextEdit,
   LSPInlayHint,
   LSPDocumentHighlight,
+  LSPSemanticTokens,
 } from '../common/lsp-protocol';
 import { JdtLsBackendService, JdtLsFrontendClient } from '../common/java-ls-protocol';
 
@@ -229,6 +230,11 @@ export class JdtLsService implements JdtLsBackendService {
     return this.manager.codeLens(uri);
   }
 
+  async resolveCodeLens(lens: LSPCodeLens): Promise<LSPCodeLens> {
+    if (!this.manager) return lens;
+    return this.manager.resolveCodeLens(lens);
+  }
+
   async formatting(uri: string, options?: { tabSize?: number; insertSpaces?: boolean }): Promise<LSPTextEdit[]> {
     if (!this.manager) return [];
     return this.manager.formatting(uri, options);
@@ -420,6 +426,10 @@ export class JdtLsService implements JdtLsBackendService {
     return this.codeLens(uri);
   }
 
+  async $codeLensResolve(lens: LSPCodeLens): Promise<LSPCodeLens> {
+    return this.resolveCodeLens(lens);
+  }
+
   async $formatting(uri: string, options?: { tabSize?: number; insertSpaces?: boolean }): Promise<LSPTextEdit[]> {
     return this.formatting(uri, options);
   }
@@ -430,6 +440,16 @@ export class JdtLsService implements JdtLsBackendService {
 
   async $inlayHint(uri: string, range?: LSPRange): Promise<LSPInlayHint[]> {
     return this.inlayHint(uri, range);
+  }
+
+  async $semanticTokensFull(uri: string): Promise<LSPSemanticTokens | null> {
+    if (!this.manager) return null;
+    return this.manager.semanticTokensFull(uri);
+  }
+
+  async $semanticTokensRange(uri: string, range: LSPRange): Promise<LSPSemanticTokens | null> {
+    if (!this.manager) return null;
+    return this.manager.semanticTokensRange(uri, range);
   }
 
   async $buildWorkspace(_force: boolean): Promise<void> {

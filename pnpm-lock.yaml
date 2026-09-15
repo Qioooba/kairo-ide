@@ -277,6 +277,28 @@ importers:
         specifier: 5.5.4
         version: 5.5.4
 
+  packages/highlighting-extension:
+    dependencies:
+      '@kairo/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      '@theia/core':
+        specifier: 1.73.1
+        version: 1.73.1(@theia/electron@1.73.1(electron@39.8.10))(@types/react-dom@18.3.5(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@theia/editor':
+        specifier: 1.73.1
+        version: 1.73.1(@theia/electron@1.73.1(electron@39.8.10))(@types/react-dom@18.3.5(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@theia/monaco':
+        specifier: 1.73.1
+        version: 1.73.1(@theia/electron@1.73.1(electron@39.8.10))(@types/react-dom@18.3.5(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.5.4)
+      '@theia/monaco-editor-core':
+        specifier: 1.108.201
+        version: 1.108.201
+    devDependencies:
+      typescript:
+        specifier: 5.5.4
+        version: 5.5.4
+
   packages/i18n:
     dependencies:
       '@theia/core':
@@ -329,6 +351,9 @@ importers:
 
   packages/jsp-extension:
     dependencies:
+      '@kairo/highlighting-extension':
+        specifier: workspace:*
+        version: link:../highlighting-extension
       '@kairo/i18n':
         specifier: workspace:*
         version: link:../i18n
@@ -611,6 +636,9 @@ importers:
       '@kairo/git-extension':
         specifier: workspace:*
         version: link:../git-extension
+      '@kairo/highlighting-extension':
+        specifier: workspace:*
+        version: link:../highlighting-extension
       '@kairo/i18n':
         specifier: workspace:*
         version: link:../i18n

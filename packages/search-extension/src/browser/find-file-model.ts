@@ -13,6 +13,8 @@ export interface FindFileItem {
   score: number;
   /** Precomputed path weight so sorting does not recompute it per comparison. */
   weight?: number;
+  lowerLabel?: string;
+  lowerDetail?: string;
 }
 
 export interface FindFileState {
@@ -44,6 +46,76 @@ function pathWeight(relativePath: string): number {
     weight += PATH_WEIGHTS[segment] ?? 0;
   }
   return weight;
+}
+
+/** Module-level so the hot fuzzy-scoring loop does not allocate per call. */
+const WORD_BOUNDARY_RE = /[/\\._\-\s]/;
+
+function isSubsequence(needle: string, haystack: string): boolean {
+  let n = 0;
+  let h = 0;
+  const nLen = needle.length;
+  const hLen = haystack.length;
+  while (n < nLen && h < hLen) {
+    if (needle.charCodeAt(n) === haystack.charCodeAt(h)) {
+      n++;
+    }
+    h++;
+  }
+  return n === nLen;
+}
+
+function fuzzyScorePreLowered(needle: string, haystack: string): number | undefined {
+  if (!needle) return 0;
+  const exact = haystack.indexOf(needle);
+  if (exact >= 0) return 10_000 - exact * 10 - (haystack.length - needle.length);
+  let score = 0;
+  let cursor = 0;
+  let last = -1;
+  for (let i = 0; i < needle.length; i++) {
+    const char = needle[i];
+    const found = haystack.indexOf(char, cursor);
+    if (found < 0) return undefined;
+    score += last < 0 ? 100 - found : Math.max(1, 40 - (found - last - 1) * 5);
+    if (found === 0 || WORD_BOUNDARY_RE.test(haystack[found - 1])) score += 30;
+    last = found;
+    cursor = found + 1;
+  }
+  return score - haystack.length;
+}
+
+function compareScoredItems(
+  a: { totalScore: number; label: string },
+  b: { totalScore: number; label: string },
+): number {
+  const diff = b.totalScore - a.totalScore;
+  if (diff !== 0) return diff;
+  return a.label.localeCompare(b.label);
+}
+
+function compareCandidateWithWorst(
+  candTotalScore: number,
+  candLabel: string,
+  worst: { totalScore: number; label: string },
+): number {
+  const diff = worst.totalScore - candTotalScore;
+  if (diff !== 0) return diff;
+  return candLabel.localeCompare(worst.label);
+}
+
+function bubbleUp(arr: (FindFileItem & { score: number; totalScore: number })[], idx: number): void {
+  let curr = idx;
+  while (curr > 0) {
+    const prev = curr - 1;
+    if (compareScoredItems(arr[prev], arr[curr]) > 0) {
+      const tmp = arr[prev];
+      arr[prev] = arr[curr];
+      arr[curr] = tmp;
+      curr = prev;
+    } else {
+      break;
+    }
+  }
 }
 
 @injectable()
@@ -87,24 +159,50 @@ export class FindFileModel {
       const allFiles = await this.getOrBuildFileList(controller.signal);
       if (controller.signal.aborted || generation !== this.generation) return this.state;
 
-      const scored = allFiles
-        .map(item => {
-          const nameScore = fuzzyScore(trimmed, item.label);
-          const pathScore = fuzzyScore(trimmed, item.detail);
-          const score = Math.max(nameScore ?? -Infinity, pathScore !== undefined ? pathScore - 500 : -Infinity);
-          return { ...item, score: Number.isFinite(score) ? score : undefined };
-        })
-        .filter((item): item is FindFileItem & { score: number } => item.score !== undefined)
-        .sort((a, b) => {
-          const pwA = a.weight ?? 0;
-          const pwB = b.weight ?? 0;
-          const scoreDiff = (b.score + pwB * 100) - (a.score + pwA * 100);
-          if (scoreDiff !== 0) return scoreDiff;
-          return a.label.localeCompare(b.label);
-        })
-        .slice(0, limit);
+      const needle = trimmed.toLowerCase();
+      // Bounded top-K candidates to avoid sorting thousands of items on 10k-50k workspaces
+      const scored: (FindFileItem & { score: number; totalScore: number })[] = [];
 
-      this.publish({ status: scored.length ? 'results' : 'empty', query: trimmed, items: scored, selectedIndex: 0 });
+      for (let i = 0; i < allFiles.length; i++) {
+        if (controller.signal.aborted || generation !== this.generation) return this.state;
+        const item = allFiles[i];
+        const lowerLabel = item.lowerLabel ?? item.label.toLowerCase();
+        const lowerDetail = item.lowerDetail ?? item.detail.toLowerCase();
+
+        // Fast subsequence pre-check: skips 95%+ non-matching items with 0 allocations
+        const labelMatches = isSubsequence(needle, lowerLabel);
+        const detailMatches = !labelMatches && isSubsequence(needle, lowerDetail);
+        if (!labelMatches && !detailMatches) {
+          continue;
+        }
+
+        const nameScore = labelMatches ? fuzzyScorePreLowered(needle, lowerLabel) : undefined;
+        const pathScore = (detailMatches || labelMatches) ? fuzzyScorePreLowered(needle, lowerDetail) : undefined;
+        const baseScore = Math.max(nameScore ?? -Infinity, pathScore !== undefined ? pathScore - 500 : -Infinity);
+        if (!Number.isFinite(baseScore)) {
+          continue;
+        }
+
+        const weight = item.weight ?? 0;
+        const totalScore = baseScore + weight * 100;
+
+        if (scored.length < limit) {
+          scored.push({ ...item, score: baseScore, totalScore });
+          if (scored.length === limit) {
+            scored.sort(compareScoredItems);
+          }
+        } else if (compareCandidateWithWorst(totalScore, item.label, scored[limit - 1]) < 0) {
+          scored[limit - 1] = { ...item, score: baseScore, totalScore };
+          bubbleUp(scored, limit - 1);
+        }
+      }
+
+      if (scored.length < limit) {
+        scored.sort(compareScoredItems);
+      }
+
+      const finalItems = scored.map(({ totalScore, ...rest }) => rest);
+      this.publish({ status: finalItems.length ? 'results' : 'empty', query: trimmed, items: finalItems, selectedIndex: 0 });
     } catch (error) {
       if (!controller.signal.aborted && generation === this.generation) {
         this.publish({ status: 'error', query: trimmed, items: [], selectedIndex: 0, error: error instanceof Error ? error : new Error(String(error)) });
@@ -148,6 +246,8 @@ export class FindFileModel {
           uri: uri.toString(),
           score: 0,
           weight: pathWeight(entry.path),
+          lowerLabel: entry.name.toLowerCase(),
+          lowerDetail: entry.path.toLowerCase(),
         };
       });
       this.fileCache = results;
@@ -184,6 +284,8 @@ export class FindFileModel {
             uri: child.resource.toString(),
             score: 0,
             weight: pathWeight(relative),
+            lowerLabel: child.resource.path.base.toLowerCase(),
+            lowerDetail: relative.toLowerCase(),
           });
         }
       }

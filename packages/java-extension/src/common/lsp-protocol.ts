@@ -250,6 +250,16 @@ export interface LSPCodeAction {
 
 export type LSPCodeActionResult = (LSPCommand | LSPCodeAction)[] | null;
 
+export interface LSPSemanticTokensLegend {
+  tokenTypes: string[];
+  tokenModifiers: string[];
+}
+
+export interface LSPSemanticTokens {
+  resultId?: string;
+  data: number[];
+}
+
 export interface LSPDiagnosticRelatedInformation {
   location: {
     uri: string;
@@ -322,9 +332,22 @@ export interface LSPInitializeParams {
       rangeFormatting?: { dynamicRegistration?: boolean };
       typeDefinition?: { dynamicRegistration?: boolean; linkSupport?: boolean };
       implementation?: { dynamicRegistration?: boolean; linkSupport?: boolean };
+      codeLens?: { dynamicRegistration?: boolean; resolveSupport?: { properties?: string[] } };
       callHierarchy?: { dynamicRegistration?: boolean };
       typeHierarchy?: { dynamicRegistration?: boolean };
       inlayHint?: { dynamicRegistration?: boolean };
+      semanticTokens?: {
+        dynamicRegistration?: boolean;
+        requests?: {
+          range?: boolean;
+          full?: boolean | { delta?: boolean };
+        };
+        tokenTypes: string[];
+        tokenModifiers: string[];
+        formats: string[];
+        multilineTokenSupport?: boolean;
+        overlappingTokenSupport?: boolean;
+      };
       publishDiagnostics?: { relatedInformation?: boolean; versionSupport?: boolean; codeDescriptionSupport?: boolean; dataSupport?: boolean };
     };
     window?: { showMessage?: { dynamicRegistration?: boolean } };

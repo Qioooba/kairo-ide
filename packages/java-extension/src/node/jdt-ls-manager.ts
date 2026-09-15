@@ -32,6 +32,7 @@
 import { spawn, ChildProcess, SpawnOptions } from 'child_process';
 import { existsSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs';
 import { dirname, join, resolve } from 'path';
+import { totalmem } from 'os';
 import { Readable, Writable } from 'stream';
 import {
   StreamMessageReader,
@@ -67,6 +68,7 @@ import {
   LSPInlayHint,
   LSPTextEdit,
   LSPDocumentHighlight,
+  LSPSemanticTokens,
 } from '../common/lsp-protocol';
 import type { JdtLsState } from '../common/jdt-ls-state';
 export type { JdtLsState } from '../common/jdt-ls-state';
@@ -101,8 +103,33 @@ export type JdtLsEvent =
 
 export type JdtLsEventListener = (event: JdtLsEvent) => void;
 
-export const JDT_LS_INITIALIZE_TIMEOUT_MS = 60_000;
+export const JDT_LS_INITIALIZE_TIMEOUT_MS = 180_000;
 export const JDT_LS_REQUEST_TIMEOUT_MS = 30_000;
+
+/**
+ * Resolves default JVM heap (-Xms / -Xmx) adaptively based on system memory.
+ * Can be explicitly overridden via KAIRO_JDT_XMX or KAIRO_JDTLS_MAX_HEAP_MB.
+ */
+export function resolveDefaultJdtHeap(): { xms: string; xmx: string } {
+  const envXmx = process.env.KAIRO_JDT_XMX || (process.env.KAIRO_JDTLS_MAX_HEAP_MB ? `${process.env.KAIRO_JDTLS_MAX_HEAP_MB}m` : undefined);
+  if (envXmx) {
+    const envXms = process.env.KAIRO_JDT_XMS || '512m';
+    return { xms: envXms, xmx: envXmx };
+  }
+  let totalMemMB = 4096;
+  try {
+    totalMemMB = Math.round(totalmem() / (1024 * 1024));
+  } catch {
+    totalMemMB = 4096;
+  }
+  if (totalMemMB >= 8192) {
+    return { xms: '1024m', xmx: '3072m' };
+  } else if (totalMemMB >= 4096) {
+    return { xms: '512m', xmx: '2048m' };
+  } else {
+    return { xms: '256m', xmx: '1536m' };
+  }
+}
 
 export class JdtLsRequestTimeoutError extends Error {
   readonly code = 'JDT_LS_REQUEST_TIMEOUT';
@@ -264,17 +291,21 @@ export class JdtLsManager implements Disposable {
     // Equinox is launched via -jar; -classpath before -jar is ignored by the
     // JVM and listing 100+ plugin jars can exceed the Windows command-line
     // limit. Bundle discovery is owned by -configuration / the launcher.
+    const heap = resolveDefaultJdtHeap();
+    const logLevel = process.env.KAIRO_JDT_LOG_LEVEL || 'WARN';
     const args: string[] = [
-      '-Xms50m',
-      // Default heap capped for IDE interactivity (OPT-003); override via KAIRO_JDT_XMX=1024m etc.
-      `-Xmx${process.env.KAIRO_JDT_XMX || '768m'}`,
+      `-Xms${heap.xms}`,
+      `-Xmx${heap.xmx}`,
       '-Declipse.application=org.eclipse.jdt.ls.core.id1',
       '-Dosgi.bundles.defaultStartLevel=4',
       '-Declipse.product=org.eclipse.jdt.ls.core.product',
-      '-Dlog.level=INFO',
+      `-Dlog.level=${logLevel}`,
       '-Dfile.encoding=UTF-8',
       '-noverify',
       '-Xss2m',
+      '-XX:+UseG1GC',
+      '-XX:MaxGCPauseMillis=200',
+      '-XX:+ParallelRefProcEnabled',
       '--add-modules=ALL-SYSTEM',
       '--add-opens=java.base/java.util=ALL-UNNAMED',
       '--add-opens=java.base/java.lang=ALL-UNNAMED',
@@ -287,20 +318,24 @@ export class JdtLsManager implements Disposable {
       args.push('-configuration', dist.configDir);
     }
     args.push('-data', opts.workspaceDataDir);
-    // BUG-20260826-403: if the previous session ended uncleanly (kill/crash
-    // — common right after a start when the lifecycle restarts the LS), the
-    // Equinox workspace in `workspaceDataDir` is restored in a half-saved
-    // state where the project is registered but its model is broken; the
-    // EclipseProjectImporter then never re-imports (references,
-    // implementations and workspace/symbol silently return nothing) and
-    // `-clean` only clears the OSGi bundle cache, not the poisoned
-    // .metadata. Reset the whole per-workspace data dir instead — JDT
-    // re-imports from scratch (a few seconds for typical projects).
+    // Non-destructive recovery:
+    // If the previous session ended uncleanly, do not destroy the entire workspace
+    // unless explicitly configured with KAIRO_JDT_FORCE_RESET=1. Instead, clear
+    // only the JDT core model index cache (.metadata/.plugins/org.eclipse.jdt.core)
+    // allowing incremental re-index without losing OSGi bundle registrations.
     const cleanExitMarker = join(opts.workspaceDataDir, '.kairo-clean-exit');
     const hadMetadata = existsSync(join(opts.workspaceDataDir, '.metadata'));
     let lastExitClean = false;
     try {
-      lastExitClean = hadMetadata && existsSync(cleanExitMarker);
+      if (hadMetadata && existsSync(cleanExitMarker)) {
+        const content = readFileSync(cleanExitMarker, 'utf-8');
+        if (content.trim().startsWith('{')) {
+          const parsed = JSON.parse(content);
+          lastExitClean = parsed && parsed.reason === 'normal_shutdown';
+        } else {
+          lastExitClean = content.trim().length > 0;
+        }
+      }
     } catch {
       lastExitClean = false;
     }
@@ -309,12 +344,26 @@ export class JdtLsManager implements Disposable {
     } catch {
       // best effort
     }
-    if (hadMetadata && !lastExitClean) {
-      this.logger?.info('[JDT LS] unclean previous shutdown detected — resetting the LS workspace data dir to force a clean re-import');
-      try {
-        rmSync(opts.workspaceDataDir, { recursive: true, force: true });
-      } catch (err) {
-        this.logger?.warn(`[JDT LS] failed to reset workspace data dir: ${String(err)}`);
+    const forceReset = process.env.KAIRO_JDT_FORCE_RESET === '1' || process.env.KAIRO_JDT_FORCE_RESET === 'true';
+    const noReset = process.env.KAIRO_JDT_NO_RESET === '1' || process.env.KAIRO_JDT_NO_RESET === 'true';
+    if (hadMetadata && !lastExitClean && !noReset) {
+      if (forceReset) {
+        this.logger?.info('[JDT LS] force-reset requested: resetting entire LS workspace data dir');
+        try {
+          rmSync(opts.workspaceDataDir, { recursive: true, force: true });
+        } catch (err) {
+          this.logger?.warn(`[JDT LS] failed to reset workspace data dir: ${String(err)}`);
+        }
+      } else {
+        const jdtCoreIndex = join(opts.workspaceDataDir, '.metadata', '.plugins', 'org.eclipse.jdt.core');
+        if (existsSync(jdtCoreIndex)) {
+          this.logger?.info('[JDT LS] unclean previous shutdown detected — purging JDT core index cache to recover model');
+          try {
+            rmSync(jdtCoreIndex, { recursive: true, force: true });
+          } catch (err) {
+            this.logger?.warn(`[JDT LS] failed to reset JDT core index: ${String(err)}`);
+          }
+        }
       }
     }
 
@@ -337,11 +386,8 @@ export class JdtLsManager implements Disposable {
     const child = spawn(dist.jre, args, spawnOpts);
     this.process = child;
 
-    // Wire up stdout/stderr line buffering. JDT LS writes
-    // its log output to stderr; the LSP frames go to
-    // stdout. We must NOT collapse stderr to a single
-    // data event because the line order matters.
-    this.attachStreamLogging(child.stdout, 'stdout');
+    // F03: JDT LS writes log output to stderr; LSP JSON-RPC frames go to stdout.
+    // child.stdout is reserved exclusively for StreamMessageReader without line splitting or decoding.
     this.attachStreamLogging(child.stderr, 'stderr');
 
     child.on('error', (err: Error) => {
@@ -397,6 +443,8 @@ export class JdtLsManager implements Disposable {
     // extendedClientCapabilities.progressReportProvider) rather than
     // standard $/progress — translate it so the UI can render it.
     const progressReportTasks = new Set<string>();
+    const lastProgressReportAt = new Map<string, number>();
+    const PROGRESS_REPORT_THROTTLE_MS = 200;
     this.connection.onNotification(
       'language/progressReport',
       (p: { id?: string; task: string; status?: string; totalWork?: number; workDone?: number; complete?: boolean }) => {
@@ -407,17 +455,24 @@ export class JdtLsManager implements Disposable {
             : undefined;
         const message = p.status;
         if (p.complete) {
+          lastProgressReportAt.delete(token);
           if (progressReportTasks.has(token)) {
             progressReportTasks.delete(token);
             this.fire({ kind: 'progress', params: { token, value: { kind: 'end', message } } });
           }
           return;
         }
+        const now = Date.now();
         if (!progressReportTasks.has(token)) {
           progressReportTasks.add(token);
+          lastProgressReportAt.set(token, now);
           this.fire({ kind: 'progress', params: { token, value: { kind: 'begin', title: p.task, percentage, message } } });
         } else {
-          this.fire({ kind: 'progress', params: { token, value: { kind: 'report', percentage, message } } });
+          const last = lastProgressReportAt.get(token) ?? 0;
+          if (now - last >= PROGRESS_REPORT_THROTTLE_MS) {
+            lastProgressReportAt.set(token, now);
+            this.fire({ kind: 'progress', params: { token, value: { kind: 'report', percentage, message } } });
+          }
         }
       },
     );
@@ -464,6 +519,7 @@ export class JdtLsManager implements Disposable {
             typeDefinition: { dynamicRegistration: true, linkSupport: true },
             implementation: { dynamicRegistration: true, linkSupport: true },
             references: { dynamicRegistration: true },
+            codeLens: { dynamicRegistration: true, resolveSupport: { properties: ['command'] } },
             documentHighlight: { dynamicRegistration: true },
             documentSymbol: { dynamicRegistration: true, symbolKind: { valueSet: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26] } },
             codeAction: { dynamicRegistration: true },
@@ -473,6 +529,26 @@ export class JdtLsManager implements Disposable {
             callHierarchy: { dynamicRegistration: true },
             typeHierarchy: { dynamicRegistration: true },
             inlayHint: { dynamicRegistration: true },
+            semanticTokens: {
+              dynamicRegistration: true,
+              requests: {
+                range: true,
+                full: { delta: false },
+              },
+              tokenTypes: [
+                'comment', 'keyword', 'string', 'number', 'regexp', 'operator',
+                'namespace', 'type', 'struct', 'class', 'interface', 'enum',
+                'typeParameter', 'function', 'method', 'decorator', 'macro',
+                'variable', 'parameter', 'property', 'label', 'enumMember', 'event',
+              ],
+              tokenModifiers: [
+                'declaration', 'definition', 'readonly', 'static', 'deprecated',
+                'abstract', 'async', 'modification', 'documentation', 'defaultLibrary',
+              ],
+              formats: ['relative'],
+              multilineTokenSupport: false,
+              overlappingTokenSupport: false,
+            },
             publishDiagnostics: { relatedInformation: true, versionSupport: false, codeDescriptionSupport: true },
           },
           window: { showMessage: { dynamicRegistration: true } },
@@ -523,12 +599,20 @@ export class JdtLsManager implements Disposable {
 
   /** Default JDT LS `java.*` settings sent on initialize / configuration. */
   protected javaSettings(): Record<string, unknown> {
+    const includeDecompiled = process.env.KAIRO_JDT_DECOMPILED === '1' || process.env.KAIRO_JDT_DECOMPILED === 'true';
     const settings: Record<string, unknown> = {
       completion: { enabled: true, guessMethodArguments: true },
       import: { enabled: true },
       format: { enabled: true },
-      references: { includeDecompiledSources: true },
+      references: { includeDecompiledSources: includeDecompiled, includeAccessors: true },
       signatureHelp: { enabled: true },
+      // IDEA-style "N usages" above methods/types/fields. JDT returns
+      // unresolved lenses from textDocument/codeLens; the titles
+      // ("N references") only appear after codeLens/resolve.
+      referencesCodeLens: { enabled: true, includeFields: true },
+      // New key (JDT LS >= 1.43): none | types | methods | all.
+      implementationCodeLens: 'all',
+      // Legacy key for older JDT LS builds; harmless when ignored.
       implementationsCodeLens: { enabled: true },
       // IDEA-like Find Symbol needs source methods in workspace/symbol.
       symbols: { includeSourceMethodDeclarations: true },
@@ -551,7 +635,8 @@ export class JdtLsManager implements Disposable {
       // Eclipse compiler compliance is normally project-driven; expose the
       // requested level so workspace/configuration consumers can read it.
       (settings.configuration as Record<string, unknown>).runtimes = [];
-      settings.autobuild = { enabled: true };
+      const autobuildEnabled = process.env.KAIRO_JDT_AUTOBUILD === '1' || process.env.KAIRO_JDT_AUTOBUILD === 'true';
+      settings.autobuild = { enabled: autobuildEnabled };
       settings.project = {
         referencedLibraries: [],
         resourceFilters: [],
@@ -754,6 +839,20 @@ export class JdtLsManager implements Disposable {
     return result ?? [];
   }
 
+  /**
+   * Resolve one unresolved JDT CodeLens (textDocument/codeLens returns
+   * lenses with `data=[uri, position, type]` and no command; the
+   * human-readable title like "3 references" plus the
+   * `java.show.references` command only appear after this call).
+   */
+  async resolveCodeLens(lens: LSPCodeLens): Promise<LSPCodeLens> {
+    if (!this.connection || this.state !== 'ready') {
+      throw new Error(`JDT LS not ready (state=${this.state})`);
+    }
+    const result = await this.sendRequestWithTimeout<LSPCodeLens>('codeLens/resolve', lens);
+    return result ?? lens;
+  }
+
   async formatting(uri: string, options?: { tabSize?: number; insertSpaces?: boolean }): Promise<LSPTextEdit[]> {
     if (!this.connection || this.state !== 'ready') {
       throw new Error(`JDT LS not ready (state=${this.state})`);
@@ -786,6 +885,27 @@ export class JdtLsManager implements Disposable {
       range,
     });
     return result ?? [];
+  }
+
+  async semanticTokensFull(uri: string): Promise<LSPSemanticTokens | null> {
+    if (!this.connection || this.state !== 'ready') {
+      return null;
+    }
+    const result = await this.sendRequestWithTimeout<LSPSemanticTokens | null>('textDocument/semanticTokens/full', {
+      textDocument: { uri },
+    });
+    return result ?? null;
+  }
+
+  async semanticTokensRange(uri: string, range: LSPRange): Promise<LSPSemanticTokens | null> {
+    if (!this.connection || this.state !== 'ready') {
+      return null;
+    }
+    const result = await this.sendRequestWithTimeout<LSPSemanticTokens | null>('textDocument/semanticTokens/range', {
+      textDocument: { uri },
+      range,
+    });
+    return result ?? null;
   }
 
   /** Force workspace reindex (clear cache and rebuild). */
@@ -896,10 +1016,24 @@ export class JdtLsManager implements Disposable {
     }
     this.setState('stopping');
     const child = this.process;
-    if (!child.killed) {
-      child.kill('SIGTERM');
+
+    // F02: Graceful LSP shutdown and exit sequence if connection is active
+    if (this.connection) {
+      try {
+        await Promise.race([
+          this.connection.sendRequest('shutdown', undefined),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('shutdown timeout')), 3000)),
+        ]);
+        await this.connection.sendNotification('exit');
+      } catch (err) {
+        this.logger?.warn?.(`[JDT LS] graceful shutdown/exit error or timeout: ${String(err)}`);
+      }
     }
-    // give it 3s to die, then SIGKILL
+
+    let killedWithSigkill = false;
+    let exitCode: number | null = null;
+
+    // Attach exit listener before sending SIGTERM to ensure immediate exits are caught
     await new Promise<void>(resolve => {
       let killWait: ReturnType<typeof setTimeout> | undefined;
       const t = setTimeout(() => {
@@ -907,7 +1041,11 @@ export class JdtLsManager implements Disposable {
         // that the child exited. Always escalate if this exact
         // process is still owned after the grace period.
         if (this.process === child) {
-          child.kill('SIGKILL');
+          killedWithSigkill = true;
+          this.logger?.warn?.('[JDT LS] child did not exit within grace period, escalating to SIGKILL');
+          try {
+            child.kill('SIGKILL');
+          } catch {}
         }
         killWait = setTimeout(() => {
           // SIGKILL should exit promptly, but the lifecycle must
@@ -917,31 +1055,52 @@ export class JdtLsManager implements Disposable {
           resolve();
         }, this.stopKillWaitMs());
       }, this.stopGracePeriodMs());
-      child.once('exit', () => {
+
+      child.once('exit', (code) => {
+        exitCode = code;
         clearTimeout(t);
         if (killWait) clearTimeout(killWait);
         resolve();
       });
+
+      if (!child.killed) {
+        try {
+          child.kill('SIGTERM');
+        } catch {
+          // best effort
+        }
+      }
     });
-    this.markCleanExit();
+
+    const isClean = !killedWithSigkill && (exitCode === 0 || exitCode === null);
+    if (isClean) {
+      this.markCleanExit({ reason: 'normal_shutdown', exitCode });
+    } else {
+      this.logger?.warn?.(`[JDT LS] unclean stop (killedWithSigkill=${killedWithSigkill}, exitCode=${exitCode})`);
+    }
   }
 
   /**
    * Persist a "last shutdown was clean" marker for `workspaceDataDir`
    * (BUG-20260826-403): the next start skips the Equinox `-clean` pass.
    */
-  protected markCleanExit(): void {
+  protected markCleanExit(details?: { reason?: string; exitCode?: number | null }): void {
     const dir = this.currentWorkspaceDataDir;
     if (!dir) return;
     try {
-      writeFileSync(join(dir, '.kairo-clean-exit'), new Date().toISOString());
+      const payload = {
+        timestamp: new Date().toISOString(),
+        reason: details?.reason ?? 'normal_shutdown',
+        exitCode: details?.exitCode ?? 0,
+      };
+      writeFileSync(join(dir, '.kairo-clean-exit'), JSON.stringify(payload, null, 2), 'utf-8');
     } catch {
-      // best effort — worst case the next start runs with -clean
+      // best effort — worst case the next start runs with recovery
     }
   }
 
   protected stopGracePeriodMs(): number {
-    return 3_000;
+    return 10_000;
   }
 
   protected stopKillWaitMs(): number {
@@ -949,6 +1108,11 @@ export class JdtLsManager implements Disposable {
   }
 
   protected initializeTimeoutMs(): number {
+    const envTimeout = process.env.KAIRO_JDT_INITIALIZE_TIMEOUT_MS;
+    if (envTimeout) {
+      const parsed = parseInt(envTimeout, 10);
+      if (!isNaN(parsed) && parsed > 0) return parsed;
+    }
     return JDT_LS_INITIALIZE_TIMEOUT_MS;
   }
 

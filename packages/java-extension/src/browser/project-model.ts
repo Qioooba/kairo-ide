@@ -40,7 +40,7 @@ export class ProjectModelManager {
   private encoding = 'UTF-8';
   private sourceLevel = '1.6';
   private targetLevel = '1.6';
-  private compiler = { toolchainId: 'javac', version: '1.6' };
+  private compiler: { toolchainId: string; version: string; executablePath?: string } = { toolchainId: 'javac', version: '1.6' };
   private runtimeJvm = { id: 'jvm-1.6', home: '', version: '1.6' };
   private classpath: OrderedClasspathEntry[] = [];
   private diagnostics: ProjectModelDiagnostic[] = [];
@@ -109,38 +109,61 @@ export class ProjectModelManager {
   }
 
   /**
-   * Update source roots and bump revision (T45).
+   * Update source roots and bump revision only if changed (T45, F10).
    */
   updateSourceRoots(sourceRoots: string[]): ProjectModelSnapshot {
+    if (this.sourceRoots.length === sourceRoots.length && this.sourceRoots.every((r, i) => r === sourceRoots[i])) {
+      return this.getSnapshot();
+    }
     this.sourceRoots = [...sourceRoots];
     return this.bumpRevision();
   }
 
   /**
-   * Update output directory and bump revision (T45).
+   * Update output directory and bump revision only if changed (T45, F10).
    */
   updateOutputDir(outputDir: string): ProjectModelSnapshot {
+    if (this.outputDir === outputDir) {
+      return this.getSnapshot();
+    }
     this.outputDir = outputDir;
     return this.bumpRevision();
   }
 
   /**
-   * Update ordered classpath and recalculate conflict diagnostics (T44, T45).
+   * Update ordered classpath and recalculate conflict diagnostics (T44, T45, F10).
    */
   updateClasspath(classpath: OrderedClasspathEntry[]): ProjectModelSnapshot {
+    if (this.classpath.length === classpath.length) {
+      const allEqual = this.classpath.every((c, i) => {
+        const o = classpath[i];
+        return c && o && c.path === o.path && c.kind === o.kind && c.resolved === o.resolved;
+      });
+      if (allEqual) {
+        return this.getSnapshot();
+      }
+    }
     this.classpath = [...classpath];
     this.recalculateDiagnostics();
     return this.bumpRevision();
   }
 
   /**
-   * Update toolchain / compiler settings and bump revision.
+   * Update toolchain / compiler settings and bump revision only if changed (F10).
    */
   updateToolchain(
     sourceLevel: string,
     targetLevel: string,
     compiler?: { toolchainId: string; version: string; executablePath?: string },
   ): ProjectModelSnapshot {
+    const sameCompiler = !compiler || (
+      this.compiler.toolchainId === compiler.toolchainId &&
+      this.compiler.version === compiler.version &&
+      this.compiler.executablePath === compiler.executablePath
+    );
+    if (this.sourceLevel === sourceLevel && this.targetLevel === targetLevel && sameCompiler) {
+      return this.getSnapshot();
+    }
     this.sourceLevel = sourceLevel;
     this.targetLevel = targetLevel;
     if (compiler) {

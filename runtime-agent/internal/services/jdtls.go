@@ -23,11 +23,20 @@ import (
 // JVM arguments, working directory, and environment variables
 // the Theia backend needs to spawn the JDT LS process.
 
+type installCall struct {
+	done chan struct{}
+	rep  jdtls.InstallReport
+	err  error
+}
+
 type jdtlsService struct {
 	mu        sync.Mutex
 	mgr       *jdtls.Manager
 	logger    *log.Logger
 	sourceLvl string
+
+	installMu    sync.Mutex
+	inFlightInst *installCall
 }
 
 func newJDTLSService(dataDir, bundled string, logger *log.Logger, skipSHAVerify bool, jdtlsURL string) *jdtlsService {
@@ -82,8 +91,36 @@ func (s *jdtlsService) DistributionStatus() (json.RawMessage, error) {
 	return json.Marshal(s.mgr.DistributionStatus())
 }
 
+// ensureInstalledSingleflight deduplicates concurrent installation/verification
+// passes across all requests, preventing concurrent layout wipes or duplicate SHA checks.
+func (s *jdtlsService) ensureInstalledSingleflight(ctx context.Context) (jdtls.InstallReport, error) {
+	s.installMu.Lock()
+	if call := s.inFlightInst; call != nil {
+		s.installMu.Unlock()
+		select {
+		case <-call.done:
+			return call.rep, call.err
+		case <-ctx.Done():
+			return jdtls.InstallReport{}, ctx.Err()
+		}
+	}
+
+	call := &installCall{done: make(chan struct{})}
+	s.inFlightInst = call
+	s.installMu.Unlock()
+
+	call.rep, call.err = s.mgr.EnsureInstalled(ctx)
+	close(call.done)
+
+	s.installMu.Lock()
+	s.inFlightInst = nil
+	s.installMu.Unlock()
+
+	return call.rep, call.err
+}
+
 func (s *jdtlsService) Prepare(ctx context.Context) (json.RawMessage, error) {
-	rep, err := s.mgr.EnsureInstalled(ctx)
+	rep, err := s.ensureInstalledSingleflight(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -97,11 +134,14 @@ func (s *jdtlsService) Prepare(ctx context.Context) (json.RawMessage, error) {
 // The descriptor does NOT include os.Environ() — only the minimal
 // allowlist of PATH, JAVA_HOME, and essential JVM variables.
 func (s *jdtlsService) GetLaunchDescriptor(ctx context.Context, workspaceID string, projectID string, workingDir string) (json.RawMessage, error) {
-	// Ensure the distribution is installed first
-	_, err := s.mgr.EnsureInstalled(ctx)
+	// Ensure the distribution is installed first (singleflight protected)
+	_, err := s.ensureInstalledSingleflight(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("jdtls distribution not installed: %w", err)
 	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	// Set the per-workspace data dir so the launch descriptor
 	// uses an isolated Eclipse workspace.

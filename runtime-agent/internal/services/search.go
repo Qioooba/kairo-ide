@@ -130,8 +130,10 @@ func (m *memSearcher) ListFiles(ctx context.Context, payload json.RawMessage) (j
 	if err != nil {
 		return nil, err
 	}
+	truncated := req.MaxFiles > 0 && len(files) >= req.MaxFiles
 	return json.Marshal(struct {
-		Files []search.FileEntry `json:"files"`
-		Total int                `json:"total"`
-	}{Files: files, Total: len(files)})
+		Files     []search.FileEntry `json:"files"`
+		Total     int                `json:"total"`
+		Truncated bool               `json:"truncated"`
+	}{Files: files, Total: len(files), Truncated: truncated})
 }

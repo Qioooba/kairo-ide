@@ -93,6 +93,15 @@ export class KairoNotificationServiceImpl {
     this._onDidChange.fire();
   }
 
+  /** Mark one notification as read and publish the change (UI-14). */
+  markRead(id: string): void {
+    const found = this.notifications.find(n => n.id === id);
+    if (found && !found.read) {
+      found.read = true;
+      this._onDidChange.fire();
+    }
+  }
+
   /** Get the notification history (last 50 items). */
   getHistory(): ReadonlyArray<KairoNotification> {
     return this.notifications;
@@ -114,12 +123,12 @@ interface NotificationCenterProps {
   i18n: KairoI18nService;
 }
 
-function categoryIcon(category: NotificationCategory): string {
+function categoryIconClass(category: NotificationCategory): string {
   switch (category) {
-    case 'error': return '$(error)';
-    case 'warning': return '$(warning)';
-    case 'info': return '$(info)';
-    default: return '$(info)';
+    case 'error': return 'codicon-error';
+    case 'warning': return 'codicon-warning';
+    case 'info': return 'codicon-info';
+    default: return 'codicon-info';
   }
 }
 
@@ -167,6 +176,9 @@ const NotificationCenter: React.FC<NotificationCenterProps> = ({ service, i18n }
       }
       return next;
     });
+    // Reading state goes through the service so every listener (badge,
+    // status bar, list) observes the same change event (UI-14).
+    service.markRead(id);
   };
 
   return (
@@ -185,40 +197,59 @@ const NotificationCenter: React.FC<NotificationCenterProps> = ({ service, i18n }
           )}
         </div>
       </div>
-      <div className="kairo-notification-list">
+      <div className="kairo-notification-list" role="list" aria-label={t('widget.notification.title')}>
         {history.length === 0 ? (
           <p className="kairo-notification-empty">{t('widget.notification.empty')}</p>
         ) : (
-          history.map(n => (
-            <div
-              key={n.id}
-              className={`kairo-notification-item ${categoryClass(n.category)} ${n.read ? 'kairo-notif-read' : 'kairo-notif-unread'}`}
-            >
+          history.map(n => {
+            // UI-14: expand and dismiss are sibling native buttons — no nested
+            // interactive elements, no div[role=button]. Only notifications
+            // with details are expandable; plain ones render no toggle.
+            const expandable = Boolean(n.details);
+            const expandedNow = expanded.has(n.id);
+            const detailsId = `kairo-notif-details-${n.id}`;
+            return (
               <div
-                className="kairo-notification-summary"
-                onClick={() => { toggleExpand(n.id); if (!n.read) { n.read = true; setHistory([...service.getHistory()]); } }}
-                role="button"
-                tabIndex={0}
-                onKeyDown={e => { if (e.key === 'Enter') { toggleExpand(n.id); if (!n.read) { n.read = true; setHistory([...service.getHistory()]); } } }}
+                key={n.id}
+                role="listitem"
+                className={`kairo-notification-item ${categoryClass(n.category)} ${n.read ? 'kairo-notif-read' : 'kairo-notif-unread'}`}
               >
-                <span className="kairo-notification-icon">{categoryIcon(n.category)}</span>
-                <span className="kairo-notification-message">{n.message}</span>
-                <span className="kairo-notification-time">{formatTime(n.timestamp)}</span>
-                <button
-                  className="kairo-notification-dismiss"
-                  onClick={e => { e.stopPropagation(); service.clear(n.id); }}
-                  title={t('widget.notification.dismiss')}
-                >
-                  ×
-                </button>
-              </div>
-              {expanded.has(n.id) && n.details && (
-                <div className="kairo-notification-details">
-                  <pre className="kairo-notification-details-text">{n.details}</pre>
+                <div className="kairo-notification-summary">
+                  <span className={`codicon ${categoryIconClass(n.category)} kairo-notification-icon`} aria-hidden="true" />
+                  <span className="kairo-notification-message">{n.message}</span>
+                  <span className="kairo-notification-time">{formatTime(n.timestamp)}</span>
+                  {expandable && (
+                    <button
+                      type="button"
+                      className="kairo-notification-expand"
+                      data-testid={`notif-expand-${n.id}`}
+                      aria-expanded={expandedNow}
+                      aria-controls={detailsId}
+                      onClick={() => toggleExpand(n.id)}
+                      title={t('widget.notification.toggleDetails')}
+                    >
+                      <span className={`codicon ${expandedNow ? 'codicon-chevron-down' : 'codicon-chevron-right'}`} aria-hidden="true" />
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="kairo-notification-dismiss"
+                    data-testid={`notif-dismiss-${n.id}`}
+                    onClick={() => service.clear(n.id)}
+                    title={t('widget.notification.dismiss')}
+                    aria-label={`${t('widget.notification.dismiss')}: ${n.message}`}
+                  >
+                    <span className="codicon codicon-close" aria-hidden="true" />
+                  </button>
                 </div>
-              )}
-            </div>
-          ))
+                {expandable && expandedNow && (
+                  <div className="kairo-notification-details" id={detailsId}>
+                    <pre className="kairo-notification-details-text">{n.details}</pre>
+                  </div>
+                )}
+              </div>
+            );
+          })
         )}
       </div>
     </div>

@@ -17,7 +17,7 @@
     "build": "tsc -p tsconfig.json && node ../../scripts/copy-css.cjs src/browser lib/browser",
     "clean": "node ../../scripts/clean-dir.cjs lib",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "test": "node --require ts-node/register --require source-map-support/register --test src/browser/kairo-theme.test.ts src/browser/kairo-theme-contribution.test.ts src/browser/kairo-theme-extended.test.ts src/browser/kairo-theme-edge-cases.test.ts src/browser/kairo-ui-contribution.test.ts src/browser/virtual-list.test.ts"
+    "test": "node --require ts-node/register --require source-map-support/register --test src/browser/kairo-theme.test.ts src/browser/kairo-theme-contribution.test.ts src/browser/kairo-theme-extended.test.ts src/browser/kairo-theme-edge-cases.test.ts src/browser/kairo-ui-contribution.test.ts src/browser/virtual-list.test.ts && node --test src/browser/resizable-split.test.cjs src/browser/form-field.test.cjs src/browser/ui-kit-exports.test.cjs"
   },
   "dependencies": {
     "@theia/core": "1.73.1",

@@ -14,6 +14,8 @@ import { KairoUiContribution } from './kairo-ui-contribution';
 import { KairoThemeContribution } from './kairo-theme-contribution';
 import { KairoIdeaEditorPreferenceContribution } from './kairo-idea-editor-preferences';
 import './kairo-theme.css';
+import './resizable-split.css';
+import './shared-form.css';
 
 export * from './kairo-ui-contribution';
 export * from './kairo-theme';
@@ -21,6 +23,10 @@ export * from './kairo-theme-idea';
 export * from './kairo-theme-contribution';
 export * from './kairo-idea-editor-preferences';
 export * from './virtual-list';
+export * from './resizable-split-math';
+export * from './resizable-split';
+export * from './form-field';
+export * from './tool-window-frame';
 export { default as KairoUiContribution } from './kairo-ui-contribution';
 
 export default new ContainerModule(bind => {

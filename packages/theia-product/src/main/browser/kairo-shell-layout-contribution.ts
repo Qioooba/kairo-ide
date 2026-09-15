@@ -3,6 +3,11 @@
  * stays at the true bottom — especially on high-DPI / 2K displays where
  * mismatched shell geometry leaves empty space under the status bar
  * (looking like it sits mid-window) and can interfere with split sashes.
+ *
+ * UI-18: the px intervention below is a last-resort guard, not the layout
+ * owner. Lumino remains the geometry authority: we only write styles when
+ * a >2px gap is actually measured, observe the host size (ResizeObserver)
+ * in addition to window resizes, and clean everything up on stop.
  */
 
 import { injectable } from '@theia/core/shared/inversify';
@@ -15,6 +20,9 @@ import {
 export class KairoShellLayoutContribution implements FrontendApplicationContribution {
   protected resizeHandler?: () => void;
   protected resizeRaf?: number;
+  protected settleTimers: number[] = [];
+  protected hostObserver?: ResizeObserver;
+  protected visibilityHandler?: () => void;
 
   onStart(app: FrontendApplication): void {
     const sync = () => this.ensureShellFillsWindow(app);
@@ -32,9 +40,27 @@ export class KairoShellLayoutContribution implements FrontendApplicationContribu
       });
     };
     window.addEventListener('resize', this.resizeHandler);
-    // Second pass after Theia finishes restoring layout.
-    window.setTimeout(sync, 500);
-    window.setTimeout(sync, 2000);
+    // Observe the shell's host element directly: DPI changes, cross-monitor
+    // moves and layout restores can change host size without a window
+    // resize event. Guarded — only measures, never writes per callback.
+    const shellNode = app.shell?.node;
+    const host = shellNode?.parentElement;
+    if (host && typeof ResizeObserver !== 'undefined') {
+      this.hostObserver = new ResizeObserver(() => this.resizeHandler?.());
+      this.hostObserver.observe(host);
+    }
+    // Re-sync when the window becomes visible again (restore from minimize,
+    // virtual-desktop switch) — hidden documents report zero sizes, so the
+    // guard inside ensureShellFillsWindow skips while hidden.
+    this.visibilityHandler = () => {
+      if (document.visibilityState === 'visible') sync();
+    };
+    document.addEventListener('visibilitychange', this.visibilityHandler);
+    // Settle passes after Theia finishes restoring layout. Two short passes
+    // preserve the original high-DPI fix intent (500/2000ms); both are
+    // tracked and cleared on stop.
+    this.settleTimers.push(window.setTimeout(sync, 500));
+    this.settleTimers.push(window.setTimeout(sync, 2000));
   }
 
   onStop(): void {
@@ -46,6 +72,16 @@ export class KairoShellLayoutContribution implements FrontendApplicationContribu
       window.removeEventListener('resize', this.resizeHandler);
       this.resizeHandler = undefined;
     }
+    for (const timer of this.settleTimers) {
+      window.clearTimeout(timer);
+    }
+    this.settleTimers = [];
+    this.hostObserver?.disconnect();
+    this.hostObserver = undefined;
+    if (this.visibilityHandler) {
+      document.removeEventListener('visibilitychange', this.visibilityHandler);
+      this.visibilityHandler = undefined;
+    }
   }
 
   protected ensureShellFillsWindow(app: FrontendApplication): void {
@@ -53,10 +89,13 @@ export class KairoShellLayoutContribution implements FrontendApplicationContribu
     if (!shellNode) {
       return;
     }
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+      return;
+    }
     const parent = shellNode.parentElement;
     const targetH = parent?.clientHeight || window.innerHeight;
     const targetW = parent?.clientWidth || window.innerWidth;
-    if (targetH <= 0 || targetW <= 0) {
+    if (!Number.isFinite(targetH) || !Number.isFinite(targetW) || targetH <= 0 || targetW <= 0) {
       return;
     }
     // Lumino uses absolute geometry; force the shell to match the viewport

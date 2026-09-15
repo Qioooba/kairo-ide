@@ -103,6 +103,11 @@ function buildAttributeCompletionItem(
   });
 }
 
+const TLD_SKIP_DIRS = new Set([
+  'node_modules', 'dist', 'build', 'target', 'classes',
+  'work', 'temp', 'logs', '.metadata', '.settings', '.git', '.svn', '.idea', '.vscode', 'bin',
+]);
+
 /**
  * Manages TLD parsing and caching. Scans the workspace for *.tld
  * files and exposes tag completions per prefix.
@@ -123,6 +128,8 @@ export class TldCompletionProvider {
 
   /** Whether the workspace has already been scanned. */
   protected scanned = false;
+  protected scanPromise: Promise<void> | undefined;
+  protected scanEpoch = 0;
 
   /** File watchers that invalidate the cache on TLD/JAR changes. */
   protected readonly watchers = new DisposableCollection();
@@ -131,15 +138,28 @@ export class TldCompletionProvider {
   /**
    * Scan the workspace roots for *.tld files and parse them.
    * Subsequent calls are no-ops until {@link invalidateCache}.
+   * Uses in-flight Promise deduping and sets scanned only upon completion (F07).
    */
   async scanWorkspace(): Promise<void> {
     if (this.scanned) return;
-    this.scanned = true;
+    if (this.scanPromise) return this.scanPromise;
+    const epoch = ++this.scanEpoch;
+    this.scanPromise = this.doScanWorkspace(epoch).finally(() => {
+      this.scanPromise = undefined;
+    });
+    return this.scanPromise;
+  }
+
+  protected async doScanWorkspace(epoch: number): Promise<void> {
     const roots = await this.workspaceService.roots;
     if (roots.length === 0) return;
     for (const root of roots) {
+      if (epoch !== this.scanEpoch) return;
       const rootUri = URI.fromFilePath(root.resource.path.toString());
       await this.walkDir(rootUri);
+    }
+    if (epoch === this.scanEpoch) {
+      this.scanned = true;
     }
     this.ensureWatchers();
   }
@@ -152,10 +172,15 @@ export class TldCompletionProvider {
     if (this.watchersStarted) return;
     this.watchersStarted = true;
 
+    const tldWatcherExcludes = [
+      '**/.git/**', '**/.svn/**', '**/node_modules/**', '**/target/**', '**/build/**',
+      '**/dist/**', '**/classes/**', '**/work/**', '**/temp/**', '**/logs/**',
+      '**/.metadata/**', '**/.settings/**',
+    ];
     void this.workspaceService.roots.then(roots => {
       for (const root of roots) {
         try {
-          this.watchers.push(this.fileService.watch(root.resource, { recursive: true, excludes: [] }));
+          this.watchers.push(this.fileService.watch(root.resource, { recursive: true, excludes: tldWatcherExcludes }));
         } catch {
           // Watch may fail on remote/unsupported providers
         }
@@ -168,7 +193,14 @@ export class TldCompletionProvider {
         const base = change.resource.path.base.toLowerCase();
         const isTld = base.endsWith('.tld');
         const isWebInfLibJar = base.endsWith('.jar') && /\/WEB-INF\/lib\//i.test(p);
-        if (isTld || isWebInfLibJar) {
+        if (isTld) {
+          // Incremental per-file update (F07)
+          if (change.type === 2 /* DELETED */) {
+            this.tldCache.delete(change.resource.toString());
+          } else {
+            void this.parseAndCache(change.resource);
+          }
+        } else if (isWebInfLibJar) {
           this.invalidateCache();
           return;
         }
@@ -239,20 +271,22 @@ export class TldCompletionProvider {
     this.invalidateCache();
   }
 
-  private async walkDir(uri: URI): Promise<void> {
+  private async walkDir(uri: URI, depth = 0, state = { count: 0 }): Promise<void> {
+    if (depth > 10 || state.count >= 3000) return;
     try {
       const stat = await this.fileService.resolve(uri, { resolveMetadata: false });
       if (!stat.children) return;
       for (const child of stat.children) {
+        state.count++;
         const basename = child.resource.path.base;
         if (child.isDirectory) {
           // Skip generic `lib/` trees, but never skip WEB-INF/lib (JV-P2-5).
           const parentBase = uri.path.base;
           const skipLib = basename === 'lib' && parentBase !== 'WEB-INF';
-          if (basename.startsWith('.') || basename === 'node_modules' || skipLib || basename === 'dist') {
+          if (basename.startsWith('.') || TLD_SKIP_DIRS.has(basename) || skipLib) {
             continue;
           }
-          await this.walkDir(child.resource);
+          await this.walkDir(child.resource, depth + 1, state);
         } else if (basename.endsWith('.tld')) {
           await this.parseAndCache(child.resource);
         }

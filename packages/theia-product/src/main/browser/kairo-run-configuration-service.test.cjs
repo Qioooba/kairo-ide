@@ -8,6 +8,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const {
   copiedConfiguration,
+  createDefaultTomcatRunConfiguration,
   createTomcatRunConfiguration,
   emptyRunConfigurationDocument,
   KairoRunConfigurationService,
@@ -160,6 +161,50 @@ test('UI contract blocks unsafe execution and exposes accessibility/error states
   assert.match(source, /kairo-runconfig-launch-progress/);
   assert.match(source, /service\.launch\(configuration\)/);
   assert.doesNotMatch(source, /executeCommand\(configuration\.mode/);
+});
+
+test('createDefaultTomcatRunConfiguration generates valid Tomcat 6 config', () => {
+  const config = createDefaultTomcatRunConfiguration('my-app', 'My Application');
+  assert.equal(config.id, 'tomcat-my-app');
+  assert.equal(config.name, 'Tomcat 6: My Application');
+  assert.equal(config.type, 'tomcat6');
+  assert.equal(config.projectId, 'my-app');
+  assert.equal(config.mode, 'run');
+  assert.equal(config.server.httpPort, 18080);
+  assert.equal(config.server.debugPort, 8000);
+  assert.equal(config.server.contextPath, '/');
+  assert.equal(config.deploy.mode, 'exploded');
+});
+
+test('ensureDefaultConfiguration seeds default config when configurations is empty', async () => {
+  let doc = emptyRunConfigurationDocument();
+  const service = createService((endpoint, payload) => {
+    if (endpoint.startsWith('POST ')) {
+      doc = { version: 1, configurations: [payload], selectedConfigurationId: payload.id };
+    }
+    return doc;
+  });
+  service.activeProject = { project: { projectId: 'p-123', name: 'Legacy Web App', root: '/app', workspaceId: 'ws-1' } };
+  const res = await service.ensureDefaultConfiguration(service.activeProject.project);
+  assert.equal(res.configurations.length, 1);
+  assert.equal(res.configurations[0].projectId, 'p-123');
+  assert.equal(res.configurations[0].name, 'Tomcat 6: Legacy Web App');
+  assert.equal(res.selectedConfigurationId, 'tomcat-p-123');
+});
+
+test('load automatically seeds default config when activeProject is present and configurations is empty', async () => {
+  let doc = emptyRunConfigurationDocument();
+  const service = createService((endpoint, payload) => {
+    if (endpoint.startsWith('POST ')) {
+      doc = { version: 1, configurations: [payload], selectedConfigurationId: payload.id };
+    }
+    return doc;
+  });
+  service.activeProject = { project: { projectId: 'auto-proj', name: 'Auto Project', root: '/auto', workspaceId: 'ws-1' } };
+  const res = await service.load();
+  assert.equal(res.configurations.length, 1);
+  assert.equal(res.configurations[0].projectId, 'auto-proj');
+  assert.equal(res.configurations[0].name, 'Tomcat 6: Auto Project');
 });
 
 test('teardown', () => disableJSDOM());

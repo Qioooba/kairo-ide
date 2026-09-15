@@ -54,26 +54,53 @@ export async function openKairoCommand(page: Page, label: string): Promise<void>
   await page.waitForTimeout(800);
 }
 
-export function expectFile(rel: string, ...needles: Array<string | RegExp>): void {
+/**
+ * Static contract check (UI-07 classification: `@contract`).
+ *
+ * Reads repository source text only. It may assert registration strings,
+ * schema keywords or protocol markers, but a passing contract check MUST
+ * NOT be reported as "the user flow works" — that requires a real
+ * rendering interaction test (`@ui`). Contract checks live alongside UI
+ * tests so both run in one campaign, distinguished by this call.
+ */
+export function expectContract(rel: string, ...needles: Array<string | RegExp>): void {
   const text = fs.readFileSync(repoPath(...rel.split('/')), 'utf8');
   for (const needle of needles) {
     if (typeof needle === 'string') {
-      expect(text, rel).toContain(needle);
+      expect(text, `[contract] ${rel}`).toContain(needle);
     } else {
-      expect(text, rel).toMatch(needle);
+      expect(text, `[contract] ${rel}`).toMatch(needle);
     }
   }
 }
 
+/**
+ * @deprecated Use {@link expectContract} for static checks (explicit
+ * `@contract` classification) or real page locators for UI acceptance.
+ * Kept only so unmigrated branches keep compiling; new tests must not use it.
+ */
+export function expectFile(rel: string, ...needles: Array<string | RegExp>): void {
+  expectContract(rel, ...needles);
+}
+
+/**
+ * Real UI assertion (UI-07 classification: `@ui`).
+ *
+ * Asserts against the live rendered page text. The historical source-text
+ * fallback was removed: when the UI does not show the expected content the
+ * test MUST fail — missing buttons, unopenable views or broken interactions
+ * can never pass because a keyword still exists in the sources.
+ */
 export async function uiOrFile(
   page: Page,
   ui: RegExp,
-  rel: string,
-  ...needles: Array<string | RegExp>
+  _rel: string,
+  ..._needles: Array<string | RegExp>
 ): Promise<void> {
+  void _rel;
+  void _needles;
   const text = await bodyText(page);
-  if (ui.test(text)) return;
-  expectFile(rel, ...needles);
+  expect(text, '[ui] expected content not rendered; source fallback is prohibited (UI-07)').toMatch(ui);
 }
 
 export function envelopePayload(res: AgentResp): any {

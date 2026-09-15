@@ -26,10 +26,12 @@ import (
 var DefaultExcludes = []string{
 	".git", ".svn", ".hg",
 	"node_modules", ".pnpm-store",
-	"target", "build", "dist", "out",
+	"target", "build", "dist", "out", "bin",
 	"logs",
 	"work", "temp", // Tomcat
 	".legacyflow", ".kairo", // runtime state
+	".metadata", ".settings", "classes", // Eclipse/IDE state and compiled classes
+	".idea", ".vscode", ".gradle",
 }
 
 // excludedDirSet is a map-based lookup for O(1) excluded dir checks.
@@ -616,10 +618,13 @@ func isLikelyBinary(path string) bool {
 	ext := strings.ToLower(filepath.Ext(path))
 	switch ext {
 	case ".class", ".jar", ".war", ".ear", ".zip", ".tar", ".gz", ".bz2", ".7z", ".rar",
-		".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".webp",
+		".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".webp", ".svgz",
 		".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
 		".so", ".dll", ".dylib", ".exe", ".bin",
-		".mp3", ".mp4", ".mov", ".avi", ".mkv", ".wav", ".ogg":
+		".mp3", ".mp4", ".mov", ".avi", ".mkv", ".wav", ".ogg",
+		".woff", ".woff2", ".ttf", ".eot", ".otf",
+		".db", ".sqlite", ".sqlite3",
+		".log", ".map", ".bak", ".swp", ".swo":
 		return true
 	}
 	return false

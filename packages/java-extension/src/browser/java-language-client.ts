@@ -50,6 +50,7 @@ import {
   LSPTextEdit,
   LSPInlayHint,
   LSPDocumentHighlight,
+  LSPSemanticTokens,
 } from '../common/lsp-protocol';
 
 /** Connection status for the language client. */
@@ -541,6 +542,10 @@ export class JavaLanguageClient implements JdtLsFrontendClient, Disposable {
     return this.callBackend('$codeLens', uri, () => this.backend?.$codeLens(uri) ?? []);
   }
 
+  async codeLensResolve(lens: LSPCodeLens): Promise<LSPCodeLens> {
+    return this.callBackend('$codeLensResolve', lens, () => this.backend?.$codeLensResolve(lens) ?? lens);
+  }
+
   async formatting(uri: string, options?: { tabSize?: number; insertSpaces?: boolean }): Promise<LSPTextEdit[]> {
     const proxy = this.proxy();
     if (proxy) {
@@ -577,6 +582,30 @@ export class JavaLanguageClient implements JdtLsFrontendClient, Disposable {
     return this.backend?.$inlayHint(uri, range) ?? [];
   }
 
+  async semanticTokensFull(uri: string): Promise<LSPSemanticTokens | null> {
+    const proxy = this.proxy();
+    if (proxy) {
+      try {
+        return await proxy.$semanticTokensFull(uri);
+      } catch (err) {
+        this.markRpcFailed(err);
+      }
+    }
+    return this.backend?.$semanticTokensFull(uri) ?? null;
+  }
+
+  async semanticTokensRange(uri: string, range: LSPRange): Promise<LSPSemanticTokens | null> {
+    const proxy = this.proxy();
+    if (proxy) {
+      try {
+        return await proxy.$semanticTokensRange(uri, range);
+      } catch (err) {
+        this.markRpcFailed(err);
+      }
+    }
+    return this.backend?.$semanticTokensRange(uri, range) ?? null;
+  }
+
   async buildWorkspace(force: boolean): Promise<void> {
     const proxy = this.proxy();
     if (proxy) {
@@ -592,7 +621,7 @@ export class JavaLanguageClient implements JdtLsFrontendClient, Disposable {
 
   /** Invoke one typed backend method through RPC, with the same
    *  durable in-process fallback used by the lifecycle calls. */
-  protected async callBackend<K extends '$implementation' | '$hover' | '$references' | '$typeDefinition' | '$documentHighlight' | '$signatureHelp' | '$documentSymbols' | '$workspaceSymbols' | '$codeActions' | '$rename' | '$prepareCallHierarchy' | '$incomingCalls' | '$outgoingCalls' | '$prepareTypeHierarchy' | '$supertypes' | '$subtypes' | '$codeLens' | '$formatting' | '$rangeFormatting' | '$inlayHint'>(
+  protected async callBackend<K extends '$implementation' | '$hover' | '$references' | '$typeDefinition' | '$documentHighlight' | '$signatureHelp' | '$documentSymbols' | '$workspaceSymbols' | '$codeActions' | '$rename' | '$prepareCallHierarchy' | '$incomingCalls' | '$outgoingCalls' | '$prepareTypeHierarchy' | '$supertypes' | '$subtypes' | '$codeLens' | '$codeLensResolve' | '$formatting' | '$rangeFormatting' | '$inlayHint'>(
     method: K,
     arg: Parameters<JdtLsBackendService[K]>[0],
     fallback: () => ReturnType<JdtLsBackendService[K]>,

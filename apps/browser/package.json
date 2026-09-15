@@ -15,7 +15,37 @@
           "files.autoSave": "off",
           "workspace.preserveWindow": true,
           "security.workspace.trust.enabled": true,
-          "editor.minimap.enabled": false
+          "editor.minimap.enabled": false,
+          "files.watcherExclude": {
+            "**/.git/**": true,
+            "**/.svn/**": true,
+            "**/node_modules/**": true,
+            "**/WEB-INF/lib/**": true,
+            "**/*.class": true,
+            "**/target/**": true,
+            "**/build/**": true,
+            "**/dist/**": true,
+            "**/classes/**": true,
+            "**/work/**": true,
+            "**/temp/**": true,
+            "**/logs/**": true,
+            "**/.metadata/**": true,
+            "**/.settings/**": true
+          },
+          "search.exclude": {
+            "**/node_modules/**": true,
+            "**/WEB-INF/lib/**": true,
+            "**/*.class": true,
+            "**/target/**": true,
+            "**/build/**": true,
+            "**/dist/**": true,
+            "**/classes/**": true,
+            "**/work/**": true,
+            "**/temp/**": true,
+            "**/logs/**": true,
+            "**/.metadata/**": true,
+            "**/.settings/**": true
+          }
         }
       }
     }

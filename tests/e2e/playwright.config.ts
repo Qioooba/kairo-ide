@@ -23,6 +23,7 @@ export default defineConfig({
     'windows-e2e.spec.ts',
     'standalone-smoke.spec.ts',
     'diagnose.spec.ts',
+    'visual-gate.spec.ts',
     'regression/shard-*.spec.ts',
   ],
 

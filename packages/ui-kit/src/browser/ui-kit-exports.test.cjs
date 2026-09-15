@@ -27,6 +27,21 @@ test('browser index.ts exports virtual-list', () => {
   assert.match(source, /virtual-list/);
 });
 
+test('browser index.ts exports resizable-split (UI-06)', () => {
+  const source = fs.readFileSync(path.join(srcDir, 'index.ts'), 'utf8');
+  assert.match(source, /resizable-split/);
+});
+
+test('browser index.ts exports form-field (UI-09/UI-13)', () => {
+  const source = fs.readFileSync(path.join(srcDir, 'index.ts'), 'utf8');
+  assert.match(source, /form-field/);
+});
+
+test('browser index.ts exports tool-window-frame', () => {
+  const source = fs.readFileSync(path.join(srcDir, 'index.ts'), 'utf8');
+  assert.match(source, /tool-window-frame/);
+});
+
 test('browser index.ts exports default ContainerModule', () => {
   const source = fs.readFileSync(path.join(srcDir, 'index.ts'), 'utf8');
   assert.match(source, /export default new ContainerModule/);

@@ -359,6 +359,10 @@ export class JavaCompletionProvider {
     return this.whenReady('codeLens', [], () => this.client.codeLens(uri));
   }
 
+  async provideCodeLensResolve(lens: LSPCodeLens): Promise<LSPCodeLens> {
+    return this.whenReady('codeLens resolve', lens, () => this.client.codeLensResolve(lens));
+  }
+
   async provideFormatting(uri: string, options?: { tabSize?: number; insertSpaces?: boolean }): Promise<LSPTextEdit[]> {
     return this.whenReady('formatting', [], () => this.client.formatting(uri, options));
   }

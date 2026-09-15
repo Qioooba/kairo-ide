@@ -82,15 +82,18 @@ const ToolbarSeparator: React.FC = () => (
 interface ThreadSelectorProps {
     threads: KairoDebugThreadInfo[];
     currentThreadId: number | undefined;
+    disabled: boolean;
+    disabledReason: string;
     onSelect: (threadId: number) => void;
 }
 
-const ThreadSelector: React.FC<ThreadSelectorProps & { i18n: KairoI18nService }> = ({ threads, currentThreadId, onSelect, i18n }) => {
-    if (threads.length === 0) return null;
+const ThreadSelector: React.FC<ThreadSelectorProps & { i18n: KairoI18nService }> = ({ threads, currentThreadId, disabled, disabledReason, onSelect, i18n }) => {
+    // UI-05: never offer a clickable control that does nothing. Without a
+    // paused session there is no thread to pick, so render nothing; with a
+    // session but no thread list yet, render a disabled selector that says why.
+    if (threads.length === 0 && disabled) return null;
 
     const t = React.useCallback((key: string) => i18n.t(key as any), [i18n]);
-    const currentThread = threads.find(t => t.id === currentThreadId);
-    const displayName = currentThread?.name ?? `Thread ${currentThreadId ?? ''}`;
     const selectLabel = t('debug.toolbar.selectThread');
 
     return (
@@ -99,14 +102,18 @@ const ThreadSelector: React.FC<ThreadSelectorProps & { i18n: KairoI18nService }>
                 value={currentThreadId ?? ''}
                 onChange={e => onSelect(Number(e.target.value))}
                 className="kairo-debug-thread-selector"
-                title={selectLabel}
-                aria-label={selectLabel}
+                data-testid="debug-thread-selector"
+                title={disabled ? disabledReason : selectLabel}
+                aria-label={disabled ? disabledReason : selectLabel}
+                disabled={disabled || threads.length === 0}
             >
-                {threads.map(t => (
-                    <option key={t.id} value={t.id}>
-                        {t.name}
-                    </option>
-                ))}
+                {threads.length === 0
+                    ? <option value="">{disabledReason}</option>
+                    : threads.map(th => (
+                        <option key={th.id} value={th.id}>
+                            {th.name}
+                        </option>
+                    ))}
             </select>
         </div>
     );
@@ -284,6 +291,8 @@ export const IDEADebugToolbar: React.FC<IDEADebugToolbarProps> = ({
                     <ThreadSelector
                         threads={state.threads}
                         currentThreadId={state.threadId}
+                        disabled={!isSuspended}
+                        disabledReason={t('debug.toolWindow.sessionNotPaused')}
                         onSelect={onSelectThread}
                         i18n={i18n}
                     />

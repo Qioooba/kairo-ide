@@ -17,6 +17,7 @@ import { DebugSessionManager } from '@theia/debug/lib/browser/debug-session-mana
 import { BreakpointManager } from '@theia/debug/lib/browser/breakpoint/breakpoint-manager';
 import type { DebugSession } from '@theia/debug/lib/browser/debug-session';
 import type { DebugStackFrame } from '@theia/debug/lib/browser/model/debug-stack-frame';
+import type { DebugThread } from '@theia/debug/lib/browser/model/debug-thread';
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import { KairoJavaDebugService, type KairoJavaDebugState } from './kairo-java-debug-service';
 
@@ -294,6 +295,41 @@ export class KairoDebugSessionService {
     } catch {
       return [];
     }
+  }
+
+  /**
+   * Select a thread in a paused multi-thread session and link stack frames
+   * + variables to it (UI-05). Returns false when there is no session or
+   * the thread id is unknown, so the UI can disable the selector with an
+   * explanation instead of offering a dead control.
+   */
+  async selectThread(threadId: number): Promise<boolean> {
+    const session = this.currentSession;
+    if (!session) {
+      return false;
+    }
+    let target: DebugThread | undefined;
+    try {
+      for (const thread of session.threads) {
+        if (thread.threadId === threadId) {
+          target = thread;
+          break;
+        }
+      }
+    } catch {
+      return false;
+    }
+    if (!target) {
+      return false;
+    }
+    try {
+      session.currentThread = target;
+      await target.fetchFrames();
+    } catch {
+      return false;
+    }
+    this.refreshState();
+    return true;
   }
 
   /**

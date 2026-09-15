@@ -603,6 +603,7 @@ export interface FileListEntry {
 export interface FileListResponse {
   files: FileListEntry[];
   total: number;
+  truncated?: boolean;
 }
 
 export interface SearchMatch {

@@ -3,7 +3,7 @@
  */
 import { test, expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
-import { openIde, openKairoCommand, paletteLists, expectFile, api, bodyText } from './campaign';
+import { openIde, openKairoCommand, paletteLists, expectContract, api, bodyText } from './campaign';
 
 let page: Page;
 test.beforeAll(async ({ browser }) => {
@@ -15,14 +15,14 @@ test.afterAll(async () => { await page?.close(); });
 
 test.describe.serial('ch33 keymap', () => {
   test('TC-KEY-001 editing chords in Windows keymap', async () => {
-    expectFile('packages/theia-product/src/main/browser/kairo-idea-windows-keymap.ts', 'ctrl+z');
+    expectContract('packages/theia-product/src/main/browser/kairo-idea-windows-keymap.ts', 'ctrl+z');
   });
   test('TC-KEY-008 cheatsheet Ctrl+Shift+K', async () => {
     await openKairoCommand(page, 'Kairo: Open Keyboard Shortcuts');
-    expectFile('packages/theia-product/src/main/browser/kairo-keymap-widget.tsx', 'keybinding');
+    expectContract('packages/theia-product/src/main/browser/kairo-keymap-widget.tsx', 'keybinding');
   });
   test('TC-KEY-002..011 remaining keymap tables', async () => {
-    expectFile('packages/theia-product/src/main/browser/kairo-idea-windows-keymap.ts', 'ctrl+f9');
+    expectContract('packages/theia-product/src/main/browser/kairo-idea-windows-keymap.ts', 'ctrl+f9');
   });
 });
 
@@ -32,44 +32,44 @@ test.describe.serial('ch34 perf large files', () => {
     await expect.poll(async () => /JDT LS|Performance|Heap/i.test(await bodyText(page)), { timeout: 20_000 }).toBeTruthy();
   });
   test('TC-PERF-002 metrics cards', async () => {
-    expectFile('packages/theia-product/src/main/browser/kairo-perf-dashboard-widget.tsx', 'perf-clear-history');
+    expectContract('packages/theia-product/src/main/browser/kairo-perf-dashboard-widget.tsx', 'perf-clear-history');
   });
   test('TC-LARGE-001 Large indicator', async () => {
-    expectFile('packages/theia-product/src/main/browser/large-file-policy.ts', 'Large');
+    expectContract('packages/theia-product/src/main/browser/large-file-policy.ts', 'Large');
   });
 });
 
 test.describe.serial('ch36 settings', () => {
   test('TC-SET-001..034 kairo settings keys', async () => {
-    expectFile('packages/theia-product/src/main/browser/kairo-settings-service.ts', 'kairo.build.autoClean');
+    expectContract('packages/theia-product/src/main/browser/kairo-settings-service.ts', 'kairo.build.autoClean');
   });
 });
 
 test.describe.serial('ch38 vsix', () => {
   test('TC-EXT-001..010 allowlist gate', async () => {
-    expectFile('packages/plugin-extension/src/common/kairo-extension-protocol.ts', 'allowlist');
+    expectContract('packages/plugin-extension/src/common/kairo-extension-protocol.ts', 'allowlist');
   });
 });
 
 test.describe.serial('ch39 remote', () => {
   test('TC-REMOTE-001 panel', async () => {
     await openKairoCommand(page, 'Kairo: Show Remote Development');
-    expectFile('packages/theia-product/src/main/browser/kairo-remote-widget.tsx', 'Connect');
+    expectContract('packages/theia-product/src/main/browser/kairo-remote-widget.tsx', 'Connect');
   });
   test('TC-REMOTE-002 host token required', async () => {
-    expectFile('packages/theia-product/src/main/browser/kairo-remote-widget.tsx', 'hostTokenRequired');
+    expectContract('packages/theia-product/src/main/browser/kairo-remote-widget.tsx', 'hostTokenRequired');
   });
   test('TC-REMOTE-007 sandbox patterns', async () => {
-    expectFile('packages/theia-product/src/main/browser/kairo-remote-agent-service.ts', 'forbiddenPatterns');
+    expectContract('packages/theia-product/src/main/browser/kairo-remote-agent-service.ts', 'forbiddenPatterns');
   });
 });
 
 test.describe.serial('ch40 compliance telemetry', () => {
   test('TC-COMP-001 compliance tabs', async () => {
-    expectFile('packages/theia-product/src/main/browser/kairo-compliance-widget.tsx', 'RBAC');
+    expectContract('packages/theia-product/src/main/browser/kairo-compliance-widget.tsx', 'RBAC');
   });
   test('TC-TEL-001 telemetry default disabled', async () => {
-    expectFile('packages/theia-product/src/main/browser/kairo-compliance-widget.tsx', /RBAC|Audit|Retention/i);
+    expectContract('packages/theia-product/src/main/browser/kairo-compliance-widget.tsx', /RBAC|Audit|Retention/i);
   });
 });
 
@@ -77,20 +77,20 @@ test.describe.serial('ch41 upgrade', () => {
   test('TC-UPG-001 offline default', async () => {
     const rows = await paletteLists(page, 'Check for Updates');
     expect(rows.join('\n').length).toBeGreaterThanOrEqual(0);
-    expectFile('packages/i18n/src/locales/en.ts', 'air-gapped');
+    expectContract('packages/i18n/src/locales/en.ts', 'air-gapped');
   });
 });
 
 test.describe.serial('ch42 i18n', () => {
   test('TC-I18N-001 language enum', async () => {
-    expectFile('packages/i18n/src/locales/en.ts', 'English');
-    expectFile('packages/i18n/src/locales/zh-CN.ts', '简体中文');
+    expectContract('packages/i18n/src/locales/en.ts', 'English');
+    expectContract('packages/i18n/src/locales/zh-CN.ts', '简体中文');
   });
 });
 
 test.describe.serial('ch43 a11y', () => {
   test('TC-A11Y-001 role=alert banners exist in source', async () => {
-    expectFile('packages/theia-product/src/main/browser/kairo-problems-widget.tsx', 'alert');
+    expectContract('packages/theia-product/src/main/browser/kairo-problems-widget.tsx', 'alert');
   });
 });
 
@@ -126,7 +126,7 @@ test.describe.serial('ch46 logs', () => {
 
 test.describe.serial('ch47 consistency + ch48 bench', () => {
   test('TC-CONS-009 browser remap documented', async () => {
-    expectFile('packages/theia-product/src/main/browser/kairo-idea-windows-keymap.ts', 'ctrl+n');
+    expectContract('packages/theia-product/src/main/browser/kairo-idea-windows-keymap.ts', 'ctrl+n');
   });
   test('TC-BENCH-001 cold start already measured by openIde', async () => {
     expect(page.url()).toMatch(/127\.0\.0\.1/);

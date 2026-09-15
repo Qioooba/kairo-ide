@@ -34,6 +34,7 @@ import type {
   LSPTextEdit,
   LSPInlayHint,
   LSPDocumentHighlight,
+  LSPSemanticTokens,
 } from './lsp-protocol';
 
 export const JdtLsBackendPath = '/services/jdt-ls-backend';
@@ -71,10 +72,13 @@ export interface JdtLsBackendService {
   $supertypes(item: LSPTypeHierarchyItem): Promise<LSPTypeHierarchyItem[]>;
   $subtypes(item: LSPTypeHierarchyItem): Promise<LSPTypeHierarchyItem[]>;
   $codeLens(uri: string): Promise<LSPCodeLens[]>;
+  $codeLensResolve(lens: LSPCodeLens): Promise<LSPCodeLens>;
   $buildWorkspace(force: boolean): Promise<void>;
   $formatting(uri: string, options?: { tabSize?: number; insertSpaces?: boolean }): Promise<LSPTextEdit[]>;
   $rangeFormatting(uri: string, range: LSPRange, options?: { tabSize?: number; insertSpaces?: boolean }): Promise<LSPTextEdit[]>;
   $inlayHint(uri: string, range?: LSPRange): Promise<LSPInlayHint[]>;
+  $semanticTokensFull(uri: string): Promise<LSPSemanticTokens | null>;
+  $semanticTokensRange(uri: string, range: LSPRange): Promise<LSPSemanticTokens | null>;
 }
 
 /** Backend → browser: state, log, diagnostics, messages.

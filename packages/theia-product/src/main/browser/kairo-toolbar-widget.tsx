@@ -45,6 +45,10 @@ const KairoToolbarComponent: React.FC<KairoToolbarProps> = ({
   }, [i18n]);
   const [project, setProject] = React.useState<ProjectInfo | undefined>(activeProject.project);
   const [projects, setProjects] = React.useState<ProjectConfig[]>([]);
+  // UI-10: explicit list lifecycle — loading / ready / error with stale
+  // retention, instead of a one-shot fetch that silently freezes on failure.
+  const [listStatus, setListStatus] = React.useState<'loading' | 'ready' | 'error'>('loading');
+  const [listError, setListError] = React.useState<string>('');
   const [runConfigState, setRunConfigState] = React.useState<RunConfigurationViewState>(runConfigService.current as RunConfigurationViewState);
   const [servers, setServers] = React.useState<ServerInstance[]>(serverStore.getServers());
   const [busy, setBusy] = React.useState<ToolbarOperation>(null);
@@ -68,23 +72,57 @@ const KairoToolbarComponent: React.FC<KairoToolbarProps> = ({
     return () => sub.dispose();
   }, [serverStore]);
 
-  // Load project list
-  React.useEffect(() => {
-    let cancelled = false;
-    runtime.request('GET /api/v1/projects', undefined).then((list) => {
-      if (!cancelled && Array.isArray(list)) {
+  // Load project list with refresh sources: initial mount, agent
+  // reconnect, and any active-project change (import/select/delete flows
+  // publish through ActiveProjectService). Failures keep the previous list
+  // marked stale and offer a retry instead of silently emptying (UI-10).
+  const hasListRef = React.useRef(false);
+  const loadProjects = React.useCallback(async () => {
+    // While reloading, the previous list stays on screen (stale) instead of
+    // flashing to empty; the status flag drives loading/error messaging.
+    // hasListRef keeps this callback identity stable so refresh effects
+    // never loop (UI-10).
+    if (!hasListRef.current) setListStatus('loading');
+    try {
+      const list = await runtime.request('GET /api/v1/projects', undefined);
+      if (Array.isArray(list)) {
+        hasListRef.current = true;
         setProjects(list as ProjectConfig[]);
+        setListStatus('ready');
+        setListError('');
+      } else {
+        throw new Error('Unexpected project list response');
       }
-    }).catch(() => {
-      // Agent not reachable — keep empty list
-    });
-    return () => { cancelled = true; };
+    } catch (err) {
+      // Agent not reachable — keep the previous list (possibly empty).
+      setListStatus('error');
+      setListError(err instanceof Error ? err.message : String(err));
+    }
   }, [runtime]);
+
+  React.useEffect(() => {
+    void loadProjects();
+  }, [loadProjects]);
+
+  React.useEffect(() => {
+    const unsubscribe = runtime.onStatusChange(status => {
+      // Offline at boot, then reconnected: pick up projects/imports (UI-10).
+      if (status === 'open') void loadProjects();
+    });
+    return unsubscribe;
+  }, [runtime, loadProjects]);
+
+  React.useEffect(() => {
+    const sub = activeProject.onDidChangeProject(() => {
+      void loadProjects();
+    });
+    return () => sub.dispose();
+  }, [activeProject, loadProjects]);
 
   const hasRunningServer = servers.some(s => s.state === 'running' || s.state === 'starting');
   const selectedConfig = runConfigState.document.configurations.find(
     c => c.id === runConfigState.document.selectedConfigurationId
-  );
+  ) ?? runConfigState.document.configurations[0];
   const isLaunching = runConfigState.submitting && runConfigState.operation === 'launch';
 
   const handleProjectChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
@@ -127,18 +165,43 @@ const KairoToolbarComponent: React.FC<KairoToolbarProps> = ({
         <label className="kairo-toolbar-label" htmlFor="kairo-toolbar-project">{t('widget.toolbar.projectLabel')}</label>
         <select
           id="kairo-toolbar-project"
+          data-testid="toolbar-project-select"
           className="theia-select kairo-toolbar-select"
           value={project?.projectId ?? ''}
-          disabled={busy !== null}
+          disabled={busy !== null || (projects.length === 0 && listStatus === 'loading')}
           onChange={handleProjectChange}
-          title={t('widget.toolbar.selectProjectAria')}
+          title={listStatus === 'error'
+            ? t('widget.toolbar.projectListError', { message: listError })
+            : t('widget.toolbar.selectProjectAria')}
           aria-label={t('widget.toolbar.selectProjectAria')}
+          aria-busy={listStatus === 'loading'}
         >
-          {projects.length === 0 && <option value="">{t('widget.toolbar.noProjects')}</option>}
+          {projects.length === 0 && (
+            <option value="">
+              {listStatus === 'loading' ? t('widget.toolbar.projectsLoading') : listStatus === 'error' ? t('widget.toolbar.projectsLoadFailed') : t('widget.toolbar.noProjects')}
+            </option>
+          )}
+          {/* Stable selection: the active project stays selectable even when
+              it is momentarily absent from the list (UI-10). */}
+          {project && project.projectId && !projects.some(p => p.id === project.projectId) && (
+            <option key={project.projectId} value={project.projectId}>{project.name}</option>
+          )}
           {projects.map(p => (
             <option key={p.id} value={p.id}>{p.name}</option>
           ))}
         </select>
+        {listStatus === 'error' && (
+          <button
+            className="theia-button secondary kairo-toolbar-btn kairo-toolbar-btn-retry"
+            data-testid="toolbar-project-retry"
+            disabled={busy !== null}
+            onClick={() => void loadProjects()}
+            title={t('widget.toolbar.projectListError', { message: listError })}
+            aria-label={t('common.retry')}
+          >
+            <span className="codicon codicon-refresh" aria-hidden="true" />
+          </button>
+        )}
       </div>
 
       {/* Run configuration selector */}

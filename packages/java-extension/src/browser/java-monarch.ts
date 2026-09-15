@@ -136,17 +136,19 @@ export const JAVA_MONARCH: object = {
     ],
 
     string: [
-      [/[^\\"]+/, 'string'],
+      [/[^\\"\r\n]+/, 'string'],
       [/@escapes/, 'string.escape'],
       [/\\./, 'string.escape.invalid'],
       [/"/, { token: 'string.quote', next: '@pop' }],
+      [/[\r\n]+/, { token: 'string.invalid', next: '@pop' }],
     ],
 
     string_char: [
       [/@escapes/, 'string.escape'],
       [/\\./, 'string.escape.invalid'],
-      [/[^\\']/, 'string'],
+      [/[^\\'\r\n]/, 'string'],
       [/'/, { token: 'string.quote', next: '@pop' }],
+      [/[\r\n]+/, { token: 'string.invalid', next: '@pop' }],
     ],
 
     textblock: [

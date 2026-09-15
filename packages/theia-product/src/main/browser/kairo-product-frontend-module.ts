@@ -55,6 +55,7 @@ import { BuildViewWidget } from '@kairo/build-extension';
 import { ServerViewWidget, LogViewerWidget, HotDeployService } from '@kairo/tomcat-extension';
 import { bindSvnExtension } from '@kairo/svn-extension';
 import { bindGitExtension } from '@kairo/git-extension';
+import { bindHighlightingExtension } from '@kairo/highlighting-extension';
 import { bindKairoI18n } from '@kairo/i18n';
 import {
   RuntimeConnectionService,
@@ -360,6 +361,9 @@ export function bindKairoFrontend(bind: interfaces.Bind, unbind?: interfaces.Unb
   // Must be bound early so all subsequent contributions can inject
   // KairoI18nService for translated labels/tooltips.
   bindKairoI18n(bind, unbind, isBound, rebind);
+
+  // ── Kairo Highlighting Extension ─────────────────────────────
+  bindHighlightingExtension(bind);
 
   // ── Kairo runtime client + workspace context ────────────────
   // Mirrors KairoRuntimeModule in

@@ -155,6 +155,15 @@ jobs:
       - name: Kairo commands tests
         run: pnpm --filter @kairo/theia-product exec node --test src/main/browser/kairo-commands.test.cjs
 
+      # UI-07: UI tests must not degenerate into source-string checks.
+      # Source-only gate — needs no running IDE.
+      - name: UI test classification gate (UI-07)
+        run: node scripts/run-with-timeout.cjs 60 node --test tests/e2e/comprehensive/ui-test-classification.test.cjs
+
+      # UI-06/UI-13: shared split/port-contract unit tests (lib/ built above).
+      - name: UI shared-primitive unit tests
+        run: node scripts/run-with-timeout.cjs 60 node --test packages/ui-kit/src/browser/resizable-split.test.cjs packages/ui-kit/src/browser/form-field.test.cjs
+
       - name: Upload test artifacts on failure
         if: failure()
         uses: actions/upload-artifact@v7.0.1

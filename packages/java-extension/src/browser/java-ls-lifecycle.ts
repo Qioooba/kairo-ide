@@ -77,6 +77,8 @@ export class JavaLanguageServerLifecycle {
      *  preparation, preventing two project changes from interleaving
      *  as stop(A) -> stop(B) -> start(A) -> start(B). */
     private transitionChain: Promise<void> = Promise.resolve();
+    /** In-flight activation promise for deduplication (F05). */
+    private inFlightActivation: Promise<void> | undefined;
     /** Duplicate "no project/no context" events can arrive back-to-back
      *  on a cold start. Share one bounded backend stop instead of opening
      *  two '/services/jdt-ls-backend' channels concurrently. */
@@ -169,14 +171,24 @@ export class JavaLanguageServerLifecycle {
             this.restartExhausted = false;
             this.fatalFailureLogged = false;
             this.lastExitCode = undefined;
+        } else if (this.inFlightActivation) {
+            // F05: Deduplicate concurrent activations for the exact same project
+            return;
         }
         this.clearRestartTimer();
         const token = ++this.activationToken;
-        void this.onProjectChanged(project, token);
+        const promise = this.onProjectChanged(project, token);
+        this.inFlightActivation = promise;
+        promise.finally(() => {
+            if (this.inFlightActivation === promise) {
+                this.inFlightActivation = undefined;
+            }
+        });
     }
 
     private deactivate(): Promise<void> {
         this.activationToken += 1;
+        this.inFlightActivation = undefined;
         this.desiredProject = undefined;
         this.launchDescriptor = undefined;
         this.lastStartKey = undefined;
@@ -473,7 +485,7 @@ export class JavaLanguageServerLifecycle {
      * Exposed as a method so tests can override it to 0.
      */
     protected initialDelayMs(): number {
-        return 5000;
+        return 300;
     }
 
     private clearRestartTimer(): void {

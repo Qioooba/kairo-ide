@@ -52,6 +52,18 @@ interface DialogState {
     loading: boolean;
     saving: boolean;
     error: string;
+    /** True once an editable field differs from the loaded snapshot (UI-02). */
+    dirty: boolean;
+}
+
+/** Editable subset used for dirty comparison; selection/loading flags excluded. */
+interface EditableSnapshot {
+    sourceLevel: SourceLevel;
+    targetLevel: SourceLevel;
+    encoding: EncodingId;
+    selectedJdkId: string;
+    sourceDirs: SourceDirEntry[];
+    classpath: ClasspathEntry[];
 }
 
 const SOURCE_LEVELS: SourceLevel[] = ['1.5', '1.6', '1.7', '1.8', '9', '11', '17'];
@@ -78,6 +90,12 @@ export class ProjectStructureDialog extends ReactDialog<void> {
     protected readonly fileDialogService: FileDialogService;
     protected readonly i18n: KairoI18nService;
     protected languageChangeDisposable?: Disposable;
+    /** Loaded snapshot for dirty tracking; null until loadData succeeds. */
+    protected loadedSnapshot: string | null = null;
+    /** Monotonic request sequence: guards late async completions (UI-02). */
+    protected requestSeq = 0;
+    /** Element that opened the dialog; focus is restored on close (UI-09). */
+    protected triggerElement: Element | null = null;
 
     protected state: DialogState;
 
@@ -119,11 +137,25 @@ export class ProjectStructureDialog extends ReactDialog<void> {
             loading: true,
             saving: false,
             error: '',
+            dirty: false,
         };
+    }
+
+    protected snapshotOf(s: DialogState): string {
+        const snap: EditableSnapshot = {
+            sourceLevel: s.sourceLevel,
+            targetLevel: s.targetLevel,
+            encoding: s.encoding,
+            selectedJdkId: s.selectedJdkId,
+            sourceDirs: s.sourceDirs,
+            classpath: s.classpath,
+        };
+        return JSON.stringify(snap);
     }
 
     protected override onAfterAttach(msg: import('@theia/core/shared/@lumino/messaging').Message): void {
         super.onAfterAttach(msg);
+        this.triggerElement = document.activeElement;
         this.languageChangeDisposable = this.i18n.onDidChangeLanguage(() => this.update());
         void this.loadData();
     }
@@ -131,7 +163,20 @@ export class ProjectStructureDialog extends ReactDialog<void> {
     protected override onBeforeDetach(msg: import('@theia/core/shared/@lumino/messaging').Message): void {
         this.languageChangeDisposable?.dispose();
         this.languageChangeDisposable = undefined;
+        // Invalidate in-flight async completions so a late save cannot close
+        // a newly opened dialog instance (UI-02).
+        this.requestSeq += 1;
         super.onBeforeDetach(msg);
+        // Restore focus to the element that opened the dialog (UI-09).
+        const trigger = this.triggerElement as HTMLElement | null;
+        this.triggerElement = null;
+        if (trigger && typeof trigger.focus === 'function') {
+            try {
+                trigger.focus();
+            } catch {
+                // Best effort; the trigger may be gone.
+            }
+        }
     }
 
     get value(): undefined {
@@ -140,6 +185,11 @@ export class ProjectStructureDialog extends ReactDialog<void> {
 
     protected setState(patch: Partial<DialogState>): void {
         this.state = { ...this.state, ...patch };
+        // Recompute dirty against the loaded snapshot; selection index,
+        // active tab and loading flags never count as edits (UI-02).
+        if (this.loadedSnapshot !== null) {
+            this.state.dirty = this.snapshotOf(this.state) !== this.loadedSnapshot;
+        }
         this.update();
     }
 
@@ -247,7 +297,9 @@ export class ProjectStructureDialog extends ReactDialog<void> {
 
             next.loading = false;
             next.error = '';
+            next.dirty = false;
             this.state = { ...this.state, ...next };
+            this.loadedSnapshot = this.snapshotOf(this.state);
             this.update();
         } catch (err) {
             const raw = err instanceof Error ? err.message : String(err);
@@ -258,83 +310,172 @@ export class ProjectStructureDialog extends ReactDialog<void> {
         }
     }
 
+    /** All states share one column skeleton: body (nav + content) + footer sibling (UI-01). */
     protected render(): React.ReactNode {
         const s = this.state;
-
-        if (s.loading) {
-            return (
-                <div className="kairo-ps-body">
-                    <div className="kairo-ps-content kairo-ps-loading">
-                        <div className="kairo-ps-loading-message">
-                            <i className="codicon codicon-loading codicon-modifier-spin kairo-ps-loading-icon" />
-                            <div>{this.t('widget.projectStructure.loading')}</div>
-                        </div>
-                    </div>
-                    {this.renderFooter()}
-                </div>
-            );
-        }
-
         return (
-            <div className="kairo-ps-body">
-                <div className="kairo-ps-tabs" role="tablist">
-                    {TABS.map(tab => (
-                        <div
-                            key={tab.id}
-                            className={`kairo-ps-tab ${s.activeTab === tab.id ? 'active' : ''}`}
-                            role="tab"
-                            aria-selected={s.activeTab === tab.id}
-                            onClick={() => this.setState({ activeTab: tab.id })}
-                        >
-                            <i className={`codicon ${tab.icon} kairo-ps-tab-icon`} />
-                            <span>{this.t(tab.labelKey)}</span>
-                        </div>
-                    ))}
-                </div>
-                <div className="kairo-ps-content" role="tabpanel">
-                    {s.error && <div className="kairo-ps-error" role="alert">{s.error}</div>}
-                    {s.activeTab === 'project' && this.renderProjectTab()}
-                    {s.activeTab === 'sdk' && this.renderSdkTab()}
-                    {s.activeTab === 'sources' && this.renderSourcesTab()}
-                    {s.activeTab === 'dependencies' && this.renderDependenciesTab()}
+            <div className="kairo-ps-layout" data-testid="project-structure-layout">
+                <div className="kairo-ps-body" data-testid="project-structure-body">
+                    {this.renderNavigation()}
+                    <div
+                        className="kairo-ps-content"
+                        data-testid="project-structure-content"
+                        role="tabpanel"
+                        id="kairo-ps-panel"
+                        aria-labelledby={`kairo-ps-tab-${s.activeTab}`}
+                        aria-busy={s.loading || s.saving}
+                    >
+                        {this.renderCurrentState()}
+                    </div>
                 </div>
                 {this.renderFooter()}
             </div>
         );
     }
 
-    protected renderFooter(): React.ReactNode {
+    protected renderCurrentState(): React.ReactNode {
+        const s = this.state;
+        if (s.loading) {
+            return (
+                <div className="kairo-ps-loading">
+                    <div className="kairo-ps-loading-message">
+                        <i className="codicon codicon-loading codicon-modifier-spin kairo-ps-loading-icon" />
+                        <div>{this.t('widget.projectStructure.loading')}</div>
+                    </div>
+                </div>
+            );
+        }
+        if (s.error && !this.loadedSnapshot) {
+            // Load failed before any data arrived: keep the draft empty and
+            // offer retry instead of a savable default form (UI-02).
+            return (
+                <div className="kairo-ps-load-error" role="alert" data-testid="project-structure-load-error">
+                    <div className="kairo-ps-error">{s.error}</div>
+                    <button
+                        className="theia-button secondary"
+                        data-testid="project-structure-retry"
+                        onClick={() => {
+                            this.loadedSnapshot = null;
+                            this.setState({ loading: true, error: '' });
+                            void this.loadData();
+                        }}
+                    >
+                        {this.t('common.retry')}
+                    </button>
+                </div>
+            );
+        }
         return (
-            <div className="kairo-ps-dialog-footer">
+            <>
+                {s.error && <div className="kairo-ps-error" role="alert">{s.error}</div>}
+                {s.activeTab === 'project' && this.renderProjectTab()}
+                {s.activeTab === 'sdk' && this.renderSdkTab()}
+                {s.activeTab === 'sources' && this.renderSourcesTab()}
+                {s.activeTab === 'dependencies' && this.renderDependenciesTab()}
+            </>
+        );
+    }
+
+    protected renderNavigation(): React.ReactNode {
+        const s = this.state;
+        const order = TABS.map(t => t.id);
+        const moveTab = (delta: number) => {
+            const idx = order.indexOf(s.activeTab);
+            const next = order[(idx + delta + order.length) % order.length];
+            this.setState({ activeTab: next });
+            // Move DOM focus to the newly selected tab (roving tabindex).
+            requestAnimationFrame(() => {
+                document.getElementById(`kairo-ps-tab-${next}`)?.focus();
+            });
+        };
+        return (
+            <div className="kairo-ps-tabs" role="tablist" aria-label={this.t('widget.projectStructure.title')}>
+                {TABS.map(tab => {
+                    const selected = s.activeTab === tab.id;
+                    return (
+                        <button
+                            key={tab.id}
+                            id={`kairo-ps-tab-${tab.id}`}
+                            type="button"
+                            className={`kairo-ps-tab ${selected ? 'active' : ''}`}
+                            role="tab"
+                            aria-selected={selected}
+                            aria-controls="kairo-ps-panel"
+                            tabIndex={selected ? 0 : -1}
+                            disabled={s.loading}
+                            onClick={() => this.setState({ activeTab: tab.id })}
+                            onKeyDown={e => {
+                                if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
+                                    e.preventDefault();
+                                    moveTab(1);
+                                } else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
+                                    e.preventDefault();
+                                    moveTab(-1);
+                                } else if (e.key === 'Home') {
+                                    e.preventDefault();
+                                    this.setState({ activeTab: order[0] });
+                                    requestAnimationFrame(() => {
+                                        document.getElementById(`kairo-ps-tab-${order[0]}`)?.focus();
+                                    });
+                                } else if (e.key === 'End') {
+                                    e.preventDefault();
+                                    this.setState({ activeTab: order[order.length - 1] });
+                                    requestAnimationFrame(() => {
+                                        document.getElementById(`kairo-ps-tab-${order[order.length - 1]}`)?.focus();
+                                    });
+                                }
+                            }}
+                        >
+                            <i className={`codicon ${tab.icon} kairo-ps-tab-icon`} aria-hidden="true" />
+                            <span>{this.t(tab.labelKey)}</span>
+                        </button>
+                    );
+                })}
+            </div>
+        );
+    }
+
+    protected renderFooter(): React.ReactNode {
+        const s = this.state;
+        // Loading / saving / missing project / load-error-without-data all
+        // lock Apply+OK; Cancel stays available so the dialog can be left (UI-02).
+        const hasProject = Boolean(this.activeProject.project);
+        const loadFailed = s.error !== '' && this.loadedSnapshot === null;
+        const locked = s.loading || s.saving || !hasProject || loadFailed;
+        return (
+            <div className="kairo-ps-dialog-footer" data-testid="project-structure-footer">
                 <button
                     className="theia-button secondary"
-                    disabled={this.state.saving}
-                    onClick={() => this.close()}
+                    data-testid="project-structure-cancel"
+                    disabled={s.saving}
+                    onClick={() => this.handleCancel()}
                 >
                     {this.t('common.cancel')}
                 </button>
                 <button
                     className="theia-button secondary"
-                    disabled={this.state.saving}
+                    data-testid="project-structure-apply"
+                    disabled={locked || !s.dirty}
                     onClick={() => void this.handleApply()}
                 >
-                    {this.state.saving ? this.t('widget.projectStructure.buttons.saving') : this.t('common.apply')}
+                    {s.saving ? this.t('widget.projectStructure.buttons.saving') : this.t('common.apply')}
                 </button>
                 <button
                     className="theia-button main"
-                    disabled={this.state.saving}
+                    data-testid="project-structure-ok"
+                    disabled={locked}
                     onClick={() => void this.handleOk()}
                 >
-                    {this.state.saving ? this.t('widget.projectStructure.buttons.saving') : this.t('common.ok')}
+                    {s.saving ? this.t('widget.projectStructure.buttons.saving') : this.t('common.ok')}
                 </button>
             </div>
         );
     }
 
-    protected field(label: string, children: React.ReactNode): React.ReactNode {
+    protected field(fieldId: string, label: string, children: React.ReactNode): React.ReactNode {
         return (
             <div className="kairo-ps-field">
-                <span className="kairo-ps-field-label">{label}</span>
+                <label className="kairo-ps-field-label" htmlFor={fieldId}>{label}</label>
                 {children}
             </div>
         );
@@ -345,36 +486,42 @@ export class ProjectStructureDialog extends ReactDialog<void> {
         return (
             <div>
                 <h3 className="kairo-ps-section-title">{this.t('widget.projectStructure.projectTab.title')}</h3>
-                {this.field(this.t('widget.projectStructure.projectTab.name'), (
-                    <input className="theia-input" type="text" value={s.projectName} readOnly />
+                {this.field('kairo-ps-project-name', this.t('widget.projectStructure.projectTab.name'), (
+                    <input id="kairo-ps-project-name" className="theia-input" type="text" value={s.projectName} readOnly aria-readonly="true" title={s.projectName} />
                 ))}
-                {this.field(this.t('widget.projectStructure.projectTab.root'), (
-                    <input className="theia-input" type="text" value={s.projectRoot} readOnly />
+                {this.field('kairo-ps-project-root', this.t('widget.projectStructure.projectTab.root'), (
+                    <input id="kairo-ps-project-root" className="theia-input" type="text" value={s.projectRoot} readOnly aria-readonly="true" title={s.projectRoot} />
                 ))}
                 <div className="kairo-ps-section-sep" />
                 <h4 className="kairo-ps-subtitle">{this.t('widget.projectStructure.projectTab.compiler')}</h4>
-                {this.field(this.t('widget.projectStructure.projectTab.sourceLevel'), (
+                {this.field('kairo-ps-source-level', this.t('widget.projectStructure.projectTab.sourceLevel'), (
                     <select
+                        id="kairo-ps-source-level"
                         className="theia-select"
                         value={s.sourceLevel}
+                        disabled={s.loading}
                         onChange={e => this.setState({ sourceLevel: e.target.value as SourceLevel })}
                     >
                         {SOURCE_LEVELS.map(lv => <option key={lv} value={lv}>{lv}</option>)}
                     </select>
                 ))}
-                {this.field(this.t('widget.projectStructure.projectTab.targetLevel'), (
+                {this.field('kairo-ps-target-level', this.t('widget.projectStructure.projectTab.targetLevel'), (
                     <select
+                        id="kairo-ps-target-level"
                         className="theia-select"
                         value={s.targetLevel}
+                        disabled={s.loading}
                         onChange={e => this.setState({ targetLevel: e.target.value as SourceLevel })}
                     >
                         {SOURCE_LEVELS.map(lv => <option key={lv} value={lv}>{lv}</option>)}
                     </select>
                 ))}
-                {this.field(this.t('widget.projectStructure.projectTab.encoding'), (
+                {this.field('kairo-ps-encoding', this.t('widget.projectStructure.projectTab.encoding'), (
                     <select
+                        id="kairo-ps-encoding"
                         className="theia-select"
                         value={s.encoding}
+                        disabled={s.loading}
                         onChange={e => this.setState({ encoding: e.target.value as EncodingId })}
                     >
                         {ENCODINGS.map(enc => <option key={enc.id} value={enc.id}>{this.t(enc.labelKey)}</option>)}
@@ -389,48 +536,60 @@ export class ProjectStructureDialog extends ReactDialog<void> {
         return (
             <div>
                 <h3 className="kairo-ps-section-title">{this.t('widget.projectStructure.sdkTab.title')}</h3>
-                <p className="kairo-ps-hint kairo-ps-hint-flush">
+                <p className="kairo-ps-hint kairo-ps-hint-flush" id="kairo-ps-jdk-hint">
                     {this.t('widget.projectStructure.sdkTab.hint')}
                 </p>
-                <div
-                    className={`kairo-ps-jdk-item ${s.selectedJdkId === 'auto' ? 'selected' : ''}`}
-                    onClick={() => this.setState({ selectedJdkId: 'auto' })}
-                >
-                    <input
-                        type="radio"
-                        className="kairo-ps-jdk-radio"
-                        name="jdk-select"
-                        checked={s.selectedJdkId === 'auto'}
-                        onChange={() => this.setState({ selectedJdkId: 'auto' })}
-                    />
-                    <div className="kairo-ps-jdk-info">
-                        <div className="kairo-ps-jdk-name">{this.t('widget.projectStructure.sdkTab.autoDetect')}</div>
-                        <div className="kairo-ps-jdk-path">{this.t('widget.projectStructure.sdkTab.autoDetectDesc')}</div>
-                    </div>
-                </div>
-                {s.toolchains.map(jdk => (
-                    <div
-                        key={jdk.id}
-                        className={`kairo-ps-jdk-item ${s.selectedJdkId === jdk.id ? 'selected' : ''}`}
-                        onClick={() => this.setState({ selectedJdkId: jdk.id })}
+                {/* Radio semantics preserved: native inputs in one group with a
+                    fieldset legend; the whole card is a <label> so clicking
+                    anywhere selects the option (UI-09). */}
+                <fieldset className="kairo-ps-radio-group" aria-describedby="kairo-ps-jdk-hint">
+                    <legend className="kairo-ps-radio-legend">{this.t('widget.projectStructure.sdkTab.title')}</legend>
+                    <label
+                        className={`kairo-ps-jdk-item ${s.selectedJdkId === 'auto' ? 'selected' : ''}`}
+                        htmlFor="kairo-ps-jdk-auto"
                     >
                         <input
+                            id="kairo-ps-jdk-auto"
                             type="radio"
                             className="kairo-ps-jdk-radio"
                             name="jdk-select"
-                            checked={s.selectedJdkId === jdk.id}
-                            onChange={() => this.setState({ selectedJdkId: jdk.id })}
+                            checked={s.selectedJdkId === 'auto'}
+                            onChange={() => this.setState({ selectedJdkId: 'auto' })}
                         />
-                        <div className="kairo-ps-jdk-info">
-                            <div className="kairo-ps-jdk-name">
-                                {`${jdk.vendor} JDK ${jdk.version}`}
-                                {jdk.version && <span className="kairo-ps-badge">{jdk.version}</span>}
-                            </div>
-                            <div className="kairo-ps-jdk-path" title={jdk.home}>{jdk.home}</div>
-                        </div>
-                        <div className="kairo-ps-jdk-version">{jdk.vendor}</div>
-                    </div>
-                ))}
+                        <span className="kairo-ps-jdk-info">
+                            <span className="kairo-ps-jdk-name">{this.t('widget.projectStructure.sdkTab.autoDetect')}</span>
+                            <span className="kairo-ps-jdk-path">{this.t('widget.projectStructure.sdkTab.autoDetectDesc')}</span>
+                        </span>
+                    </label>
+                    {s.toolchains.map(jdk => {
+                        const radioId = `kairo-ps-jdk-${jdk.id}`;
+                        const selected = s.selectedJdkId === jdk.id;
+                        return (
+                            <label
+                                key={jdk.id}
+                                className={`kairo-ps-jdk-item ${selected ? 'selected' : ''}`}
+                                htmlFor={radioId}
+                            >
+                                <input
+                                    id={radioId}
+                                    type="radio"
+                                    className="kairo-ps-jdk-radio"
+                                    name="jdk-select"
+                                    checked={selected}
+                                    onChange={() => this.setState({ selectedJdkId: jdk.id })}
+                                />
+                                <span className="kairo-ps-jdk-info">
+                                    <span className="kairo-ps-jdk-name">
+                                        {`${jdk.vendor} JDK ${jdk.version}`}
+                                        {jdk.version && <span className="kairo-ps-badge">{jdk.version}</span>}
+                                    </span>
+                                    <span className="kairo-ps-jdk-path" title={jdk.home}>{jdk.home}</span>
+                                </span>
+                                <span className="kairo-ps-jdk-version">{jdk.vendor}</span>
+                            </label>
+                        );
+                    })}
+                </fieldset>
                 <div className="kairo-ps-list-actions">
                     <button
                         className="theia-button"
@@ -553,18 +712,37 @@ export class ProjectStructureDialog extends ReactDialog<void> {
         );
     }
 
+    protected handleCancel(): void {
+        // Cancel, corner close and Esc share the same draft-close path (UI-02).
+        // Unsaved edits are discarded; nothing is written.
+        this.close();
+    }
+
     protected async handleApply(): Promise<void> {
         await this.save();
     }
 
     protected async handleOk(): Promise<void> {
+        // No edits: close directly instead of pretending to save (UI-02).
+        if (!this.state.dirty && !this.state.loading && !this.state.saving) {
+            this.close();
+            return;
+        }
+        const seq = this.requestSeq;
         const ok = await this.save();
-        if (ok) {
+        // Only auto-close when this request is still current: a late
+        // completion must not close a newly opened dialog (UI-02).
+        if (ok && seq === this.requestSeq && this.isVisible) {
             this.close();
         }
     }
 
     protected async save(): Promise<boolean> {
+        // Dual interception: footer disables the buttons AND the entry point
+        // refuses to submit while loading/saving (UI-02).
+        if (this.state.loading || this.state.saving) {
+            return false;
+        }
         const project = this.activeProject.project;
         if (!project) {
             this.setState({ error: 'No active project.' });
@@ -665,6 +843,8 @@ export class ProjectStructureDialog extends ReactDialog<void> {
             );
 
             this.setState({ saving: false });
+            // Refresh the dirty baseline: the saved values are the new clean state (UI-02).
+            this.loadedSnapshot = this.snapshotOf(this.state);
             // Broadcast encoding/project change so encoding-contribution and
             // other listeners apply immediately (BD-P2-7).
             await this.activeProject.setProject({

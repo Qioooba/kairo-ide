@@ -15,6 +15,7 @@ import { injectable, inject, postConstruct } from '@theia/core/shared/inversify'
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import { MessageService } from '@theia/core/lib/common/message-service';
 import { KairoI18nService } from '@kairo/i18n';
+import { validatePortText } from '@kairo/ui-kit';
 import {
   KairoRemoteAgentService,
   RemoteAgentConfig,
@@ -133,7 +134,10 @@ const KairoRemoteView: React.FC<KairoRemoteViewProps> = ({ agent, messages, i18n
   }, [i18n]);
   const [status, setStatus] = React.useState<RemoteAgentStatus>('disconnected');
   const [host, setHost] = React.useState('127.0.0.1');
-  const [port, setPort] = React.useState(9443);
+  // UI-13: raw port text; validated at connect time so clearing or partially
+  // typing never collapses into 0.
+  const [portText, setPortText] = React.useState('9443');
+  const [portError, setPortError] = React.useState<string | undefined>(undefined);
   const [useTLS, setUseTLS] = React.useState(true);
   const [token, setToken] = React.useState('');
   const [workspacePath, setWorkspacePath] = React.useState('/');
@@ -150,6 +154,13 @@ const KairoRemoteView: React.FC<KairoRemoteViewProps> = ({ agent, messages, i18n
       messages.warn(t('widget.remote.validation.hostTokenRequired'));
       return;
     }
+    const parsed = validatePortText(portText);
+    if (parsed.port === undefined) {
+      setPortError(t('widget.remote.validation.portRange'));
+      return;
+    }
+    setPortError(undefined);
+    const port = parsed.port;
     setBusy(true);
     try {
       const config: RemoteAgentConfig = {
@@ -185,7 +196,8 @@ const KairoRemoteView: React.FC<KairoRemoteViewProps> = ({ agent, messages, i18n
 
   const handleSelectRecent = (conn: RecentConnection) => {
     setHost(conn.host);
-    setPort(conn.port);
+    setPortText(String(conn.port));
+    setPortError(undefined);
     setUseTLS(conn.useTLS);
     setWorkspacePath(conn.workspacePath);
   };
@@ -209,10 +221,14 @@ const KairoRemoteView: React.FC<KairoRemoteViewProps> = ({ agent, messages, i18n
         )}
       </div>
 
+      {/* UI-09: every label is explicitly paired with its input via
+          htmlFor/id so clicking the label focuses the field and assistive
+          technology announces a unique accessible name. */}
       <div className="kairo-remote-form">
         <div className="kairo-remote-form-row">
-          <label className="kairo-remote-label">{t('widget.remote.label.host')}</label>
+          <label className="kairo-remote-label" htmlFor="kairo-remote-host">{t('widget.remote.label.host')}</label>
           <input
+            id="kairo-remote-host"
             type="text"
             className="theia-input"
             value={host}
@@ -223,19 +239,27 @@ const KairoRemoteView: React.FC<KairoRemoteViewProps> = ({ agent, messages, i18n
         </div>
 
         <div className="kairo-remote-form-row">
-          <label className="kairo-remote-label">{t('widget.remote.label.port')}</label>
+          <label className="kairo-remote-label" htmlFor="kairo-remote-port">{t('widget.remote.label.port')}</label>
           <input
-            type="number"
+            id="kairo-remote-port"
+            data-testid="remote-port"
+            type="text"
+            inputMode="numeric"
             className="theia-input"
-            value={port}
-            onChange={e => setPort(Number(e.target.value))}
+            value={portText}
+            onChange={e => setPortText(e.target.value)}
+            placeholder={t('widget.remote.placeholder.port')}
             disabled={connected}
+            aria-invalid={portError ? true : undefined}
+            aria-describedby={portError ? 'kairo-remote-port-error' : undefined}
           />
+          {portError && <span id="kairo-remote-port-error" className="kairo-remote-field-error" role="alert">{portError}</span>}
         </div>
 
         <div className="kairo-remote-form-row">
-          <label className="kairo-remote-label kairo-remote-checkbox">
+          <label className="kairo-remote-label kairo-remote-checkbox" htmlFor="kairo-remote-tls">
             <input
+              id="kairo-remote-tls"
               type="checkbox"
               checked={useTLS}
               onChange={e => setUseTLS(e.target.checked)}
@@ -246,8 +270,9 @@ const KairoRemoteView: React.FC<KairoRemoteViewProps> = ({ agent, messages, i18n
         </div>
 
         <div className="kairo-remote-form-row">
-          <label className="kairo-remote-label">{t('widget.remote.label.workspacePath')}</label>
+          <label className="kairo-remote-label" htmlFor="kairo-remote-workspace">{t('widget.remote.label.workspacePath')}</label>
           <input
+            id="kairo-remote-workspace"
             type="text"
             className="theia-input"
             value={workspacePath}
@@ -258,14 +283,16 @@ const KairoRemoteView: React.FC<KairoRemoteViewProps> = ({ agent, messages, i18n
         </div>
 
         <div className="kairo-remote-form-row">
-          <label className="kairo-remote-label">{t('widget.remote.label.token')}</label>
+          <label className="kairo-remote-label" htmlFor="kairo-remote-token">{t('widget.remote.label.token')}</label>
           <input
+            id="kairo-remote-token"
             type="password"
             className="theia-input"
             value={token}
             onChange={e => setToken(e.target.value)}
             placeholder={t('widget.remote.placeholder.token')}
             disabled={connected}
+            autoComplete="off"
           />
         </div>
 

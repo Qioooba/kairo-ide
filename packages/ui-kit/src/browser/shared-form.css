@@ -1,0 +1,93 @@
+/* Kairo shared form + tool-window frame (REPORT UI-09 / §5.5). */
+
+.kairo-form-field {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+}
+
+.kairo-form-field-label {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--kairo-text-secondary, #9aa0a6);
+    cursor: pointer;
+}
+
+.kairo-form-field-required {
+    color: var(--kairo-error, #f04757);
+}
+
+.kairo-form-field-control {
+    min-width: 0;
+}
+
+.kairo-form-field-error-text {
+    font-size: 12px;
+    color: var(--kairo-error, #f04757);
+    line-height: 1.4;
+}
+
+.kairo-form-field-help {
+    font-size: 11px;
+    color: var(--kairo-text-secondary, #9aa0a6);
+    line-height: 1.4;
+}
+
+.kairo-form-field-readonly .kairo-form-field-control input[readonly],
+.kairo-form-field-readonly .kairo-form-field-control textarea[readonly] {
+    opacity: 0.85;
+    cursor: text;
+}
+
+/* ToolWindowFrame: header/footer are flex-none; only the body scrolls. */
+.kairo-tool-window-frame {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.kairo-tool-window-header {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 8px 12px;
+    background: var(--kairo-bg-secondary, #252629);
+    border-bottom: 1px solid var(--kairo-border, #3a3b3e);
+}
+
+.kairo-tool-window-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--kairo-text, #dfe1e5);
+}
+
+.kairo-tool-window-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+.kairo-tool-window-body {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    overflow: auto;
+}
+
+.kairo-tool-window-footer {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px 16px;
+    border-top: 1px solid var(--kairo-border, #3a3b3e);
+    background: var(--kairo-bg-secondary, #252629);
+}

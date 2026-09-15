@@ -24,13 +24,18 @@
     --kairo-input-border: #3a3b3e;
     --kairo-input-fg: #dfe1e5;
     --kairo-input-placeholder: #9aa0a6;
+    /* UI-16: badge pairs meet WCAG 2.2 SC 1.4.3 (4.5:1 for normal text).
+     * Measured opaque ratios (white text): info #1a73e8 = 4.51:1,
+     * error #d93025 = 4.77:1. Success/warning keep dark text on bright
+     * fills (8.0:1 / 9.7:1). Re-verify with computed styles when the
+     * theme changes; transparent compositing is not covered here. */
     --kairo-badge-success-bg: #3dcc91;
     --kairo-badge-success-fg: #1e1f22;
     --kairo-badge-warning-bg: #fbbc04;
     --kairo-badge-warning-fg: #1e1f22;
-    --kairo-badge-error-bg: #f04757;
+    --kairo-badge-error-bg: #d93025;
     --kairo-badge-error-fg: #ffffff;
-    --kairo-badge-info-bg: #4a9eff;
+    --kairo-badge-info-bg: #1a73e8;
     --kairo-badge-info-fg: #ffffff;
     --kairo-badge-default-bg: #6e747a;
     --kairo-badge-default-fg: #ffffff;
@@ -315,9 +320,11 @@ body.theia-light {
 
 .kairo-config-form {
     display: grid;
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 12px 16px;
     max-width: 720px;
+    min-width: 0;
+    container-type: inline-size;
 }
 
 .kairo-config-form .kairo-form-group {
@@ -329,8 +336,21 @@ body.theia-light {
 .kairo-config-form .kairo-form-row {
     grid-column: span 2;
     display: grid;
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 12px 16px;
+    min-width: 0;
+}
+
+/* UI-17: narrow container stacks the import form instead of squeezing
+ * two columns; viewport media kept as fallback. */
+@container (max-width: 520px) {
+    .kairo-config-form,
+    .kairo-config-form .kairo-form-row {
+        grid-template-columns: minmax(0, 1fr);
+    }
+    .kairo-config-form .kairo-form-row .kairo-form-group {
+        grid-column: span 1;
+    }
 }
 
 .kairo-config-form .kairo-form-row .kairo-form-group {
@@ -1465,6 +1485,9 @@ body.theia-light {
     padding: 32px;
     color: var(--kairo-text);
     text-align: center;
+    /* UI-17: container root so narrow docked areas reflow by their own
+     * width, not the window viewport. */
+    container-type: inline-size;
 }
 
 .kairo-welcome-title {
@@ -1593,6 +1616,14 @@ body.theia-light {
 }
 
 @media (max-width: 600px) {
+    .kairo-quickstart-steps {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* UI-17: same breakpoint keyed to the welcome container (narrow docked
+ * area in a wide window), with the viewport media query kept as fallback. */
+@container (max-width: 600px) {
     .kairo-quickstart-steps {
         grid-template-columns: 1fr;
     }
@@ -1784,6 +1815,20 @@ body.theia-light {
     color: var(--kairo-text-secondary);
     margin-top: 2px;
     line-height: 1.4;
+}
+
+/* UI-13: field-level validation error sits under the field and never
+ * shifts the left edge of sibling fields. */
+.kairo-runconfig-field-error {
+    font-size: 12px;
+    color: var(--kairo-error, #f04757);
+    line-height: 1.4;
+}
+
+/* UI-13: readonly identifiers stay focusable/copyable (never disabled). */
+.kairo-runconfig-input[readonly] {
+    opacity: 0.85;
+    cursor: text;
 }
 
 .kairo-runconfig-actions {
@@ -3307,7 +3352,7 @@ body.theia-light {
     padding: 2px 0;
 }
 
-.kairo-debug-panel-frames { display: flex; flex-direction: column; height: var(--kairo-debug-frames-height, 200px); min-height: 0; overflow: hidden; }
+.kairo-debug-panel-frames { display: flex; flex-direction: column; flex: 1 1 auto; height: 100%; min-height: 0; min-width: 0; overflow: hidden; }
 .kairo-debug-flex-fill { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 .kairo-debug-placeholder { padding: 4px 8px; color: var(--theia-descriptionForeground, var(--kairo-text-secondary)); font-size: 11px; }
 
@@ -6388,8 +6433,21 @@ html, body {
 .kairo-remote-form-row {
     display: grid;
     grid-template-columns: 120px 1fr;
-    align-items: center;
-    gap: 10px;
+    align-items: start;
+    gap: 4px 10px;
+}
+
+.kairo-remote-form-row .theia-input {
+    min-width: 0;
+}
+
+/* UI-13: port validation error sits under the input, never shifting the
+ * label column of sibling rows. */
+.kairo-remote-field-error {
+    grid-column: 2;
+    font-size: 11px;
+    color: var(--kairo-error, #f04757);
+    line-height: 1.4;
 }
 
 .kairo-remote-label {
@@ -6623,10 +6681,12 @@ html, body {
 }
 
 .kairo-sql-editor-section {
-    flex: 1 1 55%;
+    flex: 1 1 auto;
     display: flex;
     flex-direction: column;
     min-height: 0;
+    min-width: 0;
+    height: 100%;
     border-bottom: 1px solid var(--kairo-border);
 }
 
@@ -6670,10 +6730,12 @@ html, body {
 }
 
 .kairo-sql-results-section {
-    flex: 1 1 45%;
+    flex: 1 1 auto;
     display: flex;
     flex-direction: column;
     min-height: 0;
+    min-width: 0;
+    height: 100%;
     overflow: hidden;
 }
 
@@ -6776,6 +6838,51 @@ html, body {
 
 .kairo-sql-history-item:last-child {
     border-bottom: none;
+}
+
+/* UI-15: body-level portal overlay — immune to ancestor overflow:hidden.
+ * Position is measured from the trigger (flip/shift in JS); z-index only
+ * orders within the top layer, it never fixes clipping by itself. */
+.kairo-sql-history-dropdown-portal {
+    position: fixed;
+    overflow: auto;
+    z-index: 10000;
+}
+
+.kairo-sql-history-dropdown-portal:focus {
+    outline: none;
+}
+
+.kairo-sql-history-dropdown-portal:focus-visible {
+    border-color: var(--theia-focusBorder, var(--kairo-focus-ring, #4a9eff));
+}
+
+.kairo-sql-history-item.active {
+    background: var(--kairo-bg-secondary);
+}
+
+.kairo-sql-history-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    background: transparent;
+}
+
+/* UI-04: connected endpoint is the source of truth, shown read-only. */
+.kairo-sql-endpoint {
+    font-family: var(--theia-monaco-font-family, monospace);
+    font-size: 11px;
+    color: var(--kairo-text-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 240px;
+}
+
+.kairo-sql-field-error {
+    font-size: 11px;
+    color: var(--kairo-error, #f04757);
+    line-height: 1.4;
 }
 
 /* ------------------------------------------------------------------
@@ -6955,34 +7062,46 @@ html, body {
  * Debug tool window flex panels
  * ------------------------------------------------------------------ */
 
+/* UI-06: panel sizes are owned by the shared ResizableSplit panes — panels
+ * simply fill their pane. No fixed 200px heights here. */
 .kairo-debug-panel-frames {
     display: flex;
     flex-direction: column;
     min-height: 0;
-    flex: 0 0 var(--kairo-debug-frames-height, 200px);
+    min-width: 0;
+    flex: 1 1 auto;
+    height: 100%;
+    overflow: hidden;
 }
 
 .kairo-debug-panel-breakpoints {
-    flex: 1;
+    flex: 1 1 auto;
     display: flex;
     flex-direction: column;
     min-height: 0;
+    min-width: 0;
+    height: 100%;
+    overflow: hidden;
 }
 
 .kairo-debug-panel-variables {
-    flex: 1;
+    flex: 1 1 auto;
     display: flex;
     flex-direction: column;
     min-height: 0;
+    min-width: 0;
+    height: 100%;
     overflow: hidden;
 }
 
 .kairo-debug-panel-watches {
     display: flex;
     flex-direction: column;
-    height: 200px;
-    min-height: 80px;
-    flex-shrink: 0;
+    flex: 1 1 auto;
+    height: 100%;
+    min-height: 0;
+    min-width: 0;
+    overflow: hidden;
     border-top: 1px solid var(--theia-panel-border, var(--kairo-border, #3a3b3e));
 }
 
@@ -9556,13 +9675,65 @@ html, body {
     display: flex;
     align-items: center;
     gap: 8px;
+    /* UI-14: the summary row itself is not clickable — expand and dismiss
+     * are explicit sibling buttons. */
+    cursor: default;
+}
+.kairo-notification-message { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.kairo-notification-icon {
+    flex-shrink: 0;
+    width: 16px;
+    text-align: center;
+    font-size: 14px;
+}
+.kairo-notification-expand,
+.kairo-notification-dismiss {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--kairo-text-secondary, #9aa0a6);
     cursor: pointer;
 }
-.kairo-notification-message { flex: 1; }
+.kairo-notification-expand:hover,
+.kairo-notification-dismiss:hover {
+    background: var(--kairo-hover-overlay, rgba(255, 255, 255, 0.05));
+    color: var(--kairo-text, #dfe1e5);
+}
+.kairo-notification-expand:focus-visible,
+.kairo-notification-dismiss:focus-visible {
+    outline: 1px solid var(--theia-focusBorder, var(--kairo-focus-ring, #4a9eff));
+    outline-offset: -1px;
+}
 .kairo-notification-time {
     color: var(--theia-descriptionForeground);
     font-size: 11px;
     flex-shrink: 0;
+}
+/* UI-14: explicit category colors for the rendered codicon (no more
+ * raw $(icon) placeholder text). */
+.kairo-notif-cat-error .kairo-notification-icon { color: var(--kairo-error, #f04757); }
+.kairo-notif-cat-warning .kairo-notification-icon { color: var(--kairo-warning, #fbbc04); }
+.kairo-notif-cat-info .kairo-notification-icon { color: var(--kairo-info, #4a9eff); }
+.kairo-notif-unread .kairo-notification-message { font-weight: 600; }
+.kairo-notification-details {
+    margin-top: 6px;
+    padding: 8px 10px;
+    border-radius: 4px;
+    background: var(--kairo-bg, #1e1f22);
+    border: 1px solid var(--kairo-border, #3a3b3e);
+}
+.kairo-notification-details-text {
+    margin: 0;
+    font-size: 12px;
+    white-space: pre-wrap;
+    word-break: break-word;
 }
 
 /* ---------- Bookmarks ---------- */

@@ -1,10 +1,13 @@
-import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
+import { injectable, inject, optional, postConstruct } from '@theia/core/shared/inversify';
 import { Emitter, Event } from '@theia/core/lib/common/event';
 import { Disposable } from '@theia/core/lib/common/disposable';
 import { StorageService } from '@theia/core/lib/browser/storage-service';
+import { MessageService } from '@theia/core/lib/common/message-service';
+import { CommandService } from '@theia/core/lib/common/command';
 import { WorkspaceContextService, type KairoProjectYaml, type WorkspaceContext } from '@kairo/runtime-extension';
 import { RuntimeConnectionService } from '@kairo/runtime-extension';
-import type { EncodingId, ProjectConfig, ProjectImportConfirmRequest } from '@kairo/protocol';
+import { KairoI18nService } from '@kairo/i18n';
+import type { EncodingId, ProjectConfig, ProjectDetection, ProjectImportConfirmRequest } from '@kairo/protocol';
 
 export interface ProjectInfo {
     workspaceId: string;
@@ -46,6 +49,20 @@ export class ActiveProjectService {
 
     @inject(StorageService)
     protected readonly storageService!: StorageService;
+
+    @inject(MessageService)
+    @optional()
+    protected readonly messageService?: MessageService;
+
+    @inject(CommandService)
+    @optional()
+    protected readonly commandService?: CommandService;
+
+    @inject(KairoI18nService)
+    @optional()
+    protected readonly i18n?: KairoI18nService;
+
+    private readonly promptedWorkspaceIds = new Set<string>();
 
     @postConstruct()
     protected init(): void {
@@ -96,8 +113,13 @@ export class ActiveProjectService {
                         if (fromYaml || myGeneration !== this.generation) {
                             return;
                         }
+                        const fromDetect = await this.tryAutoDetectAndBind(ctx, myGeneration);
+                        if (fromDetect || myGeneration !== this.generation) {
+                            return;
+                        }
                         this.currentProject = undefined;
                         this.onDidChangeProjectEmitter.fire(undefined);
+                        this.promptUnconfiguredFolder(ctx.workspaceId);
                         return;
                     }
 
@@ -239,6 +261,137 @@ export class ActiveProjectService {
         this.currentProject = projectInfo;
         this.onDidChangeProjectEmitter.fire(projectInfo);
         return true;
+    }
+
+    /**
+     * When a folder is directly opened via File -> Open Folder (without
+     * .kairo/project.yaml or prior import), scan the workspace root
+     * with the backend project scanner. If a Java Web project structure
+     * is detected, automatically import and bind it as active project.
+     */
+    protected async tryAutoDetectAndBind(
+        ctx: WorkspaceContext,
+        myGeneration: number,
+    ): Promise<boolean> {
+        try {
+            const detected = await this.runtime.request(
+                'POST /api/v1/projects/detect',
+                { rootPath: ctx.workspaceRoot },
+                { timeoutMs: 15_000, noRetry: true },
+            ) as ProjectDetection;
+
+            if (myGeneration !== this.generation) return true;
+            if (!detected || typeof detected.confidence !== 'number' || detected.confidence < 0.5) {
+                return false;
+            }
+
+            // Must have some recognizable project structure (webRoot, sourceDirs, or buildScript)
+            const hasWeb = Boolean(detected.webRoot);
+            const hasSrc = Array.isArray(detected.sourceDirs) && detected.sourceDirs.length > 0;
+            const hasBuild = Boolean(detected.buildScript);
+            if (!hasWeb && !hasSrc && !hasBuild) {
+                return false;
+            }
+
+            // Derive a sensible project name from folder name
+            const folderName = ctx.workspaceRoot.replace(/[/\\]+$/, '').split(/[/\\]/).filter(Boolean).pop() || 'project';
+            const buildTool = detected.buildSystem === 'ant' ? 'ant'
+                : (detected.buildScript === 'build.xml' ? 'ant' : 'javac');
+
+            const params: ProjectImportConfirmRequest = {
+                workspaceId: ctx.workspaceId,
+                rootPath: ctx.workspaceRoot,
+                name: folderName,
+                sourceDirs: detected.sourceDirs?.length ? detected.sourceDirs : ['src'],
+                webRoot: detected.webRoot || 'WebRoot',
+                libDirs: detected.libDirs?.length ? detected.libDirs : ['lib'],
+                buildScript: detected.buildScript || 'build.xml',
+                defaultEncoding: detected.defaultEncoding || 'gbk',
+                jdkVersion: detected.jdkVersion || '1.6',
+                sourceVersion: detected.sourceVersion || '1.6',
+                targetVersion: detected.targetVersion || '1.6',
+                outputDir: detected.outputDir || 'build/classes',
+                buildTool,
+                contextPath: '/',
+            };
+
+            let saved: { id: string; name: string; rootPath: string } | undefined;
+            try {
+                saved = await this.runtime.request(
+                    'POST /api/v1/projects/import',
+                    params,
+                    { timeoutMs: 15_000, noRetry: true },
+                ) as { id: string; name: string; rootPath: string };
+            } catch (err) {
+                // If 409 conflict, find existing project
+                const msg = err instanceof Error ? err.message : String(err);
+                if (/409|already exists|conflict/i.test(msg)) {
+                    const existing = await this.findExistingProject(ctx, { name: folderName }, ctx.workspaceRoot);
+                    if (existing) {
+                        saved = existing;
+                    }
+                } else {
+                    return false;
+                }
+            }
+
+            if (myGeneration !== this.generation || !saved) return true;
+
+            const info: ProjectInfo = {
+                workspaceId: ctx.workspaceId,
+                projectId: saved.id,
+                name: saved.name || folderName,
+                root: saved.rootPath || ctx.workspaceRoot,
+                encoding: params.defaultEncoding,
+            };
+
+            this.currentProject = info;
+            await this.storageService.setData(
+                `${LAST_PROJECT_KEY}:${ctx.workspaceId}`,
+                info.projectId,
+            );
+            this.onDidChangeProjectEmitter.fire(info);
+
+            // Show friendly notification with action to open import wizard
+            const msg = this.i18n
+                ? this.i18n.t('widget.servers.autoDetectedAndBound', { name: info.name })
+                : `已自动识别并关联 Java Web 项目「${info.name}」，已为您生成默认 Tomcat 运行配置。`;
+            const actionLabel = this.i18n
+                ? this.i18n.t('widget.servers.openImportWizard')
+                : '项目配置向导';
+
+            if (this.messageService) {
+                void this.messageService.info(msg, actionLabel).then(action => {
+                    if (action === actionLabel && this.commandService) {
+                        void this.commandService.executeCommand('kairo.project.import');
+                    }
+                });
+            }
+
+            return true;
+        } catch {
+            return false;
+        }
+    }
+
+    protected promptUnconfiguredFolder(workspaceId: string): void {
+        if (this.promptedWorkspaceIds.has(workspaceId)) return;
+        this.promptedWorkspaceIds.add(workspaceId);
+
+        const msg = this.i18n
+            ? this.i18n.t('widget.servers.unconfiguredFolderPrompt')
+            : '当前工作区尚未配置为 Kairo 项目。如需运行或调试，可通过项目向导进行配置。';
+        const actionLabel = this.i18n
+            ? this.i18n.t('widget.servers.importProject')
+            : '导入项目';
+
+        if (this.messageService) {
+            void this.messageService.info(msg, actionLabel).then(action => {
+                if (action === actionLabel && this.commandService) {
+                    void this.commandService.executeCommand('kairo.project.import');
+                }
+            });
+        }
     }
 
     protected async findExistingProject(

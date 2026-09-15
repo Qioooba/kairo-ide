@@ -3,7 +3,7 @@
  */
 import { test, expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
-import { openIde, openKairoCommand, paletteLists, expectFile, api } from './campaign';
+import { openIde, openKairoCommand, paletteLists, expectContract, api } from './campaign';
 
 let page: Page;
 test.beforeAll(async ({ browser }) => {
@@ -21,21 +21,21 @@ test.describe.serial('ch21 tomcat', () => {
     await openKairoCommand(page, 'Kairo: Show Servers');
     const rows = await paletteLists(page, 'Start Server');
     expect(rows.join('\n')).toMatch(/Start Server/);
-    expectFile(SERVERS, 'running');
+    expectContract(SERVERS, 'running');
   });
   test('TC-SRV-002 ready probe timeout', async () => {
-    expectFile(PROVIDER, '60');
+    expectContract(PROVIDER, '60');
   });
   test('TC-SRV-003 catalina-base 127.0.0.1 Reloadable=false', async () => {
-    expectFile(PROVIDER, '127.0.0.1');
+    expectContract(PROVIDER, '127.0.0.1');
   });
   test('TC-SRV-004 Java9 add-opens', async () => {
-    expectFile(PROVIDER, '--add-opens');
+    expectContract(PROVIDER, '--add-opens');
   });
   test('TC-SRV-005 Stop command', async () => {
     const rows = await paletteLists(page, 'Stop Server');
     expect(rows.join('\n')).toMatch(/Stop Server/);
-    expectFile(PROVIDER, 'ForceStop');
+    expectContract(PROVIDER, 'ForceStop');
   });
   test('TC-SRV-006 Restart', async () => {
     const rows = await paletteLists(page, 'Restart Server');
@@ -48,25 +48,25 @@ test.describe.serial('ch21 tomcat', () => {
   test('TC-SRV-008 Debug start JDWP', async () => {
     const rows = await paletteLists(page, 'Start Server (Debug)');
     expect(rows.join('\n')).toMatch(/Debug/);
-    expectFile(PROVIDER, 'jdwp');
+    expectContract(PROVIDER, 'jdwp');
   });
   test('TC-SRV-009 snapshot reconcile on crash', async () => {
-    expectFile(SERVERS, /crash|reconcil/i);
+    expectContract(SERVERS, /crash|reconcil/i);
   });
   test('TC-SRV-010 multi server list cap 16', async () => {
-    expectFile(SERVERS, '16');
+    expectContract(SERVERS, '16');
   });
   test('TC-SRV-011 active prefers running', async () => {
-    expectFile(SERVERS, 'running');
+    expectContract(SERVERS, 'running');
   });
   test('TC-SRV-012 disconnected empty state', async () => {
-    expectFile(SERVERS, 'disconnected');
+    expectContract(SERVERS, 'disconnected');
   });
   test('TC-SRV-013 bootstrap on context', async () => {
-    expectFile(SERVERS, /bootstrap/i);
+    expectContract(SERVERS, /bootstrap/i);
   });
   test('TC-SRV remaining deploy/hot-reload source gates', async () => {
-    expectFile('packages/tomcat-extension/src/browser/hot-deploy-service.ts', 'hot');
+    expectContract('packages/tomcat-extension/src/browser/hot-deploy-service.ts', 'hot');
     const health = await api('GET', '/health');
     expect([200, 204]).toContain(health.status);
   });

@@ -394,3 +394,88 @@ test('JdtLsManager: hung semantic request times out without killing the child', 
   assert.ok(m.recentLogs().some(entry => entry.line.includes('[timeout]')));
   m.dispose();
 });
+
+test('JdtLsManager: graceful shutdown sends LSP shutdown/exit and persists clean-exit marker', async () => {
+  const m = new JdtLsManager();
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kairo-jdt-clean-test-'));
+  m.currentWorkspaceDataDir = tmpDir;
+  const lspEvents = [];
+  const signals = [];
+  let exitCallback;
+  const child = {
+    killed: false,
+    kill(signal) {
+      signals.push(signal);
+      this.killed = true;
+      if (exitCallback) {
+        setImmediate(() => exitCallback(0));
+      }
+      return true;
+    },
+    once(evt, fn) {
+      if (evt === 'exit') exitCallback = fn;
+      return this;
+    },
+  };
+  m.process = child;
+  m.connection = {
+    sendRequest(method) {
+      lspEvents.push(method);
+      return Promise.resolve(null);
+    },
+    sendNotification(method) {
+      lspEvents.push(method);
+      return Promise.resolve();
+    },
+    dispose() {},
+  };
+  m.setState('ready');
+  m.stopGracePeriodMs = () => 50;
+  m.stopKillWaitMs = () => 10;
+
+  await m.stop();
+  assert.deepEqual(lspEvents, ['shutdown', 'exit']);
+  assert.ok(signals.includes('SIGTERM'));
+  assert.ok(!signals.includes('SIGKILL'));
+
+  const markerPath = path.join(tmpDir, '.kairo-clean-exit');
+  assert.ok(fs.existsSync(markerPath), 'clean exit marker must be written');
+  const marker = JSON.parse(fs.readFileSync(markerPath, 'utf-8'));
+  assert.equal(marker.reason, 'normal_shutdown');
+  assert.equal(marker.exitCode, 0);
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+  m.dispose();
+});
+
+test('JdtLsManager: SIGKILL escalation does NOT persist clean-exit marker', async () => {
+  const m = new JdtLsManager();
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kairo-jdt-unclean-test-'));
+  m.currentWorkspaceDataDir = tmpDir;
+  const signals = [];
+  const child = {
+    killed: false,
+    kill(signal) {
+      signals.push(signal);
+      this.killed = true;
+      return true;
+    },
+    once() {
+      return this;
+    },
+  };
+  m.process = child;
+  m.setState('ready');
+  m.stopGracePeriodMs = () => 0;
+  m.stopKillWaitMs = () => 0;
+
+  await m.stop();
+  assert.deepEqual(signals, ['SIGTERM', 'SIGKILL']);
+
+  const markerPath = path.join(tmpDir, '.kairo-clean-exit');
+  assert.ok(!fs.existsSync(markerPath), 'clean exit marker must NOT be written when process was killed with SIGKILL');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+  m.dispose();
+});
+

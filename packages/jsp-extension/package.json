@@ -15,6 +15,7 @@
     "test": "node --require source-map-support/register --import ./test/register-hooks.mjs --test src/browser/tld-parser.test.cjs src/browser/xml-language.test.cjs src/browser/properties-language.test.cjs src/browser/jsp-grammar.test.cjs src/browser/json-language.test.cjs src/browser/jsp-extension.test.cjs src/browser/jsp-virtual-java.test.cjs src/browser/jsp-audit-p1.test.cjs src/browser/virtual-document-manager.test.cjs src/browser/jsp-page-model.test.cjs"
   },
   "dependencies": {
+    "@kairo/highlighting-extension": "workspace:*",
     "@kairo/i18n": "workspace:*",
     "@kairo/java-extension": "workspace:*",
     "@kairo/protocol": "workspace:*",

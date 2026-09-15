@@ -13,6 +13,7 @@ import { IDEAVariablesTree } from './debug-variables-idea';
 import { IDEAFramesPanel } from './debug-frames-idea';
 import { IDEAWatchesPanel } from './debug-watches-idea';
 import { CollapsibleSection } from './debug-collapsible-section';
+import { ResizableSplit } from '@kairo/ui-kit';
 
 /* ------------------------------------------------------------------ */
 /*  React Component                                                     */
@@ -31,7 +32,6 @@ const DebugToolWindowView: React.FC<DebugToolWindowViewProps> = ({ sessionServic
     const [, forceUpdate] = React.useReducer(x => x + 1, 0);
 
     const [state, setState] = React.useState(sessionService.currentState);
-    const [framesHeight, setFramesHeight] = React.useState(200);
 
     React.useEffect(() => {
         const disposable = i18n.onDidChangeLanguage(() => forceUpdate());
@@ -60,6 +60,12 @@ const DebugToolWindowView: React.FC<DebugToolWindowViewProps> = ({ sessionServic
     const handleEvaluateExpression = () => commandService.executeCommand('kairo.debug.evaluateExpression');
     const handleStartDebugging = () => commandService.executeCommand('kairo.debug.openView');
 
+    // UI-05: thread selection goes through the session service so stack
+    // frames and variables follow the newly selected thread.
+    const handleSelectThread = React.useCallback(async (threadId: number) => {
+        await sessionService.selectThread(threadId);
+    }, [sessionService]);
+
     const handleNavigate = React.useCallback(async (path: string, line: number) => {
         try {
             const uri = path.includes('://') ? new URI(path) : URI.fromFilePath(path);
@@ -72,52 +78,8 @@ const DebugToolWindowView: React.FC<DebugToolWindowViewProps> = ({ sessionServic
         }
     }, [editorManager]);
 
-    // Frames splitter
-    const splitterRef = React.useRef<HTMLDivElement>(null);
-    const draggingRef = React.useRef(false);
-    const startYRef = React.useRef(0);
-    const startHeightRef = React.useRef(0);
-    const dragRafRef = React.useRef<number | undefined>(undefined);
-
-    const onSplitterMouseDown = React.useCallback((e: React.MouseEvent) => {
-        draggingRef.current = true;
-        startYRef.current = e.clientY;
-        startHeightRef.current = framesHeight;
-        e.preventDefault();
-    }, [framesHeight]);
-
-    React.useEffect(() => {
-        let pendingClientY: number | undefined;
-        const applyHeight = () => {
-            dragRafRef.current = undefined;
-            if (pendingClientY === undefined) return;
-            const delta = pendingClientY - startYRef.current;
-            pendingClientY = undefined;
-            const newHeight = Math.max(60, Math.min(500, startHeightRef.current + delta));
-            setFramesHeight(newHeight);
-        };
-        const onMouseMove = (e: MouseEvent) => {
-            if (!draggingRef.current) return;
-            // Coalesce to one state update per frame; mousemove fires faster.
-            pendingClientY = e.clientY;
-            if (dragRafRef.current === undefined) {
-                dragRafRef.current = requestAnimationFrame(applyHeight);
-            }
-        };
-        const onMouseUp = () => {
-            draggingRef.current = false;
-        };
-        window.addEventListener('mousemove', onMouseMove);
-        window.addEventListener('mouseup', onMouseUp);
-        return () => {
-            window.removeEventListener('mousemove', onMouseMove);
-            window.removeEventListener('mouseup', onMouseUp);
-            if (dragRafRef.current !== undefined) {
-                cancelAnimationFrame(dragRafRef.current);
-                dragRafRef.current = undefined;
-            }
-        };
-    }, []);
+    // Frames splitter is owned by the shared ResizableSplit below (UI-06);
+    // no ad-hoc mouse handlers or hard-coded pixel clamps here.
 
     const statusText = React.useMemo(() => {
         if (!state.hasSession) return t('debug.toolWindow.noSession');
@@ -151,9 +113,7 @@ const DebugToolWindowView: React.FC<DebugToolWindowViewProps> = ({ sessionServic
                 onRunToCursor={handleRunToCursor}
                 onDropFrame={handleDropFrame}
                 onEvaluateExpression={handleEvaluateExpression}
-                onSelectThread={(_threadId) => {
-                    // Switch thread - future enhancement
-                }}
+                onSelectThread={handleSelectThread}
             />
 
             {/* Status bar */}
@@ -191,64 +151,80 @@ const DebugToolWindowView: React.FC<DebugToolWindowViewProps> = ({ sessionServic
                 <div className="kairo-debug-panels">
                     {/* Left panel: Frames/Threads + Breakpoints */}
                     <div className="kairo-debug-left-panel">
-                        <div className="kairo-debug-panel-frames" style={{ '--kairo-debug-frames-height': `${framesHeight}px` } as React.CSSProperties}>
-                            <CollapsibleSection
-                                title={t('debug.toolWindow.frames')}
-                                icon="codicon-callstack"
-                                defaultExpanded={true}
-                            >
-                                <IDEAFramesPanel
-                                    sessionService={sessionService}
-                                    i18n={i18n}
-                                    onNavigate={handleNavigate}
-                                />
-                            </CollapsibleSection>
-                        </div>
-
-                        {/* Horizontal splitter */}
-                        <div
-                            ref={splitterRef}
-                            onMouseDown={onSplitterMouseDown}
-                            className="kairo-debug-splitter"
-                        >
-                            <div className="kairo-debug-splitter-grip" />
-                        </div>
-
-                        {/* Breakpoints section */}
-                        <div className="kairo-debug-panel-breakpoints">
-                            <CollapsibleSection
-                                title={t('debug.toolWindow.breakpoints')}
-                                icon="codicon-debug-breakpoint"
-                                defaultExpanded={true}
-                            >
-                                <div className="kairo-debug-breakpoints-placeholder">
-                                    {t('debug.toolWindow.breakpointsPlaceholder')}
+                        <ResizableSplit
+                            orientation="horizontal"
+                            primaryMinPx={60}
+                            secondaryMinPx={60}
+                            defaultRatio={0.5}
+                            storageKey={`${workspaceKey}:debug:frames-breakpoints`}
+                            primaryLabel={t('debug.toolWindow.frames')}
+                            secondaryLabel={t('debug.toolWindow.breakpoints')}
+                            testId="debug-frames-breakpoints"
+                            primary={(
+                                <div className="kairo-debug-panel-frames">
+                                    <CollapsibleSection
+                                        title={t('debug.toolWindow.frames')}
+                                        icon="codicon-callstack"
+                                        defaultExpanded={true}
+                                    >
+                                        <IDEAFramesPanel
+                                            sessionService={sessionService}
+                                            i18n={i18n}
+                                            onNavigate={handleNavigate}
+                                        />
+                                    </CollapsibleSection>
                                 </div>
-                            </CollapsibleSection>
-                        </div>
+                            )}
+                            secondary={(
+                                <div className="kairo-debug-panel-breakpoints">
+                                    <CollapsibleSection
+                                        title={t('debug.toolWindow.breakpoints')}
+                                        icon="codicon-debug-breakpoint"
+                                        defaultExpanded={true}
+                                    >
+                                        <div className="kairo-debug-breakpoints-placeholder">
+                                            {t('debug.toolWindow.breakpointsPlaceholder')}
+                                        </div>
+                                    </CollapsibleSection>
+                                </div>
+                            )}
+                        />
                     </div>
 
                     {/* Right panel: Variables + Watches */}
                     <div className="kairo-debug-right-panel">
-                        <div className="kairo-debug-panel-variables">
-                            <CollapsibleSection
-                                title={t('debug.toolWindow.variables')}
-                                icon="codicon-symbol-variable"
-                                defaultExpanded={true}
-                            >
-                                <IDEAVariablesTree sessionService={sessionService} i18n={i18n} />
-                            </CollapsibleSection>
-                        </div>
-
-                        <div className="kairo-debug-panel-watches">
-                            <CollapsibleSection
-                                title={t('debug.toolWindow.watches')}
-                                icon="codicon-watch"
-                                defaultExpanded={true}
-                            >
-                                <IDEAWatchesPanel sessionService={sessionService} i18n={i18n} workspaceKey={workspaceKey} />
-                            </CollapsibleSection>
-                        </div>
+                        <ResizableSplit
+                            orientation="horizontal"
+                            primaryMinPx={60}
+                            secondaryMinPx={60}
+                            defaultRatio={0.6}
+                            storageKey={`${workspaceKey}:debug:variables-watches`}
+                            primaryLabel={t('debug.toolWindow.variables')}
+                            secondaryLabel={t('debug.toolWindow.watches')}
+                            testId="debug-variables-watches"
+                            primary={(
+                                <div className="kairo-debug-panel-variables">
+                                    <CollapsibleSection
+                                        title={t('debug.toolWindow.variables')}
+                                        icon="codicon-symbol-variable"
+                                        defaultExpanded={true}
+                                    >
+                                        <IDEAVariablesTree sessionService={sessionService} i18n={i18n} />
+                                    </CollapsibleSection>
+                                </div>
+                            )}
+                            secondary={(
+                                <div className="kairo-debug-panel-watches">
+                                    <CollapsibleSection
+                                        title={t('debug.toolWindow.watches')}
+                                        icon="codicon-watch"
+                                        defaultExpanded={true}
+                                    >
+                                        <IDEAWatchesPanel sessionService={sessionService} i18n={i18n} workspaceKey={workspaceKey} />
+                                    </CollapsibleSection>
+                                </div>
+                            )}
+                        />
                     </div>
                 </div>
             )}
