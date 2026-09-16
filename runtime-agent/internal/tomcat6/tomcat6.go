@@ -1,4 +1,4 @@
-package tomcat6
+﻿package tomcat6
 
 import (
 	"context"
@@ -50,6 +50,7 @@ type Config struct {
 	DebugSuspend bool
 	ContextPath  string
 	WebappDir    string
+	Encoding     string
 	JVMOptions   []string
 	Env          []string
 }
@@ -108,7 +109,7 @@ func BuildCommand(cfg Config) (executable string, args []string, env []string, e
 	cp := BootstrapClasspath(cfg.CatalinaHome)
 	classpathStr := strings.Join(cp, string(filepath.ListSeparator))
 
-	// KAIRO-RC-WEB-2026-07-26: Tomcat 6's WebappClassLoader reflects
+	// KAIRO-RC-WEB-2026-07-26: Tomcat 6 WebappClassLoader reflects
 	// into java.base to clear ThreadLocals on undeploy. Java 9+
 	// blocks that by default and the webapp reload crashes with
 	// InaccessibleObjectException, leaving the HTTP listener up but
@@ -129,6 +130,16 @@ func BuildCommand(cfg Config) (executable string, args []string, env []string, e
 		"-Dcatalina.base=" + cfg.CatalinaBase,
 		"-Djava.util.logging.config.file=" + filepath.Join(cfg.CatalinaBase, "conf", "logging.properties"),
 	}
+	// KAIRO-ENCODING: Default to UTF-8, allow per-project override via Encoding field.
+	encoding := cfg.Encoding
+	if encoding == "" {
+		encoding = "UTF-8"
+	}
+	args = append(args,
+		"-Dfile.encoding="+encoding,
+		"-Dsun.stdout.encoding="+encoding,
+		"-Dsun.stderr.encoding="+encoding,
+	)
 	args = append(args, addOpens...)
 	if cfg.DebugPort > 0 {
 		suspend := "n"
@@ -648,6 +659,7 @@ type Spec struct {
 	DebugSuspend   bool
 	ContextPath    string
 	WebappDir      string
+	Encoding     string
 	DocBase        string
 	ExtraClasspath []string
 	JVMOptions     []string
@@ -696,6 +708,7 @@ func Start(ctx context.Context, spec Spec) (*Instance, error) {
 		DebugSuspend: spec.DebugSuspend,
 		ContextPath:  spec.ContextPath,
 		WebappDir:    spec.WebappDir,
+		Encoding:     spec.Encoding,
 		JVMOptions:   spec.JVMOptions,
 		Env:          spec.Env,
 	}

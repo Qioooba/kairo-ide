@@ -14,6 +14,8 @@ import { MenuModelRegistry, MenuPath, MenuContribution } from '@theia/core/lib/c
 import { KeybindingRegistry, KeybindingContribution } from '@theia/core/lib/browser/keybinding';
 import { TabBarDecorator } from '@theia/core/lib/browser/shell/tab-bar-decorator';
 import { NavigatorTreeDecorator } from '@theia/navigator/lib/browser/navigator-decorator-service';
+import { NavigatorContextMenu } from '@theia/navigator/lib/browser/navigator-contribution';
+import { EditorContextMenu } from '@theia/editor/lib/browser/editor-menu';
 import { WorkspaceService } from '@theia/workspace/lib/browser';
 import { ContextKeyService } from '@theia/core/lib/browser/context-key-service';
 import { QuickInputService, QuickPickItem } from '@theia/core/lib/browser/quick-input/quick-input-service';
@@ -511,71 +513,96 @@ export class SvnContribution
   }
 
   registerMenus(registry: MenuModelRegistry): void {
-    const submenuPath = [...SVN_CONTEXT_MENU];
+    // Register to file tree / directory tree right-click context menu
+    const navigatorMenu = [...NavigatorContextMenu.MODIFICATION, 'svn'];
 
-    registry.registerMenuAction(submenuPath, {
+    registry.registerMenuAction(navigatorMenu, {
       commandId: SvnCommands.UPDATE.id,
       order: '1',
     });
-    registry.registerMenuAction(submenuPath, {
+    registry.registerMenuAction(navigatorMenu, {
       commandId: SvnCommands.COMMIT.id,
       order: '2',
     });
-    registry.registerMenuAction(submenuPath, {
+    registry.registerMenuAction(navigatorMenu, {
       commandId: SvnCommands.DIFF_SHOW.id,
       order: '3',
     });
-    registry.registerMenuAction(submenuPath, {
+    registry.registerMenuAction(navigatorMenu, {
       commandId: SvnCommands.SHOW_HISTORY.id,
       order: '4',
     });
-    registry.registerMenuAction(submenuPath, {
+    registry.registerMenuAction(navigatorMenu, {
       commandId: SvnCommands.ANNOTATE.id,
       order: '5',
     });
-    registry.registerMenuAction(submenuPath, {
+    registry.registerMenuAction(navigatorMenu, {
       commandId: SvnCommands.REFRESH.id,
       order: '6',
     });
-    registry.registerMenuAction(submenuPath, {
+    registry.registerMenuAction(navigatorMenu, {
       commandId: SvnCommands.ADD.id,
       order: '7',
     });
-    registry.registerMenuAction(submenuPath, {
+    registry.registerMenuAction(navigatorMenu, {
       commandId: SvnCommands.REVERT.id,
       order: '8',
     });
-    registry.registerMenuAction(submenuPath, {
+    registry.registerMenuAction(navigatorMenu, {
       commandId: SvnCommands.CLEANUP.id,
       order: '9',
     });
-    registry.registerMenuAction(submenuPath, {
+    registry.registerMenuAction(navigatorMenu, {
       commandId: SvnCommands.LOCK.id,
       order: '10',
     });
-    registry.registerMenuAction(submenuPath, {
+    registry.registerMenuAction(navigatorMenu, {
       commandId: SvnCommands.UNLOCK.id,
       order: '11',
     });
-    registry.registerMenuAction(submenuPath, {
+    registry.registerMenuAction(navigatorMenu, {
       commandId: SvnCommands.RESOLVE.id,
       order: '12',
     });
-    registry.registerMenuAction(submenuPath, {
+    registry.registerMenuAction(navigatorMenu, {
       commandId: SvnCommands.IGNORE.id,
       order: '13',
     });
-    registry.registerMenuAction(submenuPath, {
+    registry.registerMenuAction(navigatorMenu, {
       commandId: SvnCommands.SWITCH.id,
       order: '14',
     });
-    registry.registerMenuAction(submenuPath, {
+    registry.registerMenuAction(navigatorMenu, {
       commandId: SvnCommands.SHOW_INFO.id,
       order: '15',
     });
-    registry.registerMenuAction(submenuPath, {
+    registry.registerMenuAction(navigatorMenu, {
       commandId: SvnCommands.BROWSE_REPO.id,
       order: '16',
+    });
+
+    // Register to editor / file content right-click context menu
+    const editorMenu = [...EditorContextMenu.MODIFICATION, 'svn'];
+
+    registry.registerMenuAction(editorMenu, {
+      commandId: SvnCommands.DIFF_SHOW.id,
+      order: '3',
+    });
+    registry.registerMenuAction(editorMenu, {
+      commandId: SvnCommands.SHOW_HISTORY.id,
+      order: '4',
+    });
+    registry.registerMenuAction(editorMenu, {
+      commandId: SvnCommands.ANNOTATE.id,
+      order: '5',
+    });
+    registry.registerMenuAction(editorMenu, {
+      commandId: SvnCommands.ADD.id,
+      order: '7',
+    });
+    registry.registerMenuAction(editorMenu, {
+      commandId: SvnCommands.REVERT.id,
+      order: '8',
     });
   }
 

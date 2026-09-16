@@ -1337,3 +1337,62 @@ func TestSpec_Defaults(t *testing.T) {
 		t.Error("DebugSuspend should default to false")
 	}
 }
+
+
+// BuildCommand: Encoding field
+
+func TestBuildCommand_Encoding_DefaultUTF8(t *testing.T) {
+	home := createFakeCatalinaHome(t)
+	base := t.TempDir()
+	javaHome := t.TempDir()
+	os.MkdirAll(filepath.Join(javaHome, "bin"), 0755)
+
+	cfg := Config{
+		JavaHome:     javaHome,
+		CatalinaHome: home,
+		CatalinaBase: base,
+		WebappDir:    filepath.Join(base, "webapps", "ROOT"),
+		HTTPPort:     18080,
+		ShutdownPort: 18005,
+		// Encoding left empty -- should default to UTF-8
+	}
+
+	_, args, _, err := BuildCommand(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(args, ' ')
+	for _, want := range []string{'-Dfile.encoding=UTF-8', '-Dsun.stdout.encoding=UTF-8', '-Dsun.stderr.encoding=UTF-8'} {
+		if !strings.Contains(joined, want) {
+			t.Errorf('expected %q in args, got: %v', want, args)
+		}
+	}
+}
+
+func TestBuildCommand_Encoding_GBK(t *testing.T) {
+	home := createFakeCatalinaHome(t)
+	base := t.TempDir()
+	javaHome := t.TempDir()
+	os.MkdirAll(filepath.Join(javaHome, "bin"), 0755)
+
+	cfg := Config{
+		JavaHome:     javaHome,
+		CatalinaHome: home,
+		CatalinaBase: base,
+		WebappDir:    filepath.Join(base, "webapps", "ROOT"),
+		HTTPPort:     18080,
+		ShutdownPort: 18005,
+		Encoding:     "GBK",
+	}
+
+	_, args, _, err := BuildCommand(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(args, ' ')
+	for _, want := range []string{'-Dfile.encoding=GBK', '-Dsun.stdout.encoding=GBK', '-Dsun.stderr.encoding=GBK'} {
+		if !strings.Contains(joined, want) {
+			t.Errorf('expected %q in args, got: %v', want, args)
+		}
+	}
+}

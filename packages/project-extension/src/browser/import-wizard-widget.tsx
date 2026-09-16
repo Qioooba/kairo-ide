@@ -160,7 +160,13 @@ const ImportWizard: React.FC<ImportWizardProps> = ({
             if (!dialog) {
                 return;
             }
-            const path = String(dialog.path);
+            // Theia FileDialogService returns URI.path which includes a leading slash
+            // on Windows (e.g. "/G:/my-project"). Strip it so the path is a clean
+            // "G:/my-project" that works correctly with the backend.
+            let path = String(dialog.path);
+            if (/^\/[A-Za-z]:/.test(path)) {
+                path = path.slice(1);
+            }
             setWorkspacePath(path);
             await scanPath(path);
         } catch (error) {

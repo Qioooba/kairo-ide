@@ -3,12 +3,15 @@ import { Command, CommandRegistry } from '@theia/core/lib/common';
 import { MenuModelRegistry } from '@theia/core/lib/common/menu';
 import {
   QuickInputService,
+  ContextKeyService,
 } from '@theia/core/lib/browser';
 import { MessageService } from '@theia/core/lib/common/message-service';
 import { EditorManager } from '@theia/editor/lib/browser';
 import { KairoI18nService } from '@kairo/i18n';
 import { GitService } from './git-service';
 import { toRepoRelativePath } from '../common/git-path-utils';
+import { NavigatorContextMenu } from '@theia/navigator/lib/browser/navigator-contribution';
+import { EditorContextMenu } from '@theia/editor/lib/browser/editor-menu';
 
 export const GIT_SYNC_COMMANDS = {
   PULL: 'kairo.git.pull',
@@ -18,6 +21,8 @@ export const GIT_SYNC_COMMANDS = {
   BRANCH_SWITCH: 'kairo.git.branch.switch',
   DISCARD: 'kairo.git.discard',
 } as const;
+
+export const GIT_ACTIVE_CONTEXT_KEY = 'gitActive';
 
 function cmd(id: string, label: string): Command {
   return { id, label, category: 'Git' };
@@ -42,8 +47,10 @@ export class GitSyncContribution {
   @inject(QuickInputService) protected readonly quickInput!: QuickInputService;
   @inject(EditorManager) protected readonly editorManager!: EditorManager;
   @inject(KairoI18nService) protected readonly i18n!: KairoI18nService;
+  @inject(ContextKeyService) protected readonly contextKeys!: ContextKeyService;
 
   registerCommands(commands: CommandRegistry): void {
+    this.setupContextKey();
     commands.registerCommand(GIT_PULL_COMMAND, {
       execute: () => void this.runSync(() => this.gitService.pull(), 'pull'),
     });
@@ -65,11 +72,78 @@ export class GitSyncContribution {
   }
 
   registerMenus(menus: MenuModelRegistry): void {
+    // Keep existing view menu entry
     menus.registerMenuAction(['view', 'git'], {
       commandId: GIT_BRANCH_SWITCH_COMMAND.id,
       label: 'Switch Branch',
       order: 'c0',
     });
+
+    // File tree / directory tree right-click context menu
+    const navigatorMenu = [...NavigatorContextMenu.MODIFICATION, 'git'];
+
+    menus.registerMenuAction(navigatorMenu, {
+      commandId: GIT_DISCARD_COMMAND.id,
+      label: 'Discard Changes',
+      order: '1',
+    });
+    menus.registerMenuAction(navigatorMenu, {
+      commandId: GIT_PULL_COMMAND.id,
+      label: 'Pull',
+      order: '2',
+    });
+    menus.registerMenuAction(navigatorMenu, {
+      commandId: GIT_PUSH_COMMAND.id,
+      label: 'Push',
+      order: '3',
+    });
+    menus.registerMenuAction(navigatorMenu, {
+      commandId: GIT_FETCH_COMMAND.id,
+      label: 'Fetch',
+      order: '4',
+    });
+    menus.registerMenuAction(navigatorMenu, {
+      commandId: GIT_BRANCH_CREATE_COMMAND.id,
+      label: 'Create Branch...',
+      order: '5',
+    });
+    menus.registerMenuAction(navigatorMenu, {
+      commandId: GIT_BRANCH_SWITCH_COMMAND.id,
+      label: 'Switch Branch...',
+      order: '6',
+    });
+
+    // Editor / file content right-click context menu
+    const editorMenu = [...EditorContextMenu.MODIFICATION, 'git'];
+
+    menus.registerMenuAction(editorMenu, {
+      commandId: GIT_DISCARD_COMMAND.id,
+      label: 'Discard Changes',
+      order: '1',
+    });
+    menus.registerMenuAction(editorMenu, {
+      commandId: GIT_PULL_COMMAND.id,
+      label: 'Pull',
+      order: '2',
+    });
+    menus.registerMenuAction(editorMenu, {
+      commandId: GIT_PUSH_COMMAND.id,
+      label: 'Push',
+      order: '3',
+    });
+    menus.registerMenuAction(editorMenu, {
+      commandId: GIT_FETCH_COMMAND.id,
+      label: 'Fetch',
+      order: '4',
+    });
+  }
+
+  private setupContextKey(): void {
+    const gitActiveKey = this.contextKeys.createKey<boolean>(GIT_ACTIVE_CONTEXT_KEY, false);
+    const update = () => {
+      gitActiveKey.set(!!this.gitService.getRepoRoot());
+    };
+    update();
   }
 
   private async requireRepo(): Promise<boolean> {
