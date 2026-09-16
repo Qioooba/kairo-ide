@@ -34,6 +34,58 @@ const MAX_HISTORY = 50;
 const MAX_PINNED = 10;
 const HISTORY_STORAGE_KEY = 'kairo-search-history';
 const PINNED_STORAGE_KEY = 'kairo-search-pinned';
+const LIMITS_STORAGE_KEY = 'kairo-search-limits';
+
+/** Search result limits shared by the Search Center and the Find tool window. */
+export interface SearchResultLimits {
+  /**
+   * Backend match cap. undefined = server default (100_000);
+   * -1 = unlimited; >0 = custom cap.
+   */
+  maxResults?: number;
+  /** Frontend preview cap. undefined = show all; >0 = render at most N. */
+  displayLimit?: number;
+}
+
+/** Parse the "max matches" box: empty = server default, 0 = unlimited (-1). */
+export function parseMaxResultsInput(value: string): number | undefined {
+  const text = value.trim();
+  if (!text) {
+    return undefined;
+  }
+  const n = Number(text);
+  if (!Number.isFinite(n)) {
+    return undefined;
+  }
+  if (n <= 0) {
+    return -1;
+  }
+  return Math.floor(n);
+}
+
+/** Parse the "max displayed" box: empty/non-positive = show all. */
+export function parseDisplayLimitInput(value: string): number | undefined {
+  const text = value.trim();
+  if (!text) {
+    return undefined;
+  }
+  const n = Number(text);
+  if (!Number.isFinite(n) || n <= 0) {
+    return undefined;
+  }
+  return Math.floor(n);
+}
+
+/** Render a stored limit back into the textbox: -1 shows as 0 (=unlimited). */
+export function limitToInput(value: number | undefined): string {
+  if (value === undefined) {
+    return '';
+  }
+  if (value < 0) {
+    return '0';
+  }
+  return String(value);
+}
 
 export const SCOPE_OPTIONS: SearchScopeOption[] = [
   { value: 'project', label: 'Project' },
@@ -61,6 +113,7 @@ export class SearchScopeModel {
 
   protected history: SearchHistoryEntry[] = [];
   protected pinned: SearchHistoryEntry[] = [];
+  protected limits: SearchResultLimits = {};
 
   constructor() {
     this.loadFromStorage();
@@ -73,6 +126,26 @@ export class SearchScopeModel {
   setFileTypes(fileTypes: string): void { this.filter.fileTypes = fileTypes; }
   setModifiedOnly(modifiedOnly: boolean): void { this.filter.modifiedOnly = modifiedOnly; }
   setExcludeGenerated(excludeGenerated: boolean): void { this.filter.excludeGenerated = excludeGenerated; }
+
+  getLimits(): SearchResultLimits { return { ...this.limits }; }
+
+  setMaxResults(maxResults: number | undefined): void {
+    if (maxResults === undefined) {
+      delete this.limits.maxResults;
+    } else {
+      this.limits.maxResults = maxResults;
+    }
+    this.saveLimits();
+  }
+
+  setDisplayLimit(displayLimit: number | undefined): void {
+    if (displayLimit === undefined) {
+      delete this.limits.displayLimit;
+    } else {
+      this.limits.displayLimit = displayLimit;
+    }
+    this.saveLimits();
+  }
 
   getHistory(): readonly SearchHistoryEntry[] { return this.history; }
   getRecentQueries(limit = 10): readonly SearchHistoryEntry[] {
@@ -151,6 +224,23 @@ export class SearchScopeModel {
           this.pinned = parsed.filter(isHistoryEntry).slice(0, MAX_PINNED);
         }
       }
+      const limitsRaw = storage.getItem(LIMITS_STORAGE_KEY);
+      if (limitsRaw) {
+        try {
+          const parsedLimits = JSON.parse(limitsRaw);
+          if (parsedLimits && typeof parsedLimits === 'object') {
+            const rec = parsedLimits as Record<string, unknown>;
+            if (typeof rec.maxResults === 'number' && Number.isFinite(rec.maxResults)) {
+              this.limits.maxResults = rec.maxResults;
+            }
+            if (typeof rec.displayLimit === 'number' && Number.isFinite(rec.displayLimit)) {
+              this.limits.displayLimit = rec.displayLimit;
+            }
+          }
+        } catch {
+          // Ignore corrupted limits
+        }
+      }
     } catch {
       // Ignore corrupted storage
     }
@@ -159,6 +249,14 @@ export class SearchScopeModel {
   protected saveToStorage(): void {
     try {
       globalThis.localStorage?.setItem(HISTORY_STORAGE_KEY, JSON.stringify(this.history));
+    } catch {
+      // Ignore storage errors
+    }
+  }
+
+  protected saveLimits(): void {
+    try {
+      globalThis.localStorage?.setItem(LIMITS_STORAGE_KEY, JSON.stringify(this.limits));
     } catch {
       // Ignore storage errors
     }

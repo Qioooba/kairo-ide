@@ -83,7 +83,7 @@ type Options struct {
 	WholeWord       bool
 	Include         []string // glob patterns
 	Exclude         []string // glob patterns
-	MaxResults      int      // 0 = unlimited
+	MaxResults      int      // 0 = default (100_000); negative = unlimited
 	ContextLines    int      // lines before/after
 	PreviewReplace  string   // if set, also return replacement preview
 	ProjectEncoding encoding.ID
@@ -150,6 +150,11 @@ func Search(root string, opts Options) (*Result, error) {
 	}
 	if opts.MaxResults == 0 {
 		opts.MaxResults = 100_000
+	}
+	if opts.MaxResults < 0 {
+		// Explicit unlimited request (UI "0 = unlimited"): use a huge cap
+		// so the walk never stops early and Truncated stays false.
+		opts.MaxResults = 1 << 30
 	}
 	if opts.MaxFileBytes == 0 {
 		opts.MaxFileBytes = defaultMaxFileBytes
@@ -219,6 +224,11 @@ func SearchStreamingWithStats(ctx context.Context, root string, opts Options, ca
 	}
 	if opts.MaxResults == 0 {
 		opts.MaxResults = 100_000
+	}
+	if opts.MaxResults < 0 {
+		// Explicit unlimited request (UI "0 = unlimited"): use a huge cap
+		// so the walk never stops early and Truncated stays false.
+		opts.MaxResults = 1 << 30
 	}
 	if opts.MaxFileBytes == 0 {
 		opts.MaxFileBytes = defaultMaxFileBytes

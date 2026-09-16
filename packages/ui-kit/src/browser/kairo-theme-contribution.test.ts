@@ -238,3 +238,17 @@ test('kairo-theme-contribution.ts registers KairoIDEATheme', () => {
 test('kairo-theme-contribution.ts defaults to Kairo IDEA Dark', () => {
   assert.match(contributionSource, /setCurrentTheme\(KairoIDEATheme\.id\)/);
 });
+
+// ---------------------------------------------------------------------------
+// IDEA-style selection: mouse = background only, keyboard = outline
+// ---------------------------------------------------------------------------
+
+test('kairo-theme-contribution.ts tracks input modality (kairo-keyboard-nav)', () => {
+  assert.match(contributionSource, /kairo-keyboard-nav/);
+  assert.match(contributionSource, /kairo-mouse-nav/);
+});
+
+test('kairo-theme-contribution.ts shows tree outline for keyboard only', () => {
+  assert.match(contributionSource, /pointerdown.*toMouse|toMouse.*pointerdown/s);
+  assert.match(contributionSource, /'keydown'/);
+});

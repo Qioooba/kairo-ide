@@ -315,3 +315,55 @@ test('Open in Find Window footer button is wired', async () => {
     container.remove();
   }
 });
+
+test('submits result limits from the advanced row', async () => {
+  const submitted = [];
+  const view = mount(state('idle'), { onSearch: query => submitted.push(query) });
+  try {
+    setInput(view.container.querySelector('[data-testid="search-query"]'), 'needle');
+    act(() => view.container.querySelector('[data-testid="toggle-advanced"]').click());
+    setInput(view.container.querySelector('[data-testid="filter-max-results"]'), '5000');
+    setInput(view.container.querySelector('[data-testid="filter-display-limit"]'), '100');
+    await act(async () => {
+      view.container.querySelector('[data-testid="search-form"]').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+    });
+    assert.strictEqual(submitted[0].maxResults, 5000);
+    assert.strictEqual(submitted[0].displayLimit, 100);
+  } finally {
+    view.unmount();
+  }
+});
+
+test('omits result limits when the advanced boxes are empty', async () => {
+  const submitted = [];
+  const view = mount(state('idle'), { onSearch: query => submitted.push(query) });
+  try {
+    setInput(view.container.querySelector('[data-testid="search-query"]'), 'needle');
+    await act(async () => {
+      view.container.querySelector('[data-testid="search-form"]').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+    });
+    assert.ok(!('maxResults' in submitted[0]), 'maxResults must stay unset by default');
+    assert.ok(!('displayLimit' in submitted[0]), 'displayLimit must stay unset by default');
+  } finally {
+    view.unmount();
+  }
+});
+
+test('caps rendered matches per displayLimit and shows a hint', () => {
+  const matches = [
+    { file: 'src/A.java', line: 1, column: 1, matchText: 'needle', contextBefore: '', contextAfter: '' },
+    { file: 'src/A.java', line: 2, column: 1, matchText: 'needle', contextBefore: '', contextAfter: '' },
+    { file: 'src/B.java', line: 3, column: 1, matchText: 'needle', contextBefore: '', contextAfter: '' },
+  ];
+  const view = mount(state('results', {
+    matches,
+    totalMatches: 3,
+    options: { query: 'needle', isRegex: false, caseSensitive: false, wholeWord: false, workspaceId: 'w', displayLimit: 2 },
+  }));
+  try {
+    assert.strictEqual(view.container.querySelectorAll('[data-testid="search-result"]').length, 2);
+    assert.ok(view.container.querySelector('[data-testid="search-display-capped"]'));
+  } finally {
+    view.unmount();
+  }
+});

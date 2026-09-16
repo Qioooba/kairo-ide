@@ -4,7 +4,7 @@ import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import { CommandService } from '@theia/core/lib/common';
 import { OpenerService, open } from '@theia/core/lib/browser/opener-service';
 import URI from '@theia/core/lib/common/uri';
-import { KairoI18nService } from '@kairo/i18n';
+import { KairoI18nService, formatTimestamp } from '@kairo/i18n';
 import { BuildStore, BuildRun, BuildDiagnostic, ConnectionState } from './build-store';
 
 function stateIconClass(state: BuildRun['state'] | 'idle' | 'disconnected'): string {
@@ -96,6 +96,9 @@ const BuildViewComponent: React.FC<BuildViewProps> = ({ store, commandService, o
             selection: { start: { line, character }, end: { line, character } },
         });
     };
+
+    const locale = i18n.getCurrentLanguage();
+    const shortTime = (value?: string): string => formatTimestamp(value, locale);
 
     const buildStateLabel = (state: BuildRun['state'] | 'idle' | 'disconnected'): string => {
         switch (state) {
@@ -261,13 +264,18 @@ const BuildViewComponent: React.FC<BuildViewProps> = ({ store, commandService, o
                 ) : (
                     <ul className="kairo-build-list" data-testid="build-list">
                         {builds.map(b => (
-                            <li key={b.id} className="kairo-build-item" data-testid={`build-${b.id}`}>
+                            <li
+                                key={b.id}
+                                className="kairo-build-item"
+                                data-testid={`build-${b.id}`}
+                                title={`${b.id} ${buildStateLabel(b.state)}${b.startTime ? ` ${b.startTime}` : ''}${b.endTime ? ` → ${b.endTime}` : ''}`}
+                            >
                                 <span className={`kairo-build-state-icon codicon ${stateIconClass(b.state)}`} aria-hidden="true" />
-                                <span className="kairo-build-id">{b.id}</span>
+                                <span className="kairo-build-id" title={b.id}>{b.id}</span>
                                 <span className="kairo-build-item-state" data-state={b.state}>{buildStateLabel(b.state)}</span>
-                                <span className="kairo-build-time">{b.startTime}</span>
+                                <span className="kairo-build-time" title={b.endTime ? `${b.startTime} → ${b.endTime}` : b.startTime}>{shortTime(b.startTime)}</span>
                                 {b.endTime && (
-                                    <span className="kairo-build-end-time">{b.endTime}</span>
+                                    <span className="kairo-build-end-time" title={b.endTime}>{shortTime(b.endTime)}</span>
                                 )}
                             </li>
                         ))}

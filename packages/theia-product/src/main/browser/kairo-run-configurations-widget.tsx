@@ -402,7 +402,7 @@ const RunConfigurationsView: React.FC<{ service: KairoRunConfigurationService; i
           <button className="theia-button toolbar" disabled={busy} onClick={() => setEditing({ mode: 'edit', originalId: configuration.id, value: configuration })} aria-label={`${t('common.edit')} ${configuration.name}`} title={`${t('common.edit')} ${configuration.name}`}>
             <span className="codicon codicon-edit" aria-hidden="true" />
           </button>
-          <button className="theia-button danger" disabled={busy} onClick={() => {
+          <button className="theia-button toolbar kairo-runconfig-btn-delete" disabled={busy} onClick={() => {
             void (async () => {
               const confirmed = await new ConfirmDialog({
                 title: t('common.delete'),

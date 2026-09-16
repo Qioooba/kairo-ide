@@ -41,3 +41,29 @@ test('malformed persisted history is ignored and caps are enforced', () => {
   for (let i = 0; i < 12; i++) model.pinQuery(entry(`q-${i}`, i));
   assert.equal(model.getPinned().length, 10);
 });
+
+test('result limits persist and parse helpers handle empty/zero/garbage', () => {
+  global.localStorage = makeStorage();
+  const limits = require('../../lib/browser/search-scope-model');
+  assert.strictEqual(limits.parseMaxResultsInput(''), undefined);
+  assert.strictEqual(limits.parseMaxResultsInput('0'), -1);
+  assert.strictEqual(limits.parseMaxResultsInput('5000'), 5000);
+  assert.strictEqual(limits.parseMaxResultsInput('abc'), undefined);
+  assert.strictEqual(limits.parseDisplayLimitInput(''), undefined);
+  assert.strictEqual(limits.parseDisplayLimitInput('0'), undefined);
+  assert.strictEqual(limits.parseDisplayLimitInput('100'), 100);
+  assert.strictEqual(limits.limitToInput(undefined), '');
+  assert.strictEqual(limits.limitToInput(-1), '0');
+  assert.strictEqual(limits.limitToInput(200), '200');
+
+  const model = new SearchScopeModel();
+  model.setMaxResults(-1);
+  model.setDisplayLimit(100);
+  assert.deepStrictEqual(model.getLimits(), { maxResults: -1, displayLimit: 100 });
+
+  const reloaded = new SearchScopeModel();
+  assert.deepStrictEqual(reloaded.getLimits(), { maxResults: -1, displayLimit: 100 });
+
+  reloaded.setMaxResults(undefined);
+  assert.deepStrictEqual(reloaded.getLimits(), { displayLimit: 100 });
+});

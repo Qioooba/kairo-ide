@@ -174,7 +174,7 @@ export class KairoSearchSessionModel {
             options: normalized,
             matches: streamState.matches,
             totalMatches: streamState.totalMatches,
-            truncated: false,
+            truncated: streamState.truncated ?? false,
             erroredFiles: [],
             streamState,
           });
@@ -186,7 +186,7 @@ export class KairoSearchSessionModel {
             options: normalized,
             matches: streamState.matches,
             totalMatches: streamState.totalMatches,
-            truncated: false,
+            truncated: streamState.truncated ?? streamState.totalMatches > streamState.matches.length,
             erroredFiles: [],
             streamState,
           });
@@ -198,7 +198,7 @@ export class KairoSearchSessionModel {
             options: normalized,
             matches: streamState.matches,
             totalMatches: streamState.totalMatches,
-            truncated: false,
+            truncated: streamState.truncated ?? false,
             erroredFiles: [],
             error: new Error(streamState.error ?? 'Stream search failed'),
             streamState,
@@ -216,16 +216,17 @@ export class KairoSearchSessionModel {
       }
       // Ensure loading clears even if the terminal event was missed.
       if (this.state.status === 'loading') {
-        const matches = this.streamService.snapshot.matches;
+        const snapshot = this.streamService.snapshot;
+        const matches = snapshot.matches;
         this.update({
           status: matches.length > 0 ? 'results' : 'empty',
           requestId,
           options: normalized,
           matches,
-          totalMatches: this.streamService.snapshot.totalMatches,
-          truncated: false,
+          totalMatches: snapshot.totalMatches,
+          truncated: snapshot.truncated ?? snapshot.totalMatches > matches.length,
           erroredFiles: [],
-          streamState: this.streamService.snapshot,
+          streamState: snapshot,
         });
       }
     } catch (error) {
@@ -246,16 +247,17 @@ export class KairoSearchSessionModel {
         return;
       }
       if (this.state.status === 'loading') {
+        const snapshot = this.streamService.snapshot;
         this.update({
           status: 'error',
           requestId,
           options: normalized,
-          matches: this.streamService.snapshot.matches,
-          totalMatches: this.streamService.snapshot.totalMatches,
-          truncated: false,
+          matches: snapshot.matches,
+          totalMatches: snapshot.totalMatches,
+          truncated: snapshot.truncated ?? false,
           erroredFiles: [],
           error: toError(error),
-          streamState: this.streamService.snapshot,
+          streamState: snapshot,
         });
       }
     }

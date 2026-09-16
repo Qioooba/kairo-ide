@@ -1019,6 +1019,7 @@ body.theia-light {
     border-bottom: 1px solid var(--kairo-border);
     flex-wrap: wrap;
     min-height: 42px;
+    flex-shrink: 0;
 }
 
 .kairo-build-toolbar .theia-button {
@@ -1027,10 +1028,12 @@ body.theia-light {
     gap: 5px;
     min-height: 28px;
     padding: 4px 10px;
-    border-radius: 5px;
+    border-radius: 6px;
     font-size: 12px;
     font-weight: 500;
-    transition: opacity 80ms ease, background-color 80ms ease;
+    flex-shrink: 0;
+    white-space: nowrap;
+    transition: opacity 120ms ease, background-color 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
 }
 
 .kairo-build-toolbar .theia-button .codicon {
@@ -1061,6 +1064,8 @@ body.theia-light {
     background: transparent;
     color: var(--kairo-text-secondary);
     border: 1px solid var(--kairo-border);
+    /* Beat the generic .theia-button.toolbar 4px so the trio stays uniform. */
+    border-radius: 6px;
 }
 
 .kairo-build-toolbar .theia-button.toolbar:hover:not(:disabled) {
@@ -1101,6 +1106,7 @@ body.theia-light {
     padding: 6px 10px;
     border-bottom: 1px solid var(--kairo-border);
     font-size: 12px;
+    min-width: 0;
     transition: background-color 80ms ease;
 }
 
@@ -1161,17 +1167,29 @@ body.theia-light {
     font-family: monospace;
     color: var(--kairo-text);
     flex: 1 1 auto;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
+/* The side panel is ~226px: a full ISO start + end timestamp pair can never
+ * fit next to id + state pill, so the end time is visually dropped (it stays
+ * in the row title tooltip) and the start time ellipsizes in-bounds instead
+ * of hard-clipping at the panel edge (KAIRO-BUILD-OVERLAP-01). */
 .kairo-build-time,
-.kairo-build-end-time,
 .kairo-server-port {
     color: var(--kairo-text-secondary);
     font-size: 11px;
-    flex-shrink: 0;
+    flex-shrink: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.kairo-build-end-time {
+    display: none;
 }
 
 .kairo-diagnostic {
@@ -1300,131 +1318,443 @@ body.theia-light {
 
 .kairo-info-list {
     display: grid;
-    grid-template-columns: max-content 1fr;
+    grid-template-columns: max-content minmax(0, 1fr);
     gap: 6px 12px;
     margin: 0;
     font-size: 12px;
+    min-width: 0;
 }
 
 .kairo-info-list dt {
     color: var(--kairo-text-secondary);
     font-weight: 500;
+    white-space: nowrap;
 }
 
 .kairo-info-list dd {
     margin: 0;
     font-family: monospace;
     color: var(--kairo-text);
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
-/* Log viewer */
+/* Log viewer — IDEA-style startup console */
+.kairo-log-viewer-widget {
+    background: var(--kairo-bg);
+}
 .kairo-log-viewer {
     display: flex;
     flex-direction: column;
     height: 100%;
-    min-height: 200px;
+    min-height: 220px;
+    min-width: 0;
+    background: var(--kairo-bg);
+    color: var(--kairo-text);
 }
 
+/* Header: title + server pill + meta on one row, wraps gracefully. */
+.kairo-log-viewer-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 8px 12px;
+    background: var(--kairo-bg-secondary);
+    border-bottom: 1px solid var(--kairo-border);
+    flex-shrink: 0;
+    flex-wrap: wrap;
+}
+.kairo-log-viewer-title-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    flex: 1 1 auto;
+}
+.kairo-log-viewer-header-title {
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--kairo-text-secondary);
+    white-space: nowrap;
+}
+.kairo-log-viewer-header-meta {
+    font-size: 11px;
+    color: var(--kairo-text-secondary);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+.kairo-log-server-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 100%;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-family: var(--theia-monaco-font-family, monospace);
+    background: var(--kairo-bg);
+    border: 1px solid var(--kairo-border);
+    color: var(--kairo-text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.kairo-log-server-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    background: var(--kairo-text-secondary);
+}
+.kairo-log-server-dot-running { background: var(--kairo-success); box-shadow: 0 0 6px color-mix(in srgb, var(--kairo-success) 70%, transparent); }
+.kairo-log-server-dot-starting { background: var(--kairo-info); animation: kairo-pulse 1.2s ease-in-out infinite; }
+.kairo-log-server-dot-stopping { background: var(--kairo-warning); animation: kairo-pulse 1.2s ease-in-out infinite; }
+.kairo-log-server-dot-stopped { background: var(--kairo-text-secondary); }
+.kairo-log-server-dot-error,
+.kairo-log-server-dot-crashed { background: var(--kairo-error); }
+.kairo-log-server-port {
+    color: var(--kairo-text-secondary);
+}
+@keyframes kairo-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.35; }
+}
+
+/* Toolbar: server / search / filters / actions. Single scrollable row. */
 .kairo-log-viewer-toolbar {
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 6px 10px;
+    gap: 8px;
+    padding: 7px 10px;
     background: var(--kairo-bg-secondary);
     border-bottom: 1px solid var(--kairo-border);
     flex-shrink: 0;
     flex-wrap: nowrap;
     overflow-x: auto;
     scrollbar-width: none;
-    min-height: 32px;
+    min-height: 38px;
 }
-
 .kairo-log-viewer-toolbar::-webkit-scrollbar {
     display: none;
 }
-
 .kairo-log-viewer-toolbar .theia-input,
 .kairo-log-viewer-toolbar .kairo-log-viewer-server-select,
 .kairo-log-viewer-toolbar .theia-button,
 .kairo-log-viewer-toolbar .kairo-log-checkbox {
-    min-height: 26px;
+    min-height: 28px;
 }
-
-.kairo-log-viewer-toolbar .theia-input {
-    min-width: 100px;
-    flex: 1 1 140px;
+.kairo-log-server-group {
+    flex-shrink: 0;
+}
+.kairo-log-filter {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+.kairo-log-search {
+    position: relative;
+    display: flex;
+    align-items: center;
+    flex: 1 1 160px;
+    min-width: 120px;
+}
+.kairo-log-search-icon {
+    position: absolute;
+    left: 7px;
+    font-size: 13px;
+    color: var(--kairo-text-secondary);
+    pointer-events: none;
+}
+.kairo-log-search-input.theia-input {
+    width: 100%;
+    min-width: 0;
+    flex: 1 1 auto;
+    padding-left: 26px;
+    padding-right: 26px;
+    background: var(--kairo-bg);
+    border: 1px solid var(--kairo-border);
+    border-radius: 6px;
+    font-size: 12px;
+}
+.kairo-log-search-input.theia-input:focus {
+    border-color: var(--kairo-primary);
+    outline: none;
+    box-shadow: 0 0 0 1px var(--kairo-primary);
+}
+.kairo-log-search-clear {
+    position: absolute;
+    right: 2px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--kairo-text-secondary);
+    cursor: pointer;
+}
+.kairo-log-search-clear:hover {
+    background: var(--kairo-hover-overlay);
+    color: var(--kairo-text);
+}
+.kairo-log-viewer-toolbar .kairo-toolbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+}
+.kairo-log-viewer-toolbar .theia-button.toolbar {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    min-width: 28px;
+    padding: 0;
+    border-radius: 6px;
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--kairo-text-secondary);
+}
+.kairo-log-viewer-toolbar .theia-button.toolbar:hover:not(:disabled) {
+    background: var(--kairo-hover-overlay);
+    color: var(--kairo-text);
+    border-color: var(--kairo-border);
+}
+.kairo-log-viewer-toolbar .theia-button.toolbar[aria-pressed="true"] {
+    background: color-mix(in srgb, var(--kairo-warning) 15%, transparent);
+    border-color: color-mix(in srgb, var(--kairo-warning) 40%, transparent);
+    color: var(--kairo-warning);
+}
+.kairo-log-goto-bottom {
+    color: var(--kairo-primary-light) !important;
+    border-color: color-mix(in srgb, var(--kairo-primary) 40%, transparent) !important;
 }
 
 .kairo-log-checkbox {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
+    gap: 5px;
+    font-size: 12px;
     color: var(--kairo-text-secondary);
     white-space: nowrap;
+    cursor: pointer;
+    user-select: none;
+}
+.kairo-log-checkbox input {
+    accent-color: var(--kairo-primary);
+    margin: 0;
 }
 
+/* Status strip: chips left, live/paused right. */
 .kairo-log-status {
-    padding: 3px 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 4px 12px;
     color: var(--kairo-text-secondary);
     background: var(--kairo-bg-secondary);
     border-bottom: 1px solid var(--kairo-border);
     font-size: 11px;
+    flex-shrink: 0;
+    flex-wrap: wrap;
+}
+.kairo-log-status-chips {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    min-width: 0;
+}
+.kairo-log-status-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 1px 7px;
+    border-radius: 10px;
+    border: 1px solid var(--kairo-border);
+    background: var(--kairo-bg);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+.kairo-log-status-chip[data-state="open"],
+.kairo-log-status-chip[data-state="running"] {
+    color: var(--kairo-success);
+    border-color: color-mix(in srgb, var(--kairo-success) 35%, transparent);
+}
+.kairo-log-status-chip[data-state="starting"],
+.kairo-log-status-chip[data-state="connecting"] {
+    color: var(--kairo-info);
+    border-color: color-mix(in srgb, var(--kairo-info) 35%, transparent);
+}
+.kairo-log-status-chip[data-state="error"],
+.kairo-log-status-chip[data-state="crashed"] {
+    color: var(--kairo-error);
+    border-color: color-mix(in srgb, var(--kairo-error) 35%, transparent);
+}
+.kairo-log-status-chip[data-state="warning"] {
+    color: var(--kairo-warning);
+    border-color: color-mix(in srgb, var(--kairo-warning) 35%, transparent);
+}
+.kairo-log-status-chip[data-state="disconnected"],
+.kairo-log-status-chip[data-state="closed"],
+.kairo-log-status-chip[data-state="none"] {
+    color: var(--kairo-text-secondary);
+}
+.kairo-log-status-poll {
+    color: var(--kairo-text-secondary);
+}
+.kairo-log-status-live {
+    color: var(--kairo-success);
+    font-weight: 600;
+    white-space: nowrap;
+}
+.kairo-log-status-paused {
+    color: var(--kairo-warning);
+    font-weight: 600;
+    white-space: nowrap;
 }
 
 .kairo-log-error {
     color: var(--kairo-error);
 }
 
-.kairo-log-stream,
-.kairo-log-line time {
-    color: var(--kairo-text-secondary);
-}
-
-.kairo-log-line.stream-stderr .kairo-log-stream {
-    color: var(--kairo-error);
-}
-
-.kairo-hot-reload-status { padding: 4px 0; color: var(--kairo-text-secondary); }
-.kairo-hot-reload-status.success { color: var(--kairo-success); }
-.kairo-hot-reload-status.error { color: var(--kairo-error); }
-.kairo-hot-reload-status.publishing { color: var(--kairo-warning); }
-.kairo-help-text { color: var(--kairo-text-secondary); font-size: 11px; line-height: 1.4; }
-
-.kairo-log-viewer-title {
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--kairo-text-secondary);
-    flex: 0 1 auto;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 180px;
-}
-
-.kairo-log-viewer-server-select {
-    background: var(--kairo-bg);
-    color: var(--kairo-text);
-    border: 1px solid var(--kairo-border);
-    border-radius: 4px;
-    padding: 4px 8px;
-    font-size: 12px;
-}
-
+/* Log lines: time + level dot + stream badge + message. */
 .kairo-log-viewer-content {
     flex: 1 1 auto;
     overflow-y: auto;
     background: var(--kairo-bg);
-    font-family: monospace;
+    font-family: var(--theia-monaco-font-family, monospace);
     font-size: 12px;
-    padding: 4px 0;
-    min-height: 100px;
+    line-height: 24px;
+    padding: 4px 0 12px;
+    min-height: 120px;
+}
+.kairo-log-line {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 0 12px;
+    white-space: pre-wrap;
+    word-break: break-all;
+    overflow-wrap: anywhere;
+    border-left: 2px solid transparent;
+}
+.kairo-log-line:hover {
+    background: var(--kairo-hover-overlay);
+}
+.kairo-log-line.error {
+    color: var(--kairo-text);
+    border-left-color: var(--kairo-error);
+    background: color-mix(in srgb, var(--kairo-error) 6%, transparent);
+}
+.kairo-log-line.warning {
+    border-left-color: var(--kairo-warning);
+    background: color-mix(in srgb, var(--kairo-warning) 5%, transparent);
+}
+.kairo-log-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    align-self: center;
+    background: var(--kairo-text-secondary);
+    opacity: 0.7;
+}
+.kairo-log-dot-info { background: var(--kairo-text-secondary); }
+.kairo-log-dot-warning { background: var(--kairo-warning); opacity: 1; }
+.kairo-log-dot-error { background: var(--kairo-error); opacity: 1; }
+.kairo-log-time {
+    flex-shrink: 0;
+    color: var(--kairo-text-secondary);
+    font-variant-numeric: tabular-nums;
+    font-size: 11px;
+    min-width: 58px;
+}
+.kairo-log-stream,
+.kairo-log-line time {
+    color: var(--kairo-text-secondary);
+}
+.kairo-log-stream {
+    flex-shrink: 0;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    padding: 0 5px;
+    border-radius: 3px;
+    background: var(--kairo-bg-secondary);
+    border: 1px solid var(--kairo-border);
+    line-height: 16px;
+    align-self: center;
+}
+.kairo-log-stream-stdout { color: var(--kairo-text-secondary); }
+.kairo-log-stream-stderr {
+    color: var(--kairo-error);
+    border-color: color-mix(in srgb, var(--kairo-error) 40%, transparent);
+    background: color-mix(in srgb, var(--kairo-error) 8%, transparent);
+}
+.kairo-log-stream-structured {
+    color: var(--kairo-info);
+    border-color: color-mix(in srgb, var(--kairo-info) 40%, transparent);
+    background: color-mix(in srgb, var(--kairo-info) 8%, transparent);
+}
+.kairo-log-line.stream-stderr .kairo-log-stream {
+    color: var(--kairo-error);
+}
+.kairo-log-message {
+    flex: 1 1 auto;
+    min-width: 0;
+    color: var(--kairo-text);
+}
+.kairo-log-line.error .kairo-log-message {
+    color: var(--kairo-text);
+}
+.kairo-log-match {
+    background: color-mix(in srgb, var(--kairo-warning) 35%, transparent);
+    color: inherit;
+    border-radius: 2px;
+    padding: 0 1px;
 }
 
-.kairo-log-empty {
-    color: var(--kairo-text-secondary);
-    padding: 16px;
-    text-align: center;
-    font-style: italic;
+/* Empty / loading states reuse the generic empty-state but breathe more. */
+.kairo-log-viewer-content .kairo-empty-state {
+    padding: 36px 20px;
+}
+
+/* Server toolbar: keep the new Logs button visually quiet. */
+.kairo-server-toolbar [data-testid="server-logs-button"] {
+    white-space: nowrap;
+}
+
+/* Log viewer focus visibility (D4.1 / keyboard users). */
+.kairo-log-viewer-server-select:focus-visible,
+.kairo-log-search-input:focus-visible,
+.kairo-log-viewer-toolbar .theia-button.toolbar:focus-visible,
+.kairo-log-search-clear:focus-visible {
+    outline: 1px solid var(--theia-focusBorder, var(--kairo-focus-ring));
+    outline-offset: 1px;
+}
+
+/* Narrow bottom panel: let the toolbar breathe without clipping. */
+@container (max-width: 560px) {
+    .kairo-log-viewer-header-meta {
+        display: none;
+    }
+    .kairo-log-status-poll {
+        display: none;
+    }
 }
 
 /* Deployments table */
@@ -2530,18 +2860,181 @@ body.theia-light {
     gap: 6px;
 }
 
-.kairo-toolbar-actions .theia-button {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    padding: 5px 12px;
-    font-size: 12px;
-    border-radius: 4px;
-    transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+/* State accent: a 2px top ribbon inside the toolbar announces the
+ * server lifecycle at a glance (idle = transparent). Box-shadow is
+ * used instead of background so it survives the uniform panel
+ * background rule below. */
+.kairo-toolbar {
+    position: relative;
+    box-shadow: inset 0 2px 0 transparent;
+    transition: box-shadow 200ms ease;
 }
 
-.kairo-toolbar-actions .theia-button .codicon {
+.kairo-toolbar-is-running {
+    box-shadow: inset 0 2px 0 var(--kairo-success, #3dcc91);
+}
+
+.kairo-toolbar-is-starting {
+    box-shadow: inset 0 2px 0 var(--kairo-warning, #fbbc04);
+}
+
+.kairo-toolbar-is-stopping {
+    box-shadow: inset 0 2px 0 var(--kairo-error, #f04757);
+}
+
+/* ── Action buttons: unified pill base ─────────────────────── */
+.kairo-toolbar-actions .theia-button.kairo-toolbar-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    height: 28px;
+    padding: 0 13px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.2px;
+    line-height: 1;
+    border-radius: 6px;
+    border: 1px solid transparent;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background-color 150ms ease, border-color 150ms ease,
+        color 150ms ease, box-shadow 150ms ease, transform 100ms ease,
+        opacity 150ms ease;
+}
+
+.kairo-toolbar-actions .theia-button.kairo-toolbar-btn .codicon {
     font-size: 13px;
+    line-height: 1;
+}
+
+.kairo-toolbar-actions .theia-button.kairo-toolbar-btn:hover:not(:disabled) {
+    transform: translateY(-1px);
+}
+
+.kairo-toolbar-actions .theia-button.kairo-toolbar-btn:active:not(:disabled) {
+    transform: translateY(0) scale(0.98);
+}
+
+.kairo-toolbar-actions .theia-button.kairo-toolbar-btn:focus-visible {
+    outline: 2px solid var(--kairo-focus-ring, #4a9eff);
+    outline-offset: 1px;
+}
+
+.kairo-toolbar-actions .theia-button.kairo-toolbar-btn:disabled {
+    opacity: 0.45;
+    transform: none;
+    box-shadow: none;
+    cursor: not-allowed;
+}
+
+/* Run — green solid primary CTA */
+.kairo-toolbar-actions .theia-button.kairo-toolbar-btn-run {
+    background: #1f9d55 !important;
+    border-color: #1f9d55 !important;
+    color: #ffffff !important;
+    box-shadow: 0 1px 4px rgba(31, 157, 85, 0.35);
+}
+
+.kairo-toolbar-actions .theia-button.kairo-toolbar-btn-run .codicon {
+    color: #ffffff !important;
+}
+
+.kairo-toolbar-actions .theia-button.kairo-toolbar-btn-run:hover:not(:disabled) {
+    background: #27b564 !important;
+    border-color: #27b564 !important;
+    box-shadow: 0 2px 8px rgba(31, 157, 85, 0.45);
+}
+
+/* Debug — blue solid */
+.kairo-toolbar-actions .theia-button.kairo-toolbar-btn-debug {
+    background: #2f7de1 !important;
+    border-color: #2f7de1 !important;
+    color: #ffffff !important;
+    box-shadow: 0 1px 4px rgba(47, 125, 225, 0.35);
+}
+
+.kairo-toolbar-actions .theia-button.kairo-toolbar-btn-debug .codicon {
+    color: #ffffff !important;
+}
+
+.kairo-toolbar-actions .theia-button.kairo-toolbar-btn-debug:hover:not(:disabled) {
+    background: #4a90e8 !important;
+    border-color: #4a90e8 !important;
+    box-shadow: 0 2px 8px rgba(47, 125, 225, 0.45);
+}
+
+/* Stop — quiet ghost when idle, armed red solid while a server lives */
+.kairo-toolbar-actions .theia-button.kairo-toolbar-btn-stop {
+    background: transparent !important;
+    border-color: var(--kairo-border, #3a3b3e) !important;
+    color: var(--kairo-text-secondary, #9aa0a6) !important;
+}
+
+.kairo-toolbar-actions .theia-button.kairo-toolbar-btn-stop .codicon {
+    color: var(--kairo-text-secondary, #9aa0a6) !important;
+}
+
+.kairo-toolbar-actions .theia-button.kairo-toolbar-btn-stop.is-armed {
+    background: #d93025 !important;
+    border-color: #d93025 !important;
+    color: #ffffff !important;
+    box-shadow: 0 1px 6px rgba(217, 48, 37, 0.5);
+    animation: kairo-toolbar-armed-glow 2s ease-in-out infinite;
+}
+
+.kairo-toolbar-actions .theia-button.kairo-toolbar-btn-stop.is-armed .codicon {
+    color: #ffffff !important;
+}
+
+.kairo-toolbar-actions .theia-button.kairo-toolbar-btn-stop.is-armed:hover:not(:disabled) {
+    background: #e94035 !important;
+    border-color: #e94035 !important;
+    box-shadow: 0 2px 10px rgba(217, 48, 37, 0.6);
+    animation: none;
+}
+
+/* Build — neutral outline */
+.kairo-toolbar-actions .theia-button.kairo-toolbar-btn-build {
+    background: color-mix(in srgb, var(--kairo-text, #dfe1e5) 6%, transparent) !important;
+    border-color: var(--kairo-border, #3a3b3e) !important;
+    color: var(--kairo-text, #dfe1e5) !important;
+}
+
+.kairo-toolbar-actions .theia-button.kairo-toolbar-btn-build .codicon {
+    color: var(--kairo-text-secondary, #9aa0a6) !important;
+}
+
+.kairo-toolbar-actions .theia-button.kairo-toolbar-btn-build:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--kairo-text, #dfe1e5) 12%, transparent) !important;
+    border-color: var(--kairo-text-secondary, #9aa0a6) !important;
+}
+
+.kairo-toolbar-actions .theia-button.kairo-toolbar-btn-build:hover:not(:disabled) .codicon {
+    color: var(--kairo-text, #dfe1e5) !important;
+}
+
+/* Busy (clicked, awaiting response): spinner cursor + soft pulse */
+.kairo-toolbar-busy .kairo-toolbar-select,
+.kairo-toolbar-busy .kairo-toolbar-actions .theia-button:not(:disabled) {
+    cursor: wait;
+}
+
+.kairo-toolbar-busy .kairo-toolbar-actions .theia-button:disabled {
+    cursor: wait;
+}
+
+.kairo-toolbar-actions .theia-button .codicon-modifier-spin {
+    animation: kairo-toolbar-spin 0.9s linear infinite;
+}
+
+@keyframes kairo-toolbar-spin {
+    to { transform: rotate(360deg); }
+}
+
+@keyframes kairo-toolbar-armed-glow {
+    0%, 100% { box-shadow: 0 1px 6px rgba(217, 48, 37, 0.5); }
+    50% { box-shadow: 0 1px 12px rgba(217, 48, 37, 0.85); }
 }
 
 .kairo-toolbar-separator {
@@ -2552,32 +3045,122 @@ body.theia-light {
     opacity: 0.6;
 }
 
-.kairo-toolbar-busy .kairo-toolbar-select,
-.kairo-toolbar-busy .kairo-toolbar-actions .theia-button:not(:disabled) {
-    cursor: wait;
-}
-
-.kairo-toolbar-btn-run .codicon {
-    color: var(--kairo-success, #3dcc91);
-}
-
-.kairo-toolbar-btn-debug .codicon {
-    color: var(--kairo-info, #4a9eff);
-}
-
-.kairo-toolbar-btn-stop .codicon {
-    color: var(--kairo-error, #f04757);
-}
-
-.kairo-toolbar-btn-build .codicon {
+/* ── Server status pill ────────────────────────────────────── */
+.kairo-toolbar-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+    margin-left: 2px;
+    padding: 4px 10px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+    line-height: 1;
+    border-radius: 999px;
+    border: 1px solid var(--kairo-border, #3a3b3e);
     color: var(--kairo-text-secondary, #9aa0a6);
+    background: color-mix(in srgb, var(--kairo-text-secondary, #9aa0a6) 8%, transparent);
+    white-space: nowrap;
+    user-select: none;
 }
 
-.kairo-toolbar-btn-run:not(:disabled):hover .codicon,
-.kairo-toolbar-btn-debug:not(:disabled):hover .codicon,
-.kairo-toolbar-btn-stop:not(:disabled):hover .codicon,
-.kairo-toolbar-btn-build:not(:disabled):hover .codicon {
-    color: inherit;
+.kairo-toolbar-status-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    background: currentColor;
+}
+
+.kairo-toolbar-status[data-state="running"] {
+    color: var(--kairo-success, #3dcc91);
+    border-color: color-mix(in srgb, var(--kairo-success, #3dcc91) 45%, transparent);
+    background: color-mix(in srgb, var(--kairo-success, #3dcc91) 12%, transparent);
+}
+
+.kairo-toolbar-status[data-state="running"] .kairo-toolbar-status-dot {
+    animation: kairo-toolbar-dot-pulse 1.6s ease-in-out infinite;
+}
+
+.kairo-toolbar-status[data-state="starting"] {
+    color: var(--kairo-warning, #fbbc04);
+    border-color: color-mix(in srgb, var(--kairo-warning, #fbbc04) 45%, transparent);
+    background: color-mix(in srgb, var(--kairo-warning, #fbbc04) 12%, transparent);
+}
+
+.kairo-toolbar-status[data-state="starting"] .kairo-toolbar-status-dot {
+    animation: kairo-toolbar-dot-pulse 1s ease-in-out infinite;
+}
+
+.kairo-toolbar-status[data-state="stopping"] {
+    color: var(--kairo-error, #f04757);
+    border-color: color-mix(in srgb, var(--kairo-error, #f04757) 45%, transparent);
+    background: color-mix(in srgb, var(--kairo-error, #f04757) 12%, transparent);
+}
+
+.kairo-toolbar-status[data-state="stopping"] .kairo-toolbar-status-dot {
+    animation: kairo-toolbar-dot-pulse 1s ease-in-out infinite;
+}
+
+@keyframes kairo-toolbar-dot-pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.45; transform: scale(0.8); }
+}
+
+/* Light theme: solid fills tuned for white text on light surfaces */
+body.theia-light .kairo-toolbar-actions .theia-button.kairo-toolbar-btn-run {
+    background: #188038 !important;
+    border-color: #188038 !important;
+    box-shadow: 0 1px 4px rgba(24, 128, 56, 0.3);
+}
+
+body.theia-light .kairo-toolbar-actions .theia-button.kairo-toolbar-btn-run:hover:not(:disabled) {
+    background: #1a9e46 !important;
+    border-color: #1a9e46 !important;
+}
+
+body.theia-light .kairo-toolbar-actions .theia-button.kairo-toolbar-btn-debug {
+    background: #1a73e8 !important;
+    border-color: #1a73e8 !important;
+    box-shadow: 0 1px 4px rgba(26, 115, 232, 0.3);
+}
+
+body.theia-light .kairo-toolbar-actions .theia-button.kairo-toolbar-btn-debug:hover:not(:disabled) {
+    background: #2b7de9 !important;
+    border-color: #2b7de9 !important;
+}
+
+body.theia-light .kairo-toolbar-actions .theia-button.kairo-toolbar-btn-build {
+    background: #ffffff !important;
+    color: #1f1f1f !important;
+}
+
+body.theia-light .kairo-toolbar-actions .theia-button.kairo-toolbar-btn-build .codicon {
+    color: #5f6368 !important;
+}
+
+/* Narrow chrome: keep the dot, collapse the pill text */
+@media (max-width: 960px) {
+    .kairo-toolbar-status-text {
+        display: none;
+    }
+    .kairo-toolbar-status {
+        padding: 5px 7px;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .kairo-toolbar-actions .theia-button .codicon-modifier-spin,
+    .kairo-toolbar-actions .theia-button.kairo-toolbar-btn-stop.is-armed,
+    .kairo-toolbar-status[data-state="running"] .kairo-toolbar-status-dot,
+    .kairo-toolbar-status[data-state="starting"] .kairo-toolbar-status-dot,
+    .kairo-toolbar-status[data-state="stopping"] .kairo-toolbar-status-dot {
+        animation: none;
+    }
+    .kairo-toolbar-actions .theia-button.kairo-toolbar-btn:hover:not(:disabled) {
+        transform: none;
+    }
 }
 
 /* ------------------------------------------------------------------
@@ -2615,21 +3198,27 @@ body.theia-light {
 
 .kairo-info-list {
     display: grid;
-    grid-template-columns: max-content 1fr;
+    grid-template-columns: max-content minmax(0, 1fr);
     gap: 6px 12px;
     margin: 0;
     font-size: 12px;
+    min-width: 0;
 }
 
 .kairo-info-list dt {
     color: var(--kairo-text-secondary, #9aa0a6);
     font-weight: 500;
+    white-space: nowrap;
 }
 
 .kairo-info-list dd {
     margin: 0;
     font-family: monospace;
     color: var(--kairo-text, #dfe1e5);
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    overflow-wrap: anywhere;
 }
 
 .kairo-hot-reload-banner {
@@ -2712,7 +3301,7 @@ body.theia-light {
     align-items: center;
     gap: 6px;
     padding: 6px 10px;
-    border-radius: 4px;
+    border-radius: 6px;
     font-size: 12px;
     margin-top: 8px;
 }
@@ -2750,6 +3339,43 @@ body.theia-light {
     user-select: none;
 }
 
+/* Hot-reload action buttons reuse the server toolbar look so they stay
+ * rounded (6px) instead of falling back to the square Theia default. */
+.kairo-hot-reload-controls .theia-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    min-height: 30px;
+    padding: 5px 14px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    flex-shrink: 0;
+    white-space: nowrap;
+    border: 1px solid transparent;
+    transition: opacity 120ms ease, background-color 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.kairo-hot-reload-controls .theia-button.main {
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+}
+
+.kairo-hot-reload-controls .theia-button.secondary {
+    background: var(--kairo-bg, #1e1f22) !important;
+    color: var(--kairo-text, #dfe1e5) !important;
+    border-color: var(--kairo-border, #3a3b3e) !important;
+}
+
+.kairo-hot-reload-controls .theia-button.secondary:hover:not(:disabled) {
+    border-color: var(--kairo-text-secondary, #9aa0a6) !important;
+}
+
+.kairo-hot-reload-controls .theia-button:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
 .kairo-server-list {
     list-style: none;
     padding: 0;
@@ -2764,11 +3390,12 @@ body.theia-light {
     align-items: center;
     gap: 8px;
     padding: 6px 8px;
-    border-radius: 4px;
+    border-radius: 6px;
     border: 1px solid var(--kairo-border, #3a3b3e);
     background: var(--kairo-bg, #1e1f22);
     font-size: 12px;
-    transition: background-color 80ms ease;
+    min-width: 0;
+    transition: background-color 80ms ease, border-color 80ms ease;
 }
 
 .kairo-server-item:hover {
@@ -2783,6 +3410,7 @@ body.theia-light {
     font-family: monospace;
     color: var(--kairo-text, #dfe1e5);
     flex: 1 1 auto;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -3691,6 +4319,20 @@ p.kairo-empty {
     color: var(--kairo-text);
 }
 
+/* Benchmark CTA otherwise falls back to the square Theia default (2px). */
+.kairo-perf-dashboard .theia-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    min-height: 30px;
+    padding: 5px 14px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
 .kairo-perf-header {
     margin: 0 0 16px;
     font-size: 16px;
@@ -4441,10 +5083,11 @@ html, body {
     align-items: center;
     gap: 8px;
     padding: 6px 8px;
-    border-radius: 4px;
+    border-radius: 6px;
     border: 1px solid var(--kairo-border);
     background: var(--kairo-bg);
     font-size: 12px;
+    min-width: 0;
     transition: background-color 80ms ease, border-color 80ms ease;
 }
 
@@ -4460,6 +5103,7 @@ html, body {
     font-family: monospace;
     color: var(--kairo-text);
     flex: 1 1 auto;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -4481,6 +5125,7 @@ html, body {
     border-bottom: 1px solid var(--kairo-border);
     flex-wrap: wrap;
     min-height: 42px;
+    flex-shrink: 0;
 }
 
 .kairo-server-toolbar .theia-button {
@@ -4489,34 +5134,46 @@ html, body {
     gap: 5px;
     min-height: 28px;
     padding: 4px 10px;
-    border-radius: 5px;
+    border-radius: 6px;
     font-size: 12px;
     font-weight: 500;
-    transition: opacity 80ms ease, background-color 80ms ease;
+    flex-shrink: 0;
+    white-space: nowrap;
+    transition: opacity 120ms ease, background-color 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
 }
 
 .kairo-server-toolbar .theia-button .codicon {
     font-size: 13px;
 }
 
+/* Semantic tones shared with the top toolbar: Start=green solid,
+ * Debug=blue solid, Stop=ghost idle / red armed while live.
+ * `!important` is required: the global `.theia-button` hierarchy above
+ * also uses `!important` and would otherwise flatten these tones. */
 .kairo-server-toolbar .theia-button.main {
-    background: var(--kairo-success);
-    color: #0d1117;
-    border-color: transparent;
+    background: #1f9d55 !important;
+    color: #ffffff !important;
+    border-color: #1f9d55 !important;
+    box-shadow: 0 1px 4px rgba(31, 157, 85, 0.35);
 }
 
 .kairo-server-toolbar .theia-button.main:hover:not(:disabled) {
-    background: color-mix(in srgb, var(--kairo-success) 85%, white);
+    background: #27b564 !important;
+    border-color: #27b564 !important;
+    box-shadow: 0 2px 8px rgba(31, 157, 85, 0.45);
 }
 
 .kairo-server-toolbar .theia-button.secondary {
-    background: var(--kairo-primary);
-    color: #0d1117;
-    border-color: transparent;
+    background: #2f7de1 !important;
+    color: #ffffff !important;
+    border-color: #2f7de1 !important;
+    box-shadow: 0 1px 4px rgba(47, 125, 225, 0.35);
 }
 
 .kairo-server-toolbar .theia-button.secondary:hover:not(:disabled) {
-    background: color-mix(in srgb, var(--kairo-primary) 85%, white);
+    background: #4a90e8 !important;
+    border-color: #4a90e8 !important;
+    box-shadow: 0 2px 8px rgba(47, 125, 225, 0.45);
 }
 
 .kairo-server-toolbar .theia-button.toolbar {
@@ -4531,9 +5188,41 @@ html, body {
     border-color: var(--kairo-text-secondary);
 }
 
+/* Armed stop: solid red while a server is live (i.e. not disabled). */
+.kairo-server-toolbar [data-testid="server-stop-button"]:not(:disabled) {
+    background: #d93025 !important;
+    border-color: #d93025 !important;
+    color: #ffffff !important;
+    box-shadow: 0 1px 6px rgba(217, 48, 37, 0.5);
+    animation: kairo-toolbar-armed-glow 2s ease-in-out infinite;
+}
+
+.kairo-server-toolbar [data-testid="server-stop-button"]:not(:disabled):hover {
+    background: #e94035 !important;
+    border-color: #e94035 !important;
+    animation: none;
+}
+
+body.theia-light .kairo-server-toolbar .theia-button.main {
+    background: #188038 !important;
+    border-color: #188038 !important;
+}
+
+body.theia-light .kairo-server-toolbar .theia-button.secondary {
+    background: #1a73e8 !important;
+    border-color: #1a73e8 !important;
+}
+
 .kairo-server-toolbar .theia-button.toolbar:disabled,
 .kairo-server-toolbar .theia-button:disabled {
     opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.kairo-server-toolbar .theia-button:focus-visible,
+.kairo-hot-reload-controls .theia-button:focus-visible {
+    outline: 1px solid var(--theia-focusBorder, var(--kairo-primary, #4a9eff));
+    outline-offset: 1px;
 }
 
 .kairo-server-toolbar-separator {
@@ -4542,6 +5231,30 @@ html, body {
     background: var(--kairo-border);
     margin: 0 4px;
     flex-shrink: 0;
+}
+
+/* Server view body: scrollable content below the fixed header/toolbar so
+ * long server histories can never be clipped (KAIRO-SERVER-OVERLAP-01).
+ * Sections keep their own padding; the body itself has none to avoid
+ * double gutters. */
+.kairo-server-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    min-width: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    scrollbar-width: thin;
+}
+
+.kairo-server-body > .kairo-widget-section:first-child {
+    border-top: none;
+}
+
+.kairo-server-body > .kairo-server-url + .kairo-widget-section {
+    border-top: none;
 }
 
 .kairo-server-item-state {
@@ -5289,8 +6002,20 @@ html, body {
     background: var(--kairo-bg);
 }
 
-.kairo-runconfig-list-item-actions .theia-button.danger {
+.kairo-runconfig-list-item-actions .theia-button.kairo-runconfig-btn-delete {
     margin-left: auto;
+    background: transparent !important;
+    border-color: transparent !important;
+    color: var(--kairo-error, #f04757) !important;
+}
+
+.kairo-runconfig-list-item-actions .theia-button.kairo-runconfig-btn-delete .codicon {
+    color: var(--kairo-error, #f04757) !important;
+}
+
+.kairo-runconfig-list-item-actions .theia-button.kairo-runconfig-btn-delete:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--kairo-error, #f04757) 12%, transparent) !important;
+    border-color: color-mix(in srgb, var(--kairo-error, #f04757) 40%, transparent) !important;
 }
 
 /* ------------------------------------------------------------------
@@ -8584,6 +9309,8 @@ html, body {
 .kairo-stash-message-input {
     resize: vertical;
     min-height: 64px;
+    width: 100%;
+    box-sizing: border-box;
 }
 
 .kairo-git-commit-meta {
@@ -9221,6 +9948,73 @@ html, body {
 .kairo-svn-selected-count {
     font-size: 12px;
     color: var(--kairo-text-secondary);
+}
+
+/* --- SVN changes view: narrow left-panel (1080p ~300px) polish ---
+ * Left panel is ~300-320px wide. The generic toolbar is single-row
+ * nowrap + hidden scrollbar, which clipped 3 of 7 SVN buttons.
+ * The commit box also squeezed: textarea was auto-width (~50%),
+ * selected-count wrapped per-character, 3 action buttons overflowed. */
+.kairo-svn-changes-view .kairo-widget-toolbar {
+    flex-wrap: wrap;
+    overflow-x: visible;
+    row-gap: 6px;
+}
+
+.kairo-svn-changes-view .kairo-widget-body {
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.kairo-svn-changes-view .kairo-widget-section {
+    padding: 8px;
+}
+
+.kairo-svn-changes-view .kairo-section-header {
+    background: transparent;
+    border-bottom: none;
+    padding: 0 0 6px 0;
+}
+
+.kairo-svn-commit-section .kairo-section-header {
+    background: transparent;
+    border-bottom: none;
+    padding: 0 0 8px 0;
+}
+
+.kairo-svn-changes-view .kairo-svn-commit-message {
+    min-height: 72px;
+}
+
+.kairo-svn-changes-view .kairo-svn-commit-actions {
+    flex-direction: column;
+    align-items: stretch;
+}
+
+.kairo-svn-changes-view .kairo-svn-selected-count {
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.kairo-svn-changes-view .kairo-svn-commit-buttons {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.kairo-svn-changes-view .kairo-svn-commit-buttons .theia-button {
+    flex: 1 1 auto;
+    min-width: 0;
+    white-space: nowrap;
+}
+
+.kairo-svn-changes-view .kairo-svn-commit-hint {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex-shrink: 1;
+    min-width: 0;
 }
 
 .kairo-svn-context-menu {
@@ -10408,6 +11202,7 @@ html, body {
 }
 
 .kairo-java-references-filter:focus {
+  border-color: var(--theia-focusBorder);
   outline: 1px solid var(--theia-focusBorder);
   outline-offset: -1px;
 }
@@ -12005,6 +12800,52 @@ html, body {
     .kairo-shortcuts-table-container {
         border-radius: 4px;
     }
+}
+
+/* ================================================================ */
+/*  IDEA-style selection: mouse click = background only, no outline  */
+/*  box. The outline returns for keyboard navigation (Tab/arrows),   */
+/*  gated by body.kairo-keyboard-nav set in                       */
+/*  KairoThemeContribution. Keeps ui-spec §6 WCAG focus-visible.     */
+/* ================================================================ */
+
+/* Mouse (or any non-keyboard) focus never draws an outline box. */
+*:focus:not(:focus-visible) {
+    outline: none !important;
+}
+
+/* Theia base paints `:focus:not(iframe)` + `.theia-button:focus` outlines,
+ * and Chrome also matches `:focus-visible` on mouse click for tabindex
+ * divs (activity bar, tabs, cards). In mouse mode hide them all — IDEA
+ * shows selection/hover background only. Keyboard mode
+ * (body.kairo-keyboard-nav) is unaffected, so every `:focus-visible`
+ * rule keeps working for Tab/arrow users. Editor content is excluded:
+ * Monaco manages its own find-widget/snippet/hover outlines. */
+body.kairo-mouse-nav *:focus:not(.monaco-editor *) {
+    outline: none !important;
+}
+
+/* Command palette / quick-input rows: hover+click focuses the row and
+ * Theia outlines it. Mouse users keep the hover background only. */
+body.kairo-mouse-nav .monaco-list .monaco-list-row.focused {
+    outline: none !important;
+}
+
+/* Theia draws an outline on every selected/focused tree row, so a
+ * mouse click on e.g. `src` shows background + box. IDEA shows
+ * background only — split the two layers here. */
+.theia-TreeNode.theia-mod-selected,
+.theia-TreeNode.theia-mod-focus,
+.theia-Tree .ReactVirtualized__List:focus-within .theia-TreeNode.theia-mod-focus {
+    outline: none !important;
+}
+
+/* Keyboard navigation restores the focus outline on the tree. */
+body.kairo-keyboard-nav .theia-TreeNode.theia-mod-selected,
+body.kairo-keyboard-nav .theia-TreeNode.theia-mod-focus,
+body.kairo-keyboard-nav .theia-Tree .ReactVirtualized__List:focus-within .theia-TreeNode.theia-mod-focus {
+    outline: 1px solid var(--theia-focusBorder, var(--kairo-primary, #4a9eff)) !important;
+    outline-offset: -1px;
 }
 
 

@@ -256,6 +256,9 @@ connection state: `●Connected`, `◌Reconnecting…`, `✕Disconnected`.
 
 - All interactive elements reachable by `Tab`, in a sensible order.
 - Visible focus ring (2 px accent, 3:1 contrast on every background).
+  IDEA-style: mouse click shows the selection background only (no outline
+  box on tree rows); the outline returns for keyboard (`Tab`/arrows)
+  navigation via `body.kairo-keyboard-nav`.
 - All icons have a tooltip AND an `aria-label`.
 - Color is **never** the only signal — server status has a glyph and
   text label, not just a green dot.

@@ -4,7 +4,7 @@ import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import { CommandService } from '@theia/core/lib/common';
 import { PreferenceService } from '@theia/core/lib/common/preferences';
 import { RuntimeConnectionService, WorkspaceContextService } from '@kairo/runtime-extension';
-import { KairoI18nService } from '@kairo/i18n';
+import { KairoI18nService, formatTimestamp } from '@kairo/i18n';
 import { ServerStore, ServerInstance, ConnectionState, HotReloadStatus } from './server-store';
 
 function stateIconClass(state: ServerInstance['state'] | 'disconnected'): string {
@@ -124,6 +124,7 @@ interface ServerViewProps {
 
 const ServerViewComponent: React.FC<ServerViewProps> = ({ store, commandService, runtime, i18n, preferences, workspaceContext }) => {
     const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
+    const locale = i18n.getCurrentLanguage();
     const [, forceUpdate] = React.useReducer(x => x + 1, 0);
     const [servers, setServers] = React.useState<ServerInstance[]>(store.getServers());
     const [connectionState, setConnectionState] = React.useState<ConnectionState>(store.getConnectionState());
@@ -217,6 +218,9 @@ const ServerViewComponent: React.FC<ServerViewProps> = ({ store, commandService,
     const handleStop = () => commandService.executeCommand('kairo.server.stop');
     const handleRestart = () => commandService.executeCommand('kairo.server.restart');
     const handleOpenApp = () => commandService.executeCommand('kairo.app.open');
+    const handleOpenLogs = () => {
+        void commandService.executeCommand('kairo.view.logs', activeServer?.id);
+    };
     // BD-P1-11: await the command promise instead of unconditional success.
     const handleUpdate = async () => {
         setPublishState('publishing');
@@ -367,6 +371,17 @@ const ServerViewComponent: React.FC<ServerViewProps> = ({ store, commandService,
                     <span className="codicon codicon-globe" aria-hidden="true" />
                     {t('widget.servers.toolbar.openApp')}
                 </button>
+                <button
+                    className="theia-button toolbar"
+                    data-testid="server-logs-button"
+                    onClick={handleOpenLogs}
+                    disabled={!activeServer || isDisconnected}
+                    aria-label={t('widget.logs.title')}
+                    title={t('widget.logs.title')}
+                >
+                    <span className="codicon codicon-output" aria-hidden="true" />
+                    {t('widget.logs.title')}
+                </button>
             </div>
 
             {activeServer && activeServer.url && activeServer.state === 'running' && (
@@ -378,18 +393,22 @@ const ServerViewComponent: React.FC<ServerViewProps> = ({ store, commandService,
                         rel="noopener noreferrer"
                         aria-label={t('widget.servers.info.urlAria', { url: activeServer.url })}
                         data-testid="server-url-link"
+                        title={activeServer.url}
                     >
                         {activeServer.url}
                     </a>
                 </div>
             )}
+            {/* Scrollable body: keeps header/toolbar fixed so long histories
+                can never clip the server list (KAIRO-SERVER-OVERLAP-01). */}
+            <div className="kairo-widget-body kairo-server-body">
 
             {activeServer && (
                 <div className="kairo-widget-section" data-testid="server-info">
                     <div className="kairo-section-title">{t('widget.servers.info.title')}</div>
                     <dl className="kairo-info-list" data-testid="server-info-list">
                         <dt>{t('widget.servers.info.id')}</dt>
-                        <dd data-testid="server-info-id">{activeServer.id}</dd>
+                        <dd data-testid="server-info-id" title={activeServer.id}>{activeServer.id}</dd>
                         <dt>{t('widget.servers.info.port')}</dt>
                         <dd data-testid="server-info-port">{activeServer.httpPort}</dd>
                         {Boolean(activeServer.debugPort) && (
@@ -403,7 +422,7 @@ const ServerViewComponent: React.FC<ServerViewProps> = ({ store, commandService,
                         <dt>{t('widget.servers.info.pid')}</dt>
                         <dd data-testid="server-info-pid">{activeServer.pid}</dd>
                         <dt>{t('widget.servers.info.started')}</dt>
-                        <dd data-testid="server-info-start-time">{activeServer.startTime}</dd>
+                        <dd data-testid="server-info-start-time" title={activeServer.startTime}>{formatTimestamp(activeServer.startTime, locale)}</dd>
                     </dl>
                 </div>
             )}
@@ -455,7 +474,7 @@ const ServerViewComponent: React.FC<ServerViewProps> = ({ store, commandService,
                                 data-testid={`server-${s.id}`}
                             >
                                 <span className={`kairo-server-state-icon codicon ${stateIconClass(s.state)}`} aria-hidden="true" title={stateLabel(s.state, t)} />
-                                <span className="kairo-server-id">{s.id}</span>
+                                <span className="kairo-server-id" title={s.id}>{s.id}</span>
                                 <span className="kairo-server-item-state" data-state={s.state}>{stateLabel(s.state, t)}</span>
                                 <span className="kairo-server-port">:{s.httpPort}</span>
                                 {Boolean(s.debugPort) && (
@@ -467,6 +486,7 @@ const ServerViewComponent: React.FC<ServerViewProps> = ({ store, commandService,
                         ))}
                     </ul>
                 )}
+            </div>
             </div>
         </div>
     );

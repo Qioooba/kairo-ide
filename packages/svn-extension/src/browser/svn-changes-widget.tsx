@@ -113,7 +113,10 @@ const FileSection: React.FC<FileSectionProps> = ({
   emptyText,
   i18n,
 }) => {
-  if (files.length === 0 && !actionLabel) {
+  // Show the section when it has files OR an empty-state hint.
+  // (Previously `!actionLabel` hid e.g. "No conflicts" entirely,
+  // leaving a large blank body when the working copy is clean.)
+  if (files.length === 0 && !emptyText) {
     return null;
   }
   return (
@@ -130,7 +133,7 @@ const FileSection: React.FC<FileSectionProps> = ({
         )}
       </div>
       {files.length === 0 ? (
-        emptyText ? <p className="kairo-empty-state">{emptyText}</p> : null
+        emptyText ? <p className="kairo-empty">{emptyText}</p> : null
       ) : (
         <ul className="kairo-svn-file-list">
           {files.map(f => (
@@ -223,7 +226,7 @@ const SvnChangesComponent: React.FC<SvnChangesProps> = ({ store, svnService, com
   const changelistNames = Object.keys(state.changelists || {}).sort();
 
   return (
-    <div className="kairo-widget" data-testid="svn-changes-view">
+    <div className="kairo-widget kairo-svn-changes-view" data-testid="svn-changes-view">
       <div className="kairo-widget-header" data-testid="svn-changes-header">
         <span className="kairo-widget-title">{t('widget.svn.changes.title')}</span>
         {state.available && state.branchName && (

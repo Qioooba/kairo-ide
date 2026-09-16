@@ -66,7 +66,21 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
   private isPlaceholderText(text: string): boolean {
     // Normalize Theia codicon prefix (e.g. "$(file-directory) ") and optional session suffix.
     const normalized = text.replace(/^\$\([^)]+\)\s*/, '').replace(/\s*·\s*.*$/, '').replace(/…$/, '');
-    return /(?:Project: \(no workspace\)|Project: \(not imported\)|JDK: -|JDK: crashed|JDK: not ready|JDK: stopped|JDK: uninitialized|Encoding: -|Build: -|Build: no record|Server: stopped|Server: disconnected|Server: unavailable|Server: connecting|Agent: disconnected|Agent: closed|Agent: connecting|HotReload: -|Debug: unknown|Debug: unavailable|Debug: terminated|Debug: none|SVN: not found|调试：无|项目：\(无工作区\)|项目：\(未导入\)|JDK：-|JDK：已崩溃|JDK：未就绪|JDK：已停止|编码：-|构建：-|构建：无记录|服务器：已停止|服务器：已断开|服务器：不可用|服务器：连接中…|代理：已断开|代理：已关闭|代理：连接中…|热重载：-|SVN：未找到)$/.test(normalized);
+    return /(?:Project: \(no workspace\)|Project: \(not imported\)|JDK: -|JDK: crashed|JDK: not ready|JDK: stopped|JDK: uninitialized|Encoding: -|Build: -|Build: no record|Server: stopped|Server: disconnected|Server: unavailable|Server: connecting|Agent: disconnected|Agent: closed|Agent: connecting|HotReload: -|Debug: unknown|Debug: unavailable|Debug: terminated|Debug: none|SVN: not found|调试：无|项目：\(无工作区\)|项目：\(未导入\)|JDK：-|JDK：已崩溃|JDK：未就绪|JDK：已停止|编码：-|构建：-|构建：无记录|构建：空闲|构建：等待中|构建：运行中|构建：成功|构建：失败|构建：已取消|服务器：已停止|服务器：启动中|服务器：运行中|服务器：停止中|服务器：错误|服务器：已崩溃|服务器：已断开|服务器：不可用|服务器：连接中…|代理：已断开|代理：已关闭|代理：连接中…|热重载：-|SVN：未找到)$/.test(normalized);
+  }
+
+  /** Localized label for a build state (falls back to the raw state id). */
+  private buildStateLabel(state: string): string {
+    const key = `widget.builds.state.${state}`;
+    const label = this.i18n.t(key as never);
+    return label === key ? state : label;
+  }
+
+  /** Localized label for a server state (falls back to the raw state id). */
+  private serverStateLabel(state: string): string {
+    const key = `widget.servers.state.${state}`;
+    const label = this.i18n.t(key as never);
+    return label === key ? state : label;
   }
 
   /** Build a status-bar element class name that includes its logical group and optional placeholder marker. */
@@ -462,12 +476,13 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
       }
     })();
     const summary = latest.summary ? ` · ${latest.summary}` : '';
-    const text = t('statusBar.build', { state: latest.state });
+    const buildLabel = this.buildStateLabel(latest.state);
+    const text = t('statusBar.build', { state: buildLabel });
     this.statusBar.setElement('kairo.build', {
       text: `${icon} ${text}${summary}`,
       tooltip: t('statusBar.buildTooltipWithDetails', {
         id: latest.id,
-        state: latest.state,
+        state: buildLabel,
         summary: latest.summary ?? '',
         startTime: latest.startTime ?? '',
         endTime: latest.endTime ?? '',
@@ -509,11 +524,12 @@ export class KairoStatusBarContribution implements FrontendApplicationContributi
     const debugPort = srv.debugPort ? `· JDWP:${srv.debugPort}` : '';
     const icon = srv.state === 'running' ? '$(server-process~spin)' : '$(server-process)';
     const extras = [port, debugPort].filter(Boolean).join(' ');
-    const label = t('statusBar.server', { state: srv.state });
+    const serverLabel = this.serverStateLabel(srv.state);
+    const label = t('statusBar.server', { state: serverLabel });
     const text = extras ? `${label} ${extras}` : label;
     setServerElement(`${icon} ${text}`, srv.debugPort
-      ? t('statusBar.serverTooltipWithPorts', { state: srv.state, id: srv.id, debugPort: srv.debugPort })
-      : t('statusBar.serverTooltipNoDebug', { state: srv.state, id: srv.id }), srv.state);
+      ? t('statusBar.serverTooltipWithPorts', { state: serverLabel, id: srv.id, debugPort: srv.debugPort })
+      : t('statusBar.serverTooltipNoDebug', { state: serverLabel, id: srv.id }), srv.state);
   }
 
   /**

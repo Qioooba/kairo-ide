@@ -11,7 +11,7 @@ import { KairoI18nService } from '@kairo/i18n';
 import { KairoSearchSessionModel, type SearchSessionState } from './search-session-model';
 import { SearchReplaceService, type ReplaceApplyResult, type ReplacePlan } from './search-replace-service';
 import { resolveWorkspaceMatchUri } from './search-path';
-import { SearchScopeModel, type SearchHistoryEntry, type SearchScope, SCOPE_OPTIONS } from './search-scope-model';
+import { SearchScopeModel, type SearchHistoryEntry, type SearchScope, SCOPE_OPTIONS, parseMaxResultsInput, parseDisplayLimitInput, limitToInput } from './search-scope-model';
 import { parseFileMask, mergeGlobs } from './file-mask';
 import { groupMatchesByFile, sameLineContext, multiLineContext, getSearchFileName, getSearchFileDir, getSearchFileIcon, matchPreviewParts } from './search-result-utils';
 import { SearchResultsWidget } from './search-results-widget';
@@ -32,6 +32,16 @@ export interface SearchCenterQuery {
   /** Absolute directory or file to scope the search. */
   rootPath?: string;
   scope?: SearchScope;
+  /**
+   * Backend match cap. undefined = server default (100_000); -1 = unlimited.
+   * Mirrors the IDEA split between full-result scope and preview limit.
+   */
+  maxResults?: number;
+  /**
+   * Frontend-only preview cap: at most this many matches are rendered.
+   * undefined = show all. Never sent to the backend.
+   */
+  displayLimit?: number;
   /** Replace mode: stream the post-image so rows render a replacement preview. */
   previewReplace?: string;
 }
@@ -53,6 +63,52 @@ export interface SearchCenterProps {
   mode?: 'search' | 'replace';
   initialQuery?: string;
   i18n: KairoI18nService;
+  /** IDEA-style minimize: hide the modal, keep results, show a floating restore button. */
+  minimized?: boolean;
+  onMinimize?: () => void;
+  onRestore?: () => void;
+}
+
+const MODAL_SIZE_KEY = 'kairo.search.center.modalSize';
+const PREVIEW_VISIBLE_KEY = 'kairo.search.center.previewVisible';
+const PREVIEW_HEIGHT_KEY = 'kairo.search.center.previewHeight';
+const MODAL_MIN_W = 480;
+const MODAL_MIN_H = 360;
+const PREVIEW_MIN_H = 80;
+const PREVIEW_MAX_H = 420;
+const PREVIEW_DEFAULT_H = 180;
+
+function readModalSize(): { width?: number; height?: number } {
+  try {
+    const raw = localStorage.getItem(MODAL_SIZE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as { width?: number; height?: number };
+    const width = typeof parsed.width === 'number' && parsed.width >= MODAL_MIN_W ? parsed.width : undefined;
+    const height = typeof parsed.height === 'number' && parsed.height >= MODAL_MIN_H ? parsed.height : undefined;
+    return { width, height };
+  } catch {
+    return {};
+  }
+}
+
+function readPreviewVisible(defaultValue: boolean): boolean {
+  try {
+    const raw = localStorage.getItem(PREVIEW_VISIBLE_KEY);
+    return raw === null ? defaultValue : raw !== '0';
+  } catch {
+    return defaultValue;
+  }
+}
+
+function readPreviewHeight(): number {
+  try {
+    const raw = localStorage.getItem(PREVIEW_HEIGHT_KEY);
+    const value = raw === null ? PREVIEW_DEFAULT_H : Number(raw);
+    if (!Number.isFinite(value)) return PREVIEW_DEFAULT_H;
+    return Math.min(PREVIEW_MAX_H, Math.max(PREVIEW_MIN_H, value));
+  } catch {
+    return PREVIEW_DEFAULT_H;
+  }
 }
 
 export function parseGlobInput(value: string): string[] | undefined {
@@ -86,6 +142,9 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
   mode = 'search',
   initialQuery = '',
   i18n,
+  minimized = false,
+  onMinimize,
+  onRestore,
 }) => {
   const t = React.useCallback((key: string, params?: Record<string, string | number>) => i18n.t(key as any, params), [i18n]);
   const [query, setQuery] = React.useState(initialQuery);
@@ -102,14 +161,138 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
   const [canUndo, setCanUndo] = React.useState(false);
   const [scope, setScope] = React.useState<SearchScope>('project');
   const [fileTypes, setFileTypes] = React.useState('');
+  const [maxResultsInput, setMaxResultsInput] = React.useState(() => limitToInput(scopeModel?.getLimits().maxResults));
+  const [displayLimitInput, setDisplayLimitInput] = React.useState(() => limitToInput(scopeModel?.getLimits().displayLimit));
   const [collapsedFiles, setCollapsedFiles] = React.useState<Set<string>>(new Set());
-  const [showPreview, setShowPreview] = React.useState(true);
+  const [showPreview, setShowPreview] = React.useState(() => readPreviewVisible(true));
+  const [previewHeight, setPreviewHeight] = React.useState(() => readPreviewHeight());
+  const [modalSize, setModalSize] = React.useState(() => readModalSize());
   const [currentMode, setCurrentMode] = React.useState<'search' | 'replace'>(mode);
   const [showAdvanced, setShowAdvanced] = React.useState(false);
   const [historyOpen, setHistoryOpen] = React.useState(false);
   const [historyRevision, setHistoryRevision] = React.useState(0);
   const containerRef = React.useRef<HTMLDivElement>(null);
   const inputRef = React.useRef<HTMLInputElement>(null);
+  const modalResizeRef = React.useRef<{ startX: number; startY: number; startW: number; startH: number } | null>(null);
+  const previewResizeRef = React.useRef<{ startY: number; startH: number } | null>(null);
+
+  const setShowPreviewPersisted = React.useCallback((visible: boolean) => {
+    setShowPreview(visible);
+    try {
+      localStorage.setItem(PREVIEW_VISIBLE_KEY, visible ? '1' : '0');
+    } catch {
+      // Storage may be unavailable; layout still works in-memory.
+    }
+  }, []);
+
+  const persistModalSize = React.useCallback((size: { width?: number; height?: number }) => {
+    try {
+      localStorage.setItem(MODAL_SIZE_KEY, JSON.stringify(size));
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const persistPreviewHeight = React.useCallback((height: number) => {
+    try {
+      localStorage.setItem(PREVIEW_HEIGHT_KEY, String(height));
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const onModalResizeMove = React.useCallback((event: PointerEvent) => {
+    const drag = modalResizeRef.current;
+    const modal = containerRef.current;
+    if (!drag || !modal) return;
+    const rect = modal.getBoundingClientRect();
+    const baseW = drag.startW || rect.width;
+    const baseH = drag.startH || rect.height;
+    const width = Math.max(MODAL_MIN_W, Math.min(window.innerWidth * 0.96, baseW + (event.clientX - drag.startX)));
+    const height = Math.max(MODAL_MIN_H, Math.min(window.innerHeight * 0.9, baseH + (event.clientY - drag.startY)));
+    setModalSize({ width: Math.round(width), height: Math.round(height) });
+  }, []);
+
+  const endModalResize = React.useCallback((event: PointerEvent) => {
+    if (modalResizeRef.current) {
+      modalResizeRef.current = null;
+      setModalSize(current => {
+        if (current.width !== undefined || current.height !== undefined) {
+          persistModalSize(current);
+        }
+        return current;
+      });
+    }
+    try {
+      (event.target as HTMLElement)?.releasePointerCapture?.(event.pointerId);
+    } catch {
+      // ignore
+    }
+    window.removeEventListener('pointermove', onModalResizeMove);
+    window.removeEventListener('pointerup', endModalResize);
+    window.removeEventListener('pointercancel', endModalResize);
+  }, [onModalResizeMove, persistModalSize]);
+
+  const beginModalResize = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    const modal = containerRef.current;
+    const rect = modal?.getBoundingClientRect();
+    modalResizeRef.current = {
+      startX: event.clientX,
+      startY: event.clientY,
+      startW: rect?.width ?? 0,
+      startH: rect?.height ?? 0,
+    };
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // ignore
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    window.addEventListener('pointermove', onModalResizeMove);
+    window.addEventListener('pointerup', endModalResize);
+    window.addEventListener('pointercancel', endModalResize);
+  }, [endModalResize, onModalResizeMove]);
+
+  const onPreviewResizeMove = React.useCallback((event: PointerEvent) => {
+    const drag = previewResizeRef.current;
+    if (!drag) return;
+    const height = Math.min(PREVIEW_MAX_H, Math.max(PREVIEW_MIN_H, drag.startH - (event.clientY - drag.startY)));
+    setPreviewHeight(Math.round(height));
+  }, []);
+
+  const endPreviewResize = React.useCallback((event: PointerEvent) => {
+    if (previewResizeRef.current) {
+      previewResizeRef.current = null;
+      setPreviewHeight(current => {
+        persistPreviewHeight(current);
+        return current;
+      });
+    }
+    window.removeEventListener('pointermove', onPreviewResizeMove);
+    window.removeEventListener('pointerup', endPreviewResize);
+    window.removeEventListener('pointercancel', endPreviewResize);
+  }, [onPreviewResizeMove, persistPreviewHeight]);
+
+  const beginPreviewResize = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    previewResizeRef.current = { startY: event.clientY, startH: previewHeight };
+    event.preventDefault();
+    event.stopPropagation();
+    window.addEventListener('pointermove', onPreviewResizeMove);
+    window.addEventListener('pointerup', endPreviewResize);
+    window.addEventListener('pointercancel', endPreviewResize);
+  }, [endPreviewResize, onPreviewResizeMove, previewHeight]);
+
+  React.useEffect(() => () => {
+    window.removeEventListener('pointermove', onModalResizeMove);
+    window.removeEventListener('pointerup', endModalResize);
+    window.removeEventListener('pointercancel', endModalResize);
+    window.removeEventListener('pointermove', onPreviewResizeMove);
+    window.removeEventListener('pointerup', endPreviewResize);
+    window.removeEventListener('pointercancel', endPreviewResize);
+  }, [endModalResize, endPreviewResize, onModalResizeMove, onPreviewResizeMove]);
 
   // Read the model on every render. History is mutated after a search has
   // completed (outside the session-state update), so memoizing only on the
@@ -154,11 +337,21 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
   }, [initialQuery]);
 
   const matches = state.matches;
+  // IDEA-style split: the backend searches up to maxResults while the
+  // preview only renders the first displayLimit matches.
+  const displayLimit = state.options?.displayLimit;
+  const visibleMatches = React.useMemo(() => {
+    if (displayLimit !== undefined && displayLimit > 0) {
+      return matches.slice(0, displayLimit);
+    }
+    return matches;
+  }, [matches, displayLimit]);
+  const displayCapped = visibleMatches.length < matches.length;
   // Streaming accumulates into a stable array; the revision counter marks
   // new data. Keying off both keeps grouping correct without re-running on
   // every unrelated state tick.
   const streamRevision = state.streamState?.revision ?? 0;
-  const groups = React.useMemo(() => groupMatchesByFile(matches), [matches, streamRevision]);
+  const groups = React.useMemo(() => groupMatchesByFile(visibleMatches), [visibleMatches, streamRevision]);
 
   // Reset the keyboard selection onto the first match only when a NEW result
   // set arrives (request id or live match count changed). Recomputing on every
@@ -188,7 +381,7 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
   }, [groups, collapsedFiles]);
 
   React.useEffect(() => {
-    const navKey = `${state.requestId}:${matches.length}`;
+    const navKey = `${state.requestId}:${visibleMatches.length}`;
     if (navKeyRef.current === navKey) {
       return;
     }
@@ -269,6 +462,10 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
     setSubmissionError(undefined);
     scopeModel?.setScope(scope);
     scopeModel?.setFileTypes(fileTypes);
+    const parsedMaxResults = parseMaxResultsInput(maxResultsInput);
+    const parsedDisplayLimit = parseDisplayLimitInput(displayLimitInput);
+    scopeModel?.setMaxResults(parsedMaxResults);
+    scopeModel?.setDisplayLimit(parsedDisplayLimit);
     const mask = parseFileMask(fileTypes);
     const excludeExtra = parseGlobInput(exclude);
     try {
@@ -280,6 +477,8 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
         include: mask.include,
         exclude: mergeGlobs(mask.exclude, excludeExtra),
         scope,
+        ...(parsedMaxResults !== undefined ? { maxResults: parsedMaxResults } : {}),
+        ...(parsedDisplayLimit !== undefined ? { displayLimit: parsedDisplayLimit } : {}),
         ...(currentMode === 'replace' && replacement.trim() ? { previewReplace: replacement.trim() } : {}),
       });
     } catch (error) {
@@ -408,7 +607,18 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
     const contextAfter = afterLines.slice(0, 3);
 
     return (
-      <div className="kairo-search-preview-pane">
+      <div className="kairo-search-preview-pane" style={{ height: previewHeight, maxHeight: previewHeight, flex: `0 0 ${previewHeight}px` }}>
+        <div
+          className="kairo-search-preview-resize"
+          data-testid="search-preview-resize"
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label={t('widget.search.center.preview.hide')}
+          title={t('widget.search.center.preview.hide')}
+          onPointerDown={beginPreviewResize}
+        >
+          <div className="kairo-search-preview-resize-grip" aria-hidden="true" />
+        </div>
         <div className="kairo-search-preview-header">
           <span className="codicon codicon-file" aria-hidden="true" />
           <span className="kairo-search-preview-file">{selectedMatch.file}</span>
@@ -416,7 +626,7 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
           <button
             type="button"
             className="kairo-search-preview-toggle"
-            onClick={() => setShowPreview(false)}
+            onClick={() => setShowPreviewPersisted(false)}
             title={t('widget.search.center.preview.hide')}
           >
             <span className="codicon codicon-chevron-down" />
@@ -495,11 +705,45 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
     }
   };
 
+  if (minimized) {
+    const summary = matchCount > 0
+      ? (fileCount > 0
+        ? t('widget.search.center.stats.matchInFiles', { count: matchCount, fileCount })
+        : t('widget.search.center.stats.match', { count: matchCount }))
+      : query.trim()
+        ? query.trim()
+        : t('widget.search.center.mode.search');
+    return (
+      <button
+        type="button"
+        className="kairo-search-float-restore"
+        onClick={() => onRestore?.()}
+        data-testid="search-restore"
+        title={t('widget.search.center.openInFindWindow')}
+      >
+        <span className="codicon codicon-search" aria-hidden="true" />
+        <span className="kairo-search-float-label">{summary}</span>
+        <span className="codicon codicon-chevron-up" aria-hidden="true" />
+      </button>
+    );
+  }
+
+  const modalStyle: React.CSSProperties = {};
+  if (modalSize.width !== undefined) {
+    modalStyle.width = modalSize.width;
+    modalStyle.maxWidth = '96vw';
+  }
+  if (modalSize.height !== undefined) {
+    modalStyle.height = modalSize.height;
+    modalStyle.maxHeight = '90vh';
+  }
+
   return (
     <div className="kairo-search-backdrop" onClick={() => onClose()} data-testid="search-center-backdrop">
       <div
         className="kairo-search-modal"
         ref={containerRef}
+        style={modalStyle}
         onKeyDown={keyDown}
         onClick={event => event.stopPropagation()}
         role="dialog"
@@ -528,14 +772,28 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
               </button>
             )}
           </div>
-          <button
-            type="button"
-            className="kairo-search-close"
-            onClick={() => onClose()}
-            title={t('widget.search.center.closeTooltip')}
-          >
-            <span className="codicon codicon-chrome-close" />
-          </button>
+          <div className="kairo-search-header-actions">
+            {onMinimize && (
+              <button
+                type="button"
+                className="kairo-search-close"
+                onClick={() => onMinimize()}
+                title={t('widget.search.center.minimizeTooltip')}
+                aria-label={t('widget.search.center.minimizeTooltip')}
+                data-testid="search-minimize"
+              >
+                <span className="codicon codicon-chrome-minimize" />
+              </button>
+            )}
+            <button
+              type="button"
+              className="kairo-search-close"
+              onClick={() => onClose()}
+              title={t('widget.search.center.closeTooltip')}
+            >
+              <span className="codicon codicon-chrome-close" />
+            </button>
+          </div>
         </div>
 
         <div className="kairo-search-input-area">
@@ -801,6 +1059,34 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
                 </div>
               </div>
             )}
+            {showAdvanced && (
+              <div className="kairo-search-options-row kairo-search-advanced-row">
+                <div className="kairo-search-file-mask" title={t('widget.search.center.placeholder.maxResultsHint')}>
+                  <span className="codicon codicon-symbol-numeric" aria-hidden="true" />
+                  <input
+                    className="kairo-search-mask-input"
+                    value={maxResultsInput}
+                    onChange={event => setMaxResultsInput(event.target.value)}
+                    placeholder={t('widget.search.center.placeholder.maxResults')}
+                    aria-label={t('widget.search.center.ariaLabel.maxResults')}
+                    data-testid="filter-max-results"
+                    inputMode="numeric"
+                  />
+                </div>
+                <div className="kairo-search-file-mask" title={t('widget.search.center.placeholder.displayLimitHint')}>
+                  <span className="codicon codicon-eye" aria-hidden="true" />
+                  <input
+                    className="kairo-search-mask-input"
+                    value={displayLimitInput}
+                    onChange={event => setDisplayLimitInput(event.target.value)}
+                    placeholder={t('widget.search.center.placeholder.displayLimit')}
+                    aria-label={t('widget.search.center.ariaLabel.displayLimit')}
+                    data-testid="filter-display-limit"
+                    inputMode="numeric"
+                  />
+                </div>
+              </div>
+            )}
           </form>
         </div>
 
@@ -901,8 +1187,13 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
             />
           )}
           {state.truncated && (
-            <div className="kairo-search-truncated" role="status">
-              {t('widget.search.center.truncated')}
+            <div className="kairo-search-truncated" role="status" data-testid="search-truncated">
+              {t('widget.search.center.truncated')} ({visibleMatches.length}/{matchCount})
+            </div>
+          )}
+          {displayCapped && (
+            <div className="kairo-search-truncated" role="status" data-testid="search-display-capped">
+              {t('widget.search.center.displayCapped', { shown: visibleMatches.length, total: matches.length })}
             </div>
           )}
         </div>
@@ -913,7 +1204,7 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
               <button
                 type="button"
                 className="kairo-search-preview-show"
-                onClick={() => setShowPreview(true)}
+                onClick={() => setShowPreviewPersisted(true)}
               >
                 <span className="codicon codicon-chevron-up" />
                 {t('widget.search.center.preview.show')}
@@ -929,6 +1220,7 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
               ? t('widget.search.center.stats.matchInFiles', { count: matchCount, fileCount })
               : t('widget.search.center.stats.match', { count: matchCount }))}
             {isStreaming && matches.length > 0 && t('widget.search.center.stats.streaming')}
+            {state.truncated && t('widget.search.center.truncatedHint')}
           </span>
           <div className="kairo-search-actions">
             {onOpenInFindWindow && matches.length > 0 && (
@@ -951,7 +1243,7 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
             <button
               type="button"
               className="kairo-search-footer-btn"
-              onClick={() => setShowPreview(!showPreview)}
+              onClick={() => setShowPreviewPersisted(!showPreview)}
               title={showPreview ? t('widget.search.center.preview.hide') : t('widget.search.center.preview.show')}
               disabled={matchCount === 0}
               style={matchCount === 0 ? { display: 'none' } : undefined}
@@ -959,6 +1251,16 @@ export const SearchCenterComponent: React.FC<SearchCenterProps> = ({
               {showPreview ? t('widget.search.center.preview.hide') : t('widget.search.center.preview.show')}
             </button>
           </div>
+        </div>
+        <div
+          className="kairo-search-resize-handle"
+          data-testid="search-resize-handle"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize"
+          onPointerDown={beginModalResize}
+        >
+          <span className="codicon codicon-gripper" aria-hidden="true" />
         </div>
       </div>
     </div>
@@ -984,10 +1286,23 @@ export class SearchCenterWidget extends ReactWidget {
   protected unsubscribe: (() => void) | undefined;
   protected mode: 'search' | 'replace' = 'search';
   protected initialQuery = '';
+  protected minimized = false;
 
   setMode(mode: 'search' | 'replace'): void {
     this.mode = mode;
     this.update();
+  }
+
+  setMinimized(minimized: boolean): void {
+    if (this.minimized === minimized) {
+      return;
+    }
+    this.minimized = minimized;
+    this.update();
+  }
+
+  isMinimized(): boolean {
+    return this.minimized;
   }
 
   /** Prefill from editor selection (IDEA: Find in Path uses selected text). */
@@ -1005,7 +1320,9 @@ export class SearchCenterWidget extends ReactWidget {
       this.shell.addWidget(widget, { area: 'bottom', rank: 150 });
     }
     this.shell.activateWidget(widget.id);
-    this.close();
+    // IDEA parity: keep the popup query/results. Minimize to the floating
+    // button instead of closing, so Ctrl+Shift+F restores without a page switch.
+    this.setMinimized(true);
   }
 
   constructor() {
@@ -1144,6 +1461,9 @@ export class SearchCenterWidget extends ReactWidget {
       mode={this.mode}
       initialQuery={this.initialQuery}
       i18n={this.i18n}
+      minimized={this.minimized}
+      onMinimize={() => this.setMinimized(true)}
+      onRestore={() => this.setMinimized(false)}
     />;
   }
 }

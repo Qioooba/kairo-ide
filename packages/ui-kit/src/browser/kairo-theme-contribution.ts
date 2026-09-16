@@ -240,6 +240,33 @@ export class KairoThemeContribution implements FrontendApplicationContribution, 
             ed.updateOptions({ bracketPairColorization: { enabled: false } });
         });
 
+        // IDEA-style focus: track input modality so a mouse click shows
+        // the selection background only (no outline box), while Tab/arrow
+        // keyboard navigation restores the focus outline via
+        // body.kairo-keyboard-nav in kairo-theme.css. Still satisfies
+        // ui-spec §6 / WCAG focus-visible for keyboard users.
+        if (typeof document !== 'undefined' && typeof window !== 'undefined') {
+            const body = document.body;
+            const toKeyboard = (): void => {
+                body.classList.add('kairo-keyboard-nav');
+                body.classList.remove('kairo-mouse-nav');
+            };
+            const toMouse = (): void => {
+                body.classList.add('kairo-mouse-nav');
+                body.classList.remove('kairo-keyboard-nav');
+            };
+            // Default to mouse: IDEA feel, no outline boxes on click.
+            toMouse();
+            window.addEventListener('pointerdown', toMouse, { passive: true } as AddEventListenerOptions);
+            window.addEventListener('mousedown', toMouse, { passive: true } as AddEventListenerOptions);
+            window.addEventListener('touchstart', toMouse, { passive: true } as AddEventListenerOptions);
+            window.addEventListener('keydown', (e: KeyboardEvent) => {
+                if (e.key === 'Tab' || e.key.startsWith('Arrow')) {
+                    toKeyboard();
+                }
+            }, { passive: true } as AddEventListenerOptions);
+        }
+
         // Theia 1.73 caches `WidgetManager.factories` lazily on the
         // first access, and the cache lives in `_cachedFactories`
         // and inside `factoryProvider.services`. Both caches are

@@ -582,6 +582,7 @@ export interface SearchRequest {
   include?: string[];
   exclude?: string[];
   contextLines?: number;
+  /** Max matches to search. Omitted/0 = server default (100_000); negative = unlimited. */
   maxResults?: number;
   /** If true, also return replace previews. */
   previewReplace?: string;

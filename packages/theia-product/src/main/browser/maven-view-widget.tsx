@@ -46,7 +46,9 @@ const TreeNode: React.FC<TreeNodeProps> = ({ node, depth, t }) => {
         data-testid={`maven-dep-${node.artifactId}`}
       >
         <span className="kairo-maven-tree-toggle">
-          {hasChildren ? (expanded ? '▼' : '▶') : '  '}
+          {hasChildren ? (
+            <span className={`codicon ${expanded ? 'codicon-chevron-down' : 'codicon-chevron-right'}`} aria-hidden="true" />
+          ) : null}
         </span>
         <span className="kairo-maven-dep-name">{node.groupId}:{node.artifactId}</span>
         <span className="kairo-maven-dep-version">{node.version}</span>
@@ -163,7 +165,7 @@ const MavenViewComponent: React.FC<MavenViewComponentProps> = ({ runtime, messag
 
       <div className="kairo-widget-toolbar" data-testid="maven-view-toolbar">
         <button
-          className="theia-button"
+          className="theia-button main"
           data-testid="maven-detect-button"
           onClick={detectProject}
           disabled={loading}
@@ -181,7 +183,12 @@ const MavenViewComponent: React.FC<MavenViewComponentProps> = ({ runtime, messag
       </div>
 
       {loading && <p className="kairo-empty" data-testid="maven-loading">{t('widget.maven.loading')}</p>}
-      {error && <div className="theia-error" role="alert" data-testid="maven-error">{error}</div>}
+      {error && (
+        <div className="kairo-error-banner" role="alert" data-testid="maven-error">
+          <span className="codicon codicon-error" aria-hidden="true" />
+          <span>{/outside any authorized workspace root/i.test(error) ? t('widget.maven.workspaceOutsideRoot', { message: error }) : error}</span>
+        </div>
+      )}
 
       {result?.project && (
         <>

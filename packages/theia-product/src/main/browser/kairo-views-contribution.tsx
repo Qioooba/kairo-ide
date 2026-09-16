@@ -1041,6 +1041,9 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
           }
           const srv = await this.serverSvc.start(p.projectId, false);
           this.messages.info(this.i18n.t('views.serverState', { id: srv.id, state: srv.state }));
+          // IDEA-style: pop the startup console immediately so Tomcat
+          // output is visible without hunting for the Logs view.
+          await this.revealLogsForServer(srv.id);
         } catch (err) {
           this.messages.error(kairoErrorMessage(err, this.i18n.t('views.serverStartFailed')));
         }
@@ -1076,6 +1079,9 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
           }
           const srv = await this.serverSvc.start(p.projectId, true);
           serverId = srv.id;
+          // Show the startup console before attaching the debugger so
+          // suspend=y stalls are visible instead of a silent hang.
+          await this.revealLogsForServer(srv.id);
           const port = srv.ports.debug;
           if (!port) throw new Error(this.i18n.t('views.tomcatNoJdwpPort'));
           const status = await javaDebug.attach({
@@ -1166,16 +1172,29 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
         try {
           await this.activeProject.requireProject();
           const list = await this.runtime.request('GET /api/v1/servers', undefined) as ServerInstance[];
-          for (const srv of list) {
+          // Only restart live servers — stale stopped/error rows would fail
+          // the whole command (same guard as STOP).
+          const alive = list.filter(s => s.state !== 'stopped' && s.state !== 'error' && s.state !== 'crashed');
+          if (alive.length === 0) {
+            this.messages.info(this.i18n.t('views.noRunningServer'));
+            return undefined;
+          }
+          for (const srv of alive) {
             const result = await this.runtime.request(
               'POST /api/v1/servers/{serverId}/restart',
               undefined,
               { pathParams: { serverId: srv.id } },
             ) as ServerInstance;
+            try {
+              this.serverSvc.adopt(result);
+            } catch {
+              // Store may already be clean — never fail restart on adopt.
+            }
             this.messages.info(this.i18n.t('views.serverRestarted', {
               id: result.id,
               pid: result.pid ?? '?',
             }));
+            await this.revealLogsForServer(result.id);
           }
         } catch (err) {
           this.messages.error(kairoErrorMessage(err, this.i18n.t('views.serverRestartFailed')));
@@ -1221,7 +1240,11 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
       execute: () => { void this.revealOrCreate(KairoDeploymentsWidget.ID, () => this.deploymentsView, w => { this.deploymentsView = w; }); },
     });
     registry.registerCommand(this.withLabel(KairoCommands.REVEAL_KAIRO_LOGS), {
-      execute: () => { void this.revealOrCreate(LogViewerWidget.ID, () => this.logsView, w => { this.logsView = w; }); },
+      // Optional first arg is a server id (Start/Debug/Restart and the
+      // Run Configuration service pass the fresh server through here).
+      // Logs live in the bottom panel IDEA-style: wide enough to read
+      // stack traces without horizontal scrolling the whole sidebar.
+      execute: (serverId?: string) => { void this.revealLogsForServer(typeof serverId === 'string' ? serverId : undefined); },
     });
     registry.registerCommand(this.withLabel(KairoCommands.REVEAL_KAIRO_MAVEN), {
       execute: () => { void this.revealOrCreate(MavenViewWidget.ID, () => this.mavenView, w => { this.mavenView = w; }); },
@@ -1849,6 +1872,32 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
     w.update();
   }
 
+  /**
+   * IDEA-style startup console: reveal the Tomcat Logs view in the bottom
+   * panel and pre-select the freshly started server so startup output
+   * streams immediately. Best-effort — a failure here must never fail
+   * the Start/Debug/Restart command itself.
+   */
+  protected async revealLogsForServer(serverId?: string): Promise<void> {
+    try {
+      const widget = await this.widgetManager.getOrCreateWidget<LogViewerWidget>(LogViewerWidget.ID);
+      if (serverId && typeof (widget as unknown as { selectServer?: (id: string) => void }).selectServer === 'function') {
+        (widget as unknown as { selectServer: (id: string) => void }).selectServer(serverId);
+      }
+      this.logsView = widget;
+      try {
+        this.shell.addWidget(widget, { area: 'bottom' });
+      } catch {
+        // Already attached — that's fine.
+      }
+      this.shell.activateWidget(widget.id);
+      this.shell.revealWidget(widget.id);
+      widget.update();
+    } catch (err) {
+      console.warn('[kairo] reveal logs failed', err);
+    }
+  }
+
   protected async revealOrCreate<T extends Widget>(
     id: string,
     getter: () => T | undefined,
@@ -2000,8 +2049,18 @@ export class KairoViewsContribution implements FrontendApplicationContribution, 
       // is known to carry log data.
       case 'log':
         return;
-      default:
+      default: {
+        // Compat: the Go agent publishes `server.started/stopped/error`,
+        // `build.started/completed/failed/cancelled` and
+        // `deploy.started/completed`. Refresh the derived views so the
+        // Servers panel does not stay stale until the next manual reload.
+        const compatType = (e as { type?: string }).type ?? '';
+        if (compatType.startsWith('server.') || compatType.startsWith('build.') || compatType.startsWith('deploy.')) {
+          void this.refreshBuilds();
+          void this.refreshDeployments();
+        }
         return;
+      }
     }
   }
 

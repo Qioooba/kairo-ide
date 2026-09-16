@@ -97,8 +97,11 @@
 }
 
 .kairo-search-modal {
-  width: min(780px, 92vw);
-  max-height: min(640px, 75vh);
+  width: min(920px, 94vw);
+  height: min(720px, 84vh);
+  max-height: min(760px, 86vh);
+  min-width: 480px;
+  min-height: 360px;
   background: var(--theia-editor-background);
   border: 1px solid var(--theia-panel-border, #454545);
   border-radius: 8px;
@@ -107,6 +110,7 @@
   flex-direction: column;
   overflow: hidden;
   font-size: 13px;
+  position: relative;
   animation: kairo-modal-slide-in 0.2s ease-out;
 }
 
@@ -178,6 +182,65 @@
   border-radius: 4px;
   margin-right: 4px;
   transition: all 0.15s ease;
+}
+
+.kairo-search-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* IDEA-style resize handle at the modal's bottom-right corner. */
+.kairo-search-resize-handle {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: nwse-resize;
+  color: var(--theia-descriptionForeground, #858585);
+  border-radius: 4px;
+  touch-action: none;
+  user-select: none;
+  z-index: 5;
+}
+
+.kairo-search-resize-handle:hover {
+  background: var(--theia-toolbar-hoverBackground, rgba(128, 128, 128, 0.14));
+  color: var(--theia-foreground, #cccccc);
+}
+
+/* Minimized floating restore button: popup collapses here instead of a page switch. */
+.kairo-search-float-restore {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 10001;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(420px, 80vw);
+  padding: 8px 14px;
+  background: var(--theia-button-background, #0e639c);
+  border: 1px solid var(--theia-button-background, #0e639c);
+  border-radius: 20px;
+  color: var(--theia-button-foreground, #ffffff);
+  font-size: 12px;
+  cursor: pointer;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.kairo-search-float-restore:hover {
+  background: var(--theia-button-hoverBackground, #1177bb);
+}
+
+.kairo-search-float-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .kairo-search-close:hover {
@@ -458,8 +521,8 @@
 
 /* Results Area */
 .kairo-search-results-area {
-  min-height: 120px;
-  flex: 1;
+  flex: 1 1 0;
+  min-height: 200px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -695,7 +758,8 @@
 .kairo-search-truncated {
   padding: 8px 16px;
   font-size: 12px;
-  color: var(--theia-descriptionForeground, #858585);
+  color: var(--theia-list-warningForeground, var(--theia-descriptionForeground, #858585));
+  background: var(--theia-list-warningBackground, transparent);
   text-align: center;
   border-top: 1px solid var(--theia-panel-border, #454545);
 }
@@ -725,9 +789,33 @@
 .kairo-search-preview-pane {
   border-top: 1px solid var(--theia-panel-border, #454545);
   background: var(--theia-sideBar-background, #252526);
-  max-height: 200px;
+  max-height: 420px;
+  min-height: 80px;
   display: flex;
   flex-direction: column;
+  flex-shrink: 0;
+}
+
+.kairo-search-preview-resize {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 8px;
+  flex: 0 0 8px;
+  cursor: ns-resize;
+  touch-action: none;
+  user-select: none;
+}
+
+.kairo-search-preview-resize:hover {
+  background: var(--theia-list-hoverBackground, rgba(128, 128, 128, 0.12));
+}
+
+.kairo-search-preview-resize-grip {
+  width: 48px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--theia-scrollbarSlider-background, rgba(128, 128, 128, 0.35));
 }
 
 .kairo-search-preview-header {

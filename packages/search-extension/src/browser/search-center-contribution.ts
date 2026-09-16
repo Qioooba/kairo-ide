@@ -68,6 +68,7 @@ export class SearchCenterContribution extends AbstractViewContribution<SearchCen
     }
     widget.show();
     widget.activate();
+    widget.setMinimized?.(false);
     widget.setMode?.(this.pendingMode);
     widget.captureEditorSelection?.();
     widget.update();

@@ -137,9 +137,17 @@ export const SearchResultsPanel: React.FC<SearchResultsPanelProps> = ({
   // leaves the docked view stuck at its initial empty grouping while totals
   // continue updating.
   const streamRevision = state.streamState?.revision ?? 0;
+  const displayLimit = state.options?.displayLimit;
+  const visibleMatches = React.useMemo(() => {
+    if (displayLimit !== undefined && displayLimit > 0) {
+      return state.matches.slice(0, displayLimit);
+    }
+    return state.matches;
+  }, [state.matches, displayLimit]);
+  const displayCapped = visibleMatches.length < state.matches.length;
   const groups = React.useMemo(
-    () => groupMatchesByFile(state.matches),
-    [state.matches, streamRevision],
+    () => groupMatchesByFile(visibleMatches),
+    [visibleMatches, streamRevision],
   );
   const flatItems = React.useMemo((): FlatItem[] => {
     let idx = 0;
@@ -170,6 +178,7 @@ export const SearchResultsPanel: React.FC<SearchResultsPanelProps> = ({
             ? t('widget.search.center.stats.matchInFiles', { count: matchCount, fileCount })
             : t('widget.search.center.status.idle')}
           {isStreaming ? t('widget.search.center.stats.streaming') : ''}
+          {state.truncated ? t('widget.search.center.truncatedHint') : ''}
         </span>
         {state.status === 'loading' && (
           <button type="button" className="kairo-search-footer-btn" onClick={onCancel} data-testid="find-tool-cancel">
@@ -177,6 +186,16 @@ export const SearchResultsPanel: React.FC<SearchResultsPanelProps> = ({
           </button>
         )}
       </div>
+      {state.truncated && (state.status === 'results' || state.status === 'loading') && (
+        <div className="kairo-search-truncated" role="status" data-testid="find-tool-truncated">
+          {t('widget.search.center.truncated')} ({visibleMatches.length}/{matchCount}){t('widget.search.center.truncatedHint')}
+        </div>
+      )}
+      {displayCapped && (state.status === 'results' || state.status === 'loading') && (
+        <div className="kairo-search-status kairo-empty-state" role="status" data-testid="find-tool-display-capped">
+          {t('widget.search.center.displayCapped', { shown: visibleMatches.length, total: state.matches.length })}
+        </div>
+      )}
       {state.status === 'idle' && (
         <div className="kairo-search-status kairo-empty-state" data-testid="find-tool-idle">
           {t('widget.search.center.status.idle')}

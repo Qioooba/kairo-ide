@@ -247,6 +247,12 @@ export class KairoRunConfigurationService {
         });
       }
       this.servers.adopt(server);
+      // IDEA-style: pop the startup console for Run/Debug launches too.
+      try {
+        await this.commands.executeCommand('kairo.view.logs', server.id);
+      } catch {
+        /* logs view is optional in headless tests */
+      }
       return server;
     } catch (error) {
       if (server && configuration.mode === 'debug') {
@@ -331,6 +337,11 @@ export class KairoRunConfigurationService {
       });
 
       this.servers.adopt(server);
+      try {
+        await this.commands.executeCommand('kairo.view.logs', server.id);
+      } catch {
+        /* logs view is optional in headless tests */
+      }
       return server;
     } catch (error) {
       if (server) {

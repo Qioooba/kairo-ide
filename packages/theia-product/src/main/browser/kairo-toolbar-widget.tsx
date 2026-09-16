@@ -119,7 +119,20 @@ const KairoToolbarComponent: React.FC<KairoToolbarProps> = ({
     return () => sub.dispose();
   }, [activeProject, loadProjects]);
 
-  const hasRunningServer = servers.some(s => s.state === 'running' || s.state === 'starting');
+  const isStarting = servers.some(s => s.state === 'starting');
+  const isStopping = servers.some(s => s.state === 'stopping');
+  const isRunning = servers.some(s => s.state === 'running');
+  // Any live server (starting / running / stopping) drives the toolbar's
+  // running appearance: Run/Debug stand down, Stop arms itself in red.
+  const isServerActive = isStarting || isRunning || isStopping;
+  const hasRunningServer = isRunning || isStarting;
+  const serverState: 'starting' | 'running' | 'stopping' | 'idle' = isStarting
+    ? 'starting'
+    : isRunning
+      ? 'running'
+      : isStopping
+        ? 'stopping'
+        : 'idle';
   const selectedConfig = runConfigState.document.configurations.find(
     c => c.id === runConfigState.document.selectedConfigurationId
   ) ?? runConfigState.document.configurations[0];
@@ -158,8 +171,22 @@ const KairoToolbarComponent: React.FC<KairoToolbarProps> = ({
     }
   };
 
+  const statusText = serverState === 'running'
+    ? t('widget.servers.state.running')
+    : serverState === 'starting'
+      ? t('widget.servers.state.starting')
+      : serverState === 'stopping'
+        ? t('widget.servers.state.stopping')
+        : t('widget.servers.state.stopped');
+  const toolbarClassName = [
+    'kairo-toolbar',
+    busy ? 'kairo-toolbar-busy' : '',
+    isServerActive ? 'kairo-toolbar-is-active' : 'kairo-toolbar-is-idle',
+    serverState !== 'idle' ? `kairo-toolbar-is-${serverState}` : '',
+  ].filter(Boolean).join(' ');
+
   return (
-    <div className={`kairo-toolbar${busy ? ' kairo-toolbar-busy' : ''}`} role="toolbar" aria-label={t('widget.toolbar.title')}>
+    <div className={toolbarClassName} role="toolbar" aria-label={t('widget.toolbar.title')} data-state={serverState} data-busy={busy ?? ''}>
       {/* Project selector */}
       <div className="kairo-toolbar-group kairo-toolbar-project-group">
         <label className="kairo-toolbar-label" htmlFor="kairo-toolbar-project">{t('widget.toolbar.projectLabel')}</label>
@@ -225,37 +252,45 @@ const KairoToolbarComponent: React.FC<KairoToolbarProps> = ({
 
       <div className="kairo-toolbar-separator" role="separator" aria-orientation="vertical" />
 
-      {/* Action buttons */}
+      {/* Action buttons — semantic tones: Run=green solid, Debug=blue
+          solid, Stop=ghost idle / red armed while a server is live,
+          Build=neutral outline. Busy swaps the icon for a spinner. */}
       <div className="kairo-toolbar-group kairo-toolbar-actions">
         <button
-          className="theia-button main kairo-toolbar-btn kairo-toolbar-btn-run"
-          disabled={busy !== null || !selectedConfig || isLaunching}
+          className="theia-button kairo-toolbar-btn kairo-toolbar-btn-run"
+          disabled={busy !== null || !selectedConfig || isLaunching || isServerActive}
           onClick={() => executeCommand('run', 'kairo.server.start')}
-          title={t('widget.toolbar.runTooltip')}
+          title={isServerActive ? statusText : t('widget.toolbar.runTooltip')}
           aria-label={t('widget.toolbar.run')}
+          aria-busy={busy === 'run'}
+          data-testid="toolbar-run-button"
         >
-          <span className="codicon codicon-play" aria-hidden="true" />
-          {busy === 'run' ? t('widget.toolbar.running') : t('widget.toolbar.run')}
+          <span className={`codicon ${busy === 'run' ? 'codicon-loading codicon-modifier-spin' : 'codicon-play'}`} aria-hidden="true" />
+          <span className="kairo-toolbar-btn-label">{busy === 'run' ? t('widget.toolbar.running') : t('widget.toolbar.run')}</span>
         </button>
         <button
           className="theia-button kairo-toolbar-btn kairo-toolbar-btn-debug"
-          disabled={busy !== null || !selectedConfig || selectedConfig?.mode !== 'debug' || isLaunching}
+          disabled={busy !== null || !selectedConfig || selectedConfig?.mode !== 'debug' || isLaunching || isServerActive}
           onClick={() => executeCommand('debug', 'kairo.server.debug')}
-          title={t('widget.toolbar.debugTooltip')}
+          title={isServerActive ? statusText : t('widget.toolbar.debugTooltip')}
           aria-label={t('widget.toolbar.debug')}
+          aria-busy={busy === 'debug'}
+          data-testid="toolbar-debug-button"
         >
-          <span className="codicon codicon-debug-alt" aria-hidden="true" />
-          {busy === 'debug' ? t('widget.toolbar.debugging') : t('widget.toolbar.debug')}
+          <span className={`codicon ${busy === 'debug' ? 'codicon-loading codicon-modifier-spin' : 'codicon-debug-alt'}`} aria-hidden="true" />
+          <span className="kairo-toolbar-btn-label">{busy === 'debug' ? t('widget.toolbar.debugging') : t('widget.toolbar.debug')}</span>
         </button>
         <button
-          className="theia-button secondary kairo-toolbar-btn kairo-toolbar-btn-stop"
+          className={`theia-button kairo-toolbar-btn kairo-toolbar-btn-stop${hasRunningServer && busy === null ? ' is-armed' : ''}`}
           disabled={busy !== null || !hasRunningServer}
           onClick={() => executeCommand('stop', 'kairo.server.stop')}
           title={t('widget.toolbar.stopTooltip')}
           aria-label={t('widget.toolbar.stop')}
+          aria-busy={busy === 'stop'}
+          data-testid="toolbar-stop-button"
         >
-          <span className="codicon codicon-stop" aria-hidden="true" />
-          {busy === 'stop' ? t('widget.toolbar.stopping') : t('widget.toolbar.stop')}
+          <span className={`codicon ${busy === 'stop' ? 'codicon-loading codicon-modifier-spin' : 'codicon-stop'}`} aria-hidden="true" />
+          <span className="kairo-toolbar-btn-label">{busy === 'stop' ? t('widget.toolbar.stopping') : t('widget.toolbar.stop')}</span>
         </button>
         <button
           className="theia-button kairo-toolbar-btn kairo-toolbar-btn-build"
@@ -263,10 +298,25 @@ const KairoToolbarComponent: React.FC<KairoToolbarProps> = ({
           onClick={() => executeCommand('build', 'kairo.build')}
           title={t('widget.toolbar.buildTooltip')}
           aria-label={t('widget.toolbar.build')}
+          aria-busy={busy === 'build'}
+          data-testid="toolbar-build-button"
         >
-          <span className="codicon codicon-tools" aria-hidden="true" />
-          {busy === 'build' ? t('widget.toolbar.building') : t('widget.toolbar.build')}
+          <span className={`codicon ${busy === 'build' ? 'codicon-loading codicon-modifier-spin' : 'codicon-tools'}`} aria-hidden="true" />
+          <span className="kairo-toolbar-btn-label">{busy === 'build' ? t('widget.toolbar.building') : t('widget.toolbar.build')}</span>
         </button>
+      </div>
+
+      {/* Server status pill — the at-a-glance running indicator */}
+      <div
+        className="kairo-toolbar-status"
+        data-testid="toolbar-server-status"
+        data-state={serverState}
+        role="status"
+        aria-live="polite"
+        title={statusText}
+      >
+        <span className="kairo-toolbar-status-dot" aria-hidden="true" />
+        <span className="kairo-toolbar-status-text">{statusText}</span>
       </div>
     </div>
   );

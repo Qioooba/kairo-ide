@@ -205,6 +205,7 @@ export class ServerStore {
                         startTime: existing?.startTime || new Date().toISOString(),
                         url: event.ports?.http ? `http://127.0.0.1:${event.ports.http}` : existing?.url,
                     });
+                    return;
                 }
                 if (event.type === 'hotreload.status') {
                     const nextStatus = (event.data?.status || event.message) as HotReloadStatus;
@@ -212,6 +213,27 @@ export class ServerStore {
                         this.hotReloadStatus = nextStatus;
                         this.onHotReloadStatusChangeEmitter.fire(nextStatus);
                     }
+                    return;
+                }
+                // Compat: the Go agent publishes `server.started/stopped/error`,
+                // `build.*` and `deploy.*` (see EventHub). They carry no
+                // per-server state payload, so reconcile via GET /servers
+                // instead of dropping them silently — otherwise the Servers
+                // view and the Logs server selector stay stale until the
+                // next manual refresh.
+                const compatType = (event as { type?: string }).type ?? '';
+                if (
+                    compatType === 'server.started' ||
+                    compatType === 'server.stopped' ||
+                    compatType === 'server.error' ||
+                    compatType === 'build.progress' ||
+                    compatType === 'build.completed' ||
+                    compatType === 'build.failed' ||
+                    compatType === 'deployment.progress' ||
+                    compatType === 'deploy.completed' ||
+                    compatType === 'deploy.started'
+                ) {
+                    void this.refetchServersSnapshot();
                 }
             });
             if (generation !== this.bootstrapGeneration) {

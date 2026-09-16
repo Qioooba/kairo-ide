@@ -9,6 +9,11 @@ import { RuntimeConnectionService } from '@kairo/runtime-extension';
 
 export interface SearchOptions extends Partial<SearchRequest> {
   workspaceId: string;
+  /**
+   * Frontend-only preview cap: at most this many matches are rendered.
+   * Never sent to the backend (REST/stream clients pick explicit fields).
+   */
+  displayLimit?: number;
 }
 
 /**

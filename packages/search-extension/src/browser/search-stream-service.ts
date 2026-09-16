@@ -17,6 +17,9 @@ export interface SearchStreamState {
   totalMatches: number;
   batchIndex: number;
   error?: string;
+  /** Backend capped the result set (MaxResults). UI must surface a truncated banner. */
+  truncated?: boolean;
+  filesSearched?: number;
   /**
    * Bumped whenever `matches` gains entries. Matches are accumulated in one
    * mutable buffer (avoids copying the whole result set per WebSocket
@@ -209,6 +212,8 @@ export class SearchStreamService {
               totalMatches: this.state.totalMatches,
               batchIndex: this.state.batchIndex,
               error: event.error,
+              truncated: event.truncated ?? this.state.truncated,
+              filesSearched: event.filesSearched ?? this.state.filesSearched,
               revision: this.revision,
             });
             ws.close();
@@ -223,6 +228,8 @@ export class SearchStreamService {
               matches: this.matchBuffer,
               totalMatches: event.total || this.matchBuffer.length,
               batchIndex: this.state.batchIndex,
+              truncated: event.truncated ?? this.matchBuffer.length < (event.total ?? this.matchBuffer.length),
+              filesSearched: event.filesSearched ?? this.state.filesSearched,
               revision: this.revision,
             });
             ws.close();
@@ -253,6 +260,8 @@ export class SearchStreamService {
             matches: this.matchBuffer,
             totalMatches: this.state.totalMatches,
             batchIndex: this.state.batchIndex,
+            truncated: this.state.truncated,
+            filesSearched: this.state.filesSearched,
             revision: this.revision,
           });
           finish();
@@ -270,6 +279,8 @@ export class SearchStreamService {
           totalMatches: this.state.totalMatches,
           batchIndex: this.state.batchIndex,
           error: 'WebSocket connection error',
+          truncated: this.state.truncated,
+          filesSearched: this.state.filesSearched,
           revision: this.revision,
         });
         this.ws = null;
@@ -318,6 +329,8 @@ export class SearchStreamService {
         matches: this.matchBuffer,
         totalMatches: this.pendingTotal,
         batchIndex: this.pendingBatchIndex,
+        truncated: this.state.truncated,
+        filesSearched: this.state.filesSearched,
         revision: this.revision,
       });
     }, STREAM_NOTIFY_INTERVAL_MS);
