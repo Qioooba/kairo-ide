@@ -8,13 +8,90 @@
 import { IncrementalTokenizer, TokenizeSliceResult } from './incremental-tokenizer';
 import type { TokenBatchMessage } from '../common/highlight-protocol';
 
+export interface Range {
+  start: number;
+  end: number;
+}
+
+export function addCoveredRange(ranges: Range[], start: number, end: number): void {
+  if (start > end) return;
+  ranges.push({ start, end });
+  ranges.sort((a, b) => a.start - b.start);
+  const merged: Range[] = [];
+  for (const r of ranges) {
+    if (merged.length === 0) {
+      merged.push({ ...r });
+    } else {
+      const last = merged[merged.length - 1];
+      if (r.start <= last.end + 1) {
+        last.end = Math.max(last.end, r.end);
+      } else {
+        merged.push({ ...r });
+      }
+    }
+  }
+  ranges.length = 0;
+  ranges.push(...merged);
+}
+
+export function findUncoveredRange(
+  ranges: Range[],
+  preferredStart: number,
+  preferredEnd: number,
+  totalLines: number,
+  maxSliceLines: number = 500,
+): { start: number; end: number } | undefined {
+  if (totalLines <= 0) return undefined;
+
+  // 1. Check inside preferred range [prefStart, prefEnd]
+  const prefStart = Math.max(1, Math.min(preferredStart, totalLines));
+  const prefEnd = Math.max(prefStart, Math.min(preferredEnd, totalLines));
+
+  for (let l = prefStart; l <= prefEnd; ) {
+    const covered = ranges.find(r => r.start <= l && l <= r.end);
+    if (covered) {
+      l = covered.end + 1;
+    } else {
+      const nextCovered = ranges.find(r => r.start > l);
+      const limit = Math.min(prefEnd, nextCovered ? nextCovered.start - 1 : prefEnd, l + maxSliceLines - 1);
+      return { start: l, end: limit };
+    }
+  }
+
+  // 2. Check before preferred range [1, prefStart - 1] (backfill prefix holes!)
+  for (let l = 1; l < prefStart; ) {
+    const covered = ranges.find(r => r.start <= l && l <= r.end);
+    if (covered) {
+      l = covered.end + 1;
+    } else {
+      const nextCovered = ranges.find(r => r.start > l);
+      const limit = Math.min(prefStart - 1, nextCovered ? nextCovered.start - 1 : prefStart - 1, l + maxSliceLines - 1);
+      return { start: l, end: limit };
+    }
+  }
+
+  // 3. Check after preferred range [prefEnd + 1, totalLines] (progressive sweep to EOF)
+  for (let l = prefEnd + 1; l <= totalLines; ) {
+    const covered = ranges.find(r => r.start <= l && l <= r.end);
+    if (covered) {
+      l = covered.end + 1;
+    } else {
+      const nextCovered = ranges.find(r => r.start > l);
+      const limit = Math.min(totalLines, nextCovered ? nextCovered.start - 1 : totalLines, l + maxSliceLines - 1);
+      return { start: l, end: limit };
+    }
+  }
+
+  return undefined;
+}
+
 export interface ModelTaskState {
   modelInstanceId: string;
   tokenizer: IncrementalTokenizer;
   documentVersion: number;
   viewportStart: number;
   viewportEnd: number;
-  lastProcessedLine: number;
+  coveredRanges: Range[];
   isCompleted: boolean;
 }
 
@@ -53,7 +130,7 @@ export class HighlightingScheduler {
       documentVersion: version,
       viewportStart: vpStart,
       viewportEnd: vpEnd,
-      lastProcessedLine: 0,
+      coveredRanges: [],
       isCompleted: false,
     });
 
@@ -82,8 +159,18 @@ export class HighlightingScheduler {
 
     state.documentVersion = afterVersion;
     state.isCompleted = false;
-    state.tokenizer.applyEdits(changes, afterVersion, fullText);
-    state.lastProcessedLine = 0;
+    const dirtyLine = state.tokenizer.applyEdits(changes, afterVersion, fullText);
+
+    // Invalidate covered ranges from dirtyLine
+    const newCovered: Range[] = [];
+    for (const r of state.coveredRanges) {
+      if (r.end < dirtyLine) {
+        newCovered.push(r);
+      } else if (r.start < dirtyLine) {
+        newCovered.push({ start: r.start, end: dirtyLine - 1 });
+      }
+    }
+    state.coveredRanges = newCovered;
     this.activeModelId = modelInstanceId;
     this.triggerSchedule();
   }
@@ -131,26 +218,25 @@ export class HighlightingScheduler {
       return false;
     }
 
-    // 1. Process viewport with +/- 300 line prefetch
+    const totalLines = target.tokenizer.getLineCount();
     const prefetchStart = Math.max(1, target.viewportStart - 300);
-    const prefetchEnd = Math.min(target.tokenizer.getLineCount(), target.viewportEnd + 300);
+    const prefetchEnd = Math.min(totalLines, target.viewportEnd + 300);
 
-    let sliceStart = prefetchStart;
-    let sliceEnd = prefetchEnd;
-
-    if (target.lastProcessedLine < prefetchEnd) {
-      sliceStart = Math.max(prefetchStart, target.lastProcessedLine + 1);
-      sliceEnd = prefetchEnd;
-    } else {
-      // Progressive EOF sweep
-      sliceStart = target.lastProcessedLine + 1;
-      sliceEnd = Math.min(target.tokenizer.getLineCount(), sliceStart + 500);
+    const nextRange = findUncoveredRange(target.coveredRanges, prefetchStart, prefetchEnd, totalLines);
+    if (!nextRange) {
+      target.isCompleted = true;
+      return this.hasPendingWork();
     }
 
-    const result: TokenizeSliceResult = target.tokenizer.tokenizeSlice(sliceStart, sliceEnd, 12);
+    const result: TokenizeSliceResult = target.tokenizer.tokenizeSlice(nextRange.start, nextRange.end, 12);
+    addCoveredRange(target.coveredRanges, result.startLine, result.endLine);
 
-    target.lastProcessedLine = result.endLine;
-    if (result.isCompleted) {
+    const isFullyDone =
+      target.coveredRanges.length === 1 &&
+      target.coveredRanges[0].start <= 1 &&
+      target.coveredRanges[0].end >= totalLines;
+
+    if (isFullyDone) {
       target.isCompleted = true;
     }
 

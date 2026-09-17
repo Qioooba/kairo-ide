@@ -166,6 +166,20 @@ func (s *Server) handleJvmCompile(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
+		root := p.RootPath
+		if root == "" {
+			root = p.Root
+		}
+		if root != "" {
+			rootNative, rErr := pathpolicy.ResolveURIOrPath(root)
+			if rErr == nil && !pathpolicy.IsLexicallyUnder(req.File, filepath.Clean(rootNative)) {
+				writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{
+					Code:    protocol.ErrInvalidRequest,
+					Message: fmt.Sprintf("file %s does not belong to project %s", req.File, req.ProjectID),
+				})
+				return
+			}
+		}
 	} else {
 		p, err = findProjectContainingFile(s.Services.ProjectStore, req.File)
 		if err != nil {
@@ -232,6 +246,7 @@ func (s *Server) handleJvmCompile(w http.ResponseWriter, r *http.Request) {
 	writeOK(w, env, map[string]interface{}{
 		"success":   true,
 		"classPath": classPath,
+		"projectId": req.ProjectID,
 	})
 }
 
@@ -305,6 +320,24 @@ func (s *Server) handleJvmRedefine(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Top-level vs target conflict validation
+	if req.Target != nil {
+		if req.ProjectID != "" && req.Target.ProjectID != "" && req.ProjectID != req.Target.ProjectID {
+			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{
+				Code:    protocol.ErrInvalidRequest,
+				Message: fmt.Sprintf("target project mismatch: %s != %s", req.ProjectID, req.Target.ProjectID),
+			})
+			return
+		}
+		if req.ServerID != "" && req.Target.ServerID != "" && req.ServerID != req.Target.ServerID {
+			writeError(w, env.RequestID, env.CorrelationID, protocol.KairoError{
+				Code:    protocol.ErrInvalidRequest,
+				Message: fmt.Sprintf("target server mismatch: %s != %s", req.ServerID, req.Target.ServerID),
+			})
+			return
+		}
+	}
+
 	// Mandatory target endpoint authorization
 	resolvedPort, targetErr := s.resolveTargetEndpoint(req.Target, req.ProjectID, req.ServerID, req.SourcePath)
 	if targetErr != nil {
@@ -374,6 +407,18 @@ func (s *Server) handleJvmRedefine(w http.ResponseWriter, r *http.Request) {
 // It rejects missing, ambiguous, or stale targets and NEVER falls back blindly to the first running server.
 func (s *Server) resolveTargetEndpoint(target *protocol.DebugTargetBinding, projectID, serverID, sourcePath string) (int, *protocol.KairoError) {
 	if target != nil {
+		if projectID != "" && target.ProjectID != "" && projectID != target.ProjectID {
+			return 0, &protocol.KairoError{
+				Code:    protocol.ErrInvalidRequest,
+				Message: fmt.Sprintf("target project mismatch: %s != %s", projectID, target.ProjectID),
+			}
+		}
+		if serverID != "" && target.ServerID != "" && serverID != target.ServerID {
+			return 0, &protocol.KairoError{
+				Code:    protocol.ErrInvalidRequest,
+				Message: fmt.Sprintf("target server mismatch: %s != %s", serverID, target.ServerID),
+			}
+		}
 		if projectID == "" {
 			projectID = target.ProjectID
 		}
@@ -406,6 +451,22 @@ func (s *Server) resolveTargetEndpoint(target *protocol.DebugTargetBinding, proj
 	if serverID != "" {
 		for _, srv := range allServers {
 			if srv != nil && srv.ID == serverID {
+				if projectID != "" && srv.ProjectID != "" && srv.ProjectID != projectID {
+					return 0, &protocol.KairoError{
+						Code:    protocol.ErrInvalidRequest,
+						Message: fmt.Sprintf("server %s belongs to project %s, not authorized for project %s", serverID, srv.ProjectID, projectID),
+					}
+				}
+				if sourcePath != "" && s.Services != nil && s.Services.ProjectStore != nil {
+					if p, err := findProjectContainingFile(s.Services.ProjectStore, sourcePath); err == nil && string(p.ID) != "" {
+						if srv.ProjectID != "" && string(p.ID) != srv.ProjectID {
+							return 0, &protocol.KairoError{
+								Code:    protocol.ErrInvalidRequest,
+								Message: fmt.Sprintf("source file belongs to project %s, but target server belongs to project %s", p.ID, srv.ProjectID),
+							}
+						}
+					}
+				}
 				state := strings.ToLower(srv.State)
 				if (state != "running" && state != "starting" && state != "debugging") || srv.Ports == nil || srv.Ports.Debug <= 0 {
 					return 0, &protocol.KairoError{

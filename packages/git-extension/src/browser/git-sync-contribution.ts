@@ -1,10 +1,8 @@
 import { injectable, inject } from '@theia/core/shared/inversify';
 import { Command, CommandRegistry } from '@theia/core/lib/common';
 import { MenuModelRegistry } from '@theia/core/lib/common/menu';
-import {
-  QuickInputService,
-  ContextKeyService,
-} from '@theia/core/lib/browser';
+import { QuickInputService } from '@theia/core/lib/browser';
+import { ContextKeyService } from '@theia/core/lib/browser/context-key-service';
 import { MessageService } from '@theia/core/lib/common/message-service';
 import { EditorManager } from '@theia/editor/lib/browser';
 import { KairoI18nService } from '@kairo/i18n';

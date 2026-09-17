@@ -1,6 +1,12 @@
 /**
  * Streaming search service — connects to the WebSocket endpoint
  * for incremental search results.
+ *
+ * Implements KAIRO-W10:
+ * - Independent StreamSession per search query with identity validation.
+ * - Distinguishes premature socket close (interrupted/incomplete) from normal completion (done).
+ * - Prevents stale close callbacks from wiping active WebSocket references.
+ * - Retains partial matches and refreshes revision upon interruption.
  */
 
 import { injectable, inject } from '@theia/core/shared/inversify';
@@ -19,6 +25,8 @@ export interface SearchStreamState {
   error?: string;
   /** Backend capped the result set (MaxResults). UI must surface a truncated banner. */
   truncated?: boolean;
+  /** Connection dropped before explicit done event received. */
+  interrupted?: boolean;
   filesSearched?: number;
   /**
    * Bumped whenever `matches` gains entries. Matches are accumulated in one
@@ -30,6 +38,17 @@ export interface SearchStreamState {
 }
 
 export type SearchStreamListener = (state: SearchStreamState) => void;
+
+export interface StreamSession {
+  readonly id: number;
+  readonly ws: WebSocket;
+  readonly abortController: AbortController;
+  idleTimer?: ReturnType<typeof setTimeout>;
+  doneReceived: boolean;
+  settled: boolean;
+  resolve: () => void;
+  reject: (error: Error) => void;
+}
 
 const INITIAL_STREAM_STATE: SearchStreamState = {
   status: 'idle',
@@ -66,6 +85,9 @@ export class SearchStreamService {
   protected completionReject: ((error: Error) => void) | undefined;
   protected idleTimer: ReturnType<typeof setTimeout> | undefined;
 
+  protected sessionCounter = 0;
+  protected currentSession: StreamSession | null = null;
+
   get snapshot(): SearchStreamState {
     return this.state;
   }
@@ -84,8 +106,10 @@ export class SearchStreamService {
   async searchStream(opts: SearchOptions): Promise<void> {
     this.cancel();
 
-    this.currentAbort = new AbortController();
-    const signal = this.currentAbort.signal;
+    const sessionId = ++this.sessionCounter;
+    const abortController = new AbortController();
+    const signal = abortController.signal;
+    this.currentAbort = abortController;
 
     this.matchBuffer = [];
     this.revision = 0;
@@ -107,20 +131,47 @@ export class SearchStreamService {
     const protocols = secret ? [KAIRO_WS_SUBPROTOCOL, secret] : [];
 
     return new Promise<void>((resolve, reject) => {
+      let ws: WebSocket;
+      try {
+        ws = this.createWebSocket(wsUrl, protocols);
+      } catch (_err) {
+        this.setState({
+          status: 'error',
+          matches: [],
+          totalMatches: 0,
+          batchIndex: 0,
+          error: 'Failed to create WebSocket connection',
+        });
+        reject(new Error('Failed to create WebSocket connection'));
+        return;
+      }
+
+      const session: StreamSession = {
+        id: sessionId,
+        ws,
+        abortController,
+        doneReceived: false,
+        settled: false,
+        resolve,
+        reject,
+      };
+
+      this.currentSession = session;
+      this.ws = ws;
       this.completionResolve = resolve;
       this.completionReject = reject;
 
       const clearIdle = (): void => {
-        if (this.idleTimer !== undefined) {
-          clearTimeout(this.idleTimer);
-          this.idleTimer = undefined;
+        if (session.idleTimer !== undefined) {
+          clearTimeout(session.idleTimer);
+          session.idleTimer = undefined;
         }
       };
 
       const bumpIdle = (): void => {
         clearIdle();
-        this.idleTimer = setTimeout(() => {
-          if (signal.aborted || this.state.status !== 'streaming') {
+        session.idleTimer = setTimeout(() => {
+          if (this.currentSession !== session || signal.aborted || session.settled || this.state.status !== 'streaming') {
             return;
           }
           const msg = 'Search timed out waiting for results';
@@ -132,16 +183,27 @@ export class SearchStreamService {
             error: msg,
             revision: this.revision,
           });
-          try { this.ws?.close(); } catch { /* ignore */ }
-          this.ws = null;
+          try { ws.close(); } catch { /* ignore */ }
           finish(new Error(msg));
         }, SEARCH_STREAM_IDLE_MS);
       };
 
       const finish = (error?: Error): void => {
+        if (session.settled) {
+          return;
+        }
+        session.settled = true;
         clearIdle();
-        this.completionResolve = undefined;
-        this.completionReject = undefined;
+
+        if (this.currentSession === session) {
+          this.currentSession = null;
+          this.completionResolve = undefined;
+          this.completionReject = undefined;
+        }
+        if (this.ws === ws) {
+          this.ws = null;
+        }
+
         if (signal.aborted) {
           return;
         }
@@ -152,29 +214,11 @@ export class SearchStreamService {
         }
       };
 
-      let ws: WebSocket;
-      try {
-        ws = protocols.length > 0
-          ? new WebSocket(wsUrl, protocols)
-          : new WebSocket(wsUrl);
-      } catch (_err) {
-        this.setState({
-          status: 'error',
-          matches: [],
-          totalMatches: 0,
-          batchIndex: 0,
-          error: 'Failed to create WebSocket connection',
-        });
-        finish(new Error('Failed to create WebSocket connection'));
-        return;
-      }
-
-      this.ws = ws;
       bumpIdle();
 
       ws.addEventListener('open', () => {
-        if (signal.aborted) {
-          ws.close();
+        if (this.currentSession !== session || signal.aborted || session.settled) {
+          try { ws.close(); } catch { /* ignore */ }
           return;
         }
         bumpIdle();
@@ -194,8 +238,7 @@ export class SearchStreamService {
       });
 
       ws.addEventListener('message', (ev) => {
-        if (signal.aborted) {
-          ws.close();
+        if (this.currentSession !== session || signal.aborted || session.settled) {
           return;
         }
         bumpIdle();
@@ -216,11 +259,12 @@ export class SearchStreamService {
               filesSearched: event.filesSearched ?? this.state.filesSearched,
               revision: this.revision,
             });
-            ws.close();
             finish(new Error(event.error));
+            try { ws.close(); } catch { /* ignore */ }
             return;
           }
           if (event.done) {
+            session.doneReceived = true;
             this.clearNotifyTimer();
             this.revision++;
             this.setState({
@@ -228,12 +272,12 @@ export class SearchStreamService {
               matches: this.matchBuffer,
               totalMatches: event.total || this.matchBuffer.length,
               batchIndex: this.state.batchIndex,
-              truncated: event.truncated ?? this.matchBuffer.length < (event.total ?? this.matchBuffer.length),
+              truncated: event.truncated ?? (this.matchBuffer.length < (event.total ?? this.matchBuffer.length)),
               filesSearched: event.filesSearched ?? this.state.filesSearched,
               revision: this.revision,
             });
-            ws.close();
             finish();
+            try { ws.close(); } catch { /* ignore */ }
             return;
           }
           const batch = event.batch ?? [];
@@ -241,7 +285,7 @@ export class SearchStreamService {
             for (const match of batch) {
               this.matchBuffer.push(match);
             }
-            this.scheduleStreamingUpdate(event.total ?? this.matchBuffer.length, event.batchIndex);
+            this.scheduleStreamingUpdate(session, event.total ?? this.matchBuffer.length, event.batchIndex);
           }
         } catch {
           // ignore malformed messages
@@ -249,29 +293,53 @@ export class SearchStreamService {
       });
 
       ws.addEventListener('close', () => {
-        this.ws = null;
-        if (signal.aborted) {
+        // Only wipe this.ws if it still matches this session
+        if (this.ws === ws) {
+          this.ws = null;
+        }
+        if (this.currentSession === session) {
+          this.currentSession = null;
+        }
+
+        if (session.settled || signal.aborted) {
           return;
         }
-        if (this.state.status === 'streaming') {
-          this.clearNotifyTimer();
+
+        this.clearNotifyTimer();
+
+        // If socket closed before explicit done event, treat as interrupted error
+        if (!session.doneReceived) {
+          const errorMsg = '搜索中断，结果不完整';
+          this.revision++;
           this.setState({
-            status: 'done',
+            status: 'error',
+            interrupted: true,
             matches: this.matchBuffer,
-            totalMatches: this.state.totalMatches,
+            totalMatches: this.matchBuffer.length,
             batchIndex: this.state.batchIndex,
-            truncated: this.state.truncated,
+            error: errorMsg,
+            truncated: true,
             filesSearched: this.state.filesSearched,
             revision: this.revision,
           });
+          finish(new Error(errorMsg));
+        } else {
           finish();
         }
       });
 
       ws.addEventListener('error', () => {
-        if (signal.aborted) {
+        if (this.ws === ws) {
+          this.ws = null;
+        }
+        if (this.currentSession === session) {
+          this.currentSession = null;
+        }
+
+        if (session.settled || signal.aborted) {
           return;
         }
+
         this.clearNotifyTimer();
         this.setState({
           status: 'error',
@@ -283,36 +351,52 @@ export class SearchStreamService {
           filesSearched: this.state.filesSearched,
           revision: this.revision,
         });
-        this.ws = null;
         finish(new Error('WebSocket connection error'));
       });
     });
   }
 
   cancel(): void {
-    if (this.idleTimer !== undefined) {
-      clearTimeout(this.idleTimer);
-      this.idleTimer = undefined;
-    }
     this.clearNotifyTimer();
-    this.currentAbort?.abort();
-    this.currentAbort = null;
-    if (this.ws) {
-      this.ws.close();
-      this.ws = null;
+    const session = this.currentSession;
+    if (session) {
+      if (session.idleTimer !== undefined) {
+        clearTimeout(session.idleTimer);
+        session.idleTimer = undefined;
+      }
+      session.abortController.abort();
+      try {
+        session.ws.close();
+      } catch {
+        // ignore
+      }
+      if (!session.settled) {
+        session.settled = true;
+        session.reject(new _KairoSearchCancelledError());
+      }
+      if (this.ws === session.ws) {
+        this.ws = null;
+      }
+      this.currentSession = null;
     }
-    const reject = this.completionReject;
+    this.currentAbort = null;
     this.completionResolve = undefined;
     this.completionReject = undefined;
-    reject?.(new _KairoSearchCancelledError());
     if (this.state.status === 'streaming') {
       this.matchBuffer = [];
       this.setState({ ...INITIAL_STREAM_STATE });
     }
   }
 
+  /** Allows injection/mocking of WebSocket constructor in unit tests. */
+  createWebSocket(url: string, protocols: string[]): WebSocket {
+    return protocols.length > 0
+      ? new WebSocket(url, protocols)
+      : new WebSocket(url);
+  }
+
   /** Publishes accumulated matches at most once per throttle window. */
-  protected scheduleStreamingUpdate(totalMatches: number, batchIndex: number): void {
+  protected scheduleStreamingUpdate(session: StreamSession, totalMatches: number, batchIndex: number): void {
     this.pendingTotal = totalMatches;
     this.pendingBatchIndex = batchIndex;
     if (this.notifyTimer !== undefined) {
@@ -320,7 +404,7 @@ export class SearchStreamService {
     }
     this.notifyTimer = setTimeout(() => {
       this.notifyTimer = undefined;
-      if (this.currentAbort?.signal.aborted || this.state.status !== 'streaming') {
+      if (this.currentSession !== session || session.abortController.signal.aborted || session.settled || this.state.status !== 'streaming') {
         return;
       }
       this.revision++;

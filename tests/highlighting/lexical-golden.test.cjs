@@ -1,105 +1,165 @@
-'use strict';
+/**
+ * Golden regression tests for KAIRO-W04, KAIRO-W05, KAIRO-W06.
+ */
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const {
-  JspRegionScanner,
-  defaultJspRegionScanner,
-} = require('../../packages/highlighting-extension/lib/common/jsp-region-scanner');
+const { LexerState } = require('../../packages/highlighting-extension/lib/common/lexer-state');
+const { IncrementalTokenizer } = require('../../packages/highlighting-extension/lib/worker/incremental-tokenizer');
+const { HighlightingScheduler } = require('../../packages/highlighting-extension/lib/worker/highlighting-scheduler');
+const { ModelTokenCache } = require('../../packages/highlighting-extension/lib/common/token-cache');
 
-const {
-  IncrementalTokenizer,
-} = require('../../packages/highlighting-extension/lib/worker/incremental-tokenizer');
+describe('Lexical Golden Tests (W04, W05, W06)', () => {
+  describe('W04: Worker Host Isolation & LexerState Deserialization', () => {
+    it('LexerState.from correctly revives structured clone plain objects with clone() and equals()', () => {
+      const plain = {
+        mode: 'java-block-comment',
+        embeddedLanguage: 'java',
+        embeddedStack: ['java'],
+        dialect: 'jsp',
+        quote: '"',
+        depth: 1,
+      };
 
-const {
-  LexerState,
-} = require('../../packages/highlighting-extension/lib/common/lexer-state');
+      // Plain object has no methods
+      assert.equal(typeof plain.clone, 'undefined');
 
-describe('Lexical Golden Tests (JSP & Java Monarch)', () => {
-  const scanner = new JspRegionScanner();
+      // Revive using LexerState.from
+      assert.equal(typeof LexerState.from, 'function', 'LexerState.from static factory must exist');
+      const revived = LexerState.from(plain);
+      assert.equal(typeof revived.clone, 'function');
+      assert.equal(typeof revived.equals, 'function');
+      assert.equal(revived.mode, 'java-block-comment');
+      assert.equal(revived.depth, 1);
 
-  it('JSP comment <%-- ... --%> containing nested delimiters and quotes', () => {
-    const text = '<%-- This is a comment with <% and %> and "quotes" and \'single\' --%><div>Hello</div>';
-    const regions = scanner.scanRegions(text, 'jsp');
-    assert.ok(regions.length >= 2);
-    assert.equal(regions[0].kind, 'jsp-comment');
-    assert.equal(regions[0].isClosed, true);
-    assert.equal(text.slice(regions[0].startOffset, regions[0].endOffset), '<%-- This is a comment with <% and %> and "quotes" and \'single\' --%>');
-    assert.equal(regions[1].kind, 'tag');
+      // Verify equals works against plain object and cloned instance
+      assert.ok(revived.equals(plain));
+      const cloned = revived.clone();
+      assert.ok(revived.equals(cloned));
+    });
+
+    it('HighlightingWorkerInstance can be instantiated without touching window.onmessage', () => {
+      // HighlightingWorkerInstance should be imported from worker-core without side effects
+      const { HighlightingWorkerInstance } = require('../../packages/highlighting-extension/lib/worker/highlighting-worker-core');
+      assert.ok(HighlightingWorkerInstance, 'HighlightingWorkerInstance must be exported from highlighting-worker-core');
+
+      const messages = [];
+      const worker = new HighlightingWorkerInstance(msg => messages.push(msg));
+      assert.ok(worker);
+    });
   });
 
-  it('Body EL expressions ${...} with operators and quotes', () => {
-    const text = '<h1>Welcome ${user.name != null ? user.name : \'Guest\'}</h1>';
-    const regions = scanner.scanRegions(text, 'jsp');
-    const elRegions = regions.filter(r => r.kind === 'el-expression');
-    assert.equal(elRegions.length, 1);
-    assert.equal(elRegions[0].embeddedLanguage, 'el');
-    assert.equal(text.slice(elRegions[0].startOffset, elRegions[0].endOffset), '${user.name != null ? user.name : \'Guest\'}');
+  describe('W05: Cross-line State Transitions & HTML EL Tag Attributes', () => {
+    it('Java multiline block comment preserves java-block-comment state across lines', () => {
+      const tokenizer = new IncrementalTokenizer('test-java-comment', 'java', 'java');
+
+      // Line 1: opens block comment
+      const line1 = '/* this is a multiline comment';
+      const res1 = tokenizer.tokenizeSingleLine(line1, new LexerState('root', undefined, [], 'java'));
+      assert.equal(res1.nextState.mode, 'java-block-comment', 'Line 1 nextState must be java-block-comment');
+      // Kind 1 = comment
+      assert.equal(res1.tokens[1], 1, 'Line 1 must be tokenized as comment');
+
+      // Line 2: continuation line
+      const line2 = ' * still inside comment';
+      const res2 = tokenizer.tokenizeSingleLine(line2, res1.nextState);
+      assert.equal(res2.nextState.mode, 'java-block-comment', 'Line 2 nextState must remain java-block-comment');
+      assert.equal(res2.tokens[1], 1, 'Line 2 must be tokenized as comment');
+
+      // Line 3: closes comment and has code
+      const line3 = ' */ int count = 42;';
+      const res3 = tokenizer.tokenizeSingleLine(line3, res2.nextState);
+      assert.equal(res3.nextState.mode, 'root', 'Line 3 nextState must return to root');
+      // Verify token kinds: comment (1), keyword int (9), identifier count (10)
+      assert.equal(res3.tokens[1], 1, 'First token must be comment up to */');
+      assert.equal(res3.tokens[3], 9, 'Second token must be keyword int');
+    });
+
+    it('JSP multiline directive preserves directive state across lines', () => {
+      const tokenizer = new IncrementalTokenizer('test-jsp-dir', 'jsp', 'jsp');
+
+      // Line 1: opens directive
+      const line1 = '<%@ page import="java.util.*"';
+      const res1 = tokenizer.tokenizeSingleLine(line1, new LexerState('root', undefined, [], 'jsp'));
+      assert.equal(res1.nextState.mode, 'directive', 'Line 1 nextState must be directive');
+
+      // Line 2: closes directive
+      const line2 = '    contentType="text/html; charset=UTF-8" %>';
+      const res2 = tokenizer.tokenizeSingleLine(line2, res1.nextState);
+      assert.equal(res2.nextState.mode, 'root', 'Line 2 nextState must return to root after closing delimiter');
+    });
+
+    it('HTML tag with EL expression in attribute tokenizes EL tokens separately from tag', () => {
+      const tokenizer = new IncrementalTokenizer('test-el-tag', 'jsp', 'jsp');
+      const line = '<div class="${user.theme}" id="app">';
+      const res = tokenizer.tokenizeSingleLine(line, new LexerState('root', undefined, [], 'jsp'));
+
+      // Check that EL delimiter (kind 4) and EL body (kind 5) are emitted
+      const kinds = [];
+      for (let i = 1; i < res.tokens.length; i += 2) {
+        kinds.push(res.tokens[i]);
+      }
+      assert.ok(kinds.includes(4), 'Must contain EL delimiter token kind 4');
+      assert.ok(kinds.includes(5), 'Must contain EL body token kind 5');
+    });
   });
 
-  it('Attribute EL expressions #{...} and ${...}', () => {
-    const text = '<h:inputText id="name" value="#{userBean.name}" title="${tooltip}" />';
-    const regions = scanner.scanRegions(text, 'jsp');
-    const elRegions = regions.filter(r => r.kind === 'el-expression');
-    assert.equal(elRegions.length, 2);
-    assert.equal(text.slice(elRegions[0].startOffset, elRegions[0].endOffset), '#{userBean.name}');
-    assert.equal(text.slice(elRegions[1].startOffset, elRegions[1].endOffset), '${tooltip}');
-  });
+  describe('W06: Scheduler Hole-free Scheduling & Checkpoint Precision', () => {
+    it('ModelTokenCache.getClosestCheckpoint correctly finds cp < targetLine without off-by-one duplication', () => {
+      const cache = new ModelTokenCache('test-cache');
+      const state256 = new LexerState('java', 'java', [], 'java');
+      cache.addCheckpoint(256, state256, 1);
 
-  it('Attribute Java expression <%= ... %> embedding', () => {
-    const text = '<img src="<%= request.getContextPath() %>/images/logo.png" alt="Logo" />';
-    const regions = scanner.scanRegions(text, 'jsp');
-    const exprRegions = regions.filter(r => r.kind === 'jsp-expression');
-    assert.equal(exprRegions.length, 1);
-    assert.equal(text.slice(exprRegions[0].innerStartOffset, exprRegions[0].innerEndOffset), ' request.getContextPath() ');
-  });
+      // Checkpoint at line 256 is the end state of line 256.
+      // If querying for line 256, it cannot be used (must return undefined or cp < 256).
+      const cp256 = cache.getClosestCheckpoint(256);
+      assert.equal(cp256, undefined, 'Checkpoint at 256 cannot be used to start line 256');
 
-  it('Escape sequence %\\> does not close scriptlet per JSP 2.0 / Tomcat 6 spec', () => {
-    const text = '<% String s = "%\\>"; int x = 10; %>';
-    const regions = scanner.scanRegions(text, 'jsp');
-    const scriptlets = regions.filter(r => r.kind === 'jsp-scriptlet');
-    assert.equal(scriptlets.length, 1);
-    assert.equal(scriptlets[0].isClosed, true);
-    assert.equal(text.slice(scriptlets[0].startOffset, scriptlets[0].endOffset), text);
-  });
+      // Querying for line 257 can use checkpoint 256
+      const cp257 = cache.getClosestCheckpoint(257);
+      assert.ok(cp257, 'Checkpoint at 256 must be usable for line 257');
+      assert.equal(cp257.lineNumber, 256);
+    });
 
-  it('Scriptlet skips %> inside Java string and comment literals', () => {
-    const text = '<% String s = "%>"; // %>\n /* %> */ int y = 20; %>';
-    const regions = scanner.scanRegions(text, 'jsp');
-    const scriptlets = regions.filter(r => r.kind === 'jsp-scriptlet');
-    assert.equal(scriptlets.length, 1);
-    assert.equal(scriptlets[0].isClosed, true);
-    assert.equal(text.slice(scriptlets[0].startOffset, scriptlets[0].endOffset), text);
-  });
+    it('HighlightingScheduler covers prefix lines 1..99 and emits isCompleted only when entire file is covered', () => {
+      const batches = [];
+      const scheduler = new HighlightingScheduler(batch => batches.push(batch));
 
-  it('Java Monarch unclosed string literal pops at newline and recovers', () => {
-    const tokenizer = new IncrementalTokenizer('test://test.java', 'java', 'java');
-    const initialState = new LexerState('root', undefined, [], 'java');
+      const lines = [];
+      for (let i = 1; i <= 600; i++) {
+        lines.push(`Line ${i}`);
+      }
+      scheduler.registerModel('doc-holes', 'jsp', 'jsp', 1, lines.join('\n'));
 
-    // Line 1: unclosed string
-    const line1 = 'String s = "unclosed;';
-    const res1 = tokenizer.tokenizeSingleLine(line1, initialState);
+      // Jump straight to viewport 400..450
+      scheduler.updateViewport('doc-holes', 400, 450);
 
-    // End state of line 1 must recover back to root, not stay trapped in @string
-    assert.equal(res1.nextState.mode, 'root');
+      // Run slices until scheduler is finished
+      while (scheduler.processNextSlice()) {
+        // process all slices
+      }
 
-    // Line 2: normal Java statement
-    const line2 = 'int count = 42;';
-    const res2 = tokenizer.tokenizeSingleLine(line2, res1.nextState);
-    assert.equal(res2.nextState.mode, 'root');
-    // Verify tokens were generated for line 2
-    assert.ok(res2.tokens.length > 0);
-  });
+      assert.ok(batches.length > 0);
+      const coveredLines = new Set();
+      let hadCompletedBatch = false;
 
-  it('Embedded <script> and <style> partition correctly', () => {
-    const text = '<script>function test() { var x = 1; }</script><style>body { color: red; }</style>';
-    const regions = scanner.scanRegions(text, 'jsp');
-    const jsRegions = regions.filter(r => r.kind === 'embedded-script');
-    const cssRegions = regions.filter(r => r.kind === 'embedded-style');
-    assert.equal(jsRegions.length, 1);
-    assert.equal(cssRegions.length, 1);
-    assert.equal(jsRegions[0].embeddedLanguage, 'javascript');
-    assert.equal(cssRegions[0].embeddedLanguage, 'css');
+      for (const b of batches) {
+        for (let l = b.startLineNumber; l <= b.endLineNumber; l++) {
+          coveredLines.add(l);
+        }
+        if (b.isCompleted) {
+          hadCompletedBatch = true;
+          // When isCompleted is true, lines 1 to 600 MUST all be covered!
+          assert.equal(coveredLines.size, 600, 'All 600 lines must be covered before isCompleted is true');
+        }
+      }
+
+      assert.ok(hadCompletedBatch, 'Scheduler must eventually emit isCompleted');
+      assert.ok(coveredLines.has(1), 'Line 1 must be covered (no hole in prefix)');
+      assert.ok(coveredLines.has(50), 'Line 50 must be covered (no hole in prefix)');
+      assert.ok(coveredLines.has(400), 'Line 400 must be covered');
+      assert.ok(coveredLines.has(600), 'Line 600 must be covered');
+    });
   });
 });

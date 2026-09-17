@@ -181,6 +181,52 @@ export class JavaHotSwapService implements FrontendApplicationContribution {
   }
 
   /**
+   * Resolves the project ID for a given file URI based on workspace roots.
+   * Uses longest contained prefix match with proper URI normalization.
+   */
+  resolveProjectIdForFile(uri: string): string | undefined {
+    try {
+      const roots = this.workspaceService.tryGetRoots();
+      if (!roots || roots.length === 0) {
+        return undefined;
+      }
+      let bestRoot: any = undefined;
+      let bestLen = -1;
+      for (const root of roots) {
+        const rootUri = root.resource.toString();
+        if (isUriContained(rootUri, uri)) {
+          if (rootUri.length > bestLen) {
+            bestRoot = root;
+            bestLen = rootUri.length;
+          }
+        }
+      }
+      if (bestRoot) {
+        return bestRoot.projectId || bestRoot.name || bestRoot.resource?.path?.base;
+      }
+      return undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * Authoritative target consistency validation:
+   * Checks whether the source file project matches the bound debug session project.
+   */
+  validateTargetConsistency(filePath: string, sessionProjectId: string): boolean {
+    if (!sessionProjectId) {
+      return false;
+    }
+    const sourceProjectId = this.resolveProjectIdForFile(filePath);
+    if (sourceProjectId && sourceProjectId !== sessionProjectId) {
+      this.logger.warn(`[HotSwap] Target consistency mismatch: source file ${filePath} belongs to "${sourceProjectId}", but debug session is bound to "${sessionProjectId}"`);
+      return false;
+    }
+    return true;
+  }
+
+  /**
    * Captures an immutable execution context at save time (PR05 / F04 / T15).
    * Fixed target binding prevents cross-target redefinition if the user switches active UI sessions during compilation.
    */
@@ -191,6 +237,14 @@ export class JavaHotSwapService implements FrontendApplicationContribution {
     }
     const config = session.configuration as any;
     const projectId = config?.projectId || config?.project || '';
+    if (!projectId) {
+      this.logger.warn('[HotSwap] Current debug session does not specify a projectId');
+      return undefined;
+    }
+    if (!this.validateTargetConsistency(filePath, projectId)) {
+      this.logger.warn(`[HotSwap] Target consistency rejected for ${filePath}: file does not belong to session project ${projectId}`);
+      return undefined;
+    }
     const serverId = config?.serverId;
     const target: DebugTargetBinding = {
       projectId,
@@ -324,11 +378,20 @@ export class JavaHotSwapService implements FrontendApplicationContribution {
         break;
       }
 
+      // Pre-compile validation: re-verify target consistency and active session
+      if (!this.validateTargetConsistency(filePath, ctx.target.projectId)) {
+        lastError = new Error(`Target consistency rejected: ${filePath} does not match target project ${ctx.target.projectId}`);
+        break;
+      }
+
       try {
         // Step 1: Compile the changed file
-        const compileResult = await this.compileFile(filePath);
+        const compileResult = await this.compileFile(filePath, ctx);
         if (!compileResult.success) {
           throw new Error(`Compilation failed: ${compileResult.error || 'unknown error'}`);
+        }
+        if (compileResult.projectId && ctx.target.projectId && compileResult.projectId !== ctx.target.projectId) {
+          throw new Error(`Compilation output project mismatch: compiled for ${compileResult.projectId}, but session bound to ${ctx.target.projectId}`);
         }
 
         // PR05 (F23 / T19): Check if service stopped while compile was awaiting
@@ -341,6 +404,16 @@ export class JavaHotSwapService implements FrontendApplicationContribution {
         if (currentLatest !== undefined && currentLatest > ctx.version) {
           this.logger.info(`[HotSwap] Skipping redefine for v${ctx.version} of ${fileName}; v${currentLatest} is newer`);
           return entry;
+        }
+
+        // Pre-redefine validation: ensure target consistency and bound session validity
+        if (ctx.session.isDisposed || (this.sessionManager.sessions && this.sessionManager.sessions.every((s: { id: string }) => s.id !== ctx.session.id))) {
+          lastError = new Error('Bound debug session is no longer active');
+          break;
+        }
+        if (!this.validateTargetConsistency(filePath, ctx.target.projectId)) {
+          lastError = new Error(`Target consistency check failed before redefine: file project does not match session project ${ctx.target.projectId}`);
+          break;
         }
 
         // Step 2: Redefine via DAP (if attached) or agent JDWP, using bound immutable context
@@ -442,9 +515,10 @@ export class JavaHotSwapService implements FrontendApplicationContribution {
   }
 
   /** Compile a single Java file via the Go Agent. */
-  protected async compileFile(filePath: string): Promise<{
+  protected async compileFile(filePath: string, ctx?: HotSwapContext): Promise<{
     success: boolean;
     classPath?: string;
+    projectId?: string;
     error?: string;
   }> {
     try {
@@ -454,6 +528,7 @@ export class JavaHotSwapService implements FrontendApplicationContribution {
         {
           file: nativePath,
           sourceUri: filePath,
+          projectId: ctx?.target.projectId,
         },
         { noRetry: true },
       );

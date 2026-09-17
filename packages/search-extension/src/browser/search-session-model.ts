@@ -218,16 +218,30 @@ export class KairoSearchSessionModel {
       if (this.state.status === 'loading') {
         const snapshot = this.streamService.snapshot;
         const matches = snapshot.matches;
-        this.update({
-          status: matches.length > 0 ? 'results' : 'empty',
-          requestId,
-          options: normalized,
-          matches,
-          totalMatches: snapshot.totalMatches,
-          truncated: snapshot.truncated ?? snapshot.totalMatches > matches.length,
-          erroredFiles: [],
-          streamState: snapshot,
-        });
+        if (snapshot.status === 'error' || snapshot.interrupted) {
+          this.update({
+            status: 'error',
+            requestId,
+            options: normalized,
+            matches,
+            totalMatches: snapshot.totalMatches,
+            truncated: true,
+            erroredFiles: [],
+            error: new Error(snapshot.error ?? '搜索中断，结果不完整'),
+            streamState: snapshot,
+          });
+        } else {
+          this.update({
+            status: matches.length > 0 ? 'results' : 'empty',
+            requestId,
+            options: normalized,
+            matches,
+            totalMatches: snapshot.totalMatches,
+            truncated: snapshot.truncated ?? snapshot.totalMatches > matches.length,
+            erroredFiles: [],
+            streamState: snapshot,
+          });
+        }
       }
     } catch (error) {
       if (requestId !== this.requestId) {
@@ -246,7 +260,7 @@ export class KairoSearchSessionModel {
         });
         return;
       }
-      if (this.state.status === 'loading') {
+      if (this.state.status === 'loading' || this.state.status === 'results') {
         const snapshot = this.streamService.snapshot;
         this.update({
           status: 'error',
@@ -254,7 +268,7 @@ export class KairoSearchSessionModel {
           options: normalized,
           matches: snapshot.matches,
           totalMatches: snapshot.totalMatches,
-          truncated: snapshot.truncated ?? false,
+          truncated: snapshot.truncated ?? true,
           erroredFiles: [],
           error: toError(error),
           streamState: snapshot,

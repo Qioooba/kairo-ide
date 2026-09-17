@@ -61,12 +61,14 @@ export class ModelTokenCache {
   }
 
   /**
-   * Find the closest checkpoint <= targetLine.
+   * Find the closest checkpoint strictly before targetLine (< targetLine).
+   * Checkpoint.state is the state AFTER checkpoint.lineNumber, so it is the
+   * starting state for line (checkpoint.lineNumber + 1).
    */
   getClosestCheckpoint(targetLine: number): Checkpoint | undefined {
     let best: Checkpoint | undefined;
     for (const cp of this.checkpoints) {
-      if (cp.lineNumber <= targetLine) {
+      if (cp.lineNumber < targetLine) {
         if (!best || cp.lineNumber > best.lineNumber) {
           best = cp;
         }

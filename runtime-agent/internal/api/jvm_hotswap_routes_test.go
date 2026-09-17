@@ -484,5 +484,73 @@ func TestHandleJvmRedefine_TargetBinding_T09_T10_T11(t *testing.T) {
 			t.Fatalf("expected target_not_found error for explicit port without target, got %s", e.Code)
 		}
 	})
+
+	t.Run("W01: projectId and serverId cross-project conflict rejected", func(t *testing.T) {
+		runner := &mockTargetServerRunner{servers: []*ServerResponse{srvA, srvB}}
+		srv := newTestServerWithServices(t, &Services{ServerRunner: runner})
+
+		// Request specifies projectId=proj-A, but serverId=srv_B (which belongs to proj-B)
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/jvm/redefine", bytes.NewReader(envelopeBody(t, map[string]any{
+			"sourcePath": "src/Foo.java",
+			"classPath":  "out",
+			"projectId":  "proj-A",
+			"serverId":   "srv_B",
+		})))
+		srv.Handler().ServeHTTP(rr, req)
+
+		_, e := decodeErr(t, rr.Body.Bytes())
+		if e.Code != protocol.ErrInvalidRequest {
+			t.Fatalf("expected invalid_request for cross-project serverId binding, got %s", e.Code)
+		}
+	})
+
+	t.Run("W01: top-level and target field conflict rejected", func(t *testing.T) {
+		runner := &mockTargetServerRunner{servers: []*ServerResponse{srvA, srvB}}
+		srv := newTestServerWithServices(t, &Services{ServerRunner: runner})
+
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/jvm/redefine", bytes.NewReader(envelopeBody(t, map[string]any{
+			"sourcePath": "src/Foo.java",
+			"classPath":  "out",
+			"projectId":  "proj-A",
+			"target": &protocol.DebugTargetBinding{
+				ProjectID: "proj-B",
+			},
+		})))
+		srv.Handler().ServeHTTP(rr, req)
+
+		_, e := decodeErr(t, rr.Body.Bytes())
+		if e.Code != protocol.ErrInvalidRequest {
+			t.Fatalf("expected invalid_request for conflicting top-level and target projectId, got %s", e.Code)
+		}
+	})
 }
+
+func TestHandleJvmCompile_W01_ProjectFileMismatch(t *testing.T) {
+	rootA := t.TempDir()
+	rootB := t.TempDir()
+	fileInA := filepath.Join(rootA, "Hello.java")
+	if err := os.WriteFile(fileInA, []byte("class Hello {}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	store := &listProjectStore{projects: []domain.Project{
+		{ID: "proj-A", RootPath: rootA, OutputDir: "outA"},
+		{ID: "proj-B", RootPath: rootB, OutputDir: "outB"},
+	}}
+	srv := newTestServerWithServices(t, &Services{ProjectStore: store})
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/jvm/compile", bytes.NewReader(envelopeBody(t, map[string]any{
+		"file":      fileInA,
+		"projectId": "proj-B", // Explicit project B, but file belongs to A
+	})))
+	srv.Handler().ServeHTTP(rr, req)
+
+	_, e := decodeErr(t, rr.Body.Bytes())
+	if e.Code != protocol.ErrInvalidRequest {
+		t.Fatalf("expected invalid_request when file does not belong to specified projectId, got %s (msg: %s)", e.Code, e.Message)
+	}
+}
+
 

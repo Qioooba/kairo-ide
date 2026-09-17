@@ -12,7 +12,7 @@ import { EditorManager } from '@theia/editor/lib/browser';
 import type * as monaco from '@theia/monaco-editor-core';
 import { TokenizerOwnerRegistry } from './tokenizer-owner-registry';
 import { MonacoTokenizationAdapter, registerMonacoTokenizationAdapter } from './monaco-tokenization-adapter';
-import { HighlightingWorkerInstance } from '../worker/highlighting-worker';
+import { HighlightingWorkerInstance } from '../worker/highlighting-worker-core';
 import { isJspFamily, detectLanguageAndDialect } from '../common/language-coverage';
 import type { WorkerOutboundMessage, TokenBatchMessage } from '../common/highlight-protocol';
 

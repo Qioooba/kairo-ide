@@ -33,6 +33,24 @@ export class LexerState implements ILexerState {
     this.depth = depth;
   }
 
+  static from(state: unknown, defaultDialect?: string): LexerState {
+    if (state instanceof LexerState) {
+      return state;
+    }
+    if (state && typeof state === 'object') {
+      const s = state as any;
+      return new LexerState(
+        typeof s.mode === 'string' ? s.mode : 'root',
+        typeof s.embeddedLanguage === 'string' ? s.embeddedLanguage : undefined,
+        Array.isArray(s.embeddedStack) ? [...s.embeddedStack] : [],
+        typeof s.dialect === 'string' ? s.dialect : defaultDialect,
+        typeof s.quote === 'string' ? s.quote : undefined,
+        typeof s.depth === 'number' ? s.depth : 0,
+      );
+    }
+    return new LexerState('root', undefined, [], defaultDialect);
+  }
+
   clone(): LexerState {
     return new LexerState(
       this.mode,
@@ -48,7 +66,7 @@ export class LexerState implements ILexerState {
     if (this === other) return true;
     if (!other || typeof other !== 'object') return false;
 
-    const o = other as LexerState;
+    const o = other as any;
     if (this.mode !== o.mode) return false;
     if (this.embeddedLanguage !== o.embeddedLanguage) return false;
     if (this.dialect !== o.dialect) return false;

@@ -397,3 +397,44 @@ test('T19: Stopping service (onStop) cancels in-flight work with zero side-effec
   assert.strictEqual(service.activeTargetQueues.size, 0, 'active queues must be cleared on onStop');
   assert.strictEqual(service.pendingFiles.size, 0, 'pending files must be cleared on onStop');
 });
+
+test('W01: Saving project A file while debugging project B never sends redefine to B', async () => {
+  const redefineCalls = [];
+  const sessionB = {
+    id: 'sess_B',
+    configuration: { type: 'kairo-java', projectId: 'projectB' },
+    sendCustomRequest: async (cmd, args) => {
+      redefineCalls.push({ session: 'sess_B', cmd, args });
+      return {};
+    },
+  };
+
+  const service = createTestService({
+    currentSession: sessionB,
+    sessions: [sessionB],
+    roots: [
+      { resource: { toString: () => 'file:///workspace/projectA' }, projectId: 'projectA', name: 'projectA' },
+      { resource: { toString: () => 'file:///workspace/projectB' }, projectId: 'projectB', name: 'projectB' },
+    ],
+  });
+
+  // 1. File belongs to project A, but active debug session is project B
+  const fileA = 'file:///workspace/projectA/src/com/example/MyService.java';
+  const ctx = service.captureContext(fileA);
+  assert.strictEqual(ctx, undefined, 'captureContext must reject file from non-matching project A');
+
+  // 2. Even if an explicit context for project A was passed with session B, performHotSwap must reject before redefine
+  const dummyCtx = {
+    id: 'dummy',
+    session: sessionB,
+    target: { projectId: 'projectB' },
+    filePath: fileA,
+    version: 1,
+    serviceGeneration: service.serviceGeneration,
+  };
+  service.compileFile = async () => ({ success: true, classPath: '/out/MyService.class', projectId: 'projectA' });
+
+  const result = await service.performHotSwap(dummyCtx);
+  assert.strictEqual(result.status, 'failed');
+  assert.strictEqual(redefineCalls.length, 0, 'Session B must never receive redefine for Project A');
+});

@@ -24,7 +24,10 @@ export class IncrementalTokenizer {
   readonly languageId: string;
   readonly dialect: string;
 
+  private fullText: string = '';
   private lines: string[] = [];
+  private lineStarts: number[] = [0];
+  private version: number = 0;
   private cache: ModelTokenCache;
   private jspScanner = new JspRegionScanner();
 
@@ -39,8 +42,60 @@ export class IncrementalTokenizer {
     return this.lines.length;
   }
 
+  getText(): string {
+    return this.fullText;
+  }
+
+  private rebuildFromFullText(text: string): void {
+    this.fullText = text;
+    const lineStarts = [0];
+    const lines: string[] = [];
+    let lineStart = 0;
+    const len = text.length;
+    let i = 0;
+    while (i < len) {
+      const c = text.charCodeAt(i);
+      if (c === 13 /* \r */) {
+        if (i + 1 < len && text.charCodeAt(i + 1) === 10 /* \n */) {
+          lines.push(text.slice(lineStart, i));
+          i += 2;
+        } else {
+          lines.push(text.slice(lineStart, i));
+          i += 1;
+        }
+        lineStart = i;
+        lineStarts.push(lineStart);
+      } else if (c === 10 /* \n */) {
+        lines.push(text.slice(lineStart, i));
+        i += 1;
+        lineStart = i;
+        lineStarts.push(lineStart);
+      } else {
+        i++;
+      }
+    }
+    lines.push(text.slice(lineStart));
+    this.lines = lines;
+    this.lineStarts = lineStarts;
+  }
+
+  getLineFromOffset(offset: number): number {
+    let low = 0;
+    let high = this.lineStarts.length - 1;
+    while (low <= high) {
+      const mid = (low + high) >>> 1;
+      if (this.lineStarts[mid] <= offset) {
+        low = mid + 1;
+      } else {
+        high = mid - 1;
+      }
+    }
+    return Math.max(1, high + 1);
+  }
+
   setFullText(text: string, version: number): void {
-    this.lines = text.split(/\r\n|\r|\n/);
+    this.rebuildFromFullText(text);
+    this.version = version;
     this.cache.clear();
     this.cache.setVersion(version);
   }
@@ -55,10 +110,42 @@ export class IncrementalTokenizer {
       return 1;
     }
 
-    // Apply edits to lines or reconstruct
-    // For maximum precision, update cache version and invalidate from edit line
+    if (!changes || changes.length === 0) {
+      this.version = version;
+      this.cache.setVersion(version);
+      return 1;
+    }
+
+    // Sort changes by rangeOffset descending (Monaco convention for edits within a single event)
+    const sortedChanges = [...changes].sort((a, b) => b.rangeOffset - a.rangeOffset);
+
+    // Find earliest affected line before applying edits
+    let minOffset = Infinity;
+    for (const change of sortedChanges) {
+      if (change.rangeOffset < minOffset) {
+        minOffset = change.rangeOffset;
+      }
+    }
+
+    const earliestDirtyLine = Math.min(this.lines.length || 1, this.getLineFromOffset(minOffset));
+
+    // Apply edits to text mirror in descending offset order
+    let current = this.fullText;
+    for (const c of sortedChanges) {
+      if (c.rangeOffset < 0 || c.rangeOffset > current.length) {
+        continue;
+      }
+      const before = current.slice(0, c.rangeOffset);
+      const after = current.slice(c.rangeOffset + c.rangeLength);
+      current = before + c.text + after;
+    }
+
+    this.rebuildFromFullText(current);
+    this.version = version;
     this.cache.setVersion(version);
-    return 1;
+    this.cache.invalidateFrom(earliestDirtyLine);
+
+    return earliestDirtyLine;
   }
 
   /**
@@ -83,10 +170,10 @@ export class IncrementalTokenizer {
     const startLine = Math.max(1, Math.min(fromLine, totalLines));
     const endTarget = Math.min(targetEndLine, totalLines);
 
-    // Resolve initial state from closest checkpoint
+    // Resolve initial state from closest checkpoint strictly before startLine
     const cp = this.cache.getClosestCheckpoint(startLine);
-    let currentState = cp && cp.lineNumber <= startLine ? cp.state.clone() : new LexerState('root', undefined, [], this.dialect);
-    let currentLine = cp ? cp.lineNumber : 1;
+    let currentState = cp ? cp.state.clone() : new LexerState('root', undefined, [], this.dialect);
+    let currentLine = cp ? cp.lineNumber + 1 : 1;
 
     // Fast-forward to startLine if checkpoint was earlier
     while (currentLine < startLine) {
@@ -193,10 +280,31 @@ export class IncrementalTokenizer {
       const close = lineText.indexOf('*/');
       if (close !== -1) {
         tokensBuilder.push(close + 2, 1 /* comment */);
-        nextState = new LexerState('java', 'java', [], this.dialect);
+        nextState = new LexerState(nextState.embeddedLanguage ? 'scriptlet' : 'root', nextState.embeddedLanguage, [], this.dialect);
         i = close + 2;
       } else {
         tokensBuilder.push(len, 1 /* comment */);
+        return { tokens: new Uint32Array(tokensBuilder), nextState };
+      }
+    } else if (nextState.mode === 'directive') {
+      const close = lineText.indexOf('%>');
+      if (close !== -1) {
+        if (close > 0) {
+          tokensBuilder.push(close, 3 /* directive */);
+        }
+        tokensBuilder.push(close + 2, 2 /* delimiter */);
+        nextState = new LexerState('root', undefined, [], this.dialect);
+        i = close + 2;
+      } else {
+        tokensBuilder.push(len, 3 /* directive */);
+        return { tokens: new Uint32Array(tokensBuilder), nextState };
+      }
+    } else if (nextState.mode === 'html-tag') {
+      const { nextIdx, closed } = this.tokenizeHtmlTagContent(lineText, 0, tokensBuilder);
+      if (closed) {
+        nextState = new LexerState('root', undefined, [], this.dialect);
+        i = nextIdx;
+      } else {
         return { tokens: new Uint32Array(tokensBuilder), nextState };
       }
     } else if (nextState.mode === 'scriptlet' || nextState.mode === 'java') {
@@ -211,7 +319,10 @@ export class IncrementalTokenizer {
         i = closeScriptlet + 2;
       } else {
         // Whole remaining line is inside Java
-        this.tokenizeJavaSnippet(lineText.slice(i), i, tokensBuilder);
+        const endMode = this.tokenizeJavaSnippet(lineText.slice(i), i, tokensBuilder);
+        nextState = endMode === 'java-block-comment'
+          ? new LexerState('java-block-comment', 'java', [], this.dialect)
+          : nextState;
         return { tokens: new Uint32Array(tokensBuilder), nextState };
       }
     }
@@ -268,8 +379,10 @@ export class IncrementalTokenizer {
           i = close + 2;
         } else {
           if (marker !== '@') {
-            this.tokenizeJavaSnippet(lineText.slice(tagEnd), tagEnd, tokensBuilder);
-            nextState = new LexerState('scriptlet', 'java', [], this.dialect);
+            const snipMode = this.tokenizeJavaSnippet(lineText.slice(tagEnd), tagEnd, tokensBuilder);
+            nextState = snipMode === 'java-block-comment'
+              ? new LexerState('java-block-comment', 'java', [], this.dialect)
+              : new LexerState('scriptlet', 'java', [], this.dialect);
           } else {
             tokensBuilder.push(len, 3 /* directive */);
             nextState = new LexerState('directive', undefined, [], this.dialect);
@@ -298,11 +411,13 @@ export class IncrementalTokenizer {
       if (lineText[i] === '<') {
         const nextChar = lineText[i + 1] ?? '';
         if (/[a-zA-Z_!/?]/.test(nextChar)) {
-          const tagEnd = this.jspScanner.findTagClose(lineText, i + 1);
-          if (tagEnd !== -1) {
-            tokensBuilder.push(tagEnd + 1, 6 /* tag */);
-            i = tagEnd + 1;
+          const { nextIdx, closed } = this.tokenizeHtmlTagContent(lineText, i, tokensBuilder);
+          if (closed) {
+            i = nextIdx;
             continue;
+          } else {
+            nextState = new LexerState('html-tag', undefined, [], this.dialect);
+            break;
           }
         }
       }
@@ -324,6 +439,91 @@ export class IncrementalTokenizer {
       tokens: new Uint32Array(tokensBuilder),
       nextState,
     };
+  }
+
+  /**
+   * Tokenize HTML/XML tag body including attribute EL expressions.
+   */
+  private tokenizeHtmlTagContent(
+    lineText: string,
+    fromIdx: number,
+    tokensBuilder: number[],
+  ): { nextIdx: number; closed: boolean } {
+    let idx = fromIdx;
+    const len = lineText.length;
+    let tagStart = idx;
+    let inQuote: '"' | "'" | undefined = undefined;
+
+    while (idx < len) {
+      const c = lineText[idx];
+
+      if (inQuote) {
+        if (c === inQuote) {
+          inQuote = undefined;
+          idx++;
+          continue;
+        }
+        // EL inside quoted attribute: "${...}" or '#{...}'
+        if ((c === '$' || c === '#') && idx + 1 < len && lineText[idx + 1] === '{') {
+          if (idx > tagStart) {
+            tokensBuilder.push(idx, 6 /* tag */);
+          }
+          tokensBuilder.push(idx + 2, 4 /* el.delimiter */);
+          const closeEl = this.jspScanner.findElClose(lineText, idx + 2);
+          if (closeEl !== -1) {
+            tokensBuilder.push(closeEl, 5 /* el.body */);
+            tokensBuilder.push(closeEl + 1, 4 /* el.delimiter */);
+            idx = closeEl + 1;
+            tagStart = idx;
+          } else {
+            tokensBuilder.push(len, 5 /* el.body */);
+            return { nextIdx: len, closed: false };
+          }
+          continue;
+        }
+        idx++;
+        continue;
+      }
+
+      // Not in quote
+      if (c === '"' || c === "'") {
+        inQuote = c;
+        idx++;
+        continue;
+      }
+
+      // EL unquoted attribute: <tag attr=${...}>
+      if ((c === '$' || c === '#') && idx + 1 < len && lineText[idx + 1] === '{') {
+        if (idx > tagStart) {
+          tokensBuilder.push(idx, 6 /* tag */);
+        }
+        tokensBuilder.push(idx + 2, 4 /* el.delimiter */);
+        const closeEl = this.jspScanner.findElClose(lineText, idx + 2);
+        if (closeEl !== -1) {
+          tokensBuilder.push(closeEl, 5 /* el.body */);
+          tokensBuilder.push(closeEl + 1, 4 /* el.delimiter */);
+          idx = closeEl + 1;
+          tagStart = idx;
+        } else {
+          tokensBuilder.push(len, 5 /* el.body */);
+          return { nextIdx: len, closed: false };
+        }
+        continue;
+      }
+
+      // End of tag `>`
+      if (c === '>') {
+        tokensBuilder.push(idx + 1, 6 /* tag */);
+        return { nextIdx: idx + 1, closed: true };
+      }
+
+      idx++;
+    }
+
+    if (idx > tagStart) {
+      tokensBuilder.push(len, 6 /* tag */);
+    }
+    return { nextIdx: len, closed: false };
   }
 
   private tokenizeJavaLine(lineText: string, state: LexerState): { tokens: Uint32Array; nextState: LexerState } {
@@ -348,18 +548,22 @@ export class IncrementalTokenizer {
       }
     }
 
-    this.tokenizeJavaSnippet(lineText.slice(i), i, tokensBuilder);
+    const endMode = this.tokenizeJavaSnippet(lineText.slice(i), i, tokensBuilder);
+    nextState = endMode === 'java-block-comment'
+      ? new LexerState('java-block-comment', undefined, [], 'java')
+      : new LexerState('root', undefined, [], 'java');
+
     return {
       tokens: new Uint32Array(tokensBuilder),
-      nextState: new LexerState('root', undefined, [], 'java'),
+      nextState,
     };
   }
 
   /**
    * Tokenize snippet of Java code.
    */
-  private tokenizeJavaSnippet(code: string, baseOffset: number, tokensBuilder: number[]): void {
-    if (!code) return;
+  private tokenizeJavaSnippet(code: string, baseOffset: number, tokensBuilder: number[]): 'root' | 'java-block-comment' {
+    if (!code) return 'root';
     let idx = 0;
     const len = code.length;
 
@@ -386,7 +590,7 @@ export class IncrementalTokenizer {
           idx = close + 2;
         } else {
           tokensBuilder.push(baseOffset + len, 1 /* comment */);
-          break;
+          return 'java-block-comment';
         }
         continue;
       }
@@ -429,6 +633,8 @@ export class IncrementalTokenizer {
       idx++;
       tokensBuilder.push(baseOffset + idx, 11 /* operator */);
     }
+
+    return 'root';
   }
 
   getCache(): ModelTokenCache {

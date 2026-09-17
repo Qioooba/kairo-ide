@@ -18,7 +18,7 @@ import {
   virtualUriForBlock,
   type JspVirtualKind,
 } from './jsp-virtual-java';
-import { JspPageModelBuilder, convertAdditionalTextEditsToJsp } from './jsp-page-model';
+import { JspPageModelBuilder, convertAdditionalTextEditsToJsp, createDefaultJspIncludeResolver } from './jsp-page-model';
 import { defaultVirtualDocumentManager } from './virtual-document-manager';
 import { setJspI18n, t } from './i18n-context';
 
@@ -157,7 +157,8 @@ export function registerJspScriptletJavaCompletion(
           let virtualChar: number;
 
           const pageBuilder = new JspPageModelBuilder();
-          const pageResult = await pageBuilder.buildPageVirtualJava(model.uri.toString(), content);
+          const resolver = createDefaultJspIncludeResolver();
+          const pageResult = await pageBuilder.buildPageVirtualJava(model.uri.toString(), content, resolver);
           const mappedVirtual = pageResult.sourceMap.mapJspPositionToVirtual(
             model.uri.toString(),
             position.lineNumber - 1,

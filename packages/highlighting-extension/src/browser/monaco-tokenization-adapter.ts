@@ -43,6 +43,105 @@ function getTokenizationRegistry(): any {
   return TokenizationRegistryObj;
 }
 
+export function packMonacoMetadata(
+  languageId: number,
+  tokenType: number,
+  fontStyle: number,
+  foreground: number,
+  background: number = 0,
+): number {
+  return (
+    ((languageId & 0xff) << 0) |
+    ((tokenType & 0x03) << 8) |
+    ((fontStyle & 0x0f) << 11) |
+    ((foreground & 0x1ff) << 15) |
+    ((background & 0xff) << 24)
+  ) >>> 0;
+}
+
+export function kindIdToMetadata(kindId: number, languageId: number = 1): number {
+  let tokenType = 0; // Other
+  let fontStyle = 0; // None
+  let foreground = 1; // DefaultForeground
+
+  switch (kindId) {
+    case 1: // comment.block.jsp
+      tokenType = 1; // Comment
+      fontStyle = 1; // Italic
+      foreground = 3;
+      break;
+    case 2: // delimiter.jsp
+      tokenType = 0;
+      foreground = 4;
+      break;
+    case 3: // tag.jsp-directive
+      tokenType = 0;
+      foreground = 5;
+      break;
+    case 4: // metatag.el
+      tokenType = 0;
+      foreground = 6;
+      break;
+    case 5: // identifier.el
+      tokenType = 0;
+      foreground = 7;
+      break;
+    case 6: // tag.html
+      tokenType = 0;
+      foreground = 8;
+      break;
+    case 7: // string.java
+      tokenType = 2; // String
+      foreground = 9;
+      break;
+    case 8: // string.invalid.java
+      tokenType = 2; // String
+      foreground = 10;
+      break;
+    case 9: // keyword.java
+      tokenType = 0;
+      fontStyle = 2; // Bold
+      foreground = 11;
+      break;
+    case 10: // identifier.java
+      tokenType = 0;
+      foreground = 12;
+      break;
+    case 11: // operator.java
+      tokenType = 0;
+      foreground = 13;
+      break;
+    default:
+      tokenType = 0;
+      foreground = 1;
+      break;
+  }
+
+  return packMonacoMetadata(languageId, tokenType, fontStyle, foreground, 0);
+}
+
+export function convertLexicalToProviderTokens(lexicalTokens: Uint32Array, languageId: number = 1): Uint32Array {
+  const result = new Uint32Array(lexicalTokens.length);
+  for (let i = 0; i < lexicalTokens.length; i += 2) {
+    const startIndex = i === 0 ? 0 : lexicalTokens[i - 2];
+    const kindId = lexicalTokens[i + 1];
+    result[i] = startIndex;
+    result[i + 1] = kindIdToMetadata(kindId, languageId);
+  }
+  return result;
+}
+
+export function convertLexicalToStoredTokens(lexicalTokens: Uint32Array, languageId: number = 1): Uint32Array {
+  const result = new Uint32Array(lexicalTokens.length);
+  for (let i = 0; i < lexicalTokens.length; i += 2) {
+    const endOffset = lexicalTokens[i];
+    const kindId = lexicalTokens[i + 1];
+    result[i] = endOffset;
+    result[i + 1] = kindIdToMetadata(kindId, languageId);
+  }
+  return result;
+}
+
 export interface IBackgroundTokenizationStore {
   setTokens(tokens: any[]): void;
   setFontInfo?(changes: any): void;
@@ -119,8 +218,9 @@ export class MonacoTokenizationAdapter implements ITokenizationSupport {
   tokenizeEncoded(line: string, _hasEOL: boolean, state: monaco.languages.IState): monaco.languages.IEncodedLineTokens {
     const lexState = state instanceof LexerState ? state : new LexerState('root', undefined, [], this.dialect);
     const { tokens, nextState } = this.localTokenizer.tokenizeSingleLine(line, lexState);
+    const providerTokens = convertLexicalToProviderTokens(tokens);
     return {
-      tokens,
+      tokens: providerTokens,
       endState: nextState,
     };
   }
@@ -164,12 +264,23 @@ export class MonacoTokenizationAdapter implements ITokenizationSupport {
       return;
     }
 
+    // Check documentVersion: drop batch if model version has moved past batch.documentVersion
+    if (batch.documentVersion !== undefined && session.model && typeof session.model.getVersionId === 'function') {
+      const currentVersion = session.model.getVersionId();
+      if (batch.documentVersion !== currentVersion) {
+        return;
+      }
+    }
+
     try {
       const MultilineClass = getContiguousMultilineTokensClass();
       if (MultilineClass && batch.lineTokens && batch.lineTokens.length > 0) {
+        const storedLineTokens = batch.lineTokens.map(line =>
+          convertLexicalToStoredTokens(line instanceof Uint32Array ? line : new Uint32Array(line))
+        );
         const multilineTokens = new MultilineClass(
           batch.startLineNumber,
-          batch.lineTokens,
+          storedLineTokens,
         );
         session.store.setTokens([multilineTokens]);
       }

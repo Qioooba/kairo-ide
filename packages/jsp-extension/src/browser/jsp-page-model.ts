@@ -133,22 +133,91 @@ export class JspPageModelBuilder {
     return pages;
   }
 
-  private resolveRelativeUri(parentUri: string, relativePath: string): string {
+  resolveRelativeUri(parentUri: string, relativePath: string): string {
     const cleanPath = relativePath.replace(/\\/g, '/');
-    try {
-      return new URL(cleanPath, parentUri).toString();
-    } catch {
-      if (cleanPath.startsWith('/')) {
-        const idx = parentUri.lastIndexOf('//');
-        const rootPrefix = idx >= 0 ? parentUri.slice(0, parentUri.indexOf('/', idx + 2)) : '';
-        return `${rootPrefix}${cleanPath}`;
+    if (cleanPath.startsWith('/')) {
+      const webRoots = ['/src/main/webapp', '/WebContent', '/webapp', '/web'];
+      for (const root of webRoots) {
+        const idx = parentUri.indexOf(root);
+        if (idx !== -1) {
+          const base = parentUri.slice(0, idx + root.length);
+          return `${base}${cleanPath}`;
+        }
       }
-      const lastSlash = parentUri.lastIndexOf('/');
-      if (lastSlash >= 0) {
-        return `${parentUri.slice(0, lastSlash + 1)}${cleanPath}`;
-      }
-      return `${parentUri}/${cleanPath}`;
+      const idx = parentUri.lastIndexOf('//');
+      const rootPrefix = idx >= 0 ? parentUri.slice(0, parentUri.indexOf('/', idx + 2)) : '';
+      return `${rootPrefix}${cleanPath}`;
     }
+    const lastSlash = parentUri.lastIndexOf('/');
+    if (lastSlash >= 0) {
+      return `${parentUri.slice(0, lastSlash + 1)}${cleanPath}`;
+    }
+    return `${parentUri}/${cleanPath}`;
+  }
+
+  /**
+   * Recursively collect body blocks (scriptlets and expressions) in exact source order,
+   * expanding static include directives in-place at their declaration offsets (W08).
+   */
+  async collectExpandedBodyBlocks(
+    rootUri: string,
+    rootContent: string,
+    resolver?: JspIncludeResolver,
+  ): Promise<Array<{ block: JavaBlock; pageUri: string; pageContent: string }>> {
+    const callStack = new Set<string>();
+
+    const traverse = async (
+      uri: string,
+      content: string,
+      depth: number = 0,
+    ): Promise<Array<{ block: JavaBlock; pageUri: string; pageContent: string }>> => {
+      if (depth > 20 || callStack.has(uri)) {
+        return [];
+      }
+      callStack.add(uri);
+      const result: Array<{ block: JavaBlock; pageUri: string; pageContent: string }> = [];
+
+      try {
+        const parsed = this.parsePage(uri, content);
+        const events: Array<{
+          offset: number;
+          kind: 'block' | 'include';
+          block?: JavaBlock;
+          include?: JspIncludeDirective;
+        }> = [];
+
+        for (const b of parsed.bodyBlocks) {
+          events.push({ offset: b.start, kind: 'block', block: b });
+        }
+        for (const inc of parsed.includes) {
+          events.push({ offset: inc.startOffset, kind: 'include', include: inc });
+        }
+        events.sort((a, b) => a.offset - b.offset);
+
+        for (const ev of events) {
+          if (ev.kind === 'block' && ev.block) {
+            result.push({ block: ev.block, pageUri: uri, pageContent: content });
+          } else if (ev.kind === 'include' && ev.include && resolver) {
+            try {
+              const childContent = await resolver(ev.include.file, uri);
+              if (typeof childContent === 'string') {
+                const childUri = this.resolveRelativeUri(uri, ev.include.file);
+                const childBlocks = await traverse(childUri, childContent, depth + 1);
+                result.push(...childBlocks);
+              }
+            } catch {
+              // Ignore unresolvable includes
+            }
+          }
+        }
+      } finally {
+        callStack.delete(uri);
+      }
+
+      return result;
+    };
+
+    return traverse(rootUri, rootContent);
   }
 
   /**
@@ -255,79 +324,87 @@ export class JspPageModelBuilder {
 
     let exprCounter = 0;
 
-    // Sequential scriptlets and expressions from all included pages in order
-    for (const page of pages) {
-      for (const block of page.bodyBlocks) {
-        const rawContent = page.content.slice(block.start, block.end);
-        const sourceStart = this.parser.offsetToPosition(page.content, block.start);
-        const sourceEnd = this.parser.offsetToPosition(page.content, block.end);
+    // Sequential scriptlets and expressions expanded in-place at include directive locations
+    const expandedBodyBlocks = await this.collectExpandedBodyBlocks(rootUri, rootContent, resolver);
+    for (const item of expandedBodyBlocks) {
+      const pageUri = item.pageUri;
+      const pageContent = item.pageContent;
+      const block = item.block;
+      const rawContent = pageContent.slice(block.start, block.end);
+      const sourceStart = this.parser.offsetToPosition(pageContent, block.start);
+      const sourceEnd = this.parser.offsetToPosition(pageContent, block.end);
 
-        const vStartLine = currentLine;
-        const vStartCol = 8; // method body indentation
-        const vStartOffset = currentOffset + vStartCol;
+      const vStartLine = currentLine;
+      const vStartCol = 8; // method body indentation
+      const vStartOffset = currentOffset + vStartCol;
 
-        if (block.kind === 'expression') {
-          exprCounter++;
-          const prefix = `Object __expr_${exprCounter} = `;
-          // Clean trailing semicolon/whitespace for expression wrapping
-          const cleaned = rawContent.replace(/;?\s*$/, '');
-          const exprLines = cleaned.split('\n');
+      if (block.kind === 'expression') {
+        exprCounter++;
+        const prefix = `Object __expr_${exprCounter} = `;
+        // Clean trailing semicolon/whitespace for expression wrapping
+        const cleaned = rawContent.replace(/;?\s*$/, '');
+        const exprLines = cleaned.split('\n');
 
+        // Emit expression with trailing semicolon atomically to avoid currentOffset drift
+        if (exprLines.length === 1) {
+          emitLine(`        ${prefix}${exprLines[0]};`);
+        } else {
           emitLine(`        ${prefix}${exprLines[0]}`);
-          for (let i = 1; i < exprLines.length; i++) {
+          for (let i = 1; i < exprLines.length - 1; i++) {
             emitLine(`        ${exprLines[i]}`);
           }
-          // Terminate expression statement
-          lines[lines.length - 1] += ';';
-
-          const vEndLine = currentLine - 1;
-          const lastLineLen = exprLines[exprLines.length - 1].length;
-          const vEndCol = 8 + (exprLines.length === 1 ? prefix.length : 0) + lastLineLen;
-
-          sourceMap.addSpan({
-            sourceUri: page.uri,
-            sourceStartLine: sourceStart.line,
-            sourceStartCol: sourceStart.character,
-            sourceStartOffset: block.start,
-            sourceEndLine: sourceEnd.line,
-            sourceEndCol: sourceEnd.character,
-            sourceEndOffset: block.end,
-            virtualStartLine: vStartLine,
-            virtualStartCol: vStartCol,
-            virtualStartOffset: vStartOffset,
-            virtualEndLine: vEndLine,
-            virtualEndCol: vEndCol,
-            virtualEndOffset: currentOffset,
-            kind: 'expression',
-            prefixLength: prefix.length,
-          });
-        } else {
-          // Scriptlet (<% ... %>)
-          const scriptletLines = rawContent.split('\n');
-          for (let i = 0; i < scriptletLines.length; i++) {
-            emitLine(`        ${scriptletLines[i]}`);
-          }
-
-          const vEndLine = currentLine - 1;
-          const vEndCol = 8 + scriptletLines[scriptletLines.length - 1].length;
-
-          sourceMap.addSpan({
-            sourceUri: page.uri,
-            sourceStartLine: sourceStart.line,
-            sourceStartCol: sourceStart.character,
-            sourceStartOffset: block.start,
-            sourceEndLine: sourceEnd.line,
-            sourceEndCol: sourceEnd.character,
-            sourceEndOffset: block.end,
-            virtualStartLine: vStartLine,
-            virtualStartCol: vStartCol,
-            virtualStartOffset: vStartOffset,
-            virtualEndLine: vEndLine,
-            virtualEndCol: vEndCol,
-            virtualEndOffset: currentOffset,
-            kind: 'scriptlet',
-          });
+          emitLine(`        ${exprLines[exprLines.length - 1]};`);
         }
+
+        const vEndLine = currentLine - 1;
+        const lastLineLen = exprLines[exprLines.length - 1].length;
+        const vEndCol = 8 + (exprLines.length === 1 ? prefix.length : 0) + lastLineLen;
+
+        sourceMap.addSpan({
+          sourceUri: pageUri,
+          sourceStartLine: sourceStart.line,
+          sourceStartCol: sourceStart.character,
+          sourceStartOffset: block.start,
+          sourceEndLine: sourceEnd.line,
+          sourceEndCol: sourceEnd.character,
+          sourceEndOffset: block.end,
+          virtualStartLine: vStartLine,
+          virtualStartCol: vStartCol,
+          virtualStartOffset: vStartOffset,
+          virtualEndLine: vEndLine,
+          virtualEndCol: vEndCol,
+          virtualEndOffset: currentOffset,
+          kind: 'expression',
+          prefixLength: prefix.length,
+        });
+      } else {
+        // Scriptlet (<% ... %>)
+        const scriptletLines = rawContent.split('\n');
+        for (let i = 0; i < scriptletLines.length; i++) {
+          emitLine(`        ${scriptletLines[i]}`);
+        }
+
+        const vEndLine = currentLine - 1;
+        const lastLineLen = scriptletLines[scriptletLines.length - 1].length;
+        const vEndCol = 8 + lastLineLen;
+        const vEndOffset = currentOffset - 1;
+
+        sourceMap.addSpan({
+          sourceUri: pageUri,
+          sourceStartLine: sourceStart.line,
+          sourceStartCol: sourceStart.character,
+          sourceStartOffset: block.start,
+          sourceEndLine: sourceEnd.line,
+          sourceEndCol: sourceEnd.character,
+          sourceEndOffset: block.end,
+          virtualStartLine: vStartLine,
+          virtualStartCol: vStartCol,
+          virtualStartOffset: vStartOffset,
+          virtualEndLine: vEndLine,
+          virtualEndCol: vEndCol,
+          virtualEndOffset: vEndOffset,
+          kind: 'scriptlet',
+        });
       }
     }
 
@@ -335,6 +412,10 @@ export class JspPageModelBuilder {
     emitLine('}');
 
     const virtualJava = lines.join('\n');
+    sourceMap.setVirtualText(virtualJava);
+    for (const page of pages) {
+      sourceMap.setSourceText(page.uri, page.content);
+    }
     const virtualUri = `jsp-scriptlet://${rootUri}#page`;
 
     return {
@@ -344,6 +425,54 @@ export class JspPageModelBuilder {
       primaryUri: rootUri,
     };
   }
+}
+
+export function createDefaultJspIncludeResolver(fileService?: any): JspIncludeResolver {
+  const builder = new JspPageModelBuilder();
+  return async (includePath: string, parentUri: string) => {
+    const targetUri = builder.resolveRelativeUri(parentUri, includePath);
+
+    // 1. Check open Monaco models first (unsaved buffer has priority)
+    try {
+      const monacoModule = require('@theia/monaco-editor-core');
+      if (monacoModule && monacoModule.editor && typeof monacoModule.editor.getModels === 'function') {
+        for (const m of monacoModule.editor.getModels()) {
+          if (m.uri.toString() === targetUri) {
+            return m.getValue();
+          }
+        }
+      }
+    } catch {
+      // Ignore
+    }
+
+    // 2. Check FileService if available
+    if (fileService && typeof fileService.read === 'function') {
+      try {
+        const fileUri = new (require('@theia/core/lib/common/uri').URI)(targetUri);
+        const res = await fileService.read(fileUri);
+        return res.value;
+      } catch {
+        // Continue
+      }
+    }
+
+    // 3. Fallback to Node fs if in Node environment
+    if (typeof process !== 'undefined' && process.versions && process.versions.node) {
+      try {
+        const fs = require('fs');
+        const url = require('url');
+        const localPath = targetUri.startsWith('file://') ? url.fileURLToPath(targetUri) : targetUri;
+        if (fs.existsSync(localPath)) {
+          return fs.readFileSync(localPath, 'utf8');
+        }
+      } catch {
+        // Ignore
+      }
+    }
+
+    return undefined;
+  };
 }
 
 export interface JspTextEdit {

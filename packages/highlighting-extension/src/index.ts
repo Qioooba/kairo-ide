@@ -12,6 +12,7 @@ export * from './common/grammars/java-rules';
 
 export * from './worker/incremental-tokenizer';
 export * from './worker/highlighting-scheduler';
+export * from './worker/highlighting-worker-core';
 export * from './worker/highlighting-worker';
 
 export * from './browser/tokenizer-owner-registry';
