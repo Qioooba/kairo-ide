@@ -16,9 +16,9 @@
   },
   "dependencies": {
     "@kairo/protocol": "workspace:*",
-    "@theia/core": "1.73.1",
-    "@theia/editor": "1.73.1",
-    "@theia/monaco": "1.73.1",
+    "@theia/core": "1.75.0",
+    "@theia/editor": "1.75.0",
+    "@theia/monaco": "1.75.0",
     "@theia/monaco-editor-core": "1.108.201"
   },
   "devDependencies": {

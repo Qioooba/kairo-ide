@@ -20,8 +20,8 @@
     "@kairo/protocol": "workspace:*",
     "@kairo/runtime-extension": "workspace:*",
     "@kairo/ui-kit": "workspace:*",
-    "@theia/filesystem": "1.73.1",
-    "@theia/workspace": "1.73.1"
+    "@theia/filesystem": "1.75.0",
+    "@theia/workspace": "1.75.0"
   },
   "peerDependencies": {
     "@theia/core": "1.73.1",
