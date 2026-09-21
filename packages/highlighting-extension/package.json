@@ -22,6 +22,6 @@
     "@theia/monaco-editor-core": "1.108.201"
   },
   "devDependencies": {
-    "typescript": "5.5.4"
+    "typescript": "7.0.2"
   }
 }
