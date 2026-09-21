@@ -19,8 +19,8 @@
     "@kairo/project-extension": "workspace:*",
     "@kairo/protocol": "workspace:*",
     "@kairo/runtime-extension": "workspace:*",
-    "@theia/core": "1.73.1",
-    "@theia/filesystem": "1.73.1"
+    "@theia/core": "1.75.0",
+    "@theia/filesystem": "1.75.0"
   },
   "devDependencies": {
     "iconv-lite": "^0.7.3",
